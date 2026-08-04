@@ -70,7 +70,7 @@ pub struct BattleReport {
     version: Version,
     map_name: String,
     game_mode: String,
-    game_mode_id: Recognized<GameMode, i32>,
+    game_mode_id: Recognized<GameMode, u32>,
     game_type: Recognized<BattleType>,
     match_group: String,
     players: Vec<Rc<Player>>,
@@ -122,7 +122,7 @@ impl BattleReport {
         self.game_mode.as_ref()
     }
 
-    pub fn game_mode_id(&self) -> &Recognized<GameMode, i32> {
+    pub fn game_mode_id(&self) -> &Recognized<GameMode, u32> {
         &self.game_mode_id
     }
 
@@ -610,14 +610,18 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
 
     /// `ReplayMeta.gameMode` is a `u32` on the wire, but `GameMode::Invalid` is
     /// `-1`, a value no `u32` can carry -- it is unreachable from a replay.
-    /// Converted with `try_from` rather than `as i32`, which would wrap a value
-    /// above `i32::MAX` into the negative range and could land on `Invalid` by
-    /// accident. A value that does not fit becomes `Unknown` at `i32::MAX`:
-    /// honestly out of range, not a false `Invalid`.
-    fn report_game_mode_id(&self) -> Recognized<GameMode, i32> {
-        match i32::try_from(self.meta().gameMode) {
-            Ok(id) => GameMode::from_id(id),
-            Err(_) => Recognized::Unknown(i32::MAX),
+    /// `GameMode::from_id` is `i32`-keyed (Task 1's table; `Invalid` genuinely
+    /// needs the sign), so this widens back out to `u32` only at the report
+    /// boundary: a value that does not fit in `i32` becomes `Unknown` carrying
+    /// its own true `u32` value, not a placeholder standing in for it.
+    /// Converted with `try_from` rather than `as i32`, which would wrap a
+    /// value above `i32::MAX` into the negative range and could land on
+    /// `Invalid` by accident.
+    fn report_game_mode_id(&self) -> Recognized<GameMode, u32> {
+        let raw = self.meta().gameMode;
+        match i32::try_from(raw) {
+            Ok(id) => GameMode::from_id(id).map_unknown(|_| raw),
+            Err(_) => Recognized::Unknown(raw),
         }
     }
 
@@ -789,5 +793,16 @@ mod tests {
         // unused), not a value this code invents.
         let gap = report_with_game_mode(3);
         assert_eq!(*gap.game_mode_id(), Recognized::Unknown(3));
+    }
+
+    /// A `gameMode` too large for `i32` must not wrap into the negative range
+    /// and silently read as `Invalid` (`as i32` would do exactly that for
+    /// values at or above `1 << 31`). It must come back as `Unknown` carrying
+    /// its own real value, not a placeholder that would be indistinguishable
+    /// from a genuine mode id.
+    #[test]
+    fn a_game_mode_too_large_for_i32_is_unknown_at_its_own_value_not_a_sentinel() {
+        let overflow = report_with_game_mode(u32::MAX);
+        assert_eq!(*overflow.game_mode_id(), Recognized::Unknown(u32::MAX));
     }
 }
