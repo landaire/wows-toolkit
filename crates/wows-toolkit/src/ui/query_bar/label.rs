@@ -7,7 +7,6 @@ use rust_i18n::t;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
-use wowsunpack::recognized::Recognized;
 
 use crate::db::index::query_ast::CmpOp;
 use crate::db::index::query_ast::DivisionScope;
@@ -246,7 +245,7 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
         Value::Float(f) => format!("{f:.0}"),
         Value::Bool(b) => bool_label(*b),
         Value::Outcome(o) => outcome_label(*o),
-        Value::GameMode(m) => game_mode_label(m),
+        Value::GameMode(m) => game_mode_label(*m),
         Value::Relation(r) => relation_label(*r),
         Value::Division(d) => division_label(*d),
         Value::Class(c) => class_label(*c),
@@ -347,13 +346,20 @@ pub(crate) fn bool_label(b: bool) -> String {
 }
 
 pub(crate) fn outcome_label(o: MatchOutcome) -> String {
+    t!(outcome_key(o)).into()
+}
+
+/// Split from `outcome_label` so a test can assert the translated text is not
+/// the key itself -- `rust_i18n::t!` returns a missing key verbatim, which is
+/// non-empty and would otherwise satisfy every existing non-empty-text
+/// assertion while shipping the literal key string.
+fn outcome_key(o: MatchOutcome) -> &'static str {
     match o {
-        MatchOutcome::Win => t!("ui.search.outcome_win"),
-        MatchOutcome::Loss => t!("ui.search.outcome_loss"),
-        MatchOutcome::Draw => t!("ui.search.outcome_draw"),
-        MatchOutcome::Unknown => t!("ui.search.outcome_unknown"),
+        MatchOutcome::Win => "ui.search.outcome_win",
+        MatchOutcome::Loss => "ui.search.outcome_loss",
+        MatchOutcome::Draw => "ui.search.outcome_draw",
+        MatchOutcome::Unknown => "ui.search.outcome_unknown",
     }
-    .into()
 }
 
 pub(crate) fn relation_label(r: VehicleRelation) -> String {
@@ -374,60 +380,70 @@ pub(crate) fn division_label(d: DivisionScope) -> String {
     .into()
 }
 
-/// An unrecognised id (a build the id table does not cover) shows as `#<id>`,
-/// matching how an unresolved ship or account id renders in `value_text`.
-pub(crate) fn game_mode_label(m: &Recognized<GameMode, i32>) -> String {
-    match m {
-        Recognized::Known(mode) => game_mode_variant_label(*mode),
-        Recognized::Unknown(raw) => format!("#{raw}"),
-    }
+/// `GameMode` is never `Recognized` here: `Value::GameMode` only ever carries
+/// a mode the grammar or the dropdown produced, both of which draw from
+/// `GameMode::ALL`, so there is no unrecognised id to fall back on.
+pub(crate) fn game_mode_label(mode: GameMode) -> String {
+    t!(game_mode_key(mode)).into()
 }
 
-fn game_mode_variant_label(mode: GameMode) -> String {
+/// Split out for the same reason `outcome_key` is: it lets a test assert the
+/// label actually translated rather than merely being non-empty.
+///
+/// Where the game's own player-facing name for a mode has not been confirmed
+/// (there is no `IDS_` source for `GAME_MODE` anywhere in the deobfuscated
+/// scripts), the label is the mode's own constant name rather than an
+/// invented descriptive phrase: an invented phrase asserts a mechanic nobody
+/// verified, where the constant name asserts only what the id table says.
+/// Each of those is one line in `en.toml`, so a confirmed name can replace one
+/// without touching this match or anything else.
+fn game_mode_key(mode: GameMode) -> &'static str {
     match mode {
-        GameMode::Invalid => t!("ui.search.value.game_mode_invalid"),
-        GameMode::Test => t!("ui.search.value.game_mode_test"),
-        GameMode::Standart => t!("ui.search.value.game_mode_standard"),
-        GameMode::Singlebase => t!("ui.search.value.game_mode_singlebase"),
-        GameMode::Domination => t!("ui.search.value.game_mode_domination"),
-        GameMode::Tutorial => t!("ui.search.value.game_mode_tutorial"),
-        GameMode::Megabase => t!("ui.search.value.game_mode_megabase"),
-        GameMode::Forts => t!("ui.search.value.game_mode_forts"),
-        GameMode::StandardDomination => t!("ui.search.value.game_mode_standard_domination"),
-        GameMode::Epicenter => t!("ui.search.value.game_mode_epicenter"),
-        GameMode::AssaultDefense => t!("ui.search.value.game_mode_assault_defense"),
-        GameMode::Pve => t!("ui.search.value.game_mode_pve"),
-        GameMode::ArmsRace => t!("ui.search.value.game_mode_arms_race"),
-        GameMode::EpicenterRing => t!("ui.search.value.game_mode_epicenter_ring"),
-        GameMode::AntiStandard => t!("ui.search.value.game_mode_anti_standard"),
-        GameMode::AttackDefense => t!("ui.search.value.game_mode_attack_defense"),
-        GameMode::TorpedoBeat => t!("ui.search.value.game_mode_torpedo_beat"),
-        GameMode::TeamBattleRoyale => t!("ui.search.value.game_mode_team_battle_royale"),
-        GameMode::EscapeToPortal => t!("ui.search.value.game_mode_escape_to_portal"),
-        GameMode::DominationAsymm => t!("ui.search.value.game_mode_domination_asymm"),
-        GameMode::KeyBattle => t!("ui.search.value.game_mode_key_battle"),
-        GameMode::Portal2021 => t!("ui.search.value.game_mode_portal_2021"),
-        GameMode::TeamBattleRoyale2021 => t!("ui.search.value.game_mode_team_battle_royale_2021"),
-        GameMode::ConvoyEvent => t!("ui.search.value.game_mode_convoy_event"),
-        GameMode::ConvoyAirship => t!("ui.search.value.game_mode_convoy_airship"),
-        GameMode::TwoTeamsBattleRoyale => t!("ui.search.value.game_mode_two_teams_battle_royale"),
-        GameMode::PinataEvent => t!("ui.search.value.game_mode_pinata_event"),
-        GameMode::Respawns => t!("ui.search.value.game_mode_respawns"),
-        GameMode::RespawnsSectors => t!("ui.search.value.game_mode_respawns_sectors"),
+        GameMode::Invalid => "ui.search.value.game_mode_invalid",
+        GameMode::Test => "ui.search.value.game_mode_test",
+        GameMode::Standart => "ui.search.value.game_mode_standard",
+        GameMode::Singlebase => "ui.search.value.game_mode_singlebase",
+        GameMode::Domination => "ui.search.value.game_mode_domination",
+        GameMode::Tutorial => "ui.search.value.game_mode_tutorial",
+        GameMode::Megabase => "ui.search.value.game_mode_megabase",
+        GameMode::Forts => "ui.search.value.game_mode_forts",
+        GameMode::StandardDomination => "ui.search.value.game_mode_standard_domination",
+        GameMode::Epicenter => "ui.search.value.game_mode_epicenter",
+        GameMode::AssaultDefense => "ui.search.value.game_mode_assault_defense",
+        GameMode::Pve => "ui.search.value.game_mode_pve",
+        GameMode::ArmsRace => "ui.search.value.game_mode_arms_race",
+        GameMode::EpicenterRing => "ui.search.value.game_mode_epicenter_ring",
+        GameMode::AntiStandard => "ui.search.value.game_mode_anti_standard",
+        GameMode::AttackDefense => "ui.search.value.game_mode_attack_defense",
+        GameMode::TorpedoBeat => "ui.search.value.game_mode_torpedo_beat",
+        GameMode::TeamBattleRoyale => "ui.search.value.game_mode_team_battle_royale",
+        GameMode::EscapeToPortal => "ui.search.value.game_mode_escape_to_portal",
+        GameMode::DominationAsymm => "ui.search.value.game_mode_domination_asymm",
+        GameMode::KeyBattle => "ui.search.value.game_mode_key_battle",
+        GameMode::Portal2021 => "ui.search.value.game_mode_portal_2021",
+        GameMode::TeamBattleRoyale2021 => "ui.search.value.game_mode_team_battle_royale_2021",
+        GameMode::ConvoyEvent => "ui.search.value.game_mode_convoy_event",
+        GameMode::ConvoyAirship => "ui.search.value.game_mode_convoy_airship",
+        GameMode::TwoTeamsBattleRoyale => "ui.search.value.game_mode_two_teams_battle_royale",
+        GameMode::PinataEvent => "ui.search.value.game_mode_pinata_event",
+        GameMode::Respawns => "ui.search.value.game_mode_respawns",
+        GameMode::RespawnsSectors => "ui.search.value.game_mode_respawns_sectors",
     }
-    .into()
 }
 
 pub(crate) fn class_label(c: ShipClass) -> String {
+    t!(class_key(c)).into()
+}
+
+fn class_key(c: ShipClass) -> &'static str {
     match c {
-        ShipClass::AirCarrier => t!("ui.search.value.class_air_carrier"),
-        ShipClass::Battleship => t!("ui.search.value.class_battleship"),
-        ShipClass::Cruiser => t!("ui.search.value.class_cruiser"),
-        ShipClass::Destroyer => t!("ui.search.value.class_destroyer"),
-        ShipClass::Submarine => t!("ui.search.value.class_submarine"),
-        ShipClass::Auxiliary => t!("ui.search.value.class_auxiliary"),
+        ShipClass::AirCarrier => "ui.search.value.class_air_carrier",
+        ShipClass::Battleship => "ui.search.value.class_battleship",
+        ShipClass::Cruiser => "ui.search.value.class_cruiser",
+        ShipClass::Destroyer => "ui.search.value.class_destroyer",
+        ShipClass::Submarine => "ui.search.value.class_submarine",
+        ShipClass::Auxiliary => "ui.search.value.class_auxiliary",
     }
-    .into()
 }
 
 #[cfg(test)]
@@ -826,29 +842,35 @@ mod tests {
             ValueKind::Account => Value::Account(wows_replays::types::AccountId(1)),
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
-            ValueKind::GameMode => Value::GameMode(Recognized::Known(GameMode::ArmsRace)),
+            ValueKind::GameMode => Value::GameMode(GameMode::ArmsRace),
         }
     }
 
+    /// Pins the actual claim `every_field_and_allowed_operator_yields_a_non_empty_segment_each`
+    /// cannot: `t!` returns a missing key verbatim, which is non-empty, so a
+    /// typo'd or deleted translation key would satisfy every "not empty"
+    /// assertion above while shipping the literal key string in the UI. This
+    /// was probed directly: renaming `game_mode_arms_race` to
+    /// `game_mode_arms_raceZZZ` left every other test in this suite green.
+    ///
+    /// Covers `class_label` and `outcome_label` too, since the same exposure
+    /// applies to them; `relation_label`, `division_label`, `bool_label`,
+    /// `match_field_label`, `roster_field_label`, and `op_label` share it as
+    /// well but are not covered here.
     #[test]
-    fn a_game_mode_pill_renders_three_segments_with_a_readable_value() {
-        let cache = NameCache::default();
-        let term =
-            MatchTerm::Field(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Known(GameMode::ArmsRace)));
-        let segs = pill_segments(&term, &cache);
-        assert_eq!(segs.len(), 3);
-        assert_eq!(segs[2].role, SegmentRole::Value);
-        assert!(!segs[2].text.is_empty(), "the value segment must not be blank");
-    }
-
-    /// An unrecognised game mode still renders a readable value segment, as
-    /// `#<id>` rather than a blank pill.
-    #[test]
-    fn an_unrecognised_game_mode_pill_shows_its_raw_id() {
-        let cache = NameCache::default();
-        let term = MatchTerm::Field(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Unknown(9_001)));
-        let segs = pill_segments(&term, &cache);
-        assert_eq!(segs[2].text, "#9001");
+    fn enum_labels_resolve_to_translated_text_not_their_own_key() {
+        for mode in GameMode::ALL {
+            let key = game_mode_key(mode);
+            assert_ne!(game_mode_label(mode), key, "{mode:?} has no translation for {key}");
+        }
+        for c in ShipClass::ALL {
+            let key = class_key(c);
+            assert_ne!(class_label(c), key, "{c:?} has no translation for {key}");
+        }
+        for o in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown] {
+            let key = outcome_key(o);
+            assert_ne!(outcome_label(o), key, "{o:?} has no translation for {key}");
+        }
     }
 
     /// `sugar_inner_path` names an index while `sugar_shape` names a term, and

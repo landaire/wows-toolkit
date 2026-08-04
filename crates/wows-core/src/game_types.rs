@@ -2426,6 +2426,18 @@ impl GameMode {
         }
     }
 
+    /// Whether this mode's id fits `ReplayMeta.gameMode`'s wire type, `u32`.
+    /// `Invalid` is the one variant with a negative id (-1, the game's own
+    /// sentinel for "no mode"), which a `u32` field can never carry; the
+    /// indexer (`replay_index.rs`) can therefore never write it into
+    /// `indexed_match.game_mode_id`. A filter or dropdown built from
+    /// `game_mode_id`'s value space must exclude exactly the modes this
+    /// returns `false` for, or it offers a choice the column can never
+    /// satisfy.
+    pub const fn is_offerable(self) -> bool {
+        self.id() >= 0
+    }
+
     pub fn from_id(id: i32) -> Recognized<GameMode, i32> {
         match id {
             -1 => Recognized::Known(GameMode::Invalid),
@@ -3322,5 +3334,18 @@ mod tests {
         ];
         let actual: Vec<i32> = GameMode::ALL.iter().map(|m| m.id()).collect();
         assert_eq!(actual, expected.to_vec());
+    }
+
+    #[test]
+    fn is_offerable_excludes_exactly_the_modes_whose_id_does_not_fit_the_wire_type() {
+        // `ReplayMeta.gameMode` is `u32` on the wire, so an id a `u32` cannot
+        // hold can never appear in an indexed row, which is what makes the
+        // predicate exactly `u32::try_from(id()).is_ok()` rather than a
+        // hand-picked exclusion list.
+        for mode in GameMode::ALL {
+            assert_eq!(mode.is_offerable(), u32::try_from(mode.id()).is_ok(), "{mode:?}");
+        }
+        let excluded: Vec<GameMode> = GameMode::ALL.into_iter().filter(|m| !m.is_offerable()).collect();
+        assert_eq!(excluded, vec![GameMode::Invalid], "the offerable set must narrow by exactly Invalid, no more");
     }
 }

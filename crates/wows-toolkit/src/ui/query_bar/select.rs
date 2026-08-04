@@ -5,7 +5,6 @@ use jiff::Timestamp;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
-use wowsunpack::recognized::Recognized;
 
 use crate::db::index::query_ast::DivisionScope;
 use crate::db::index::query_ast::Expr;
@@ -385,9 +384,12 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 /// A deterministic placeholder for a value of `kind`, used only to replace a
 /// value whose kind no longer matches its field. Empty text, zero for a
 /// number or an ID, the epoch for a timestamp, and the first declared variant
-/// for an enum. This is an arbitrary in-kind value, never a sentinel for
-/// "absent" -- `Outcome`'s placeholder is `Win`, a value a user can also
-/// choose on purpose, so nothing may treat it as meaning "unchosen".
+/// for an enum -- except `GameMode`, whose placeholder is the first *offerable*
+/// variant (`GameMode::Invalid` cannot be offered; see `GameMode::is_offerable`),
+/// so the placeholder stays a value the dropdown can also produce. This is an
+/// arbitrary in-kind value, never a sentinel for "absent" -- `Outcome`'s
+/// placeholder is `Win`, a value a user can also choose on purpose, so
+/// nothing may treat it as meaning "unchosen".
 ///
 /// `suggest::no_preset_carries_a_placeholder_value` asserts the opposite for
 /// a preset's `Value::Ship`/`Value::Account`: no zero id there. The two do
@@ -416,7 +418,9 @@ fn placeholder_value(kind: ValueKind) -> Value {
         ValueKind::Account => Value::Account(AccountId(0)),
         ValueKind::Source => Value::Source(SourceId(0)),
         ValueKind::Timestamp => Value::Timestamp(Timestamp::from_second(0).unwrap()),
-        ValueKind::GameMode => Value::GameMode(Recognized::Known(GameMode::ALL[0])),
+        ValueKind::GameMode => Value::GameMode(
+            GameMode::ALL.into_iter().find(|m| m.is_offerable()).expect("at least one mode is offerable"),
+        ),
     }
 }
 
@@ -1536,7 +1540,40 @@ mod tests {
             ValueKind::Account => Value::Account(wows_replays::types::AccountId(1)),
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
-            ValueKind::GameMode => Value::GameMode(Recognized::Known(GameMode::ArmsRace)),
+            ValueKind::GameMode => Value::GameMode(GameMode::ArmsRace),
+        }
+    }
+
+    /// A retarget that mints a placeholder must mint one the dropdown could
+    /// also have produced: a value the user could reach some other way, not a
+    /// value that exists only inside this function. `GameMode`'s placeholder
+    /// (`is_offerable`'s first hit, not `ALL[0]`) is what motivates this test;
+    /// checked across every enum kind so a future kind cannot reintroduce the
+    /// same gap.
+    #[test]
+    fn the_placeholder_for_every_enum_kind_is_something_the_dropdown_offers() {
+        use crate::db::index::query_ast::ValueKind;
+        use crate::db::index::query_text::parse_roster_value;
+        use crate::ui::query_bar::suggest::enum_values;
+
+        for kind in [
+            ValueKind::Outcome,
+            ValueKind::Bool,
+            ValueKind::Relation,
+            ValueKind::Division,
+            ValueKind::Class,
+            ValueKind::GameMode,
+        ] {
+            let options = enum_values(kind).unwrap_or_else(|| panic!("{kind:?} should be enumerable"));
+            let placeholder = placeholder_value(kind);
+            let offered: Vec<Value> = options
+                .iter()
+                .map(|o| parse_roster_value(kind, &o.token).unwrap_or_else(|| panic!("{kind:?} token {:?}", o.token)))
+                .collect();
+            assert!(
+                offered.contains(&placeholder),
+                "{kind:?} placeholder {placeholder:?} is not among the dropdown's own values: {offered:?}"
+            );
         }
     }
 

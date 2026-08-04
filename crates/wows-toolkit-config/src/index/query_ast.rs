@@ -8,7 +8,6 @@ use jiff::Timestamp;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
-use wows_core::recognized::Recognized;
 
 use super::rows::MatchOutcome;
 use super::rows::SourceId;
@@ -266,7 +265,14 @@ pub enum Value {
     Account(AccountId),
     Source(SourceId),
     Timestamp(Timestamp),
-    GameMode(Recognized<GameMode, i32>),
+    /// Always a recognised mode: the parser rejects an unrecognised token as a
+    /// `BadValue`, the dropdown only ever offers a mode from `GameMode::ALL`,
+    /// and the indexer (`replay_index.rs`) writes `game_mode_id` through
+    /// `Recognized::known()`, so an unrecognised id cannot reach the database
+    /// either. `GameMode::from_id`, at the decode boundary, is where
+    /// `Recognized` belongs; carrying it here would model a state that can
+    /// never occur.
+    GameMode(GameMode),
     /// The operand-less companion to `Op::IsSet` and `Op::IsNotSet`. Named
     /// `NoOperand` rather than `None` so it is never misread as `Option::None`.
     NoOperand,

@@ -26,7 +26,6 @@ use winnow::token::take_while;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
-use wows_core::recognized::Recognized;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;
@@ -837,7 +836,7 @@ fn parse_value(kind: ValueKind, raw: &str) -> Option<Value> {
             _ => None,
         },
         ValueKind::Outcome => MatchOutcome::from_db_str(&s.to_ascii_lowercase()).map(Value::Outcome),
-        ValueKind::GameMode => game_mode_from_token(&s).map(|m| Value::GameMode(Recognized::Known(m))),
+        ValueKind::GameMode => game_mode_from_token(&s).map(Value::GameMode),
         ValueKind::Timestamp => parse_date(&s).or_else(|| parse_relative(&s)).map(Value::Timestamp),
         // A source is picked in the widget rather than typed, but the printed
         // form is the persistence format, so the id it prints has to read back.
@@ -929,7 +928,13 @@ pub fn enumerable_values(kind: ValueKind) -> Option<Vec<String>> {
                 .collect(),
         ),
         ValueKind::Bool => Some(vec!["true".into(), "false".into()]),
-        ValueKind::GameMode => Some(GameMode::ALL.iter().map(|m| m.as_token().to_string()).collect()),
+        // `GameMode::Invalid` cannot appear in an indexed row (its id does
+        // not fit `game_mode_id`'s wire type), so offering it here would
+        // suggest a value that can never match. The parser still reads the
+        // token if someone types it: only the offered list narrows.
+        ValueKind::GameMode => {
+            Some(GameMode::ALL.iter().filter(|m| m.is_offerable()).map(|m| m.as_token().to_string()).collect())
+        }
         _ => None,
     }
 }
@@ -1118,8 +1123,7 @@ pub fn print_value(value: &Value) -> String {
         Value::Account(a) => a.raw().to_string(),
         Value::Source(s) => s.0.to_string(),
         Value::Timestamp(t) => print_timestamp(*t),
-        Value::GameMode(Recognized::Known(m)) => m.as_token().to_string(),
-        Value::GameMode(Recognized::Unknown(raw)) => raw.to_string(),
+        Value::GameMode(m) => m.as_token().to_string(),
         Value::NoOperand => String::new(),
     }
 }
@@ -2069,7 +2073,24 @@ mod tests {
         let e = parse_query("game-mode:arms-race").expect("parse");
         match &e {
             Expr::Leaf(MatchTerm::Field(MatchField::GameMode, _, Value::GameMode(m))) => {
-                assert_eq!(m.known().copied(), Some(GameMode::ArmsRace));
+                assert_eq!(*m, GameMode::ArmsRace);
+            }
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(parse_query(&print_query(&e)).expect("reparse"), e);
+    }
+
+    /// The dropdown excludes `Invalid` (its id cannot fit `game_mode_id`'s
+    /// wire type), but existing query text naming it must not turn into a
+    /// parse error just because the offered list narrowed. The parser stays
+    /// total over `GameMode::ALL`; only `enumerable_values` (the dropdown's
+    /// and the error hint's source) narrows.
+    #[test]
+    fn game_mode_invalid_still_parses_though_the_dropdown_excludes_it() {
+        let e = parse_query("game-mode:invalid").expect("parse");
+        match &e {
+            Expr::Leaf(MatchTerm::Field(MatchField::GameMode, _, Value::GameMode(m))) => {
+                assert_eq!(*m, GameMode::Invalid);
             }
             other => panic!("got {other:?}"),
         }
@@ -2084,7 +2105,7 @@ mod tests {
             let src = format!("game-mode:{}", mode.as_token());
             match parse_query(&src).unwrap_or_else(|e| panic!("{src:?}: {e}")) {
                 Expr::Leaf(MatchTerm::Field(_, _, Value::GameMode(m))) => {
-                    assert_eq!(m.known().copied(), Some(mode), "{src:?}");
+                    assert_eq!(m, mode, "{src:?}");
                 }
                 other => panic!("{src:?} gave {other:?}"),
             }

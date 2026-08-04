@@ -2,7 +2,6 @@
 
 use rust_i18n::t;
 use wowsunpack::game_types::GameMode;
-use wowsunpack::recognized::Recognized;
 
 use crate::db::index::query_ast::CmpOp;
 use crate::db::index::query_ast::DivisionScope;
@@ -708,9 +707,7 @@ fn enum_value_label(kind: ValueKind, token: &str) -> String {
         ValueKind::Relation => VehicleRelation::from_db_str(token).map(relation_label),
         ValueKind::Division => DivisionScope::from_token(token).map(division_label),
         ValueKind::Class => ShipClass::from_token(token).map(class_label),
-        ValueKind::GameMode => {
-            GameMode::ALL.into_iter().find(|m| m.as_token() == token).map(|m| game_mode_label(&Recognized::Known(m)))
-        }
+        ValueKind::GameMode => GameMode::ALL.into_iter().find(|m| m.as_token() == token).map(game_mode_label),
         ValueKind::Text
         | ValueKind::Int
         | ValueKind::Float
@@ -1241,12 +1238,22 @@ mod tests {
         }
     }
 
+    /// `GameMode::Invalid` cannot fit `game_mode_id`'s wire type (`u32`), so
+    /// the index can never hold it and offering it would be a filter value
+    /// that can never match. The offered set must be exactly `is_offerable`'s
+    /// -- no more (the filter must not silently grow to include it back) and
+    /// no less (it must not become vacuous by excluding something offerable).
     #[test]
-    fn the_game_mode_value_source_offers_every_mode() {
+    fn the_game_mode_value_source_excludes_only_the_unrepresentable_mode() {
         let offered = enum_values(ValueKind::GameMode).expect("game mode is enumerable");
-        assert_eq!(offered.len(), GameMode::ALL.len());
+        assert_eq!(offered.len(), GameMode::ALL.len() - 1, "exactly one mode must be excluded");
+        assert!(
+            !offered.iter().any(|o| o.token == GameMode::Invalid.as_token()),
+            "Invalid must not be offered: it can never fit game_mode_id"
+        );
         for mode in GameMode::ALL {
-            assert!(offered.iter().any(|o| o.token == mode.as_token()), "{mode:?} not offered");
+            let is_offered = offered.iter().any(|o| o.token == mode.as_token());
+            assert_eq!(is_offered, mode.is_offerable(), "{mode:?}");
         }
     }
 
@@ -1268,9 +1275,9 @@ mod tests {
                 Value::Division(DivisionScope::from_token(token).unwrap_or_else(|| panic!("{token:?}")))
             }
             ValueKind::Class => Value::Class(ShipClass::from_token(token).unwrap_or_else(|| panic!("{token:?}"))),
-            ValueKind::GameMode => Value::GameMode(Recognized::Known(
+            ValueKind::GameMode => Value::GameMode(
                 GameMode::ALL.into_iter().find(|m| m.as_token() == token).unwrap_or_else(|| panic!("{token:?}")),
-            )),
+            ),
             other => unreachable!("enum_values never offers {other:?}"),
         }
     }
