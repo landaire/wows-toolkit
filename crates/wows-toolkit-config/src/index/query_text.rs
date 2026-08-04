@@ -575,7 +575,12 @@ fn roster_term_from_parts(
 
 /// The roster-only value kinds, falling through to `parse_value` for the kinds
 /// both levels share.
-fn parse_roster_value(kind: ValueKind, raw: &str) -> Option<Value> {
+///
+/// Public, and the superset of the two, for the same reason
+/// `enumerable_roster_values` is: the query bar's value editor turns a picked
+/// literal back into a `Value` without knowing which level the field came from,
+/// and a second reader of these spellings would drift from the parser.
+pub fn parse_roster_value(kind: ValueKind, raw: &str) -> Option<Value> {
     let s = unquote(raw);
     match kind {
         ValueKind::Relation => match s.to_ascii_lowercase().as_str() {
@@ -1080,7 +1085,12 @@ fn cmp_token_str(op: CmpOp) -> &'static str {
     }
 }
 
-fn print_value(value: &Value) -> String {
+/// The grammar literal a value prints as.
+///
+/// Public because the query bar seeds its plain-entry value editor with the
+/// value already on the term, and that seed has to be text `parse_roster_value`
+/// reads back as the same value.
+pub fn print_value(value: &Value) -> String {
     match value {
         Value::Text(s) => quote_if_needed(s),
         Value::Int(n) => n.to_string(),

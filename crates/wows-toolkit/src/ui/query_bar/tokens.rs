@@ -68,6 +68,12 @@ pub fn tokenize(expr: &MatchExpr, cache: &NameCache) -> Vec<Token> {
 
 /// Resolve a path back to the node it names. See `NodePath` for what happens
 /// when the path continues past a `Roster` leaf.
+///
+/// Editing resolves paths through `select`'s own `expr_at`, which walks a
+/// roster predicate the same way it walks the match tree; the tests below are
+/// what still ask this level of the question, so it is compiled only for them
+/// rather than shipped as a permanently suppressed warning.
+#[cfg(test)]
 pub fn node_at<'a>(expr: &'a MatchExpr, path: &[usize]) -> Option<&'a MatchExpr> {
     let Some((&i, rest)) = path.split_first() else {
         return Some(expr);

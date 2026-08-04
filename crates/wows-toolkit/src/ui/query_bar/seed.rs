@@ -27,7 +27,7 @@ use crate::db::index::rows::VehicleRelation;
 /// The comparison a seeded term wants, before the field's own `allowed_ops`
 /// decides how to spell it.
 #[derive(Debug, Clone, Copy)]
-enum Wanted {
+pub(crate) enum Wanted {
     Equality,
     Substring,
 }
@@ -40,7 +40,11 @@ enum Wanted {
 /// hand-picked last resort: naming an `Op` here is exactly what this module
 /// exists to stop, and chaining the field's own list already makes the fallback
 /// its first entry.
-fn seed_op(allowed: &'static [Op], wanted: Wanted) -> Op {
+///
+/// Also the chooser `select::reconcile_term` goes through when a filter change
+/// leaves a term carrying an operator its new field disallows, so there is one
+/// preference list rather than one per editing path.
+pub(crate) fn seed_op(allowed: &'static [Op], wanted: Wanted) -> Op {
     let preferred: &[Op] = match wanted {
         Wanted::Equality => &[Op::Is, Op::Equals, Op::Eq],
         Wanted::Substring => &[Op::Contains],

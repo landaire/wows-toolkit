@@ -90,8 +90,8 @@ pub fn token(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], kind: &TokenKind, sta
 /// so a pill's selection fill reads as one continuous surface rather than a
 /// strip per segment. Each segment then paints its own run inside the rect
 /// `segment_rects` gives it, with a separator between adjacent segments and a
-/// background of its own when the pointer sits over it -- the click target
-/// `select`'s Task 7 caller will interact, made discoverable ahead of that.
+/// background of its own when the pointer sits over it, which is the click
+/// target `mod.rs` registers over the same rect.
 fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &LayoutCfg) {
     let visuals = ui.visuals();
     let (fill, text) = match state {
@@ -105,8 +105,7 @@ fn pill(ui: &Ui, rect: Rect, galleys: &[Arc<Galley>], state: TokenState, cfg: &L
         painter.rect_stroke(rect, CornerRadius::same(RADIUS), visuals.selection.stroke, StrokeKind::Inside);
     }
 
-    let segment_widths: Vec<f32> = galleys.iter().map(|g| g.size().x + 2.0 * PAD_X).collect();
-    let segments = segment_rects(rect, &segment_widths, cfg);
+    let segments = segment_rects(rect, &segment_widths(galleys), cfg);
     let hover_fill = ui.sem().text_strong.gamma_multiply(SEGMENT_HOVER_ALPHA);
     let separator = Stroke::new(1.0, ui.sem().pill_separator);
     let last = segments.len().saturating_sub(1);
@@ -139,12 +138,20 @@ fn segment_corner_radius(index: usize, last: usize) -> CornerRadius {
     }
 }
 
+/// The cell width one measured run needs: the glyphs plus the padding
+/// `text_origin` insets them by, on both sides. The single derivation, so the
+/// width a pill is sized to, the width its segments are painted at, and the
+/// width its click targets are hit-tested against cannot disagree.
+pub fn segment_widths(galleys: &[Arc<Galley>]) -> Vec<f32> {
+    galleys.iter().map(|g| g.size().x + 2.0 * PAD_X).collect()
+}
+
 /// One rect per segment, positioned inside `pill_rect` by
 /// `layout::segment_offsets`. `pill_rect`'s own width must already equal
 /// `layout::pill_width(segment_widths, cfg)` -- `mod.rs` sizes a pill token
 /// that way -- so every returned rect lands inside `pill_rect` with nothing
 /// left over. Pure arithmetic: this is the half of segment hit-testing that
-/// does not need a rendered frame to check, and is what Task 7 will
+/// does not need a rendered frame to check, and is what `mod.rs` calls
 /// `ui.interact` against.
 pub fn segment_rects(pill_rect: Rect, segment_widths: &[f32], cfg: &LayoutCfg) -> Vec<Rect> {
     layout::segment_offsets(segment_widths, cfg)
@@ -246,7 +253,7 @@ fn text_origin(rect: Rect, galley: &Galley) -> Pos2 {
 /// Characters before `byte`, so a byte span from the grammar becomes the
 /// character index `CCursor` takes. Counting avoids slicing the string, which
 /// would panic on a span that lands mid-character.
-fn char_index(text: &str, byte: usize) -> usize {
+pub(crate) fn char_index(text: &str, byte: usize) -> usize {
     text.char_indices().take_while(|(i, _)| *i < byte).count()
 }
 
@@ -469,6 +476,28 @@ mod tests {
         let last = rects.last().expect("at least one segment");
         assert!((first.left() - pill_rect.left()).abs() < f32::EPSILON, "first segment {first:?} vs {pill_rect:?}");
         assert!((last.right() - pill_rect.right()).abs() < f32::EPSILON, "last segment {last:?} vs {pill_rect:?}");
+    }
+
+    /// The hover wash rounds only where a segment sits on the pill's own outer
+    /// boundary. Pure arithmetic, but only ever exercised through the render
+    /// loop otherwise, which needs pointer-hover context to reach.
+    #[test]
+    fn a_segments_corners_round_only_on_the_pills_own_boundary() {
+        let first = segment_corner_radius(0, 2);
+        assert_eq!((first.nw, first.sw), (RADIUS, RADIUS), "the first segment carries the pill's left edge");
+        assert_eq!((first.ne, first.se), (0, 0), "and none of its right");
+
+        let middle = segment_corner_radius(1, 2);
+        assert_eq!((middle.nw, middle.sw, middle.ne, middle.se), (0, 0, 0, 0), "an interior segment is a slice");
+
+        let last = segment_corner_radius(2, 2);
+        assert_eq!((last.ne, last.se), (RADIUS, RADIUS), "the last segment carries the pill's right edge");
+        assert_eq!((last.nw, last.sw), (0, 0), "and none of its left");
+
+        // `MatchTerm::FreeText` ships a one-segment pill, which is both first
+        // and last and so matches the pill's own outline all the way round.
+        let only = segment_corner_radius(0, 0);
+        assert_eq!((only.nw, only.sw, only.ne, only.se), (RADIUS, RADIUS, RADIUS, RADIUS));
     }
 
     /// `MatchTerm::FreeText` (`label.rs`) always yields exactly one segment,

@@ -17,6 +17,8 @@ use crate::db::index::query_ast::ValueKind;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::SourceId;
 use crate::db::index::rows::VehicleRelation;
+use crate::ui::query_bar::label;
+use crate::ui::query_bar::seed;
 use crate::ui::query_bar::suggest::TermField;
 use crate::ui::query_bar::tokens::NodePath;
 use crate::ui::query_bar::tokens::Token;
@@ -173,6 +175,44 @@ pub fn term_op_at(expr: &MatchExpr, path: &[usize]) -> Option<(&'static [Op], Op
     }
 }
 
+/// The field, operator, and value of the term a segment path names. `None` for
+/// a path that names no single term, which is every path that stops on a roster
+/// quantifier whose predicate has more than one leaf. `segment_path` is what
+/// turns a pill's own path into one this accepts.
+pub fn term_at<'a>(expr: &'a MatchExpr, path: &[usize]) -> Option<(TermField, Op, &'a Value)> {
+    let (term, rest) = split_at_leaf(expr, path)?;
+    match term {
+        MatchTerm::Field(field, op, value) if rest.is_empty() => Some((TermField::Match(*field), *op, value)),
+        MatchTerm::Roster { pred, .. } => match expr_at(pred, rest)? {
+            Expr::Leaf(roster) => Some((TermField::Roster(roster.field), roster.op, &roster.value)),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// The path a segment edit acts on, given the path of the pill that was
+/// clicked. `None` for a pill whose segments address no editable term.
+///
+/// A sugar-collapsed roster pill draws the quantifier's inner term ("Enemy ship
+/// is Yamato") on a path that names the `Roster` leaf, which carries no single
+/// field of its own, so its segments are redirected into the predicate.
+/// `MatchTerm::FreeText` has no field or operator at all and yields `None`,
+/// which is what keeps its one segment from being a click that does nothing.
+pub fn segment_path(expr: &MatchExpr, path: &NodePath) -> Option<NodePath> {
+    let (term, rest) = split_at_leaf(expr, path)?;
+    match term {
+        MatchTerm::Field(..) if rest.is_empty() => Some(path.clone()),
+        MatchTerm::Roster { quant, pred } if rest.is_empty() => {
+            let mut extended = path.clone();
+            extended.extend(label::sugar_inner_path(*quant, pred)?);
+            Some(extended)
+        }
+        MatchTerm::Roster { pred, .. } => matches!(expr_at(pred, rest), Some(Expr::Leaf(_))).then(|| path.clone()),
+        _ => None,
+    }
+}
+
 /// Whether `set_op` would take, so an operator menu can disable an entry rather
 /// than offer one that silently does nothing.
 pub fn can_set_op(expr: &MatchExpr, path: &[usize], op: Op) -> bool {
@@ -201,6 +241,33 @@ pub fn set_op(expr: &mut MatchExpr, path: &[usize], op: Op) -> bool {
         },
         _ => false,
     }
+}
+
+/// Replaces the value of the term at `path`, reporting whether it took.
+///
+/// Refuses a value whose kind the field does not carry, so a picked literal
+/// that parsed against the wrong field cannot land in the tree, and refuses any
+/// value at all on a nullary operator, which has no right-hand side to hold it.
+pub fn set_value(expr: &mut MatchExpr, path: &[usize], value: Value) -> bool {
+    let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
+        return false;
+    };
+    match term {
+        MatchTerm::Field(field, op, current) if rest.is_empty() => apply_value(field.value_kind(), *op, current, value),
+        MatchTerm::Roster { pred, .. } => match expr_at_mut(pred, rest) {
+            Some(Expr::Leaf(roster)) => apply_value(roster.field.value_kind(), roster.op, &mut roster.value, value),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn apply_value(kind: ValueKind, op: Op, current: &mut Value, value: Value) -> bool {
+    if op.is_nullary() || value_kind_of(&value) != Some(kind) {
+        return false;
+    }
+    *current = value;
+    true
 }
 
 fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool {
@@ -240,10 +307,6 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 /// read it as "the user has not chosen a value yet". A caller that needs to
 /// know whether the value was reset compares the old and new field's own
 /// `value_kind()` rather than inspecting what landed here.
-///
-/// No production caller yet: the segmented pill UI that wires this up is a
-/// later task.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> bool {
     let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
         return false;
@@ -268,10 +331,15 @@ pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> boo
 
 /// Brings an operator/value pair back into a field's own rules after the
 /// field itself changed underneath them.
-#[cfg_attr(not(test), allow(dead_code))]
+///
+/// The replacement operator comes from `seed::seed_op`, the same chooser the
+/// app's built-in queries go through, rather than from a second copy of the
+/// preference list: `Op` spells equality three ways and all three print
+/// identically, so two lists that drifted would build a term that reparses into
+/// a different tree.
 fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: ValueKind) {
     if !allowed.contains(op) {
-        *op = equality_op(allowed);
+        *op = seed::seed_op(allowed, seed::Wanted::Equality);
     }
     if op.is_nullary() {
         *value = Value::NoOperand;
@@ -280,24 +348,8 @@ fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: 
     }
 }
 
-/// The equality operator a field spells its own way, found the same way
-/// `seed::seed_op` picks one for its `Wanted::Equality`: the class-correct
-/// spellings are tried first, and the field's own list is the fallback, so a
-/// field this preference list misses still gets something it allows.
-#[cfg_attr(not(test), allow(dead_code))]
-fn equality_op(allowed: &'static [Op]) -> Op {
-    const PREFERRED: [Op; 3] = [Op::Is, Op::Equals, Op::Eq];
-    PREFERRED
-        .iter()
-        .chain(allowed)
-        .copied()
-        .find(|op| allowed.contains(op))
-        .expect("every field allows at least one operator")
-}
-
 /// The `ValueKind` a `Value` carries, or `None` for `NoOperand`, which is not
 /// in any kind's family.
-#[cfg_attr(not(test), allow(dead_code))]
 fn value_kind_of(value: &Value) -> Option<ValueKind> {
     match value {
         Value::Text(_) => Some(ValueKind::Text),
@@ -328,13 +380,10 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 /// not contradict. A preset is a complete, shipped tree, so a zero id in one
 /// would be a resting bug the user could commit unchanged. A `Ship` or
 /// `Account` placeholder minted here exists only inside a live edit, where
-/// changing to an entity-kind field always changes `value_kind()` -- but that
-/// only keeps the zero id out of a resting state if the caller treats the
-/// `value_kind()` change as a requirement to open the value editor before the
-/// term can be committed. No production caller yet: the segmented pill UI
-/// that wires this up is a later task, and it is on that task to honour this,
-/// not something already guaranteed here.
-#[cfg_attr(not(test), allow(dead_code))]
+/// changing to an entity-kind field always changes `value_kind()` -- and
+/// `QueryBar::commit_field_change` compares the old and new `value_kind()` and
+/// opens the value segment's editor on the spot when they differ, so a minted
+/// zero id is never a state the user can rest on or commit.
 fn placeholder_value(kind: ValueKind) -> Value {
     match kind {
         ValueKind::Text => Value::Text(String::new()),
@@ -1555,5 +1604,188 @@ mod tests {
             }),
         });
         assert_eq!(prune_empty(&roster), roster);
+    }
+
+    /// One segment edit, in the three shapes `mod.rs`'s routing applies.
+    #[derive(Debug, Clone)]
+    enum Edit {
+        Field(TermField),
+        Operator(Op),
+        Literal(Value),
+    }
+
+    fn apply_edit(expr: &mut MatchExpr, path: &NodePath, edit: &Edit) -> bool {
+        match edit {
+            Edit::Field(field) => set_field(expr, path, *field),
+            Edit::Operator(op) => set_op(expr, path, *op),
+            Edit::Literal(value) => set_value(expr, path, value.clone()),
+        }
+    }
+
+    /// (query text, starting tree, path, edit) quadruples where the edit must
+    /// land on exactly the tree the text parses to.
+    ///
+    /// There is no scope-change case. A scope is not a field: in the grammar it
+    /// is a `RosterField::Relation` conjunct beside the term it scopes, so no
+    /// `set_field` call can express one and there is nothing here for a segment
+    /// edit to converge with. What is expressible is covered instead: a
+    /// match-level field change, a roster-level field change, an operator
+    /// change, and a value change.
+    fn convergence_cases() -> Vec<(&'static str, MatchExpr, NodePath, Edit)> {
+        use crate::db::index::query_ast::Quant;
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+
+        let roster = |field: RosterField, op: Op, value: Value| -> MatchExpr {
+            Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::Leaf(RosterTerm { field, op, value }) })
+        };
+        vec![
+            (
+                "date>=1970-01-01",
+                Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(5))),
+                vec![],
+                Edit::Field(TermField::Match(MatchField::Date)),
+            ),
+            (
+                "anyone.damage=10",
+                roster(RosterField::Tier, Op::Eq, Value::Int(10)),
+                vec![],
+                Edit::Field(TermField::Roster(RosterField::Damage)),
+            ),
+            (
+                "build<5",
+                Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(5))),
+                vec![],
+                Edit::Operator(Op::Lt),
+            ),
+            (
+                "outcome=loss",
+                Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win))),
+                vec![],
+                Edit::Literal(Value::Outcome(MatchOutcome::Loss)),
+            ),
+        ]
+    }
+
+    /// The property that keeps the two editing paths honest, and the reason
+    /// both can be first-class: whatever a segment edit builds, typing the
+    /// equivalent text builds the same tree.
+    #[test]
+    fn editing_a_segment_and_typing_the_text_produce_the_same_tree() {
+        use crate::db::index::query_text::parse_query;
+        for (typed, start, path, edit) in convergence_cases() {
+            let mut edited = start;
+            assert!(apply_edit(&mut edited, &path, &edit), "the edit {edit:?} was refused");
+            canonicalise(&mut edited);
+            assert_eq!(edited, parse_query(typed).expect("the case text parses"), "typing {typed:?} diverged");
+        }
+    }
+
+    /// The bug `edit_as_text` had: it printed the leaf under a `not`, deleted
+    /// the leaf, and left the caret holding text that reparsed without the
+    /// negation. A segment edit rewrites the term in place, so the enclosing
+    /// node cannot be lost -- and this is the property the retired refusal test
+    /// was ultimately protecting.
+    #[test]
+    fn changing_a_value_under_a_not_keeps_the_negation() {
+        let win = Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)));
+        let mut e = Expr::Not(Box::new(win));
+        assert_eq!(segment_path(&e, &vec![0]), Some(vec![0]));
+        assert!(set_value(&mut e, &[0], Value::Outcome(MatchOutcome::Loss)));
+        canonicalise(&mut e);
+        match &e {
+            Expr::Not(inner) => assert_eq!(
+                **inner,
+                Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Loss)))
+            ),
+            other => panic!("the negation was lost: {other:?}"),
+        }
+    }
+
+    /// The direct replacement for the retired `edit_as_text` refusal. That test
+    /// asserted a roster-internal pill could not be lifted into the caret,
+    /// because the printed text would be the whole quantifier while the removal
+    /// addressed a node the match tree does not have. Segment edits do not
+    /// print or remove anything, so the refusal is meaningless; what has to
+    /// hold instead is that the edit reaches the inner term and touches nothing
+    /// around it.
+    #[test]
+    fn a_segment_edit_on_a_roster_internal_pill_changes_only_that_term() {
+        use crate::db::index::query_ast::Quant;
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+
+        let pred = Expr::All(vec![
+            Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) }),
+            Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }),
+        ]);
+        let win = Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)));
+        let mut e = Expr::All(vec![win.clone(), Expr::Leaf(MatchTerm::Roster { quant: Quant::None, pred })]);
+
+        let path = segment_path(&e, &vec![1, 0]).expect("a roster-internal pill addresses its own term");
+        assert_eq!(path, vec![1, 0]);
+        assert!(set_value(&mut e, &path, Value::Int(8)));
+
+        let Expr::All(children) = &e else { panic!("got {e:?}") };
+        assert_eq!(children[0], win, "the sibling term must not move");
+        let Expr::Leaf(MatchTerm::Roster { quant, pred }) = &children[1] else { panic!("got {:?}", children[1]) };
+        assert_eq!(*quant, Quant::None, "the quantifier must survive");
+        let Expr::All(inner) = pred else { panic!("got {pred:?}") };
+        assert_eq!(inner[0], Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(8) }));
+        assert_eq!(inner[1], Expr::Leaf(RosterTerm { field: RosterField::Kills, op: Op::Ge, value: Value::Int(2) }));
+    }
+
+    /// A sugar-collapsed pill draws the quantifier's inner term, so its
+    /// segments have to address that term rather than the `Roster` leaf, which
+    /// carries no single field. Without the redirection every segment on a
+    /// collapsed pill would be a click that does nothing.
+    #[test]
+    fn a_sugar_collapsed_pill_addresses_the_term_it_draws() {
+        use crate::db::index::query_ast::Quant;
+        use crate::db::index::query_ast::RosterField;
+        use crate::db::index::query_ast::RosterTerm;
+        use crate::db::index::rows::VehicleRelation;
+
+        let scope = Expr::Leaf(RosterTerm {
+            field: RosterField::Relation,
+            op: Op::Is,
+            value: Value::Relation(VehicleRelation::Enemy),
+        });
+        let inner = Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) });
+        let e: MatchExpr = Expr::Leaf(MatchTerm::Roster { quant: Quant::Any, pred: Expr::All(vec![scope, inner]) });
+
+        assert_eq!(segment_path(&e, &vec![]), Some(vec![1]), "the scope conjunct is not what the pill draws");
+        let (field, op, value) = term_at(&e, &[1]).expect("the inner term");
+        assert_eq!(field, TermField::Roster(RosterField::Tier));
+        assert_eq!(op, Op::Eq);
+        assert_eq!(*value, Value::Int(10));
+    }
+
+    /// Free text has no field and no operator, so it has nothing a segment can
+    /// edit. Returning `None` is what keeps its one segment from registering a
+    /// click target that could not act on it.
+    #[test]
+    fn a_free_text_pill_has_no_segment_target() {
+        let e: MatchExpr = Expr::Leaf(MatchTerm::FreeText("yamato".into()));
+        assert_eq!(segment_path(&e, &vec![]), None);
+        assert!(term_at(&e, &[]).is_none());
+    }
+
+    #[test]
+    fn a_value_of_the_wrong_kind_is_refused() {
+        let mut e = Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)));
+        let before = e.clone();
+        assert!(!set_value(&mut e, &[], Value::Int(3)), "an Int cannot land on an Outcome field");
+        assert_eq!(e, before);
+    }
+
+    /// A nullary operator draws no value segment, so nothing should be able to
+    /// put a value back on one without going through the operator first.
+    #[test]
+    fn a_value_on_a_nullary_operator_is_refused() {
+        let mut e = Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand));
+        let before = e.clone();
+        assert!(!set_value(&mut e, &[], Value::Int(3)));
+        assert_eq!(e, before);
     }
 }

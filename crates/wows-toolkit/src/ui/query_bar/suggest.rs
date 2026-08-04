@@ -373,6 +373,15 @@ pub fn rank(needle: &str, all: &[Suggestion]) -> Vec<usize> {
     scored.into_iter().map(|(i, _)| i).collect()
 }
 
+/// Whether one row survives `needle`, scored the same way `rank` scores a
+/// suggestion label. A segment's list keeps its source's declaration order
+/// rather than re-sorting by tier, so this answers only whether a row stays.
+/// An empty needle keeps everything.
+pub fn matches(label: &str, needle: &str) -> bool {
+    let needle = needle.trim();
+    needle.is_empty() || match_tier(label, &needle.to_ascii_lowercase()).is_some()
+}
+
 /// 0 = the label starts with the needle; 1 = some word in the label does; 2 =
 /// the needle appears somewhere else in the label; `None` = no match at all.
 fn match_tier(label: &str, needle_lower: &str) -> Option<u8> {
@@ -439,8 +448,9 @@ fn split_on_operator(fragment: &str) -> Option<(&str, &str)> {
 }
 
 /// Where the caret's active fragment begins: just past the last whitespace, or
-/// the start of the text when there is none.
-fn active_fragment_start(pending: &str) -> usize {
+/// the start of the text when there is none. A byte offset, which
+/// `paint::char_index` turns into the character index a `CCursor` takes.
+pub(crate) fn active_fragment_start(pending: &str) -> usize {
     pending.char_indices().rev().find(|(_, c)| c.is_whitespace()).map_or(0, |(i, c)| i + c.len_utf8())
 }
 
@@ -548,19 +558,49 @@ pub struct ValueOption {
 
 /// Distinguishes a match-level field from a roster field so one function can
 /// serve both without the caller unpacking which kind it has.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TermField {
     Match(MatchField),
     Roster(RosterField),
 }
 
+impl TermField {
+    pub fn value_kind(self) -> ValueKind {
+        match self {
+            TermField::Match(f) => f.value_kind(),
+            TermField::Roster(f) => f.value_kind(),
+        }
+    }
+
+    pub fn allowed_ops(self) -> &'static [Op] {
+        match self {
+            TermField::Match(f) => f.allowed_ops(),
+            TermField::Roster(f) => f.allowed_ops(),
+        }
+    }
+
+    /// The label a committed pill's filter segment shows for this field.
+    pub fn label(self) -> String {
+        match self {
+            TermField::Match(f) => match_field_label(f),
+            TermField::Roster(f) => roster_field_label(f),
+        }
+    }
+}
+
 /// One row of the operator segment's dropdown: an operator the field's
 /// grammar accepts, paired with the same label a committed pill shows for it.
-#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq)]
 pub struct OperatorOption {
     pub op: Op,
+    pub label: String,
+}
+
+/// One row of the filter segment's dropdown: a field the pill can be retargeted
+/// to, with the label a committed pill would show for it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FieldOption {
+    pub field: TermField,
     pub label: String,
 }
 
@@ -568,27 +608,67 @@ pub struct OperatorOption {
 /// `allowed_ops` order. Never a superset: an operator absent here is
 /// unreachable by clicking, which is what keeps the grammar's per-field
 /// restrictions enforced at the UI boundary rather than only at parse time.
-///
-/// No production caller yet: the segmented pill UI that wires this up is a
-/// later task.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn operator_options(field: TermField) -> Vec<OperatorOption> {
-    let allowed = match field {
-        TermField::Match(f) => f.allowed_ops(),
-        TermField::Roster(f) => f.allowed_ops(),
-    };
-    allowed.iter().map(|&op| OperatorOption { op, label: op_label(op) }).collect()
+    field.allowed_ops().iter().map(|&op| OperatorOption { op, label: op_label(op) }).collect()
 }
 
-/// Every suggestion the filter segment's dropdown can show: presets and both
-/// field levels. Reuses `static_suggestions` rather than a second table, so a
-/// field added there reaches this dropdown too.
+/// The fields a pill's filter segment may offer: exactly the fields of the
+/// pill's own kind.
 ///
-/// No production caller yet: the segmented pill UI that wires this up is a
-/// later task.
-#[cfg_attr(not(test), allow(dead_code))]
+/// Scoped rather than offering both levels because `select::set_field` refuses
+/// a cross-kind change -- a `MatchTerm::Field` cannot carry a `RosterField` and
+/// the reverse -- so a wider list would be a click that does nothing. Presets
+/// are absent for the same reason: a preset is a whole query shape, not a field
+/// one existing term can be retargeted to.
+pub fn field_options(field: TermField) -> Vec<FieldOption> {
+    let of = |field: TermField| FieldOption { field, label: field.label() };
+    match field {
+        TermField::Match(_) => MatchField::ALL.iter().map(|&f| of(TermField::Match(f))).collect(),
+        TermField::Roster(_) => RosterField::ALL.iter().map(|&f| of(TermField::Roster(f))).collect(),
+    }
+}
+
+/// Every suggestion the caret's dropdown can show: presets and both field
+/// levels. Reuses `static_suggestions` rather than a second table, so a field
+/// added there reaches the dropdown too.
 pub fn filter_options() -> Vec<Suggestion> {
     static_suggestions()
+}
+
+/// How a field's value is picked once its value segment is being edited.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueEditor {
+    /// A closed set of grammar literals, offered as rows with no round trip.
+    Enum(Vec<ValueOption>),
+    /// Rows the Search tab fetches for a `ValueRequest`.
+    Lookup,
+    /// Free text parsed straight into a `Value`: numbers, dates, and open text.
+    Plain,
+}
+
+/// Which of the three editors a field's value segment opens, decided by the
+/// same two sources the caret already uses so a clicked value and a typed one
+/// come from the same place.
+pub fn value_editor(field: TermField) -> ValueEditor {
+    if let Some(options) = enum_values(field.value_kind()) {
+        return ValueEditor::Enum(options);
+    }
+    if segment_value_request(field, "").is_some() {
+        return ValueEditor::Lookup;
+    }
+    ValueEditor::Plain
+}
+
+/// The value lookup a segment edit calls for, from the field itself rather than
+/// from caret text. `value_request_for` answers the same question for a typed
+/// fragment; both route through `request_for_kind`, and `map` gets its own
+/// catalogue request in both, so the two cannot offer different rows for the
+/// same field.
+pub fn segment_value_request(field: TermField, needle: &str) -> Option<ValueRequest> {
+    if field == TermField::Match(MatchField::Map) {
+        return Some(ValueRequest::Maps);
+    }
+    request_for_kind(field.value_kind(), needle)
 }
 
 /// The value segment's autocomplete list for an enum-like kind: every literal
@@ -599,10 +679,6 @@ pub fn filter_options() -> Vec<Suggestion> {
 ///
 /// Draws on `enumerable_roster_values` rather than `enumerable_values`: the
 /// roster-only kinds `Relation`, `Division`, and `Class` only appear there.
-///
-/// No production caller yet: the segmented pill UI that wires this up is a
-/// later task.
-#[cfg_attr(not(test), allow(dead_code))]
 pub fn enum_values(kind: ValueKind) -> Option<Vec<ValueOption>> {
     let tokens = query_text::enumerable_roster_values(kind)?;
     Some(tokens.into_iter().map(|token| ValueOption { label: enum_value_label(kind, &token), token }).collect())
@@ -617,7 +693,6 @@ pub fn enum_values(kind: ValueKind) -> Option<Vec<ValueOption>> {
 /// a future enum kind added to `enumerable_roster_values` must get a label
 /// arm here or the compiler rejects the match, instead of silently shipping
 /// the raw grammar token as its label.
-#[cfg_attr(not(test), allow(dead_code))]
 fn enum_value_label(kind: ValueKind, token: &str) -> String {
     match kind {
         ValueKind::Outcome => MatchOutcome::from_db_str(token).map(outcome_label),
@@ -1289,6 +1364,79 @@ mod tests {
             assert!(
                 !matches!(kind, ValueKind::Relation | ValueKind::Division | ValueKind::Class),
                 "{f:?} has roster-only value kind {kind:?}; enum_values must key on TermField instead"
+            );
+        }
+    }
+
+    /// Every field lands in exactly one of the three editors, and in the one
+    /// the design table names for its kind. A kind that fell through to `Plain`
+    /// by accident would silently take away a working autocomplete.
+    #[test]
+    fn every_field_reaches_the_value_editor_its_kind_names() {
+        let expected = |kind: ValueKind| match kind {
+            ValueKind::Outcome | ValueKind::Bool | ValueKind::Relation | ValueKind::Division | ValueKind::Class => {
+                "enum"
+            }
+            ValueKind::Ship | ValueKind::Account | ValueKind::Source => "lookup",
+            ValueKind::Text | ValueKind::Int | ValueKind::Float | ValueKind::Timestamp => "plain",
+        };
+        let actual = |field: TermField| match value_editor(field) {
+            ValueEditor::Enum(options) => {
+                assert!(!options.is_empty(), "{field:?} offers an empty enum list");
+                "enum"
+            }
+            ValueEditor::Lookup => "lookup",
+            ValueEditor::Plain => "plain",
+        };
+        for f in MatchField::ALL {
+            let field = TermField::Match(f);
+            // `map` reads as text but its values are a catalogue the caller
+            // resolves, so it is the one field whose editor its kind alone does
+            // not decide.
+            let want = if f == MatchField::Map { "lookup" } else { expected(f.value_kind()) };
+            assert_eq!(actual(field), want, "{} took the wrong value editor", f.name());
+        }
+        for f in RosterField::ALL {
+            assert_eq!(actual(TermField::Roster(f)), expected(f.value_kind()), "{} took the wrong editor", f.name());
+        }
+    }
+
+    /// The filter segment offers one level's fields, never both. `set_field`
+    /// refuses a cross-kind change, so a wider list would put dead rows in the
+    /// dropdown, and a preset cannot retarget a single term at all.
+    #[test]
+    fn the_filter_segment_offers_only_its_own_levels_fields() {
+        let match_rows = field_options(TermField::Match(MatchField::Outcome));
+        assert_eq!(match_rows.len(), MatchField::ALL.len());
+        assert!(match_rows.iter().all(|o| matches!(o.field, TermField::Match(_))), "{match_rows:?}");
+
+        let roster_rows = field_options(TermField::Roster(RosterField::Tier));
+        assert_eq!(roster_rows.len(), RosterField::ALL.len());
+        assert!(roster_rows.iter().all(|o| matches!(o.field, TermField::Roster(_))), "{roster_rows:?}");
+
+        // Presets reach the caret's list and only the caret's list.
+        assert!(filter_options().iter().any(|s| matches!(s.kind, SuggestionKind::Preset(_))));
+    }
+
+    /// A segment's rows narrow by the same rule the caret's do, so a needle
+    /// that finds a field by typing finds it by clicking too.
+    #[test]
+    fn a_needle_narrows_a_segments_rows_the_way_it_narrows_the_carets() {
+        assert!(matches("Enemy damage", ""), "an empty needle keeps everything");
+        assert!(matches("Enemy damage", "dam"), "a word-boundary hit survives");
+        assert!(matches("Enemy damage", "ENE"), "matching is case-insensitive");
+        assert!(!matches("Enemy damage", "tier"));
+        for (label, needle) in [("Enemy damage", "dam"), ("Tier", "tie"), ("Outcome", "come")] {
+            let one = vec![Suggestion {
+                key: "probe",
+                label: label.to_string(),
+                context: SuggestionCategory::Match,
+                kind: SuggestionKind::MatchField(MatchField::Outcome),
+            }];
+            assert_eq!(
+                matches(label, needle),
+                !rank(needle, &one).is_empty(),
+                "{label:?} against {needle:?} disagrees with rank"
             );
         }
     }

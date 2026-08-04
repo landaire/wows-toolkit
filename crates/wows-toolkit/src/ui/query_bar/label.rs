@@ -24,6 +24,7 @@ use crate::db::index::query_ast::ValueKind;
 use crate::db::index::rows::IndexSource;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::VehicleRelation;
+use crate::ui::query_bar::tokens::NodePath;
 
 /// Display names for ids that only appear as numbers in the tree. Filled by the
 /// Search tab from the index; an id that is absent renders as `#<id>`, matching
@@ -39,8 +40,8 @@ pub struct NameCache {
     pub locale: Option<String>,
 }
 
-/// Which part of a term a segment renders. Later tasks give each role its own
-/// click target and autocomplete behavior.
+/// Which part of a term a segment renders. Each role carries its own click
+/// target and its own autocomplete source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SegmentRole {
     /// The field, including any scope prefix.
@@ -298,6 +299,24 @@ fn sugar_shape(quant: Quant, pred: &Expr<RosterTerm>) -> Option<(Option<String>,
         Expr::Leaf(inner) => Some((None, inner)),
         _ => None,
     }
+}
+
+/// Where inside a sugar-shaped predicate the term a collapsed pill renders
+/// lives, as a path relative to the predicate root. `None` for a shape that
+/// does not collapse.
+///
+/// Gated on `sugar_shape` so the two cannot disagree about which shapes
+/// collapse at all, and the index then follows from that function's two
+/// accepting arms: a bare leaf is the predicate root itself, and the
+/// two-conjunct scope form renders its second child.
+/// `the_sugar_inner_path_resolves_to_the_term_sugar_shape_renders` pins the
+/// pair against each other.
+pub(crate) fn sugar_inner_path(quant: Quant, pred: &Expr<RosterTerm>) -> Option<NodePath> {
+    sugar_shape(quant, pred)?;
+    Some(match pred {
+        Expr::Leaf(_) => Vec::new(),
+        _ => vec![1],
+    })
 }
 
 /// Compact "Enemy ship is Yamato" form for a roster quantifier whose predicate
@@ -764,5 +783,47 @@ mod tests {
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
         }
+    }
+
+    /// `sugar_inner_path` names an index while `sugar_shape` names a term, and
+    /// they have to be the same term: a segment edit on a collapsed pill
+    /// rewrites whatever the index reaches, and a pill that draws one term
+    /// while its clicks retarget another is worse than no click at all.
+    #[test]
+    fn the_sugar_inner_path_resolves_to_the_term_sugar_shape_renders() {
+        use crate::db::index::query_ast::Op;
+        use crate::db::index::query_ast::RosterField;
+
+        let tier = RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(10) };
+        let scopes = [
+            (RosterField::Relation, Value::Relation(VehicleRelation::SelfPlayer)),
+            (RosterField::Relation, Value::Relation(VehicleRelation::Ally)),
+            (RosterField::Relation, Value::Relation(VehicleRelation::Enemy)),
+            (RosterField::Division, Value::Division(DivisionScope::Mine)),
+        ];
+        let mut preds: Vec<Expr<RosterTerm>> = vec![Expr::Leaf(tier.clone())];
+        for (field, value) in scopes {
+            preds.push(Expr::All(vec![Expr::Leaf(RosterTerm { field, op: Op::Is, value }), Expr::Leaf(tier.clone())]));
+        }
+
+        for pred in &preds {
+            let (_, inner) = sugar_shape(Quant::Any, pred).expect("the fixture is sugar-shaped");
+            let path = sugar_inner_path(Quant::Any, pred).expect("a sugar shape has an inner path");
+            let mut reached = pred;
+            for step in &path {
+                match reached {
+                    Expr::All(children) | Expr::Any(children) => reached = &children[*step],
+                    other => panic!("path {path:?} left the tree at {other:?}"),
+                }
+            }
+            match reached {
+                Expr::Leaf(term) => assert_eq!(term, inner, "path {path:?} reached the wrong term"),
+                other => panic!("path {path:?} reached {other:?}, not a leaf"),
+            }
+        }
+
+        // A shape that does not collapse has no inner term to point at.
+        let not_sugar = Expr::Leaf(tier.clone());
+        assert!(sugar_inner_path(Quant::None, &not_sugar).is_none());
     }
 }
