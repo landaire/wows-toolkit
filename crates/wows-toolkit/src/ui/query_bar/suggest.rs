@@ -610,8 +610,13 @@ pub fn enum_values(kind: ValueKind) -> Option<Vec<ValueOption>> {
 
 /// The label a value token reads as once committed, matching `label.rs`'s
 /// rendering of the typed `Value` the token parses into. Falls back to the
-/// raw token for a kind `enum_values` never emits, which keeps this total
-/// without a matching arm per future enum kind.
+/// raw token when parsing the token back fails, which should not happen for
+/// a token this module just generated.
+///
+/// Matched exhaustively over `ValueKind` rather than through a catch-all arm:
+/// a future enum kind added to `enumerable_roster_values` must get a label
+/// arm here or the compiler rejects the match, instead of silently shipping
+/// the raw grammar token as its label.
 #[cfg_attr(not(test), allow(dead_code))]
 fn enum_value_label(kind: ValueKind, token: &str) -> String {
     match kind {
@@ -624,7 +629,13 @@ fn enum_value_label(kind: ValueKind, token: &str) -> String {
         ValueKind::Relation => VehicleRelation::from_db_str(token).map(relation_label),
         ValueKind::Division => DivisionScope::from_token(token).map(division_label),
         ValueKind::Class => ShipClass::from_token(token).map(class_label),
-        _ => None,
+        ValueKind::Text
+        | ValueKind::Int
+        | ValueKind::Float
+        | ValueKind::Ship
+        | ValueKind::Account
+        | ValueKind::Source
+        | ValueKind::Timestamp => None,
     }
     .unwrap_or_else(|| token.to_string())
 }
@@ -1124,17 +1135,53 @@ mod tests {
             let vs = enum_values(kind).unwrap_or_else(|| panic!("{kind:?} should offer values"));
             assert!(!vs.is_empty(), "{kind:?} offered an empty list");
         }
-        for kind in [ValueKind::Int, ValueKind::Float, ValueKind::Timestamp] {
+        // Ship/Account/Source are the DB-backed kinds `ValueRequest` serves
+        // instead; pinning them here alongside the plain scalars is what makes
+        // "no DB round trip folded into enum_values" a checked fact rather than
+        // only a doc comment.
+        for kind in [
+            ValueKind::Int,
+            ValueKind::Float,
+            ValueKind::Timestamp,
+            ValueKind::Ship,
+            ValueKind::Account,
+            ValueKind::Source,
+        ] {
             assert!(enum_values(kind).is_none(), "{kind:?} must be plain entry");
+        }
+    }
+
+    /// The value a clicked option of `kind` and raw `token` must parse into.
+    /// Built independently of `enum_value_label`, from the same domain
+    /// conversions `query_text`'s own value parser uses for these kinds, so
+    /// the round-trip test below checks the parsed leaf against the value the
+    /// option actually names rather than merely against itself.
+    fn expected_enum_value(kind: ValueKind, token: &str) -> Value {
+        match kind {
+            ValueKind::Outcome => {
+                Value::Outcome(MatchOutcome::from_db_str(token).unwrap_or_else(|| panic!("{token:?}")))
+            }
+            ValueKind::Bool => Value::Bool(token == "true"),
+            ValueKind::Relation => {
+                Value::Relation(VehicleRelation::from_db_str(token).unwrap_or_else(|| panic!("{token:?}")))
+            }
+            ValueKind::Division => {
+                Value::Division(DivisionScope::from_token(token).unwrap_or_else(|| panic!("{token:?}")))
+            }
+            ValueKind::Class => Value::Class(ShipClass::from_token(token).unwrap_or_else(|| panic!("{token:?}"))),
+            other => unreachable!("enum_values never offers {other:?}"),
         }
     }
 
     #[test]
     fn every_offered_enum_value_parses_back_to_the_same_value() {
         // A clicked value must be a value the grammar accepts, or committing it
-        // produces text that will not reparse.
+        // produces text that will not reparse. Beyond that, the parsed leaf
+        // must carry the exact value the option named, not merely reparse to
+        // something self-consistent.
         for f in RosterField::ALL {
-            let Some(options) = enum_values(f.value_kind()) else { continue };
+            let kind = f.value_kind();
+            let Some(options) = enum_values(kind) else { continue };
             for o in options {
                 let src = format!("any({}{}{})", f.name(), leading_op(f.allowed_ops()).unwrap().as_token(), o.token);
                 let parsed = crate::db::index::query_text::parse_query(&src)
@@ -1145,6 +1192,73 @@ mod tests {
                     parsed,
                     "{src:?} printed {printed:?}"
                 );
+                let Expr::Leaf(MatchTerm::Roster { pred, .. }) = &parsed else {
+                    panic!("{src:?} parsed as {parsed:?}");
+                };
+                let term = sole_roster_term(pred).unwrap_or_else(|| panic!("{src:?} pred {pred:?}"));
+                assert_eq!(term.value, expected_enum_value(kind, &o.token), "{src:?}");
+            }
+        }
+        // The match-level mirror of the loop above, without the `any(...)`
+        // wrapper a bare match field never takes. `MatchField::Outcome` is the
+        // only match field this reaches today, but a future match-level enum
+        // field is covered the moment it exists.
+        for f in MatchField::ALL {
+            let kind = f.value_kind();
+            let Some(options) = enum_values(kind) else { continue };
+            for o in options {
+                let src = format!("{}{}{}", f.name(), leading_op(f.allowed_ops()).unwrap().as_token(), o.token);
+                let parsed = crate::db::index::query_text::parse_query(&src)
+                    .unwrap_or_else(|e| panic!("{src:?} did not parse: {e}"));
+                let printed = crate::db::index::query_text::print_query(&parsed);
+                assert_eq!(
+                    crate::db::index::query_text::parse_query(&printed).unwrap(),
+                    parsed,
+                    "{src:?} printed {printed:?}"
+                );
+                let Expr::Leaf(MatchTerm::Field(_, _, value)) = &parsed else {
+                    panic!("{src:?} parsed as {parsed:?}");
+                };
+                assert_eq!(*value, expected_enum_value(kind, &o.token), "{src:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn enum_value_labels_match_the_committed_pills_value_text() {
+        // The whole point of widening the five `label.rs` functions to
+        // `pub(crate)` is that a dropdown row reads exactly like the pill it
+        // becomes. This pins that equality directly against `pill_segments` /
+        // `roster_segments` rather than trusting the two call paths to stay in
+        // sync.
+        use crate::ui::query_bar::label::NameCache;
+        use crate::ui::query_bar::label::SegmentRole;
+        use crate::ui::query_bar::label::pill_segments;
+        use crate::ui::query_bar::label::roster_segments;
+
+        let cache = NameCache::default();
+
+        for f in MatchField::ALL {
+            let kind = f.value_kind();
+            let Some(options) = enum_values(kind) else { continue };
+            for o in options {
+                let op = leading_op(f.allowed_ops()).unwrap();
+                let term = MatchTerm::Field(f, op, expected_enum_value(kind, &o.token));
+                let segs = pill_segments(&term, &cache);
+                let value_text = segs.iter().find(|s| s.role == SegmentRole::Value).map(|s| s.text.clone());
+                assert_eq!(value_text, Some(o.label.clone()), "{f:?} option {o:?}");
+            }
+        }
+
+        for f in RosterField::ALL {
+            let kind = f.value_kind();
+            let Some(options) = enum_values(kind) else { continue };
+            for o in options {
+                let op = leading_op(f.allowed_ops()).unwrap();
+                let term = RosterTerm { field: f, op, value: expected_enum_value(kind, &o.token) };
+                let segs = roster_segments(&term, &cache);
+                let value_text = segs.iter().find(|s| s.role == SegmentRole::Value).map(|s| s.text.clone());
+                assert_eq!(value_text, Some(o.label.clone()), "{f:?} option {o:?}");
             }
         }
     }
