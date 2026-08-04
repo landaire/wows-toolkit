@@ -6,7 +6,9 @@
 
 use jiff::Timestamp;
 use wows_core::game_types::AccountId;
+use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
+use wows_core::recognized::Recognized;
 
 use super::rows::MatchOutcome;
 use super::rows::SourceId;
@@ -247,6 +249,7 @@ pub enum ValueKind {
     Account,
     Source,
     Timestamp,
+    GameMode,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -263,6 +266,7 @@ pub enum Value {
     Account(AccountId),
     Source(SourceId),
     Timestamp(Timestamp),
+    GameMode(Recognized<GameMode, i32>),
     /// The operand-less companion to `Op::IsSet` and `Op::IsNotSet`. Named
     /// `NoOperand` rather than `None` so it is never misread as `Option::None`.
     NoOperand,
@@ -418,7 +422,8 @@ impl MatchField {
 
     pub fn value_kind(self) -> ValueKind {
         match self {
-            MatchField::Map | MatchField::GameType | MatchField::GameMode | MatchField::MatchGroup => ValueKind::Text,
+            MatchField::Map | MatchField::GameType | MatchField::MatchGroup => ValueKind::Text,
+            MatchField::GameMode => ValueKind::GameMode,
             MatchField::Date => ValueKind::Timestamp,
             MatchField::Build => ValueKind::Int,
             MatchField::Outcome => ValueKind::Outcome,
@@ -429,11 +434,11 @@ impl MatchField {
 
     pub fn allowed_ops(self) -> &'static [Op] {
         match self {
-            MatchField::Map | MatchField::GameType | MatchField::GameMode | MatchField::MatchGroup => TEXT_OPS,
+            MatchField::Map | MatchField::GameType | MatchField::MatchGroup => TEXT_OPS,
             MatchField::Date => NUM_OPS,
             // version_build is the one nullable match column.
             MatchField::Build => NUM_OPS_NULLABLE,
-            MatchField::Outcome | MatchField::Group | MatchField::ResultsAvailable => ENUM_OPS,
+            MatchField::Outcome | MatchField::Group | MatchField::ResultsAvailable | MatchField::GameMode => ENUM_OPS,
         }
     }
 }

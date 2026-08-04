@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use rust_i18n::t;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
+use wowsunpack::game_types::GameMode;
+use wowsunpack::recognized::Recognized;
 
 use crate::db::index::query_ast::CmpOp;
 use crate::db::index::query_ast::DivisionScope;
@@ -244,6 +246,7 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
         Value::Float(f) => format!("{f:.0}"),
         Value::Bool(b) => bool_label(*b),
         Value::Outcome(o) => outcome_label(*o),
+        Value::GameMode(m) => game_mode_label(m),
         Value::Relation(r) => relation_label(*r),
         Value::Division(d) => division_label(*d),
         Value::Class(c) => class_label(*c),
@@ -367,6 +370,50 @@ pub(crate) fn division_label(d: DivisionScope) -> String {
         DivisionScope::Mine => t!("ui.search.value.division_mine"),
         DivisionScope::Any => t!("ui.search.value.division_any"),
         DivisionScope::None => t!("ui.search.value.division_none"),
+    }
+    .into()
+}
+
+/// An unrecognised id (a build the id table does not cover) shows as `#<id>`,
+/// matching how an unresolved ship or account id renders in `value_text`.
+pub(crate) fn game_mode_label(m: &Recognized<GameMode, i32>) -> String {
+    match m {
+        Recognized::Known(mode) => game_mode_variant_label(*mode),
+        Recognized::Unknown(raw) => format!("#{raw}"),
+    }
+}
+
+fn game_mode_variant_label(mode: GameMode) -> String {
+    match mode {
+        GameMode::Invalid => t!("ui.search.value.game_mode_invalid"),
+        GameMode::Test => t!("ui.search.value.game_mode_test"),
+        GameMode::Standart => t!("ui.search.value.game_mode_standard"),
+        GameMode::Singlebase => t!("ui.search.value.game_mode_singlebase"),
+        GameMode::Domination => t!("ui.search.value.game_mode_domination"),
+        GameMode::Tutorial => t!("ui.search.value.game_mode_tutorial"),
+        GameMode::Megabase => t!("ui.search.value.game_mode_megabase"),
+        GameMode::Forts => t!("ui.search.value.game_mode_forts"),
+        GameMode::StandardDomination => t!("ui.search.value.game_mode_standard_domination"),
+        GameMode::Epicenter => t!("ui.search.value.game_mode_epicenter"),
+        GameMode::AssaultDefense => t!("ui.search.value.game_mode_assault_defense"),
+        GameMode::Pve => t!("ui.search.value.game_mode_pve"),
+        GameMode::ArmsRace => t!("ui.search.value.game_mode_arms_race"),
+        GameMode::EpicenterRing => t!("ui.search.value.game_mode_epicenter_ring"),
+        GameMode::AntiStandard => t!("ui.search.value.game_mode_anti_standard"),
+        GameMode::AttackDefense => t!("ui.search.value.game_mode_attack_defense"),
+        GameMode::TorpedoBeat => t!("ui.search.value.game_mode_torpedo_beat"),
+        GameMode::TeamBattleRoyale => t!("ui.search.value.game_mode_team_battle_royale"),
+        GameMode::EscapeToPortal => t!("ui.search.value.game_mode_escape_to_portal"),
+        GameMode::DominationAsymm => t!("ui.search.value.game_mode_domination_asymm"),
+        GameMode::KeyBattle => t!("ui.search.value.game_mode_key_battle"),
+        GameMode::Portal2021 => t!("ui.search.value.game_mode_portal_2021"),
+        GameMode::TeamBattleRoyale2021 => t!("ui.search.value.game_mode_team_battle_royale_2021"),
+        GameMode::ConvoyEvent => t!("ui.search.value.game_mode_convoy_event"),
+        GameMode::ConvoyAirship => t!("ui.search.value.game_mode_convoy_airship"),
+        GameMode::TwoTeamsBattleRoyale => t!("ui.search.value.game_mode_two_teams_battle_royale"),
+        GameMode::PinataEvent => t!("ui.search.value.game_mode_pinata_event"),
+        GameMode::Respawns => t!("ui.search.value.game_mode_respawns"),
+        GameMode::RespawnsSectors => t!("ui.search.value.game_mode_respawns_sectors"),
     }
     .into()
 }
@@ -779,7 +826,29 @@ mod tests {
             ValueKind::Account => Value::Account(wows_replays::types::AccountId(1)),
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
+            ValueKind::GameMode => Value::GameMode(Recognized::Known(GameMode::ArmsRace)),
         }
+    }
+
+    #[test]
+    fn a_game_mode_pill_renders_three_segments_with_a_readable_value() {
+        let cache = NameCache::default();
+        let term =
+            MatchTerm::Field(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Known(GameMode::ArmsRace)));
+        let segs = pill_segments(&term, &cache);
+        assert_eq!(segs.len(), 3);
+        assert_eq!(segs[2].role, SegmentRole::Value);
+        assert!(!segs[2].text.is_empty(), "the value segment must not be blank");
+    }
+
+    /// An unrecognised game mode still renders a readable value segment, as
+    /// `#<id>` rather than a blank pill.
+    #[test]
+    fn an_unrecognised_game_mode_pill_shows_its_raw_id() {
+        let cache = NameCache::default();
+        let term = MatchTerm::Field(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Unknown(9_001)));
+        let segs = pill_segments(&term, &cache);
+        assert_eq!(segs[2].text, "#9001");
     }
 
     /// `sugar_inner_path` names an index while `sugar_shape` names a term, and

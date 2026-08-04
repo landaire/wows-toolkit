@@ -4,6 +4,8 @@
 use jiff::Timestamp;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
+use wowsunpack::game_types::GameMode;
+use wowsunpack::recognized::Recognized;
 
 use crate::db::index::query_ast::DivisionScope;
 use crate::db::index::query_ast::Expr;
@@ -375,6 +377,7 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
         Value::Account(_) => Some(ValueKind::Account),
         Value::Source(_) => Some(ValueKind::Source),
         Value::Timestamp(_) => Some(ValueKind::Timestamp),
+        Value::GameMode(_) => Some(ValueKind::GameMode),
         Value::NoOperand => None,
     }
 }
@@ -413,6 +416,7 @@ fn placeholder_value(kind: ValueKind) -> Value {
         ValueKind::Account => Value::Account(AccountId(0)),
         ValueKind::Source => Value::Source(SourceId(0)),
         ValueKind::Timestamp => Value::Timestamp(Timestamp::from_second(0).unwrap()),
+        ValueKind::GameMode => Value::GameMode(Recognized::Known(GameMode::ALL[0])),
     }
 }
 
@@ -1532,6 +1536,7 @@ mod tests {
             ValueKind::Account => Value::Account(wows_replays::types::AccountId(1)),
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
+            ValueKind::GameMode => Value::GameMode(Recognized::Known(GameMode::ArmsRace)),
         }
     }
 

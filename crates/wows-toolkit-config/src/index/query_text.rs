@@ -24,7 +24,9 @@ use winnow::stream::Location;
 use winnow::stream::Stream;
 use winnow::token::take_while;
 use wows_core::game_types::AccountId;
+use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
+use wows_core::recognized::Recognized;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;
@@ -795,6 +797,7 @@ fn op_from_token(token: &str, kind: ValueKind) -> Option<Op> {
             | ValueKind::Ship
             | ValueKind::Account
             | ValueKind::Source
+            | ValueKind::GameMode
     );
     match token {
         ":" if textual => Some(Op::Contains),
@@ -834,6 +837,7 @@ fn parse_value(kind: ValueKind, raw: &str) -> Option<Value> {
             _ => None,
         },
         ValueKind::Outcome => MatchOutcome::from_db_str(&s.to_ascii_lowercase()).map(Value::Outcome),
+        ValueKind::GameMode => game_mode_from_token(&s).map(|m| Value::GameMode(Recognized::Known(m))),
         ValueKind::Timestamp => parse_date(&s).or_else(|| parse_relative(&s)).map(Value::Timestamp),
         // A source is picked in the widget rather than typed, but the printed
         // form is the persistence format, so the id it prints has to read back.
@@ -842,6 +846,15 @@ fn parse_value(kind: ValueKind, raw: &str) -> Option<Value> {
         // handled by `parse_roster_value`.
         _ => None,
     }
+}
+
+/// The `GameMode` whose grammar token is `s`, case-insensitively. `GameMode`
+/// carries no `from_token` of its own -- `as_token` is the only direction
+/// Task 1 defined -- so this is the one place that inverts it, shared by the
+/// parser and by `enumerable_values`'s round trip through the same list.
+fn game_mode_from_token(s: &str) -> Option<GameMode> {
+    let lower = s.to_ascii_lowercase();
+    GameMode::ALL.into_iter().find(|m| m.as_token() == lower)
 }
 
 /// An integer with an optional `k` or `m` multiplier.
@@ -916,6 +929,7 @@ pub fn enumerable_values(kind: ValueKind) -> Option<Vec<String>> {
                 .collect(),
         ),
         ValueKind::Bool => Some(vec!["true".into(), "false".into()]),
+        ValueKind::GameMode => Some(GameMode::ALL.iter().map(|m| m.as_token().to_string()).collect()),
         _ => None,
     }
 }
@@ -1104,6 +1118,8 @@ pub fn print_value(value: &Value) -> String {
         Value::Account(a) => a.raw().to_string(),
         Value::Source(s) => s.0.to_string(),
         Value::Timestamp(t) => print_timestamp(*t),
+        Value::GameMode(Recognized::Known(m)) => m.as_token().to_string(),
+        Value::GameMode(Recognized::Unknown(raw)) => raw.to_string(),
         Value::NoOperand => String::new(),
     }
 }
@@ -2046,5 +2062,32 @@ mod tests {
     fn values_needing_quotes_are_quoted() {
         let parsed = parse_query_at("map:\"new dawn\"", fixed_now()).unwrap();
         assert_eq!(print_query(&parsed), "map:\"new dawn\"");
+    }
+
+    #[test]
+    fn a_game_mode_filter_parses_and_round_trips() {
+        let e = parse_query("game-mode:arms-race").expect("parse");
+        match &e {
+            Expr::Leaf(MatchTerm::Field(MatchField::GameMode, _, Value::GameMode(m))) => {
+                assert_eq!(m.known().copied(), Some(GameMode::ArmsRace));
+            }
+            other => panic!("got {other:?}"),
+        }
+        assert_eq!(parse_query(&print_query(&e)).expect("reparse"), e);
+    }
+
+    #[test]
+    fn every_game_mode_token_parses_back_to_its_own_mode() {
+        // A value offered in the dropdown must be one the grammar accepts, and
+        // must not land on a neighbouring mode.
+        for mode in GameMode::ALL {
+            let src = format!("game-mode:{}", mode.as_token());
+            match parse_query(&src).unwrap_or_else(|e| panic!("{src:?}: {e}")) {
+                Expr::Leaf(MatchTerm::Field(_, _, Value::GameMode(m))) => {
+                    assert_eq!(m.known().copied(), Some(mode), "{src:?}");
+                }
+                other => panic!("{src:?} gave {other:?}"),
+            }
+        }
     }
 }

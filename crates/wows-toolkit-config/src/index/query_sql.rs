@@ -5,6 +5,8 @@
 
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
+use wows_core::game_types::GameMode;
+use wows_core::recognized::Recognized;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;
@@ -92,7 +94,7 @@ fn match_column(field: MatchField) -> &'static str {
     match field {
         MatchField::Map => "m.map",
         MatchField::GameType => "m.game_type",
-        MatchField::GameMode => "m.game_mode",
+        MatchField::GameMode => "m.game_mode_id",
         MatchField::MatchGroup => "m.match_group",
         MatchField::Date => "m.timestamp",
         MatchField::Build => "m.version_build",
@@ -119,6 +121,7 @@ fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, valu
         (ValueKind::Outcome, Value::Outcome(o)) => push_eq_str(qb, col, op, o.as_db_str()),
         (ValueKind::Source, Value::Source(s)) => push_num_i64(qb, col, op, s.0),
         (ValueKind::Bool, Value::Bool(b)) => push_eq_bool(qb, col, op, *b),
+        (ValueKind::GameMode, Value::GameMode(m)) => push_game_mode(qb, col, op, m),
         _ => {
             qb.push("1=0");
         }
@@ -202,6 +205,20 @@ fn push_num_i64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: i64) {
 fn push_eq_str(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, val: &str) {
     let sql = if matches!(op, Op::IsNot | Op::NotEquals | Op::Ne) { "<>" } else { "=" };
     qb.push(format!("{col} {sql} ")).push_bind(val.to_string());
+}
+
+/// The `game_mode_id` column stores the game's own numeric id, so a known mode
+/// compiles to `id()` and an unrecognised one compiles to the raw id it was
+/// read back as. A NULL row (an old row, or a build the id table does not
+/// cover) fails the comparison under SQL's normal three-valued logic for both
+/// `=` and `<>`, which is exactly "does not match this filter" and needs no
+/// special-casing here.
+fn push_game_mode(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, mode: &Recognized<GameMode, i32>) {
+    let id = match mode {
+        Recognized::Known(m) => m.id(),
+        Recognized::Unknown(raw) => *raw,
+    };
+    push_num_i64(qb, col, op, i64::from(id));
 }
 
 fn push_eq_bool(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, b: bool) {
@@ -368,6 +385,51 @@ mod tests {
         let ts = jiff::Timestamp::from_second(1_700_000_000).unwrap();
         let sql = sql_for(&leaf(MatchField::Date, Op::Ge, Value::Timestamp(ts)));
         assert!(sql.contains("m.timestamp >="), "got {sql}");
+    }
+
+    #[test]
+    fn the_game_mode_filter_compiles_against_the_numeric_column() {
+        // The display string is not stable across locales or versions, so the
+        // filter must never compare against it.
+        let sql = sql_for(&leaf(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Known(GameMode::ArmsRace))));
+        assert!(sql.contains("m.game_mode_id"), "got {sql}");
+        assert!(!sql.contains("m.game_mode "), "compared against the display string: {sql}");
+    }
+
+    #[test]
+    fn an_unknown_game_mode_compiles_to_its_raw_id() {
+        let sql = sql_for(&leaf(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Unknown(9_001))));
+        assert!(sql.contains("m.game_mode_id"), "got {sql}");
+    }
+
+    /// A row with no recorded mode must fail both the positive and the
+    /// negated form, not just one of them: SQL's three-valued logic makes
+    /// `col = x` and `col <> x` both NULL (not TRUE) when `col` is NULL, and
+    /// `WHERE` treats NULL the same as FALSE. Verified against a real SQLite
+    /// connection rather than assumed from the generated SQL text.
+    #[tokio::test]
+    async fn a_null_game_mode_row_matches_neither_is_nor_is_not() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, game_mode_id INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, game_mode_id) VALUES (1, NULL)")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let is_term = leaf(MatchField::GameMode, Op::Is, Value::GameMode(Recognized::Known(GameMode::ArmsRace)));
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT COUNT(*) FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &is_term, &CompileCtx::default());
+        let is_count: i64 = qb.build_query_scalar().fetch_one(&pool).await.unwrap();
+        assert_eq!(is_count, 0, "a NULL row must not satisfy game-mode is arms-race");
+
+        let is_not_term = leaf(MatchField::GameMode, Op::IsNot, Value::GameMode(Recognized::Known(GameMode::ArmsRace)));
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT COUNT(*) FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &is_not_term, &CompileCtx::default());
+        let is_not_count: i64 = qb.build_query_scalar().fetch_one(&pool).await.unwrap();
+        assert_eq!(is_not_count, 0, "a NULL row must not satisfy game-mode is not arms-race either");
     }
 
     #[test]

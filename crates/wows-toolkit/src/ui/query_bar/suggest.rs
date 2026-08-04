@@ -1,6 +1,8 @@
 //! Suggestion sourcing and ranking for the query bar's dropdown.
 
 use rust_i18n::t;
+use wowsunpack::game_types::GameMode;
+use wowsunpack::recognized::Recognized;
 
 use crate::db::index::query_ast::CmpOp;
 use crate::db::index::query_ast::DivisionScope;
@@ -21,6 +23,7 @@ use crate::db::index::rows::VehicleRelation;
 use crate::ui::query_bar::label::bool_label;
 use crate::ui::query_bar::label::class_label;
 use crate::ui::query_bar::label::division_label;
+use crate::ui::query_bar::label::game_mode_label;
 use crate::ui::query_bar::label::match_field_label;
 use crate::ui::query_bar::label::op_label;
 use crate::ui::query_bar::label::outcome_label;
@@ -539,7 +542,8 @@ fn request_for_kind(kind: ValueKind, needle: &str) -> Option<ValueRequest> {
         | ValueKind::Relation
         | ValueKind::Division
         | ValueKind::Class
-        | ValueKind::Timestamp => None,
+        | ValueKind::Timestamp
+        | ValueKind::GameMode => None,
     }
 }
 
@@ -704,6 +708,9 @@ fn enum_value_label(kind: ValueKind, token: &str) -> String {
         ValueKind::Relation => VehicleRelation::from_db_str(token).map(relation_label),
         ValueKind::Division => DivisionScope::from_token(token).map(division_label),
         ValueKind::Class => ShipClass::from_token(token).map(class_label),
+        ValueKind::GameMode => {
+            GameMode::ALL.into_iter().find(|m| m.as_token() == token).map(|m| game_mode_label(&Recognized::Known(m)))
+        }
         ValueKind::Text
         | ValueKind::Int
         | ValueKind::Float
@@ -960,6 +967,7 @@ mod tests {
             ValueKind::Class => "dd",
             ValueKind::Ship | ValueKind::Account | ValueKind::Source => "1",
             ValueKind::Timestamp => "2024-01-01",
+            ValueKind::GameMode => "arms-race",
         }
     }
 
@@ -1206,7 +1214,14 @@ mod tests {
 
     #[test]
     fn enum_kinds_offer_values_and_scalars_do_not() {
-        for kind in [ValueKind::Outcome, ValueKind::Bool, ValueKind::Relation, ValueKind::Division, ValueKind::Class] {
+        for kind in [
+            ValueKind::Outcome,
+            ValueKind::Bool,
+            ValueKind::Relation,
+            ValueKind::Division,
+            ValueKind::Class,
+            ValueKind::GameMode,
+        ] {
             let vs = enum_values(kind).unwrap_or_else(|| panic!("{kind:?} should offer values"));
             assert!(!vs.is_empty(), "{kind:?} offered an empty list");
         }
@@ -1223,6 +1238,15 @@ mod tests {
             ValueKind::Source,
         ] {
             assert!(enum_values(kind).is_none(), "{kind:?} must be plain entry");
+        }
+    }
+
+    #[test]
+    fn the_game_mode_value_source_offers_every_mode() {
+        let offered = enum_values(ValueKind::GameMode).expect("game mode is enumerable");
+        assert_eq!(offered.len(), GameMode::ALL.len());
+        for mode in GameMode::ALL {
+            assert!(offered.iter().any(|o| o.token == mode.as_token()), "{mode:?} not offered");
         }
     }
 
@@ -1244,6 +1268,9 @@ mod tests {
                 Value::Division(DivisionScope::from_token(token).unwrap_or_else(|| panic!("{token:?}")))
             }
             ValueKind::Class => Value::Class(ShipClass::from_token(token).unwrap_or_else(|| panic!("{token:?}"))),
+            ValueKind::GameMode => Value::GameMode(Recognized::Known(
+                GameMode::ALL.into_iter().find(|m| m.as_token() == token).unwrap_or_else(|| panic!("{token:?}")),
+            )),
             other => unreachable!("enum_values never offers {other:?}"),
         }
     }
@@ -1374,9 +1401,12 @@ mod tests {
     #[test]
     fn every_field_reaches_the_value_editor_its_kind_names() {
         let expected = |kind: ValueKind| match kind {
-            ValueKind::Outcome | ValueKind::Bool | ValueKind::Relation | ValueKind::Division | ValueKind::Class => {
-                "enum"
-            }
+            ValueKind::Outcome
+            | ValueKind::Bool
+            | ValueKind::Relation
+            | ValueKind::Division
+            | ValueKind::Class
+            | ValueKind::GameMode => "enum",
             ValueKind::Ship | ValueKind::Account | ValueKind::Source => "lookup",
             ValueKind::Text | ValueKind::Int | ValueKind::Float | ValueKind::Timestamp => "plain",
         };
