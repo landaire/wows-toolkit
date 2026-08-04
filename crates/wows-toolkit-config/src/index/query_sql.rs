@@ -110,9 +110,12 @@ fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, valu
         qb.push(format!("{col} {sql}"));
         return;
     }
-    // A typed date names a whole day, not the single instant of its local
-    // midnight, so equality and inequality widen to a half-open range over
-    // that day. Every other comparison on `Date` already means what it says
+    // Equality and inequality on `Date` always widen to a half-open range
+    // over the bound value's local day, regardless of whether that value is
+    // a bare date or a fully-specified instant: `date=2026-07-23T14:32:00Z`
+    // matches that whole day too, since the AST carries only a `Timestamp`
+    // and cannot tell "the user typed a day" from "the user typed a precise
+    // instant". Every other comparison on `Date` already means what it says
     // (`date>=X` is "at or after this instant") and is left to the numeric
     // path below.
     if let (MatchField::Date, Value::Timestamp(t)) = (field, value)
@@ -140,10 +143,12 @@ fn push_field(qb: &mut QueryBuilder<'_, Sqlite>, field: MatchField, op: Op, valu
 
 /// Emits the half-open range `[start, end)` of the local day containing `t`
 /// (`Eq`) or its negation (any other operator this is called for), resolved
-/// through `current_zone()` so `date=X` and `date!=X` mean the day the user
-/// typed rather than a single instant. The bounds come from the day's own
-/// start and its own following day rather than a fixed 86400 seconds, so a
-/// DST-transition day (23 or 25 hours) still gets its real boundaries.
+/// through `current_zone()`. This is `Eq`/`Ne` on `Date`'s whole meaning: `t`
+/// may be a bare date's local midnight or a fully-specified instant midday,
+/// and either way the range is the local day that instant falls in. The
+/// bounds come from the day's own start and its own following day rather
+/// than a fixed 86400 seconds, so a DST-transition day (23 or 25 hours)
+/// still gets its real boundaries.
 fn push_date_day_range(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, t: jiff::Timestamp) {
     let zoned = t.to_zoned(super::query_text::current_zone());
     // `start_of_day`/`tomorrow` disambiguate a local midnight that falls in a
@@ -437,12 +442,38 @@ mod tests {
         assert!(!sql.contains("m.timestamp ="), "still an instant comparison: {sql}");
     }
 
-    #[test]
-    fn an_inequality_on_a_date_excludes_the_whole_day() {
+    /// Substring-matching the generated SQL cannot tell an `OR` from an `AND`
+    /// joining the two halves, and an `AND` here is a bug that matches
+    /// nothing at all (a value cannot be both `< start` and `>= end` in a
+    /// half-open range). Only running the query against real rows on and
+    /// around the boundary proves the join is right.
+    #[tokio::test]
+    async fn an_inequality_on_a_date_excludes_only_that_days_rows() {
         let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
-        let ts = parse_one_timestamp("date!=2026-07-23");
-        let sql = sql_for(&leaf(MatchField::Date, Op::Ne, Value::Timestamp(ts)));
-        assert!(sql.contains("NOT") || sql.contains("<") && sql.contains(">="), "got {sql}");
+        let ts = parse_one_timestamp("date=2026-07-23");
+        let start = ts.as_second();
+        let end = start + 24 * 3600; // an ordinary day: no DST transition in July
+        let ne_term = leaf(MatchField::Date, Op::Ne, Value::Timestamp(ts));
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, timestamp INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, timestamp) VALUES (1, ?), (2, ?), (3, ?), (4, ?), (5, ?)")
+            .bind(start - 1) // last second of the previous day: must match
+            .bind(start) // first second of this day: must not
+            .bind(start + 12 * 3600) // midday this day: must not
+            .bind(end - 1) // last second of this day: must not
+            .bind(end) // first second of the next day: must match
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &ne_term, &CompileCtx::default());
+        let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
+        assert_eq!(matched, vec![1, 5], "got {matched:?}");
     }
 
     #[test]
@@ -484,6 +515,38 @@ mod tests {
         push_match_expr(&mut qb, &eq_term, &CompileCtx::default());
         let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
         assert_eq!(matched, vec![1], "got {matched:?}");
+    }
+
+    /// 2026-11-01 is the US fall-back day in America/New_York: local midnight
+    /// to local midnight is 25 hours (90000s). A `start + 86400`
+    /// implementation would cut this day an hour short; a row sitting in
+    /// that last real hour must still match.
+    #[tokio::test]
+    async fn an_equality_on_a_dst_fall_back_day_uses_that_day_s_own_length() {
+        let _zone = crate::index::query_text::ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").unwrap());
+        let ts = parse_one_timestamp("date=2026-11-01");
+        let real_start = ts.as_second();
+        let real_end = real_start + 25 * 3600;
+        let naive_end = real_start + 24 * 3600;
+        let eq_term = leaf(MatchField::Date, Op::Eq, Value::Timestamp(ts));
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY, timestamp INTEGER)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id, timestamp) VALUES (1, ?), (2, ?), (3, ?)")
+            .bind(naive_end) // inside the real 25h day, past a naive 24h window: must match
+            .bind(real_end - 1) // the day's real last second: must match
+            .bind(real_end) // the following real day's first second: must not
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new("SELECT arena_id FROM indexed_match m WHERE ");
+        push_match_expr(&mut qb, &eq_term, &CompileCtx::default());
+        let matched: Vec<i64> = qb.build_query_scalar().fetch_all(&pool).await.unwrap();
+        assert_eq!(matched, vec![1, 2], "got {matched:?}");
     }
 
     #[test]
