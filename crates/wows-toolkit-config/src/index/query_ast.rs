@@ -413,7 +413,8 @@ impl MatchField {
 
     pub fn aliases(self) -> &'static [&'static str] {
         match self {
-            MatchField::GameType => &["mode", "type"],
+            MatchField::GameType => &["type"],
+            MatchField::GameMode => &["mode"],
             MatchField::Date => &["when"],
             MatchField::Outcome => &["result"],
             MatchField::Group => &["source"],
@@ -674,6 +675,10 @@ impl MapCatalog {
 mod tests {
     use super::*;
 
+    // A single `seen` set spans both loops below, so a name or alias reused by
+    // any other MatchField or RosterField (including one equal to some other
+    // field's canonical name) collides on insert. This is what would have
+    // caught GameMode shipping with no aliases while GameType kept "mode".
     #[test]
     fn every_field_name_is_unique_and_lowercase() {
         let mut seen = std::collections::HashSet::new();
@@ -689,6 +694,16 @@ mod tests {
                 assert!(seen.insert(name), "duplicate field name: {name}");
             }
         }
+    }
+
+    // Regression: "mode" used to be aliased to GameType (BattleType: Random,
+    // Ranked, Co-op, Clan, Brawl) while GameMode (Standard, Domination,
+    // Epicenter, Arms Race) had no alias at all, so typing "mode" silently
+    // landed on the wrong axis and fell back to free text.
+    #[test]
+    fn mode_alias_resolves_to_game_mode_not_game_type() {
+        assert_eq!(MatchField::from_name("mode"), Some(MatchField::GameMode));
+        assert_eq!(MatchField::from_name("type"), Some(MatchField::GameType));
     }
 
     #[test]

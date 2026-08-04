@@ -1292,7 +1292,8 @@ mod tests {
     #[test]
     fn field_aliases_resolve_to_the_canonical_field() {
         assert!(matches!(one("result:win"), MatchTerm::Field(MatchField::Outcome, _, _)));
-        assert!(matches!(one("mode:pvp"), MatchTerm::Field(MatchField::GameType, _, _)));
+        assert!(matches!(one("type:pvp"), MatchTerm::Field(MatchField::GameType, _, _)));
+        assert!(matches!(one("mode:arms-race"), MatchTerm::Field(MatchField::GameMode, _, _)));
     }
 
     #[test]
