@@ -15,6 +15,7 @@ pub mod select;
 pub mod suggest;
 pub mod tokens;
 
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use egui::Galley;
@@ -83,6 +84,11 @@ const MIN_CARET_WIDTH: f32 = 90.0;
 /// Width held back for the scrollbar once the bar is tall enough to need one.
 const SCROLLBAR_ALLOWANCE: f32 = 14.0;
 const MAX_DROPDOWN_HEIGHT: f32 = 260.0;
+/// Edits the undo stack keeps before the oldest falls off. Every entry is a
+/// whole query tree, so a bar left open for a session cannot be allowed to keep
+/// one per edit forever; deep enough that stepping back through an afternoon's
+/// worth of filter juggling still lands where the user expects.
+const UNDO_DEPTH: usize = 64;
 
 /// The bar's editing state. `expr` is the source of truth; everything else is
 /// either in-flight text or a view of it.
@@ -131,6 +137,14 @@ pub struct QueryBar {
     history_cursor: Option<usize>,
     suggestions: Vec<Suggestion>,
     suggestions_locale: String,
+
+    /// Trees to step back to, oldest first: one entry per committed change,
+    /// holding the query as it stood before that change. A deque because the
+    /// bound is enforced by dropping the oldest.
+    undo_stack: VecDeque<MatchExpr>,
+    /// Trees stepped back from, most recent last. A fresh edit clears it: the
+    /// branch it describes is one the user left.
+    redo_stack: Vec<MatchExpr>,
 }
 
 pub struct QueryBarOutput {
@@ -265,6 +279,8 @@ enum Nav {
     DeleteSelection,
     Step { back: bool, extend: bool },
     HistoryBack,
+    Undo,
+    Redo,
 }
 
 /// A pointer interaction, collected while painting and applied afterwards so a
@@ -352,9 +368,15 @@ impl QueryBar {
         self.anchor = None;
         self.focus = None;
         self.clear_pending();
+        // The stack describes edits to the query being replaced, so stepping
+        // back through it would land on a tree the caller never asked for.
+        self.undo_stack.clear();
+        self.redo_stack.clear();
     }
 
     pub fn show(&mut self, ui: &mut Ui, deps: &Deps<'_>) -> QueryBarOutput {
+        // The frame's undo baseline, taken before anything can rewrite the tree.
+        let mut settled_before = self.settled().clone();
         let id = ui.id().with("query_bar");
         let caret_id = id.with("caret");
         let focused = ui.memory(|m| m.has_focus(caret_id));
@@ -378,6 +400,11 @@ impl QueryBar {
         if edited {
             self.finish_edit();
             (tokens, replaced) = self.stream();
+        }
+        // Undo and redo walk the stack themselves, so the frame's baseline walks
+        // with them and the step is not recorded as another edit on top of it.
+        if matches!(nav, Some(Nav::Undo | Nav::Redo)) {
+            settled_before = self.settled().clone();
         }
 
         let frame = paint::bar_frame(ui, focused);
@@ -422,6 +449,7 @@ impl QueryBar {
         if edited {
             self.finish_edit();
         }
+        self.record_edit(settled_before);
         QueryBarOutput { changed: edited, request: self.pending_request.take() }
     }
 
@@ -1123,6 +1151,20 @@ impl QueryBar {
         if self.pending.is_empty() && take(Modifiers::NONE, Key::Backspace) {
             return Some(if self.selection.is_empty() { Nav::DeleteAtCaret } else { Nav::DeleteSelection });
         }
+        // Redo before undo, because `consume_key` ignores a Shift the pattern
+        // did not ask for and the plain pattern would take Ctrl+Shift+Z first.
+        //
+        // Ahead of the editing gate, and taken whatever the caret holds. The
+        // stack is over committed edits, which is one meaning these keys can
+        // keep in every state the bar reaches; leaving them to the `TextEdit`
+        // while its buffer has text would make the same shortcut mean the query
+        // or a half-typed literal depending on state the user is not tracking.
+        if take(Modifiers::COMMAND.plus(Modifiers::SHIFT), Key::Z) || take(Modifiers::COMMAND, Key::Y) {
+            return Some(Nav::Redo);
+        }
+        if take(Modifiers::COMMAND, Key::Z) {
+            return Some(Nav::Undo);
+        }
         if editing {
             return None;
         }
@@ -1186,7 +1228,77 @@ impl QueryBar {
                 false
             }
             Nav::HistoryBack => self.walk_history(deps),
+            Nav::Undo => self.undo(),
+            Nav::Redo => self.redo(),
         }
+    }
+
+    /// The query as the user would read it back: the committed tree, minus a
+    /// placeholder a forced editor is still standing on.
+    ///
+    /// A mint and a retarget-that-replaces-the-value both write an arbitrary
+    /// in-kind value into the tree and open an editor over it. Nobody chose that
+    /// value -- dismissing the editor takes it back out -- so until the editor
+    /// commits, the tree the query means is the one the editor's snapshot holds.
+    /// Reading the stack's boundaries off this rather than off `expr` is what
+    /// keeps a placeholder off the stack from both ends: minting one records
+    /// nothing, withdrawing it records nothing, and choosing a value for it
+    /// records one entry that steps back past the whole pill.
+    fn settled(&self) -> &MatchExpr {
+        match self.editing.as_ref().and_then(|edit| edit.restore.as_ref()) {
+            Some(restore) => &restore.before,
+            None => &self.expr,
+        }
+    }
+
+    /// Records the tree a frame started with, when that frame moved it. Called
+    /// once per frame, so a gesture that rewrites the tree twice -- a click that
+    /// commits an open box and then edits somewhere else -- is one entry, and a
+    /// frame that only moved the caret is none.
+    fn record_edit(&mut self, before: MatchExpr) {
+        if *self.settled() == before {
+            return;
+        }
+        self.redo_stack.clear();
+        if self.undo_stack.len() == UNDO_DEPTH {
+            self.undo_stack.pop_front();
+        }
+        self.undo_stack.push_back(before);
+    }
+
+    /// Steps back to the tree before the last committed edit, reporting whether
+    /// it moved so the caller re-runs the query.
+    fn undo(&mut self) -> bool {
+        let Some(previous) = self.undo_stack.pop_back() else {
+            return false;
+        };
+        let current = self.settled().clone();
+        self.redo_stack.push(current);
+        self.restore_query(previous);
+        true
+    }
+
+    fn redo(&mut self) -> bool {
+        let Some(next) = self.redo_stack.pop() else {
+            return false;
+        };
+        let current = self.settled().clone();
+        self.undo_stack.push_back(current);
+        self.restore_query(next);
+        true
+    }
+
+    /// Puts a tree from the stack back. Whatever was being edited closes with
+    /// it: an open editor addresses the tree it opened over by path, and this
+    /// replaces that tree wholesale. The editor is dropped rather than
+    /// dismissed, since a forced one would otherwise write its snapshot over the
+    /// tree the step just restored.
+    fn restore_query(&mut self, expr: MatchExpr) {
+        self.expr = expr;
+        self.selection.clear();
+        self.anchor = None;
+        self.focus = None;
+        self.clear_pending();
     }
 
     /// Removes the filter the caret stands at, in one press. Reports whether the
@@ -4448,5 +4560,243 @@ mod tests {
         h.press(Key::Backspace);
 
         assert_eq!(printed(&h), "outcome=win and map:north", "the selected filter is the one that goes");
+    }
+
+    /// The modifiers a desktop backend reports while Ctrl is held down.
+    /// `command` is egui's platform-independent flag for the shortcut key and
+    /// rides along with `ctrl` everywhere but mac, where Cmd sets it instead.
+    const CTRL: Modifiers = Modifiers::CTRL.plus(Modifiers::COMMAND);
+
+    impl Harness {
+        /// One press with modifiers held, which `press` cannot send.
+        fn press_with(&mut self, modifiers: Modifiers, key: Key) {
+            let mut input = frame_input(self.width);
+            for pressed in [true, false] {
+                input.events.push(egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers });
+            }
+            self.frame(input);
+            self.settle();
+        }
+
+        fn undo(&mut self) {
+            self.press_with(CTRL, Key::Z);
+        }
+
+        fn redo(&mut self) {
+            self.press_with(CTRL.plus(Modifiers::SHIFT), Key::Z);
+        }
+
+        /// How many edits are on the stack, which is the granularity the tests
+        /// about typing are really about.
+        fn undo_depth(&self) -> usize {
+            self.bar.undo_stack.len()
+        }
+
+        /// Removes one pill through the bar's own delete path: the pill is
+        /// selected the way clicking it selects it, and Backspace over a
+        /// selection is what takes it away.
+        fn delete_pill(&mut self, path: &NodePath) {
+            self.bar.select_single(path.clone());
+            self.press(Key::Backspace);
+        }
+
+        fn query_is_empty(&self) -> bool {
+            self.bar.expr.is_empty_all()
+        }
+
+        /// Types into the caret and commits nothing, which is what every
+        /// keystroke of a query built by hand does.
+        fn type_text(&mut self, text: &str) {
+            let mut input = frame_input(self.width);
+            input.events.push(egui::Event::Text(text.to_owned()));
+            self.frame(input);
+            self.settle();
+            assert_eq!(self.caret_text(), text, "the caret did not take the typed text");
+        }
+
+        fn press_backspace_on_empty_caret(&mut self) {
+            assert!(self.caret_text().is_empty(), "the fixture must press on an empty caret");
+            self.press(Key::Backspace);
+        }
+    }
+
+    #[test]
+    fn undo_restores_the_query_before_the_last_edit() {
+        let mut h = bar_with("outcome:win");
+        h.delete_pill(&vec![]);
+        assert!(h.query_is_empty());
+        h.undo();
+        assert_eq!(h.query(), parse_query("outcome:win").expect("parse"));
+    }
+
+    #[test]
+    fn redo_reapplies_an_undone_edit() {
+        let mut h = bar_with("outcome:win");
+        h.delete_pill(&vec![]);
+        h.undo();
+        h.redo();
+        assert!(h.query_is_empty());
+    }
+
+    #[test]
+    fn a_fresh_edit_truncates_the_redo_side() {
+        // Otherwise redo would reapply an edit from a branch the user left.
+        let mut h = bar_with("outcome:win and anyone.tier>=8");
+        h.delete_pill(&vec![1]);
+        h.undo();
+        h.delete_pill(&vec![0]);
+        h.redo();
+        assert_eq!(h.query(), parse_query("anyone.tier>=8").expect("parse"));
+    }
+
+    #[test]
+    fn undo_with_nothing_to_undo_does_nothing() {
+        let mut h = bar_with("outcome:win");
+        h.undo();
+        assert_eq!(h.query(), parse_query("outcome:win").expect("parse"));
+    }
+
+    /// The one above is satisfied by a bar that never undoes anything at all, so
+    /// this is what says the press on an empty stack was a no-op rather than a
+    /// break: the stack must still be empty afterwards, and the undo after a
+    /// real edit must still land.
+    #[test]
+    fn a_press_on_an_empty_stack_leaves_the_next_undo_working() {
+        let mut h = bar_with("outcome:win");
+
+        h.undo();
+        assert_eq!(h.undo_depth(), 0, "an empty stack must not gain an entry from a press it had nothing for");
+
+        h.delete_pill(&vec![]);
+        assert_eq!(h.undo_depth(), 1, "the delete is the control: it is what the next undo has to find");
+        h.undo();
+        assert_eq!(h.query(), parse_query("outcome:win").expect("parse"));
+        assert_eq!(h.undo_depth(), 0);
+    }
+
+    #[test]
+    fn typing_does_not_push_an_entry_until_it_commits() {
+        // A query built by typing must not take one undo per keystroke.
+        let mut h = bar_with("");
+        h.type_text("outcome:win");
+        assert_eq!(h.undo_depth(), 0);
+        h.press_enter();
+        assert_eq!(h.undo_depth(), 1);
+    }
+
+    #[test]
+    fn a_backspace_delete_is_undoable() {
+        // The reason Task 1 can afford to delete on one press.
+        let mut h = bar_with("outcome:win and anyone.tier>=8");
+        h.press_backspace_on_empty_caret();
+        h.undo();
+        assert_eq!(h.query(), parse_query("outcome:win and anyone.tier>=8").expect("parse"));
+    }
+
+    /// Windows spells redo with Ctrl+Y as well, and a binding nothing presses
+    /// is a binding nothing tells apart from a missing one.
+    #[test]
+    fn ctrl_y_redoes_as_well_as_ctrl_shift_z() {
+        let mut h = bar_with("outcome:win");
+        h.delete_pill(&vec![]);
+        h.undo();
+        assert_eq!(h.query(), parse_query("outcome:win").expect("parse"), "the fixture must have something to redo");
+
+        h.press_with(CTRL, Key::Y);
+
+        assert!(h.query_is_empty(), "Ctrl+Y must reapply the undone delete");
+    }
+
+    /// The shortcut means the committed query in every state the bar can be in,
+    /// an open value box included: the box holds a literal nobody has committed,
+    /// which is not something the stack has an entry for. The box closes with
+    /// the tree it was opened over, since its paths address that tree.
+    #[test]
+    fn undo_reaches_the_query_while_a_value_box_is_open() {
+        let mut h = bar_with("outcome:win and anyone.tier>=8");
+        h.delete_pill(&vec![1]);
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must open a box over the surviving pill");
+
+        h.undo();
+
+        assert_eq!(h.query(), parse_query("outcome:win and anyone.tier>=8").expect("parse"));
+        assert!(!h.inline_edit_open(), "the box must close with the tree it was opened over");
+    }
+
+    /// A placeholder a mint forced a box open on is not a value the user chose,
+    /// so withdrawing it is not an edit and nothing on the stack describes it.
+    /// Recording it would put a filter nobody set back on a redo, and a mint the
+    /// user abandoned would eat the undo that belongs to the edit before it.
+    #[test]
+    fn withdrawing_a_placeholder_is_not_an_edit_the_stack_records() {
+        let mut h = bar_with("outcome:win");
+        mint_forced_box(&mut h, TermField::Match(MatchField::Build));
+
+        h.press_escape();
+
+        assert_eq!(h.query(), win(), "the fixture must withdraw the placeholder");
+        assert_eq!(h.undo_depth(), 0, "a tree nobody committed must not be on the stack");
+    }
+
+    /// Task 1's Backspace aimed at the pill a forced box is standing in. The
+    /// mint put a placeholder there and the press takes it straight back out, so
+    /// the query is where it started and the stack has nothing to hold.
+    ///
+    /// The two mechanisms meet here: `delete_at_caret` drops the box's snapshot
+    /// rather than dismissing through it, and the recording reads the snapshot
+    /// as the tree that frame started from, so neither ends up describing a
+    /// placeholder as a committed state.
+    #[test]
+    fn backspacing_a_just_minted_pill_leaves_nothing_on_the_stack() {
+        let mut h = bar_with("anyone.tier>=8");
+        mint_forced_box(&mut h, TermField::Match(MatchField::Outcome));
+        assert_eq!(h.caret_text(), "", "an enum box opens on an empty needle, so one press means the pill");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(h.query(), parse_query("anyone.tier>=8").expect("parse"), "the placeholder must go with the press");
+        assert_eq!(h.undo_depth(), 0, "a pill minted and removed leaves the query where it already was");
+    }
+
+    /// The other half of that: choosing a value is the edit, and it is one
+    /// entry covering the whole pill. Undoing it takes the pill away rather than
+    /// stepping back onto the placeholder, which is a state the user never saw
+    /// as a committed query.
+    #[test]
+    fn choosing_a_minted_pills_value_is_one_entry_that_takes_the_pill_with_it() {
+        let mut h = bar_with("outcome:win");
+        mint_forced_box(&mut h, TermField::Match(MatchField::Build));
+        assert_eq!(h.undo_depth(), 0, "the mint alone commits nothing");
+
+        h.set_caret_text("1234");
+        h.press_enter();
+        assert_eq!(
+            h.query(),
+            parse_query("outcome:win and build=1234").expect("parse"),
+            "the fixture must commit the typed value"
+        );
+        assert_eq!(h.undo_depth(), 1, "one committed filter is one entry");
+
+        h.undo();
+        assert_eq!(h.query(), win(), "undo must take the whole pill, not leave the placeholder behind");
+    }
+
+    /// The stack is bounded, so a bar left open all session does not keep every
+    /// tree it ever held. The oldest entry is what goes.
+    #[test]
+    fn the_stack_stops_growing_at_its_bound() {
+        let mut h = bar_with("");
+        for build in 1..=(UNDO_DEPTH + 4) {
+            h.type_text(&format!("build={build}"));
+            h.press_enter();
+        }
+
+        assert_eq!(h.undo_depth(), UNDO_DEPTH, "the stack must stop at its bound");
+        for _ in 0..UNDO_DEPTH {
+            h.undo();
+        }
+        assert_eq!(h.undo_depth(), 0, "every entry must still be reachable");
+        assert!(!h.query_is_empty(), "the edits dropped off the front stay applied");
     }
 }
