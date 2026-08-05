@@ -2440,6 +2440,30 @@ mod tests {
         let harness = TableHarness::at_width(hits.clone(), 1000.0);
         render_png(&harness, &format!("{dir}/table-wide.png"));
 
+        let mut rects: Vec<(f32, f32, f32, f32)> = harness
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Rect(r) if r.rect.height() < 27.9 && r.rect.width() < 200.0 => {
+                    Some((r.rect.height(), r.rect.width(), r.rect.min.y, r.rect.max.y))
+                }
+                _ => None,
+            })
+            .collect();
+        rects.sort_by(|a, b| b.0.total_cmp(&a.0));
+        rects.dedup();
+        println!("tallest painted rects (h, w, top, bottom): {:?}", &rects[..rects.len().min(8)]);
+        let texts: Vec<(String, f32, f32)> = harness
+            .shapes
+            .iter()
+            .filter_map(|c| match &c.shape {
+                egui::Shape::Text(t) => Some((t.galley.text().to_owned(), t.galley.size().y, t.pos.y)),
+                _ => None,
+            })
+            .take(12)
+            .collect();
+        println!("texts (text, galley h, top y): {texts:?}");
+
         let mut squeezed = TableHarness::at_width(hits, 1000.0);
         squeezed.drag_column(column_number(Some(ResultColumn::Date)), -200.0);
         squeezed.settle();
