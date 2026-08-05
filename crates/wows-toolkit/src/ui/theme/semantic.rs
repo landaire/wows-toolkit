@@ -57,24 +57,6 @@ pub struct BracketColors {
     pub deep: Color32,
 }
 
-/// Chip fills for a match-outcome badge (the search results table's Result
-/// column). Distinct from `win`/`loss`/`draw`: those are flat text colours
-/// used elsewhere (the replay listing row's identity tint, chat), and being
-/// flat text on the panel binds them to the narrow lightness band that clears
-/// `CONTRAST_FLOOR` there -- a band too narrow for three roles to also clear
-/// `SURFACE_CONTRAST_FLOOR` against each other, in the light theme most
-/// visibly (`win`/`loss`/`draw` there sit at 1.02-1.05:1 apart, all well under
-/// the 1.3 floor). A chip fill carries no such binding: it only has to be
-/// told apart from its neighbours and from the row it sits on, not double as
-/// legible text on its own, so it is free to use the lightness room that
-/// requirement was consuming. The label painted on top of the fill is
-/// `contrast::label_on(fill)`, legible by construction.
-pub struct OutcomeChipColors {
-    pub win: Color32,
-    pub loss: Color32,
-    pub draw: Color32,
-}
-
 /// Blends `fg` `num`/`den` of the way over `bg`. Lets a derived chrome tone be
 /// written as what it is, a proportion of a role colour over a surface, instead
 /// of a hex literal that silently stops matching when either end is retuned.
@@ -127,7 +109,6 @@ pub struct SemanticColors {
     pub chat: ChatColors,
     pub armor: ArmorColors,
     pub bracket: BracketColors,
-    pub outcome_chip: OutcomeChipColors,
     /// Divider between two segments of one query-bar pill.
     ///
     /// A pill's segments sit on the pill's own fill (idle, hovered, or
@@ -160,7 +141,12 @@ pub struct SemanticColors {
 pub const DARK: SemanticColors = SemanticColors {
     win: Color32::from_rgb(0x6F, 0xD9, 0x8A),
     loss: Color32::from_rgb(0xEA, 0x70, 0x78),
-    draw: Color32::from_rgb(0xCF, 0xC8, 0xB6),
+    // Pushed close to white, well clear of `win`'s lightness: `CONTRAST_FLOOR`
+    // against the dark surfaces only pins a minimum lightness for flat text,
+    // not a maximum, so `draw` has the whole bright end of the scale to
+    // itself to clear `SURFACE_CONTRAST_FLOOR` against `win`. `loss` needs no
+    // adjustment; it already sits far enough from both.
+    draw: Color32::from_rgb(0xE9, 0xE5, 0xDD),
     warn: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     error: DARK_ERROR,
     ok: Color32::from_rgb(0x6F, 0xD9, 0x8A),
@@ -181,11 +167,6 @@ pub const DARK: SemanticColors = SemanticColors {
         other: Color32::from_rgb(0xE8, 0xA5, 0x4A),
     },
     bracket: BracketColors { shallow: palette::dark::BORDER_BRIGHT, deep: palette::dark::BORDER },
-    outcome_chip: OutcomeChipColors {
-        win: Color32::from_rgb(0x19, 0x4D, 0x1E),
-        loss: Color32::from_rgb(0xF2, 0x8C, 0xA6),
-        draw: Color32::from_rgb(0xED, 0xE8, 0xAB),
-    },
     pill_separator: palette::dark::BORDER_BRIGHT,
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x64, 0xD9, 0x8A),
@@ -201,9 +182,18 @@ pub const DARK: SemanticColors = SemanticColors {
 };
 
 pub const LIGHT: SemanticColors = SemanticColors {
-    win: Color32::from_rgb(0x10, 0x6C, 0x34),
-    loss: Color32::from_rgb(0xB0, 0x1F, 0x2B),
-    draw: Color32::from_rgb(0x5F, 0x5C, 0x52),
+    // All three tuned apart along lightness, not just hue: `CONTRAST_FLOOR`
+    // against every text surface caps how light any of the three may be
+    // (flat text on a light panel needs to stay dark), and that cap leaves a
+    // window barely wide enough for three roles to also clear
+    // `SURFACE_CONTRAST_FLOOR` against each other. `loss` sits deepest in
+    // that window (darkest); `win` and `draw` are staged above it in turn.
+    // `win` could not stay put while only `draw` moved: `draw` a full step
+    // above a fixed `win` would have overshot the cap, so `win` gave up some
+    // of its own lightness to leave `draw` room under it.
+    win: Color32::from_rgb(0x0C, 0x50, 0x27),
+    loss: Color32::from_rgb(0x60, 0x11, 0x18),
+    draw: Color32::from_rgb(0x5C, 0x59, 0x50),
     warn: Color32::from_rgb(0x8A, 0x4B, 0x00),
     error: LIGHT_ERROR,
     ok: Color32::from_rgb(0x10, 0x6C, 0x34),
@@ -224,11 +214,6 @@ pub const LIGHT: SemanticColors = SemanticColors {
         other: Color32::from_rgb(0x8A, 0x4B, 0x00),
     },
     bracket: BracketColors { shallow: palette::light::BORDER_BRIGHT, deep: palette::light::BORDER },
-    outcome_chip: OutcomeChipColors {
-        win: Color32::from_rgb(0x09, 0x53, 0x0F),
-        loss: Color32::from_rgb(0x25, 0x04, 0x0C),
-        draw: Color32::from_rgb(0xCA, 0xB2, 0x91),
-    },
     pill_separator: palette::light::BORDER_BRIGHT,
     armor: ArmorColors {
         angle_good: Color32::from_rgb(0x11, 0x6B, 0x34),
@@ -248,9 +233,15 @@ pub fn semantic(visuals: &egui::Visuals) -> &'static SemanticColors {
     if visuals.dark_mode { &DARK } else { &LIGHT }
 }
 
-/// Ergonomic access from a `Ui` or `Visuals`.
+/// Ergonomic access from a `Ui`, `Visuals` or `Style`.
 pub trait SemanticExt {
     fn sem(&self) -> &'static SemanticColors;
+
+    /// Spelled-out alias for `sem()`, for call sites (mostly tests) where the
+    /// noun reads better than the abbreviation.
+    fn semantic(&self) -> &'static SemanticColors {
+        self.sem()
+    }
 }
 
 impl SemanticExt for egui::Ui {
@@ -262,6 +253,12 @@ impl SemanticExt for egui::Ui {
 impl SemanticExt for egui::Visuals {
     fn sem(&self) -> &'static SemanticColors {
         semantic(self)
+    }
+}
+
+impl SemanticExt for egui::Style {
+    fn sem(&self) -> &'static SemanticColors {
+        semantic(&self.visuals)
     }
 }
 

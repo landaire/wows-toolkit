@@ -42,7 +42,6 @@ use crate::ui::query_bar::select::prune_empty;
 use crate::ui::query_bar::suggest::ValueOption;
 use crate::ui::query_bar::suggest::ValueRequest;
 use crate::ui::replay_parser::preview_popup;
-use crate::ui::theme::contrast::label_on;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::ui::widgets::pr_chip;
 use crate::util::personal_rating::PersonalRatingCategory;
@@ -725,13 +724,8 @@ impl ResultsTable<'_> {
                     MatchOutcome::Draw => "D",
                     MatchOutcome::Unknown => "-",
                 };
-                let fill = outcome_colour(hit.outcome, ui.style());
-                if hit.outcome == MatchOutcome::Unknown {
-                    ui.colored_label(fill, letter);
-                } else {
-                    let text = label_on(fill);
-                    ui.label(egui::RichText::new(letter).color(text).background_color(fill).strong());
-                }
+                let colour = outcome_colour(hit.outcome, ui.style());
+                ui.colored_label(colour, letter);
             }
             ResultColumn::Damage => {
                 ui.label(
@@ -901,18 +895,20 @@ fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
     Some(format!("[{ship_id}]"))
 }
 
-/// The chip fill for a match outcome, read off `ui.sem()`. `Unknown` reads
-/// `text_dim` rather than a fourth chip tone: plenty of indexed rows carry no
+/// The text colour for a match outcome, matching the replay listing row's
+/// identity tint: `Win`, `Loss` and `Draw` each carry their own colour, held
+/// far enough apart in lightness to stay mutually distinguishable as flat
+/// text (see `win_loss_and_draw_are_pairwise_distinguishable`). `Unknown`
+/// alone draws in the plain text colour: plenty of indexed rows carry no
 /// recorded outcome, and colouring that absence as if it were a result would
-/// be actively misleading, so it deliberately falls back to the same
-/// de-emphasised tone every other "nothing recorded" cell in this table uses.
+/// be misleading.
 fn outcome_colour(outcome: MatchOutcome, style: &egui::Style) -> egui::Color32 {
-    let sem = style.visuals.sem();
+    let sem = style.semantic();
     match outcome {
-        MatchOutcome::Win => sem.outcome_chip.win,
-        MatchOutcome::Loss => sem.outcome_chip.loss,
-        MatchOutcome::Draw => sem.outcome_chip.draw,
-        MatchOutcome::Unknown => sem.text_dim,
+        MatchOutcome::Win => sem.win,
+        MatchOutcome::Loss => sem.loss,
+        MatchOutcome::Draw => sem.draw,
+        MatchOutcome::Unknown => style.visuals.text_color(),
     }
 }
 
@@ -1206,26 +1202,42 @@ mod tests {
     }
 
     #[test]
-    fn win_loss_and_draw_are_mutually_distinguishable() {
+    fn the_search_table_tints_outcomes_the_way_the_file_listing_does() {
+        // One source of truth for what a win, loss or draw looks like across
+        // the app: `listing_row.rs:285-288` tints all three the same way and
+        // only Unknown falls back to plain text.
         for theme in [dark_style(), light_style()] {
-            let win = outcome_colour(MatchOutcome::Win, &theme);
-            let loss = outcome_colour(MatchOutcome::Loss, &theme);
-            let draw = outcome_colour(MatchOutcome::Draw, &theme);
-            for (a, b, names) in [(win, loss, "win/loss"), (win, draw, "win/draw"), (loss, draw, "loss/draw")] {
-                assert!(contrast_ratio(a, b) >= SURFACE_CONTRAST_FLOOR, "{names} are too close");
+            let sem = theme.semantic();
+            assert_eq!(outcome_colour(MatchOutcome::Win, &theme), sem.win);
+            assert_eq!(outcome_colour(MatchOutcome::Loss, &theme), sem.loss);
+            assert_eq!(outcome_colour(MatchOutcome::Draw, &theme), sem.draw);
+            assert_eq!(outcome_colour(MatchOutcome::Unknown, &theme), theme.visuals.text_color());
+        }
+    }
+
+    #[test]
+    fn win_loss_and_draw_are_pairwise_distinguishable() {
+        // `sem.win`/`sem.loss`/`sem.draw` are shared with the file listing's
+        // identity tint, so this protects both surfaces at once.
+        for theme in [dark_style(), light_style()] {
+            let sem = theme.semantic();
+            for (a, b, names) in
+                [(sem.win, sem.loss, "win/loss"), (sem.win, sem.draw, "win/draw"), (sem.loss, sem.draw, "loss/draw")]
+            {
+                assert_ne!(a, b, "{names} must not resolve to the same colour");
+                let ratio = contrast_ratio(a, b);
+                assert!(ratio >= SURFACE_CONTRAST_FLOOR, "{names} read at {ratio:.3}, too close to tell apart");
             }
         }
     }
 
     #[test]
-    fn an_unknown_outcome_is_not_dressed_as_a_result() {
+    fn all_three_tinted_outcomes_stay_legible_against_the_table() {
         for theme in [dark_style(), light_style()] {
-            let unknown = outcome_colour(MatchOutcome::Unknown, &theme);
-            for known in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw] {
-                assert!(
-                    contrast_ratio(unknown, outcome_colour(known, &theme)) >= SURFACE_CONTRAST_FLOOR,
-                    "unknown reads as {known:?}"
-                );
+            let sem = theme.semantic();
+            for (colour, name) in [(sem.win, "win"), (sem.loss, "loss"), (sem.draw, "draw")] {
+                let ratio = contrast_ratio(colour, theme.visuals.panel_fill);
+                assert!(ratio >= TEXT_CONTRAST_FLOOR, "{name} reads at {ratio:.3} against the table");
             }
         }
     }
