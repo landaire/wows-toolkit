@@ -1724,11 +1724,20 @@ mod tests {
         );
     }
 
-    fn frame_input() -> egui::RawInput {
+    /// The width every harness lays out at unless a test asks for a narrower
+    /// one. Wide enough that the whole table fits without the viewport clipping
+    /// its rightmost column.
+    const WIDE_SCREEN: f32 = 1400.0;
+
+    fn sized_input(width: f32) -> egui::RawInput {
         egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 400.0))),
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 400.0))),
             ..Default::default()
         }
+    }
+
+    fn frame_input() -> egui::RawInput {
+        sized_input(WIDE_SCREEN)
     }
 
     fn click_input(pos: egui::Pos2) -> egui::RawInput {
@@ -1917,6 +1926,10 @@ mod tests {
         /// cannot accidentally arm a preview.
         dwell_step: Duration,
         table_id: egui::Id,
+        /// How wide the frames this harness drives are. A table wider than this
+        /// has its rightmost columns clipped by the viewport, which is the one
+        /// case a divider can be culled in.
+        screen_width: f32,
         asked: TablePass,
         /// What the last pass painted, so a test can aim at where a widget
         /// actually drew rather than at where column arithmetic says it should
@@ -1930,6 +1943,11 @@ mod tests {
         /// A table over `hits` with no ship names resolved, since none of these
         /// tests turn on what the Ship cell reads.
         fn new(hits: Vec<MatchHit>) -> Self {
+            Self::at_width(hits, WIDE_SCREEN)
+        }
+
+        /// The same table laid out in a viewport `width` across.
+        fn at_width(hits: Vec<MatchHit>, width: f32) -> Self {
             let ship_names = vec![None; hits.len()];
             let mut harness = Self {
                 ctx: egui::Context::default(),
@@ -1939,11 +1957,16 @@ mod tests {
                 preview_state: PreviewState::default(),
                 dwell_step: Duration::ZERO,
                 table_id: egui::Id::NULL,
+                screen_width: width,
                 asked: TablePass::default(),
                 shapes: Vec::new(),
             };
             harness.settle();
             harness
+        }
+
+        fn quiet_input(&self) -> egui::RawInput {
+            sized_input(self.screen_width)
         }
 
         fn frame(&mut self, input: egui::RawInput) {
@@ -2000,7 +2023,7 @@ mod tests {
         /// on the next.
         fn settle(&mut self) {
             for _ in 0..4 {
-                self.frame(frame_input());
+                self.frame(self.quiet_input());
             }
         }
 
@@ -2059,6 +2082,41 @@ mod tests {
             rect.center()
         }
 
+        /// Drags `col_nr`'s resize handle `dx` points sideways, leaving the
+        /// column at whatever width that lands on.
+        fn drag_column(&mut self, col_nr: usize, dx: f32) {
+            let handle = self.rect_of(self.resizer_id(col_nr)).center();
+            let target = egui::Pos2::new(handle.x + dx, handle.y);
+
+            let mut press = self.quiet_input();
+            press.events.push(egui::Event::PointerMoved(handle));
+            press.events.push(egui::Event::PointerButton {
+                pos: handle,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            });
+            self.frame(press);
+
+            // Two frames holding the pointer at the target: the first is what
+            // egui promotes the press into a drag on, the second is the one
+            // egui_table reads `pointer_latest_pos` from to resize the column.
+            for _ in 0..2 {
+                let mut drag = self.quiet_input();
+                drag.events.push(egui::Event::PointerMoved(target));
+                self.frame(drag);
+            }
+
+            let mut release = self.quiet_input();
+            release.events.push(egui::Event::PointerButton {
+                pos: target,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            self.frame(release);
+        }
+
         /// Clicks `pos` and reports what that pass asked the tab to do.
         ///
         /// egui applies the input at the start of the pass carrying it and
@@ -2066,11 +2124,13 @@ mod tests {
         /// answer belongs to that pass and has to be taken before the quiet
         /// frame that follows overwrites it.
         fn click(&mut self, pos: egui::Pos2) -> TablePass {
-            self.frame(click_input(pos));
+            let mut input = self.quiet_input();
+            input.events = click_input(pos).events;
+            self.frame(input);
             let asked = self.asked.clone();
             // The pointer stays where it was left, so a quiet frame clears the
             // press before the next probe is aimed somewhere else.
-            self.frame(frame_input());
+            self.frame(self.quiet_input());
             asked
         }
     }
@@ -2263,6 +2323,163 @@ mod tests {
             header_line.1.color, theme_resting.color,
             "the header divider must be painted in the theme's own resting stroke, not a literal"
         );
+    }
+
+    /// Software-rasterises one settled frame to a PNG so the table can be
+    /// looked at rather than reasoned about.
+    fn render_png(harness: &TableHarness, path: &str) {
+        let ppp = 1.0f32;
+        let (w, h) = (harness.screen_width as usize, 400usize);
+        let mut buf = vec![[30u8, 30, 30, 255]; w * h];
+        let font = harness.ctx.fonts(|f| f.image());
+        let prims = harness.ctx.tessellate(harness.shapes.clone(), ppp);
+        for prim in &prims {
+            let clip = prim.clip_rect;
+            let egui::epaint::Primitive::Mesh(mesh) = &prim.primitive else {
+                continue;
+            };
+            for tri in mesh.indices.chunks(3) {
+                let v: Vec<_> = tri.iter().map(|i| mesh.vertices[*i as usize]).collect();
+                let minx = v.iter().map(|a| a.pos.x).fold(f32::MAX, f32::min).max(clip.min.x).max(0.0);
+                let maxx = v.iter().map(|a| a.pos.x).fold(f32::MIN, f32::max).min(clip.max.x).min(w as f32 - 1.0);
+                let miny = v.iter().map(|a| a.pos.y).fold(f32::MAX, f32::min).max(clip.min.y).max(0.0);
+                let maxy = v.iter().map(|a| a.pos.y).fold(f32::MIN, f32::max).min(clip.max.y).min(h as f32 - 1.0);
+                if maxx < minx || maxy < miny {
+                    continue;
+                }
+                // 3x3 supersampling so hairlines show their real coverage.
+                for py in (miny as usize)..=(maxy as usize) {
+                    for px in (minx as usize)..=(maxx as usize) {
+                        let mut acc = [0f32; 4];
+                        let mut hits = 0f32;
+                        for sy in 0..3 {
+                            for sx in 0..3 {
+                                let p = egui::pos2(
+                                    px as f32 + (sx as f32 + 0.5) / 3.0,
+                                    py as f32 + (sy as f32 + 0.5) / 3.0,
+                                );
+                                if p.x < clip.min.x || p.x > clip.max.x || p.y < clip.min.y || p.y > clip.max.y {
+                                    continue;
+                                }
+                                let d = |a: egui::epaint::Vertex, b: egui::epaint::Vertex| {
+                                    (b.pos.x - a.pos.x) * (p.y - a.pos.y) - (b.pos.y - a.pos.y) * (p.x - a.pos.x)
+                                };
+                                let (d0, d1, d2) = (d(v[0], v[1]), d(v[1], v[2]), d(v[2], v[0]));
+                                if !((d0 >= 0.0 && d1 >= 0.0 && d2 >= 0.0) || (d0 <= 0.0 && d1 <= 0.0 && d2 <= 0.0)) {
+                                    continue;
+                                }
+                                let area = d0 + d1 + d2;
+                                let (b0, b1, b2) = if area.abs() < 1e-6 {
+                                    (1.0, 0.0, 0.0)
+                                } else {
+                                    (d1 / area, d2 / area, d0 / area)
+                                };
+                                let mut col = [0f32; 4];
+                                for (i, w) in [(0, b0), (1, b1), (2, b2)] {
+                                    let c = v[i].color.to_array();
+                                    for k in 0..4 {
+                                        col[k] += c[k] as f32 * w;
+                                    }
+                                }
+                                let uv = egui::pos2(
+                                    v[0].uv.x * b0 + v[1].uv.x * b1 + v[2].uv.x * b2,
+                                    v[0].uv.y * b0 + v[1].uv.y * b1 + v[2].uv.y * b2,
+                                );
+                                // Textured triangles sample the font atlas;
+                                // the white pixel leaves the colour alone.
+                                let tx = (uv.x * font.width() as f32) as usize;
+                                let ty = (uv.y * font.height() as f32) as usize;
+                                if tx < font.width() && ty < font.height() && (tx > 1 || ty > 1) {
+                                    let a = font.pixels[ty * font.width() + tx].a() as f32 / 255.0;
+                                    col[3] *= a;
+                                }
+                                for k in 0..4 {
+                                    acc[k] += col[k];
+                                }
+                                hits += 1.0;
+                            }
+                        }
+                        if hits == 0.0 {
+                            continue;
+                        }
+                        let cov = hits / 9.0;
+                        let src = [acc[0] / hits, acc[1] / hits, acc[2] / hits, acc[3] / hits];
+                        let alpha = (src[3] / 255.0) * cov;
+                        let dst = &mut buf[py * w + px];
+                        for k in 0..3 {
+                            dst[k] = (src[k] * alpha + dst[k] as f32 * (1.0 - alpha)).clamp(0.0, 255.0) as u8;
+                        }
+                    }
+                }
+            }
+        }
+        let flat: Vec<u8> = buf.iter().flat_map(|p| p.iter().copied()).collect();
+        image::RgbaImage::from_raw(w as u32, h as u32, flat).unwrap().save(path).unwrap();
+        println!("wrote {path}");
+    }
+
+    #[test]
+    fn diagnostic_render() {
+        let dir = std::env::var("WT_SHOT_DIR").unwrap_or_else(|_| ".".to_owned());
+        let hits: Vec<MatchHit> = [SHORT_MAP, MEDIUM_MAP, LONG_MAP, SHORT_MAP, MEDIUM_MAP].iter().map(|m| hit_on_map(m)).collect();
+        let harness = TableHarness::at_width(hits.clone(), 1000.0);
+        render_png(&harness, &format!("{dir}/table-wide.png"));
+
+        let mut squeezed = TableHarness::at_width(hits, 1000.0);
+        squeezed.drag_column(column_number(Some(ResultColumn::Date)), -200.0);
+        squeezed.settle();
+        println!("date width after squeeze: {}", squeezed.column_width(Some(ResultColumn::Date)));
+        let x = squeezed.column_right(column_number(Some(ResultColumn::Date)));
+        println!("date right {x}, lines {:?}", vlines_near_x(&squeezed.shapes, x));
+        render_png(&squeezed, &format!("{dir}/table-squeezed.png"));
+    }
+
+    #[test]
+    fn diagnostic_dump() {
+        for width in [1400.0f32, 900.0, 700.0, 500.0, 300.0] {
+            let harness = TableHarness::at_width(vec![hit_on_map(SHORT_MAP)], width);
+            println!("=== screen width {width} ===");
+            let total: usize = RESULT_COLUMNS.len() + 1;
+            for col_nr in 0..total {
+                let w = harness.column_width(column_at(col_nr));
+                let x = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| harness.column_right(col_nr)));
+                match x {
+                    Ok(x) => {
+                        let lines = vlines_near_x(&harness.shapes, x);
+                        println!(
+                            "  col {col_nr} {:?} w={w:.1} right={x:.1} lines={:?}",
+                            column_at(col_nr),
+                            lines.iter().map(|(r, s)| (r.min, r.max, s.color, s.width)).collect::<Vec<_>>()
+                        );
+                    }
+                    Err(_) => println!("  col {col_nr} {:?} w={w:.1} NO RESIZER", column_at(col_nr)),
+                }
+            }
+            let all_vlines: Vec<_> = harness
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::LineSegment { points, stroke }
+                        if (points[0].x - points[1].x).abs() < 0.5 && stroke.color != egui::Color32::TRANSPARENT =>
+                    {
+                        Some((points[0].x, points[0].y, points[1].y, c.clip_rect.min.x, c.clip_rect.max.x))
+                    }
+                    _ => None,
+                })
+                .collect();
+            println!("  visible vlines (x, y0, y1, clipL, clipR): {all_vlines:?}");
+            let hlines: Vec<_> = harness
+                .shapes
+                .iter()
+                .filter_map(|c| match &c.shape {
+                    egui::Shape::LineSegment { points, stroke } if (points[0].y - points[1].y).abs() < 0.5 => {
+                        Some((points[0].y, points[0].x, points[1].x, stroke.color))
+                    }
+                    _ => None,
+                })
+                .collect();
+            println!("  ALL hlines: {hlines:?}");
+        }
     }
 
     /// Whether any vertical line segment was painted in exactly `color`.
