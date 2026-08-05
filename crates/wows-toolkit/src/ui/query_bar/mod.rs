@@ -488,6 +488,15 @@ impl QueryBar {
         select::selectable_paths(&self.expr, &tokenize(&self.expr, &self.names))
     }
 
+    /// Every pill the bar draws, over the same full stream. Wider than
+    /// `selectable_paths` by the pills inside a quantifier's bracket, which name
+    /// no match-level node and so are not what the caret steps onto or the
+    /// toolbar acts on, but which Backspace at the caret still has to reach:
+    /// they are filters the user put in the bar.
+    fn pill_paths(&self) -> Vec<NodePath> {
+        select::pill_paths(&tokenize(&self.expr, &self.names))
+    }
+
     /// Steps 4 through 9: measure, lay out, paint, run the caret, and collect
     /// what the pointer did.
     fn body(
@@ -1218,7 +1227,7 @@ impl QueryBar {
                 self.dropdown_open = true;
                 false
             }
-            Nav::DeleteAtCaret => self.delete_at_caret(&paths),
+            Nav::DeleteAtCaret => self.delete_at_caret(),
             Nav::DeleteSelection => {
                 select::delete(&mut self.expr, &self.selection);
                 true
@@ -1313,15 +1322,22 @@ impl QueryBar {
     /// the caret goes and its siblings stay. The group's brackets go with it only
     /// when one member is left, because a one-child `All`/`Any` has no printable
     /// form and `canonicalise` folds it into that child.
-    fn delete_at_caret(&mut self, paths: &[NodePath]) -> bool {
+    ///
+    /// Aimed at every pill the bar draws (`pill_paths`) rather than at the ones
+    /// the caret can step onto. A pill inside a roster predicate is not a target
+    /// for the toolbar, which has no match-level node to group or negate, but it
+    /// is a filter the user put in the bar and `select::delete` reaches into the
+    /// predicate to take it out. A quantifier's bracket behaves as a group does:
+    /// its last two members leave one behind, and the one after that takes the
+    /// bracket with it.
+    fn delete_at_caret(&mut self) -> bool {
         let target = match self.editing.as_ref() {
             Some(edit) => Some(edit.pill.clone()),
-            None => select::step(paths, None, true),
+            None => select::step(&self.pill_paths(), None, true),
         };
-        // A pill inside a roster predicate draws inside its quantifier's bracket
-        // and can hold an editor, but names no match-level node, so removing it
-        // would rewrite nothing and report an edit that never happened.
-        let Some(target) = target.filter(|path| select::addresses_match_node(&self.expr, path)) else {
+        // A path naming nothing removes nothing, and reporting an edit that
+        // never happened would re-run the query and push an undo entry for it.
+        let Some(target) = target.filter(|path| select::addresses_node(&self.expr, path)) else {
             return false;
         };
         // Dropped rather than dismissed: a forced editor's snapshot describes a
@@ -4470,6 +4486,90 @@ mod tests {
 
         h.press(Key::Backspace);
         assert_eq!(printed(&h), "outcome=win", "the last member goes with the next press, not the whole group at once");
+    }
+
+    /// Whether the bar drew a quantifier's bracket this frame. The fixtures
+    /// below are only the shape they are about while this holds: a quantifier
+    /// the printer can spell as scope sugar collapses to a single pill with no
+    /// bracket at all, and a press on that is the ordinary match-level delete
+    /// the tests above already cover.
+    fn is_bracketed(h: &Harness) -> bool {
+        h.tokens().iter().any(|t| matches!(t.kind, TokenKind::QuantOpen { .. }))
+    }
+
+    /// The reported bug: a query that is one quantifier over two filters, the
+    /// caret after its closing bracket, and Backspace doing nothing at all.
+    ///
+    /// A pill inside a quantifier's bracket names no match-level node, so
+    /// `selectable_paths` leaves it out -- and the delete used to aim at those,
+    /// which for this query is an empty list. Every press was filtered away
+    /// before it could reach the tree.
+    #[test]
+    fn backspace_removes_the_last_filter_inside_a_quantifier() {
+        let mut h = bar_with("any(tier>=8 and class:dd)");
+        assert!(is_bracketed(&h), "the fixture must draw a bracket: {:#?}", h.tokens());
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "anyone.tier>=8", "the member before the caret goes and its sibling stays");
+        assert_eq!(
+            h.query(),
+            parse_query(&printed(&h)).expect("the printed query must parse"),
+            "the predicate left holding one term must fold, or the tree stops round tripping"
+        );
+
+        h.press(Key::Backspace);
+        assert_eq!(printed(&h), "", "the last member takes the quantifier with it rather than leaving an empty one");
+    }
+
+    /// And the aim is the last pill *drawn*, which is inside the bracket. The
+    /// fallback to the selectable paths did not merely skip that pill: it
+    /// reached over the whole quantifier and took the filter in front of it, so
+    /// a press at the end of the bar deleted a filter the caret was nowhere
+    /// near. That the untouched filter survives is the assertion; that the
+    /// quantifier lost a member is the control saying the press landed at all.
+    #[test]
+    fn backspace_after_a_quantifier_takes_its_last_member_not_the_filter_before_it() {
+        let mut h = bar_with("outcome:win and any(tier>=8 and class:dd)");
+        assert!(is_bracketed(&h), "the fixture must draw a bracket: {:#?}", h.tokens());
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "outcome=win and anyone.tier>=8");
+    }
+
+    /// A bracket empties one member at a time, and every tree it passes through
+    /// on the way has to be one the printer can spell and the parser reads back
+    /// the same. `count(...)` rather than `any(...)` so the shape stays
+    /// bracketed all the way down instead of collapsing into scope sugar.
+    #[test]
+    fn emptying_a_quantifier_leaves_a_tree_that_round_trips_at_every_step() {
+        let mut h = bar_with("count(tier>=8 and class:dd and kills>=2)>=3");
+        assert!(is_bracketed(&h), "the fixture must draw a bracket: {:#?}", h.tokens());
+
+        for expected in ["count(tier>=8 and class=destroyer)>=3", "count(tier>=8)>=3", ""] {
+            h.press(Key::Backspace);
+            assert_eq!(printed(&h), expected);
+            assert_eq!(
+                h.query(),
+                parse_query(&printed(&h)).expect("the printed query must parse"),
+                "the tree behind {expected:?} does not round trip"
+            );
+        }
+    }
+
+    /// The delete is one edit like any other, so the press that reaches inside a
+    /// bracket is on the stack the same way. A press that rewrote the tree
+    /// without recording it would leave the user no way back.
+    #[test]
+    fn a_backspace_inside_a_quantifier_is_undoable() {
+        let mut h = bar_with("any(tier>=8 and class:dd)");
+        h.press_backspace_on_empty_caret();
+        assert_eq!(printed(&h), "anyone.tier>=8", "the fixture must have deleted something to undo");
+
+        h.undo();
+
+        assert_eq!(h.query(), parse_query("any(tier>=8 and class:dd)").expect("parse"));
     }
 
     /// A nested group is stepped into the same way, so the innermost member is

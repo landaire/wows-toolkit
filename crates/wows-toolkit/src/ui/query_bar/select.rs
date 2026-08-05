@@ -100,6 +100,19 @@ pub fn addresses_match_node(expr: &MatchExpr, path: &[usize]) -> bool {
     }
 }
 
+/// True when `path` names a node either tree level holds, so a path that
+/// continues into a roster predicate counts as long as the predicate has such a
+/// node. `delete` is addressed this way: removing a term from a predicate is
+/// the same operation one level down, which is more than the match-level edits
+/// `addresses_match_node` gates can say.
+pub fn addresses_node(expr: &MatchExpr, path: &[usize]) -> bool {
+    match split_at_leaf(expr, path) {
+        Some((MatchTerm::Roster { pred, .. }, rest)) => expr_at(pred, rest).is_some(),
+        Some((_, rest)) => rest.is_empty(),
+        None => expr_at(expr, path).is_some(),
+    }
+}
+
 /// The pill one step from `anchor` in stream order. With no anchor, stepping
 /// back lands on the last pill (the caret sits after it) and stepping forward
 /// goes nowhere, since there is nothing after the caret. `None` when there is
@@ -742,6 +755,11 @@ pub fn negate(expr: &mut MatchExpr, path: &NodePath) {
 /// one still to be removed. The root sorts last under that order, so a
 /// selection that names it takes effect after the rest and leaves the same
 /// empty query either way.
+///
+/// A path that continues into a roster predicate removes from that predicate.
+/// The selection itself never holds one -- `selectable_paths` keeps the caret
+/// and the toolbar at the match level -- but Backspace at the caret aims at
+/// every pill the bar draws, quantifier contents included.
 pub fn delete(expr: &mut MatchExpr, sel: &Selection) {
     let mut paths = sel.nodes.clone();
     paths.sort_by(|a, b| b.cmp(a));
@@ -750,7 +768,25 @@ pub fn delete(expr: &mut MatchExpr, sel: &Selection) {
     }
 }
 
-/// Detaches the node at `path` from whatever holds it.
+/// Detaches the node at `path` from whatever holds it, at whichever tree level
+/// holds it: a path that continues past a `Roster` leaf detaches from that
+/// leaf's predicate, which is the same operation one level down.
+fn remove_node(expr: &mut MatchExpr, path: &[usize]) {
+    // Resolved twice because the tail borrows `path` while the term borrows
+    // `expr`; keeping only the tail lets the mutable walk below start.
+    let tail = split_at_leaf(expr, path)
+        .filter(|(term, rest)| matches!(term, MatchTerm::Roster { .. }) && !rest.is_empty())
+        .map(|(_, rest)| rest);
+    let Some(tail) = tail else {
+        detach(expr, path);
+        return;
+    };
+    if let Some((MatchTerm::Roster { pred, .. }, _)) = split_at_leaf_mut(expr, path) {
+        detach(pred, tail);
+    }
+}
+
+/// Removes the node at `path` from its parent.
 ///
 /// The root is held by nothing, so removing it leaves the canonical empty
 /// query. A `Not`'s only operand cannot simply be dropped, since that would
@@ -758,12 +794,12 @@ pub fn delete(expr: &mut MatchExpr, sel: &Selection) {
 /// `canonicalise` then drops along with the `Not` above it. Both matter for a
 /// canonical tree: a one-pill query is a bare `Leaf` at the root, and
 /// `-outcome:win` puts its only pill under a root `Not`.
-fn remove_node(expr: &mut MatchExpr, path: &[usize]) {
+fn detach<L>(expr: &mut Expr<L>, path: &[usize]) {
     let Some((parent_path, index)) = parent_and_index(path) else {
         *expr = Expr::All(Vec::new());
         return;
     };
-    let Some(parent) = node_at_mut(expr, parent_path) else {
+    let Some(parent) = expr_at_mut(expr, parent_path) else {
         return;
     };
     match parent {
@@ -784,7 +820,9 @@ fn remove_node(expr: &mut MatchExpr, path: &[usize]) {
 /// `All`/`Any` with zero children except a root left as the canonical empty
 /// query. Bottom-up and idempotent: re-running it on its own output is a
 /// no-op, since every remaining `All`/`Any` already has zero (root only) or at
-/// least two children.
+/// least two children. Roster predicates are held to the same invariants, by
+/// the same walk: the printer spells a predicate by the same rules and so reads
+/// one back by them (see `canonicalise_match_leaf`).
 ///
 /// This deliberately does not preserve `Expr`'s own boolean semantics for an
 /// emptied `Any`: per its doc comment, `Any([])` denotes "matches nothing", so
@@ -801,19 +839,42 @@ fn remove_node(expr: &mut MatchExpr, path: &[usize]) {
 /// would otherwise compile to the literal `1=0`.
 pub fn canonicalise(expr: &mut MatchExpr) {
     let taken = std::mem::replace(expr, Expr::All(Vec::new()));
-    *expr = canonicalise_node(taken).unwrap_or(Expr::All(Vec::new()));
+    *expr = canonicalise_node(taken, &mut canonicalise_match_leaf).unwrap_or(Expr::All(Vec::new()));
 }
 
-/// Canonicalises one node bottom-up. Returns `None` when the node collapsed
-/// to nothing (an empty `All`/`Any`), for the caller to drop from its own
-/// children; the top-level `canonicalise` substitutes the canonical empty
-/// query when the whole tree collapses this way.
-fn canonicalise_node(expr: MatchExpr) -> Option<MatchExpr> {
+/// The leaf hook the match level runs with. A roster leaf carries a whole
+/// second tree, and the printer spells that tree by the same rules, so it needs
+/// the same folding: a one-child predicate would print as a bare term and
+/// reparse as one, losing the group. A predicate that collapsed to nothing
+/// takes its quantifier with it, since a quantifier's body is what its brackets
+/// hold and there is nothing left to hold. That is the predicate-level reading
+/// of the choice this module's `canonicalise` already makes for an emptied
+/// group: deleting the last pill out of a bracket means "remove this", not
+/// "assert something about an empty predicate".
+fn canonicalise_match_leaf(term: MatchTerm) -> Option<MatchTerm> {
+    match term {
+        MatchTerm::Roster { quant, pred } => {
+            Some(MatchTerm::Roster { quant, pred: canonicalise_node(pred, &mut Some)? })
+        }
+        other => Some(other),
+    }
+}
+
+/// Canonicalises one node bottom-up, mapping each leaf through `leaf`. Returns
+/// `None` when the node collapsed to nothing (an empty `All`/`Any`, or a leaf
+/// `leaf` dropped), for the caller to drop from its own children; the top-level
+/// `canonicalise` substitutes the canonical empty query when the whole tree
+/// collapses this way.
+///
+/// Generic over the leaf type so a roster predicate folds by the rules its own
+/// printer reads it back by, rather than by a second set written out beside
+/// them.
+fn canonicalise_node<L>(expr: Expr<L>, leaf: &mut dyn FnMut(L) -> Option<L>) -> Option<Expr<L>> {
     match expr {
-        Expr::Leaf(l) => Some(Expr::Leaf(l)),
-        Expr::Not(inner) => Some(Expr::Not(Box::new(canonicalise_node(*inner)?))),
-        Expr::All(cs) => canonicalise_conjunction(cs, false),
-        Expr::Any(cs) => canonicalise_conjunction(cs, true),
+        Expr::Leaf(l) => leaf(l).map(Expr::Leaf),
+        Expr::Not(inner) => Some(Expr::Not(Box::new(canonicalise_node(*inner, leaf)?))),
+        Expr::All(cs) => canonicalise_conjunction(cs, false, leaf),
+        Expr::Any(cs) => canonicalise_conjunction(cs, true, leaf),
     }
 }
 
@@ -822,8 +883,8 @@ fn canonicalise_node(expr: MatchExpr) -> Option<MatchExpr> {
 /// one remains -- whether it started that way or was only reduced to it by a
 /// sibling collapsing away. A node with zero surviving children returns
 /// `None` for the caller to drop.
-fn canonicalise_conjunction(cs: Vec<MatchExpr>, is_or: bool) -> Option<MatchExpr> {
-    let mut out: Vec<MatchExpr> = cs.into_iter().filter_map(canonicalise_node).collect();
+fn canonicalise_conjunction<L>(cs: Vec<Expr<L>>, is_or: bool, leaf: &mut dyn FnMut(L) -> Option<L>) -> Option<Expr<L>> {
+    let mut out: Vec<Expr<L>> = cs.into_iter().filter_map(|child| canonicalise_node(child, leaf)).collect();
     match out.len() {
         0 => None,
         1 => out.pop(),
@@ -845,9 +906,12 @@ fn canonicalise_conjunction(cs: Vec<MatchExpr>, is_or: bool) -> Option<MatchExpr
 /// should be honoured. `canonicalise` makes the same choice for an emptied
 /// `Any`, for the same reason.
 ///
-/// Roster predicates are left alone. A quantifier over an emptied predicate is
-/// a different assertion, not a no-op -- `no(...)` over nothing asks whether the
-/// roster is empty -- so there is no removal here that is safe by inspection.
+/// No term inside a roster predicate is pruned. A quantifier over an emptied
+/// predicate is a different assertion, not a no-op -- `no(...)` over nothing
+/// asks whether the roster is empty -- so there is no removal here that is safe
+/// by inspection. The `canonicalise` below still folds a predicate the way it
+/// folds the match level, which only ever normalises a shape the printer cannot
+/// spell and never drops a term that says something.
 pub fn prune_empty(expr: &MatchExpr) -> MatchExpr {
     let mut out = prune_node(expr).unwrap_or_default();
     canonicalise(&mut out);
@@ -881,10 +945,14 @@ fn is_vacuous(term: &MatchTerm) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::index::query_ast::CmpOp;
     use crate::db::index::query_ast::Expr;
     use crate::db::index::query_ast::MatchField;
     use crate::db::index::query_ast::MatchTerm;
     use crate::db::index::query_ast::Op;
+    use crate::db::index::query_ast::RosterExpr;
+    use crate::db::index::query_ast::RosterField;
+    use crate::db::index::query_ast::RosterTerm;
     use crate::db::index::query_ast::Value;
     use crate::db::index::rows::MatchOutcome;
 
@@ -1101,6 +1169,64 @@ mod tests {
         delete(&mut e, &sel(&[&[1, 0]]));
         canonicalise(&mut e);
         assert_eq!(e, leaf(1));
+    }
+
+    /// A quantifier the bar draws bracketed, holding `pred`.
+    fn roster(pred: RosterExpr) -> MatchExpr {
+        Expr::Leaf(MatchTerm::Roster { quant: Quant::Count(CmpOp::Ge, 2), pred })
+    }
+    fn rleaf(n: i64) -> RosterExpr {
+        Expr::Leaf(RosterTerm { field: RosterField::Tier, op: Op::Eq, value: Value::Int(n) })
+    }
+
+    /// A path that walks past a `Roster` leaf addresses that leaf's predicate,
+    /// and a delete follows it there. Nothing above the quantifier moves: the
+    /// term stays where it was, holding one fewer condition.
+    #[test]
+    fn deleting_a_path_inside_a_quantifier_removes_from_its_predicate() {
+        let mut e = Expr::All(vec![leaf(1), roster(Expr::All(vec![rleaf(8), rleaf(9)]))]);
+        delete(&mut e, &sel(&[&[1, 1]]));
+        canonicalise(&mut e);
+        assert_eq!(e, Expr::All(vec![leaf(1), roster(rleaf(8))]));
+    }
+
+    /// The predicate is printed by the rules the match level is printed by, so
+    /// it needs the same folding: `count(All([tier=8]))>=2` prints as
+    /// `count(tier=8)>=2`, which reparses with a bare leaf.
+    #[test]
+    fn canonicalise_folds_a_one_child_roster_predicate() {
+        let mut e = roster(Expr::All(vec![rleaf(8)]));
+        canonicalise(&mut e);
+        assert_eq!(e, roster(rleaf(8)));
+    }
+
+    /// A quantifier over a predicate that collapsed away has no body to bracket,
+    /// so the whole term goes rather than leaving an empty pair of brackets in
+    /// the bar. `Not` is the shape a delete actually reaches this through: its
+    /// only operand cannot be dropped in place, so it becomes an empty
+    /// conjunction for this to fold away.
+    #[test]
+    fn canonicalise_drops_a_quantifier_whose_predicate_collapsed() {
+        let mut e = Expr::All(vec![leaf(1), roster(Expr::Not(Box::new(Expr::All(vec![]))))]);
+        canonicalise(&mut e);
+        assert_eq!(e, leaf(1));
+    }
+
+    /// `addresses_match_node` gates the match-level edits and must keep saying
+    /// no to a path inside a predicate; `addresses_node` gates the delete and
+    /// must say yes to the same path. A path naming nothing at either level is
+    /// refused by both, which is what stops the delete reporting an edit it did
+    /// not make.
+    #[test]
+    fn only_the_delete_gate_admits_a_path_inside_a_predicate() {
+        let e = Expr::All(vec![leaf(1), roster(Expr::All(vec![rleaf(8), rleaf(9)]))]);
+
+        assert!(!addresses_match_node(&e, &[1, 1]), "a predicate's term is no match-level node");
+        assert!(addresses_node(&e, &[1, 1]), "a predicate's term is still a node a delete can remove");
+        assert!(addresses_match_node(&e, &[1]), "the quantifier itself is a match-level node");
+        assert!(addresses_node(&e, &[1]));
+        assert!(!addresses_node(&e, &[1, 7]), "a path past the end of the predicate names nothing");
+        assert!(!addresses_node(&e, &[9]), "a path past the end of the tree names nothing");
     }
 
     #[test]
