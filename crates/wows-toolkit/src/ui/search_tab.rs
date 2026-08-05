@@ -729,7 +729,7 @@ struct ResultsTable<'a> {
     sort_clicked: Option<SortColumn>,
     open_path: Option<std::path::PathBuf>,
     copy_path: Option<std::path::PathBuf>,
-    /// The replay whose film strip was clicked, to be rendered.
+    /// The replay whose play button was clicked, to be rendered.
     render_path: Option<std::path::PathBuf>,
     /// Whether any row's preview icon was under the pointer this frame.
     preview_icon_hovered: bool,
@@ -786,7 +786,7 @@ impl ResultsTable<'_> {
         }
     }
 
-    /// Open, copy path, and the film strip -- click to render, dwell-gated
+    /// Open, copy path, and the play button -- click to render, dwell-gated
     /// hover for the compact map preview -- each acting on this row's own
     /// replay.
     fn actions_ui(&mut self, ui: &mut egui::Ui, row: usize) {
@@ -813,7 +813,7 @@ impl ResultsTable<'_> {
             self.copy_path = Some(copy_target(self.hits, row));
         }
 
-        let mut preview_response = ui.add(egui::Button::new(icons::FILM_STRIP));
+        let mut preview_response = ui.add(egui::Button::new(icons::PLAY));
         // Recorded before the hover branch below, which is left exactly as it
         // was: a click implies a hover, so the dwell gate still sees the frame
         // that carried it and the compact preview behaves identically.
@@ -1017,7 +1017,7 @@ fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
 
 /// What a table pass asked to open, given the two paths it reports.
 ///
-/// The film strip and the Open button are separate widgets on the same row, so
+/// The play button and the Open button are separate widgets on the same row, so
 /// one pass raises at most one of them. A render wins the impossible frame that
 /// carries both, being the more specific of the two.
 fn search_open_request(
@@ -2841,21 +2841,21 @@ mod tests {
         }
     }
 
-    /// The film strip is the third action, and the only one that is not a
+    /// The play button is the third action, and the only one that is not a
     /// one-shot: hovering it has to credit the dwell to the row under the
     /// pointer, since that gate is what stops a fast scroll from queuing a
     /// preview bake per row it crossed.
     #[test]
-    fn hovering_a_rows_film_strip_arms_a_preview_for_that_row() {
+    fn hovering_a_rows_play_button_arms_a_preview_for_that_row() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
         // A whole dwell's worth per frame, so one hovered frame arms it.
         harness.dwell_step = PREVIEW_DWELL;
         let mut hover = frame_input();
-        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        hover.events.push(egui::Event::PointerMoved(plays[1]));
         harness.frame(hover);
 
         let armed = harness.preview_state.pending_request();
@@ -2867,16 +2867,16 @@ mod tests {
     /// resting on it must arm nothing, which is the whole reason the dwell
     /// exists.
     #[test]
-    fn crossing_a_film_strip_without_resting_arms_nothing() {
+    fn crossing_a_play_button_without_resting_arms_nothing() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
         harness.dwell_step = PREVIEW_DWELL / 10;
-        for strip in &strips {
+        for play in &plays {
             let mut hover = frame_input();
-            hover.events.push(egui::Event::PointerMoved(*strip));
+            hover.events.push(egui::Event::PointerMoved(*play));
             harness.frame(hover);
         }
         assert_eq!(harness.preview_state.pending_request(), None, "a pass across the rows armed a preview");
@@ -2900,65 +2900,65 @@ mod tests {
         assert!(by_copy.open_path.is_none(), "the copy button also opened: {by_copy:?}");
     }
 
-    /// The film strip's click is the new action, and it has to carry the row it
+    /// The play button's click is the new action, and it has to carry the row it
     /// was clicked on rather than the first row: the action cell is drawn by
     /// index out of a slice, so an off-by-one here would render somebody else's
     /// replay.
     #[test]
-    fn clicking_a_rows_film_strip_asks_to_render_that_rows_replay() {
+    fn clicking_a_rows_play_button_asks_to_render_that_rows_replay() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
         for (row, hit) in hits.iter().enumerate() {
-            let asked = harness.click(strips[row]);
+            let asked = harness.click(plays[row]);
             assert_eq!(
                 asked.render_path.as_deref(),
                 Some(hit.replay_path.as_path()),
-                "row {row}'s film strip asked to render {:?}",
+                "row {row}'s play button asked to render {:?}",
                 asked.render_path
             );
         }
     }
 
     /// The two actions are different actions. Without this, a cell that wired
-    /// the film strip to the Open button's response would satisfy the test
-    /// above and open the inspector for every film-strip click.
+    /// the play button to the Open button's response would satisfy the test
+    /// above and open the inspector for every play_button click.
     #[test]
-    fn the_film_strip_and_the_open_button_ask_for_different_things() {
+    fn the_play_button_and_the_open_button_ask_for_different_things() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
         let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
-        assert_ne!(opens[0], strips[0], "the two buttons drew on top of each other");
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
+        assert_ne!(opens[0], plays[0], "the two buttons drew on top of each other");
 
-        let by_strip = harness.click(strips[0]);
-        assert!(by_strip.open_path.is_none(), "the film strip also opened the inspector: {by_strip:?}");
+        let by_play = harness.click(plays[0]);
+        assert!(by_play.open_path.is_none(), "the play button also opened the inspector: {by_play:?}");
         let by_open = harness.click(opens[0]);
         assert!(by_open.render_path.is_none(), "the open button also asked for a render: {by_open:?}");
     }
 
-    /// Hovering the film strip is unchanged: it arms the compact preview and
+    /// Hovering the play button is unchanged: it arms the compact preview and
     /// asks for nothing else. The positive control for this negative is
-    /// `clicking_a_rows_film_strip_asks_to_render_that_rows_replay`, which
+    /// `clicking_a_rows_play_button_asks_to_render_that_rows_replay`, which
     /// proves a click at these very coordinates does reach the widget; without
     /// it, "no render was asked for" would also hold for a hover that landed
     /// nowhere at all.
     #[test]
-    fn hovering_a_film_strip_asks_for_no_render() {
+    fn hovering_a_play_button_asks_for_no_render() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
         harness.dwell_step = PREVIEW_DWELL;
         let mut hover = frame_input();
-        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        hover.events.push(egui::Event::PointerMoved(plays[1]));
         harness.frame(hover);
 
-        assert!(harness.preview_state.pending_request().is_some(), "the hover must actually reach the film strip");
+        assert!(harness.preview_state.pending_request().is_some(), "the hover must actually reach the play button");
         assert_eq!(harness.asked.render_path, None, "hovering asked for a render");
     }
 
@@ -2968,14 +2968,14 @@ mod tests {
     /// elapses -- which is also where a hit with no mtime lands permanently,
     /// since it never reaches the rich preview branch below.
     #[test]
-    fn the_film_strips_resting_tooltip_names_both_the_hover_and_the_click() {
+    fn the_play_buttons_resting_tooltip_names_both_the_hover_and_the_click() {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
         let mut hover = frame_input();
-        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        hover.events.push(egui::Event::PointerMoved(plays[1]));
         harness.frame(hover);
         // egui's own tooltip only appears once the pointer has been still for
         // `Style::interaction.tooltip_delay` (0.5s), measured against the
@@ -3004,20 +3004,20 @@ mod tests {
         assert!(hit_preview_key(&hits[1]).is_none(), "the fixture row must actually lack an mtime");
 
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
-        let asked = harness.click(strips[1]);
+        let asked = harness.click(plays[1]);
         assert_eq!(
             asked.render_path.as_deref(),
             Some(hits[1].replay_path.as_path()),
-            "a hit missing file_mtime must still offer a usable film strip"
+            "a hit missing file_mtime must still offer a usable play button"
         );
     }
 
     /// The other half of the split: `PreviewKey` needs the mtime as its cache
     /// key (see `hit_preview_key`), so the row above must not arm a preview
     /// bake no matter how long it is hovered. The positive control is
-    /// `hovering_a_rows_film_strip_arms_a_preview_for_that_row`, which proves
+    /// `hovering_a_rows_play_button_arms_a_preview_for_that_row`, which proves
     /// the same dwell, aimed the same way, does arm one for a row that has an
     /// mtime; without it this would also pass for a hover that missed.
     #[test]
@@ -3025,11 +3025,11 @@ mod tests {
         let dir = tempfile::tempdir().expect("a temp dir");
         let hits = hits_with_real_files_one_missing_mtime(dir.path());
         let mut harness = TableHarness::new(hits.clone());
-        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        let plays = button_per_row(&harness, icons::PLAY, hits.len());
 
         harness.dwell_step = PREVIEW_DWELL;
         let mut hover = frame_input();
-        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        hover.events.push(egui::Event::PointerMoved(plays[1]));
         harness.frame(hover);
 
         assert_eq!(harness.preview_state.pending_request(), None, "a hit with no mtime armed a preview");
