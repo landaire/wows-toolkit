@@ -38,6 +38,7 @@ use crate::db::index::query_ast::ValueKind;
 use crate::db::index::query_text;
 use crate::db::index::query_text::ParseErrorKind;
 use crate::db::index::query_text::QueryParseError;
+use crate::db::index::query_text::local_date;
 use crate::db::index::query_text::parse_query;
 use crate::db::index::query_text::parse_roster_value;
 use crate::db::index::query_text::print_value;
@@ -86,6 +87,9 @@ const MIN_CARET_WIDTH: f32 = 90.0;
 /// Width held back for the scrollbar once the bar is tall enough to need one.
 const SCROLLBAR_ALLOWANCE: f32 = 14.0;
 const MAX_DROPDOWN_HEIGHT: f32 = 260.0;
+/// Salts the calendar's id inside the dropdown. Named rather than inlined
+/// because a test has to reach the same widget the user clicks.
+const DATE_PICKER_SALT: &str = "date_picker";
 /// Edits the undo stack keeps before the oldest falls off. Every entry is a
 /// whole query tree, so a bar left open for a session cannot be allowed to keep
 /// one per edit forever; deep enough that stepping back through an afternoon's
@@ -147,6 +151,10 @@ pub struct QueryBar {
     /// Trees stepped back from, most recent last. A fresh edit clears it: the
     /// branch it describes is one the user left.
     redo_stack: Vec<MatchExpr>,
+    /// The day the calendar under a date box is showing. Seeded from the term
+    /// when that box opens and written by the picker when the user saves, so it
+    /// has to outlive the frame the calendar is clicked through.
+    picker_date: jiff::civil::Date,
 }
 
 pub struct QueryBarOutput {
@@ -917,12 +925,17 @@ impl QueryBar {
             return false;
         }
         let rows = self.dropdown_rows();
-        // A plain value -- a number, a date, free text -- is drawn from no set
-        // the bar could list, so its editor is the box in the pill and nothing
-        // hangs under it. The field it belongs to is named by the segment drawn
+        // A plain value -- a number, free text -- is drawn from no set the bar
+        // could list, so its editor is the box in the pill and nothing hangs
+        // under it. The field it belongs to is named by the segment drawn
         // beside that box, so a popup here would be a frame under the pill
         // repeating what the pill already says.
-        if self.plain_value_field().is_some() {
+        //
+        // A date is the one plain kind that does have something to hang: the
+        // calendar goes where an enum's rows go, under the box that still takes
+        // whatever is typed into it.
+        let date_field = self.date_value_field();
+        if date_field.is_none() && self.plain_value_field().is_some() {
             return false;
         }
         // A bar with nothing typed into its active fragment says nothing by
@@ -939,6 +952,11 @@ impl QueryBar {
         }
 
         let mut picked = None;
+        // The calendar writes the day it saved into its own `&mut`, so the read
+        // back out happens after the popup rather than through the shared
+        // borrow the closure already holds.
+        let mut calendar_day = self.picker_date;
+        let mut calendar_saved = false;
         // Anchored to the segment being edited, or to the start of the fragment
         // being typed; the bar is the fallback for a frame where neither was
         // drawn. The alternative alignments are left at egui's defaults, which
@@ -977,6 +995,32 @@ impl QueryBar {
                 let overhead = egui::Frame::popup(ui.style()).total_margin().sum().x;
                 let max_width = (bar_rect.width() - overhead).max(0.0);
                 ui.set_max_width(max_width);
+                if date_field.is_some() {
+                    // The calendar itself draws into a foreground `Area`, so
+                    // whether it is up is knowable here without the picker
+                    // exposing anything. Its layer is salted through the
+                    // `Option` the picker hands to `make_persistent_id`, not
+                    // through the bare string: the two hash differently, and a
+                    // bare one would name a layer that is never up.
+                    let calendar =
+                        egui::LayerId::new(egui::Order::Foreground, ui.make_persistent_id(Some(DATE_PICKER_SALT)));
+                    let response = ui.add(
+                        egui_extras::DatePickerButton::new(&mut calendar_day)
+                            .id_salt(DATE_PICKER_SALT)
+                            .show_icon(false),
+                    );
+                    calendar_saved = response.changed();
+                    // Every widget in the calendar is one the bar reads a click
+                    // on as the pointer moving on, so the box would close on the
+                    // click that opened the calendar and take the calendar with
+                    // it. Handing the caret its focus back holds the box open
+                    // for as long as the calendar is up -- and no longer, or a
+                    // date box would be the one box a click away never closes.
+                    if response.clicked() || ui.ctx().memory(|m| m.areas().visible_last_frame(&calendar)) {
+                        ui.memory_mut(|m| m.request_focus(caret_id));
+                    }
+                    return;
+                }
                 if rows.is_empty() {
                     ui.label(
                         egui::RichText::new(t!("ui.search.bar.no_suggestions").into_owned()).color(ui.sem().text_dim),
@@ -1001,6 +1045,13 @@ impl QueryBar {
                     }
                 });
             });
+
+        if calendar_saved {
+            self.picker_date = calendar_day;
+            let edited = self.commit_picked_date(calendar_day);
+            ui.memory_mut(|m| m.request_focus(caret_id));
+            return edited;
+        }
 
         let Some(row) = picked else {
             return false;
@@ -1130,6 +1181,14 @@ impl QueryBar {
         }
         let (field, _, _) = select::term_at(&self.expr, &edit.path)?;
         matches!(suggest::value_editor(field), ValueEditor::Plain).then_some(field)
+    }
+
+    /// The field whose open plain box gets a calendar under it: the one kind
+    /// whose values a picker can offer without closing the set the box accepts.
+    /// The box stays the value itself, since `-30d` and the other relative
+    /// forms have no day on a calendar to point at.
+    fn date_value_field(&self) -> Option<TermField> {
+        self.plain_value_field().filter(|field| field.value_kind() == ValueKind::Timestamp)
     }
 
     /// Steps 1 and 2: read the caret position captured last frame, then take
@@ -1572,6 +1631,15 @@ impl QueryBar {
             },
             _ => String::new(),
         };
+        // The calendar hanging under a date box opens on the day the term
+        // already carries, read in the zone the grammar reads a typed date in
+        // so the day it highlights is the day the box beside it spells.
+        if field.value_kind() == ValueKind::Timestamp {
+            self.picker_date = match &value {
+                Value::Timestamp(t) => local_date(*t),
+                _ => local_date(jiff::Timestamp::now()),
+            };
+        }
         self.parsed_text.clone_from(&self.pending);
         let opened_with = self.pending.clone();
         self.editing = Some(SegmentEdit::open(&self.expr, pill, path, role, restore, &opened_with));
@@ -1642,6 +1710,16 @@ impl QueryBar {
             edit.restore = None;
         }
         self.end_segment_edit();
+    }
+
+    /// Applies the day the calendar handed back. It goes in as the literal a
+    /// person would type for that day, through the same parser the box's own
+    /// text goes through, so a picked date and a typed one are the same value
+    /// rather than two readings of the same calendar square. The whole local
+    /// day is what either one means, and only `parse_date` knows which zone
+    /// that day belongs to.
+    fn commit_picked_date(&mut self, day: jiff::civil::Date) -> bool {
+        self.commit_value_literal(&day.to_string())
     }
 
     fn commit_row(&mut self, row: Row, ui: &Ui, caret_id: egui::Id) -> bool {
@@ -3821,6 +3899,23 @@ mod tests {
         harness
     }
 
+    /// The same bar under the style and fonts the app actually installs, for a
+    /// test whose click points come out of the layout rather than out of a
+    /// segment rect it can read back. Stock egui's `interact_size` and font set
+    /// belong to widgets the app never draws, so a row height or a button
+    /// centre measured under them is a position nothing on screen occupies.
+    fn bar_with_app_look(text: &str) -> Harness {
+        let expr = parse_query(text).unwrap_or_else(|error| panic!("the fixture {text:?} must parse: {error:?}"));
+        let mut harness = Harness::new(expr, INLINE_WIDTH);
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        harness.ctx.set_fonts(fonts);
+        crate::ui::theme::install(&harness.ctx);
+        harness.ctx.memory_mut(|m| m.request_focus(harness.caret_id()));
+        harness.settle();
+        harness
+    }
+
     impl Harness {
         /// The stream the bar is drawing right now, which is what the token
         /// indices its widget ids are salted with count over.
@@ -3985,6 +4080,53 @@ mod tests {
 
         fn has_error_mark(&self) -> bool {
             self.bar.pending_error.is_some()
+        }
+
+        /// The picker hanging under an open date box, found by the day it
+        /// paints inside the popup. Not by id: the picker salts its id inside
+        /// the popup's own `Ui`, which nothing outside that closure can name.
+        fn date_picker_rect(&self) -> Option<Rect> {
+            let popup = self.ctx.read_response(self.id.with("dropdown"))?.rect;
+            let day = self.bar.picker_date.to_string();
+            self.painted(|text, pos| text == day && popup.contains(pos))
+        }
+
+        /// A rect the calendar painted, found by its text. The calendar draws
+        /// into an `Area` of its own, outside the popup the picker sits in, so
+        /// this searches the whole frame rather than the popup.
+        fn calendar_text_rect(&self, wanted: &str) -> Option<Rect> {
+            self.painted(|text, _| text == wanted)
+        }
+
+        /// Where the calendar draws a given day of the month it is showing.
+        ///
+        /// The grid labels each day with its number, and so do the week column
+        /// and the day combo box, so a number that reads more than once in the
+        /// frame is refused rather than guessed at: a click aimed at the wrong
+        /// one of them would still land on something and still pass.
+        fn calendar_day_pos(&self, day: i8) -> Option<Pos2> {
+            let label = day.to_string();
+            let hits: Vec<Rect> = self
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == label => {
+                        Some(Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert!(hits.len() < 2, "{label:?} reads {} times in the frame, so a click on it is a guess", hits.len());
+            hits.first().map(Rect::center)
+        }
+
+        fn painted(&self, matches: impl Fn(&str, Pos2) -> bool) -> Option<Rect> {
+            self.shapes.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if matches(&text.galley.job.text, text.pos) => {
+                    Some(Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                _ => None,
+            })
         }
 
         fn click(&mut self, pos: Pos2) {
@@ -4379,6 +4521,52 @@ mod tests {
         assert!(!h.inline_edit_open(), "the box must close on a click that moved on");
     }
 
+    /// The calendar hands the caret its focus back every frame it is drawn, or
+    /// the click that opens it would read as the pointer moving on and close
+    /// the box the calendar hangs under. That hand-back must not outlive the
+    /// calendar: a date box has to close on a click away exactly as any other
+    /// box does, and one held open by its own focus repair would never close.
+    #[test]
+    fn a_click_elsewhere_in_the_bar_commits_a_date_box() {
+        let _zone = pinned_utc();
+        let mut h = bar_with("date>=2026-07-23");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must open a box");
+        h.set_caret_text("2026-07-09");
+
+        let bar = h.rect_of(h.id.with("background"));
+        let box_rect = h.caret_rect();
+        let away = Pos2::new(bar.right() - 1.0, box_rect.center().y);
+        assert!(!box_rect.contains(away), "the click must land off the box: {away:?} in {box_rect:?}");
+        h.click(away);
+
+        assert_eq!(printed(&h), "date>=2026-07-09", "a click away must commit what the date box held");
+        assert!(!h.inline_edit_open(), "the date box must close on a click that moved on");
+    }
+
+    /// A click that lands nowhere near the bar closes whatever box was open.
+    /// The date box is the one that can get this wrong, because it is the one
+    /// whose calendar hands the caret its focus back -- held past the
+    /// calendar's own life, that repair would make a date box the single box
+    /// the pointer can never leave.
+    ///
+    /// `tier` runs first and is not decoration: it is what says the click point
+    /// really does close a box. Without it a point that landed on nothing at
+    /// all would satisfy the date assertion and the test could not fail.
+    #[test]
+    fn a_click_outside_the_bar_closes_a_date_box_the_way_it_closes_any_other() {
+        let _zone = pinned_utc();
+        let away = Pos2::new(INLINE_WIDTH / 2.0, 550.0);
+        for query in ["anyone.tier>=8", "date>=2026-07-23"] {
+            let mut h = bar_with(query);
+            h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+            assert!(h.inline_edit_open(), "{query}: the fixture must open a box");
+            assert!(!h.rect_of(h.id.with("background")).contains(away), "{query}: the click must land off the bar");
+            h.click(away);
+            assert!(!h.inline_edit_open(), "{query}: the box stayed open after a click that moved on");
+        }
+    }
+
     #[test]
     fn an_enum_value_lists_its_options_under_the_box() {
         let mut h = bar_with("outcome:win");
@@ -4489,15 +4677,178 @@ mod tests {
         assert!(!h.popup_shown(), "a scalar value drew a popup under its box: {:?}", h.popup_rect());
     }
 
-    /// A date is the other scalar editor, and the one whose prompt read as a
-    /// label rather than as a repeat, so it is swept separately.
+    /// A date is the one plain kind with something to hang under its box, and
+    /// it hangs it where an enum hangs its rows. The box itself is unchanged --
+    /// still the value, still typeable -- so this asserts both.
     #[test]
-    fn a_date_box_draws_no_popup_either() {
+    fn a_date_box_hangs_a_calendar_under_it() {
         let _zone = pinned_utc();
         let mut h = bar_with("date>=2026-07-23");
-        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        let value = h.segment_rect(&vec![], SegmentRole::Value);
+        h.click(value.center());
         assert!(h.inline_edit_open(), "the fixture must open a box");
-        assert!(!h.popup_shown(), "a date value drew a popup under its box: {:?}", h.popup_rect());
+        assert_eq!(h.caret_text(), "2026-07-23", "the box must still hold the date to type into");
+        assert!(h.popup_shown(), "a date value hung nothing under its box");
+        let popup = h.popup_rect();
+        assert!((popup.left() - value.left()).abs() < 4.0, "calendar {popup:?} is not under the box {value:?}");
+        assert!(
+            h.date_picker_rect().is_some(),
+            "the popup under a date box painted no picker reading its day: {popup:?}"
+        );
+    }
+
+    /// The positive control for the two negatives above and below: without it,
+    /// a `date_picker_rect` that never finds anything would satisfy every one
+    /// of them and the whole group would pass with the picker deleted.
+    ///
+    /// `build` and `name` are the other two plain editors -- an int and open
+    /// text -- and neither has a day to point at, so neither gets a calendar.
+    #[test]
+    fn a_build_box_and_a_text_box_get_no_calendar() {
+        for query in ["build>=1000", "anyone.name:someone"] {
+            let mut h = bar_with(query);
+            h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+            assert!(h.inline_edit_open(), "{query}: the fixture must open a box");
+            assert!(!h.popup_shown(), "{query}: a plain value drew a popup under its box: {:?}", h.popup_rect());
+            assert!(h.date_picker_rect().is_none(), "{query}: a plain value drew a calendar");
+        }
+    }
+
+    /// Clicking through the calendar the way a user does: open the box, open
+    /// the calendar, choose a day, save. What lands on the pill has to be that
+    /// day, spelled the way the grammar spells one.
+    ///
+    /// Driven under the app's own style and fonts. Every position here is
+    /// derived from what was painted, and stock egui paints widgets at sizes
+    /// the app never draws -- a hit point computed off those would be aimed
+    /// somewhere the app's own layout never puts anything.
+    #[test]
+    fn clicking_through_the_calendar_commits_the_day_it_saved() {
+        let _zone = pinned_utc();
+        let mut h = bar_with_app_look("date>=2026-07-23");
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        let picker = h.date_picker_rect().expect("the calendar hangs under the box");
+
+        h.click(picker.center());
+        assert!(h.inline_edit_open(), "opening the calendar closed the box it hangs under");
+        assert!(h.calendar_text_rect("Save").is_some(), "clicking the picker opened no calendar");
+
+        let day = h.calendar_day_pos(9).expect("the calendar draws the days of the month it opened on");
+        h.click(day);
+        h.click(h.calendar_text_rect("Save").expect("the calendar draws a Save").center());
+
+        assert_eq!(printed(&h), "date>=2026-07-09", "the saved day is not what landed on the pill");
+        assert!(!h.inline_edit_open(), "the box stayed open after a day was saved");
+    }
+
+    /// A zone west of UTC, which is the only place a picked day and a typed one
+    /// can differ at all: in UTC a calendar square's midnight is the same
+    /// instant whichever zone the picker resolved it in, so a test that only
+    /// ran there could not fail however wrong the picker was.
+    #[must_use]
+    fn pinned_new_york() -> ZoneGuard {
+        ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").expect("the bundled tzdb carries America/New_York"))
+    }
+
+    /// The instant a one-term date query carries.
+    fn only_timestamp(expr: &MatchExpr) -> jiff::Timestamp {
+        match expr {
+            Expr::Leaf(MatchTerm::Field(MatchField::Date, _, Value::Timestamp(t))) => *t,
+            other => panic!("the fixture must be one date term carrying a timestamp: {other:?}"),
+        }
+    }
+
+    /// Clicks a day out of a calendar opened over `fixture`, and hands back the
+    /// query it left. The whole path, from the segment click to the Save: the
+    /// picker's answer is only the same as a typed one if every step between
+    /// them agrees, and a shortcut past any of them would pin a value the user
+    /// never produces.
+    fn pick_day(fixture: &str, day: i8) -> MatchExpr {
+        let mut h = bar_with_app_look(fixture);
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        h.click(h.date_picker_rect().expect("the calendar hangs under the box").center());
+        let pos = h.calendar_day_pos(day).unwrap_or_else(|| panic!("the calendar over {fixture} draws no {day}"));
+        h.click(pos);
+        h.click(h.calendar_text_rect("Save").expect("the calendar draws a Save").center());
+        assert!(!h.inline_edit_open(), "the box stayed open after {day} was saved");
+        h.query()
+    }
+
+    /// Types a date into the box over `fixture` and hands back the query it
+    /// left. Deliberately not `parse_query` on the whole line: the point of
+    /// comparison is the editor's own commit path, which is where a picked day
+    /// and a typed one could part company.
+    fn type_date(fixture: &str, text: &str) -> MatchExpr {
+        let mut h = bar_with(fixture);
+        h.click(h.segment_rect(&vec![], SegmentRole::Value).center());
+        h.set_caret_text(text);
+        h.press_enter();
+        assert!(!h.has_error_mark(), "{text:?} was refused by the box");
+        assert!(!h.inline_edit_open(), "the box stayed open after {text:?} was committed");
+        h.query()
+    }
+
+    /// The one thing the calendar must not quietly change: a day chosen from it
+    /// is the same value as the same day typed. A typed date means the whole
+    /// local day, so a picker resolving its square in UTC -- or at any hour but
+    /// the day's own start -- would put a different instant on the pill while
+    /// the pill went on reading the same date.
+    #[test]
+    fn a_picked_day_and_the_same_day_typed_are_the_same_value() {
+        let _zone = pinned_new_york();
+        let picked = pick_day("date>=2026-07-23", 9);
+        let typed = type_date("date>=2026-07-23", "2026-07-09");
+        assert_eq!(picked, typed, "a picked day and a typed one are different values");
+
+        let zoned = jiff::civil::date(2026, 7, 9)
+            .to_zoned(jiff::tz::TimeZone::get("America/New_York").expect("tzdb"))
+            .expect("an ordinary day resolves");
+        assert_eq!(only_timestamp(&picked), zoned.timestamp(), "the picked day is not that day's local start");
+        assert_eq!(
+            query_text::print_query(&picked),
+            "date>=2026-07-09",
+            "a picked day must print back as the bare date"
+        );
+    }
+
+    /// 2026-03-08 is the US spring-forward day in `America/New_York`: local
+    /// midnight to local midnight is 23 hours, and 01:00 to 02:00 does not
+    /// exist. A picked day has to land on that day's own start rather than on
+    /// a wall clock reading 00:00 that the zone skipped, because the half-open
+    /// range the query compiles to is built from the instant that lands here.
+    #[test]
+    fn a_day_picked_on_a_dst_transition_gets_that_days_real_bounds() {
+        let _zone = pinned_new_york();
+        let picked = pick_day("date=2026-03-20", 8);
+        let typed = type_date("date=2026-03-20", "2026-03-08");
+        assert_eq!(picked, typed, "a picked day and a typed one differ on a DST day");
+
+        let zone = jiff::tz::TimeZone::get("America/New_York").expect("tzdb");
+        let start = only_timestamp(&picked).to_zoned(zone).start_of_day().expect("the day has a start");
+        assert_eq!(only_timestamp(&picked), start.timestamp(), "the picked day is not that day's real start");
+        let end = start.tomorrow().expect("the day has a successor");
+        assert_eq!(
+            end.timestamp().as_second() - start.timestamp().as_second(),
+            23 * 3600,
+            "the spring-forward day must be 23 hours, not the 86400 a fixed offset would assume"
+        );
+    }
+
+    /// The relative forms are why the box stays typeable rather than becoming a
+    /// calendar: there is no square on a calendar for "thirty days ago", and
+    /// the calendar hanging under the box must not have taken the box's job.
+    #[test]
+    fn a_relative_date_still_commits_from_the_box() {
+        let _zone = pinned_new_york();
+        let before = jiff::Timestamp::now();
+        let committed = only_timestamp(&type_date("date>=2026-07-23", "-30d"));
+        let after = jiff::Timestamp::now();
+
+        let ago = |t: jiff::Timestamp| t.as_second() - 30 * 86_400;
+        assert!(
+            (ago(before)..=ago(after)).contains(&committed.as_second()),
+            "-30d committed {committed}, which is not thirty days before the moment it was typed"
+        );
     }
 
     /// The entity lookups list under the box too, and their rows are not a

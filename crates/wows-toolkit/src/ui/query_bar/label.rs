@@ -23,6 +23,7 @@ use crate::db::index::query_ast::Value;
 // Reached by the test module's `sample_value` through `use super::*`.
 #[cfg(test)]
 use crate::db::index::query_ast::ValueKind;
+use crate::db::index::query_text::local_date;
 use crate::db::index::rows::IndexSource;
 use crate::db::index::rows::MatchOutcome;
 use crate::db::index::rows::VehicleRelation;
@@ -260,7 +261,10 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
             .find(|src| src.id == *s)
             .map(|src| src.name.clone())
             .unwrap_or_else(|| format!("#{}", s.0)),
-        Value::Timestamp(ts) => ts.strftime("%Y-%m-%d").to_string(),
+        // The local day, the same one the grammar reads a typed date as and the
+        // same one the calendar under the box highlights. `Timestamp::strftime`
+        // formats in UTC, which east of it names the day before.
+        Value::Timestamp(ts) => local_date(*ts).to_string(),
         Value::NoOperand => String::new(),
     }
 }
@@ -488,6 +492,22 @@ mod tests {
         let cache = NameCache::default();
         let term = MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win));
         assert_eq!(pill_text(&term, &cache), "Result is Win");
+    }
+
+    /// A date pill has to read as the day the box beside it spells and the day
+    /// the calendar under it highlights, all three of which are the local day.
+    /// East of UTC the two readings name different days, so the fixture is
+    /// pinned there: in UTC they agree and nothing here could fail.
+    #[test]
+    fn a_date_pill_reads_as_the_local_day_not_the_utc_one() {
+        let _zone = crate::db::index::query_text::ZoneGuard::set(
+            jiff::tz::TimeZone::get("Asia/Tokyo").expect("the bundled tzdb carries Asia/Tokyo"),
+        );
+        let midnight = jiff::civil::date(2026, 7, 9)
+            .to_zoned(jiff::tz::TimeZone::get("Asia/Tokyo").expect("tzdb"))
+            .expect("an ordinary day resolves");
+        let term = MatchTerm::Field(MatchField::Date, Op::Ge, Value::Timestamp(midnight.timestamp()));
+        assert_eq!(pill_text(&term, &NameCache::default()), "Date >= 2026-07-09");
     }
 
     #[test]

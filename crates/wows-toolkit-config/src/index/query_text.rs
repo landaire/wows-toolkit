@@ -939,6 +939,16 @@ fn parse_date(s: &str) -> Option<Timestamp> {
     s.parse::<Timestamp>().ok()
 }
 
+/// The local day an instant falls in, in the same zone `parse_date` reads a
+/// bare date in and `print_timestamp` writes one back in.
+///
+/// Public because the query bar's calendar opens on the day the term already
+/// carries: restating the zone rule there would let the day the calendar
+/// highlights drift from the day the box beside it spells.
+pub fn local_date(t: Timestamp) -> jiff::civil::Date {
+    t.to_zoned(current_zone()).date()
+}
+
 /// A negative offset from the parse-time "now": `-30d`, `-6h`, `-1y`.
 ///
 /// The unit is taken as the last `char`, not the last byte, so a multi-byte
