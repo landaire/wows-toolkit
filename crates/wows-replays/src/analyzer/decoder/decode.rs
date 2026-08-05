@@ -424,7 +424,7 @@ impl PlayerStateData {
         }
     }
 
-    fn from_pickle(value: &pickled::Value, version: &Version, is_bot: bool) -> Self {
+    pub(crate) fn from_pickle(value: &pickled::Value, version: &Version, is_bot: bool) -> Self {
         let raw_values = convert_flat_dict_to_real_dict(value);
 
         let mapped_values = Self::convert_raw_dict(&raw_values, version, is_bot);
@@ -731,15 +731,33 @@ impl PlayerStateData {
     }
 }
 
+/// Decode an `onArenaStateReceived` / `onNewPlayerSpawnedInBattle` player
+/// blob into player records. Kept out of `DecodedPacketPayload` so a caller
+/// that only wants the roster does not go through arms that panic on the
+/// other arguments of those methods.
+pub(crate) fn player_states_from_blob(blob: &[u8], version: &Version) -> Vec<PlayerStateData> {
+    let Ok(value) = pickled::de::value_from_slice(blob, pickled::de::DeOptions::new()) else {
+        return Vec::new();
+    };
+    let value = try_convert_pickle_to_string(value);
+    let pickled::value::Value::List(players) = &value else {
+        return Vec::new();
+    };
+    players.inner().iter().map(|player| PlayerStateData::from_pickle(player, version, false)).collect()
+}
+
 /// Converts a list of key-value pairs to a real dictionary
 fn convert_flat_dict_to_real_dict(value: &Value) -> HashMap<i64, Value> {
     let mut raw_values = HashMap::new();
     if let pickled::value::Value::List(elements) = value {
         for elem in elements.inner().iter() {
             if let pickled::value::Value::Tuple(kv) = elem {
-                let key = kv.inner()[0].i64_ref().expect("tuple first value was not an integer");
-
-                raw_values.insert(*key, kv.inner()[1].clone());
+                // Runs against packet data that may be truncated or version-drifted;
+                // skip a malformed entry instead of panicking on it.
+                let (Some(key), Some(val)) = (kv.inner().first().and_then(|k| k.i64_ref()), kv.inner().get(1)) else {
+                    continue;
+                };
+                raw_values.insert(*key, val.clone());
             }
         }
     }
@@ -2831,5 +2849,37 @@ mod player_key_map_tests {
         ] {
             assert_eq!(a.get(key), b.get(key), "field {key} diverges at 0.11.11");
         }
+    }
+}
+
+#[cfg(test)]
+mod convert_flat_dict_to_real_dict_tests {
+    use super::*;
+    use pickled::value::Shared;
+    use pickled::value::SharedFrozen;
+
+    fn list(items: Vec<Value>) -> Value {
+        Value::List(Shared::new(items))
+    }
+
+    fn tuple(items: Vec<Value>) -> Value {
+        Value::Tuple(SharedFrozen::new(items))
+    }
+
+    /// Runs against packet data the game may still be writing: a truncated or
+    /// version-drifted entry must be skipped rather than panic the whole scan.
+    #[test]
+    fn malformed_tuples_are_skipped_alongside_a_well_formed_entry() {
+        let value = list(vec![
+            tuple(vec![Value::Bool(true), Value::I64(1)]),
+            tuple(vec![Value::I64(2)]),
+            tuple(vec![]),
+            tuple(vec![Value::I64(3), Value::I64(42)]),
+        ]);
+
+        let result = convert_flat_dict_to_real_dict(&value);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result.get(&3), Some(&Value::I64(42)));
     }
 }
