@@ -551,10 +551,20 @@ const fn column_label_key(column: ResultColumn) -> &'static str {
     }
 }
 
+/// Phosphor's own naming is backwards from what the glyphs draw:
+/// `icons::SORT_ASCENDING` (`\u{E444}`) is the arrow that points down (a
+/// descending sort), and `icons::SORT_DESCENDING` (`\u{E446}`) is the arrow
+/// that points up (an ascending sort). These constants are named for what
+/// they draw on screen, not for phosphor's constant names, so the mapping
+/// below reads as deliberate rather than as a swap waiting to be "fixed"
+/// back to the wrong glyphs.
+const ASCENDING_SORT_GLYPH: &str = icons::SORT_DESCENDING;
+const DESCENDING_SORT_GLYPH: &str = icons::SORT_ASCENDING;
+
 const fn direction_icon(direction: SortDirection) -> &'static str {
     match direction {
-        SortDirection::Ascending => icons::SORT_ASCENDING,
-        SortDirection::Descending => icons::SORT_DESCENDING,
+        SortDirection::Ascending => ASCENDING_SORT_GLYPH,
+        SortDirection::Descending => DESCENDING_SORT_GLYPH,
     }
 }
 
@@ -795,7 +805,7 @@ impl ToolkitTabViewer<'_> {
         // same closures make (`search_ship_display_name`, `preview_deps`);
         // put back once the table is done drawing.
         let mut preview_state = std::mem::take(&mut self.tab_state.search_tab.preview_state);
-        let mut map_cell_hovered = false;
+        let mut preview_icon_hovered = false;
         let dwell_step = Duration::from_secs_f32(ui.input(|i| i.stable_dt).max(0.0));
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
             use egui_extras::Column;
@@ -832,28 +842,7 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string());
                             });
                             row.col(|ui| {
-                                let mut response = ui.label(&hit.map);
-                                if let Some(key) = preview_key.clone()
-                                    && response.hovered()
-                                {
-                                    map_cell_hovered = true;
-                                    preview_state.hover(key.clone(), dwell_step);
-                                    if preview_state.pending_request().as_ref() == Some(&key)
-                                        && let Some(deps) = self.preview_deps(ui, true)
-                                    {
-                                        let hover_text = preview_hover_text(hit, ship_name.as_deref());
-                                        response = response.on_hover_ui(|ui| {
-                                            preview_popup::preview_tooltip(
-                                                ui,
-                                                &deps,
-                                                key.clone(),
-                                                &hit.map,
-                                                &hover_text,
-                                            );
-                                        });
-                                    }
-                                }
-                                let _ = response;
+                                ui.label(&hit.map);
                             });
                             row.col(|ui| {
                                 ui.label(&hit.game_type);
@@ -913,6 +902,35 @@ impl ToolkitTabViewer<'_> {
                                     if copy_btn.clicked() {
                                         copy_path = Some(copy_target(results, index));
                                     }
+
+                                    if let Some(key) = preview_key.clone() {
+                                        let mut preview_response = ui.add(egui::Button::new(icons::FILM_STRIP));
+                                        if preview_response.hovered() {
+                                            preview_icon_hovered = true;
+                                            preview_state.hover(key.clone(), dwell_step);
+                                            if preview_state.pending_request().as_ref() == Some(&key)
+                                                && let Some(deps) = self.preview_deps(ui, true)
+                                            {
+                                                let hover_text = preview_hover_text(hit, ship_name.as_deref());
+                                                preview_response = preview_response.on_hover_ui(|ui| {
+                                                    preview_popup::preview_tooltip(
+                                                        ui,
+                                                        &deps,
+                                                        key.clone(),
+                                                        &hit.map,
+                                                        &hover_text,
+                                                    );
+                                                });
+                                            } else {
+                                                preview_response =
+                                                    preview_response.on_hover_text(t!("ui.search.preview_map"));
+                                            }
+                                        } else {
+                                            preview_response =
+                                                preview_response.on_hover_text(t!("ui.search.preview_map"));
+                                        }
+                                        let _ = preview_response;
+                                    }
                                 });
                             });
                         });
@@ -920,11 +938,11 @@ impl ToolkitTabViewer<'_> {
                 });
         });
 
-        // No row's map cell was hovered this frame, whether the pointer left
-        // the table entirely or is sitting over a different column: either
-        // way nothing is dwelling anymore, so a return to the same row later
-        // starts the dwell over rather than resuming it.
-        if !map_cell_hovered {
+        // No row's preview icon was hovered this frame, whether the pointer
+        // left the table entirely or is sitting over a different column:
+        // either way nothing is dwelling anymore, so a return to the same
+        // row later starts the dwell over rather than resuming it.
+        if !preview_icon_hovered {
             preview_state.leave();
         }
         self.tab_state.search_tab.preview_state = preview_state;
@@ -1572,11 +1590,15 @@ mod tests {
 
         let arrowed: Vec<&String> = painted
             .iter()
-            .filter(|text| text.contains(icons::SORT_ASCENDING) || text.contains(icons::SORT_DESCENDING))
+            .filter(|text| text.contains(ASCENDING_SORT_GLYPH) || text.contains(DESCENDING_SORT_GLYPH))
             .collect();
         assert_eq!(arrowed.len(), 1, "exactly one header may claim the sort: {painted:?}");
         assert!(arrowed[0].starts_with("Damage"), "the arrow belongs to the sorted column: {:?}", arrowed[0]);
-        assert!(arrowed[0].contains(icons::SORT_ASCENDING), "the arrow must read the way it sorts: {:?}", arrowed[0]);
+        // Ascending was requested, so the header must carry the glyph that
+        // visually draws an ascending (upward) arrow -- not the phosphor
+        // constant that happens to be named SORT_ASCENDING, which draws the
+        // opposite.
+        assert!(arrowed[0].contains(ASCENDING_SORT_GLYPH), "the arrow must read the way it sorts: {:?}", arrowed[0]);
     }
 
     /// The arrow is the only thing that says which way it sorts, so reversing
@@ -1586,7 +1608,10 @@ mod tests {
         let descending =
             painted_header_texts(SortSpec { column: SortColumn::Damage, direction: SortDirection::Descending });
         let damage = descending.iter().find(|text| text.starts_with("Damage")).expect("the damage header draws");
-        assert!(damage.contains(icons::SORT_DESCENDING), "got {damage:?}");
-        assert!(!damage.contains(icons::SORT_ASCENDING), "got {damage:?}");
+        // Descending was requested, so the header must carry the glyph that
+        // visually draws a descending (downward) arrow, and must not carry
+        // the one that draws an ascending arrow.
+        assert!(damage.contains(DESCENDING_SORT_GLYPH), "got {damage:?}");
+        assert!(!damage.contains(ASCENDING_SORT_GLYPH), "got {damage:?}");
     }
 }

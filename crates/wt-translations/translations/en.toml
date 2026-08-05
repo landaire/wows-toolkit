@@ -701,6 +701,7 @@ game_mode_gap_hint = "%{count} indexed matches have no game mode recorded. Re-in
 open = "Open"
 open_missing = "Replay file no longer exists"
 path_copied = "Replay path copied to clipboard"
+preview_map = "Preview map"
 free_text = "contains \"%{text}\""
 quant_any = "any"
 quant_none = "no"
