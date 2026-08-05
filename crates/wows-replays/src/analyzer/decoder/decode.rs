@@ -291,8 +291,10 @@ impl PlayerStateData {
             h
         } else if version.is_at_least(&Version::from_client_exe("0,10,7,0")) {
             // 0.10.7-0.10.8 (35 fields): pre-0.10.7 layout plus isClientLoaded(15);
-            // still predates antiAbuseEnabled and shipComponents. Verified against a
-            // real 0.10.7 replay.
+            // still predates antiAbuseEnabled, keyTargetMarkers and shipConfigDump.
+            // Verified against a real 0.10.7 replay; the field count is what places
+            // shipComponents at 29, since the modern 38-field set minus those three
+            // absentees leaves exactly these 35.
             let mut h = HashMap::new();
             h.insert(Self::KEY_ACCOUNT_DBID, 0);
             h.insert(Self::KEY_AVATAR_ID, 1);
@@ -323,7 +325,7 @@ impl PlayerStateData {
             h.insert(Self::KEY_PRE_BATTLE_SIGN, 26);
             h.insert(Self::KEY_PREBATTLE_ID, 27);
             h.insert(Self::KEY_REALM, 28);
-            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 29);
+            h.insert(Self::KEY_SHIP_COMPONENTS, 29);
             h.insert(Self::KEY_SHIP_ID, 30);
             h.insert(Self::KEY_SHIP_PARAMS_ID, 31);
             h.insert(Self::KEY_SKIN_ID, 32);
@@ -335,10 +337,11 @@ impl PlayerStateData {
             // replay's player FixedDict. BigWorld FixedDict keys are alphabetically
             // ordered, so the index is the field's alphabetical position over the
             // fields that existed then -- this era predates isClientLoaded,
-            // antiAbuseEnabled, keyTargetMarkers and shipComponents. Mapping the full
+            // antiAbuseEnabled, keyTargetMarkers and shipConfigDump. Mapping the full
             // set (not just the 8 fields older code needed) is what lets old replays
-            // resolve connection state and ship builds instead of defaulting to
-            // disconnected/empty.
+            // resolve connection state and ship modules instead of defaulting to
+            // disconnected/empty. Without the dump, a build is only recoverable from
+            // the shipComponents module variants plus a spotted ship's `shipConfig`.
             let mut h = HashMap::new();
             h.insert(Self::KEY_ACCOUNT_DBID, 0);
             h.insert(Self::KEY_AVATAR_ID, 1);
@@ -368,7 +371,7 @@ impl PlayerStateData {
             h.insert(Self::KEY_PRE_BATTLE_SIGN, 25);
             h.insert(Self::KEY_PREBATTLE_ID, 26);
             h.insert(Self::KEY_REALM, 27);
-            h.insert(Self::KEY_SHIP_CONFIG_DUMP, 28);
+            h.insert(Self::KEY_SHIP_COMPONENTS, 28);
             h.insert(Self::KEY_SHIP_ID, 29);
             h.insert(Self::KEY_SHIP_PARAMS_ID, 30);
             h.insert(Self::KEY_SKIN_ID, 31);
@@ -701,10 +704,22 @@ impl PlayerStateData {
     /// so `wowsunpack::data::ship_config::parse_ship_config` accepts it directly.
     /// Lets callers reconstruct a ship's build for players never seen via
     /// `EntityCreate` (i.e. enemies that stay outside detection all match).
+    ///
+    /// `None` on clients up to 0.10.8, whose arena state carries no dump; there
+    /// the only pre-detection loadout signal is [`Self::ship_components`].
     pub fn ship_config_dump(&self) -> Option<Vec<u8>> {
         self.raw_with_names
             .get(Self::KEY_SHIP_CONFIG_DUMP)
             .and_then(|v| v.as_array().map(|arr| arr.iter().filter_map(|n| n.as_u64().map(|u| u as u8)).collect()))
+    }
+
+    /// The module variant chosen for each component slot, keyed by slot name
+    /// (`artillery` -> `A_Artillery`, `hull` -> `B_Hull`, ...). The server sends
+    /// this for every participant in the arena state, so it resolves a ship's
+    /// modules even for players the recorder never detects.
+    pub fn ship_components(&self) -> Option<HashMap<&str, &str>> {
+        let components = self.raw_with_names.get(Self::KEY_SHIP_COMPONENTS)?.as_object()?;
+        Some(components.iter().filter_map(|(slot, variant)| variant.as_str().map(|v| (slot.as_str(), v))).collect())
     }
 
     pub fn raw(&self) -> &HashMap<i64, String> {
@@ -2734,13 +2749,13 @@ mod player_key_map_tests {
     /// Pre-0.10.7 clients (e.g. the 0.9.10 Smaland replay) carry a 34-field player
     /// FixedDict. Verified field-by-field against a real 0.9.10 replay: mapping the
     /// full set -- not just the eight the old code needed -- is what lets these
-    /// replays resolve connection state and ship builds instead of reading every
+    /// replays resolve connection state and ship modules instead of reading every
     /// player as disconnected with no build.
     #[test]
     fn pre_10_7_maps_connection_and_build_fields() {
         let m = PlayerStateData::player_key_map(&v(0, 9, 10));
         assert_eq!(m.get(PlayerStateData::KEY_IS_CONNECTED), Some(&15));
-        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), Some(&28));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), Some(&28));
         assert_eq!(m.get(PlayerStateData::KEY_IS_ALIVE), Some(&13));
         assert_eq!(m.get(PlayerStateData::KEY_IS_BOT), Some(&14));
         // Anchors that were already correct in the prior (partial) map.
@@ -2750,24 +2765,25 @@ mod player_key_map_tests {
         assert_eq!(m.get(PlayerStateData::KEY_TEAM_ID), Some(&32));
         // Fields that did not exist this early must be absent, not mis-indexed.
         assert_eq!(m.get(PlayerStateData::KEY_IS_CLIENT_LOADED), None);
-        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), None);
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), None);
     }
 
-    /// 0.10.7-0.10.8 added isClientLoaded; still no antiAbuseEnabled/shipComponents.
+    /// 0.10.7-0.10.8 added isClientLoaded; still no antiAbuseEnabled/shipConfigDump.
     /// Verified against a real 0.10.7 replay.
     #[test]
     fn v10_7_layout() {
         let m = PlayerStateData::player_key_map(&v(0, 10, 7));
         assert_eq!(m.get(PlayerStateData::KEY_IS_CLIENT_LOADED), Some(&15));
         assert_eq!(m.get(PlayerStateData::KEY_IS_CONNECTED), Some(&16));
-        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), Some(&29));
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), Some(&29));
         assert_eq!(m.get(PlayerStateData::KEY_MAX_HEALTH), Some(&22));
         assert_eq!(m.get(PlayerStateData::KEY_TEAM_ID), Some(&33));
         assert_eq!(m.get(PlayerStateData::KEY_ANTI_ABUSE_ENABLED), None);
-        assert_eq!(m.get(PlayerStateData::KEY_SHIP_COMPONENTS), None);
+        assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), None);
     }
 
-    /// 0.10.9-0.11.10 added antiAbuseEnabled(1) and shipComponents(30).
+    /// 0.10.9-0.11.10 added antiAbuseEnabled(1) and shipConfigDump(31), the first
+    /// layout to hand every participant's full loadout out at battle load.
     /// Verified against real replays across the range.
     #[test]
     fn v10_9_layout() {
@@ -2778,6 +2794,25 @@ mod player_key_map_tests {
         assert_eq!(m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP), Some(&31));
         assert_eq!(m.get(PlayerStateData::KEY_MAX_HEALTH), Some(&23));
         assert_eq!(m.get(PlayerStateData::KEY_TEAM_ID), Some(&35));
+    }
+
+    /// Every layout that carries shipComponents keeps it directly before shipId,
+    /// and one slot before shipConfigDump once that exists: BigWorld sorts the
+    /// FixedDict keys alphabetically, so the two "shipCo..." fields are adjacent.
+    #[test]
+    fn ship_component_indices_stay_adjacent_to_ship_id() {
+        for ver in [v(0, 9, 10), v(0, 10, 7), v(0, 10, 9), v(0, 11, 11), v(0, 12, 8)] {
+            let m = PlayerStateData::player_key_map(&ver);
+            let components = m.get(PlayerStateData::KEY_SHIP_COMPONENTS).copied().expect("shipComponents mapped");
+            let ship_id = m.get(PlayerStateData::KEY_SHIP_ID).copied().expect("shipId mapped");
+            match m.get(PlayerStateData::KEY_SHIP_CONFIG_DUMP).copied() {
+                Some(dump) => {
+                    assert_eq!(dump, components + 1, "{ver:?}: shipConfigDump must follow shipComponents");
+                    assert_eq!(ship_id, dump + 1, "{ver:?}: shipId must follow shipConfigDump");
+                }
+                None => assert_eq!(ship_id, components + 1, "{ver:?}: shipId must follow shipComponents"),
+            }
+        }
     }
 
     /// 0.11.11 onward shares the 38-field layout (every field this code reads matches
