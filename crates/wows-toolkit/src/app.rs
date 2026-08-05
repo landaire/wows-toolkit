@@ -3994,6 +3994,96 @@ impl WowsToolkitApp {
         self.start_directory_scan(id, root);
     }
 
+    /// Acts on a replay the search results table asked to open.
+    ///
+    /// Both actions target the workspace that owns the replay's directory, so
+    /// neither can drop a replay into a listing that does not cover it.
+    fn handle_pending_search_open(&mut self) {
+        use crate::ui::search_tab::SearchOpenAction;
+
+        let Some(request) = self.tab_state.pending_search_open.take() else {
+            return;
+        };
+        match request.action {
+            SearchOpenAction::Inspect => {
+                let Some(ws_id) = self.workspace_for_search_open(&request.path) else {
+                    return;
+                };
+                if self.open_search_replay_in_new_tab(ws_id, &request.path) {
+                    self.focus_tab(&Tab::Replays(ws_id));
+                }
+            }
+            SearchOpenAction::Render => {
+                if !request.path.exists() {
+                    self.tab_state.toasts.lock().warning(t!("ui.search.open_missing"));
+                    return;
+                }
+                // No workspace is opened for a render: the renderer is a window
+                // of its own, not a sub-tab, so there is no container to put it
+                // in. An already-open owning workspace is still consulted,
+                // since that is where an alt-perspective merge would live.
+                let ws_id = self.tab_state.workspace_for_replay_path(&request.path);
+                let viewer = &mut ToolkitTabViewer { tab_state: &mut self.tab_state };
+                if !viewer.launch_replay_render(&request.path, ws_id) {
+                    self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
+                }
+            }
+        }
+    }
+
+    /// The workspace an inspector sub-tab for `path` belongs in, opening one
+    /// for the replay's own directory when nothing open lists it. A directory
+    /// opened this way is scanned and announced, so the tab that appears is
+    /// never unexplained.
+    fn workspace_for_search_open(&mut self, path: &Path) -> Option<WorkspaceId> {
+        use crate::tab_state::SearchOpenTarget;
+
+        match self.tab_state.workspace_to_open_replay_in(path) {
+            Some(SearchOpenTarget::Existing(id)) => Some(id),
+            Some(SearchOpenTarget::Opened { id, root }) => {
+                self.start_directory_scan(id, root.clone());
+                self.tab_state.toasts.lock().info(t!("ui.search.opened_directory", dir = root.display()));
+                Some(id)
+            }
+            None => {
+                warn!("cannot open {}: it names no directory", path.display());
+                self.tab_state.toasts.lock().error(t!("ui.search.open_no_directory"));
+                None
+            }
+        }
+    }
+
+    /// Reads `path` and adds it to `ws_id`'s dock as a new sub-tab, reporting
+    /// whether it landed.
+    ///
+    /// A file this workspace already has hydrated is shared rather than parsed
+    /// twice, so a second view of a replay already open costs a tab and nothing
+    /// else.
+    fn open_search_replay_in_new_tab(&mut self, ws_id: WorkspaceId, path: &Path) -> bool {
+        let hydrated = self.tab_state.workspace(ws_id).and_then(|workspace| workspace.hydrated_replay(path));
+        let replay = match hydrated {
+            Some(replay) => replay,
+            None => match self.tab_state.hydrate_replay(path) {
+                Ok(replay) => replay,
+                Err(error) => {
+                    warn!("could not open replay {}: {error}", path.display());
+                    self.tab_state.toasts.lock().error(t!("ui.messages.replay_load_failed"));
+                    return false;
+                }
+            },
+        };
+        if !self.tab_state.open_replay_in_new_workspace_tab(ws_id, Arc::clone(&replay)) {
+            return false;
+        }
+        if let Some(deps) = self.tab_state.replay_dependencies() {
+            update_background_task!(
+                self.tab_state.background_tasks,
+                deps.load_replay(replay, crate::task::ReplaySource::SearchOpen)
+            );
+        }
+        true
+    }
+
     /// Whether `id` already has a scan, either running or taken and waiting on
     /// the download offer.
     ///
@@ -4286,6 +4376,8 @@ impl eframe::App for WowsToolkitApp {
         if std::mem::take(&mut self.tab_state.pending_focus_search) {
             self.focus_tab(&Tab::Search);
         }
+
+        self.handle_pending_search_open();
     }
 
     fn on_exit(&mut self) {

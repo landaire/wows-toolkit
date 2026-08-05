@@ -5799,20 +5799,29 @@ impl ToolkitTabViewer<'_> {
         let Some(path) = requested else {
             return;
         };
+        self.launch_replay_render(&path, Some(ws_id));
+    }
+
+    /// Opens the replay renderer for `path`.
+    ///
+    /// `ws_id` names the workspace the request came from, and is used only to
+    /// find a hydrated replay for `path`: the renderer itself is a viewport of
+    /// its own rather than a dock tab, so it belongs to no workspace.
+    /// Returns whether a renderer was launched.
+    pub(crate) fn launch_replay_render(&mut self, path: &std::path::Path, ws_id: Option<WorkspaceId>) -> bool {
         let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref() else {
-            return;
+            return false;
         };
-        let Some(info) = crate::replay::renderer::replay_render_input(&path, wows_data_map) else {
-            return;
+        let Some(info) = crate::replay::renderer::replay_render_input(path, wows_data_map) else {
+            return false;
         };
 
         // Only a replay open in a tab can have had an alternate perspective
         // merged into it, and the merged view is what the user is looking at,
         // so a render started from its row renders the same thing.
-        let alt_replays: Vec<crate::replay::renderer::AltReplayBytes> = self
-            .tab_state
-            .workspace(ws_id)
-            .and_then(|workspace| workspace.hydrated_replay(&path))
+        let alt_replays: Vec<crate::replay::renderer::AltReplayBytes> = ws_id
+            .and_then(|ws_id| self.tab_state.workspace(ws_id))
+            .and_then(|workspace| workspace.hydrated_replay(path))
             .map(|replay| {
                 replay
                     .read()
@@ -5844,6 +5853,7 @@ impl ToolkitTabViewer<'_> {
             is_debug_mode,
         );
         self.tab_state.replay_renderers.lock().push(viewer);
+        true
     }
 
     /// The selected paths and the data map a batch render needs, or `None` when

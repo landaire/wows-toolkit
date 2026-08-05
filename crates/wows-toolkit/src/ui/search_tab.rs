@@ -103,6 +103,26 @@ impl PreviewState {
     }
 }
 
+/// What a search row was asked to do with its replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchOpenAction {
+    /// Open the replay in the inspector, as a new sub-tab.
+    Inspect,
+    /// Open the replay's renderer.
+    Render,
+}
+
+/// A replay the search results table asked to open.
+///
+/// Raised while the table draws and consumed once by the app loop afterwards,
+/// because acting on it needs the outer dock and the workspace list, neither of
+/// which a tab body can touch while it is drawing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchOpenRequest {
+    pub path: std::path::PathBuf,
+    pub action: SearchOpenAction,
+}
+
 /// A reply from the tokio runtime. Every database read the tab makes comes back
 /// through one channel, so the UI thread never blocks on the runtime.
 enum SearchMsg {
@@ -697,6 +717,8 @@ struct ResultsTable<'a> {
     sort_clicked: Option<SortColumn>,
     open_path: Option<std::path::PathBuf>,
     copy_path: Option<std::path::PathBuf>,
+    /// The replay whose film strip was clicked, to be rendered.
+    render_path: Option<std::path::PathBuf>,
     /// Whether any row's preview icon was under the pointer this frame.
     preview_icon_hovered: bool,
 }
@@ -767,6 +789,12 @@ impl ResultsTable<'_> {
             return;
         };
         let mut preview_response = ui.add(egui::Button::new(icons::FILM_STRIP));
+        // Recorded before the hover branch below, which is left exactly as it
+        // was: a click implies a hover, so the dwell gate still sees the frame
+        // that carried it and the compact preview behaves identically.
+        if preview_response.clicked() {
+            self.render_path = Some(hit.replay_path.clone());
+        }
         if !preview_response.hovered() {
             let _ = preview_response.on_hover_text(t!("ui.search.preview_map"));
             return;
@@ -893,6 +921,20 @@ fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
         return Some(stored.to_owned());
     }
     Some(format!("[{ship_id}]"))
+}
+
+/// What a table pass asked to open, given the two paths it reports.
+///
+/// The film strip and the Open button are separate widgets on the same row, so
+/// one pass raises at most one of them. A render wins the impossible frame that
+/// carries both, being the more specific of the two.
+fn search_open_request(
+    render_path: Option<std::path::PathBuf>,
+    open_path: Option<std::path::PathBuf>,
+) -> Option<SearchOpenRequest> {
+    render_path
+        .map(|path| SearchOpenRequest { path, action: SearchOpenAction::Render })
+        .or_else(|| open_path.map(|path| SearchOpenRequest { path, action: SearchOpenAction::Inspect }))
 }
 
 /// The text colour for a match outcome, matching the replay listing row's
@@ -1074,10 +1116,11 @@ impl ToolkitTabViewer<'_> {
             sort_clicked: None,
             open_path: None,
             copy_path: None,
+            render_path: None,
             preview_icon_hovered: false,
         };
         show_results_table(ui, &mut delegate);
-        let ResultsTable { sort_clicked, open_path, copy_path, preview_icon_hovered, .. } = delegate;
+        let ResultsTable { sort_clicked, open_path, copy_path, render_path, preview_icon_hovered, .. } = delegate;
 
         // No row's preview icon was hovered this frame, whether the pointer
         // left the table entirely or is sitting over a different column:
@@ -1095,13 +1138,10 @@ impl ToolkitTabViewer<'_> {
             self.tab_state.search_tab.dirty = true;
         }
 
-        if let Some(path) = open_path
-            && let Some(deps) = self.tab_state.replay_dependencies()
-        {
-            crate::update_background_task!(
-                self.tab_state.background_tasks,
-                deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
-            );
+        // Both actions target the workspace that owns the replay's directory,
+        // which the app resolves once the dock has finished drawing.
+        if let Some(request) = search_open_request(render_path, open_path) {
+            self.tab_state.pending_search_open = Some(request);
         }
 
         if let Some(path) = copy_path {
@@ -1778,6 +1818,7 @@ mod tests {
         sort_clicked: Option<SortColumn>,
         open_path: Option<std::path::PathBuf>,
         copy_path: Option<std::path::PathBuf>,
+        render_path: Option<std::path::PathBuf>,
     }
 
     /// The whole results table driven through real frames.
@@ -1850,6 +1891,7 @@ mod tests {
                     sort_clicked: None,
                     open_path: None,
                     copy_path: None,
+                    render_path: None,
                     preview_icon_hovered: false,
                 };
                 table_id = Some(show_results_table(ui, &mut delegate));
@@ -1857,6 +1899,7 @@ mod tests {
                     sort_clicked: delegate.sort_clicked,
                     open_path: delegate.open_path,
                     copy_path: delegate.copy_path,
+                    render_path: delegate.render_path,
                 };
             });
             if let Some(id) = table_id {
@@ -2272,5 +2315,86 @@ mod tests {
         assert!(by_open.copy_path.is_none(), "the open button also copied: {by_open:?}");
         let by_copy = harness.click(copies[0]);
         assert!(by_copy.open_path.is_none(), "the copy button also opened: {by_copy:?}");
+    }
+
+    /// The film strip's click is the new action, and it has to carry the row it
+    /// was clicked on rather than the first row: the action cell is drawn by
+    /// index out of a slice, so an off-by-one here would render somebody else's
+    /// replay.
+    #[test]
+    fn clicking_a_rows_film_strip_asks_to_render_that_rows_replay() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        for (row, hit) in hits.iter().enumerate() {
+            let asked = harness.click(strips[row]);
+            assert_eq!(
+                asked.render_path.as_deref(),
+                Some(hit.replay_path.as_path()),
+                "row {row}'s film strip asked to render {:?}",
+                asked.render_path
+            );
+        }
+    }
+
+    /// The two actions are different actions. Without this, a cell that wired
+    /// the film strip to the Open button's response would satisfy the test
+    /// above and open the inspector for every film-strip click.
+    #[test]
+    fn the_film_strip_and_the_open_button_ask_for_different_things() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+        assert_ne!(opens[0], strips[0], "the two buttons drew on top of each other");
+
+        let by_strip = harness.click(strips[0]);
+        assert!(by_strip.open_path.is_none(), "the film strip also opened the inspector: {by_strip:?}");
+        let by_open = harness.click(opens[0]);
+        assert!(by_open.render_path.is_none(), "the open button also asked for a render: {by_open:?}");
+    }
+
+    /// Hovering the film strip is unchanged: it arms the compact preview and
+    /// asks for nothing else. The positive control for this negative is
+    /// `clicking_a_rows_film_strip_asks_to_render_that_rows_replay`, which
+    /// proves a click at these very coordinates does reach the widget; without
+    /// it, "no render was asked for" would also hold for a hover that landed
+    /// nowhere at all.
+    #[test]
+    fn hovering_a_film_strip_asks_for_no_render() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        harness.dwell_step = PREVIEW_DWELL;
+        let mut hover = frame_input();
+        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        harness.frame(hover);
+
+        assert!(harness.preview_state.pending_request().is_some(), "the hover must actually reach the film strip");
+        assert_eq!(harness.asked.render_path, None, "hovering asked for a render");
+    }
+
+    /// The two paths a pass reports map onto the two actions. A mapping that
+    /// sent both to the inspector, or both to the renderer, would leave every
+    /// widget test above passing.
+    #[test]
+    fn each_reported_path_becomes_its_own_kind_of_request() {
+        let rendered = std::path::PathBuf::from("D:/a/rendered.wowsreplay");
+        let opened = std::path::PathBuf::from("D:/a/opened.wowsreplay");
+
+        assert_eq!(
+            search_open_request(Some(rendered.clone()), None),
+            Some(SearchOpenRequest { path: rendered.clone(), action: SearchOpenAction::Render })
+        );
+        assert_eq!(
+            search_open_request(None, Some(opened.clone())),
+            Some(SearchOpenRequest { path: opened.clone(), action: SearchOpenAction::Inspect })
+        );
+        assert_eq!(search_open_request(None, None), None, "a pass that clicked nothing must ask for nothing");
     }
 }

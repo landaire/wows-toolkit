@@ -434,6 +434,18 @@ pub struct GameDataCacheStats {
     pub version_count: usize,
 }
 
+/// Where a replay opened from search is going, as resolved by
+/// [`TabState::workspace_to_open_replay_in`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SearchOpenTarget {
+    /// A workspace that was already open lists the replay.
+    Existing(WorkspaceId),
+    /// Nothing open listed the replay, so `root` was opened as a workspace of
+    /// its own. Its listing still has to be scanned, and the tab that appeared
+    /// has to be accounted for to the user.
+    Opened { id: WorkspaceId, root: PathBuf },
+}
+
 /// Main application state container.
 ///
 /// Persisted state lives in `self.persisted` (shared with background save task).
@@ -463,6 +475,10 @@ pub struct TabState {
     pub pending_search_query: Option<crate::db::index::query_ast::MatchExpr>,
     /// When true, the app focuses the Search tab next frame (from palette/tracker).
     pub pending_focus_search: bool,
+    /// A replay a search result asked to open. Consumed by the app loop after
+    /// the dock has drawn, which is the only place the outer dock and the
+    /// workspace list can both be written.
+    pub pending_search_open: Option<crate::ui::search_tab::SearchOpenRequest>,
     /// Cached ship catalog for palette ship entries; built lazily on first palette open.
     pub ship_catalog: Option<crate::armor_viewer::ship_selector::ShipCatalog>,
     pub file_viewer: Mutex<Vec<PlaintextFileViewer>>,
@@ -633,6 +649,7 @@ impl Default for TabState {
             command_palette: Default::default(),
             pending_search_query: None,
             pending_focus_search: false,
+            pending_search_open: None,
             ship_catalog: None,
             file_viewer: Default::default(),
             replay_renderers: Default::default(),
@@ -864,6 +881,40 @@ impl TabState {
         std::iter::once(&self.live_workspace).chain(self.workspaces.values())
     }
 
+    /// Every workspace paired with the id that names it, live one first.
+    pub fn all_workspaces_with_ids(&self) -> impl Iterator<Item = (WorkspaceId, &ReplayWorkspace)> {
+        std::iter::once((WorkspaceId::LIVE, &self.live_workspace))
+            .chain(self.workspaces.iter().map(|(id, workspace)| (*id, workspace)))
+    }
+
+    /// The open workspace whose listing covers `path`, if any.
+    ///
+    /// A workspace lists its root recursively -- [`crate::task::replays::walk_replay_files`]
+    /// walks with `WalkDir` -- so ownership is "the root is an ancestor of the
+    /// file", not "the root is the file's parent". Roots nest legitimately: a
+    /// subdirectory of the live replays directory can be imported as its own
+    /// workspace, and then both list the same file. The deepest matching root
+    /// wins, because that is the listing showing the file most tightly. Two
+    /// distinct roots cannot tie on depth while both being ancestors of one
+    /// path, so the only tie is two workspaces on the same root, which the live
+    /// workspace takes by drawing first.
+    pub fn workspace_for_replay_path(&self, path: &Path) -> Option<WorkspaceId> {
+        let mut best: Option<(WorkspaceId, usize)> = None;
+        for (id, workspace) in self.all_workspaces_with_ids() {
+            let Some(root) = workspace.root.as_deref() else {
+                continue;
+            };
+            if !path.starts_with(root) {
+                continue;
+            }
+            let depth = root.components().count();
+            if best.is_none_or(|(_, best_depth)| depth > best_depth) {
+                best = Some((id, depth));
+            }
+        }
+        best.map(|(id, _)| id)
+    }
+
     /// Every replay open in a dock tab of any workspace. What invalidates a
     /// cached report -- new constants, a locale change -- invalidates it in
     /// every workspace, and a tab the user has to switch tabs to see is still a
@@ -890,6 +941,45 @@ impl TabState {
     /// Replace the focused tab's replay, or open a new tab if none exists.
     pub fn open_replay_in_focused_tab(&mut self, replay: Arc<RwLock<Replay>>) {
         self.active_workspace_mut().open_replay_in_focused_tab(replay);
+    }
+
+    /// Which workspace an inspector sub-tab for `path` belongs in.
+    ///
+    /// When no open workspace lists `path`, its own directory is opened as one
+    /// rather than the replay being adopted by whichever tab happens to be
+    /// active: a search covers directories whose tabs were never opened this
+    /// session, so refusing would make those results unopenable, while adopting
+    /// would put a replay in a listing that does not contain it. Which of the
+    /// two happened is reported rather than inferred, so the caller can start
+    /// the new listing's scan and tell the user a tab appeared.
+    ///
+    /// `None` only when `path` names no directory to fall back on.
+    pub fn workspace_to_open_replay_in(&mut self, path: &Path) -> Option<SearchOpenTarget> {
+        if let Some(id) = self.workspace_for_replay_path(path) {
+            return Some(SearchOpenTarget::Existing(id));
+        }
+        // An empty parent is what a bare filename yields. Opening it as a root
+        // would produce a workspace that `starts_with` reports as containing
+        // every path there is.
+        let root = path.parent().filter(|parent| !parent.as_os_str().is_empty())?.to_path_buf();
+        let id = self.open_directory_workspace(root.clone());
+        Some(SearchOpenTarget::Opened { id, root })
+    }
+
+    /// Adds `replay` to `ws_id`'s dock as a new sub-tab, reporting whether it
+    /// landed.
+    ///
+    /// Always a new sub-tab, never a focus of one already showing the same
+    /// file: two views of one replay are what a dock is for, and search is how
+    /// a replay open in one tab gets put beside another. A workspace closed
+    /// between the click and this call has no dock to add to, and the replay is
+    /// dropped rather than redirected into a listing that does not cover it.
+    pub fn open_replay_in_new_workspace_tab(&mut self, ws_id: WorkspaceId, replay: Arc<RwLock<Replay>>) -> bool {
+        let Some(workspace) = self.workspace_mut(ws_id) else {
+            return false;
+        };
+        workspace.open_replay_in_new_tab(replay);
+        true
     }
 
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
@@ -2062,6 +2152,181 @@ mod tests {
             ctx.memory(|m| m.focused()),
             None,
             "focus must clear on its own once the field stops drawing, with no help from settings_tab.rs"
+        );
+    }
+
+    /// Three open workspaces over three unrelated directories, none of them the
+    /// active one for the replay being opened. A lookup that returned the first
+    /// workspace, the live workspace, or the active one would pick the wrong
+    /// container for at least one of these, so all three are walked rather than
+    /// one being spot-checked.
+    fn three_directory_workspaces() -> (TabState, [WorkspaceId; 3]) {
+        let mut state = TabState::default();
+        state.live_workspace.root = Some(PathBuf::from("D:/live"));
+        let a = state.open_directory_workspace(PathBuf::from("D:/archive/a"));
+        let b = state.open_directory_workspace(PathBuf::from("D:/archive/b"));
+        assert_ne!(a, b, "the fixture workspaces must be distinguishable");
+        (state, [WorkspaceId::LIVE, a, b])
+    }
+
+    #[test]
+    fn a_replay_resolves_to_the_workspace_whose_directory_contains_it() {
+        let (state, [live, a, b]) = three_directory_workspaces();
+
+        assert_eq!(state.workspace_for_replay_path(Path::new("D:/live/x.wowsreplay")), Some(live));
+        assert_eq!(state.workspace_for_replay_path(Path::new("D:/archive/a/x.wowsreplay")), Some(a));
+        assert_eq!(state.workspace_for_replay_path(Path::new("D:/archive/b/x.wowsreplay")), Some(b));
+    }
+
+    /// The containment is over the whole subtree, not just the immediate
+    /// parent: a workspace's listing is built by a recursive walk of its root
+    /// (`walk_replay_files` uses `WalkDir`), so a file two directories down is
+    /// listed by it and belongs to it.
+    #[test]
+    fn a_replay_in_a_subdirectory_still_belongs_to_the_workspace_above_it() {
+        let (state, [_, a, _]) = three_directory_workspaces();
+        assert_eq!(state.workspace_for_replay_path(Path::new("D:/archive/a/2026/07/x.wowsreplay")), Some(a));
+    }
+
+    /// Roots nest: a subdirectory of the live replays directory can be imported
+    /// as its own workspace, and then two listings both cover the file. The
+    /// deeper one is the one actually showing it in context, so it wins.
+    #[test]
+    fn the_deepest_containing_root_wins_over_an_ancestor_root() {
+        let mut state = TabState::default();
+        state.live_workspace.root = Some(PathBuf::from("D:/replays"));
+        let nested = state.open_directory_workspace(PathBuf::from("D:/replays/2026-07"));
+
+        assert_eq!(
+            state.workspace_for_replay_path(Path::new("D:/replays/2026-07/x.wowsreplay")),
+            Some(nested),
+            "the nested workspace lists the file more tightly than its ancestor"
+        );
+        assert_eq!(
+            state.workspace_for_replay_path(Path::new("D:/replays/2026-06/x.wowsreplay")),
+            Some(WorkspaceId::LIVE),
+            "a sibling directory the nested workspace does not cover still belongs to the ancestor"
+        );
+    }
+
+    /// A prefix match on the string would call `D:/archive/abc` a child of
+    /// `D:/archive/a`. Path components are what nest, not characters.
+    #[test]
+    fn a_directory_that_merely_shares_a_name_prefix_does_not_own_the_replay() {
+        let (mut state, [_, a, _]) = three_directory_workspaces();
+        let sibling = state.open_directory_workspace(PathBuf::from("D:/archive/abc"));
+        assert_ne!(sibling, a, "the fixture roots must be different workspaces");
+
+        assert_eq!(state.workspace_for_replay_path(Path::new("D:/archive/abc/x.wowsreplay")), Some(sibling));
+        assert_eq!(state.workspace_for_replay_path(Path::new("D:/archive/a/x.wowsreplay")), Some(a));
+    }
+
+    #[test]
+    fn a_replay_under_no_open_root_resolves_to_no_workspace() {
+        let (state, _) = three_directory_workspaces();
+        assert_eq!(state.workspace_for_replay_path(Path::new("E:/elsewhere/x.wowsreplay")), None);
+    }
+
+    /// The choice for a replay nothing lists: its own directory becomes a
+    /// workspace, and that fact is reported so the caller can scan it and say
+    /// so. Adopting it into an already-open workspace would put it in a listing
+    /// that does not contain it, and refusing would make an archive search
+    /// unopenable on a fresh session.
+    #[test]
+    fn a_replay_under_no_open_root_opens_its_own_directory_as_a_workspace() {
+        let (mut state, _) = three_directory_workspaces();
+        let before = state.workspaces.len();
+
+        let target = state.workspace_to_open_replay_in(Path::new("E:/elsewhere/x.wowsreplay"));
+
+        let Some(SearchOpenTarget::Opened { id, root }) = target else {
+            panic!("nothing listed the replay, so a workspace had to be opened: {target:?}");
+        };
+        assert_eq!(root, PathBuf::from("E:/elsewhere"), "the directory opened must be the replay's own");
+        assert_eq!(state.workspaces.len(), before + 1, "exactly one workspace was opened");
+        assert_eq!(
+            state.workspace_for_replay_path(Path::new("E:/elsewhere/x.wowsreplay")),
+            Some(id),
+            "the workspace just opened must be the one that now owns the replay"
+        );
+    }
+
+    /// The other side of that branch: a replay an open workspace already lists
+    /// must not cause a second workspace to be opened for its directory.
+    #[test]
+    fn a_replay_an_open_workspace_lists_opens_nothing_new() {
+        let (mut state, [_, a, _]) = three_directory_workspaces();
+        let before = state.workspaces.len();
+
+        let target = state.workspace_to_open_replay_in(Path::new("D:/archive/a/2026/x.wowsreplay"));
+
+        assert_eq!(target, Some(SearchOpenTarget::Existing(a)));
+        assert_eq!(state.workspaces.len(), before, "an already-listed replay must not open a workspace");
+    }
+
+    /// A bare filename's parent is the empty path, whose `starts_with` matches
+    /// every path there is. Opening it as a root would produce a workspace that
+    /// claims to contain every replay on the machine.
+    #[test]
+    fn a_bare_filename_opens_no_workspace_at_all() {
+        let mut state = TabState::default();
+        let before = state.workspaces.len();
+        assert_eq!(state.workspace_to_open_replay_in(Path::new("x.wowsreplay")), None);
+        assert_eq!(state.workspaces.len(), before, "a directoryless path must not open a workspace");
+    }
+
+    /// End to end over the two steps the search tab actually runs: resolve the
+    /// owning workspace from the path, then put the replay in that workspace's
+    /// dock. The tab has to land in the resolved workspace and nowhere else.
+    #[test]
+    fn opening_a_replay_from_search_puts_its_tab_in_the_workspace_that_owns_it() {
+        let (mut state, [live, a, b]) = three_directory_workspaces();
+        let path = Path::new("D:/archive/b/x.wowsreplay");
+
+        let ws_id = state.workspace_for_replay_path(path).expect("an open workspace lists it");
+        assert!(state.open_replay_in_new_workspace_tab(ws_id, open_replay("D:/archive/b/x.wowsreplay")));
+
+        let tabs = |state: &TabState, id: WorkspaceId| {
+            state.workspace(id).expect("open").replay_dock_state.iter_all_tabs().count()
+        };
+        assert_eq!(tabs(&state, b), 1, "the replay belongs to b's directory");
+        assert_eq!(tabs(&state, a), 0, "no other workspace may receive it");
+        assert_eq!(tabs(&state, live), 0, "the live workspace is not a fallback");
+    }
+
+    /// "A new sub-tab" was the request, and it holds even for a replay the
+    /// workspace already has open: a second tab is how one replay gets put
+    /// beside another, so this adds rather than focusing or replacing.
+    #[test]
+    fn opening_a_replay_that_is_already_open_adds_a_second_sub_tab() {
+        let (mut state, [_, a, _]) = three_directory_workspaces();
+        let path = "D:/archive/a/x.wowsreplay";
+
+        state.open_replay_in_new_workspace_tab(a, open_replay(path));
+        assert_eq!(state.workspace(a).expect("open").replay_dock_state.iter_all_tabs().count(), 1);
+
+        state.open_replay_in_new_workspace_tab(a, open_replay(path));
+        assert_eq!(
+            state.workspace(a).expect("open").replay_dock_state.iter_all_tabs().count(),
+            2,
+            "the same replay opened twice must produce two sub-tabs, not replace the first"
+        );
+    }
+
+    /// A workspace closed between the click and the load must not send the
+    /// replay somewhere else. The live workspace is the tempting fallback, so
+    /// it is the one checked.
+    #[test]
+    fn a_replay_for_a_closed_workspace_is_not_redirected_to_the_live_one() {
+        let (mut state, _) = three_directory_workspaces();
+        let closed = WorkspaceId(999);
+        assert!(state.workspace(closed).is_none(), "the fixture id must actually be closed");
+
+        assert!(!state.open_replay_in_new_workspace_tab(closed, open_replay("D:/gone/x.wowsreplay")));
+        assert_eq!(
+            state.live_workspace.replay_dock_state.iter_all_tabs().count(),
+            0,
+            "a replay for a closed workspace must not land in the live one"
         );
     }
 }

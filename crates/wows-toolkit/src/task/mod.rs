@@ -41,6 +41,11 @@ pub enum ReplaySource {
     /// Background batch loading for session stats only.
     /// No UI update, only tracks session stats.
     SessionStatsOnly,
+    /// Opened from the search results table. The caller has already put the
+    /// replay in a sub-tab of the workspace that owns its directory, so this
+    /// opens no tab of its own. It tracks no session stats either: a match
+    /// found by searching history is history, not part of this session.
+    SearchOpen,
 }
 
 // Re-export everything so `use crate::task::*` still works
