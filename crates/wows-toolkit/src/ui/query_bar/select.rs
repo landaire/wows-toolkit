@@ -2,10 +2,10 @@
 //! authorises. Pure so the boolean-editing rules are testable without egui.
 
 use jiff::Timestamp;
-use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
+use wowsunpack::game_types::PersonalRatingCategory;
 
 use crate::db::index::query_ast::DivisionScope;
 use crate::db::index::query_ast::Expr;
@@ -1645,7 +1645,7 @@ mod tests {
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
             ValueKind::GameMode => Value::GameMode(GameMode::ArmsRace),
-            ValueKind::Rating => Value::Rating(wows_replay_insights::personal_rating::PersonalRatingCategory::Unicum),
+            ValueKind::Rating => Value::Rating(PersonalRatingCategory::Unicum),
         }
     }
 

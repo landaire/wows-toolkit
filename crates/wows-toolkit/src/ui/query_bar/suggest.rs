@@ -1,8 +1,8 @@
 //! Suggestion sourcing and ranking for the query bar's dropdown.
 
 use rust_i18n::t;
-use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wowsunpack::game_types::GameMode;
+use wowsunpack::game_types::PersonalRatingCategory;
 
 use crate::db::index::query_ast::CmpOp;
 use crate::db::index::query_ast::DivisionScope;

@@ -6,7 +6,7 @@
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
 use wows_core::game_types::GameMode;
-use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_core::game_types::PersonalRatingCategory;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;
@@ -852,6 +852,12 @@ mod tests {
         // Pins the constants this filter compiles against, so a future edit to
         // them is a visible failure rather than a silent reclassification of
         // every historical row.
+        //
+        // Each boundary is checked from both sides. Asserting only that the
+        // boundary value lands in the band it names is one-sided: lowering a
+        // floor leaves that value inside the band and passes, so the second
+        // assertion -- that one PR below the boundary is still the band under
+        // it -- is what makes a move in either direction visible.
         for (pr, expected) in [
             (0.0, PersonalRatingCategory::Bad),
             (749.0, PersonalRatingCategory::Bad),
@@ -864,6 +870,15 @@ mod tests {
             (2450.0, PersonalRatingCategory::SuperUnicum),
         ] {
             assert_eq!(PersonalRatingCategory::from_pr(pr), expected, "pr {pr}");
+            let Some(below) = PersonalRatingCategory::ALL.into_iter().rev().find(|b| *b < expected) else {
+                continue;
+            };
+            assert_eq!(
+                PersonalRatingCategory::from_pr(pr - 1.0),
+                below,
+                "pr {} must still be below {expected:?}",
+                pr - 1.0
+            );
         }
     }
 

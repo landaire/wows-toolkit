@@ -32,7 +32,7 @@ serde_json = { workspace = true }
 [features]
 default = ["build", "arc"]
 build = []
-serde = ["dep:serde"]
+serde = ["dep:serde", "wows-core/serde"]
 # Forwards to wowsunpack/wows_replays so Arc-backed `Param` storage in the
 # provider matches the smart pointer this crate hands back. On by default
 # because the rest of the workspace uses Arc; non-arc consumers opt out via
@@ -45,8 +45,4 @@ wowssb = ["build", "dep:serde_json", "dep:flate2", "dep:data-encoding"]
 # has no `serde` feature (serde is a mandatory, non-optional dependency there), so
 # only wowsunpack needs the forward. `build` powers consumable-slot resolution;
 # `jiff` carries the match timestamp.
-battle-report = ["dep:serde_json", "dep:jiff", "serde", "build", "wowsunpack/serde", "personal-rating"]
-# The PR data model and formula on their own, with none of the report machinery
-# around them. Split out so a consumer that only needs the rating bands (the
-# replay search's rating filter) does not pull the whole battle report in.
-personal-rating = ["serde", "dep:serde_json"]
+battle-report = ["dep:serde_json", "dep:jiff", "serde", "build", "wowsunpack/serde"]

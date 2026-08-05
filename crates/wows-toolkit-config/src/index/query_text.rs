@@ -26,7 +26,7 @@ use winnow::token::take_while;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
-use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_core::game_types::PersonalRatingCategory;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;

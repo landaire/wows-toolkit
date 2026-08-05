@@ -4,10 +4,10 @@
 use std::collections::HashMap;
 
 use rust_i18n::t;
-use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
+use wowsunpack::game_types::PersonalRatingCategory;
 
 use crate::db::index::query_ast::CmpOp;
 use crate::db::index::query_ast::DivisionScope;

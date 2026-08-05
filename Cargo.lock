@@ -11263,7 +11263,6 @@ dependencies = [
  "tracing",
  "winnow 1.0.4",
  "wows-core",
- "wows-replay-insights",
 ]
 
 [[package]]

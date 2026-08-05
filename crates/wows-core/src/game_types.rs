@@ -3187,6 +3187,114 @@ pub enum NarrowingReason {
     ImpactNotOnAShip,
 }
 
+/// A player's Personal Rating band, as wows-numbers.com names them.
+///
+/// A band is a range on a PR number rather than a stored value, which is what
+/// lets a consumer classify a rating it recorded before the band existed. The
+/// PR formula and the expected-values data it needs live in
+/// `wows-replay-insights`; only the boundaries are here, because the replay
+/// search compiles a band filter into a range over an already-indexed PR column
+/// and must not pull the replay-parsing stack in to do it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum PersonalRatingCategory {
+    Bad,
+    BelowAverage,
+    Average,
+    Good,
+    VeryGood,
+    Great,
+    Unicum,
+    SuperUnicum,
+}
+
+impl PersonalRatingCategory {
+    /// Every band, weakest first. The order is the `Ord` order, which
+    /// `ceiling` and `from_pr` both read.
+    pub const ALL: [PersonalRatingCategory; 8] = [
+        Self::Bad,
+        Self::BelowAverage,
+        Self::Average,
+        Self::Good,
+        Self::VeryGood,
+        Self::Great,
+        Self::Unicum,
+        Self::SuperUnicum,
+    ];
+
+    /// The inclusive PR floor of this band. `None` for `Bad`: nothing sits
+    /// below it, so it has no bound rather than a bound of zero.
+    ///
+    /// The one statement of these constants. `ceiling` and `from_pr` both
+    /// derive from it, so a band cannot be moved in one place and left behind
+    /// in another.
+    pub fn floor(self) -> Option<f64> {
+        match self {
+            Self::Bad => None,
+            Self::BelowAverage => Some(750.0),
+            Self::Average => Some(1100.0),
+            Self::Good => Some(1350.0),
+            Self::VeryGood => Some(1550.0),
+            Self::Great => Some(1750.0),
+            Self::Unicum => Some(2100.0),
+            Self::SuperUnicum => Some(2450.0),
+        }
+    }
+
+    /// The exclusive PR ceiling of this band: the next band's floor. `None`
+    /// for `SuperUnicum`, which is unbounded above.
+    pub fn ceiling(self) -> Option<f64> {
+        Self::ALL.into_iter().find(|band| *band > self).and_then(Self::floor)
+    }
+
+    /// The band a PR value falls in.
+    pub fn from_pr(pr: f64) -> Self {
+        Self::ALL.into_iter().rev().find(|band| band.floor().is_none_or(|floor| pr >= floor)).unwrap_or(Self::Bad)
+    }
+
+    /// The display name for this band.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Bad => "Bad",
+            Self::BelowAverage => "Below Average",
+            Self::Average => "Average",
+            Self::Good => "Good",
+            Self::VeryGood => "Very Good",
+            Self::Great => "Great",
+            Self::Unicum => "Unicum",
+            Self::SuperUnicum => "Super Unicum",
+        }
+    }
+
+    /// The lowercase token this band is written as in the replay search
+    /// grammar.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Bad => "bad",
+            Self::BelowAverage => "below-average",
+            Self::Average => "average",
+            Self::Good => "good",
+            Self::VeryGood => "very-good",
+            Self::Great => "great",
+            Self::Unicum => "unicum",
+            Self::SuperUnicum => "super-unicum",
+        }
+    }
+
+    /// The band `s` names, case-insensitively. The hyphenated `as_token`
+    /// spelling and the run-together one are both accepted, so a user who
+    /// types `superunicum` reaches the same band the dropdown offers as
+    /// `super-unicum`.
+    pub fn from_token(s: &str) -> Option<Self> {
+        let lower = s.to_ascii_lowercase();
+        Self::ALL.into_iter().find(|band| {
+            let token = band.as_token();
+            lower == token || lower == token.replace('-', "")
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3347,5 +3455,71 @@ mod tests {
         }
         let excluded: Vec<GameMode> = GameMode::ALL.into_iter().filter(|m| !m.is_offerable()).collect();
         assert_eq!(excluded, vec![GameMode::Invalid], "the offerable set must narrow by exactly Invalid, no more");
+    }
+
+    #[test]
+    fn pr_category_boundaries() {
+        assert_eq!(PersonalRatingCategory::from_pr(0.0), PersonalRatingCategory::Bad);
+        assert_eq!(PersonalRatingCategory::from_pr(749.0), PersonalRatingCategory::Bad);
+        assert_eq!(PersonalRatingCategory::from_pr(750.0), PersonalRatingCategory::BelowAverage);
+        assert_eq!(PersonalRatingCategory::from_pr(1099.0), PersonalRatingCategory::BelowAverage);
+        assert_eq!(PersonalRatingCategory::from_pr(1100.0), PersonalRatingCategory::Average);
+        assert_eq!(PersonalRatingCategory::from_pr(1349.0), PersonalRatingCategory::Average);
+        assert_eq!(PersonalRatingCategory::from_pr(1350.0), PersonalRatingCategory::Good);
+        assert_eq!(PersonalRatingCategory::from_pr(1549.0), PersonalRatingCategory::Good);
+        assert_eq!(PersonalRatingCategory::from_pr(1550.0), PersonalRatingCategory::VeryGood);
+        assert_eq!(PersonalRatingCategory::from_pr(1749.0), PersonalRatingCategory::VeryGood);
+        assert_eq!(PersonalRatingCategory::from_pr(1750.0), PersonalRatingCategory::Great);
+        assert_eq!(PersonalRatingCategory::from_pr(2099.0), PersonalRatingCategory::Great);
+        assert_eq!(PersonalRatingCategory::from_pr(2100.0), PersonalRatingCategory::Unicum);
+        assert_eq!(PersonalRatingCategory::from_pr(2449.0), PersonalRatingCategory::Unicum);
+        assert_eq!(PersonalRatingCategory::from_pr(2450.0), PersonalRatingCategory::SuperUnicum);
+        assert_eq!(PersonalRatingCategory::from_pr(5000.0), PersonalRatingCategory::SuperUnicum);
+    }
+
+    #[test]
+    fn pr_category_names() {
+        assert_eq!(PersonalRatingCategory::Bad.name(), "Bad");
+        assert_eq!(PersonalRatingCategory::BelowAverage.name(), "Below Average");
+        assert_eq!(PersonalRatingCategory::Average.name(), "Average");
+        assert_eq!(PersonalRatingCategory::Good.name(), "Good");
+        assert_eq!(PersonalRatingCategory::VeryGood.name(), "Very Good");
+        assert_eq!(PersonalRatingCategory::Great.name(), "Great");
+        assert_eq!(PersonalRatingCategory::Unicum.name(), "Unicum");
+        assert_eq!(PersonalRatingCategory::SuperUnicum.name(), "Super Unicum");
+    }
+
+    #[test]
+    fn pr_category_ordering() {
+        for pair in PersonalRatingCategory::ALL.windows(2) {
+            assert!(pair[0] < pair[1], "{:?} must sort below {:?}", pair[0], pair[1]);
+        }
+    }
+
+    #[test]
+    fn every_band_token_round_trips_and_accepts_the_run_together_spelling() {
+        for band in PersonalRatingCategory::ALL {
+            assert_eq!(PersonalRatingCategory::from_token(band.as_token()), Some(band));
+            assert_eq!(PersonalRatingCategory::from_token(&band.as_token().to_ascii_uppercase()), Some(band));
+            assert_eq!(PersonalRatingCategory::from_token(&band.as_token().replace('-', "")), Some(band));
+        }
+        assert_eq!(PersonalRatingCategory::from_token("superunicum"), Some(PersonalRatingCategory::SuperUnicum));
+        assert_eq!(PersonalRatingCategory::from_token("legendary"), None);
+    }
+
+    /// Each band's ceiling is the next band's floor, and the chain is closed at
+    /// both ends. A band whose ceiling drifted off the next band's floor would
+    /// leave a PR value belonging to no band or to two.
+    #[test]
+    fn the_bands_tile_the_pr_line_with_no_gap_and_no_overlap() {
+        assert_eq!(PersonalRatingCategory::Bad.floor(), None, "Bad must have no floor");
+        assert_eq!(PersonalRatingCategory::SuperUnicum.ceiling(), None, "SuperUnicum must have no ceiling");
+        for pair in PersonalRatingCategory::ALL.windows(2) {
+            let (lower, upper) = (pair[0], pair[1]);
+            assert_eq!(lower.ceiling(), upper.floor(), "{lower:?} does not meet {upper:?}");
+            let boundary = upper.floor().expect("only Bad has no floor");
+            assert_eq!(PersonalRatingCategory::from_pr(boundary), upper);
+            assert_eq!(PersonalRatingCategory::from_pr(boundary - 1.0), lower);
+        }
     }
 }
