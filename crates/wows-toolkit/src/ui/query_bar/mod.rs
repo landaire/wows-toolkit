@@ -33,6 +33,7 @@ use rust_i18n::t;
 
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::Op;
+use crate::db::index::query_ast::OperatorPreferences;
 use crate::db::index::query_ast::Value;
 use crate::db::index::query_ast::ValueKind;
 use crate::db::index::query_text;
@@ -116,6 +117,12 @@ pub struct QueryBar {
     pub names: NameCache,
     /// Value rows the Search tab fetched for the request the bar last made.
     pub value_options: Vec<ValueOption>,
+    /// The operator each field was last committed with, mirrored in from the
+    /// caller's persisted settings each frame and read back out after a change,
+    /// the way `names.locale` and the query text already are. A new filter for a
+    /// field starts on the operator remembered here rather than on its class
+    /// default.
+    pub op_prefs: OperatorPreferences,
 
     /// The pill segment the dropdown is editing, when it was opened by clicking
     /// one rather than by typing. While it is set the caret's text belongs to
@@ -1493,7 +1500,18 @@ impl QueryBar {
             }
             Command::Negate(path) => {
                 self.end_segment_edit();
+                // Negating a field term flips its operator in place rather than
+                // wrapping it in a `not`, so the pill comes out carrying an
+                // operator the user chose by asking for the negation. The other
+                // two shapes -- a `not` wrapper, an inverted quantifier -- leave
+                // the operator where it was, which the comparison tells apart.
+                let before = select::term_at(&self.expr, &path).map(|(field, op, _)| (field, op));
                 select::negate(&mut self.expr, &path);
+                if let (Some((field, was)), Some((_, now, _))) = (before, select::term_at(&self.expr, &path))
+                    && was != now
+                {
+                    self.op_prefs.record(field.name(), now);
+                }
                 true
             }
             Command::Delete(path) => {
@@ -1771,7 +1789,7 @@ impl QueryBar {
         };
         let previous = current.clone();
         let before = self.expr.clone();
-        if !select::set_field(&mut self.expr, &edit.path, field) {
+        if !select::set_field(&mut self.expr, &edit.path, field, &self.op_prefs) {
             return false;
         }
         let kept = select::term_at(&self.expr, &edit.path).is_some_and(|(_, _, value)| *value == previous);
@@ -1788,12 +1806,21 @@ impl QueryBar {
         true
     }
 
+    /// Applies the operator the user picked from the pill's operator list, and
+    /// remembers it as what that field is now filtered with.
+    ///
+    /// Remembered here rather than where the row is offered, so an operator the
+    /// field refuses (`set_op` returns `false`) is not recorded as one the user
+    /// filtered by.
     fn commit_operator(&mut self, op: Op) -> bool {
         let Some(edit) = self.editing.clone() else {
             return false;
         };
         if !select::set_op(&mut self.expr, &edit.path, op) {
             return false;
+        }
+        if let Some((field, _, _)) = select::term_at(&self.expr, &edit.path) {
+            self.op_prefs.record(field.name(), op);
         }
         self.commit_segment_edit();
         true
@@ -1932,7 +1959,7 @@ impl QueryBar {
     /// a term, and the editor that opens next takes the caret, the way opening
     /// any other segment editor does.
     fn mint_term(&mut self, field: TermField, scope: Option<Scope>, ui: &Ui, caret_id: egui::Id) -> bool {
-        let Some(node) = select::new_term(field, scope) else {
+        let Some(node) = select::new_term(field, scope, &self.op_prefs) else {
             return false;
         };
         self.pending = suggest::replace_active_fragment(&self.pending, "");
@@ -1982,12 +2009,18 @@ impl QueryBar {
 
     /// Parses the caret's text and adds it to the tree. Blank text commits
     /// nothing; text that does not parse stays put with its span underlined.
+    ///
+    /// The operators the text spelled are remembered here, so typing
+    /// `damage<=50000` teaches the same preference that picking `<=` from a
+    /// pill's list does. Only text that became terms is read: text that fails
+    /// to parse stays in the caret, still being written.
     fn commit_pending(&mut self, ui: &Ui, caret_id: egui::Id) -> bool {
         if self.pending.trim().is_empty() {
             return false;
         }
         match parse_query(&self.pending) {
             Ok(parsed) if !parsed.is_empty_all() => {
+                select::record_operators(&parsed, &mut self.op_prefs);
                 select::append_query(&mut self.expr, parsed);
                 self.clear_pending();
                 // Adding two filters in a row is the common case, so a
@@ -2307,6 +2340,12 @@ mod tests {
     use crate::db::index::query_text::ZoneGuard;
     use crate::db::index::rows::MatchOutcome;
 
+    /// A user who has never committed an operator, which is what every case
+    /// here is about unless it says otherwise.
+    fn no_prefs() -> OperatorPreferences {
+        OperatorPreferences::default()
+    }
+
     fn win() -> MatchExpr {
         Expr::Leaf(MatchTerm::Field(MatchField::Outcome, Op::Is, Value::Outcome(MatchOutcome::Win)))
     }
@@ -2395,7 +2434,8 @@ mod tests {
     /// The caret text is the field's own grammar prefix, so this is the state a
     /// picked field suggestion used to leave behind rather than a hand-built one.
     fn seed_ship_value_editor(bar: &mut QueryBar, ship: GameParamId) -> Row {
-        bar.pending = suggest::roster_field_prefix(RosterField::Ship, Scope::Enemy).expect("ship has a grammar prefix");
+        bar.pending = suggest::roster_field_prefix(RosterField::Ship, Scope::Enemy, &no_prefs())
+            .expect("ship has a grammar prefix");
         bar.parsed_text.clone_from(&bar.pending);
         assert_eq!(
             value_request_for(&bar.pending),
@@ -2744,6 +2784,133 @@ mod tests {
         assert!(bar.commit_operator(option.op), "the row Enter takes must actually take");
         assert_eq!(select::term_at(&bar.expr, &[]).expect("the term").1, option.op);
         assert!(bar.editing.is_none(), "a committed operator closes its editor");
+    }
+
+    /// A damage pill with its operator list open, which is where a user reaches
+    /// for `<=`.
+    fn damage_operator_bar() -> QueryBar {
+        bar_editing(roster_pill(RosterField::Damage, Op::Ge, Value::Int(50_000)), SegmentRole::Operator)
+    }
+
+    /// The operator a fresh damage filter would start on, as the bar's own
+    /// minting path builds it.
+    fn next_damage_op(bar: &QueryBar) -> Op {
+        let minted = select::new_term(TermField::Roster(RosterField::Damage), Some(Scope::Anyone), &bar.op_prefs)
+            .expect("damage has a grammar spelling");
+        let path = select::segment_path(&minted, &vec![]).expect("the minted pill names a term");
+        select::term_at(&minted, &path).expect("the minted pill is one term").1
+    }
+
+    /// The request, end to end on the path the user actually takes: pick `<=`
+    /// from a damage pill's operator list, and the next damage filter starts
+    /// there.
+    #[test]
+    fn an_operator_picked_from_the_list_is_what_the_next_filter_starts_on() {
+        let mut bar = damage_operator_bar();
+        assert_eq!(next_damage_op(&bar), Op::Eq, "before anything is picked the class default stands");
+        assert!(bar.commit_operator(Op::Le), "the fixture's field allows <=");
+        assert_eq!(next_damage_op(&bar), Op::Le);
+    }
+
+    /// The second of the three paths an operator reaches the tree on. Typing
+    /// the term is not a lesser way of choosing `<=` than clicking it.
+    #[test]
+    fn an_operator_typed_into_the_caret_is_remembered_too() {
+        let mut bar = QueryBar { pending: "anyone.damage<=50000".to_owned(), ..Default::default() };
+        assert!(with_ui(|ui, caret_id| bar.commit_pending(ui, caret_id)), "the text must parse and commit");
+        assert_eq!(next_damage_op(&bar), Op::Le);
+    }
+
+    /// Text that does not parse never became a filter, so it never chose an
+    /// operator either. The positive control is the case above: the same
+    /// method, the same field, text that does parse.
+    #[test]
+    fn text_that_fails_to_parse_teaches_nothing() {
+        let mut bar = QueryBar { pending: "anyone.damage<=not-a-number".to_owned(), ..Default::default() };
+        assert!(!with_ui(|ui, caret_id| bar.commit_pending(ui, caret_id)), "the fixture text must really be refused");
+        assert_eq!(next_damage_op(&bar), Op::Eq);
+    }
+
+    /// Opening the list is not choosing from it. A bar left mid-gesture must
+    /// not have taught anything, or every field the user browsed would rewrite
+    /// its own default.
+    #[test]
+    fn opening_the_operator_list_teaches_nothing_until_something_commits() {
+        let mut bar = damage_operator_bar();
+        assert!(bar.editing.is_some(), "the fixture must really have an operator editor open");
+        let rows = bar.dropdown_rows();
+        assert!(
+            rows.iter().any(|row| matches!(row, Row::Operator(option) if option.op == Op::Le)),
+            "the open list must really be offering <=, or the negative below is about nothing"
+        );
+        // Browsing the list, up to but not including the commit.
+        bar.highlighted = bar.step_highlight(&rows, false);
+        assert_eq!(next_damage_op(&bar), Op::Eq, "an open, unconfirmed list must not have taught anything");
+
+        // The positive control: the very next call commits, and it does teach.
+        assert!(bar.commit_operator(Op::Le));
+        assert_eq!(next_damage_op(&bar), Op::Le);
+    }
+
+    /// The third way a user commits an operator: negating a pill flips it in
+    /// place rather than wrapping the term, so the pill comes out carrying an
+    /// operator the user asked for as plainly as if they had picked it.
+    #[test]
+    fn negating_a_pill_remembers_the_operator_it_flipped_to() {
+        let next_build_op = |bar: &QueryBar| -> Op {
+            let minted = select::new_term(TermField::Match(MatchField::Build), None, &bar.op_prefs)
+                .expect("build has a grammar spelling");
+            let path = select::segment_path(&minted, &vec![]).expect("the minted pill names a term");
+            select::term_at(&minted, &path).expect("the minted pill is one term").1
+        };
+
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(5))));
+        assert!(with_ui(|ui, caret_id| bar.apply_command(Command::Negate(vec![]), ui, caret_id)));
+        assert_eq!(select::term_at(&bar.expr, &[]).expect("the term").1, Op::Lt, "negating >= must flip it in place");
+        assert_eq!(next_build_op(&bar), Op::Lt);
+
+        // The negation that wraps instead of flipping: `map:` has no inverse
+        // operator, so the term keeps the operator it had and there is no new
+        // choice to remember.
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into()))));
+        assert!(with_ui(|ui, caret_id| bar.apply_command(Command::Negate(vec![]), ui, caret_id)));
+        assert!(matches!(bar.expr, Expr::Not(_)), "the fixture must really wrap rather than flip: {:?}", bar.expr);
+        assert_eq!(
+            bar.op_prefs.preferred(MatchField::Map.name(), MatchField::Map.allowed_ops()),
+            None,
+            "a wrapping negation chose no operator"
+        );
+    }
+
+    /// An operator that never landed in the tree is not one the user filtered
+    /// by, so it must not become what their next filter starts on.
+    ///
+    /// The refusal is a nullary term being asked for a non-nullary operator,
+    /// not an operator the field disallows. That matters: a disallowed one is
+    /// caught again on the way back out by `preferred`, so a test built on it
+    /// would pass whether the recording waited for the commit or not.
+    #[test]
+    fn an_operator_the_tree_refuses_is_not_remembered() {
+        let next_build_op = |bar: &QueryBar| -> Op {
+            let minted = select::new_term(TermField::Match(MatchField::Build), None, &bar.op_prefs)
+                .expect("build has a grammar spelling");
+            let path = select::segment_path(&minted, &vec![]).expect("the minted pill names a term");
+            select::term_at(&minted, &path).expect("the minted pill is one term").1
+        };
+
+        let mut bar = nullary_build_bar();
+        assert!(MatchField::Build.allowed_ops().contains(&Op::Le), "the field itself must allow the refused operator");
+        assert!(!bar.commit_operator(Op::Le), "a nullary term must really refuse an operator wanting a value");
+        assert_eq!(next_build_op(&bar), Op::Eq, "a refused operator must leave the default standing");
+
+        // The positive control: the same operator on the same field, on a term
+        // that can take it.
+        let mut bar =
+            bar_editing(Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(5))), SegmentRole::Operator);
+        assert!(bar.commit_operator(Op::Le));
+        assert_eq!(next_build_op(&bar), Op::Le);
     }
 
     #[test]
@@ -3446,10 +3613,12 @@ mod tests {
     /// the only statement of the expansion that cannot drift from the parser.
     #[test]
     fn a_scoped_field_mints_the_scopes_own_constraint() {
-        let minted = select::new_term(TermField::Roster(RosterField::Ship), Some(Scope::Enemy)).expect("a ship term");
+        let minted = select::new_term(TermField::Roster(RosterField::Ship), Some(Scope::Enemy), &no_prefs())
+            .expect("a ship term");
         assert_eq!(minted, parse_query("enemy.ship=0").expect("the same term typed by hand"));
 
-        let anyone = select::new_term(TermField::Roster(RosterField::Ship), Some(Scope::Anyone)).expect("a ship term");
+        let anyone = select::new_term(TermField::Roster(RosterField::Ship), Some(Scope::Anyone), &no_prefs())
+            .expect("a ship term");
         assert_ne!(anyone, minted, "the widest scope must not carry a relation constraint");
         assert_eq!(anyone, parse_query("anyone.ship=0").expect("the same term typed by hand"));
     }
@@ -3471,7 +3640,7 @@ mod tests {
                 SuggestionKind::Preset(_) => continue,
             };
             let label = &suggestion.label;
-            let minted = select::new_term(field, scope).unwrap_or_else(|| panic!("{label} mints nothing"));
+            let minted = select::new_term(field, scope, &no_prefs()).unwrap_or_else(|| panic!("{label} mints nothing"));
 
             let path = select::segment_path(&minted, &vec![])
                 .unwrap_or_else(|| panic!("{label} mints a pill with no editable segment"));

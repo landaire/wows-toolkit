@@ -225,6 +225,114 @@ impl Op {
             Op::IsNotSet => "is-not-set",
         }
     }
+
+    /// The name this operator is stored under, one per variant.
+    ///
+    /// Distinct from `as_token`, which spells three variants `=` and three
+    /// `!=`. A stored operator read back through the token would come back as
+    /// whichever of those variants the reader guessed, and the wrong guess is
+    /// an operator its field rejects.
+    pub fn persist_name(self) -> &'static str {
+        match self {
+            Op::Contains => "contains",
+            Op::Equals => "equals",
+            Op::NotEquals => "not-equals",
+            Op::Eq => "eq",
+            Op::Ne => "ne",
+            Op::Gt => "gt",
+            Op::Ge => "ge",
+            Op::Lt => "lt",
+            Op::Le => "le",
+            Op::Is => "is",
+            Op::IsNot => "is-not",
+            Op::IsSet => "is-set",
+            Op::IsNotSet => "is-not-set",
+        }
+    }
+
+    /// The operator `name` was written for, or `None` for a name this build
+    /// does not know.
+    pub fn from_persist_name(name: &str) -> Option<Op> {
+        Op::ALL.into_iter().find(|op| op.persist_name() == name)
+    }
+}
+
+/// The operator each field was last committed with, so a filter created for a
+/// field starts on the comparison the user reached for last rather than on the
+/// one its class defaults to.
+///
+/// Keyed by `MatchField::name`/`RosterField::name`, which
+/// `every_field_name_is_unique_and_lowercase` pins as unique across both sets,
+/// so one key space covers them.
+///
+/// Nothing reads an entry without `allowed_ops` in hand. `Op` spells equality
+/// three ways and inequality three more, all printing as the same token, so a
+/// term carrying an operator its field disallows prints and reparses into a
+/// different tree with nothing at compile time to catch it. An entry written
+/// before a field's operator set changed, or typed into the settings file by
+/// hand, is exactly how one would arrive.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct OperatorPreferences {
+    by_field: std::collections::BTreeMap<String, Op>,
+}
+
+impl OperatorPreferences {
+    /// The remembered operator for `field`, when it is one `allowed` still
+    /// lists and one that takes a right-hand value.
+    ///
+    /// The `allowed` check is the invariant this whole type exists behind; see
+    /// the type's own documentation. The nullary check is the other half: both
+    /// callers hand the user a value to fill in straight after seeding, and
+    /// `is-set` has no right-hand side to fill.
+    pub fn preferred(&self, field: &str, allowed: &[Op]) -> Option<Op> {
+        let op = *self.by_field.get(field)?;
+        (allowed.contains(&op) && !op.is_nullary()).then_some(op)
+    }
+
+    /// Remembers `op` as what `field` was last committed with.
+    ///
+    /// A nullary operator is not remembered: `preferred` would refuse it
+    /// anyway, and storing one would drop the last comparison the user picked
+    /// that seeding can actually express.
+    ///
+    /// No `allowed_ops` check here on purpose. Callers pass an operator the
+    /// tree already carries, and keeping the single validation at the read is
+    /// what makes it cover entries this build never wrote.
+    pub fn record(&mut self, field: &str, op: Op) {
+        if op.is_nullary() {
+            return;
+        }
+        self.by_field.insert(field.to_owned(), op);
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_field.is_empty()
+    }
+}
+
+impl serde::Serialize for OperatorPreferences {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_map(self.by_field.iter().map(|(field, op)| (field.as_str(), op.persist_name())))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for OperatorPreferences {
+    /// Drops an entry naming an operator this build does not know and keeps the
+    /// rest, so a settings file written by a newer build, or edited by hand,
+    /// still loads.
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let stored = std::collections::BTreeMap::<String, String>::deserialize(deserializer)?;
+        let mut by_field = std::collections::BTreeMap::new();
+        for (field, name) in stored {
+            match Op::from_persist_name(&name) {
+                Some(op) => {
+                    by_field.insert(field, op);
+                }
+                None => tracing::warn!("dropping operator preference for {field:?}: unknown operator {name:?}"),
+            }
+        }
+        Ok(OperatorPreferences { by_field })
+    }
 }
 
 const TEXT_OPS: &[Op] = &[Op::Contains, Op::Equals, Op::NotEquals];
@@ -715,6 +823,80 @@ mod tests {
                 assert!(seen.insert(name), "duplicate field name: {name}");
             }
         }
+    }
+
+    /// The reason preferences are stored by `persist_name` and not by
+    /// `as_token`: three variants print as `=` and three as `!=`, so a name
+    /// shared by two variants would read back as whichever one the reader
+    /// happened to try first.
+    #[test]
+    fn every_operator_persist_name_is_distinct_and_reads_back() {
+        let mut seen = std::collections::HashSet::new();
+        for op in Op::ALL {
+            assert!(seen.insert(op.persist_name()), "{op:?} shares a persist name");
+            assert_eq!(Op::from_persist_name(op.persist_name()), Some(op));
+        }
+        assert_eq!(Op::from_persist_name("wat"), None);
+    }
+
+    /// The invariant the whole type exists behind. A remembered operator its
+    /// field does not allow prints as a token the field's own `ValueKind` reads
+    /// back as a different variant, so it has to be refused rather than seeded.
+    #[test]
+    fn a_remembered_operator_the_field_disallows_is_refused() {
+        let mut prefs = OperatorPreferences::default();
+        prefs.record(RosterField::Damage.name(), Op::Contains);
+        assert!(
+            !RosterField::Damage.allowed_ops().contains(&Op::Contains),
+            "the fixture must store an operator the field really refuses"
+        );
+        assert_eq!(prefs.preferred(RosterField::Damage.name(), RosterField::Damage.allowed_ops()), None);
+
+        // The positive control: the same map, the same field, an operator the
+        // field does allow. Without it the assertion above passes for a map
+        // that simply never stored anything.
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        assert_eq!(prefs.preferred(RosterField::Damage.name(), RosterField::Damage.allowed_ops()), Some(Op::Le));
+    }
+
+    /// Both seeding paths hand the user a value to fill in straight after, and
+    /// `is-set` has no right-hand side to fill. Storing one would also throw
+    /// away the last comparison that seeding can express.
+    #[test]
+    fn a_nullary_operator_is_neither_stored_nor_offered() {
+        let mut prefs = OperatorPreferences::default();
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        prefs.record(RosterField::Damage.name(), Op::IsSet);
+        assert!(
+            RosterField::Damage.allowed_ops().contains(&Op::IsSet),
+            "the field must really allow the nullary operator, or this proves nothing"
+        );
+        assert_eq!(
+            prefs.preferred(RosterField::Damage.name(), RosterField::Damage.allowed_ops()),
+            Some(Op::Le),
+            "recording a nullary operator must leave the last usable one in place"
+        );
+    }
+
+    #[test]
+    fn preferences_survive_a_round_trip() {
+        let mut prefs = OperatorPreferences::default();
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        prefs.record(MatchField::Map.name(), Op::Equals);
+        let json = serde_json::to_string(&prefs).expect("preferences serialize");
+        assert_eq!(json, r#"{"damage":"le","map":"equals"}"#);
+        assert_eq!(serde_json::from_str::<OperatorPreferences>(&json).expect("and read back"), prefs);
+    }
+
+    /// A settings file written by a build that knew an operator this one does
+    /// not must still load. The unknown entry goes; everything beside it stays.
+    #[test]
+    fn an_unknown_operator_name_drops_only_its_own_entry() {
+        let stored = r#"{"damage":"le","kills":"between","map":"equals"}"#;
+        let prefs: OperatorPreferences = serde_json::from_str(stored).expect("the file still loads");
+        assert_eq!(prefs.preferred(RosterField::Damage.name(), RosterField::Damage.allowed_ops()), Some(Op::Le));
+        assert_eq!(prefs.preferred(MatchField::Map.name(), MatchField::Map.allowed_ops()), Some(Op::Equals));
+        assert_eq!(prefs.preferred(RosterField::Kills.name(), RosterField::Kills.allowed_ops()), None);
     }
 
     // Regression: "mode" used to be aliased to GameType (BattleType: Random,

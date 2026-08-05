@@ -1,7 +1,6 @@
 //! Selection over the token stream's node paths, and the tree edits a selection
 //! authorises. Pure so the boolean-editing rules are testable without egui.
 
-use jiff::Timestamp;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
@@ -12,7 +11,9 @@ use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::MatchTerm;
 use crate::db::index::query_ast::Op;
+use crate::db::index::query_ast::OperatorPreferences;
 use crate::db::index::query_ast::Quant;
+use crate::db::index::query_ast::RosterExpr;
 use crate::db::index::query_ast::ShipClass;
 use crate::db::index::query_ast::Value;
 use crate::db::index::query_ast::ValueKind;
@@ -166,10 +167,11 @@ pub fn last_appended_path(expr: &MatchExpr) -> NodePath {
     }
 }
 
-/// A fresh term for `field`, ready to be appended: the field's leading allowed
-/// operator and an in-kind placeholder value, under `scope` when the field is a
-/// roster one. `None` for a field with no grammar spelling, which is the same
-/// refusal the two prefix functions already make.
+/// A fresh term for `field`, ready to be appended: the operator `prefs`
+/// remembers for the field or its leading allowed one, and an in-kind
+/// placeholder value, under `scope` when the field is a roster one. `None` for
+/// a field with no grammar spelling, which is the same refusal the two prefix
+/// functions already make.
 ///
 /// Built by parsing the grammar text that spells the term, so a term minted by
 /// picking a field and one typed by hand cannot differ. That is also what keeps
@@ -179,14 +181,38 @@ pub fn last_appended_path(expr: &MatchExpr) -> NodePath {
 /// The value is `placeholder_value`'s arbitrary in-kind value, so the caller
 /// carries the obligation that function names: open the value editor on the new
 /// term, because nothing about the placeholder is a choice the user made.
-pub fn new_term(field: TermField, scope: Option<Scope>) -> Option<MatchExpr> {
+pub fn new_term(field: TermField, scope: Option<Scope>, prefs: &OperatorPreferences) -> Option<MatchExpr> {
     let prefix = match (field, scope) {
-        (TermField::Match(f), _) => suggest::match_field_prefix(f),
-        (TermField::Roster(f), Some(scope)) => suggest::roster_field_prefix(f, scope),
+        (TermField::Match(f), _) => suggest::match_field_prefix(f, prefs),
+        (TermField::Roster(f), Some(scope)) => suggest::roster_field_prefix(f, scope, prefs),
         (TermField::Roster(_), None) => None,
     }?;
     let literal = query_text::print_value(&placeholder_value(field.value_kind()));
     query_text::parse_query(&format!("{prefix}{literal}")).ok().filter(|parsed| !parsed.is_empty_all())
+}
+
+/// Remembers the operator every field term in `expr` carries, as the operator
+/// its field is now filtered with.
+///
+/// Called with a tree the user just typed, so every operator in it is one they
+/// spelled. The one exception is the relation conjunct a scope prefix expands
+/// to -- `enemy.` becomes `relation is enemy` -- whose `Op::Is` the parser
+/// synthesizes; it is also `relation`'s own class default, so remembering it
+/// seeds nothing a fresh `relation` filter would not already start on.
+pub fn record_operators(expr: &MatchExpr, prefs: &mut OperatorPreferences) {
+    match expr {
+        Expr::Leaf(MatchTerm::Field(field, op, _)) => prefs.record(field.name(), *op),
+        Expr::Leaf(MatchTerm::Roster { pred, .. }) => record_roster_operators(pred, prefs),
+        Expr::Leaf(MatchTerm::FreeText(_)) => {}
+        other => other.children().iter().for_each(|child| record_operators(child, prefs)),
+    }
+}
+
+fn record_roster_operators(expr: &RosterExpr, prefs: &mut OperatorPreferences) {
+    match expr {
+        Expr::Leaf(term) => prefs.record(term.field.name(), term.op),
+        other => other.children().iter().for_each(|child| record_roster_operators(child, prefs)),
+    }
 }
 
 /// Adds a freshly parsed query to the tree. An `All` root is spliced rather
@@ -418,10 +444,11 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 /// report that anything changed.
 ///
 /// The operator is kept when the new field still allows it; otherwise it is
-/// replaced by that field's own equality spelling, chosen by class through
-/// `seed::seed_op` rather than by naming an `Op` literal here -- `Op` spells
-/// equality three ways and all three print identically, so picking the wrong
-/// one silently reparses into a different tree.
+/// replaced by the one `prefs` remembers for the new field, and failing that by
+/// that field's own equality spelling, chosen by class through `seed::seed_op`
+/// rather than by naming an `Op` literal here -- `Op` spells equality three
+/// ways and all three print identically, so picking the wrong one silently
+/// reparses into a different tree.
 ///
 /// The value is kept when it already matches the new field's `ValueKind`;
 /// otherwise it is replaced by `placeholder_value(kind)`. That placeholder is
@@ -434,20 +461,28 @@ fn apply_op(allowed: &[Op], current: &mut Op, value: &mut Value, op: Op) -> bool
 /// operator carries `Value::NoOperand`, which belongs to no kind at all, so
 /// retargeting `realm is set` at `name` -- both `Text` -- still replaces the
 /// value here.
-pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> bool {
+pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField, prefs: &OperatorPreferences) -> bool {
     let Some((term, rest)) = split_at_leaf_mut(expr, path) else {
         return false;
     };
     match (term, field) {
         (MatchTerm::Field(current, op, value), TermField::Match(new_field)) if rest.is_empty() => {
             *current = new_field;
-            reconcile_term(op, value, new_field.allowed_ops(), new_field.value_kind());
+            let allowed = new_field.allowed_ops();
+            reconcile_term(op, value, allowed, new_field.value_kind(), prefs.preferred(new_field.name(), allowed));
             true
         }
         (MatchTerm::Roster { pred, .. }, TermField::Roster(new_field)) => match expr_at_mut(pred, rest) {
             Some(Expr::Leaf(roster)) => {
                 roster.field = new_field;
-                reconcile_term(&mut roster.op, &mut roster.value, new_field.allowed_ops(), new_field.value_kind());
+                let allowed = new_field.allowed_ops();
+                reconcile_term(
+                    &mut roster.op,
+                    &mut roster.value,
+                    allowed,
+                    new_field.value_kind(),
+                    prefs.preferred(new_field.name(), allowed),
+                );
                 true
             }
             _ => false,
@@ -459,14 +494,15 @@ pub fn set_field(expr: &mut MatchExpr, path: &NodePath, field: TermField) -> boo
 /// Brings an operator/value pair back into a field's own rules after the
 /// field itself changed underneath them.
 ///
-/// The replacement operator comes from `seed::seed_op`, the same chooser the
-/// app's built-in queries go through, rather than from a second copy of the
-/// preference list: `Op` spells equality three ways and all three print
-/// identically, so two lists that drifted would build a term that reparses into
-/// a different tree.
-fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: ValueKind) {
+/// `remembered` is what the field was last committed with, already checked
+/// against `allowed` by `OperatorPreferences::preferred`. Without one the
+/// replacement comes from `seed::seed_op`, the same chooser the app's built-in
+/// queries go through, rather than from a second copy of the preference list:
+/// `Op` spells equality three ways and all three print identically, so two
+/// lists that drifted would build a term that reparses into a different tree.
+fn reconcile_term(op: &mut Op, value: &mut Value, allowed: &'static [Op], kind: ValueKind, remembered: Option<Op>) {
     if !allowed.contains(op) {
-        *op = seed::seed_op(allowed, seed::Wanted::Equality);
+        *op = remembered.unwrap_or_else(|| seed::seed_op(allowed, seed::Wanted::Equality));
     }
     if op.is_nullary() {
         *value = Value::NoOperand;
@@ -499,7 +535,7 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
 
 /// A deterministic placeholder for a value of `kind`, used only to replace a
 /// value whose kind no longer matches its field. Empty text, zero for a
-/// number or an ID, the epoch for a timestamp, and the first declared variant
+/// number or an ID, local midnight today for a timestamp, and the first declared variant
 /// for an enum -- except `GameMode`, whose placeholder is the first *offerable*
 /// variant (`GameMode::Invalid` cannot be offered; see `GameMode::is_offerable`),
 /// so the placeholder stays a value the dropdown can also produce. This is an
@@ -533,7 +569,10 @@ fn placeholder_value(kind: ValueKind) -> Value {
         ValueKind::Ship => Value::Ship(GameParamId::from(0u64)),
         ValueKind::Account => Value::Account(AccountId(0)),
         ValueKind::Source => Value::Source(SourceId(0)),
-        ValueKind::Timestamp => Value::Timestamp(Timestamp::from_second(0).unwrap()),
+        // Local midnight today, not the epoch: a date filter seeded at time zero
+        // reads as 1970, a day no replay was ever played on, and every widening
+        // of it from there reaches back over the whole index.
+        ValueKind::Timestamp => Value::Timestamp(query_text::start_of_today()),
         ValueKind::GameMode => Value::GameMode(
             GameMode::ALL.into_iter().find(|m| m.is_offerable()).expect("at least one mode is offerable"),
         ),
@@ -955,6 +994,18 @@ mod tests {
     use crate::db::index::query_ast::RosterTerm;
     use crate::db::index::query_ast::Value;
     use crate::db::index::rows::MatchOutcome;
+
+    /// A user who has never committed an operator, which is what every case
+    /// here is about unless it says otherwise.
+    fn no_prefs() -> OperatorPreferences {
+        OperatorPreferences::default()
+    }
+
+    /// Midday on 2026-03-14 UTC. Held by a `NowGuard` wherever a test reaches
+    /// something that reads the clock, so "today" is a day the assertion can
+    /// name. Midday rather than a boundary hour so a zone pinned east or west
+    /// of UTC still lands on the same calendar day.
+    const PINNED_DAY_NOON: jiff::Timestamp = jiff::Timestamp::constant(1_773_489_600, 0);
 
     fn leaf_term(n: i64) -> MatchTerm {
         MatchTerm::Field(MatchField::Build, Op::Eq, Value::Int(n))
@@ -1538,11 +1589,149 @@ mod tests {
         assert_eq!(term_op_at(&e, &[1]), None);
     }
 
+    /// Damage's operator, straight off a freshly minted term. `new_term` builds
+    /// by parsing grammar text, so this reads what the pill actually carries
+    /// rather than what the chooser returned.
+    fn minted_damage_op(prefs: &OperatorPreferences) -> Op {
+        let minted = new_term(TermField::Roster(RosterField::Damage), Some(Scope::Anyone), prefs)
+            .expect("damage has a grammar spelling");
+        let (_, op, _) = term_at(&minted, &segment_path(&minted, &vec![]).expect("the minted pill names a term"))
+            .expect("the minted pill is one term");
+        op
+    }
+
+    /// The request: pick `<=` on a damage filter once and every damage filter
+    /// after it starts there.
+    #[test]
+    fn a_new_filter_starts_on_the_operator_that_field_was_last_used_with() {
+        let mut prefs = no_prefs();
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        assert_eq!(minted_damage_op(&prefs), Op::Le);
+    }
+
+    /// The control for the case above, and the behaviour every untouched field
+    /// keeps.
+    #[test]
+    fn a_field_never_used_starts_on_its_class_default() {
+        assert_eq!(minted_damage_op(&no_prefs()), Op::Eq);
+    }
+
+    /// The invariant, at the minting site, with a poison that can actually
+    /// reach it.
+    ///
+    /// `Op::Contains` would not: minting builds by parsing `damage:0`, and the
+    /// field's own `ValueKind` reads `:` back as `Eq`, so the parser corrects
+    /// that poison on its way in. `Op::IsNot` is not corrected -- `!=` on a
+    /// numeric field reads back as `Ne` -- so without the check a damage filter
+    /// would start on an operator that reached it from some other field.
+    ///
+    /// Poisoned deliberately, because `record` is not where the check lives: a
+    /// preference written before a field's operator set changed, or typed into
+    /// the settings file by hand, arrives exactly like this.
+    #[test]
+    fn a_remembered_operator_the_field_refuses_is_ignored_when_minting() {
+        let mut prefs = no_prefs();
+        prefs.record(RosterField::Damage.name(), Op::IsNot);
+        assert!(!RosterField::Damage.allowed_ops().contains(&Op::IsNot), "the fixture must poison for real");
+        assert_eq!(minted_damage_op(&prefs), Op::Eq, "a refused preference falls back to the class default");
+
+        // The positive control: the same map reaching the same field with an
+        // operator it does allow. Without it this test would pass for a
+        // preference lookup that was never wired up at all.
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        assert_eq!(minted_damage_op(&prefs), Op::Le);
+    }
+
+    /// The other half of what `preferred` refuses, and the one whose failure is
+    /// a dead click rather than a wrong operator: minting appends a placeholder
+    /// literal after the operator's token, and `damage is-set` has nowhere to
+    /// put one, so the text no longer parses and no pill appears at all.
+    #[test]
+    fn a_remembered_nullary_operator_does_not_break_minting() {
+        let mut prefs = no_prefs();
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        // `record` drops it, so the poison goes in the way a hand-edited
+        // settings file delivers one.
+        let stored: OperatorPreferences =
+            serde_json::from_str(r#"{"damage":"is-set"}"#).expect("the stored form loads");
+        assert!(RosterField::Damage.allowed_ops().contains(&Op::IsSet), "the field must really allow it");
+        assert_eq!(minted_damage_op(&stored), Op::Eq, "a nullary preference falls back rather than minting nothing");
+        assert_eq!(minted_damage_op(&prefs), Op::Le, "and a usable one is still honoured");
+    }
+
+    /// The third path an operator is chosen on: retargeting an existing pill at
+    /// a field whose operator set refuses what the pill carries.
+    #[test]
+    fn retargeting_a_pill_re_derives_through_the_remembered_operator() {
+        let mut prefs = no_prefs();
+        prefs.record(RosterField::Damage.name(), Op::Le);
+        let start = || -> MatchExpr {
+            Expr::Leaf(MatchTerm::Roster {
+                quant: Quant::Any,
+                pred: Expr::Leaf(RosterTerm {
+                    field: RosterField::Clan,
+                    op: Op::Contains,
+                    value: Value::Text("PANDA".into()),
+                }),
+            })
+        };
+        let op_after = |prefs: &OperatorPreferences| -> Op {
+            let mut e = start();
+            assert!(set_field(&mut e, &vec![], TermField::Roster(RosterField::Damage), prefs));
+            match &e {
+                Expr::Leaf(MatchTerm::Roster { pred: Expr::Leaf(term), .. }) => term.op,
+                other => panic!("got {other:?}"),
+            }
+        };
+        assert_eq!(op_after(&prefs), Op::Le);
+        assert_eq!(op_after(&no_prefs()), Op::Eq, "with nothing remembered the class default still applies");
+
+        let mut poisoned = no_prefs();
+        poisoned.record(RosterField::Damage.name(), Op::Contains);
+        assert_eq!(op_after(&poisoned), Op::Eq, "a refused preference must not survive the retarget either");
+    }
+
+    /// A `date` filter created today means today, not 1970, which is a day no
+    /// replay was ever played on and the one instant a date filter is never
+    /// asked about.
+    ///
+    /// The clock and the zone are both pinned, and the expected day is spelled
+    /// out, so this compares the seeded value to a date rather than to another
+    /// reading of the same clock.
+    #[test]
+    fn a_new_date_filter_starts_on_today() {
+        use crate::db::index::query_text::NowGuard;
+        use crate::db::index::query_text::ZoneGuard;
+        use crate::db::index::query_text::print_query;
+        let _now = NowGuard::set(PINNED_DAY_NOON);
+        for (zone, expected) in
+            [("UTC", "date=2026-03-14"), ("America/New_York", "date=2026-03-14"), ("Asia/Tokyo", "date=2026-03-14")]
+        {
+            let _zone = ZoneGuard::set(jiff::tz::TimeZone::get(zone).expect("the bundled tzdb carries it"));
+            let minted = new_term(TermField::Match(MatchField::Date), None, &no_prefs()).expect("date mints a term");
+            assert_eq!(print_query(&minted), expected, "in {zone}");
+        }
+    }
+
+    /// The half the printed text above cannot state on its own: local midnight
+    /// in a zone away from UTC is not the same instant as UTC midnight, and it
+    /// is the local one a bare date means.
+    #[test]
+    fn todays_seeded_instant_is_local_midnight_not_utc_midnight() {
+        use crate::db::index::query_text::NowGuard;
+        use crate::db::index::query_text::ZoneGuard;
+        let _now = NowGuard::set(PINNED_DAY_NOON);
+        let _zone = ZoneGuard::set(jiff::tz::TimeZone::get("America/New_York").expect("the bundled tzdb carries it"));
+        // 2026-03-14 is EDT (UTC-4), so the local day starts at 04:00 UTC.
+        let expected = jiff::Timestamp::constant(1_773_460_800, 0);
+        assert_eq!(placeholder_value(ValueKind::Timestamp), Value::Timestamp(expected));
+    }
+
     #[test]
     fn changing_the_field_keeps_a_compatible_operator() {
         // Map and GameType are both text, so Contains survives.
         let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
-        assert!(set_field(&mut e, &vec![], TermField::Match(MatchField::GameType)));
+        assert!(set_field(&mut e, &vec![], TermField::Match(MatchField::GameType), &no_prefs()));
         match &e {
             Expr::Leaf(MatchTerm::Field(f, op, v)) => {
                 assert_eq!(*f, MatchField::GameType);
@@ -1556,7 +1745,7 @@ mod tests {
     #[test]
     fn changing_the_field_replaces_an_operator_the_new_field_disallows() {
         let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
-        assert!(set_field(&mut e, &vec![], TermField::Match(MatchField::Outcome)));
+        assert!(set_field(&mut e, &vec![], TermField::Match(MatchField::Outcome), &no_prefs()));
         match &e {
             Expr::Leaf(MatchTerm::Field(f, op, _)) => {
                 assert_eq!(*f, MatchField::Outcome);
@@ -1569,7 +1758,7 @@ mod tests {
     #[test]
     fn changing_the_field_clears_a_value_of_the_wrong_kind() {
         let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text("ocean".into())));
-        set_field(&mut e, &vec![], TermField::Match(MatchField::Build));
+        set_field(&mut e, &vec![], TermField::Match(MatchField::Build), &no_prefs());
         match &e {
             Expr::Leaf(MatchTerm::Field(_, _, v)) => {
                 assert_ne!(*v, Value::Text("ocean".into()), "a text value must not survive onto an int field");
@@ -1594,7 +1783,7 @@ mod tests {
                     let value = if op.is_nullary() { Value::NoOperand } else { sample_value(from.value_kind()) };
                     let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(from, op, value));
                     assert!(
-                        set_field(&mut e, &vec![], TermField::Match(to)),
+                        set_field(&mut e, &vec![], TermField::Match(to), &no_prefs()),
                         "{from:?}/{op:?} -> {to:?} was not addressed as a field term"
                     );
                     match &e {
@@ -1638,7 +1827,7 @@ mod tests {
                         pred: Expr::Leaf(RosterTerm { field: from, op, value: value.clone() }),
                     });
                     assert!(
-                        set_field(&mut root, &vec![], TermField::Roster(to)),
+                        set_field(&mut root, &vec![], TermField::Roster(to), &no_prefs()),
                         "{from:?}/{op:?} -> {to:?} at the root was not addressed as a field term"
                     );
                     match &root {
@@ -1671,7 +1860,7 @@ mod tests {
                         ]),
                     });
                     assert!(
-                        set_field(&mut nested, &vec![1], TermField::Roster(to)),
+                        set_field(&mut nested, &vec![1], TermField::Roster(to), &no_prefs()),
                         "{from:?}/{op:?} -> {to:?} nested was not addressed as a field term"
                     );
                     match &nested {
@@ -1719,7 +1908,7 @@ mod tests {
         for to in MatchField::ALL {
             let mut e: MatchExpr = Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::IsSet, Value::NoOperand));
             assert!(
-                set_field(&mut e, &vec![], TermField::Match(to)),
+                set_field(&mut e, &vec![], TermField::Match(to), &no_prefs()),
                 "Build -> {to:?} was not addressed as a field term"
             );
             match &e {
@@ -1746,7 +1935,10 @@ mod tests {
             Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(1234))),
         ]);
         let before = e.children()[1].clone();
-        assert!(set_field(&mut e, &vec![0], TermField::Match(MatchField::Outcome)), "the path addresses a field term");
+        assert!(
+            set_field(&mut e, &vec![0], TermField::Match(MatchField::Outcome), &no_prefs()),
+            "the path addresses a field term"
+        );
         assert_eq!(
             term_at(&e, &[0]).expect("the retargeted term").0,
             TermField::Match(MatchField::Outcome),
@@ -1916,7 +2108,7 @@ mod tests {
 
     fn apply_edit(expr: &mut MatchExpr, path: &NodePath, edit: &Edit) -> bool {
         match edit {
-            Edit::Field(field) => set_field(expr, path, *field),
+            Edit::Field(field) => set_field(expr, path, *field, &no_prefs()),
             Edit::Operator(op) => set_op(expr, path, *op),
             Edit::Literal(value) => set_value(expr, path, value.clone()),
         }
@@ -1963,7 +2155,10 @@ mod tests {
         };
         vec![
             (
-                "date>=1970-01-01",
+                // The day `PINNED_DAY_NOON` falls in, in UTC. Spelled out so a
+                // change to what a fresh date filter starts on shows up here as
+                // a failure rather than being recomputed into agreement.
+                "date>=2026-03-14",
                 Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Ge, Value::Int(5))),
                 vec![],
                 Edit::Field(TermField::Match(MatchField::Date)),
@@ -2007,13 +2202,16 @@ mod tests {
     /// equivalent text builds the same tree.
     #[test]
     fn editing_a_segment_and_typing_the_text_produce_the_same_tree() {
+        use crate::db::index::query_text::NowGuard;
         use crate::db::index::query_text::ZoneGuard;
         use crate::db::index::query_text::parse_query;
         // The `date` case types a bare date, which the parser reads as local
-        // midnight, against the epoch `placeholder_value` mints. The two are
-        // the same instant in UTC alone, so the zone is pinned rather than left
-        // to be whichever one the machine running the test sits in.
+        // midnight, against the local midnight `placeholder_value` mints. Both
+        // halves resolve against the clock and the zone, so both are pinned:
+        // the case's own text names the pinned day outright rather than
+        // recomputing it, which is what leaves it able to fail.
         let _zone = ZoneGuard::set(jiff::tz::TimeZone::UTC);
+        let _now = NowGuard::set(PINNED_DAY_NOON);
         for (typed, start, path, edit) in convergence_cases() {
             let mut edited = start;
             assert!(apply_edit(&mut edited, &path, &edit), "the edit {edit:?} was refused");

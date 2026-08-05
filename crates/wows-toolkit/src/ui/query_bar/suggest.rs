@@ -11,6 +11,7 @@ use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::MatchField;
 use crate::db::index::query_ast::MatchTerm;
 use crate::db::index::query_ast::Op;
+use crate::db::index::query_ast::OperatorPreferences;
 use crate::db::index::query_ast::Quant;
 use crate::db::index::query_ast::RosterField;
 use crate::db::index::query_ast::RosterTerm;
@@ -504,18 +505,34 @@ pub fn replace_active_fragment(pending: &str, replacement: &str) -> String {
 
 /// The grammar text a match-level field suggestion puts in the caret, ready
 /// for a value to be typed after it.
-pub fn match_field_prefix(field: MatchField) -> Option<String> {
-    Some(format!("{}{}", field.name(), leading_op(field.allowed_ops())?.as_token()))
+pub fn match_field_prefix(field: MatchField, prefs: &OperatorPreferences) -> Option<String> {
+    Some(format!("{}{}", field.name(), field_op(field.name(), field.allowed_ops(), prefs)?.as_token()))
 }
 
 /// The grammar text a roster-field suggestion puts in the caret. A roster
 /// field name is only reachable through a scope prefix or a quantifier, so the
 /// scope is not optional here.
-pub fn roster_field_prefix(field: RosterField, scope: Scope) -> Option<String> {
-    Some(format!("{}{}{}", scope_token(scope), field.name(), leading_op(field.allowed_ops())?.as_token()))
+pub fn roster_field_prefix(field: RosterField, scope: Scope, prefs: &OperatorPreferences) -> Option<String> {
+    Some(format!(
+        "{}{}{}",
+        scope_token(scope),
+        field.name(),
+        field_op(field.name(), field.allowed_ops(), prefs)?.as_token()
+    ))
 }
 
-/// The operator a field suggestion commits with. Taken from `allowed_ops` and
+/// The operator a field suggestion commits with: the one the user last
+/// committed for that field, and otherwise the field's leading allowed one.
+///
+/// `OperatorPreferences::preferred` yields nothing for a field the user has not
+/// used, for a remembered operator `allowed` no longer lists, and for a nullary
+/// one, so every path out of here is an operator this field accepts and takes a
+/// value.
+fn field_op(name: &str, allowed: &'static [Op], prefs: &OperatorPreferences) -> Option<Op> {
+    prefs.preferred(name, allowed).or_else(|| leading_op(allowed))
+}
+
+/// The operator a field suggestion falls back to. Taken from `allowed_ops` and
 /// never hand-picked: three `Op` variants print as `=` and the wrong one
 /// yields text that reparses into a different term. A nullary operator is
 /// skipped because the caret is about to be handed a value to type.
@@ -587,6 +604,16 @@ impl TermField {
         match self {
             TermField::Match(f) => f.allowed_ops(),
             TermField::Roster(f) => f.allowed_ops(),
+        }
+    }
+
+    /// The field's canonical grammar name, which is also the key its remembered
+    /// operator is stored under. Unique across both levels, so one key space
+    /// covers them; `every_field_name_is_unique_and_lowercase` pins that.
+    pub fn name(self) -> &'static str {
+        match self {
+            TermField::Match(f) => f.name(),
+            TermField::Roster(f) => f.name(),
         }
     }
 
@@ -731,6 +758,12 @@ fn enum_value_label(kind: ValueKind, token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A user who has never committed an operator, which is what every case
+    /// here is about unless it says otherwise.
+    fn no_prefs() -> OperatorPreferences {
+        OperatorPreferences::default()
+    }
 
     #[test]
     fn an_empty_needle_returns_everything_in_declaration_order() {
@@ -1037,7 +1070,7 @@ mod tests {
     #[test]
     fn every_match_field_prefix_completes_into_the_term_it_names() {
         for field in MatchField::ALL {
-            let prefix = match_field_prefix(field).expect("every field has an operator");
+            let prefix = match_field_prefix(field, &no_prefs()).expect("every field has an operator");
             let expected_op = leading_op(field.allowed_ops()).expect("every field has an operator");
             let text = format!("{prefix}{}", sample_literal(field.value_kind()));
             let parsed = parse_query(&text).unwrap_or_else(|err| panic!("{field:?} emitted {text:?}: {err}"));
@@ -1055,7 +1088,7 @@ mod tests {
     fn every_roster_field_prefix_completes_into_the_term_it_names_under_every_scope() {
         for field in RosterField::ALL {
             for scope in SCOPES {
-                let prefix = roster_field_prefix(field, scope).expect("every field has an operator");
+                let prefix = roster_field_prefix(field, scope, &no_prefs()).expect("every field has an operator");
                 let expected_op = leading_op(field.allowed_ops()).expect("every field has an operator");
                 let text = format!("{prefix}{}", sample_literal(field.value_kind()));
                 let parsed =
@@ -1089,8 +1122,11 @@ mod tests {
     fn every_emitted_prefix_round_trips_once_completed() {
         use crate::db::index::query_text::print_query;
         for field in MatchField::ALL {
-            let text =
-                format!("{}{}", match_field_prefix(field).expect("an operator"), sample_literal(field.value_kind()));
+            let text = format!(
+                "{}{}",
+                match_field_prefix(field, &no_prefs()).expect("an operator"),
+                sample_literal(field.value_kind())
+            );
             let parsed = parse_query(&text).expect("the completed text parses");
             assert_eq!(parse_query(&print_query(&parsed)).ok().as_ref(), Some(&parsed), "{text:?}");
         }
@@ -1098,7 +1134,7 @@ mod tests {
             for scope in SCOPES {
                 let text = format!(
                     "{}{}",
-                    roster_field_prefix(field, scope).expect("an operator"),
+                    roster_field_prefix(field, scope, &no_prefs()).expect("an operator"),
                     sample_literal(field.value_kind())
                 );
                 let parsed = parse_query(&text).expect("the completed text parses");

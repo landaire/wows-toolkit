@@ -194,14 +194,19 @@ thread_local! {
     static NOW: std::cell::Cell<Option<Timestamp>> = const { std::cell::Cell::new(None) };
 }
 
-/// Restores `NOW` on drop, so an early return or a panic mid-parse cannot leave
-/// a stale instant visible to the next parse on this thread.
-struct NowGuard {
+/// Overrides the instant relative dates and `start_of_today` resolve against,
+/// restoring it on drop, so an early return or a panic mid-parse cannot leave a
+/// stale instant visible to the next parse on this thread.
+///
+/// `parse_query_at` holds one for the length of a parse. A test holds one to
+/// pin every clock reading in a sequence, which is what lets an assertion name
+/// a literal date instead of recomputing the value under test.
+pub struct NowGuard {
     previous: Option<Timestamp>,
 }
 
 impl NowGuard {
-    fn set(now: Timestamp) -> Self {
+    pub fn set(now: Timestamp) -> Self {
         NowGuard { previous: NOW.with(|cell| cell.replace(Some(now))) }
     }
 }
@@ -947,6 +952,19 @@ fn parse_date(s: &str) -> Option<Timestamp> {
 /// highlights drift from the day the box beside it spells.
 pub fn local_date(t: Timestamp) -> jiff::civil::Date {
     t.to_zoned(current_zone()).date()
+}
+
+/// Local midnight starting the day it is now, in the same zone `parse_date`
+/// reads a bare date in.
+///
+/// The instant a new `date` filter starts on. Landing exactly on local midnight
+/// is what makes `print_timestamp` spell it as a bare date, so the term reads
+/// `date>=2026-08-05` rather than as a full RFC 3339 instant, and what makes it
+/// mean the whole day the user means by "today". Reads the clock through the
+/// same `NowGuard` a parse does, so a test pinning one pins this too.
+pub fn start_of_today() -> Timestamp {
+    let zoned = current_now().to_zoned(current_zone());
+    zoned.start_of_day().unwrap_or(zoned).timestamp()
 }
 
 /// A negative offset from the parse-time "now": `-30d`, `-6h`, `-1y`.

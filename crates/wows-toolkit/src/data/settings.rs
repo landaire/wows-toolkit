@@ -8,6 +8,7 @@ use wows_minimap_renderer::ShipConfigFilter;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
+use wows_toolkit_config::index::query_ast::OperatorPreferences;
 
 use crate::data::session_stats::DivisionFilter;
 use crate::twitch::Token;
@@ -214,6 +215,10 @@ pub struct SearchSettings {
     pub columns: Vec<ResultColumn>,
     #[serde(default = "default_result_sort")]
     pub sort: (ResultColumn, SortDir),
+    /// The operator each field was last filtered with, so a new filter starts
+    /// on the comparison the user reached for last.
+    #[serde(default)]
+    pub op_prefs: OperatorPreferences,
 }
 
 impl Default for SearchSettings {
@@ -224,6 +229,7 @@ impl Default for SearchSettings {
             history: std::collections::VecDeque::new(),
             columns: ResultColumn::default_columns(),
             sort: default_result_sort(),
+            op_prefs: OperatorPreferences::default(),
         }
     }
 }
@@ -622,5 +628,43 @@ mod search_sort_tests {
     fn a_stored_column_the_index_cannot_order_by_falls_back_to_the_default() {
         let settings = SearchSettings { sort: (ResultColumn::Ship, SortDir::Ascending), ..Default::default() };
         assert_eq!(settings.sort_spec(), SortSpec::default());
+    }
+
+    /// A remembered operator is worth nothing if it does not outlive the
+    /// session that learned it.
+    #[test]
+    fn remembered_operators_survive_a_settings_round_trip() {
+        use wows_toolkit_config::index::query_ast::Op;
+        use wows_toolkit_config::index::query_ast::RosterField;
+
+        let mut settings = SearchSettings::default();
+        settings.op_prefs.record(RosterField::Damage.name(), Op::Le);
+        let encoded = serde_json::to_string(&settings).expect("serialises");
+        let decoded: SearchSettings = serde_json::from_str(&encoded).expect("deserialises");
+        assert_eq!(
+            decoded.op_prefs.preferred(RosterField::Damage.name(), RosterField::Damage.allowed_ops()),
+            Some(Op::Le)
+        );
+        assert!(SearchSettings::default().op_prefs.is_empty(), "a fresh install remembers nothing");
+    }
+
+    /// A settings file naming an operator this build does not know must not
+    /// cost the user everything else in it.
+    #[test]
+    fn a_stored_operator_this_build_does_not_know_leaves_the_rest_intact() {
+        use wows_toolkit_config::index::query_ast::Op;
+        use wows_toolkit_config::index::query_ast::RosterField;
+
+        let settings: SearchSettings = serde_json::from_str(
+            r#"{"query":"outcome=win","sort":["Date","Descending"],"op_prefs":{"damage":"between","kills":"le"}}"#,
+        )
+        .expect("the file must still load");
+        assert_eq!(settings.query, "outcome=win");
+        assert_eq!(settings.op_prefs.preferred(RosterField::Damage.name(), RosterField::Damage.allowed_ops()), None);
+        assert_eq!(
+            settings.op_prefs.preferred(RosterField::Kills.name(), RosterField::Kills.allowed_ops()),
+            Some(Op::Le),
+            "the entry beside the unknown one must survive"
+        );
     }
 }

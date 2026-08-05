@@ -1093,18 +1093,23 @@ impl ToolkitTabViewer<'_> {
         // The persisted settings are the sort's only home, read fresh each
         // frame and written back on a header click, so the choice survives a
         // restart without a separate restore step to keep in step with it.
-        let (locale, history, sort) = {
+        let (locale, history, sort, op_prefs) = {
             let persisted = self.tab_state.persisted.read();
             let search = &persisted.settings.search;
             (
                 persisted.settings.app.locale.clone(),
                 search.history.iter().cloned().collect::<Vec<_>>(),
                 search.sort_spec(),
+                search.op_prefs.clone(),
             )
         };
 
         let search_tab = &mut self.tab_state.search_tab;
         search_tab.bar.names.locale.clone_from(&locale);
+        // Read in fresh each frame for the same reason the sort is, so the
+        // persisted map stays the only home and nothing has to be restored into
+        // the bar at startup. The bar writes its own additions back below.
+        search_tab.bar.op_prefs = op_prefs;
         search_tab.drain_replies();
         let seeded_now = seeded.is_some();
         if let Some(expr) = seeded {
@@ -1162,7 +1167,10 @@ impl ToolkitTabViewer<'_> {
         // query counts: the user asked for it as much as a typed one.
         if output.changed || seeded_now {
             let text = print_query(&self.tab_state.search_tab.bar.expr);
-            self.tab_state.persisted.write().settings.search.query = text;
+            let op_prefs = self.tab_state.search_tab.bar.op_prefs.clone();
+            let mut persisted = self.tab_state.persisted.write();
+            persisted.settings.search.query = text;
+            persisted.settings.search.op_prefs = op_prefs;
         }
 
         ui.separator();
