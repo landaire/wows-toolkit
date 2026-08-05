@@ -1488,6 +1488,10 @@ impl ReplayRendererViewer {
                     return;
                 }
 
+                // The controls sit on the game's own dark minimap, so they stay
+                // dark whatever the app theme is.
+                let _dark_pass = crate::ui::theme::DarkPass::force(viewport_ui);
+
                 let mut repaint = false;
 
                 let mut state = shared_state.lock();
