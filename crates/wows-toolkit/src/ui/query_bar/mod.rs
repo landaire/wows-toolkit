@@ -261,7 +261,7 @@ enum Nav {
     CommitTyped,
     HighlightNext,
     HighlightPrev,
-    SelectPrev,
+    DeleteAtCaret,
     DeleteSelection,
     Step { back: bool, extend: bool },
     HistoryBack,
@@ -1115,11 +1115,16 @@ impl QueryBar {
             let in_list = editing || self.highlighted.is_some() || !self.pending.is_empty();
             return Some(if in_list { Nav::HighlightPrev } else { Nav::HistoryBack });
         }
+        // Ahead of the editing gate, on the caret buffer alone. `self.pending`
+        // is the open editor's own text while one is open and the caret's own
+        // otherwise, so the same emptiness test covers both: a buffer with text
+        // in it leaves the key to the `TextEdit`, which deletes a character,
+        // and an empty one has nothing left to erase and means the filter.
+        if self.pending.is_empty() && take(Modifiers::NONE, Key::Backspace) {
+            return Some(if self.selection.is_empty() { Nav::DeleteAtCaret } else { Nav::DeleteSelection });
+        }
         if editing {
             return None;
-        }
-        if self.pending.is_empty() && take(Modifiers::NONE, Key::Backspace) {
-            return Some(if self.selection.is_empty() { Nav::SelectPrev } else { Nav::DeleteSelection });
         }
         if self.caret_at_start {
             if take(Modifiers::SHIFT, Key::ArrowLeft) {
@@ -1171,12 +1176,7 @@ impl QueryBar {
                 self.dropdown_open = true;
                 false
             }
-            Nav::SelectPrev => {
-                if let Some(path) = select::step(&paths, None, true) {
-                    self.select_single(path);
-                }
-                false
-            }
+            Nav::DeleteAtCaret => self.delete_at_caret(&paths),
             Nav::DeleteSelection => {
                 select::delete(&mut self.expr, &self.selection);
                 true
@@ -1187,6 +1187,37 @@ impl QueryBar {
             }
             Nav::HistoryBack => self.walk_history(deps),
         }
+    }
+
+    /// Removes the filter the caret stands at, in one press. Reports whether the
+    /// tree changed.
+    ///
+    /// The target is the pill an open editor is on, and otherwise the last pill
+    /// in the stream, which is the one the trailing caret sits after. Both are
+    /// "the filter the caret is at": a pill being edited is where the user is
+    /// looking, and for a value box the caret is literally drawn inside it.
+    ///
+    /// A pill inside a group is a pill like any other here, so the member before
+    /// the caret goes and its siblings stay. The group's brackets go with it only
+    /// when one member is left, because a one-child `All`/`Any` has no printable
+    /// form and `canonicalise` folds it into that child.
+    fn delete_at_caret(&mut self, paths: &[NodePath]) -> bool {
+        let target = match self.editing.as_ref() {
+            Some(edit) => Some(edit.pill.clone()),
+            None => select::step(paths, None, true),
+        };
+        // A pill inside a roster predicate draws inside its quantifier's bracket
+        // and can hold an editor, but names no match-level node, so removing it
+        // would rewrite nothing and report an edit that never happened.
+        let Some(target) = target.filter(|path| select::addresses_match_node(&self.expr, path)) else {
+            return false;
+        };
+        // Dropped rather than dismissed: a forced editor's snapshot describes a
+        // tree that still holds the pill this is about to remove, so putting it
+        // back would restore what the keystroke just deleted.
+        self.commit_segment_edit();
+        select::delete(&mut self.expr, &Selection { nodes: vec![target] });
+        true
     }
 
     fn step_selection(&mut self, paths: &[NodePath], back: bool, extend: bool) {
@@ -4252,5 +4283,170 @@ mod tests {
             popup.top() >= value.bottom() - 1.0 && popup.top() - value.bottom() < 24.0,
             "the list {popup:?} does not hang on the box's bottom edge {value:?}"
         );
+    }
+
+    /// The query a fixture holds, spelled the way the user reads it, so a
+    /// failure names the tree rather than printing an `Expr` debug dump.
+    fn printed(h: &Harness) -> String {
+        crate::db::index::query_text::print_query(&h.query())
+    }
+
+    /// One press, one filter gone. It used to take two: the first selected the
+    /// pill and the second removed it, which reads as a keystroke that did
+    /// nothing and is what makes Backspace look intermittent.
+    #[test]
+    fn one_backspace_on_an_empty_caret_removes_the_filter_before_it() {
+        let mut h = bar_with("outcome:win and map:ocean");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "outcome=win", "one press must remove one filter");
+        assert!(h.bar.selection.is_empty(), "the press must delete rather than leave a selection behind");
+    }
+
+    /// And it keeps going, one filter per press, rather than needing a select
+    /// press interleaved between the deletes.
+    #[test]
+    fn each_further_backspace_removes_one_more_filter() {
+        let mut h = bar_with("outcome:win and map:ocean and map:north");
+
+        h.press(Key::Backspace);
+        assert_eq!(printed(&h), "outcome=win and map:ocean");
+        h.press(Key::Backspace);
+        assert_eq!(printed(&h), "outcome=win");
+        h.press(Key::Backspace);
+        assert_eq!(printed(&h), "", "the last press must leave the canonical empty query");
+    }
+
+    /// A member of a group is a filter like any other: the one before the caret
+    /// goes and the rest of the group stays, brackets included.
+    ///
+    /// Reproduced before it was written. Stepping already reaches inside a
+    /// group -- `outcome:win and (map:ocean or map:north or map:trap)` offers
+    /// the paths `[0]`, `[1,0]`, `[1,1]`, `[1,2]` -- and the delete already
+    /// removes the member rather than the group.
+    #[test]
+    fn backspace_inside_a_group_removes_one_member_and_leaves_its_siblings() {
+        let mut h = bar_with("outcome:win and (map:ocean or map:north or map:trap)");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(
+            printed(&h),
+            "outcome=win and (map:ocean or map:north)",
+            "the group's other members and its brackets must survive"
+        );
+    }
+
+    /// The other half of that, and the part that reads as "the whole group
+    /// went": a group with two members has no group left once one is deleted.
+    /// A one-child `All`/`Any` has no printable form, so `canonicalise` folds it
+    /// into the child that is left. The sibling survives as a filter; only the
+    /// bracket goes, and no empty bracket lingers.
+    #[test]
+    fn deleting_down_to_one_member_folds_the_group_into_that_member() {
+        let mut h = bar_with("outcome:win and (map:ocean or map:north)");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "outcome=win and map:ocean", "the surviving member must stay as a plain filter");
+        assert_eq!(
+            h.query(),
+            parse_query("outcome:win and map:ocean").expect("parse"),
+            "no emptied group may linger in the tree"
+        );
+
+        h.press(Key::Backspace);
+        assert_eq!(printed(&h), "outcome=win", "the last member goes with the next press, not the whole group at once");
+    }
+
+    /// A nested group is stepped into the same way, so the innermost member is
+    /// what a press at the end of the bar removes.
+    #[test]
+    fn backspace_reaches_the_innermost_member_of_a_nested_group() {
+        let mut h = bar_with("outcome:win and (map:ocean or (map:north and map:trap and map:land))");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "outcome=win and (map:ocean or map:north and map:trap)");
+    }
+
+    /// The intermittency the user reported. An editor opens on its own whenever
+    /// a filter is minted or a value is clicked, and Backspace used to be
+    /// swallowed outright while one was open, so whether the key did anything
+    /// depended on state the user had no reason to be tracking.
+    ///
+    /// The pill removed is the one the editor is on, not the last in the bar,
+    /// which is what tells this apart from the no-editor path: the fixture edits
+    /// the first of two filters.
+    #[test]
+    fn backspace_in_an_empty_value_editor_removes_the_pill_it_is_editing() {
+        let mut h = bar_with("outcome:win and map:ocean");
+        h.click(h.segment_rect(&vec![0], SegmentRole::Value).center());
+        assert!(h.inline_edit_open(), "the fixture must open a value box");
+        assert_eq!(h.caret_text(), "", "an enum editor opens on an empty needle");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "map:ocean", "the edited pill must go, not the last one in the bar");
+        assert!(!h.inline_edit_open(), "the box must close with the pill it was editing");
+    }
+
+    /// The same for an editor a click opened over a plain literal: erasing the
+    /// value is what makes the buffer empty, and the press after that is the one
+    /// that means the filter.
+    #[test]
+    fn a_plain_editor_erases_its_value_first_and_only_then_the_filter() {
+        let mut h = bar_with("outcome:win and anyone.tier>=8");
+        h.click(h.segment_rect(&vec![1], SegmentRole::Value).center());
+        assert_eq!(h.caret_text(), "8", "a plain editor opens holding the literal already on the term");
+
+        h.press(Key::Backspace);
+
+        // The positive control for the negative below: the keystroke reached the
+        // box and did something there.
+        assert_eq!(h.caret_text(), "", "the press must erase the literal");
+        assert_eq!(
+            h.query(),
+            parse_query("outcome:win and anyone.tier>=8").expect("parse"),
+            "a press that erased text must leave the query alone"
+        );
+
+        h.press(Key::Backspace);
+        assert_eq!(printed(&h), "outcome=win", "the press on the emptied box must remove the filter");
+    }
+
+    /// Backspace over typed text is the `TextEdit`'s own, not the bar's. The
+    /// query being untouched is the assertion, and the caret losing exactly one
+    /// character is the control that says the key was delivered at all.
+    #[test]
+    fn backspace_with_text_in_the_caret_deletes_text_and_leaves_the_query_alone() {
+        let mut h = bar_with("outcome:win and map:ocean");
+        h.set_caret_text("map");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(h.caret_text(), "ma", "the press must reach the caret's own text");
+        assert_eq!(
+            h.query(),
+            parse_query("outcome:win and map:ocean").expect("parse"),
+            "typing in the caret must not put the query at risk"
+        );
+    }
+
+    /// An explicit selection is still what Backspace acts on, and it is not the
+    /// pill the caret sits after: the fixture steps back twice, so a press that
+    /// ignored the selection would remove the last filter instead of the middle
+    /// one.
+    #[test]
+    fn backspace_with_a_selection_deletes_the_selection_rather_than_the_last_pill() {
+        let mut h = bar_with("outcome:win and map:ocean and map:north");
+        h.press(Key::ArrowLeft);
+        h.press(Key::ArrowLeft);
+        assert_eq!(h.bar.selection.nodes, vec![vec![1]], "the fixture must select the middle filter");
+
+        h.press(Key::Backspace);
+
+        assert_eq!(printed(&h), "outcome=win and map:north", "the selected filter is the one that goes");
     }
 }
