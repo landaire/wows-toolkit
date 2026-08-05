@@ -1949,8 +1949,16 @@ mod tests {
         /// The same table laid out in a viewport `width` across.
         fn at_width(hits: Vec<MatchHit>, width: f32) -> Self {
             let ship_names = vec![None; hits.len()];
+            let ctx = egui::Context::default();
+            // The app's own style, not egui's defaults: the row height has to
+            // clear the action buttons, and what those measure depends on
+            // `interact_size` and `button_padding`, both of which this theme
+            // sets. Sized against stock egui the table would be measured
+            // against a button the app never draws.
+            ctx.set_style_of(egui::Theme::Dark, dark_style());
+            ctx.set_theme(egui::Theme::Dark);
             let mut harness = Self {
-                ctx: egui::Context::default(),
+                ctx,
                 hits,
                 ship_names,
                 sort: SortSpec::default(),
@@ -2414,7 +2422,14 @@ mod tests {
             }
         }
         let flat: Vec<u8> = buf.iter().flat_map(|p| p.iter().copied()).collect();
-        image::RgbaImage::from_raw(w as u32, h as u32, flat).unwrap().save(path).unwrap();
+        let img = image::RgbaImage::from_raw(w as u32, h as u32, flat).unwrap();
+        img.save(path).unwrap();
+        let crop = image::imageops::crop_imm(&img, 0, 0, 360.min(w as u32), 90).to_image();
+        let zoom = image::imageops::resize(&crop, crop.width() * 3, crop.height() * 3, image::imageops::Nearest);
+        zoom.save(path.replace(".png", "-zoom.png")).unwrap();
+        let crop2 = image::imageops::crop_imm(&img, 480, 0, 240.min(w as u32 - 480), 90).to_image();
+        let zoom2 = image::imageops::resize(&crop2, crop2.width() * 3, crop2.height() * 3, image::imageops::Nearest);
+        zoom2.save(path.replace(".png", "-zoom2.png")).unwrap();
         println!("wrote {path}");
     }
 
