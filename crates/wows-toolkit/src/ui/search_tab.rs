@@ -616,13 +616,21 @@ fn header_cell(ui: &mut egui::Ui, column: ResultColumn, sort: SortSpec) -> Optio
     clicked.then_some(sortable)
 }
 
-/// Height of one results row.
-const RESULT_ROW_HEIGHT: f32 = 24.0;
-/// Height of the single header row above them.
-const RESULT_HEADER_HEIGHT: f32 = 20.0;
+/// Height of one results row. Widened by exactly `2 * RESULT_CELL_MARGIN_V`
+/// over the space a cell's content actually needs, so the vertical margin
+/// added around that content is real room rather than a squeeze.
+const RESULT_ROW_HEIGHT: f32 = 28.0;
+/// Height of the single header row above them, widened the same way.
+const RESULT_HEADER_HEIGHT: f32 = 24.0;
 /// Padding either side of a cell's content, so text in adjacent columns does
-/// not run together across the separator.
+/// not run together across the divider.
 const RESULT_CELL_MARGIN: i8 = 4;
+/// Padding above and below a cell's content, so a row of text does not sit
+/// flush against the row above and below it.
+const RESULT_CELL_MARGIN_V: i8 = 2;
+/// Padding kept clear around the table as a whole, so it does not sit flush
+/// against the match-count label above it or the tab's own edges.
+const RESULT_TABLE_MARGIN: i8 = 4;
 /// What the table stores its column widths under. Held across frames by
 /// `egui_table`, so a width the user drags to survives a scroll, a re-query and
 /// an app restart.
@@ -721,6 +729,13 @@ struct ResultsTable<'a> {
     render_path: Option<std::path::PathBuf>,
     /// Whether any row's preview icon was under the pointer this frame.
     preview_icon_hovered: bool,
+    /// The theme's real `widgets.noninteractive.bg_stroke`, captured by
+    /// `show_results_table` before the table's own scope mutes that stroke to
+    /// stop `egui_table`'s full-height column line (see the comment there).
+    /// Reused for the header's own short-lived divider, and to give the
+    /// disabled "Open" button back its border: a disabled `Response` forces
+    /// non-interactive sense, so that button paints in the same muted state.
+    noninteractive_bg_stroke: egui::Stroke,
 }
 
 impl ResultsTable<'_> {
@@ -767,13 +782,22 @@ impl ResultsTable<'_> {
         }
     }
 
-    /// Open, copy path, and the dwell-gated map preview, each acting on this
-    /// row's own replay.
+    /// Open, copy path, and the film strip -- click to render, dwell-gated
+    /// hover for the compact map preview -- each acting on this row's own
+    /// replay.
     fn actions_ui(&mut self, ui: &mut egui::Ui, row: usize) {
         let hit = &self.hits[row];
         let exists = hit.replay_path.exists();
-        let btn = ui
-            .add_enabled(exists, egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.search.open"))));
+        let mut open_button = egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.search.open")));
+        if !exists {
+            // Disabled renders in the same Noninteractive state the table's
+            // scope mutes the bg_stroke of (see `show_results_table`), which
+            // would otherwise also swallow this button's own border. Putting
+            // the real theme stroke back here has nothing to do with that
+            // line; it is just restoring this widget's own outline.
+            open_button = open_button.stroke(self.noninteractive_bg_stroke);
+        }
+        let btn = ui.add_enabled(exists, open_button);
         if !exists {
             btn.on_hover_text(t!("ui.search.open_missing"));
         } else if btn.clicked() {
@@ -785,9 +809,6 @@ impl ResultsTable<'_> {
             self.copy_path = Some(copy_target(self.hits, row));
         }
 
-        let Some(key) = hit_preview_key(hit) else {
-            return;
-        };
         let mut preview_response = ui.add(egui::Button::new(icons::FILM_STRIP));
         // Recorded before the hover branch below, which is left exactly as it
         // was: a click implies a hover, so the dwell gate still sees the frame
@@ -795,8 +816,18 @@ impl ResultsTable<'_> {
         if preview_response.clicked() {
             self.render_path = Some(hit.replay_path.clone());
         }
+
+        // The render above needs only `hit.replay_path`; the mtime exists
+        // solely to key the cached preview bake (see `PreviewKey`). So it
+        // gates the hover preview alone, not the button: a hit the index has
+        // not yet stamped with an mtime still renders on click, and only
+        // loses the compact preview.
+        let Some(key) = hit_preview_key(hit) else {
+            preview_response.on_hover_text(t!("ui.search.preview_and_render"));
+            return;
+        };
         if !preview_response.hovered() {
-            let _ = preview_response.on_hover_text(t!("ui.search.preview_map"));
+            let _ = preview_response.on_hover_text(t!("ui.search.preview_and_render"));
             return;
         }
 
@@ -810,7 +841,7 @@ impl ResultsTable<'_> {
                 preview_popup::preview_tooltip(ui, &deps, key.clone(), &hit.map, &hover_text);
             });
         } else {
-            preview_response = preview_response.on_hover_text(t!("ui.search.preview_map"));
+            preview_response = preview_response.on_hover_text(t!("ui.search.preview_and_render"));
         }
         let _ = preview_response;
     }
@@ -818,17 +849,42 @@ impl ResultsTable<'_> {
 
 impl egui_table::TableDelegate for ResultsTable<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
-        // The action column has no header, so nothing is drawn over it and
-        // there is nothing there to click.
+        // The header's own short-lived stand-in for the column line
+        // `egui_table` normally draws the full height of the table (see
+        // `show_results_table` for why that one is muted): confined to this
+        // cell's own rect, so it never runs past the header row, and drawn
+        // for every column including the trailing action one, matching where
+        // the full-height line used to appear.
+        //
+        // `egui_table` runs `header_cell_ui` once for a zero-width sticky
+        // ("left") pass as well as the real one, even though this table has
+        // no sticky columns: ordinary widgets are silent there because their
+        // own rect fails `is_rect_visible` against that pass's collapsed clip
+        // rect, and a raw `painter()` call has to check the same thing itself
+        // or it paints the divider twice. Checked against a rect actually at
+        // the divider's own x, not the cell's full rect: the cell's left edge
+        // can still touch that collapsed clip even when the divider, at the
+        // cell's right edge, does not.
+        let cell_rect = ui.max_rect();
+        let divider_rect = egui::Rect::from_x_y_ranges(cell_rect.right()..=cell_rect.right(), cell_rect.y_range());
+        if ui.is_rect_visible(divider_rect) {
+            ui.painter().vline(cell_rect.right(), cell_rect.y_range(), self.noninteractive_bg_stroke);
+        }
+
+        // The action column has no header, so nothing else is drawn over it
+        // and there is nothing there to click.
         let Some(column) = column_at(cell.group_index) else {
             return;
         };
         let sort = self.sort;
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(RESULT_CELL_MARGIN, 0)).show(ui, |ui| {
-            if let Some(clicked) = header_cell(ui, column, sort) {
-                self.sort_clicked = Some(clicked);
-            }
-        });
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(RESULT_CELL_MARGIN, RESULT_CELL_MARGIN_V)).show(
+            ui,
+            |ui| {
+                if let Some(clicked) = header_cell(ui, column, sort) {
+                    self.sort_clicked = Some(clicked);
+                }
+            },
+        );
     }
 
     fn row_ui(&mut self, ui: &mut egui::Ui, row_nr: u64) {
@@ -845,10 +901,13 @@ impl egui_table::TableDelegate for ResultsTable<'_> {
         // The frame allocates in the parent, so the margin and the content are
         // both part of the cell's `min_size`, which is what egui_table measures
         // a column's width from.
-        egui::Frame::new().inner_margin(egui::Margin::symmetric(RESULT_CELL_MARGIN, 0)).show(ui, |ui| match column {
-            Some(column) => self.data_cell_ui(ui, column, row),
-            None => self.actions_ui(ui, row),
-        });
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(RESULT_CELL_MARGIN, RESULT_CELL_MARGIN_V)).show(
+            ui,
+            |ui| match column {
+                Some(column) => self.data_cell_ui(ui, column, row),
+                None => self.actions_ui(ui, row),
+            },
+        );
     }
 
     fn default_row_height(&self) -> f32 {
@@ -863,14 +922,32 @@ impl egui_table::TableDelegate for ResultsTable<'_> {
 /// per-column sizing this move is for, which runs off each column's own widest
 /// measured cell.
 fn show_results_table(ui: &mut egui::Ui, delegate: &mut ResultsTable<'_>) -> egui::Id {
-    let id = egui_table::TableState::id(ui, egui::IdSalt::new(RESULT_TABLE_SALT));
-    egui_table::Table::new()
-        .id_salt(RESULT_TABLE_SALT)
-        .num_rows(delegate.hits.len() as u64)
-        .columns(result_columns())
-        .headers([egui_table::HeaderRow { height: RESULT_HEADER_HEIGHT, groups: Default::default() }])
-        .auto_size_mode(egui_table::AutoSizeMode::Never)
-        .show(ui, delegate);
+    // Captured from the ambient theme before the scope below mutes it.
+    delegate.noninteractive_bg_stroke = ui.visuals().widgets.noninteractive.bg_stroke;
+
+    let mut id = egui::Id::NULL;
+    egui::Frame::new().inner_margin(egui::Margin::same(RESULT_TABLE_MARGIN)).show(ui, |ui| {
+        // `egui_table::Table::finish` paints its column-resize line the full
+        // height of the table, and its resting (non-hovered, non-dragged)
+        // stroke is `widgets.noninteractive.bg_stroke`. Muting only that one
+        // stroke, only for this scope, stops the resting line without
+        // touching the hover or drag strokes the same code paints from
+        // `widgets.hovered`/`widgets.active`: reaching for a divider to
+        // resize it still shows one. `header_cell_ui` paints the header's own
+        // short stand-in from the stroke captured above, and `actions_ui`
+        // restores it for the disabled Open button, which also renders in the
+        // Noninteractive state this mutes.
+        ui.style_mut().visuals.widgets.noninteractive.bg_stroke = egui::Stroke::NONE;
+
+        id = egui_table::TableState::id(ui, egui::IdSalt::new(RESULT_TABLE_SALT));
+        egui_table::Table::new()
+            .id_salt(RESULT_TABLE_SALT)
+            .num_rows(delegate.hits.len() as u64)
+            .columns(result_columns())
+            .headers([egui_table::HeaderRow { height: RESULT_HEADER_HEIGHT, groups: Default::default() }])
+            .auto_size_mode(egui_table::AutoSizeMode::Never)
+            .show(ui, delegate);
+    });
     id
 }
 
@@ -1118,6 +1195,8 @@ impl ToolkitTabViewer<'_> {
             copy_path: None,
             render_path: None,
             preview_icon_hovered: false,
+            // Overwritten by `show_results_table` before the table draws.
+            noninteractive_bg_stroke: egui::Stroke::NONE,
         };
         show_results_table(ui, &mut delegate);
         let ResultsTable { sort_clicked, open_path, copy_path, render_path, preview_icon_hovered, .. } = delegate;
@@ -1893,6 +1972,7 @@ mod tests {
                     copy_path: None,
                     render_path: None,
                     preview_icon_hovered: false,
+                    noninteractive_bg_stroke: egui::Stroke::NONE,
                 };
                 table_id = Some(show_results_table(ui, &mut delegate));
                 asked = TablePass {
@@ -2119,6 +2199,193 @@ mod tests {
         assert!((after - dragged).abs() < 1.0, "the dragged width did not survive a frame: {dragged} became {after}");
     }
 
+    /// Every vertical line segment painted near `x`, as `(y-range, stroke)`.
+    /// A column boundary carries at most two: the header's own short divider
+    /// (`header_cell_ui`) and `egui_table`'s own full-height line
+    /// (`Table::finish`), which sit at the same x because both are derived
+    /// from the same column geometry.
+    fn vlines_near_x(shapes: &[egui::epaint::ClippedShape], x: f32) -> Vec<(egui::Rangef, egui::Stroke)> {
+        shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points, stroke } => {
+                    let vertical = (points[0].x - points[1].x).abs() < 0.5;
+                    let at_x = (points[0].x - x).abs() < 1.0;
+                    (vertical && at_x).then(|| {
+                        (egui::Rangef::new(points[0].y.min(points[1].y), points[0].y.max(points[1].y)), *stroke)
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// egui_table's own resting column-resize line runs the full height of
+    /// the table (`Table::finish`); the point of muting it within the table's
+    /// scope is that a column boundary shows only the header's own short
+    /// stand-in instead. This pins both halves: the full-height line is
+    /// there but invisible, and the header's own line is there, visible, at
+    /// the theme's real resting divider colour.
+    #[test]
+    fn the_header_draws_a_short_divider_and_the_full_height_line_is_muted() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let col_nr = column_number(Some(ResultColumn::Date));
+        let x = harness.column_right(col_nr);
+
+        let mut lines = vlines_near_x(&harness.shapes, x);
+        assert_eq!(lines.len(), 2, "expected the header divider and egui_table's own line at x={x}: {lines:?}");
+        lines.sort_by(|a, b| a.0.span().total_cmp(&b.0.span()));
+        let (header_line, table_line) = (lines[0], lines[1]);
+
+        assert!(
+            table_line.0.span() > header_line.0.span() * 3.0,
+            "the header divider must be much shorter than the full-height line: header {:?}, table {:?}",
+            header_line.0,
+            table_line.0
+        );
+        assert!(
+            (header_line.0.min - table_line.0.min).abs() < 1.0,
+            "both lines should start at the same header top: header {:?}, table {:?}",
+            header_line.0,
+            table_line.0
+        );
+
+        assert_eq!(
+            table_line.1.color,
+            egui::Color32::TRANSPARENT,
+            "egui_table's own resting line must be invisible within the table's scope: {:?}",
+            table_line.1
+        );
+
+        let theme_resting = harness.ctx.style_of(harness.ctx.theme()).visuals.widgets.noninteractive.bg_stroke;
+        assert_ne!(header_line.1.color, egui::Color32::TRANSPARENT, "the header divider must actually be visible");
+        assert_eq!(
+            header_line.1.color, theme_resting.color,
+            "the header divider must be painted in the theme's own resting stroke, not a literal"
+        );
+    }
+
+    /// Whether any vertical line segment was painted in exactly `color`.
+    ///
+    /// Deliberately not scoped to an x: while a resize is in progress the
+    /// column boundary moves within the same frame it is dragged in (the
+    /// header and body still lay out at the old width; only the resize line
+    /// itself is nudged by the live delta), and `TableHarness::rect_of`'s
+    /// response lookup is one frame stale besides. Searching every line
+    /// segment for the colour a state is known to paint sidesteps both: it
+    /// reads what was actually painted rather than reasoning about where.
+    fn any_vline_in_color(shapes: &[egui::epaint::ClippedShape], color: egui::Color32) -> bool {
+        shapes.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::LineSegment { points, stroke } => {
+                (points[0].x - points[1].x).abs() < 0.5 && stroke.color == color
+            }
+            _ => false,
+        })
+    }
+
+    /// Reaching for a divider to resize it must still show one: the hover
+    /// stroke `Table::finish` paints from `widgets.hovered` is untouched by
+    /// the resting-stroke mute, so hovering the resizer must paint a line in
+    /// the theme's hovered stroke where none was before (the positive
+    /// control: a settled, unhovered table must not already show it).
+    #[test]
+    fn hovering_a_divider_shows_a_line_in_the_hover_stroke() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let col_nr = column_number(Some(ResultColumn::Date));
+        let resting = harness.ctx.style_of(harness.ctx.theme()).visuals.widgets.noninteractive.bg_stroke.color;
+        let hovered = harness.ctx.style_of(harness.ctx.theme()).visuals.widgets.hovered.bg_stroke.color;
+        assert_ne!(resting, hovered, "the theme must distinguish resting from hovered for this test to mean anything");
+        assert!(
+            !any_vline_in_color(&harness.shapes, hovered),
+            "a settled, unhovered table must not already show the hover stroke"
+        );
+
+        let handle = harness.rect_of(harness.resizer_id(col_nr)).center();
+        let mut hover = frame_input();
+        hover.events.push(egui::Event::PointerMoved(handle));
+        harness.frame(hover);
+
+        assert!(
+            any_vline_in_color(&harness.shapes, hovered),
+            "hovering the divider must paint a line in the theme's hover stroke"
+        );
+    }
+
+    /// The same as the hover case, but for an active drag: `Table::finish`
+    /// paints `widgets.active` while a resize is in progress, which the
+    /// resting-stroke mute must also leave untouched.
+    #[test]
+    fn dragging_a_divider_shows_a_line_in_the_active_stroke() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let col_nr = column_number(Some(ResultColumn::Date));
+        let resting = harness.ctx.style_of(harness.ctx.theme()).visuals.widgets.noninteractive.bg_stroke.color;
+        let active = harness.ctx.style_of(harness.ctx.theme()).visuals.widgets.active.bg_stroke.color;
+        assert_ne!(resting, active, "the theme must distinguish resting from active for this test to mean anything");
+        assert!(
+            !any_vline_in_color(&harness.shapes, active),
+            "a settled, non-dragged table must not already show the active stroke"
+        );
+
+        let handle = harness.rect_of(harness.resizer_id(col_nr)).center();
+        let mut press = frame_input();
+        press.events.push(egui::Event::PointerMoved(handle));
+        press.events.push(egui::Event::PointerButton {
+            pos: handle,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.frame(press);
+
+        let target = egui::Pos2::new(handle.x + 20.0, handle.y);
+        let mut drag = frame_input();
+        drag.events.push(egui::Event::PointerMoved(target));
+        harness.frame(drag);
+
+        assert!(
+            any_vline_in_color(&harness.shapes, active),
+            "an in-progress drag must paint a line in the theme's active stroke"
+        );
+    }
+
+    /// A disabled row's Open button renders in the same Noninteractive widget
+    /// state the table's scope mutes the bg_stroke of, so it needs its own
+    /// stroke put back (`actions_ui`) or it would silently lose its border
+    /// along with the resize line's. `a_hit`'s `replay_path` does not exist on
+    /// disk, so `hit_on_map` is already a disabled-Open-button fixture.
+    ///
+    /// Checked by width, not colour: a disabled widget's whole subtree is
+    /// additionally faded by egui's own `disabled_alpha` (gamma-multiplied
+    /// into every colour `ui.disable()` touches), so the stroke this button
+    /// paints is never bit-for-bit the theme's resting colour even once
+    /// restored. Width is untouched by that fade, and `Stroke::NONE` -- what
+    /// the table's own mute would leave behind with nothing put back -- is
+    /// zero width as well as zero alpha, so it is still the fact that
+    /// distinguishes "restored" from "still muted".
+    #[test]
+    fn a_disabled_open_button_keeps_its_own_border() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+
+        let open_center = harness.only_text_at(&t!("ui.search.open"));
+        let button_frame = harness
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(r) if r.rect.contains(open_center) => Some(r.clone()),
+                _ => None,
+            })
+            // The smallest containing rect is the button's own frame; larger
+            // ones are the cell, the row, and the table's own outer margin.
+            .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+            .expect("the Open button must paint a frame around its label");
+
+        assert!(button_frame.stroke.width > 0.0, "the disabled Open button lost its border width: {button_frame:?}");
+        assert!(
+            button_frame.stroke.color.a() > 0,
+            "the disabled Open button's border is fully transparent: {button_frame:?}"
+        );
+    }
+
     /// Every sortable header still cycles its own column's sort once the table
     /// draws it. This is the part the move to a delegate could quietly break:
     /// header cells are now addressed by a column index rather than emitted in
@@ -2222,6 +2489,14 @@ mod tests {
                 MatchHit { replay_path: path, ..a_hit(None, None) }
             })
             .collect()
+    }
+
+    /// The same three real files, but the middle row carries no indexed mtime
+    /// -- the case the index has not yet caught up with.
+    fn hits_with_real_files_one_missing_mtime(dir: &std::path::Path) -> Vec<MatchHit> {
+        let mut hits = hits_with_real_files(dir);
+        hits[1].file_mtime = None;
+        hits
     }
 
     /// Where every row painted `needle`, top to bottom, which is row order.
@@ -2377,6 +2652,79 @@ mod tests {
 
         assert!(harness.preview_state.pending_request().is_some(), "the hover must actually reach the film strip");
         assert_eq!(harness.asked.render_path, None, "hovering asked for a render");
+    }
+
+    /// The click is no longer discoverable from the icon alone, so the resting
+    /// tooltip has to say what both gestures do. This is the state the button
+    /// is in on the very first frame it is hovered, before the dwell (if any)
+    /// elapses -- which is also where a hit with no mtime lands permanently,
+    /// since it never reaches the rich preview branch below.
+    #[test]
+    fn the_film_strips_resting_tooltip_names_both_the_hover_and_the_click() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        let mut hover = frame_input();
+        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        harness.frame(hover);
+        // egui's own tooltip only appears once the pointer has been still for
+        // `Style::interaction.tooltip_delay` (0.5s), measured against the
+        // synthetic clock `frame_input`'s missing `RawInput::time` advances by
+        // `predicted_dt` (1/60s) each quiet frame -- about 30 of them.
+        for _ in 0..40 {
+            harness.frame(frame_input());
+        }
+
+        let tooltip = t!("ui.search.preview_and_render");
+        assert!(
+            !harness.text_rects(&tooltip).is_empty(),
+            "the combined tooltip {tooltip:?} never painted; shapes: {:?}",
+            harness.shapes.len()
+        );
+    }
+
+    /// The render click needs only the path (`launch_replay_render` takes
+    /// `&Path`, not a `PreviewKey`), so a row the index has not yet stamped
+    /// with an mtime must still be renderable. Before this, `hit_preview_key`
+    /// gated the whole button, not just the preview it exists for.
+    #[test]
+    fn a_hit_with_no_recorded_mtime_still_renders_on_click() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files_one_missing_mtime(dir.path());
+        assert!(hit_preview_key(&hits[1]).is_none(), "the fixture row must actually lack an mtime");
+
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        let asked = harness.click(strips[1]);
+        assert_eq!(
+            asked.render_path.as_deref(),
+            Some(hits[1].replay_path.as_path()),
+            "a hit missing file_mtime must still offer a usable film strip"
+        );
+    }
+
+    /// The other half of the split: `PreviewKey` needs the mtime as its cache
+    /// key (see `hit_preview_key`), so the row above must not arm a preview
+    /// bake no matter how long it is hovered. The positive control is
+    /// `hovering_a_rows_film_strip_arms_a_preview_for_that_row`, which proves
+    /// the same dwell, aimed the same way, does arm one for a row that has an
+    /// mtime; without it this would also pass for a hover that missed.
+    #[test]
+    fn a_hit_with_no_recorded_mtime_arms_no_preview() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files_one_missing_mtime(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        harness.dwell_step = PREVIEW_DWELL;
+        let mut hover = frame_input();
+        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        harness.frame(hover);
+
+        assert_eq!(harness.preview_state.pending_request(), None, "a hit with no mtime armed a preview");
     }
 
     /// The two paths a pass reports map onto the two actions. A mapping that
