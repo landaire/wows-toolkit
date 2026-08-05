@@ -33,6 +33,8 @@ use rust_i18n::t;
 
 use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::query_ast::Op;
+use crate::db::index::query_ast::Value;
+use crate::db::index::query_ast::ValueKind;
 use crate::db::index::query_text;
 use crate::db::index::query_text::ParseErrorKind;
 use crate::db::index::query_text::QueryParseError;
@@ -1557,8 +1559,17 @@ impl QueryBar {
         // A plain editor is the value itself, so the caret opens holding the
         // literal already on the term rather than making the user retype it.
         // Every other editor picks from rows, and the caret is only its needle.
+        //
+        // A text value seeds as the string itself, not its grammar spelling:
+        // quoting is how the printed query carries a value with spaces or a
+        // quote character, and has no business showing up inside the box that
+        // holds the value. Every other plain kind has no such distinction --
+        // an int, a float, and a timestamp print exactly what they parse.
         self.pending = match (role, suggest::value_editor(field)) {
-            (SegmentRole::Value, ValueEditor::Plain) => print_value(&value),
+            (SegmentRole::Value, ValueEditor::Plain) => match &value {
+                Value::Text(s) => s.clone(),
+                _ => print_value(&value),
+            },
             _ => String::new(),
         };
         self.parsed_text.clone_from(&self.pending);
@@ -1713,12 +1724,20 @@ impl QueryBar {
     /// Applies a grammar literal to the pill's value, whether it came from a
     /// row or from the caret. The literal goes through the grammar's own parser
     /// rather than a second reader of the same spellings, so a clicked value
-    /// and a typed one become the same `Value`.
+    /// and a typed one become the same `Value` -- except for a text kind,
+    /// whose box holds the value itself rather than grammar, and which is
+    /// therefore taken verbatim rather than parsed. Text is also the only
+    /// kind `ValueEditor::Plain` reaches that a row or lookup never supplies a
+    /// literal for, so this only ever sees a typed box, never a token this
+    /// module generated.
     ///
     /// A literal the field cannot read is reported the way the typed path
     /// reports one, through `pending_error` and the underline it drives, and
-    /// leaves the box open over the value it could not replace.
-    /// `reparse_pending` clears it on the next keystroke, so the mark follows
+    /// leaves the box open over the value it could not replace. A text box
+    /// left blank is refused the same way: there is no quoted-empty-string
+    /// spelling to type into a box that holds the value plainly, so an empty
+    /// box has no reading and stays open rather than becoming `""`.
+    /// `reparse_pending` clears the mark on the next keystroke, so it follows
     /// the text rather than outlasting it.
     ///
     /// The write goes through the leaf the box opened over rather than through
@@ -1733,11 +1752,19 @@ impl QueryBar {
         let Some((field, _, _)) = select::term_at(&self.expr, &edit.path) else {
             return false;
         };
-        let value = match parse_roster_value(field.value_kind(), literal.trim()) {
-            Some(value) => value,
-            None => {
+        let value = if field.value_kind() == ValueKind::Text {
+            if literal.trim().is_empty() {
                 self.report_bad_value(field, literal);
                 return false;
+            }
+            Value::Text(literal.to_owned())
+        } else {
+            match parse_roster_value(field.value_kind(), literal.trim()) {
+                Some(value) => value,
+                None => {
+                    self.report_bad_value(field, literal);
+                    return false;
+                }
             }
         };
         let Some(inline) = edit.inline else {
@@ -2747,6 +2774,99 @@ mod tests {
         assert!(opened);
         assert_eq!(bar.pending, "1970-01-01", "the caret opens holding the value already on the term");
         assert_eq!(bar.editing.as_ref().map(|edit| edit.role), Some(SegmentRole::Value));
+    }
+
+    /// A text value's box holds the value itself, not the grammar spelling of
+    /// it: quoting is a printed-query concern, and leaking it into the editor
+    /// is exactly the awkwardness this seeding exists to avoid.
+    #[test]
+    fn opening_a_text_value_editor_seeds_the_caret_unquoted() {
+        let mut bar = QueryBar::default();
+        bar.set_expr(Expr::Leaf(MatchTerm::Field(
+            MatchField::GameType,
+            Op::Equals,
+            Value::Text("two words".to_owned()),
+        )));
+        let opened = with_ui(|ui, caret_id| bar.begin_segment_edit(vec![], vec![], SegmentRole::Value, ui, caret_id));
+        assert!(opened);
+        assert_eq!(bar.pending, "two words", "the box must hold the value verbatim, not its quoted spelling");
+    }
+
+    /// A text value is the box's content, not grammar to be reparsed: leading
+    /// and trailing spaces, which the grammar would otherwise need quotes to
+    /// carry, must survive committing the box as-is.
+    #[test]
+    fn committing_a_text_literal_with_spaces_keeps_them_verbatim() {
+        let mut bar = bar_editing(
+            Expr::Leaf(MatchTerm::Field(MatchField::GameType, Op::Equals, Value::Text(String::new()))),
+            SegmentRole::Value,
+        );
+        assert!(bar.commit_value_literal(" two words "));
+        assert_eq!(
+            select::term_at(&bar.expr, &[]).map(|(_, _, v)| v.clone()),
+            Some(Value::Text(" two words ".to_owned())),
+            "the committed value must keep the spaces the box held"
+        );
+    }
+
+    /// A quote character inside a text value is data, not grammar syntax, once
+    /// it is inside the box: it must come back exactly as typed rather than
+    /// being doubled or stripped the way the printed query's escaping would.
+    #[test]
+    fn committing_a_text_literal_with_a_quote_character_keeps_it_verbatim() {
+        let mut bar = bar_editing(
+            Expr::Leaf(MatchTerm::Field(MatchField::GameType, Op::Equals, Value::Text(String::new()))),
+            SegmentRole::Value,
+        );
+        // Starts and ends with `"`, which is exactly the shape the grammar's
+        // own unquoting strips: a text kind must not run that step at all.
+        assert!(bar.commit_value_literal("\"hi\""));
+        assert_eq!(
+            select::term_at(&bar.expr, &[]).map(|(_, _, v)| v.clone()),
+            Some(Value::Text("\"hi\"".to_owned())),
+            "a quote character in the box is part of the value, not grammar to unescape"
+        );
+    }
+
+    /// The printed query text is the one place quoting belongs: a text value
+    /// that needs quoting to read back must still print quoted, unaffected by
+    /// the editor no longer showing it.
+    #[test]
+    fn the_printed_query_still_quotes_a_text_value_that_needs_it() {
+        let expr = Expr::Leaf(MatchTerm::Field(MatchField::GameType, Op::Equals, Value::Text("two words".to_owned())));
+        let printed = query_text::print_query(&expr);
+        assert!(printed.contains("\"two words\""), "the printed query must quote the value: {printed:?}");
+        let reparsed = query_text::parse_query(&printed).expect("the printed query must reparse");
+        assert_eq!(reparsed, expr, "parse(print(t)) must still hold");
+    }
+
+    /// An empty text box is refused the same way an unreadable literal on any
+    /// other plain-editor field is: reported through `pending_error` with the
+    /// box left open, never silently accepted as an empty string.
+    #[test]
+    fn an_empty_text_box_is_refused_like_any_other_bad_value() {
+        let mut bar = bar_editing(
+            Expr::Leaf(MatchTerm::Field(MatchField::GameType, Op::Equals, Value::Text("yamato".to_owned()))),
+            SegmentRole::Value,
+        );
+        let before = bar.expr.clone();
+        assert!(!bar.commit_value_literal(""));
+        assert_eq!(bar.expr, before, "an empty box must not reach the tree");
+        let error = bar.pending_error.as_ref().expect("the failure must be reported");
+        assert!(matches!(error.kind, ParseErrorKind::BadValue { field: "game-type", .. }), "got {:?}", error.kind);
+    }
+
+    /// Non-text plain-editor kinds still parse: a value they cannot read is
+    /// still refused, unaffected by the text kind taking its literal verbatim.
+    #[test]
+    fn a_bad_int_literal_is_still_refused() {
+        let mut bar =
+            bar_editing(Expr::Leaf(MatchTerm::Field(MatchField::Build, Op::Eq, Value::Int(0))), SegmentRole::Value);
+        let before = bar.expr.clone();
+        assert!(!bar.commit_value_literal("not-a-number"));
+        assert_eq!(bar.expr, before, "an unreadable int literal must not reach the tree");
+        let error = bar.pending_error.as_ref().expect("the failure must be reported");
+        assert!(matches!(error.kind, ParseErrorKind::BadValue { field: "build", .. }), "got {:?}", error.kind);
     }
 
     /// A nullary operator draws no value segment, so there is nothing for a
