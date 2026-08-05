@@ -3253,6 +3253,31 @@ impl PersonalRatingCategory {
         Self::ALL.into_iter().rev().find(|band| band.floor().is_none_or(|floor| pr >= floor)).unwrap_or(Self::Bad)
     }
 
+    /// The inclusive win-rate floor of this band, as a percentage, on the
+    /// wows-numbers scale. `None` for `Bad`, which has nothing below it.
+    pub fn win_rate_floor(self) -> Option<f64> {
+        match self {
+            Self::Bad => None,
+            Self::BelowAverage => Some(47.0),
+            Self::Average => Some(50.0),
+            Self::Good => Some(52.0),
+            Self::VeryGood => Some(54.0),
+            Self::Great => Some(56.0),
+            Self::Unicum => Some(60.0),
+            Self::SuperUnicum => Some(65.0),
+        }
+    }
+
+    /// The band a PvP win rate falls in. `win_rate` is a percentage, so 54.3
+    /// rather than 0.543.
+    pub fn from_win_rate(win_rate: f64) -> Self {
+        Self::ALL
+            .into_iter()
+            .rev()
+            .find(|band| band.win_rate_floor().is_none_or(|floor| win_rate >= floor))
+            .unwrap_or(Self::Bad)
+    }
+
     /// The display name for this band.
     pub fn name(&self) -> &'static str {
         match self {
@@ -3455,6 +3480,31 @@ mod tests {
         }
         let excluded: Vec<GameMode> = GameMode::ALL.into_iter().filter(|m| !m.is_offerable()).collect();
         assert_eq!(excluded, vec![GameMode::Invalid], "the offerable set must narrow by exactly Invalid, no more");
+    }
+
+    #[test]
+    fn win_rate_bands_sit_on_their_floors() {
+        assert_eq!(PersonalRatingCategory::from_win_rate(0.0), PersonalRatingCategory::Bad);
+        assert_eq!(PersonalRatingCategory::from_win_rate(46.9), PersonalRatingCategory::Bad);
+        assert_eq!(PersonalRatingCategory::from_win_rate(47.0), PersonalRatingCategory::BelowAverage);
+        assert_eq!(PersonalRatingCategory::from_win_rate(49.9), PersonalRatingCategory::BelowAverage);
+        assert_eq!(PersonalRatingCategory::from_win_rate(50.0), PersonalRatingCategory::Average);
+        assert_eq!(PersonalRatingCategory::from_win_rate(52.0), PersonalRatingCategory::Good);
+        assert_eq!(PersonalRatingCategory::from_win_rate(54.0), PersonalRatingCategory::VeryGood);
+        assert_eq!(PersonalRatingCategory::from_win_rate(56.0), PersonalRatingCategory::Great);
+        assert_eq!(PersonalRatingCategory::from_win_rate(60.0), PersonalRatingCategory::Unicum);
+        assert_eq!(PersonalRatingCategory::from_win_rate(65.0), PersonalRatingCategory::SuperUnicum);
+        assert_eq!(PersonalRatingCategory::from_win_rate(100.0), PersonalRatingCategory::SuperUnicum);
+    }
+
+    #[test]
+    fn win_rate_floors_ascend_with_the_band_order() {
+        let floors: Vec<Option<f64>> =
+            PersonalRatingCategory::ALL.into_iter().map(PersonalRatingCategory::win_rate_floor).collect();
+        assert_eq!(floors[0], None);
+        for pair in floors[1..].windows(2) {
+            assert!(pair[0] < pair[1], "win-rate floors must ascend: {pair:?}");
+        }
     }
 
     #[test]
