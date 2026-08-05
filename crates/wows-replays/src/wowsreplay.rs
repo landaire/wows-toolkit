@@ -123,6 +123,48 @@ fn replay_format<'a>(i: &mut &'a [u8]) -> PResult<Replay<'a>> {
     Ok(Replay { meta, raw_meta, extra_data: blocks, decompressed_size, compressed_size })
 }
 
+/// Blowfish-CBC decrypt of a replay's trailing packet stream. A ragged
+/// trailing block is dropped: the loop walks whole 8-byte blocks only, which
+/// is what makes a file the game is still writing readable.
+fn decrypt_packet_stream(encrypted: &[u8]) -> Vec<u8> {
+    let key = [0x29, 0xB7, 0xC9, 0x09, 0x38, 0x3F, 0x84, 0x88, 0xFA, 0x98, 0xEC, 0x4E, 0x13, 0x19, 0x79, 0xFB];
+    let cipher = <Blowfish<BE>>::new_from_slice(&key).expect("16-byte key is valid for Blowfish");
+
+    // CBC decrypt: each plaintext block is xored with the previous ciphertext
+    // block (the WoWs replay format uses an all-zero IV).
+    let mut decrypted = vec![0u8; encrypted.len()];
+    let mut previous = [0u8; 8];
+    for chunk_idx in 0..(encrypted.len() / 8) {
+        let off = chunk_idx * 8;
+        let mut block = GenericArray::clone_from_slice(&encrypted[off..off + 8]);
+        cipher.decrypt_block(&mut block);
+        for j in 0..8 {
+            decrypted[off + j] = block[j] ^ previous[j];
+        }
+        previous.copy_from_slice(&decrypted[off..off + 8]);
+    }
+    decrypted.truncate((encrypted.len() / 8) * 8);
+    decrypted
+}
+
+/// Inflate as much of `deflated` as is intact. Any inflate error ends the
+/// prefix: a stream cut mid-symbol is reported as corrupt rather than as a
+/// clean EOF, so a partial write cannot be told apart from real damage. The
+/// caller retries either way.
+fn inflate_prefix(deflated: &[u8]) -> Vec<u8> {
+    let mut decoder = flate2::read::ZlibDecoder::new(deflated);
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        match decoder.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => out.extend_from_slice(&chunk[..n]),
+            Err(_) => break,
+        }
+    }
+    out
+}
+
 #[derive(Debug, Clone)]
 pub struct ReplayFile {
     pub meta: ReplayMeta,
@@ -147,24 +189,7 @@ impl ReplayFile {
     pub fn from_bytes(bytes: &[u8]) -> rootcause::Result<ReplayFile, ParseError> {
         let mut input = bytes;
         let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e)))?;
-        let encrypted = input;
-
-        let key = [0x29, 0xB7, 0xC9, 0x09, 0x38, 0x3F, 0x84, 0x88, 0xFA, 0x98, 0xEC, 0x4E, 0x13, 0x19, 0x79, 0xFB];
-        let cipher = <Blowfish<BE>>::new_from_slice(&key).expect("16-byte key is valid for Blowfish");
-
-        // CBC decrypt: each plaintext block is xored with the previous ciphertext
-        // block (the WoWs replay format uses an all-zero IV).
-        let mut decrypted = vec![0u8; encrypted.len()];
-        let mut previous = [0u8; 8];
-        for chunk_idx in 0..(encrypted.len() / 8) {
-            let off = chunk_idx * 8;
-            let mut block = GenericArray::clone_from_slice(&encrypted[off..off + 8]);
-            cipher.decrypt_block(&mut block);
-            for j in 0..8 {
-                decrypted[off + j] = block[j] ^ previous[j];
-            }
-            previous.copy_from_slice(&decrypted[off..off + 8]);
-        }
+        let decrypted = decrypt_packet_stream(input);
 
         let mut deflater = flate2::read::ZlibDecoder::new(decrypted.as_slice());
         let mut packet_data = vec![];
@@ -185,6 +210,36 @@ impl ReplayFile {
         f.read_to_end(&mut contents).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
 
         Self::from_bytes(&contents).attach_with(path_context)
+    }
+
+    /// Parse a replay whose packet stream may still be being written.
+    ///
+    /// Identical to [`ReplayFile::from_bytes`] except that an unfinished zlib
+    /// stream yields the packets that did inflate instead of an error. Use this
+    /// for `temp.wowsreplay` during a battle; use `from_bytes` everywhere else,
+    /// where a truncated stream means a corrupt file and should be reported.
+    pub fn from_partial_bytes(bytes: &[u8]) -> rootcause::Result<ReplayFile, ParseError> {
+        let mut input = bytes;
+        let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e)))?;
+        let decrypted = decrypt_packet_stream(input);
+        let packet_data = inflate_prefix(&decrypted);
+
+        Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data })
+    }
+
+    /// Read [`ReplayFile::from_partial_bytes`] from a file on disk.
+    pub fn from_partial_file(replay: &std::path::Path) -> rootcause::Result<ReplayFile, ParseError> {
+        let path_context = || format!("path: {}", replay.display());
+
+        let mut f = std::fs::File::options()
+            .read(true)
+            .open(replay)
+            .map_err(|e| report!(ParseError::from(e)))
+            .attach_with(path_context)?;
+        let mut contents = vec![];
+        f.read_to_end(&mut contents).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+
+        Self::from_partial_bytes(&contents).attach_with(path_context)
     }
 
     /// Parse only the replay metadata header, skipping decryption and
@@ -226,5 +281,34 @@ impl ReplayFile {
         buffer.extend_from_slice(&meta_bytes);
 
         Self::meta_from_bytes(&buffer).attach_with(path_context)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A zlib stream cut off mid-way, which is what a battle in progress
+    /// leaves on disk. `from_bytes` must reject it and `from_partial_bytes`
+    /// must keep the prefix that did inflate.
+    #[test]
+    fn a_truncated_stream_inflates_up_to_the_cut() {
+        use flate2::Compression;
+        use flate2::write::ZlibEncoder;
+        use std::io::Write;
+
+        let payload: Vec<u8> = (0..4096u32).map(|i| (i % 251) as u8).collect();
+        let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&payload).expect("write payload");
+        encoder.flush().expect("sync flush emits everything written so far");
+        let full = encoder.finish().expect("finish stream");
+        let truncated = &full[..full.len() - 8];
+
+        let complete = inflate_prefix(&full);
+        let partial = inflate_prefix(truncated);
+
+        assert_eq!(complete, payload);
+        assert!(!partial.is_empty(), "a flushed prefix must inflate to something");
+        assert!(payload.starts_with(&partial), "the prefix must be a prefix of the payload");
     }
 }
