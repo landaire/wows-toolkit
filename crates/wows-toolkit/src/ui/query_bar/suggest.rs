@@ -1,6 +1,7 @@
 //! Suggestion sourcing and ranking for the query bar's dropdown.
 
 use rust_i18n::t;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wowsunpack::game_types::GameMode;
 
 use crate::db::index::query_ast::CmpOp;
@@ -26,6 +27,7 @@ use crate::ui::query_bar::label::game_mode_label;
 use crate::ui::query_bar::label::match_field_label;
 use crate::ui::query_bar::label::op_label;
 use crate::ui::query_bar::label::outcome_label;
+use crate::ui::query_bar::label::rating_label;
 use crate::ui::query_bar::label::relation_label;
 use crate::ui::query_bar::label::roster_field_label;
 
@@ -245,6 +247,11 @@ const STAT_SHORTCUTS: &[(RosterField, Scope, &str)] = &[
     (RosterField::Pr, Scope::Enemy, "stat.pr.enemy"),
     (RosterField::Pr, Scope::Division, "stat.pr.division"),
     (RosterField::Pr, Scope::Anyone, "stat.pr.anyone"),
+    (RosterField::Rating, Scope::SelfPlayer, "stat.rating.self"),
+    (RosterField::Rating, Scope::Ally, "stat.rating.ally"),
+    (RosterField::Rating, Scope::Enemy, "stat.rating.enemy"),
+    (RosterField::Rating, Scope::Division, "stat.rating.division"),
+    (RosterField::Rating, Scope::Anyone, "stat.rating.anyone"),
 ];
 
 /// Every roster field that is not a stat field and not already named by
@@ -542,7 +549,8 @@ fn request_for_kind(kind: ValueKind, needle: &str) -> Option<ValueRequest> {
         | ValueKind::Division
         | ValueKind::Class
         | ValueKind::Timestamp
-        | ValueKind::GameMode => None,
+        | ValueKind::GameMode
+        | ValueKind::Rating => None,
     }
 }
 
@@ -708,6 +716,7 @@ fn enum_value_label(kind: ValueKind, token: &str) -> String {
         ValueKind::Division => DivisionScope::from_token(token).map(division_label),
         ValueKind::Class => ShipClass::from_token(token).map(class_label),
         ValueKind::GameMode => GameMode::ALL.into_iter().find(|m| m.as_token() == token).map(game_mode_label),
+        ValueKind::Rating => PersonalRatingCategory::from_token(token).map(rating_label),
         ValueKind::Text
         | ValueKind::Int
         | ValueKind::Float
@@ -965,6 +974,7 @@ mod tests {
             ValueKind::Ship | ValueKind::Account | ValueKind::Source => "1",
             ValueKind::Timestamp => "2024-01-01",
             ValueKind::GameMode => "arms-race",
+            ValueKind::Rating => "unicum",
         }
     }
 
@@ -1218,6 +1228,7 @@ mod tests {
             ValueKind::Division,
             ValueKind::Class,
             ValueKind::GameMode,
+            ValueKind::Rating,
         ] {
             let vs = enum_values(kind).unwrap_or_else(|| panic!("{kind:?} should offer values"));
             assert!(!vs.is_empty(), "{kind:?} offered an empty list");
@@ -1257,6 +1268,18 @@ mod tests {
         }
     }
 
+    /// The dropdown must draw from `PersonalRatingCategory::ALL`, the same list
+    /// the parser's error hint reads, rather than a hand-maintained copy that
+    /// could offer a band the grammar does not accept or miss one it does.
+    #[test]
+    fn the_rating_value_source_offers_every_band() {
+        let offered = enum_values(ValueKind::Rating).expect("rating is enumerable");
+        assert_eq!(offered.len(), PersonalRatingCategory::ALL.len());
+        for band in PersonalRatingCategory::ALL {
+            assert!(offered.iter().any(|o| o.token == band.as_token()), "{band:?} not offered");
+        }
+    }
+
     /// The value a clicked option of `kind` and raw `token` must parse into.
     /// Built independently of `enum_value_label`, from the same domain
     /// conversions `query_text`'s own value parser uses for these kinds, so
@@ -1278,6 +1301,9 @@ mod tests {
             ValueKind::GameMode => Value::GameMode(
                 GameMode::ALL.into_iter().find(|m| m.as_token() == token).unwrap_or_else(|| panic!("{token:?}")),
             ),
+            ValueKind::Rating => {
+                Value::Rating(PersonalRatingCategory::from_token(token).unwrap_or_else(|| panic!("{token:?}")))
+            }
             other => unreachable!("enum_values never offers {other:?}"),
         }
     }
@@ -1413,7 +1439,8 @@ mod tests {
             | ValueKind::Relation
             | ValueKind::Division
             | ValueKind::Class
-            | ValueKind::GameMode => "enum",
+            | ValueKind::GameMode
+            | ValueKind::Rating => "enum",
             ValueKind::Ship | ValueKind::Account | ValueKind::Source => "lookup",
             ValueKind::Text | ValueKind::Int | ValueKind::Float | ValueKind::Timestamp => "plain",
         };

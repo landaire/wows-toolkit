@@ -2,6 +2,7 @@
 //! authorises. Pure so the boolean-editing rules are testable without egui.
 
 use jiff::Timestamp;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
@@ -478,6 +479,7 @@ fn value_kind_of(value: &Value) -> Option<ValueKind> {
         Value::Source(_) => Some(ValueKind::Source),
         Value::Timestamp(_) => Some(ValueKind::Timestamp),
         Value::GameMode(_) => Some(ValueKind::GameMode),
+        Value::Rating(_) => Some(ValueKind::Rating),
         Value::NoOperand => None,
     }
 }
@@ -522,6 +524,7 @@ fn placeholder_value(kind: ValueKind) -> Value {
         ValueKind::GameMode => Value::GameMode(
             GameMode::ALL.into_iter().find(|m| m.is_offerable()).expect("at least one mode is offerable"),
         ),
+        ValueKind::Rating => Value::Rating(PersonalRatingCategory::ALL[0]),
     }
 }
 
@@ -1642,6 +1645,7 @@ mod tests {
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
             ValueKind::GameMode => Value::GameMode(GameMode::ArmsRace),
+            ValueKind::Rating => Value::Rating(wows_replay_insights::personal_rating::PersonalRatingCategory::Unicum),
         }
     }
 

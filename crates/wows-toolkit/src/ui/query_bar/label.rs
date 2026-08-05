@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 
 use rust_i18n::t;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::AccountId;
 use wows_replays::types::GameParamId;
 use wowsunpack::game_types::GameMode;
@@ -205,6 +206,7 @@ pub(crate) fn roster_field_label(field: RosterField) -> String {
         RosterField::Potential => t!("ui.search.field.stat_potential"),
         RosterField::Received => t!("ui.search.field.stat_received"),
         RosterField::Pr => t!("ui.search.field.stat_pr"),
+        RosterField::Rating => t!("ui.search.field.rating"),
         RosterField::Survived => t!("ui.search.field.stat_survived"),
         RosterField::Disconnected => t!("ui.search.field.stat_disconnected"),
         RosterField::StreamSniper => t!("ui.search.field.stream_sniper"),
@@ -249,6 +251,7 @@ fn value_text(value: &Value, cache: &NameCache) -> String {
         Value::Relation(r) => relation_label(*r),
         Value::Division(d) => division_label(*d),
         Value::Class(c) => class_label(*c),
+        Value::Rating(b) => rating_label(*b),
         Value::Ship(id) => cache.ships.get(id).cloned().unwrap_or_else(|| format!("#{}", id.raw())),
         Value::Account(a) => cache.players.get(a).cloned().unwrap_or_else(|| format!("#{}", a.raw())),
         Value::Source(s) => cache
@@ -431,6 +434,27 @@ fn game_mode_key(mode: GameMode) -> &'static str {
         GameMode::PinataEvent => "ui.search.value.game_mode_pinata_event",
         GameMode::Respawns => "ui.search.value.game_mode_respawns",
         GameMode::RespawnsSectors => "ui.search.value.game_mode_respawns_sectors",
+    }
+}
+
+/// The band's own display name, from the crate that owns the boundaries, so
+/// the search reads a rating the same way the rest of the app does.
+pub(crate) fn rating_label(band: PersonalRatingCategory) -> String {
+    t!(rating_key(band)).into()
+}
+
+/// Split out for the same reason `outcome_key` is: it lets a test assert the
+/// label actually translated rather than merely being non-empty.
+fn rating_key(band: PersonalRatingCategory) -> &'static str {
+    match band {
+        PersonalRatingCategory::Bad => "ui.search.value.rating_bad",
+        PersonalRatingCategory::BelowAverage => "ui.search.value.rating_below_average",
+        PersonalRatingCategory::Average => "ui.search.value.rating_average",
+        PersonalRatingCategory::Good => "ui.search.value.rating_good",
+        PersonalRatingCategory::VeryGood => "ui.search.value.rating_very_good",
+        PersonalRatingCategory::Great => "ui.search.value.rating_great",
+        PersonalRatingCategory::Unicum => "ui.search.value.rating_unicum",
+        PersonalRatingCategory::SuperUnicum => "ui.search.value.rating_super_unicum",
     }
 }
 
@@ -846,6 +870,7 @@ mod tests {
             ValueKind::Source => Value::Source(crate::db::index::rows::SourceId(1)),
             ValueKind::Timestamp => Value::Timestamp(jiff::Timestamp::from_second(0).unwrap()),
             ValueKind::GameMode => Value::GameMode(GameMode::ArmsRace),
+            ValueKind::Rating => Value::Rating(PersonalRatingCategory::Unicum),
         }
     }
 
@@ -873,6 +898,10 @@ mod tests {
         for o in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown] {
             let key = outcome_key(o);
             assert_ne!(outcome_label(o), key, "{o:?} has no translation for {key}");
+        }
+        for band in PersonalRatingCategory::ALL {
+            let key = rating_key(band);
+            assert_ne!(rating_label(band), key, "{band:?} has no translation for {key}");
         }
     }
 

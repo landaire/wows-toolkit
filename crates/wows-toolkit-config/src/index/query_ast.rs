@@ -8,6 +8,7 @@ use jiff::Timestamp;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
 
 use super::rows::MatchOutcome;
 use super::rows::SourceId;
@@ -231,6 +232,10 @@ const NUM_OPS: &[Op] = &[Op::Eq, Op::Ne, Op::Gt, Op::Ge, Op::Lt, Op::Le];
 const NUM_OPS_NULLABLE: &[Op] = &[Op::Eq, Op::Ne, Op::Gt, Op::Ge, Op::Lt, Op::Le, Op::IsSet, Op::IsNotSet];
 const ENUM_OPS: &[Op] = &[Op::Is, Op::IsNot];
 const ENUM_OPS_NULLABLE: &[Op] = &[Op::Is, Op::IsNot, Op::IsSet, Op::IsNotSet];
+/// The rating bands are ordered, so a comparison against one is meaningful and
+/// reads as a PR threshold: `rating >= unicum` is every player at or past the
+/// Unicum floor. Equality stays the band's own half-open range.
+const ORDERED_ENUM_OPS: &[Op] = &[Op::Is, Op::IsNot, Op::Gt, Op::Ge, Op::Lt, Op::Le];
 
 /// Which `Value` variant a field expects. Drives both the parser's value
 /// production and the widget's value editor.
@@ -249,6 +254,9 @@ pub enum ValueKind {
     Source,
     Timestamp,
     GameMode,
+    /// A named personal-rating band. Not a stored column: it compiles to a
+    /// range over `indexed_vehicle.pr`.
+    Rating,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -273,6 +281,11 @@ pub enum Value {
     /// `Recognized` belongs; carrying it here would model a state that can
     /// never occur.
     GameMode(GameMode),
+    /// A personal-rating band, always one the parser or the dropdown produced
+    /// from `PersonalRatingCategory::ALL`. It names a PR range rather than a
+    /// stored value, which is what lets the filter run against replays indexed
+    /// before it existed.
+    Rating(PersonalRatingCategory),
     /// The operand-less companion to `Op::IsSet` and `Op::IsNotSet`. Named
     /// `NoOperand` rather than `None` so it is never misread as `Option::None`.
     NoOperand,
@@ -472,6 +485,7 @@ pub enum RosterField {
     Potential,
     Received,
     Pr,
+    Rating,
     Survived,
     Disconnected,
     StreamSniper,
@@ -479,7 +493,7 @@ pub enum RosterField {
 }
 
 impl RosterField {
-    pub const ALL: [RosterField; 22] = [
+    pub const ALL: [RosterField; 23] = [
         RosterField::Relation,
         RosterField::Division,
         RosterField::Account,
@@ -498,6 +512,7 @@ impl RosterField {
         RosterField::Potential,
         RosterField::Received,
         RosterField::Pr,
+        RosterField::Rating,
         RosterField::Survived,
         RosterField::Disconnected,
         RosterField::StreamSniper,
@@ -524,6 +539,7 @@ impl RosterField {
             RosterField::Potential => "potential",
             RosterField::Received => "received",
             RosterField::Pr => "pr",
+            RosterField::Rating => "rating",
             RosterField::Survived => "survived",
             RosterField::Disconnected => "disconnected",
             RosterField::StreamSniper => "stream-sniper",
@@ -573,6 +589,9 @@ impl RosterField {
             RosterField::Potential => "potential",
             RosterField::Received => "received",
             RosterField::Pr => "pr",
+            // The band is a range over the same PR column, which is what lets
+            // the filter reach history indexed before it existed.
+            RosterField::Rating => "pr",
             RosterField::Survived => "survived",
             RosterField::Disconnected => "disconnected",
             RosterField::StreamSniper => "is_stream_sniper",
@@ -594,6 +613,7 @@ impl RosterField {
                 ValueKind::Bool
             }
             RosterField::Pr => ValueKind::Float,
+            RosterField::Rating => ValueKind::Rating,
             RosterField::Damage
             | RosterField::Kills
             | RosterField::Spotting
@@ -621,6 +641,7 @@ impl RosterField {
             | RosterField::Potential
             | RosterField::Received
             | RosterField::Pr => NUM_OPS_NULLABLE,
+            RosterField::Rating => ORDERED_ENUM_OPS,
             RosterField::Survived | RosterField::Disconnected | RosterField::StreamSniper => ENUM_OPS_NULLABLE,
         }
     }

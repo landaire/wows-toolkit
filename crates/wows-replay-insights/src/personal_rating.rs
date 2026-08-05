@@ -54,18 +54,74 @@ pub enum PersonalRatingCategory {
 }
 
 impl PersonalRatingCategory {
+    /// Every band, weakest first. The order is the `Ord` order, which
+    /// `ceiling` and `from_pr` both read.
+    pub const ALL: [PersonalRatingCategory; 8] = [
+        Self::Bad,
+        Self::BelowAverage,
+        Self::Average,
+        Self::Good,
+        Self::VeryGood,
+        Self::Great,
+        Self::Unicum,
+        Self::SuperUnicum,
+    ];
+
+    /// The inclusive PR floor of this band. `None` for `Bad`: nothing sits
+    /// below it, so it has no bound rather than a bound of zero.
+    ///
+    /// The one statement of these constants. `ceiling` and `from_pr` both
+    /// derive from it, so a band cannot be moved in one place and left behind
+    /// in another.
+    pub fn floor(self) -> Option<f64> {
+        match self {
+            Self::Bad => None,
+            Self::BelowAverage => Some(750.0),
+            Self::Average => Some(1100.0),
+            Self::Good => Some(1350.0),
+            Self::VeryGood => Some(1550.0),
+            Self::Great => Some(1750.0),
+            Self::Unicum => Some(2100.0),
+            Self::SuperUnicum => Some(2450.0),
+        }
+    }
+
+    /// The exclusive PR ceiling of this band: the next band's floor. `None`
+    /// for `SuperUnicum`, which is unbounded above.
+    pub fn ceiling(self) -> Option<f64> {
+        Self::ALL.into_iter().find(|band| *band > self).and_then(Self::floor)
+    }
+
     /// Get the category for a given PR value
     pub fn from_pr(pr: f64) -> Self {
-        match pr as u32 {
-            0..750 => Self::Bad,
-            750..1100 => Self::BelowAverage,
-            1100..1350 => Self::Average,
-            1350..1550 => Self::Good,
-            1550..1750 => Self::VeryGood,
-            1750..2100 => Self::Great,
-            2100..2450 => Self::Unicum,
-            _ => Self::SuperUnicum,
+        Self::ALL.into_iter().rev().find(|band| band.floor().is_none_or(|floor| pr >= floor)).unwrap_or(Self::Bad)
+    }
+
+    /// The lowercase token this band is written as in the replay search
+    /// grammar.
+    pub fn as_token(self) -> &'static str {
+        match self {
+            Self::Bad => "bad",
+            Self::BelowAverage => "below-average",
+            Self::Average => "average",
+            Self::Good => "good",
+            Self::VeryGood => "very-good",
+            Self::Great => "great",
+            Self::Unicum => "unicum",
+            Self::SuperUnicum => "super-unicum",
         }
+    }
+
+    /// The band `s` names, case-insensitively. The hyphenated `as_token`
+    /// spelling and the run-together one are both accepted, so a user who
+    /// types `superunicum` reaches the same band the dropdown offers as
+    /// `super-unicum`.
+    pub fn from_token(s: &str) -> Option<Self> {
+        let lower = s.to_ascii_lowercase();
+        Self::ALL.into_iter().find(|band| {
+            let token = band.as_token();
+            lower == token || lower == token.replace('-', "")
+        })
     }
 
     /// Get the display name for this category
@@ -331,6 +387,33 @@ mod tests {
         assert_eq!(PersonalRatingCategory::Great.name(), "Great");
         assert_eq!(PersonalRatingCategory::Unicum.name(), "Unicum");
         assert_eq!(PersonalRatingCategory::SuperUnicum.name(), "Super Unicum");
+    }
+
+    #[test]
+    fn every_band_token_round_trips_and_accepts_the_run_together_spelling() {
+        for band in PersonalRatingCategory::ALL {
+            assert_eq!(PersonalRatingCategory::from_token(band.as_token()), Some(band));
+            assert_eq!(PersonalRatingCategory::from_token(&band.as_token().to_ascii_uppercase()), Some(band));
+            assert_eq!(PersonalRatingCategory::from_token(&band.as_token().replace('-', "")), Some(band));
+        }
+        assert_eq!(PersonalRatingCategory::from_token("superunicum"), Some(PersonalRatingCategory::SuperUnicum));
+        assert_eq!(PersonalRatingCategory::from_token("legendary"), None);
+    }
+
+    /// Each band's ceiling is the next band's floor, and the chain is closed at
+    /// both ends. A band whose ceiling drifted off the next band's floor would
+    /// leave a PR value belonging to no band or to two.
+    #[test]
+    fn the_bands_tile_the_pr_line_with_no_gap_and_no_overlap() {
+        assert_eq!(PersonalRatingCategory::Bad.floor(), None, "Bad must have no floor");
+        assert_eq!(PersonalRatingCategory::SuperUnicum.ceiling(), None, "SuperUnicum must have no ceiling");
+        for pair in PersonalRatingCategory::ALL.windows(2) {
+            let (lower, upper) = (pair[0], pair[1]);
+            assert_eq!(lower.ceiling(), upper.floor(), "{lower:?} does not meet {upper:?}");
+            let boundary = upper.floor().expect("only Bad has no floor");
+            assert_eq!(PersonalRatingCategory::from_pr(boundary), upper);
+            assert_eq!(PersonalRatingCategory::from_pr(boundary - 1.0), lower);
+        }
     }
 
     #[test]

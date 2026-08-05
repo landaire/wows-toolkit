@@ -26,6 +26,7 @@ use winnow::token::take_while;
 use wows_core::game_types::AccountId;
 use wows_core::game_types::GameMode;
 use wows_core::game_types::GameParamId;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;
@@ -642,6 +643,7 @@ pub fn parse_roster_value(kind: ValueKind, raw: &str) -> Option<Value> {
         },
         ValueKind::Division => DivisionScope::from_token(&s).map(Value::Division),
         ValueKind::Class => ShipClass::from_token(&s).map(Value::Class),
+        ValueKind::Rating => PersonalRatingCategory::from_token(&s).map(Value::Rating),
         ValueKind::Account => s.parse::<i64>().ok().map(|n| Value::Account(AccountId(n))),
         ValueKind::Ship => s.parse::<u64>().ok().map(|n| Value::Ship(GameParamId::from(n))),
         other => parse_value(other, raw),
@@ -653,6 +655,7 @@ pub fn enumerable_roster_values(kind: ValueKind) -> Option<Vec<String>> {
         ValueKind::Relation => Some(vec!["self".into(), "ally".into(), "enemy".into()]),
         ValueKind::Division => Some(DivisionScope::ALL.iter().map(|d| d.as_token().to_string()).collect()),
         ValueKind::Class => Some(ShipClass::ALL.iter().map(|c| c.as_db_str().to_ascii_lowercase()).collect()),
+        ValueKind::Rating => Some(PersonalRatingCategory::ALL.iter().map(|b| b.as_token().to_string()).collect()),
         other => enumerable_values(other),
     }
 }
@@ -847,6 +850,7 @@ fn op_from_token(token: &str, kind: ValueKind) -> Option<Op> {
             | ValueKind::Account
             | ValueKind::Source
             | ValueKind::GameMode
+            | ValueKind::Rating
     );
     match token {
         ":" if textual => Some(Op::Contains),
@@ -1177,6 +1181,7 @@ pub fn print_value(value: &Value) -> String {
         Value::Source(s) => s.0.to_string(),
         Value::Timestamp(t) => print_timestamp(*t),
         Value::GameMode(m) => m.as_token().to_string(),
+        Value::Rating(b) => b.as_token().to_string(),
         Value::NoOperand => String::new(),
     }
 }
@@ -1985,6 +1990,90 @@ mod tests {
             let text = format!("a{token}b");
             round_trip_tree(Expr::Leaf(MatchTerm::FreeText(text.clone())));
             round_trip_tree(Expr::Leaf(MatchTerm::Field(MatchField::Map, Op::Contains, Value::Text(text))));
+        }
+    }
+
+    /// The band a roster term carries, or a panic naming the shape that was
+    /// found instead. Reaches through both the `any(...)` wrapper and the
+    /// scope sugar so a caller can assert on the band alone.
+    fn sole_rating_band(expr: &MatchExpr) -> PersonalRatingCategory {
+        let Expr::Leaf(MatchTerm::Roster { pred, .. }) = expr else { panic!("expected a roster term, got {expr:?}") };
+        let leaf = match pred {
+            Expr::Leaf(t) => t,
+            Expr::All(cs) => match cs.last() {
+                Some(Expr::Leaf(t)) => t,
+                other => panic!("expected a leaf predicate, got {other:?}"),
+            },
+            other => panic!("expected a leaf predicate, got {other:?}"),
+        };
+        match leaf.value {
+            Value::Rating(band) => band,
+            ref other => panic!("expected a rating value, got {other:?}"),
+        }
+    }
+
+    /// The scope sugar the checklist is written in reaches the roster field
+    /// like any other, so `self.rating >= great` and `any(enemy.rating:unicum)`
+    /// are one form of the same term.
+    #[test]
+    fn the_scope_sugar_reaches_a_rating_the_way_it_reaches_any_roster_field() {
+        for src in ["self.rating>=great", "enemy.rating:unicum", "ally.rating!=bad", "anyone.rating<average"] {
+            let parsed = parse_query(src).unwrap_or_else(|e| panic!("{src:?}: {e}"));
+            assert_eq!(parse_query(&print_query(&parsed)).expect("reparse"), parsed, "{src:?}");
+        }
+        assert_eq!(
+            parse_query("enemy.rating:unicum").unwrap(),
+            parse_query("any(relation=enemy and rating=unicum)").unwrap()
+        );
+    }
+
+    #[test]
+    fn every_rating_token_parses_back_to_its_own_band() {
+        for band in PersonalRatingCategory::ALL {
+            let src = format!("any(rating:{})", band.as_token());
+            let parsed = parse_query(&src).unwrap_or_else(|e| panic!("{src:?}: {e}"));
+            assert_eq!(sole_rating_band(&parsed), band, "{src:?} landed on another band");
+            assert_eq!(parse_query(&print_query(&parsed)).expect("reparse"), parsed, "{src:?}");
+        }
+    }
+
+    /// `:` and `=` must both read as `Op::Is` for a band, the way they do for
+    /// every other enum kind. `Op::Eq` prints as the same `=` token but is not
+    /// in `rating`'s allowed set, so reading one here would build a term the
+    /// printer cannot round trip.
+    #[test]
+    fn a_rating_equality_is_the_enum_equality_and_a_comparison_keeps_its_own_operator() {
+        for (src, expected) in [
+            ("any(rating:unicum)", Op::Is),
+            ("any(rating=unicum)", Op::Is),
+            ("any(rating!=unicum)", Op::IsNot),
+            ("any(rating>=unicum)", Op::Ge),
+            ("any(rating<unicum)", Op::Lt),
+        ] {
+            let parsed = parse_query(src).unwrap_or_else(|e| panic!("{src:?}: {e}"));
+            let Expr::Leaf(MatchTerm::Roster { pred: Expr::Leaf(term), .. }) = &parsed else {
+                panic!("{src:?} parsed as {parsed:?}");
+            };
+            assert_eq!(term.op, expected, "{src:?}");
+            assert!(term.field.allowed_ops().contains(&term.op), "{src:?} built a disallowed operator");
+        }
+    }
+
+    /// A misspelled band is an error naming the bands that would have worked,
+    /// never a silent fall back to some default band.
+    #[test]
+    fn an_unrecognised_rating_token_reports_the_bands_that_would_have_worked() {
+        let err = parse_query("any(rating:legendary)").unwrap_err();
+        match &err.kind {
+            ParseErrorKind::BadValue { field, allowed } => {
+                assert_eq!(*field, "rating");
+                let allowed = allowed.as_ref().expect("rating is an enum, so its values are enumerable");
+                assert_eq!(allowed.len(), PersonalRatingCategory::ALL.len());
+                for band in PersonalRatingCategory::ALL {
+                    assert!(allowed.iter().any(|a| a == band.as_token()), "{band:?} missing from {allowed:?}");
+                }
+            }
+            other => panic!("got {other:?}"),
         }
     }
 

@@ -765,6 +765,7 @@ stat_spotting = "Spotting"
 stat_potential = "Potential damage"
 stat_received = "Damage received"
 stat_pr = "PR"
+rating = "Rating"
 stat_survived = "Survived"
 stat_disconnected = "Disconnected"
 game_type = "Game type"
@@ -812,6 +813,16 @@ class_cruiser = "Cruiser"
 class_destroyer = "Destroyer"
 class_submarine = "Submarine"
 class_auxiliary = "Auxiliary"
+# The personal-rating bands, named as wows-numbers.com names them; the
+# boundaries they stand for live in wows-replay-insights.
+rating_bad = "Bad"
+rating_below_average = "Below Average"
+rating_average = "Average"
+rating_good = "Good"
+rating_very_good = "Very Good"
+rating_great = "Great"
+rating_unicum = "Unicum"
+rating_super_unicum = "Super Unicum"
 # Most of these are the mode's own name from the GAME_MODE table, typeset for
 # reading (underscores to spaces, words capitalised) rather than an invented
 # descriptive phrase: there is no IDS_ source anywhere in the deobfuscated

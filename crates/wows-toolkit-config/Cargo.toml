@@ -13,6 +13,10 @@ tracing = { workspace = true }
 tokio = { version = "1.51", features = ["rt", "rt-multi-thread", "macros"] }
 home = "0.5"
 wows-core = { path = "../wows-core", features = ["serde"] }
+# Only for `PersonalRatingCategory`: the rating filter is a range over the
+# existing `indexed_vehicle.pr`, so it reads the band boundaries from the crate
+# that owns them rather than restating them here.
+wows-replay-insights = { workspace = true, features = ["personal-rating"] }
 thiserror = { workspace = true }
 jiff = { workspace = true, features = ["serde"] }
 winnow = { workspace = true }

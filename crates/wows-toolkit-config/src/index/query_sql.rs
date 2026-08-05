@@ -6,6 +6,7 @@
 use sqlx::QueryBuilder;
 use sqlx::Sqlite;
 use wows_core::game_types::GameMode;
+use wows_replay_insights::personal_rating::PersonalRatingCategory;
 
 use super::query_ast::CmpOp;
 use super::query_ast::DivisionScope;
@@ -308,6 +309,7 @@ fn push_roster_term(qb: &mut QueryBuilder<'_, Sqlite>, term: &RosterTerm) {
         (ValueKind::Relation, Value::Relation(r)) => push_eq_str(qb, &col, term.op, r.as_db_str()),
         (ValueKind::Account, Value::Account(a)) => push_num_i64(qb, &col, term.op, a.raw()),
         (ValueKind::Ship, Value::Ship(s)) => push_num_i64(qb, &col, term.op, s.raw() as i64),
+        (ValueKind::Rating, Value::Rating(band)) => push_rating(qb, &col, term.op, *band),
         // A value that does not fit the field is a bug upstream. Narrow, do not widen.
         _ => {
             qb.push("1=0");
@@ -349,6 +351,78 @@ fn push_division(qb: &mut QueryBuilder<'_, Sqlite>, op: Op, scope: DivisionScope
 
 fn push_num_f64(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, n: f64) {
     qb.push(format!("{col} {} ", num_cmp(op).as_sql())).push_bind(n);
+}
+
+/// A rating band is a half-open range on the PR column, never a stored value,
+/// which is what lets this filter run against rows indexed before it existed.
+///
+/// Equality is the band's own range. A comparison is the open threshold at
+/// whichever of its ends the operator points at, so `rating >= unicum` reads as
+/// the PR threshold a person means by it. `Bad` has no floor and `SuperUnicum`
+/// no ceiling, so a threshold can fall off either end: off the low end it means
+/// every row that has a rating at all, off the high end it means none.
+///
+/// A NULL `pr` matches no form. The real comparisons exclude it under SQL's
+/// three-valued logic (including the negated one, where `NOT NULL` is still
+/// NULL), and the open low end says `IS NOT NULL` rather than accepting every
+/// row: a player with no recorded PR is not secretly `Bad`.
+fn push_rating(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, op: Op, band: PersonalRatingCategory) {
+    match op {
+        Op::IsNot | Op::NotEquals | Op::Ne => {
+            qb.push("NOT (");
+            push_rating_range(qb, col, band);
+            qb.push(")");
+        }
+        // Strictly above the band starts at its exclusive ceiling.
+        Op::Gt => match band.ceiling() {
+            Some(ceiling) => push_at_least(qb, col, ceiling),
+            None => {
+                qb.push("1=0");
+            }
+        },
+        Op::Ge => match band.floor() {
+            Some(floor) => push_at_least(qb, col, floor),
+            None => push_has_rating(qb, col),
+        },
+        Op::Lt => match band.floor() {
+            Some(floor) => push_below(qb, col, floor),
+            None => {
+                qb.push("1=0");
+            }
+        },
+        Op::Le => match band.ceiling() {
+            Some(ceiling) => push_below(qb, col, ceiling),
+            None => push_has_rating(qb, col),
+        },
+        _ => push_rating_range(qb, col, band),
+    }
+}
+
+fn push_rating_range(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, band: PersonalRatingCategory) {
+    match (band.floor(), band.ceiling()) {
+        (Some(floor), Some(ceiling)) => {
+            qb.push("(");
+            push_at_least(qb, col, floor);
+            qb.push(" AND ");
+            push_below(qb, col, ceiling);
+            qb.push(")");
+        }
+        (Some(floor), None) => push_at_least(qb, col, floor),
+        (None, Some(ceiling)) => push_below(qb, col, ceiling),
+        (None, None) => push_has_rating(qb, col),
+    }
+}
+
+fn push_at_least(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, bound: f64) {
+    qb.push(format!("{col} >= ")).push_bind(bound);
+}
+
+fn push_below(qb: &mut QueryBuilder<'_, Sqlite>, col: &str, bound: f64) {
+    qb.push(format!("{col} < ")).push_bind(bound);
+}
+
+fn push_has_rating(qb: &mut QueryBuilder<'_, Sqlite>, col: &str) {
+    qb.push(format!("{col} IS NOT NULL"));
 }
 
 #[cfg(test)]
@@ -771,6 +845,110 @@ mod tests {
         let ship =
             sql_for(&roster(Quant::Any, rleaf(RosterField::Ship, Op::Is, Value::Ship(GameParamId::from(999u64)))));
         assert!(ship.contains("v.ship_id ="), "got {ship}");
+    }
+
+    #[test]
+    fn every_band_boundary_maps_to_the_band_it_names() {
+        // Pins the constants this filter compiles against, so a future edit to
+        // them is a visible failure rather than a silent reclassification of
+        // every historical row.
+        for (pr, expected) in [
+            (0.0, PersonalRatingCategory::Bad),
+            (749.0, PersonalRatingCategory::Bad),
+            (750.0, PersonalRatingCategory::BelowAverage),
+            (1100.0, PersonalRatingCategory::Average),
+            (1350.0, PersonalRatingCategory::Good),
+            (1550.0, PersonalRatingCategory::VeryGood),
+            (1750.0, PersonalRatingCategory::Great),
+            (2100.0, PersonalRatingCategory::Unicum),
+            (2450.0, PersonalRatingCategory::SuperUnicum),
+        ] {
+            assert_eq!(PersonalRatingCategory::from_pr(pr), expected, "pr {pr}");
+        }
+    }
+
+    /// An in-memory index holding one match per PR, each with a single roster
+    /// row, so a quantifier over the roster and the match it returns are the
+    /// same thing and the assertions can talk about PRs directly.
+    async fn test_db_with_vehicle_prs(prs: &[f64]) -> sqlx::SqlitePool {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+        sqlx::query("CREATE TABLE indexed_match (arena_id INTEGER PRIMARY KEY)").execute(&pool).await.unwrap();
+        sqlx::query("CREATE TABLE indexed_vehicle (arena_id INTEGER, pr REAL)").execute(&pool).await.unwrap();
+        for &pr in prs {
+            insert_vehicle_with_pr(&pool, Some(pr)).await;
+        }
+        pool
+    }
+
+    async fn insert_vehicle_with_pr(pool: &sqlx::SqlitePool, pr: Option<f64>) {
+        let arena_id: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(arena_id), 0) + 1 FROM indexed_match")
+            .fetch_one(pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO indexed_match (arena_id) VALUES (?)").bind(arena_id).execute(pool).await.unwrap();
+        sqlx::query("INSERT INTO indexed_vehicle (arena_id, pr) VALUES (?, ?)")
+            .bind(arena_id)
+            .bind(pr)
+            .execute(pool)
+            .await
+            .unwrap();
+    }
+
+    /// Runs `query` through the real parser and the real compiler against real
+    /// SQLite, in insertion order. Substring-matching the generated SQL cannot
+    /// tell a range that matches the right rows from one that matches none.
+    async fn search(pool: &sqlx::SqlitePool, query: &str) -> Vec<Option<f64>> {
+        let expr = crate::index::query_text::parse_query(query).unwrap_or_else(|e| panic!("{query:?}: {e}"));
+        let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+            "SELECT vr.pr FROM indexed_match m JOIN indexed_vehicle vr ON vr.arena_id = m.arena_id WHERE ",
+        );
+        push_match_expr(&mut qb, &expr, &CompileCtx::default());
+        qb.push(" ORDER BY m.arena_id");
+        qb.build_query_scalar().fetch_all(pool).await.unwrap()
+    }
+
+    /// Panics rather than dropping a matched row with no recorded PR, so a
+    /// NULL that slipped through a rating filter cannot be silently discarded
+    /// on the way to an assertion about the PRs that matched.
+    fn prs_of(hits: &[Option<f64>]) -> Vec<f64> {
+        hits.iter().map(|pr| pr.expect("a matched row had no recorded PR")).collect()
+    }
+
+    #[tokio::test]
+    async fn an_equality_on_a_band_matches_only_that_bands_range() {
+        let db = test_db_with_vehicle_prs(&[700.0, 2200.0, 2500.0]).await;
+        let hits = search(&db, "any(rating:unicum)").await;
+        assert_eq!(prs_of(&hits), vec![2200.0], "matched outside the band");
+    }
+
+    #[tokio::test]
+    async fn a_comparison_on_a_band_is_an_open_threshold() {
+        let db = test_db_with_vehicle_prs(&[700.0, 2200.0, 2500.0]).await;
+        let hits = search(&db, "any(rating>=unicum)").await;
+        assert_eq!(prs_of(&hits), vec![2200.0, 2500.0]);
+    }
+
+    /// `Bad` has no floor and `SuperUnicum` no ceiling, so a threshold can fall
+    /// off either end of the band order. Off the low end it means every row
+    /// that has a rating; off the high end it means none.
+    #[tokio::test]
+    async fn a_threshold_past_either_end_of_the_band_order_stays_meaningful() {
+        let db = test_db_with_vehicle_prs(&[700.0, 2200.0, 2500.0]).await;
+        assert_eq!(prs_of(&search(&db, "any(rating>=bad)").await), vec![700.0, 2200.0, 2500.0]);
+        assert_eq!(prs_of(&search(&db, "any(rating<=super-unicum)").await), vec![700.0, 2200.0, 2500.0]);
+        assert!(search(&db, "any(rating<bad)").await.is_empty(), "nothing sits below Bad");
+        assert!(search(&db, "any(rating>super-unicum)").await.is_empty(), "nothing sits above SuperUnicum");
+    }
+
+    #[tokio::test]
+    async fn a_null_pr_matches_no_rating_filter() {
+        // Not equality, not a comparison, not a negation. A player with no
+        // recorded PR is not secretly Bad.
+        let db = test_db_with_vehicle_prs(&[]).await;
+        insert_vehicle_with_pr(&db, None).await;
+        for query in ["any(rating:bad)", "any(rating>=bad)", "any(rating<superunicum)", "any(rating!=unicum)"] {
+            assert!(search(&db, query).await.is_empty(), "{query} matched a NULL pr");
+        }
     }
 
     #[test]
