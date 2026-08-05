@@ -2,6 +2,7 @@
 //! replay index.
 
 use std::collections::HashSet;
+use std::sync::Arc;
 use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::TryRecvError;
@@ -596,6 +597,261 @@ fn header_cell(ui: &mut egui::Ui, column: ResultColumn, sort: SortSpec) -> Optio
     clicked.then_some(sortable)
 }
 
+/// Height of one results row.
+const RESULT_ROW_HEIGHT: f32 = 24.0;
+/// Height of the single header row above them.
+const RESULT_HEADER_HEIGHT: f32 = 20.0;
+/// Padding either side of a cell's content, so text in adjacent columns does
+/// not run together across the separator.
+const RESULT_CELL_MARGIN: i8 = 4;
+/// What the table stores its column widths under. Held across frames by
+/// `egui_table`, so a width the user drags to survives a scroll, a re-query and
+/// an app restart.
+const RESULT_TABLE_SALT: &str = "search_results";
+
+/// The column at `col_nr`, or `None` for the trailing action column, which
+/// shows no data and has no header.
+fn column_at(col_nr: usize) -> Option<ResultColumn> {
+    RESULT_COLUMNS.get(col_nr).copied()
+}
+
+/// The id `egui_table` files a column's stored width under. Keyed on the column
+/// itself rather than on its position, so a width follows its own column if the
+/// order ever changes instead of being inherited by whatever lands at that
+/// index.
+fn column_id(column: Option<ResultColumn>) -> egui::Id {
+    match column {
+        Some(column) => egui::Id::new(column_label_key(column)),
+        None => egui::Id::new("search_results.actions"),
+    }
+}
+
+/// Narrowest any column may be dragged.
+///
+/// Auto-sizing never lands here: a column's own header label is measured along
+/// with its cells, so the header is the floor content sizing actually reaches.
+/// This only stops a drag from collapsing a column to nothing.
+const RESULT_COLUMN_MIN_WIDTH: f32 = 24.0;
+
+/// The width a column first lays out at, and the widest it may be auto-sized or
+/// dragged to, as `(initial, max)`.
+///
+/// The initial width only decides the very first layout. `egui_table` runs a
+/// sizing pass the first time the table is shown and every column lands on its
+/// own widest cell; afterwards a column grows to fit content that no longer
+/// fits. The maxima are therefore ceilings on how far one outlier row may push
+/// a column, not target widths.
+const fn column_extent(column: ResultColumn) -> (f32, f32) {
+    match column {
+        ResultColumn::Date => (150.0, 260.0),
+        ResultColumn::Map => (120.0, 400.0),
+        ResultColumn::Mode => (90.0, 200.0),
+        ResultColumn::Ship => (140.0, 320.0),
+        ResultColumn::Outcome => (60.0, 120.0),
+        ResultColumn::Damage => (80.0, 180.0),
+        ResultColumn::Kills => (50.0, 120.0),
+        ResultColumn::Pr => (60.0, 140.0),
+    }
+}
+
+/// The action column holds three buttons whose combined width depends on the
+/// locale's word for "Open", so it is sized from its content like every other
+/// column rather than from a constant that only holds in English.
+const ACTION_COLUMN_EXTENT: (f32, f32) = (120.0, 320.0);
+
+/// Every column is resizable. That is what the user asked for, and it is also
+/// what makes auto-sizing work at all: `egui_table` only records a measured
+/// content width for a column it can resize, so a fixed column would sit at its
+/// declared width and clip whatever did not fit.
+fn result_columns() -> Vec<egui_table::Column> {
+    RESULT_COLUMNS
+        .iter()
+        .map(|column| (column_id(Some(*column)), column_extent(*column)))
+        .chain(std::iter::once((column_id(None), ACTION_COLUMN_EXTENT)))
+        .map(|(id, (initial, max))| {
+            egui_table::Column::new(initial).range(RESULT_COLUMN_MIN_WIDTH..=max).id(id).resizable(true)
+        })
+        .collect()
+}
+
+/// Draws the results table.
+///
+/// Everything the rows need is resolved before this is built, so a cell body
+/// neither borrows the tab mutably nor reaches back into `TabState`. What the
+/// pass asked for is collected into the trailing fields and read back once the
+/// table has drawn, which is also what keeps the sort out of the widget: a
+/// header click records a column here and the next frame's SQL applies it.
+struct ResultsTable<'a> {
+    hits: &'a [MatchHit],
+    /// Per-hit ship name, resolved against whichever build's game data is
+    /// loaded. Parallel to `hits`.
+    ship_names: &'a [Option<String>],
+    sort: SortSpec,
+    locale: Option<&'a str>,
+    /// Consulted only for a row whose dwell has already elapsed: resolving the
+    /// dependencies builds the preview assets and uploads icon textures, which
+    /// is far too much to do for every row the pointer crosses.
+    preview_deps: &'a dyn Fn(&egui::Ui) -> Option<Arc<preview_popup::PreviewDeps>>,
+    preview_state: &'a mut PreviewState,
+    /// Wall time since the last frame, which is what the dwell accumulates.
+    dwell_step: Duration,
+    sort_clicked: Option<SortColumn>,
+    open_path: Option<std::path::PathBuf>,
+    copy_path: Option<std::path::PathBuf>,
+    /// Whether any row's preview icon was under the pointer this frame.
+    preview_icon_hovered: bool,
+}
+
+impl ResultsTable<'_> {
+    fn data_cell_ui(&self, ui: &mut egui::Ui, column: ResultColumn, row: usize) {
+        let hit = &self.hits[row];
+        match column {
+            ResultColumn::Date => {
+                ui.label(hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string());
+            }
+            ResultColumn::Map => {
+                ui.label(&hit.map);
+            }
+            ResultColumn::Mode => {
+                ui.label(&hit.game_type);
+            }
+            ResultColumn::Ship => {
+                ui.label(self.ship_names[row].clone().unwrap_or_default());
+            }
+            ResultColumn::Outcome => {
+                let letter = match hit.outcome {
+                    MatchOutcome::Win => "W",
+                    MatchOutcome::Loss => "L",
+                    MatchOutcome::Draw => "D",
+                    MatchOutcome::Unknown => "-",
+                };
+                let fill = outcome_colour(hit.outcome, ui.style());
+                if hit.outcome == MatchOutcome::Unknown {
+                    ui.colored_label(fill, letter);
+                } else {
+                    let text = label_on(fill);
+                    ui.label(egui::RichText::new(letter).color(text).background_color(fill).strong());
+                }
+            }
+            ResultColumn::Damage => {
+                ui.label(
+                    hit.self_damage
+                        .map(|d| crate::util::formatting::separate_number(d, self.locale))
+                        .unwrap_or_default(),
+                );
+            }
+            ResultColumn::Kills => {
+                ui.label(hit.self_kills.map(|k| k.to_string()).unwrap_or_default());
+            }
+            ResultColumn::Pr => {
+                if let Some(pr) = hit.self_pr {
+                    pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false);
+                }
+            }
+        }
+    }
+
+    /// Open, copy path, and the dwell-gated map preview, each acting on this
+    /// row's own replay.
+    fn actions_ui(&mut self, ui: &mut egui::Ui, row: usize) {
+        let hit = &self.hits[row];
+        let exists = hit.replay_path.exists();
+        let btn = ui
+            .add_enabled(exists, egui::Button::new(wt_translations::icon_t(icons::FOLDER_OPEN, &t!("ui.search.open"))));
+        if !exists {
+            btn.on_hover_text(t!("ui.search.open_missing"));
+        } else if btn.clicked() {
+            self.open_path = Some(hit.replay_path.clone());
+        }
+
+        let copy_btn = ui.add(egui::Button::new(icons::COPY)).on_hover_text(t!("ui.replay.context.copy_path"));
+        if copy_btn.clicked() {
+            self.copy_path = Some(copy_target(self.hits, row));
+        }
+
+        let Some(key) = hit_preview_key(hit) else {
+            return;
+        };
+        let mut preview_response = ui.add(egui::Button::new(icons::FILM_STRIP));
+        if !preview_response.hovered() {
+            let _ = preview_response.on_hover_text(t!("ui.search.preview_map"));
+            return;
+        }
+
+        self.preview_icon_hovered = true;
+        self.preview_state.hover(key.clone(), self.dwell_step);
+        if self.preview_state.pending_request().as_ref() == Some(&key)
+            && let Some(deps) = (self.preview_deps)(ui)
+        {
+            let hover_text = preview_hover_text(hit, self.ship_names[row].as_deref());
+            preview_response = preview_response.on_hover_ui(|ui| {
+                preview_popup::preview_tooltip(ui, &deps, key.clone(), &hit.map, &hover_text);
+            });
+        } else {
+            preview_response = preview_response.on_hover_text(t!("ui.search.preview_map"));
+        }
+        let _ = preview_response;
+    }
+}
+
+impl egui_table::TableDelegate for ResultsTable<'_> {
+    fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
+        // The action column has no header, so nothing is drawn over it and
+        // there is nothing there to click.
+        let Some(column) = column_at(cell.group_index) else {
+            return;
+        };
+        let sort = self.sort;
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(RESULT_CELL_MARGIN, 0)).show(ui, |ui| {
+            if let Some(clicked) = header_cell(ui, column, sort) {
+                self.sort_clicked = Some(clicked);
+            }
+        });
+    }
+
+    fn row_ui(&mut self, ui: &mut egui::Ui, row_nr: u64) {
+        // Striping belongs here rather than in `cell_ui`, which runs afterwards
+        // and would paint over the cell contents.
+        if row_nr % 2 == 1 {
+            ui.painter().rect_filled(ui.max_rect(), 0.0, ui.visuals().faint_bg_color);
+        }
+    }
+
+    fn cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::CellInfo) {
+        let row = cell.row_nr as usize;
+        let column = column_at(cell.col_nr);
+        // The frame allocates in the parent, so the margin and the content are
+        // both part of the cell's `min_size`, which is what egui_table measures
+        // a column's width from.
+        egui::Frame::new().inner_margin(egui::Margin::symmetric(RESULT_CELL_MARGIN, 0)).show(ui, |ui| match column {
+            Some(column) => self.data_cell_ui(ui, column, row),
+            None => self.actions_ui(ui, row),
+        });
+    }
+
+    fn default_row_height(&self) -> f32 {
+        RESULT_ROW_HEIGHT
+    }
+}
+
+/// Draws the table, returning the id its per-column widths are stored under.
+///
+/// `AutoSizeMode::Never` leaves the columns' total width alone rather than
+/// redistributing it across the parent every frame; it does not disable the
+/// per-column sizing this move is for, which runs off each column's own widest
+/// measured cell.
+fn show_results_table(ui: &mut egui::Ui, delegate: &mut ResultsTable<'_>) -> egui::Id {
+    let id = egui_table::TableState::id(ui, egui::IdSalt::new(RESULT_TABLE_SALT));
+    egui_table::Table::new()
+        .id_salt(RESULT_TABLE_SALT)
+        .num_rows(delegate.hits.len() as u64)
+        .columns(result_columns())
+        .headers([egui_table::HeaderRow { height: RESULT_HEADER_HEIGHT, groups: Default::default() }])
+        .auto_size_mode(egui_table::AutoSizeMode::Never)
+        .show(ui, delegate);
+    id
+}
+
 fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: &mut Vec<AccountId>) {
     match expr {
         Expr::Leaf(term) => match &term.value {
@@ -797,146 +1053,35 @@ impl ToolkitTabViewer<'_> {
             t!("ui.search.match_count", count = count)
         });
 
-        let mut open_path: Option<std::path::PathBuf> = None;
-        let mut copy_path: Option<std::path::PathBuf> = None;
-        let mut sort_clicked: Option<SortColumn> = None;
-        // Taken out for the duration of the table so the row closures below
-        // can hold it mutably alongside the immutable borrows of `self` those
-        // same closures make (`search_ship_display_name`, `preview_deps`);
-        // put back once the table is done drawing.
+        // Taken out for the duration of the table so the delegate can hold it
+        // mutably alongside the immutable borrows of `self` it also makes
+        // (`search_ship_display_name`, `preview_deps`); put back once the table
+        // is done drawing.
         let mut preview_state = std::mem::take(&mut self.tab_state.search_tab.preview_state);
-        let mut preview_icon_hovered = false;
         let dwell_step = Duration::from_secs_f32(ui.input(|i| i.stable_dt).max(0.0));
-        egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
-            use egui_extras::Column;
-            use egui_extras::TableBuilder;
-            TableBuilder::new(ui)
-                .striped(true)
-                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-                .column(Column::initial(150.0)) // date
-                .column(Column::initial(120.0)) // map
-                .column(Column::initial(90.0)) // mode
-                .column(Column::initial(140.0)) // ship
-                .column(Column::initial(60.0)) // result
-                .column(Column::initial(80.0)) // dmg
-                .column(Column::initial(50.0)) // kills
-                .column(Column::initial(60.0)) // pr
-                .column(Column::remainder()) // open
-                .header(20.0, |mut h| {
-                    for column in RESULT_COLUMNS {
-                        h.col(|ui| {
-                            if let Some(clicked) = header_cell(ui, column, sort) {
-                                sort_clicked = Some(clicked);
-                            }
-                        });
-                    }
-                    h.col(|_ui| {});
-                })
-                .body(|mut body| {
-                    let results = &self.tab_state.search_tab.results;
-                    for (index, hit) in results.iter().enumerate() {
-                        let ship_name = self.search_ship_display_name(hit);
-                        let preview_key = hit_preview_key(hit);
-                        body.row(24.0, |mut row| {
-                            row.col(|ui| {
-                                ui.label(hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string());
-                            });
-                            row.col(|ui| {
-                                ui.label(&hit.map);
-                            });
-                            row.col(|ui| {
-                                ui.label(&hit.game_type);
-                            });
-                            row.col(|ui| {
-                                ui.label(ship_name.clone().unwrap_or_default());
-                            });
-                            row.col(|ui| {
-                                let letter = match hit.outcome {
-                                    MatchOutcome::Win => "W",
-                                    MatchOutcome::Loss => "L",
-                                    MatchOutcome::Draw => "D",
-                                    MatchOutcome::Unknown => "-",
-                                };
-                                let fill = outcome_colour(hit.outcome, ui.style());
-                                if hit.outcome == MatchOutcome::Unknown {
-                                    ui.colored_label(fill, letter);
-                                } else {
-                                    let text = label_on(fill);
-                                    ui.label(egui::RichText::new(letter).color(text).background_color(fill).strong());
-                                }
-                            });
-                            row.col(|ui| {
-                                ui.label(
-                                    hit.self_damage
-                                        .map(|d| crate::util::formatting::separate_number(d, locale.as_deref()))
-                                        .unwrap_or_default(),
-                                );
-                            });
-                            row.col(|ui| {
-                                ui.label(hit.self_kills.map(|k| k.to_string()).unwrap_or_default());
-                            });
-                            row.col(|ui| {
-                                if let Some(pr) = hit.self_pr {
-                                    pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false);
-                                }
-                            });
-                            row.col(|ui| {
-                                ui.horizontal(|ui| {
-                                    let exists = hit.replay_path.exists();
-                                    let btn = ui.add_enabled(
-                                        exists,
-                                        egui::Button::new(wt_translations::icon_t(
-                                            icons::FOLDER_OPEN,
-                                            &t!("ui.search.open"),
-                                        )),
-                                    );
-                                    if !exists {
-                                        btn.on_hover_text(t!("ui.search.open_missing"));
-                                    } else if btn.clicked() {
-                                        open_path = Some(hit.replay_path.clone());
-                                    }
 
-                                    let copy_btn = ui
-                                        .add(egui::Button::new(icons::COPY))
-                                        .on_hover_text(t!("ui.replay.context.copy_path"));
-                                    if copy_btn.clicked() {
-                                        copy_path = Some(copy_target(results, index));
-                                    }
+        let results = &self.tab_state.search_tab.results;
+        // Resolved before the delegate takes its borrows, since naming a ship
+        // reads the loaded game data through `self`.
+        let ship_names: Vec<Option<String>> = results.iter().map(|hit| self.search_ship_display_name(hit)).collect();
+        let viewer: &ToolkitTabViewer<'_> = self;
+        let preview_deps = |ui: &egui::Ui| viewer.preview_deps(ui, true);
 
-                                    if let Some(key) = preview_key.clone() {
-                                        let mut preview_response = ui.add(egui::Button::new(icons::FILM_STRIP));
-                                        if preview_response.hovered() {
-                                            preview_icon_hovered = true;
-                                            preview_state.hover(key.clone(), dwell_step);
-                                            if preview_state.pending_request().as_ref() == Some(&key)
-                                                && let Some(deps) = self.preview_deps(ui, true)
-                                            {
-                                                let hover_text = preview_hover_text(hit, ship_name.as_deref());
-                                                preview_response = preview_response.on_hover_ui(|ui| {
-                                                    preview_popup::preview_tooltip(
-                                                        ui,
-                                                        &deps,
-                                                        key.clone(),
-                                                        &hit.map,
-                                                        &hover_text,
-                                                    );
-                                                });
-                                            } else {
-                                                preview_response =
-                                                    preview_response.on_hover_text(t!("ui.search.preview_map"));
-                                            }
-                                        } else {
-                                            preview_response =
-                                                preview_response.on_hover_text(t!("ui.search.preview_map"));
-                                        }
-                                        let _ = preview_response;
-                                    }
-                                });
-                            });
-                        });
-                    }
-                });
-        });
+        let mut delegate = ResultsTable {
+            hits: results,
+            ship_names: &ship_names,
+            sort,
+            locale: locale.as_deref(),
+            preview_deps: &preview_deps,
+            preview_state: &mut preview_state,
+            dwell_step,
+            sort_clicked: None,
+            open_path: None,
+            copy_path: None,
+            preview_icon_hovered: false,
+        };
+        show_results_table(ui, &mut delegate);
+        let ResultsTable { sort_clicked, open_path, copy_path, preview_icon_hovered, .. } = delegate;
 
         // No row's preview icon was hovered this frame, whether the pointer
         // left the table entirely or is sitting over a different column:
@@ -1613,5 +1758,507 @@ mod tests {
         // the one that draws an ascending arrow.
         assert!(damage.contains(DESCENDING_SORT_GLYPH), "got {damage:?}");
         assert!(!damage.contains(ASCENDING_SORT_GLYPH), "got {damage:?}");
+    }
+
+    /// What one pass of the table asked the tab to do.
+    #[derive(Default, Clone, PartialEq, Eq, Debug)]
+    struct TablePass {
+        sort_clicked: Option<SortColumn>,
+        open_path: Option<std::path::PathBuf>,
+        copy_path: Option<std::path::PathBuf>,
+    }
+
+    /// The whole results table driven through real frames.
+    ///
+    /// Geometry has to come from real passes. `egui::__run_test_ui`, which
+    /// `with_ui` runs, lays every glyph out at zero size, so a width read
+    /// through it comes back at the column's floor and an assertion about
+    /// auto-sizing would hold without anything having been measured.
+    struct TableHarness {
+        ctx: egui::Context,
+        hits: Vec<MatchHit>,
+        ship_names: Vec<Option<String>>,
+        sort: SortSpec,
+        preview_state: PreviewState,
+        /// Wall time each frame credits to whichever preview icon is hovered.
+        /// Zero unless a test is about the dwell, so probing the action cell
+        /// cannot accidentally arm a preview.
+        dwell_step: Duration,
+        table_id: egui::Id,
+        asked: TablePass,
+        /// What the last pass painted, so a test can aim at where a widget
+        /// actually drew rather than at where column arithmetic says it should
+        /// be. A point computed the second way is the classic vacuous UI test:
+        /// it misses everything, and every "nothing was clicked" assertion
+        /// holds for the wrong reason.
+        shapes: Vec<egui::epaint::ClippedShape>,
+    }
+
+    impl TableHarness {
+        /// A table over `hits` with no ship names resolved, since none of these
+        /// tests turn on what the Ship cell reads.
+        fn new(hits: Vec<MatchHit>) -> Self {
+            let ship_names = vec![None; hits.len()];
+            let mut harness = Self {
+                ctx: egui::Context::default(),
+                hits,
+                ship_names,
+                sort: SortSpec::default(),
+                preview_state: PreviewState::default(),
+                dwell_step: Duration::ZERO,
+                table_id: egui::Id::NULL,
+                asked: TablePass::default(),
+                shapes: Vec::new(),
+            };
+            harness.settle();
+            harness
+        }
+
+        fn frame(&mut self, input: egui::RawInput) {
+            let hits = &self.hits;
+            let ship_names = &self.ship_names;
+            let sort = self.sort;
+            let preview_state = &mut self.preview_state;
+            let dwell_step = self.dwell_step;
+            // A preview needs loaded game data and a texture cache, neither of
+            // which exists here; nothing in these tests dwells long enough to
+            // ask for one.
+            let no_previews: &dyn Fn(&egui::Ui) -> Option<Arc<preview_popup::PreviewDeps>> = &|_ui| None;
+            let mut table_id = None;
+            let mut asked = TablePass::default();
+            let output = self.ctx.run_ui(input, |ui| {
+                let mut delegate = ResultsTable {
+                    hits,
+                    ship_names,
+                    sort,
+                    locale: None,
+                    preview_deps: no_previews,
+                    preview_state: &mut *preview_state,
+                    dwell_step,
+                    sort_clicked: None,
+                    open_path: None,
+                    copy_path: None,
+                    preview_icon_hovered: false,
+                };
+                table_id = Some(show_results_table(ui, &mut delegate));
+                asked = TablePass {
+                    sort_clicked: delegate.sort_clicked,
+                    open_path: delegate.open_path,
+                    copy_path: delegate.copy_path,
+                };
+            });
+            if let Some(id) = table_id {
+                self.table_id = id;
+            }
+            self.asked = asked;
+            self.shapes = output.shapes;
+        }
+
+        /// Runs quiet frames until the widths and rects report what the table
+        /// has settled at.
+        ///
+        /// Several, for lags that stack. An input is applied at the end of the
+        /// pass carrying it, so that pass still draws the state before it, and
+        /// `read_response` answers out of `this_pass`, which `end_pass` *swaps*
+        /// with `prev_pass` rather than clearing. On top of that egui_table
+        /// measures a column on one pass and lays it out at the measured width
+        /// on the next.
+        fn settle(&mut self) {
+            for _ in 0..4 {
+                self.frame(frame_input());
+            }
+        }
+
+        /// The width egui_table has stored for a column, which is what it lays
+        /// the column out at on the following frame.
+        fn column_width(&self, column: Option<ResultColumn>) -> f32 {
+            let state = egui_table::TableState::load(&self.ctx, self.table_id)
+                .unwrap_or_else(|| panic!("the table stored no state under {:?}", self.table_id));
+            let id = column_id(column);
+            *state.col_widths.get(&id).unwrap_or_else(|| {
+                panic!("no stored width for {column:?} under {id:?}; stored: {:?}", state.col_widths)
+            })
+        }
+
+        fn rect_of(&self, id: egui::Id) -> egui::Rect {
+            self.ctx.read_response(id).unwrap_or_else(|| panic!("no widget registered under {id:?}")).rect
+        }
+
+        fn resizer_id(&self, col_nr: usize) -> egui::Id {
+            self.table_id.with(column_id(column_at(col_nr))).with("resize")
+        }
+
+        /// The x of `col_nr`'s right edge, read off the resizer egui_table
+        /// registered there rather than summed from the declared widths, so a
+        /// probe aims where the column actually is.
+        fn column_right(&self, col_nr: usize) -> f32 {
+            self.rect_of(self.resizer_id(col_nr)).center().x
+        }
+
+        fn column_left(&self, col_nr: usize) -> f32 {
+            self.column_right(col_nr) - self.column_width(column_at(col_nr))
+        }
+
+        /// Where every painted text containing `needle` was drawn, in paint
+        /// order, which for the body is row order.
+        fn text_rects(&self, needle: &str) -> Vec<egui::Rect> {
+            self.shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) if text.galley.text().contains(needle) => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// The one place `needle` was painted, as a click point. Panics unless
+        /// it was drawn exactly once at a non-degenerate size, so a test can
+        /// never end up aiming at a rect that is not there.
+        fn only_text_at(&self, needle: &str) -> egui::Pos2 {
+            let rects = self.text_rects(needle);
+            assert_eq!(rects.len(), 1, "{needle:?} was painted {} times, wanted once", rects.len());
+            let rect = rects[0];
+            assert!(rect.width() > 1.0 && rect.height() > 1.0, "{needle:?} laid out at {rect:?}");
+            rect.center()
+        }
+
+        /// Clicks `pos` and reports what that pass asked the tab to do.
+        ///
+        /// egui applies the input at the start of the pass carrying it and
+        /// hit-tests against the rects the previous pass registered, so the
+        /// answer belongs to that pass and has to be taken before the quiet
+        /// frame that follows overwrites it.
+        fn click(&mut self, pos: egui::Pos2) -> TablePass {
+            self.frame(click_input(pos));
+            let asked = self.asked.clone();
+            // The pointer stays where it was left, so a quiet frame clears the
+            // press before the next probe is aimed somewhere else.
+            self.frame(frame_input());
+            asked
+        }
+    }
+
+    /// Where a column sits in the table, counting the action column as the one
+    /// past the displayed ones.
+    fn column_number(column: Option<ResultColumn>) -> usize {
+        match column {
+            Some(column) => RESULT_COLUMNS.iter().position(|c| *c == column).expect("a displayed column"),
+            None => RESULT_COLUMNS.len(),
+        }
+    }
+
+    /// Three real map names of clearly different lengths. The longest is longer
+    /// than the Map column's declared 120 px so a fixed column would clip it,
+    /// and still short of that column's own ceiling so what is measured is the
+    /// content rather than the clamp.
+    const SHORT_MAP: &str = "Ocean";
+    const MEDIUM_MAP: &str = "Islands of Ice";
+    const LONG_MAP: &str = "Northern Waters Approach";
+
+    fn hit_on_map(map: &str) -> MatchHit {
+        MatchHit { map: map.to_owned(), ..a_hit(None, None) }
+    }
+
+    fn map_column_width(map: &str) -> f32 {
+        TableHarness::new(vec![hit_on_map(map)]).column_width(Some(ResultColumn::Map))
+    }
+
+    /// The property the whole move to `egui_table` exists for: a column is as
+    /// wide as what is in it, not as wide as a number written next to it.
+    ///
+    /// Three lengths rather than two, so a column pinned at any one value --
+    /// its declared width, its floor, or its ceiling -- fails rather than
+    /// happening to satisfy a one-sided comparison.
+    #[test]
+    fn a_column_sizes_itself_to_the_widest_thing_in_it() {
+        let short = map_column_width(SHORT_MAP);
+        let medium = map_column_width(MEDIUM_MAP);
+        let long = map_column_width(LONG_MAP);
+
+        assert!(
+            long > medium && medium > short,
+            "the column must track its content: {SHORT_MAP} {short}, {MEDIUM_MAP} {medium}, {LONG_MAP} {long}"
+        );
+
+        let (declared, ceiling) = column_extent(ResultColumn::Map);
+        assert!(long < ceiling, "the long name must be sized to, not clamped at, the ceiling: {long} vs {ceiling}");
+        assert!(short > RESULT_COLUMN_MIN_WIDTH, "the short name sank to the drag floor: {short}");
+        // The point of the move: a column is not stuck at the number written
+        // next to it. One of these names has to be on each side of it.
+        assert!(short < declared && long > declared, "nothing straddled the declared width {declared}");
+    }
+
+    /// The half a widening-only test cannot state: a short cell must leave the
+    /// column narrower than a long one does, rather than every row reserving
+    /// the widest width the column could ever take.
+    #[test]
+    fn a_short_cell_does_not_reserve_a_long_cells_width() {
+        let short = map_column_width(SHORT_MAP);
+        let long = map_column_width(LONG_MAP);
+        assert!(short < long, "a short name must not claim a long name's width: {short} vs {long}");
+    }
+
+    /// Sizing is per column: a long map name must widen the Map column and
+    /// leave its neighbours alone. Without this, a table that simply grew every
+    /// column together would pass the tests above.
+    #[test]
+    fn one_columns_content_does_not_widen_another() {
+        let short = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let long = TableHarness::new(vec![hit_on_map(LONG_MAP)]);
+        assert_eq!(
+            short.column_width(Some(ResultColumn::Date)),
+            long.column_width(Some(ResultColumn::Date)),
+            "the Date cells are identical in both, so the column may not differ"
+        );
+    }
+
+    /// A column the pointer drags has to end up at the width it was dragged to
+    /// and stay there once the pointer is gone: egui_table re-derives widths
+    /// every frame, so a width that was not stored is a width that snaps back.
+    #[test]
+    fn a_dragged_column_keeps_the_width_it_was_dragged_to() {
+        const DRAG: f32 = 60.0;
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let before = harness.column_width(Some(ResultColumn::Map));
+
+        let handle = harness.rect_of(harness.resizer_id(column_number(Some(ResultColumn::Map)))).center();
+        let target = egui::Pos2::new(handle.x + DRAG, handle.y);
+
+        let mut press = frame_input();
+        press.events.push(egui::Event::PointerMoved(handle));
+        press.events.push(egui::Event::PointerButton {
+            pos: handle,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.frame(press);
+
+        // Two frames holding the pointer at the target: the first is what egui
+        // promotes the press into a drag on, the second is the one egui_table
+        // reads `pointer_latest_pos` from to widen the column.
+        for _ in 0..2 {
+            let mut drag = frame_input();
+            drag.events.push(egui::Event::PointerMoved(target));
+            harness.frame(drag);
+        }
+
+        let mut release = frame_input();
+        release.events.push(egui::Event::PointerButton {
+            pos: target,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        harness.frame(release);
+
+        let dragged = harness.column_width(Some(ResultColumn::Map));
+        assert!(dragged > before + DRAG / 2.0, "the drag did not widen the column: {before} to {dragged}");
+
+        // Quiet frames with the pointer gone: what the drag settled on has to
+        // survive them rather than being recomputed from the content.
+        harness.settle();
+        let after = harness.column_width(Some(ResultColumn::Map));
+        assert!((after - dragged).abs() < 1.0, "the dragged width did not survive a frame: {dragged} became {after}");
+    }
+
+    /// Every sortable header still cycles its own column's sort once the table
+    /// draws it. This is the part the move to a delegate could quietly break:
+    /// header cells are now addressed by a column index rather than emitted in
+    /// order, so an off-by-one would sort by a neighbour.
+    fn column_label(column: ResultColumn) -> String {
+        t!(column_label_key(column)).into_owned()
+    }
+
+    /// Every sort a sweep across `column`'s header cell asked for.
+    ///
+    /// The sweep runs at the height the header labels were actually painted at,
+    /// taken from a label that is provably there. A y derived from column
+    /// arithmetic instead can miss the header band entirely, at which point
+    /// every "asked for nothing" assertion below holds for the wrong reason.
+    fn sorts_asked_across_header(harness: &mut TableHarness, column: Option<ResultColumn>) -> Vec<SortColumn> {
+        let y = harness.only_text_at(&column_label(ResultColumn::Date)).y;
+        let col_nr = column_number(column);
+        let (left, right) = (harness.column_left(col_nr), harness.column_right(col_nr));
+        let mut asked = Vec::new();
+        let mut x = left + 2.0;
+        while x < right {
+            if let Some(got) = harness.click(egui::Pos2::new(x, y)).sort_clicked {
+                asked.push(got);
+            }
+            x += 4.0;
+        }
+        asked
+    }
+
+    /// Every sortable header still cycles its own column's sort once the table
+    /// draws it. This is what the move to a delegate could quietly break:
+    /// header cells are addressed by a column index rather than emitted in
+    /// order, so an off-by-one would sort by a neighbour.
+    #[test]
+    fn every_sortable_header_asks_the_index_to_order_by_its_own_column() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let mut exercised = 0;
+        for column in RESULT_COLUMNS {
+            let Some(expected) = column.sort_column() else {
+                continue;
+            };
+            exercised += 1;
+            // The label itself, which is where a user clicks.
+            let label = harness.only_text_at(&column_label(column));
+            let asked = harness.click(label).sort_clicked;
+            assert_eq!(asked, Some(expected), "{column:?}'s header at {label:?} asked for {asked:?}");
+        }
+        assert_eq!(exercised, SortColumn::ALL.len(), "every orderable column must have been exercised");
+    }
+
+    /// The affordance the Ship exclusion is about: its header must answer a
+    /// click with nothing rather than sort on something its cell does not
+    /// display. Its label is clicked directly, and then the rest of its cell is
+    /// swept, so this says nothing anywhere in the header is a click target.
+    #[test]
+    fn the_ship_header_asks_for_nothing_when_clicked_in_the_table() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let label = harness.only_text_at(&column_label(ResultColumn::Ship));
+        assert_eq!(harness.click(label).sort_clicked, None, "the ship label must not be a click target");
+
+        let asked = sorts_asked_across_header(&mut harness, Some(ResultColumn::Ship));
+        assert!(asked.is_empty(), "something in the ship header asked for {asked:?}");
+    }
+
+    /// The action column has no header at all, so nothing there may reach a
+    /// sort either.
+    #[test]
+    fn the_action_header_asks_for_nothing_when_clicked_in_the_table() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let asked = sorts_asked_across_header(&mut harness, None);
+        assert!(asked.is_empty(), "the action header asked for {asked:?}");
+    }
+
+    /// The sweep the two tests above lean on has to be capable of finding a
+    /// click target. Run over a header that does sort, it must find one; that
+    /// is what makes their empty results mean something.
+    #[test]
+    fn the_header_sweep_finds_a_sortable_header() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let asked = sorts_asked_across_header(&mut harness, Some(ResultColumn::Damage));
+        assert!(!asked.is_empty(), "the sweep found nothing on a header that does sort");
+        assert!(asked.iter().all(|got| *got == SortColumn::Damage), "the sweep strayed off Damage: {asked:?}");
+    }
+
+    /// A quiet frame must not look like a click, or the sort would cycle on its
+    /// own every time the tab repainted.
+    #[test]
+    fn a_quiet_frame_over_the_table_asks_for_no_sort() {
+        let mut harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        harness.frame(frame_input());
+        assert_eq!(harness.asked.sort_clicked, None);
+    }
+
+    /// Three real files, so the Open button is enabled: it is disabled for a
+    /// path that does not exist, and a disabled button answers no click.
+    fn hits_with_real_files(dir: &std::path::Path) -> Vec<MatchHit> {
+        (0..3)
+            .map(|i| {
+                let path = dir.join(format!("row-{i}.wowsreplay"));
+                std::fs::write(&path, b"").expect("write the fixture replay");
+                MatchHit { replay_path: path, ..a_hit(None, None) }
+            })
+            .collect()
+    }
+
+    /// Where every row painted `needle`, top to bottom, which is row order.
+    ///
+    /// One per row, asserted, rather than assumed: this is what says the button
+    /// exists on the row a click is about to be aimed at.
+    fn button_per_row(harness: &TableHarness, needle: &str, rows: usize) -> Vec<egui::Pos2> {
+        let mut rects = harness.text_rects(needle);
+        rects.sort_by(|a, b| a.top().total_cmp(&b.top()));
+        assert_eq!(rects.len(), rows, "{needle:?} was painted {} times over {rows} rows", rects.len());
+        rects.into_iter().map(|rect| rect.center()).collect()
+    }
+
+    /// The row's own replay, not the first row's. Rows are drawn by index out
+    /// of a slice rather than by an iterator carrying the hit with it, so an
+    /// off-by-one here would open somebody else's replay.
+    #[test]
+    fn each_rows_action_buttons_carry_that_rows_own_replay() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let distinct: HashSet<&std::path::PathBuf> = hits.iter().map(|hit| &hit.replay_path).collect();
+        assert_eq!(distinct.len(), hits.len(), "the fixture rows must be distinguishable: {hits:?}");
+
+        let mut harness = TableHarness::new(hits.clone());
+        let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
+        let copies = button_per_row(&harness, icons::COPY, hits.len());
+
+        for (row, hit) in hits.iter().enumerate() {
+            let opened = harness.click(opens[row]).open_path;
+            assert_eq!(opened.as_deref(), Some(hit.replay_path.as_path()), "row {row}'s open button opened {opened:?}");
+
+            let copied = harness.click(copies[row]).copy_path;
+            assert_eq!(copied.as_deref(), Some(hit.replay_path.as_path()), "row {row}'s copy button copied {copied:?}");
+        }
+    }
+
+    /// The film strip is the third action, and the only one that is not a
+    /// one-shot: hovering it has to credit the dwell to the row under the
+    /// pointer, since that gate is what stops a fast scroll from queuing a
+    /// preview bake per row it crossed.
+    #[test]
+    fn hovering_a_rows_film_strip_arms_a_preview_for_that_row() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        // A whole dwell's worth per frame, so one hovered frame arms it.
+        harness.dwell_step = PREVIEW_DWELL;
+        let mut hover = frame_input();
+        hover.events.push(egui::Event::PointerMoved(strips[1]));
+        harness.frame(hover);
+
+        let armed = harness.preview_state.pending_request();
+        assert_eq!(armed, hit_preview_key(&hits[1]), "the dwell must arm the hovered row's own replay, not another's");
+        assert_ne!(armed, hit_preview_key(&hits[0]), "the fixture rows must be distinguishable by preview key");
+    }
+
+    /// The same gate from the other side: a pointer that crosses a row without
+    /// resting on it must arm nothing, which is the whole reason the dwell
+    /// exists.
+    #[test]
+    fn crossing_a_film_strip_without_resting_arms_nothing() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let strips = button_per_row(&harness, icons::FILM_STRIP, hits.len());
+
+        harness.dwell_step = PREVIEW_DWELL / 10;
+        for strip in &strips {
+            let mut hover = frame_input();
+            hover.events.push(egui::Event::PointerMoved(*strip));
+            harness.frame(hover);
+        }
+        assert_eq!(harness.preview_state.pending_request(), None, "a pass across the rows armed a preview");
+    }
+
+    /// The two buttons are separate actions on the same row. A cell that wired
+    /// both to one response would pass the test above, since each assertion
+    /// only reads the field it is about.
+    #[test]
+    fn the_open_and_copy_buttons_are_not_the_same_button() {
+        let dir = tempfile::tempdir().expect("a temp dir");
+        let hits = hits_with_real_files(dir.path());
+        let mut harness = TableHarness::new(hits.clone());
+        let opens = button_per_row(&harness, &t!("ui.search.open"), hits.len());
+        let copies = button_per_row(&harness, icons::COPY, hits.len());
+        assert_ne!(opens[0], copies[0], "the two buttons drew on top of each other");
+
+        let by_open = harness.click(opens[0]);
+        assert!(by_open.copy_path.is_none(), "the open button also copied: {by_open:?}");
+        let by_copy = harness.click(copies[0]);
+        assert!(by_copy.open_path.is_none(), "the copy button also opened: {by_copy:?}");
     }
 }
