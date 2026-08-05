@@ -39,7 +39,10 @@ use crate::ui::query_bar::QueryBar;
 use crate::ui::query_bar::select::prune_empty;
 use crate::ui::query_bar::suggest::ValueOption;
 use crate::ui::query_bar::suggest::ValueRequest;
+use crate::ui::theme::contrast::label_on;
 use crate::ui::theme::semantic::SemanticExt;
+use crate::ui::widgets::pr_chip;
+use crate::util::personal_rating::PersonalRatingCategory;
 
 /// Rows a single search reads. `search_by_ast` fetches one more so the count can
 /// say "at least this many" rather than reporting a truncated total.
@@ -583,6 +586,28 @@ fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
     Some(format!("[{ship_id}]"))
 }
 
+/// The chip fill for a match outcome, read off `ui.sem()`. `Unknown` reads
+/// `text_dim` rather than a fourth chip tone: plenty of indexed rows carry no
+/// recorded outcome, and colouring that absence as if it were a result would
+/// be actively misleading, so it deliberately falls back to the same
+/// de-emphasised tone every other "nothing recorded" cell in this table uses.
+fn outcome_colour(outcome: MatchOutcome, style: &egui::Style) -> egui::Color32 {
+    let sem = style.visuals.sem();
+    match outcome {
+        MatchOutcome::Win => sem.outcome_chip.win,
+        MatchOutcome::Loss => sem.outcome_chip.loss,
+        MatchOutcome::Draw => sem.outcome_chip.draw,
+        MatchOutcome::Unknown => sem.text_dim,
+    }
+}
+
+/// The path a copy-path click on `hits[index]` copies: that row's own path,
+/// never the selected row's or the first row's. There is no row selection in
+/// this table, so the button's own row is the only source that can be right.
+fn copy_target(hits: &[MatchHit], index: usize) -> std::path::PathBuf {
+    hits[index].replay_path.clone()
+}
+
 impl ToolkitTabViewer<'_> {
     /// [`ship_display_name`] against the game data for the match's own build,
     /// when that build is loaded.
@@ -693,6 +718,7 @@ impl ToolkitTabViewer<'_> {
         });
 
         let mut open_path: Option<std::path::PathBuf> = None;
+        let mut copy_path: Option<std::path::PathBuf> = None;
         let mut sort_clicked: Option<SortColumn> = None;
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
             use egui_extras::Column;
@@ -720,7 +746,8 @@ impl ToolkitTabViewer<'_> {
                     h.col(|_ui| {});
                 })
                 .body(|mut body| {
-                    for hit in &self.tab_state.search_tab.results {
+                    let results = &self.tab_state.search_tab.results;
+                    for (index, hit) in results.iter().enumerate() {
                         let ship_name = self.search_ship_display_name(hit);
                         body.row(24.0, |mut row| {
                             row.col(|ui| {
@@ -736,12 +763,19 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(ship_name.clone().unwrap_or_default());
                             });
                             row.col(|ui| {
-                                ui.label(match hit.outcome {
+                                let letter = match hit.outcome {
                                     MatchOutcome::Win => "W",
                                     MatchOutcome::Loss => "L",
                                     MatchOutcome::Draw => "D",
                                     MatchOutcome::Unknown => "-",
-                                });
+                                };
+                                let fill = outcome_colour(hit.outcome, ui.style());
+                                if hit.outcome == MatchOutcome::Unknown {
+                                    ui.colored_label(fill, letter);
+                                } else {
+                                    let text = label_on(fill);
+                                    ui.label(egui::RichText::new(letter).color(text).background_color(fill).strong());
+                                }
                             });
                             row.col(|ui| {
                                 ui.label(
@@ -754,22 +788,33 @@ impl ToolkitTabViewer<'_> {
                                 ui.label(hit.self_kills.map(|k| k.to_string()).unwrap_or_default());
                             });
                             row.col(|ui| {
-                                ui.label(hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_default());
+                                if let Some(pr) = hit.self_pr {
+                                    pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false);
+                                }
                             });
                             row.col(|ui| {
-                                let exists = hit.replay_path.exists();
-                                let btn = ui.add_enabled(
-                                    exists,
-                                    egui::Button::new(wt_translations::icon_t(
-                                        icons::FOLDER_OPEN,
-                                        &t!("ui.search.open"),
-                                    )),
-                                );
-                                if !exists {
-                                    btn.on_hover_text(t!("ui.search.open_missing"));
-                                } else if btn.clicked() {
-                                    open_path = Some(hit.replay_path.clone());
-                                }
+                                ui.horizontal(|ui| {
+                                    let exists = hit.replay_path.exists();
+                                    let btn = ui.add_enabled(
+                                        exists,
+                                        egui::Button::new(wt_translations::icon_t(
+                                            icons::FOLDER_OPEN,
+                                            &t!("ui.search.open"),
+                                        )),
+                                    );
+                                    if !exists {
+                                        btn.on_hover_text(t!("ui.search.open_missing"));
+                                    } else if btn.clicked() {
+                                        open_path = Some(hit.replay_path.clone());
+                                    }
+
+                                    let copy_btn = ui
+                                        .add(egui::Button::new(icons::COPY))
+                                        .on_hover_text(t!("ui.replay.context.copy_path"));
+                                    if copy_btn.clicked() {
+                                        copy_path = Some(copy_target(results, index));
+                                    }
+                                });
                             });
                         });
                     }
@@ -791,6 +836,11 @@ impl ToolkitTabViewer<'_> {
                 deps.parse_replay_from_path(path, crate::task::ReplaySource::ManualOpen)
             );
         }
+
+        if let Some(path) = copy_path {
+            ui.ctx().copy_text(path.to_string_lossy().into_owned());
+            self.tab_state.toasts.lock().success(t!("ui.search.path_copied"));
+        }
     }
 }
 
@@ -802,6 +852,89 @@ mod tests {
     use crate::db::index::query_ast::RosterTerm;
     use crate::db::index::rows::VehicleRelation;
     use crate::ui::query_bar::seed;
+    use crate::ui::theme::contrast::CONTRAST_FLOOR as TEXT_CONTRAST_FLOOR;
+    use crate::ui::theme::contrast::SURFACE_CONTRAST_FLOOR;
+    use crate::ui::theme::contrast::contrast_ratio;
+    use crate::ui::theme::style::dark_style;
+    use crate::ui::theme::style::light_style;
+    use crate::util::personal_rating::PersonalRatingCategorySwatch;
+
+    /// A proof wrapper over `PersonalRatingCategory`, kept test-only: render
+    /// code calls `PersonalRatingCategory::from_pr` and `widgets::pr_chip`
+    /// directly. `colour` reads the exact tier-solved tone `pr_chip` paints
+    /// the label in, off the same `swatch` call, so a passing test here is a
+    /// property of what actually renders rather than a parallel computation.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    struct PersonalRatingBand(PersonalRatingCategory);
+
+    impl PersonalRatingBand {
+        const ALL: [PersonalRatingBand; 8] = [
+            PersonalRatingBand(PersonalRatingCategory::Bad),
+            PersonalRatingBand(PersonalRatingCategory::BelowAverage),
+            PersonalRatingBand(PersonalRatingCategory::Average),
+            PersonalRatingBand(PersonalRatingCategory::Good),
+            PersonalRatingBand(PersonalRatingCategory::VeryGood),
+            PersonalRatingBand(PersonalRatingCategory::Great),
+            PersonalRatingBand(PersonalRatingCategory::Unicum),
+            PersonalRatingBand(PersonalRatingCategory::SuperUnicum),
+        ];
+
+        fn colour(&self, style: &egui::Style) -> egui::Color32 {
+            self.0.swatch(&style.visuals).text
+        }
+    }
+
+    /// One `MatchHit` per name, distinguished only by `replay_path`; every
+    /// other field is the fixture default from `a_hit`, since the tests this
+    /// feeds only ever check which path a row's own button carries.
+    fn sample_hits(names: &[&str]) -> Vec<MatchHit> {
+        names.iter().map(|name| MatchHit { replay_path: std::path::PathBuf::from(name), ..a_hit(None, None) }).collect()
+    }
+
+    /// A PR colour that vanishes into the table is worse than no colour.
+    #[test]
+    fn every_pr_band_is_distinguishable_from_the_row_background() {
+        for band in PersonalRatingBand::ALL {
+            for theme in [dark_style(), light_style()] {
+                let ratio = contrast_ratio(band.colour(&theme), theme.visuals.panel_fill);
+                assert!(ratio >= TEXT_CONTRAST_FLOOR, "{band:?} reads at {ratio:.3} against the table");
+            }
+        }
+    }
+
+    #[test]
+    fn win_loss_and_draw_are_mutually_distinguishable() {
+        for theme in [dark_style(), light_style()] {
+            let win = outcome_colour(MatchOutcome::Win, &theme);
+            let loss = outcome_colour(MatchOutcome::Loss, &theme);
+            let draw = outcome_colour(MatchOutcome::Draw, &theme);
+            for (a, b, names) in [(win, loss, "win/loss"), (win, draw, "win/draw"), (loss, draw, "loss/draw")] {
+                assert!(contrast_ratio(a, b) >= SURFACE_CONTRAST_FLOOR, "{names} are too close");
+            }
+        }
+    }
+
+    #[test]
+    fn an_unknown_outcome_is_not_dressed_as_a_result() {
+        for theme in [dark_style(), light_style()] {
+            let unknown = outcome_colour(MatchOutcome::Unknown, &theme);
+            for known in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw] {
+                assert!(
+                    contrast_ratio(unknown, outcome_colour(known, &theme)) >= SURFACE_CONTRAST_FLOOR,
+                    "unknown reads as {known:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_copy_action_carries_the_rows_own_path() {
+        // The row's path, not the selected row's or the first row's.
+        let hits = sample_hits(&["a.wowsreplay", "b.wowsreplay", "c.wowsreplay"]);
+        for (index, hit) in hits.iter().enumerate() {
+            assert_eq!(copy_target(&hits, index), hit.replay_path);
+        }
+    }
 
     /// Seeded queries carry bare ids, so the pill reads as `#<id>` until these
     /// are found and looked up. A walk that stopped at the roster boundary
