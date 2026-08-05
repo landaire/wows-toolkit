@@ -225,7 +225,7 @@ enum Commands {
         damaged: bool,
 
         /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
-        /// texture tier that meets the limit instead of the full-resolution one
+        /// texture tier that meets the limit. Overrides the tier that --lod selects
         #[arg(long)]
         max_texture_size: Option<u32>,
 
@@ -275,7 +275,7 @@ enum Commands {
         armor: bool,
 
         /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
-        /// texture tier that meets the limit instead of the full-resolution one
+        /// texture tier that meets the limit. Overrides the tier that --lod selects
         #[arg(long)]
         max_texture_size: Option<u32>,
 
@@ -331,8 +331,8 @@ enum Commands {
         #[arg(long)]
         no_textures: bool,
 
-        /// Maximum texture dimension (e.g. 512, 1024). Textures larger than this
-        /// are downsampled with box filtering. Reduces GLB file size significantly.
+        /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
+        /// texture tier that meets the limit. Overrides the tier that --lod selects
         #[arg(long)]
         max_texture_size: Option<u32>,
     },
@@ -1088,7 +1088,7 @@ fn run() -> Result<(), Report> {
                 lod,
                 no_textures,
                 damaged,
-                texture_lod: TextureLod::from_max_edge(max_texture_size),
+                texture_lod: resolve_texture_lod(max_texture_size, lod),
                 list_textures,
                 no_vfs,
                 vfs: vfs.as_ref(),
@@ -1682,6 +1682,18 @@ fn parse_lightmap_path(xml: &str) -> Option<String> {
     if path.is_empty() || path == "null" { None } else { Some(path.to_string()) }
 }
 
+/// Resolve the texture detail for an export from its two controls.
+///
+/// An explicit `--max-texture-size` wins, since a pixel budget is a deliberate
+/// answer. Otherwise `--lod` carries over: mesh LOD `k` takes the `k`-th texture
+/// tier down, pairing each geometry level with the textures shipped for it.
+fn resolve_texture_lod(max_texture_size: Option<u32>, lod: usize) -> TextureLod {
+    match max_texture_size {
+        Some(_) => TextureLod::from_max_edge(max_texture_size),
+        None => TextureLod::from_mesh_lod(lod),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_export_map(
     space_dir: &Path,
@@ -1697,7 +1709,7 @@ fn run_export_map(
     no_textures: bool,
     max_texture_size: Option<u32>,
 ) -> Result<(), Report> {
-    let texture_lod = TextureLod::from_max_edge(max_texture_size);
+    let texture_lod = resolve_texture_lod(max_texture_size, lod);
     use wowsunpack::export::gltf_export;
     use wowsunpack::export::texture;
     use wowsunpack::models::assets_bin;
@@ -2037,7 +2049,7 @@ fn run_export_ship(
         textures: !no_textures,
         damaged,
         armor,
-        texture_lod: TextureLod::from_max_edge(max_texture_size),
+        texture_lod: resolve_texture_lod(max_texture_size, lod),
         ..Default::default()
     };
     let ctx = assets.load_ship(name, &options)?;

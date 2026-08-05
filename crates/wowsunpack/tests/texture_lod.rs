@@ -10,6 +10,7 @@ use std::path::PathBuf;
 
 use wowsunpack::export::texture::MaxEdge;
 use wowsunpack::export::texture::TextureLod;
+use wowsunpack::export::texture::TierDrop;
 use wowsunpack::export::texture::load_dds_from_vfs;
 
 /// A four-tier texture: 4096 `.dd0`, 2048 `.dd1`, 1024 `.dd2`, 512 `.dds`.
@@ -93,6 +94,39 @@ fn decode_honours_the_budget_for_every_tier() {
             img.height()
         );
     }
+}
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn mesh_lod_steps_down_one_tier_per_level() {
+    let vfs = vfs();
+    // FOUR_TIER's ladder is 4096 / 2048 / 1024 / 512, so mesh LOD k lands on
+    // the k-th entry.
+    for (lod, want_edge) in [(0, 4096), (1, 2048), (2, 1024), (3, 512)] {
+        let bytes = load_dds_from_vfs(&vfs, FOUR_TIER, TextureLod::from_mesh_lod(lod)).expect("tier loaded");
+        assert_eq!(header(&bytes).0, want_edge, "mesh LOD {lod} should take the {want_edge} tier");
+    }
+}
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn mesh_lod_past_the_ladder_clamps_to_the_tail() {
+    // The tail is the lowest separately authored level; a rank beyond it must
+    // clamp rather than fail or read something larger.
+    let bytes = load_dds_from_vfs(&vfs(), FOUR_TIER, TextureLod::from_mesh_lod(9)).expect("tail loaded");
+    assert_eq!(header(&bytes).0, 512);
+}
+
+#[test]
+fn mesh_lod_zero_is_full_detail() {
+    assert_eq!(TextureLod::from_mesh_lod(0), TextureLod::Full);
+    assert_ne!(TextureLod::from_mesh_lod(1), TextureLod::Full);
+}
+
+#[test]
+fn tier_drop_rejects_zero() {
+    assert!(TierDrop::new(0).is_none());
+    assert_eq!(TierDrop::new(2).map(TierDrop::tiers), Some(2));
 }
 
 #[test]

@@ -51,12 +51,14 @@ impl MaxEdge {
 /// [`Full`](Self::Full) takes the largest tier. [`Capped`](Self::Capped) takes
 /// the largest tier and stored mip that stay within budget, so a small budget
 /// skips the multi-megabyte read outright instead of decoding 4096 pixels and
-/// scaling the result down.
+/// scaling the result down. [`Tiers`](Self::Tiers) steps down that authored
+/// ladder by rank rather than by pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum TextureLod {
     #[default]
     Full,
     Capped(MaxEdge),
+    Tiers(TierDrop),
 }
 
 impl TextureLod {
@@ -69,11 +71,40 @@ impl TextureLod {
         }
     }
 
+    /// Match a mesh LOD index by rank: mesh LOD `k` takes the `k`-th texture
+    /// tier down. Both ladders are authored by the game, so equal ranks pair
+    /// the geometry detail with the texture detail shipped alongside it.
+    ///
+    /// Pixel sizes cannot do this job: the same rank is 4096 on a hull atlas and
+    /// 512 on a small fitting, and a texture only has the tiers it was given.
+    pub fn from_mesh_lod(lod: usize) -> Self {
+        match TierDrop::new(lod) {
+            Some(drop) => Self::Tiers(drop),
+            None => Self::Full,
+        }
+    }
+
     fn budget(self) -> Option<MaxEdge> {
         match self {
-            Self::Full => None,
+            Self::Full | Self::Tiers(_) => None,
             Self::Capped(edge) => Some(edge),
         }
+    }
+}
+
+/// How many tiers to step down a texture's authored ladder.
+///
+/// Zero is not representable: dropping no tiers is [`TextureLod::Full`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct TierDrop(usize);
+
+impl TierDrop {
+    pub fn new(tiers: usize) -> Option<Self> {
+        (tiers > 0).then_some(Self(tiers))
+    }
+
+    pub fn tiers(self) -> usize {
+        self.0
     }
 }
 
@@ -103,6 +134,26 @@ fn dds_top_edge(dds_bytes: &[u8]) -> Option<u32> {
 /// ladder to the `.dds` tail.
 fn read_highest_tier(vfs: &vfs::VfsPath, stem: &str, tail_path: &str) -> Option<Vec<u8>> {
     for suffix in DDS_TIER_SUFFIXES {
+        if let Some(data) = read_vfs_file(vfs, &format!("{stem}.{suffix}")) {
+            return Some(data);
+        }
+    }
+    read_vfs_file(vfs, tail_path)
+}
+
+/// Read the tier `drop` steps below the top of this texture's own ladder.
+///
+/// The ladder is the tiers the texture actually has, largest first, ending at
+/// the `.dds` tail. A drop past the end clamps to the tail, which is the lowest
+/// separately authored level; going below it is a pixel budget's job, not a
+/// rank's. Existence checks size the ladder, so exactly one file is read.
+fn read_tier_below_top(vfs: &vfs::VfsPath, stem: &str, tail_path: &str, drop: TierDrop) -> Option<Vec<u8>> {
+    let present: Vec<&str> =
+        DDS_TIER_SUFFIXES.into_iter().filter(|s| vfs_file_exists(vfs, &format!("{stem}.{s}"))).collect();
+
+    // Walk down from the requested rank so a tier that fails to read falls back
+    // to the next smaller one rather than aborting the load.
+    for suffix in present.into_iter().skip(drop.tiers()) {
         if let Some(data) = read_vfs_file(vfs, &format!("{stem}.{suffix}")) {
             return Some(data);
         }
@@ -316,6 +367,10 @@ pub fn load_dds_from_vfs(vfs: &vfs::VfsPath, path: &str, lod: TextureLod) -> Opt
     let Some(stem) = path.strip_suffix(".dds") else {
         return read_vfs_file(vfs, path);
     };
+
+    if let TextureLod::Tiers(drop) = lod {
+        return read_tier_below_top(vfs, stem, path, drop);
+    }
 
     let Some(budget) = lod.budget() else {
         return read_highest_tier(vfs, stem, path);
