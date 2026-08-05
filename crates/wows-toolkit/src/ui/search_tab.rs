@@ -616,21 +616,25 @@ fn header_cell(ui: &mut egui::Ui, column: ResultColumn, sort: SortSpec) -> Optio
     clicked.then_some(sortable)
 }
 
-/// Height of one results row. Widened by exactly `2 * RESULT_CELL_MARGIN_V`
-/// over the space a cell's content actually needs, so the vertical margin
-/// added around that content is real room rather than a squeeze.
-const RESULT_ROW_HEIGHT: f32 = 28.0;
-/// Height of the single header row above them, widened the same way.
-const RESULT_HEADER_HEIGHT: f32 = 24.0;
+/// Height of one results row.
+///
+/// The tallest thing a cell draws is an action button, which the theme's
+/// `interact_size` holds at 22 points however short its label is, so the row
+/// is that plus `RESULT_CELL_MARGIN_V` above and below it.
+const RESULT_ROW_HEIGHT: f32 = 34.0;
+/// Height of the single header row above them: one line of text plus the same
+/// margin, with a point in hand for a fallback font whose line box is taller
+/// than the body font's.
+const RESULT_HEADER_HEIGHT: f32 = 28.0;
 /// Padding either side of a cell's content, so text in adjacent columns does
 /// not run together across the divider.
-const RESULT_CELL_MARGIN: i8 = 4;
+const RESULT_CELL_MARGIN: i8 = 8;
 /// Padding above and below a cell's content, so a row of text does not sit
 /// flush against the row above and below it.
-const RESULT_CELL_MARGIN_V: i8 = 2;
+const RESULT_CELL_MARGIN_V: i8 = 6;
 /// Padding kept clear around the table as a whole, so it does not sit flush
 /// against the match-count label above it or the tab's own edges.
-const RESULT_TABLE_MARGIN: i8 = 4;
+const RESULT_TABLE_MARGIN: i8 = 8;
 /// What the table stores its column widths under. Held across frames by
 /// `egui_table`, so a width the user drags to survives a scroll, a re-query and
 /// an app restart.
@@ -849,12 +853,22 @@ impl ResultsTable<'_> {
 
 impl egui_table::TableDelegate for ResultsTable<'_> {
     fn header_cell_ui(&mut self, ui: &mut egui::Ui, cell: &egui_table::HeaderCellInfo) {
-        // The header's own short-lived stand-in for the column line
-        // `egui_table` normally draws the full height of the table (see
-        // `show_results_table` for why that one is muted): confined to this
-        // cell's own rect, so it never runs past the header row, and drawn
-        // for every column including the trailing action one, matching where
-        // the full-height line used to appear.
+        // The header's own short stand-in for the column line `egui_table`
+        // draws the full height of the table (see `show_results_table` for why
+        // that one is muted): confined to this cell's own rect, so it never
+        // runs past the header row, and drawn for every column including the
+        // trailing action one.
+        //
+        // Held clear of the cell's right edge rather than centred on it. The
+        // cell's clip rect ends at that edge, and the renderer turns a clip
+        // rect into a scissor by rounding its edges to whole pixels, which can
+        // land up to half a pixel short of the edge itself. A stroke centred
+        // there loses its outer half to the clip in every case, and at the
+        // fractional widths auto-sizing settles columns on -- a boundary whose
+        // x falls just below a pixel centre -- that rounding takes the rest of
+        // it, leaving no divider at all on those columns. Inset by half the
+        // stroke plus that half pixel, the whole line sits inside every
+        // scissor the clip rect can round to.
         //
         // `egui_table` runs `header_cell_ui` once for a zero-width sticky
         // ("left") pass as well as the real one, even though this table has
@@ -863,12 +877,13 @@ impl egui_table::TableDelegate for ResultsTable<'_> {
         // rect, and a raw `painter()` call has to check the same thing itself
         // or it paints the divider twice. Checked against a rect actually at
         // the divider's own x, not the cell's full rect: the cell's left edge
-        // can still touch that collapsed clip even when the divider, at the
-        // cell's right edge, does not.
+        // can still touch that collapsed clip when the divider does not.
         let cell_rect = ui.max_rect();
-        let divider_rect = egui::Rect::from_x_y_ranges(cell_rect.right()..=cell_rect.right(), cell_rect.y_range());
+        let stroke = self.noninteractive_bg_stroke;
+        let x = cell_rect.right() - stroke.width / 2.0 - 0.5;
+        let divider_rect = egui::Rect::from_x_y_ranges(x..=x, cell_rect.y_range());
         if ui.is_rect_visible(divider_rect) {
-            ui.painter().vline(cell_rect.right(), cell_rect.y_range(), self.noninteractive_bg_stroke);
+            ui.painter().vline(x, cell_rect.y_range(), stroke);
         }
 
         // The action column has no header, so nothing else is drawn over it
@@ -1957,6 +1972,13 @@ mod tests {
             // against a button the app never draws.
             ctx.set_style_of(egui::Theme::Dark, dark_style());
             ctx.set_theme(egui::Theme::Dark);
+            // The phosphor icons the action buttons and the sort arrow draw
+            // come from a fallback font with its own metrics, so a line that
+            // carries one is taller than a line of plain text. Registering it
+            // here is what makes a measured row height mean anything.
+            let mut fonts = egui::FontDefinitions::default();
+            egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+            ctx.set_fonts(fonts);
             let mut harness = Self {
                 ctx,
                 hits,
@@ -2088,41 +2110,6 @@ mod tests {
             let rect = rects[0];
             assert!(rect.width() > 1.0 && rect.height() > 1.0, "{needle:?} laid out at {rect:?}");
             rect.center()
-        }
-
-        /// Drags `col_nr`'s resize handle `dx` points sideways, leaving the
-        /// column at whatever width that lands on.
-        fn drag_column(&mut self, col_nr: usize, dx: f32) {
-            let handle = self.rect_of(self.resizer_id(col_nr)).center();
-            let target = egui::Pos2::new(handle.x + dx, handle.y);
-
-            let mut press = self.quiet_input();
-            press.events.push(egui::Event::PointerMoved(handle));
-            press.events.push(egui::Event::PointerButton {
-                pos: handle,
-                button: egui::PointerButton::Primary,
-                pressed: true,
-                modifiers: egui::Modifiers::NONE,
-            });
-            self.frame(press);
-
-            // Two frames holding the pointer at the target: the first is what
-            // egui promotes the press into a drag on, the second is the one
-            // egui_table reads `pointer_latest_pos` from to resize the column.
-            for _ in 0..2 {
-                let mut drag = self.quiet_input();
-                drag.events.push(egui::Event::PointerMoved(target));
-                self.frame(drag);
-            }
-
-            let mut release = self.quiet_input();
-            release.events.push(egui::Event::PointerButton {
-                pos: target,
-                button: egui::PointerButton::Primary,
-                pressed: false,
-                modifiers: egui::Modifiers::NONE,
-            });
-            self.frame(release);
         }
 
         /// Clicks `pos` and reports what that pass asked the tab to do.
@@ -2270,15 +2257,17 @@ mod tests {
     /// Every vertical line segment painted near `x`, as `(y-range, stroke)`.
     /// A column boundary carries at most two: the header's own short divider
     /// (`header_cell_ui`) and `egui_table`'s own full-height line
-    /// (`Table::finish`), which sit at the same x because both are derived
-    /// from the same column geometry.
+    /// (`Table::finish`), which are derived from the same column geometry.
+    /// The tolerance covers the point and a half the header's divider is held
+    /// clear of the boundary by, so that it stays out of the clip rect's own
+    /// rounding.
     fn vlines_near_x(shapes: &[egui::epaint::ClippedShape], x: f32) -> Vec<(egui::Rangef, egui::Stroke)> {
         shapes
             .iter()
             .filter_map(|clipped| match &clipped.shape {
                 egui::Shape::LineSegment { points, stroke } => {
                     let vertical = (points[0].x - points[1].x).abs() < 0.5;
-                    let at_x = (points[0].x - x).abs() < 1.0;
+                    let at_x = (points[0].x - x).abs() < 2.0;
                     (vertical && at_x).then(|| {
                         (egui::Rangef::new(points[0].y.min(points[1].y), points[0].y.max(points[1].y)), *stroke)
                     })
@@ -2333,192 +2322,247 @@ mod tests {
         );
     }
 
-    /// Software-rasterises one settled frame to a PNG so the table can be
-    /// looked at rather than reasoned about.
-    fn render_png(harness: &TableHarness, path: &str) {
-        let ppp = 1.0f32;
-        let (w, h) = (harness.screen_width as usize, 400usize);
-        let mut buf = vec![[30u8, 30, 30, 255]; w * h];
-        let font = harness.ctx.fonts(|f| f.image());
-        let prims = harness.ctx.tessellate(harness.shapes.clone(), ppp);
-        for prim in &prims {
-            let clip = prim.clip_rect;
-            let egui::epaint::Primitive::Mesh(mesh) = &prim.primitive else {
-                continue;
-            };
-            for tri in mesh.indices.chunks(3) {
-                let v: Vec<_> = tri.iter().map(|i| mesh.vertices[*i as usize]).collect();
-                let minx = v.iter().map(|a| a.pos.x).fold(f32::MAX, f32::min).max(clip.min.x).max(0.0);
-                let maxx = v.iter().map(|a| a.pos.x).fold(f32::MIN, f32::max).min(clip.max.x).min(w as f32 - 1.0);
-                let miny = v.iter().map(|a| a.pos.y).fold(f32::MAX, f32::min).max(clip.min.y).max(0.0);
-                let maxy = v.iter().map(|a| a.pos.y).fold(f32::MIN, f32::max).min(clip.max.y).min(h as f32 - 1.0);
-                if maxx < minx || maxy < miny {
-                    continue;
-                }
-                // 3x3 supersampling so hairlines show their real coverage.
-                for py in (miny as usize)..=(maxy as usize) {
-                    for px in (minx as usize)..=(maxx as usize) {
-                        let mut acc = [0f32; 4];
-                        let mut hits = 0f32;
-                        for sy in 0..3 {
-                            for sx in 0..3 {
-                                let p = egui::pos2(
-                                    px as f32 + (sx as f32 + 0.5) / 3.0,
-                                    py as f32 + (sy as f32 + 0.5) / 3.0,
-                                );
-                                if p.x < clip.min.x || p.x > clip.max.x || p.y < clip.min.y || p.y > clip.max.y {
-                                    continue;
-                                }
-                                let d = |a: egui::epaint::Vertex, b: egui::epaint::Vertex| {
-                                    (b.pos.x - a.pos.x) * (p.y - a.pos.y) - (b.pos.y - a.pos.y) * (p.x - a.pos.x)
-                                };
-                                let (d0, d1, d2) = (d(v[0], v[1]), d(v[1], v[2]), d(v[2], v[0]));
-                                if !((d0 >= 0.0 && d1 >= 0.0 && d2 >= 0.0) || (d0 <= 0.0 && d1 <= 0.0 && d2 <= 0.0)) {
-                                    continue;
-                                }
-                                let area = d0 + d1 + d2;
-                                let (b0, b1, b2) = if area.abs() < 1e-6 {
-                                    (1.0, 0.0, 0.0)
-                                } else {
-                                    (d1 / area, d2 / area, d0 / area)
-                                };
-                                let mut col = [0f32; 4];
-                                for (i, w) in [(0, b0), (1, b1), (2, b2)] {
-                                    let c = v[i].color.to_array();
-                                    for k in 0..4 {
-                                        col[k] += c[k] as f32 * w;
-                                    }
-                                }
-                                let uv = egui::pos2(
-                                    v[0].uv.x * b0 + v[1].uv.x * b1 + v[2].uv.x * b2,
-                                    v[0].uv.y * b0 + v[1].uv.y * b1 + v[2].uv.y * b2,
-                                );
-                                // Textured triangles sample the font atlas;
-                                // the white pixel leaves the colour alone.
-                                let tx = (uv.x * font.width() as f32) as usize;
-                                let ty = (uv.y * font.height() as f32) as usize;
-                                if tx < font.width() && ty < font.height() && (tx > 1 || ty > 1) {
-                                    let a = font.pixels[ty * font.width() + tx].a() as f32 / 255.0;
-                                    col[3] *= a;
-                                }
-                                for k in 0..4 {
-                                    acc[k] += col[k];
-                                }
-                                hits += 1.0;
-                            }
-                        }
-                        if hits == 0.0 {
-                            continue;
-                        }
-                        let cov = hits / 9.0;
-                        let src = [acc[0] / hits, acc[1] / hits, acc[2] / hits, acc[3] / hits];
-                        let alpha = (src[3] / 255.0) * cov;
-                        let dst = &mut buf[py * w + px];
-                        for k in 0..3 {
-                            dst[k] = (src[k] * alpha + dst[k] as f32 * (1.0 - alpha)).clamp(0.0, 255.0) as u8;
-                        }
-                    }
-                }
-            }
-        }
-        let flat: Vec<u8> = buf.iter().flat_map(|p| p.iter().copied()).collect();
-        let img = image::RgbaImage::from_raw(w as u32, h as u32, flat).unwrap();
-        img.save(path).unwrap();
-        let crop = image::imageops::crop_imm(&img, 0, 0, 360.min(w as u32), 90).to_image();
-        let zoom = image::imageops::resize(&crop, crop.width() * 3, crop.height() * 3, image::imageops::Nearest);
-        zoom.save(path.replace(".png", "-zoom.png")).unwrap();
-        let crop2 = image::imageops::crop_imm(&img, 480, 0, 240.min(w as u32 - 480), 90).to_image();
-        let zoom2 = image::imageops::resize(&crop2, crop2.width() * 3, crop2.height() * 3, image::imageops::Nearest);
-        zoom2.save(path.replace(".png", "-zoom2.png")).unwrap();
-        println!("wrote {path}");
+    /// One visible vertical line the table painted, with the clip rect it was
+    /// painted under.
+    struct PaintedVline {
+        x: f32,
+        stroke: egui::Stroke,
+        y_range: egui::Rangef,
+        clip: egui::Rect,
     }
 
-    #[test]
-    fn diagnostic_render() {
-        let dir = std::env::var("WT_SHOT_DIR").unwrap_or_else(|_| ".".to_owned());
-        let hits: Vec<MatchHit> = [SHORT_MAP, MEDIUM_MAP, LONG_MAP, SHORT_MAP, MEDIUM_MAP].iter().map(|m| hit_on_map(m)).collect();
-        let harness = TableHarness::at_width(hits.clone(), 1000.0);
-        render_png(&harness, &format!("{dir}/table-wide.png"));
-
-        let mut rects: Vec<(f32, f32, f32, f32)> = harness
+    /// Every header divider a settled table painted.
+    ///
+    /// Read off the frame rather than derived from the column widths: what the
+    /// tests below are about is where the line ended up relative to the clip
+    /// rect it was painted under, and only the frame carries both. Transparent
+    /// segments are `egui_table`'s own full-height line, muted within the
+    /// table's scope; the header's dividers are the ones that still carry a
+    /// colour.
+    fn painted_header_dividers(harness: &TableHarness) -> Vec<PaintedVline> {
+        harness
             .shapes
             .iter()
-            .filter_map(|c| match &c.shape {
-                egui::Shape::Rect(r) if r.rect.height() < 27.9 && r.rect.width() < 200.0 => {
-                    Some((r.rect.height(), r.rect.width(), r.rect.min.y, r.rect.max.y))
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points, stroke }
+                    if (points[0].x - points[1].x).abs() < 0.5 && stroke.color != egui::Color32::TRANSPARENT =>
+                {
+                    Some(PaintedVline {
+                        x: points[0].x,
+                        stroke: *stroke,
+                        y_range: egui::Rangef::new(points[0].y.min(points[1].y), points[0].y.max(points[1].y)),
+                        clip: clipped.clip_rect,
+                    })
                 }
                 _ => None,
             })
-            .collect();
-        rects.sort_by(|a, b| b.0.total_cmp(&a.0));
-        rects.dedup();
-        println!("tallest painted rects (h, w, top, bottom): {:?}", &rects[..rects.len().min(8)]);
-        let texts: Vec<(String, f32, f32)> = harness
-            .shapes
-            .iter()
-            .filter_map(|c| match &c.shape {
-                egui::Shape::Text(t) => Some((t.galley.text().to_owned(), t.galley.size().y, t.pos.y)),
-                _ => None,
-            })
-            .take(12)
-            .collect();
-        println!("texts (text, galley h, top y): {texts:?}");
-
-        let mut squeezed = TableHarness::at_width(hits, 1000.0);
-        squeezed.drag_column(column_number(Some(ResultColumn::Date)), -200.0);
-        squeezed.settle();
-        println!("date width after squeeze: {}", squeezed.column_width(Some(ResultColumn::Date)));
-        let x = squeezed.column_right(column_number(Some(ResultColumn::Date)));
-        println!("date right {x}, lines {:?}", vlines_near_x(&squeezed.shapes, x));
-        render_png(&squeezed, &format!("{dir}/table-squeezed.png"));
+            .collect()
     }
 
+    /// How much of a vertical stroke of `width` centred on `x` survives the
+    /// scissor rectangle the renderer derives from `clip`, as a fraction of
+    /// the stroke's width.
+    ///
+    /// `egui-wgpu` builds that scissor by multiplying the clip rect by the
+    /// pixel ratio and rounding each edge to a whole pixel, so a clip edge can
+    /// sit up to half a pixel inside the rect it came from and take a stroke's
+    /// ink with it. Modelling that arithmetic is the only way to say whether a
+    /// line the shape list contains is a line the user can see.
+    fn scissor_surviving_fraction(x: f32, width: f32, clip: egui::Rect, ppp: f32) -> f32 {
+        let (lo, hi) = ((x - width / 2.0) * ppp, (x + width / 2.0) * ppp);
+        let (scissor_lo, scissor_hi) = ((clip.min.x * ppp).round(), (clip.max.x * ppp).round());
+        let kept = hi.min(scissor_hi) - lo.max(scissor_lo);
+        (kept / (width * ppp)).clamp(0.0, 1.0)
+    }
+
+    /// The pixel ratios the fractions below are checked at: one per whole
+    /// pixel and the fractional Windows scalings, since the rounding a clip
+    /// edge undergoes depends on where the boundary lands once scaled.
+    const PIXEL_RATIOS: [f32; 4] = [1.0, 1.25, 1.5, 2.0];
+
+    /// A header divider centred on its own cell's right edge -- where the cell
+    /// clip rect also ends -- loses at least half its width to that clip, and
+    /// at a boundary whose scaled x falls just under a pixel centre the
+    /// renderer's rounding takes the rest. The line is in the shape list
+    /// either way, so nothing that only counts segments can tell the
+    /// difference; the fraction that survives the scissor can.
+    ///
+    /// This is the positive control for the test below: it says the measure
+    /// used there is capable of reporting a loss, on the real clip rects of
+    /// this very table, at the placement the divider used to have.
     #[test]
-    fn diagnostic_dump() {
-        for width in [1400.0f32, 900.0, 700.0, 500.0, 300.0] {
-            let harness = TableHarness::at_width(vec![hit_on_map(SHORT_MAP)], width);
-            println!("=== screen width {width} ===");
-            let total: usize = RESULT_COLUMNS.len() + 1;
-            for col_nr in 0..total {
-                let w = harness.column_width(column_at(col_nr));
-                let x = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| harness.column_right(col_nr)));
-                match x {
-                    Ok(x) => {
-                        let lines = vlines_near_x(&harness.shapes, x);
-                        println!(
-                            "  col {col_nr} {:?} w={w:.1} right={x:.1} lines={:?}",
-                            column_at(col_nr),
-                            lines.iter().map(|(r, s)| (r.min, r.max, s.color, s.width)).collect::<Vec<_>>()
-                        );
-                    }
-                    Err(_) => println!("  col {col_nr} {:?} w={w:.1} NO RESIZER", column_at(col_nr)),
-                }
+    fn a_divider_on_the_cells_own_edge_is_eaten_by_the_clip() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let dividers = painted_header_dividers(&harness);
+        assert!(!dividers.is_empty(), "no header dividers were painted at all");
+
+        let on_the_edge: Vec<f32> =
+            dividers.iter().map(|d| scissor_surviving_fraction(d.clip.max.x, d.stroke.width, d.clip, 1.0)).collect();
+        assert!(
+            on_the_edge.iter().all(|f| *f < 0.999),
+            "a stroke centred on the clip edge always loses ink to it: {on_the_edge:?}"
+        );
+        assert!(
+            on_the_edge.iter().any(|f| *f < 0.1),
+            "no column boundary in this fixture lands where rounding erases the divider, \
+             so the fixture cannot exercise the case that was reported: {on_the_edge:?}"
+        );
+    }
+
+    /// Every column boundary must show its divider whatever width the column
+    /// settled at.
+    ///
+    /// Checked as the fraction of the stroke that survives the renderer's
+    /// scissor, for every column rather than one, because that is the way the
+    /// bug presented: the segment was always in the shape list and always at
+    /// the right x, and the columns whose divider vanished were the ones whose
+    /// auto-sized width put the boundary at an unlucky fraction of a pixel.
+    #[test]
+    fn every_header_divider_survives_the_renderers_scissor() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let dividers = painted_header_dividers(&harness);
+        assert_eq!(
+            dividers.len(),
+            RESULT_COLUMNS.len() + 1,
+            "every column including the action one draws a divider: {:?}",
+            dividers.iter().map(|d| d.x).collect::<Vec<_>>()
+        );
+
+        // The shape the bug needed. Auto-sizing lands columns on fractional
+        // widths, and whether rounding spares a stroke depends on which side
+        // of a pixel centre the boundary falls. A fixture whose boundaries all
+        // sat on one side would pass without ever meeting the other.
+        let fractions: Vec<f32> = dividers.iter().map(|d| d.clip.max.x.fract()).collect();
+        assert!(
+            fractions.iter().any(|f| *f < 0.5) && fractions.iter().any(|f| *f >= 0.5),
+            "the columns must straddle a pixel centre for this to test both roundings: {fractions:?}"
+        );
+
+        for ppp in PIXEL_RATIOS {
+            for divider in &dividers {
+                let kept = scissor_surviving_fraction(divider.x, divider.stroke.width, divider.clip, ppp);
+                assert!(
+                    kept > 0.999,
+                    "the divider at x={} lost {:.0}% of its width to the scissor at {ppp}x \
+                     (clip right {}, stroke {})",
+                    divider.x,
+                    (1.0 - kept) * 100.0,
+                    divider.clip.max.x,
+                    divider.stroke.width
+                );
             }
-            let all_vlines: Vec<_> = harness
-                .shapes
-                .iter()
-                .filter_map(|c| match &c.shape {
-                    egui::Shape::LineSegment { points, stroke }
-                        if (points[0].x - points[1].x).abs() < 0.5 && stroke.color != egui::Color32::TRANSPARENT =>
-                    {
-                        Some((points[0].x, points[0].y, points[1].y, c.clip_rect.min.x, c.clip_rect.max.x))
-                    }
-                    _ => None,
-                })
-                .collect();
-            println!("  visible vlines (x, y0, y1, clipL, clipR): {all_vlines:?}");
-            let hlines: Vec<_> = harness
-                .shapes
-                .iter()
-                .filter_map(|c| match &c.shape {
-                    egui::Shape::LineSegment { points, stroke } if (points[0].y - points[1].y).abs() < 0.5 => {
-                        Some((points[0].y, points[0].x, points[1].x, stroke.color))
-                    }
-                    _ => None,
-                })
-                .collect();
-            println!("  ALL hlines: {hlines:?}");
         }
+    }
+
+    /// The same, in a viewport too narrow for the whole table.
+    ///
+    /// A second shape the fixture above cannot reach: the rightmost columns
+    /// are then clipped by the scroll viewport rather than by their own cell,
+    /// which moves the clip edge off the column boundary entirely and lands
+    /// the boundaries themselves at different fractions. Whatever dividers are
+    /// still on screen have to be whole ones; the ones scrolled past are
+    /// rightly absent.
+    #[test]
+    fn a_clipped_table_still_draws_whole_dividers() {
+        const NARROW: f32 = 420.0;
+        let harness = TableHarness::at_width(vec![hit_on_map(LONG_MAP)], NARROW);
+        let dividers = painted_header_dividers(&harness);
+        assert!(
+            !dividers.is_empty() && dividers.len() < RESULT_COLUMNS.len() + 1,
+            "a {NARROW}-wide viewport must show some but not all of the {} boundaries, showed {}",
+            RESULT_COLUMNS.len() + 1,
+            dividers.len()
+        );
+
+        for ppp in PIXEL_RATIOS {
+            for divider in &dividers {
+                let kept = scissor_surviving_fraction(divider.x, divider.stroke.width, divider.clip, ppp);
+                assert!(
+                    kept > 0.999,
+                    "the divider at x={} lost {:.0}% of its width to the scissor at {ppp}x in a narrow table",
+                    divider.x,
+                    (1.0 - kept) * 100.0
+                );
+            }
+        }
+    }
+
+    /// The divider is the header's, so it must stay inside the header row
+    /// rather than running down over the results.
+    #[test]
+    fn a_header_divider_is_confined_to_the_header_row() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        for divider in painted_header_dividers(&harness) {
+            assert!(
+                (divider.y_range.span() - RESULT_HEADER_HEIGHT).abs() < 1.0,
+                "the divider at x={} spans {:?}, which is not the header row's {RESULT_HEADER_HEIGHT}",
+                divider.x,
+                divider.y_range
+            );
+        }
+    }
+
+    /// The tallest thing any cell draws, measured off the frame within one
+    /// row's own band. The action buttons are what this finds: the theme holds
+    /// them at `interact_size.y` however short their labels are.
+    fn tallest_content_in_a_row(harness: &TableHarness, row_band: egui::Rangef) -> f32 {
+        harness
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(r)
+                    if r.rect.min.y >= row_band.min - 0.5
+                        && r.rect.max.y <= row_band.max + 0.5
+                        && r.rect.height() < row_band.span() - 0.5 =>
+                {
+                    Some(r.rect.height())
+                }
+                _ => None,
+            })
+            .fold(0.0, f32::max)
+    }
+
+    /// The row has to be tall enough for what it draws plus the margin the
+    /// cell frame claims, or the padding is nominal: egui centres the content
+    /// in whatever height is left and the declared margin is never really
+    /// there.
+    #[test]
+    fn a_row_is_tall_enough_for_its_content_and_its_margin() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let top = RESULT_TABLE_MARGIN as f32 + RESULT_HEADER_HEIGHT;
+        let band = egui::Rangef::new(top, top + RESULT_ROW_HEIGHT);
+        let tallest = tallest_content_in_a_row(&harness, band);
+        assert!(tallest > 0.0, "nothing was measured in the first row's band {band:?}; the probe missed");
+
+        let needed = tallest + 2.0 * RESULT_CELL_MARGIN_V as f32;
+        assert!(
+            RESULT_ROW_HEIGHT >= needed,
+            "a row is {RESULT_ROW_HEIGHT} tall but its content is {tallest} and its margin \
+             {RESULT_CELL_MARGIN_V} either side, so it needs {needed}"
+        );
+    }
+
+    /// The same for the header, whose content is one line of text.
+    #[test]
+    fn the_header_row_is_tall_enough_for_its_label_and_its_margin() {
+        let harness = TableHarness::new(vec![hit_on_map(SHORT_MAP)]);
+        let label = column_label(ResultColumn::Date);
+        let painted = harness
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) if text.galley.text().contains(&label) => Some(text.galley.size().y),
+                _ => None,
+            })
+            .fold(0.0, f32::max);
+        assert!(painted > 0.0, "the {label} header drew no text to measure");
+
+        let needed = painted + 2.0 * RESULT_CELL_MARGIN_V as f32;
+        assert!(
+            RESULT_HEADER_HEIGHT >= needed,
+            "the header is {RESULT_HEADER_HEIGHT} tall but its label is {painted} and its margin \
+             {RESULT_CELL_MARGIN_V} either side, so it needs {needed}"
+        );
     }
 
     /// Whether any vertical line segment was painted in exactly `color`.
