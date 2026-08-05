@@ -34,11 +34,13 @@ use crate::db::index::rows::IndexSource;
 use crate::db::index::rows::MatchHit;
 use crate::db::index::rows::MatchOutcome;
 use crate::icons;
+use crate::replay::renderer::preview::PreviewKey;
 use crate::ui::query_bar::Deps;
 use crate::ui::query_bar::QueryBar;
 use crate::ui::query_bar::select::prune_empty;
 use crate::ui::query_bar::suggest::ValueOption;
 use crate::ui::query_bar::suggest::ValueRequest;
+use crate::ui::replay_parser::preview_popup;
 use crate::ui::theme::contrast::label_on;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::ui::widgets::pr_chip;
@@ -56,6 +58,50 @@ const VALUE_DEBOUNCE: Duration = Duration::from_millis(150);
 /// repaints on input, so a reply arriving between frames would otherwise sit in
 /// the channel until the pointer moved.
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+/// How long the pointer has to sit continuously on one result row's map cell
+/// before the shared preview machinery is asked to do anything for it. A
+/// table is scrolled fast, and scrolling drags the pointer across every row
+/// in between; this gate is what stops that from queuing a bake per row the
+/// pointer merely crossed.
+const PREVIEW_DWELL: Duration = Duration::from_millis(300);
+
+/// Tracks how long the pointer has continuously dwelled on one result row's
+/// map cell, independent of egui: the table calls `hover`/`leave` once per
+/// frame, and `pending_request` says whether a preview should actually be
+/// asked for. Kept as pure logic so the dwell and cancellation behaviour can
+/// be tested without rendering a frame.
+#[derive(Default)]
+struct PreviewState {
+    /// The row currently under the pointer and how long it has been watched
+    /// there.
+    watched: Option<(PreviewKey, Duration)>,
+}
+
+impl PreviewState {
+    /// Record that `key` was under the pointer for another `elapsed` of wall
+    /// time. A key different from the one already being watched replaces it
+    /// rather than adding to it: the dwell belongs to whichever row is
+    /// currently under the pointer, not to a sum across rows visited earlier.
+    fn hover(&mut self, key: PreviewKey, elapsed: Duration) {
+        match &mut self.watched {
+            Some((watched_key, dwelled)) if *watched_key == key => *dwelled += elapsed,
+            _ => self.watched = Some((key, elapsed)),
+        }
+    }
+
+    /// The row a preview should be requested for, once the pointer has
+    /// dwelled on it for at least `PREVIEW_DWELL`.
+    fn pending_request(&self) -> Option<PreviewKey> {
+        let (key, dwelled) = self.watched.as_ref()?;
+        (*dwelled >= PREVIEW_DWELL).then(|| key.clone())
+    }
+
+    /// The pointer left the table this frame, so nothing is dwelling
+    /// anymore; whatever was pending is cancelled.
+    fn leave(&mut self) {
+        self.watched = None;
+    }
+}
 
 /// A reply from the tokio runtime. Every database read the tab makes comes back
 /// through one channel, so the UI thread never blocks on the runtime.
@@ -130,6 +176,8 @@ pub struct SearchTabState {
     /// index with no groups and no maps answers with nothing, and a flag that
     /// only rose on a non-empty answer would re-ask every frame forever.
     catalogues_requested: bool,
+    /// The dwell gate for the results table's per-row map preview.
+    preview_state: PreviewState,
 }
 
 impl Default for SearchTabState {
@@ -153,6 +201,7 @@ impl Default for SearchTabState {
             asked_players: HashSet::new(),
             map_names: Vec::new(),
             catalogues_requested: false,
+            preview_state: PreviewState::default(),
         }
     }
 }
@@ -601,6 +650,27 @@ fn outcome_colour(outcome: MatchOutcome, style: &egui::Style) -> egui::Color32 {
     }
 }
 
+/// `PreviewKey` for `hit`, or `None` when the match has no recorded mtime.
+///
+/// Mirrors `preview_popup::preview_key`, which builds the same key from a
+/// replay-listing row's `RowSummary`; a search hit carries its own mtime
+/// directly on `MatchHit` and has no `RowSummary` to build one from.
+fn hit_preview_key(hit: &MatchHit) -> Option<PreviewKey> {
+    Some(PreviewKey { path: hit.replay_path.clone(), mtime_secs: hit.file_mtime? })
+}
+
+/// The line the preview popup shows below the map: when the match was played
+/// and, when it is known, which ship. The map name and the rest of the
+/// match's facts already have their own columns in the row the popup is
+/// anchored to, so this stays short.
+fn preview_hover_text(hit: &MatchHit, ship_name: Option<&str>) -> String {
+    let when = hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string();
+    match ship_name {
+        Some(name) => format!("{when} - {name}"),
+        None => when,
+    }
+}
+
 /// The path a copy-path click on `hits[index]` copies: that row's own path,
 /// never the selected row's or the first row's. There is no row selection in
 /// this table, so the button's own row is the only source that can be right.
@@ -720,6 +790,13 @@ impl ToolkitTabViewer<'_> {
         let mut open_path: Option<std::path::PathBuf> = None;
         let mut copy_path: Option<std::path::PathBuf> = None;
         let mut sort_clicked: Option<SortColumn> = None;
+        // Taken out for the duration of the table so the row closures below
+        // can hold it mutably alongside the immutable borrows of `self` those
+        // same closures make (`search_ship_display_name`, `preview_deps`);
+        // put back once the table is done drawing.
+        let mut preview_state = std::mem::take(&mut self.tab_state.search_tab.preview_state);
+        let mut map_cell_hovered = false;
+        let dwell_step = Duration::from_secs_f32(ui.input(|i| i.stable_dt).max(0.0));
         egui::ScrollArea::horizontal().id_salt("search_results").show(ui, |ui| {
             use egui_extras::Column;
             use egui_extras::TableBuilder;
@@ -749,12 +826,34 @@ impl ToolkitTabViewer<'_> {
                     let results = &self.tab_state.search_tab.results;
                     for (index, hit) in results.iter().enumerate() {
                         let ship_name = self.search_ship_display_name(hit);
+                        let preview_key = hit_preview_key(hit);
                         body.row(24.0, |mut row| {
                             row.col(|ui| {
                                 ui.label(hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string());
                             });
                             row.col(|ui| {
-                                ui.label(&hit.map);
+                                let mut response = ui.label(&hit.map);
+                                if let Some(key) = preview_key.clone()
+                                    && response.hovered()
+                                {
+                                    map_cell_hovered = true;
+                                    preview_state.hover(key.clone(), dwell_step);
+                                    if preview_state.pending_request().as_ref() == Some(&key)
+                                        && let Some(deps) = self.preview_deps(ui, true)
+                                    {
+                                        let hover_text = preview_hover_text(hit, ship_name.as_deref());
+                                        response = response.on_hover_ui(|ui| {
+                                            preview_popup::preview_tooltip(
+                                                ui,
+                                                &deps,
+                                                key.clone(),
+                                                &hit.map,
+                                                &hover_text,
+                                            );
+                                        });
+                                    }
+                                }
+                                let _ = response;
                             });
                             row.col(|ui| {
                                 ui.label(&hit.game_type);
@@ -821,6 +920,15 @@ impl ToolkitTabViewer<'_> {
                 });
         });
 
+        // No row's map cell was hovered this frame, whether the pointer left
+        // the table entirely or is sitting over a different column: either
+        // way nothing is dwelling anymore, so a return to the same row later
+        // starts the dwell over rather than resuming it.
+        if !map_cell_hovered {
+            preview_state.leave();
+        }
+        self.tab_state.search_tab.preview_state = preview_state;
+
         // The re-query happens next frame, since this frame's search was
         // already dispatched under the old sort before the header drew.
         if let Some(column) = sort_clicked {
@@ -858,6 +966,38 @@ mod tests {
     use crate::ui::theme::style::dark_style;
     use crate::ui::theme::style::light_style;
     use crate::util::personal_rating::PersonalRatingCategorySwatch;
+
+    fn row_key(i: usize) -> PreviewKey {
+        PreviewKey { path: std::path::PathBuf::from(format!("row-{i}")), mtime_secs: 0 }
+    }
+
+    #[test]
+    fn a_preview_is_requested_only_after_the_dwell_gate() {
+        let mut state = PreviewState::default();
+        state.hover(row_key(0), Duration::from_millis(50));
+        assert!(state.pending_request().is_none(), "requested before the dwell elapsed");
+        state.hover(row_key(0), PREVIEW_DWELL);
+        assert!(state.pending_request().is_some(), "no request after the dwell elapsed");
+    }
+
+    #[test]
+    fn moving_across_rows_does_not_queue_a_request_per_row() {
+        // Scrolling a long table drags the pointer over every row in between.
+        let mut state = PreviewState::default();
+        for row in 0..20 {
+            state.hover(row_key(row), Duration::from_millis(10));
+        }
+        assert!(state.pending_request().is_none(), "a fast pass queued work");
+    }
+
+    #[test]
+    fn leaving_a_row_cancels_its_pending_preview() {
+        let mut state = PreviewState::default();
+        state.hover(row_key(0), PREVIEW_DWELL);
+        assert!(state.pending_request().is_some());
+        state.leave();
+        assert!(state.pending_request().is_none(), "the request outlived the hover");
+    }
 
     /// A proof wrapper over `PersonalRatingCategory`, kept test-only: render
     /// code calls `PersonalRatingCategory::from_pr` and `widgets::pr_chip`

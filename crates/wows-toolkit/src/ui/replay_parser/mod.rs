@@ -1,7 +1,7 @@
 mod damage_types;
 mod listing_row;
 mod models;
-mod preview_popup;
+pub(crate) mod preview_popup;
 mod sorting;
 mod workspace;
 
@@ -3991,7 +3991,11 @@ impl ToolkitTabViewer<'_> {
     /// are not resolved here at all -- `preview_tooltip` fetches the hovered
     /// row's map lazily, so opening a large listing never uploads every map
     /// it contains.
-    fn preview_deps(&self, ui: &egui::Ui, pointer_over_listing: bool) -> Option<Arc<preview_popup::PreviewDeps>> {
+    pub(crate) fn preview_deps(
+        &self,
+        ui: &egui::Ui,
+        pointer_over_listing: bool,
+    ) -> Option<Arc<preview_popup::PreviewDeps>> {
         if !pointer_over_listing {
             return None;
         }
