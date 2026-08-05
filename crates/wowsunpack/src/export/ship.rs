@@ -50,6 +50,7 @@ use super::gltf_export;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
 use super::gltf_export::TextureSet;
+use super::part_group::PartGroup;
 use super::texture;
 
 // ---------------------------------------------------------------------------
@@ -71,6 +72,14 @@ pub struct ShipExportOptions {
     /// When true, crack geometry is included and patch geometry is excluded.
     /// Default: false (intact hull).
     pub damaged: bool,
+    /// Include armor plating geometry in the GLB, grouped under "Armor".
+    /// Opt-in, so callers who want only the visual model do not pay to
+    /// tessellate and embed a per-zone triangle soup for the hull and every
+    /// mount. Does not affect [`ShipModelContext::interactive_armor_meshes`],
+    /// which serves armor to viewers independently. Default: false.
+    pub armor: bool,
+    /// Detail level for textures embedded in the GLB. Default: [`TextureLod::Full`].
+    pub texture_lod: texture::TextureLod,
     /// Module overrides: component type key (e.g. "artillery") to component name.
     /// Overrides the default component for specific types.
     pub module_overrides: std::collections::HashMap<crate::game_params::keys::ComponentType, String>,
@@ -78,7 +87,15 @@ pub struct ShipExportOptions {
 
 impl Default for ShipExportOptions {
     fn default() -> Self {
-        Self { lod: 0, hull: None, textures: true, damaged: false, module_overrides: std::collections::HashMap::new() }
+        Self {
+            lod: 0,
+            hull: None,
+            textures: true,
+            damaged: false,
+            armor: false,
+            texture_lod: texture::TextureLod::Full,
+            module_overrides: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -1433,9 +1450,11 @@ impl ShipModelContext {
                 .context("Failed to parse turret geometry for hull meshes")?;
             let mut meshes =
                 gltf_export::collect_hull_meshes(&part.visual, &geom, &db, lod, damaged, mount.barrel_pitch.as_ref())?;
+            let group = PartGroup::from_mount_species(mount.species);
             for mesh in &mut meshes {
                 mesh.transform = mount.transform.map(gltf_export::negate_z_transform);
                 mesh.name = format!("{} [{}]", mesh.name, mount.hp_name);
+                mesh.group = group;
             }
             result.extend(meshes);
         }
@@ -1456,6 +1475,7 @@ impl ShipModelContext {
             for mesh in &mut meshes {
                 mesh.transform = misc.transform.map(gltf_export::negate_z_transform);
                 mesh.name = format!("{} [{}]", mesh.name, misc.node_name);
+                mesh.group = PartGroup::Misc;
             }
             result.extend(meshes);
         }
@@ -1474,7 +1494,7 @@ impl ShipModelContext {
             }
 
             let image = texture_cache.entry(mfm_path.clone()).or_insert_with(|| {
-                let dds_bytes = texture::load_base_albedo_bytes(&self.vfs, &mfm_path)?;
+                let dds_bytes = texture::load_base_albedo_bytes(&self.vfs, &mfm_path, self.options.texture_lod)?;
                 let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&dds_bytes)).ok()?;
                 image_dds::image_from_dds(&dds, 0).ok()
             });
@@ -1522,9 +1542,14 @@ impl ShipModelContext {
             if out.contains_key(path) {
                 continue;
             }
-            if let Some(png) =
-                texture::load_or_bake_albedo(&self.vfs, path, mesh.mfm_path_id, Some(&db), Some(&self_id_index), None)
-            {
+            if let Some(png) = texture::load_or_bake_albedo(
+                &self.vfs,
+                path,
+                mesh.mfm_path_id,
+                Some(&db),
+                Some(&self_id_index),
+                self.options.texture_lod,
+            ) {
                 out.insert(path.clone(), png);
             }
         }
@@ -1564,7 +1589,7 @@ impl ShipModelContext {
                 visual: &data.visual,
                 geometry: geom,
                 transform: None,
-                group: "Hull",
+                group: PartGroup::Hull,
                 barrel_pitch: None,
             });
         }
@@ -1579,7 +1604,7 @@ impl ShipModelContext {
                 visual: &turret_data.visual,
                 geometry: turret_geom,
                 transform: mount.transform,
-                group: mount_group(mount.species),
+                group: PartGroup::from_mount_species(mount.species),
                 barrel_pitch: mount.barrel_pitch.clone(),
             });
         }
@@ -1594,7 +1619,7 @@ impl ShipModelContext {
                 visual: &misc_data.visual,
                 geometry: misc_geom,
                 transform: misc.transform,
-                group: "Misc",
+                group: PartGroup::Misc,
                 barrel_pitch: None,
             });
         }
@@ -1613,23 +1638,25 @@ impl ShipModelContext {
         // Collect armor meshes from hull AND turret geometries with thickness data.
         let armor_map = self.armor_map.as_ref();
         let mut armor_meshes: Vec<gltf_export::ArmorSubModel> = Vec::new();
-        // Hull armor (already in world space, no transform needed).
-        for geom in &hull_geoms {
-            for am in &geom.armor_models {
-                armor_meshes.extend(gltf_export::armor_sub_models_by_zone(am, armor_map, None));
-            }
-        }
-
-        // Turret armor: instance per mount with that mount's transform.
-        for mount in &self.mounts {
-            let turret_geom = &turret_geoms[mount.turret_model_index];
-            for am in &turret_geom.armor_models {
-                let mut subs = gltf_export::armor_sub_models_by_zone(am, armor_map, mount.mount_armor.as_ref());
-                for s in &mut subs {
-                    s.transform = mount.armor_transform;
-                    s.name = format!("{} [{}]", s.name, mount.hp_name);
+        if self.options.armor {
+            // Hull armor (already in world space, no transform needed).
+            for geom in &hull_geoms {
+                for am in &geom.armor_models {
+                    armor_meshes.extend(gltf_export::armor_sub_models_by_zone(am, armor_map, None));
                 }
-                armor_meshes.extend(subs);
+            }
+
+            // Turret armor: instance per mount with that mount's transform.
+            for mount in &self.mounts {
+                let turret_geom = &turret_geoms[mount.turret_model_index];
+                for am in &turret_geom.armor_models {
+                    let mut subs = gltf_export::armor_sub_models_by_zone(am, armor_map, mount.mount_armor.as_ref());
+                    for s in &mut subs {
+                        s.transform = mount.armor_transform;
+                        s.name = format!("{} [{}]", s.name, mount.hp_name);
+                    }
+                    armor_meshes.extend(subs);
+                }
             }
         }
 
@@ -1701,6 +1728,7 @@ impl ShipModelContext {
             unique_infos,
             legacy_schemes,
             mat_schemes,
+            self.options.texture_lod,
         ))
     }
 
@@ -1710,7 +1738,7 @@ impl ShipModelContext {
         // the mat-camo path below surfaces those colorized.
         let camo_texture_paths: HashSet<String> =
             self.mat_camo_schemes.iter().flat_map(|s| s.textures.values().cloned()).collect();
-        let mut tex_set = build_texture_set(all_mfm_infos, &self.vfs, &camo_texture_paths);
+        let mut tex_set = build_texture_set(all_mfm_infos, &self.vfs, &camo_texture_paths, self.options.texture_lod);
         let per_ship_count = tex_set.camo_schemes.len();
 
         if !self.mat_camo_schemes.is_empty() {
@@ -1729,7 +1757,8 @@ impl ShipModelContext {
                     color_scheme_colors: scheme.color_scheme_colors.as_ref(),
                     uv_transforms: &scheme.uv_transforms,
                 };
-                let scheme_textures = crate::export::camo_textures::decode_mat_scheme(&self.vfs, &view, &stems);
+                let scheme_textures =
+                    crate::export::camo_textures::decode_mat_scheme(&self.vfs, &view, &stems, self.options.texture_lod);
 
                 if scheme_textures.is_empty() {
                     continue;
@@ -2003,7 +2032,12 @@ pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) ->
 }
 
 /// Build a `TextureSet` from MFM infos: base albedo + all camo schemes.
-pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, exclude_paths: &HashSet<String>) -> TextureSet {
+pub fn build_texture_set(
+    mfm_infos: &[MfmInfo],
+    vfs: &VfsPath,
+    exclude_paths: &HashSet<String>,
+    lod: texture::TextureLod,
+) -> TextureSet {
     let mut base = HashMap::new();
 
     let mut seen_stems = HashSet::new();
@@ -2016,8 +2050,8 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, exclude_paths: &H
 
     // Load base albedo textures.
     for info in &unique_infos {
-        if let Some(dds_bytes) = texture::load_base_albedo_bytes(vfs, &info.full_path) {
-            match texture::dds_to_png(&dds_bytes) {
+        if let Some(dds_bytes) = texture::load_base_albedo_bytes(vfs, &info.full_path, lod) {
+            match texture::dds_to_png(&dds_bytes, lod) {
                 Ok(png_bytes) => {
                     base.insert(info.stem.clone(), png_bytes);
                 }
@@ -2036,7 +2070,7 @@ pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, exclude_paths: &H
     let mut camo_origins = Vec::new();
     let mut camo_use_color_scheme = Vec::new();
     for scheme in &schemes {
-        let scheme_textures = crate::export::camo_textures::decode_legacy_scheme(vfs, &unique_infos, scheme);
+        let scheme_textures = crate::export::camo_textures::decode_legacy_scheme(vfs, &unique_infos, scheme, lod);
         if !scheme_textures.is_empty() {
             camo_schemes.push((scheme.clone(), scheme_textures));
             camo_origins.push(gltf_export::CamoOrigin::LegacyScan);
@@ -2191,14 +2225,6 @@ fn mat4_rotation_inverse(m: &[f32; 16]) -> [f32; 16] {
         m[2], m[6], m[10], 0.0, // col 2 = original row 2
         0.0, 0.0, 0.0, 1.0, // no translation
     ]
-}
-
-/// Map a mount's species to a display group name.
-fn mount_group(species: Option<crate::game_params::types::MountSpecies>) -> &'static str {
-    match species {
-        Some(s) => s.display_group(),
-        None => "Other",
-    }
 }
 
 // ---------------------------------------------------------------------------

@@ -858,21 +858,6 @@ impl MountSpecies {
             _ => None,
         }
     }
-
-    /// Display group name for Blender outliner hierarchy.
-    pub fn display_group(&self) -> &'static str {
-        match self {
-            Self::Main => "Main Battery",
-            Self::Secondary => "Secondary Battery",
-            Self::AAircraft => "AA Guns",
-            Self::Torpedo => "Torpedoes",
-            Self::DCharge => "Depth Charges",
-            Self::FireControl => "Fire Control",
-            Self::Search => "Radar",
-            Self::MissileGun => "Missiles",
-            Self::Decoration => "Decorations",
-        }
-    }
 }
 
 /// A single mount point (hardpoint) within a ship component.

@@ -154,6 +154,7 @@ pub(crate) fn load_ship_armor(
         textures: false,
         damaged: false,
         module_overrides: options.module_overrides,
+        ..Default::default()
     };
     let ctx = ship_assets.load_ship_from_vehicle(vehicle, &export_options).map_err(|e| format!("{e:?}"))?;
 

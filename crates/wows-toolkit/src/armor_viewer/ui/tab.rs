@@ -1113,6 +1113,8 @@ impl ToolkitTabViewer<'_> {
                                             hull,
                                             textures: true,
                                             damaged: false,
+                                            // The armor viewer exports the armored model by definition.
+                                            armor: true,
                                             ..Default::default()
                                         };
                                         let ctx = assets
@@ -2630,7 +2632,9 @@ pub(crate) fn start_hull_lod_reload(
                 textures: false,
                 damaged: false,
                 module_overrides,
+                ..Default::default()
             };
+            let texture_lod = options.texture_lod;
             let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
             let hull_meshes = ctx.interactive_hull_meshes().map_err(|e| format!("{e:?}"))?;
 
@@ -2644,7 +2648,8 @@ pub(crate) fn start_hull_lod_reload(
                     if hull_textures.contains_key(mfm) {
                         continue;
                     }
-                    if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(assets.vfs(), mfm)
+                    if let Some(dds_bytes) =
+                        wowsunpack::export::texture::load_base_albedo_bytes(assets.vfs(), mfm, texture_lod)
                         && let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes))
                         && let Ok(img) = image_dds::image_from_dds(&dds, 0)
                     {
@@ -2922,7 +2927,9 @@ fn start_upgrade_reload(
                 textures: false,
                 damaged: false,
                 module_overrides,
+                ..Default::default()
             };
+            let texture_lod = options.texture_lod;
             let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
 
             // Reload armor meshes (hull armor unchanged, turret armor re-mounted)
@@ -2989,7 +2996,8 @@ fn start_upgrade_reload(
                     if hull_textures.contains_key(mfm) {
                         continue;
                     }
-                    if let Some(dds_bytes) = wowsunpack::export::texture::load_base_albedo_bytes(assets.vfs(), mfm)
+                    if let Some(dds_bytes) =
+                        wowsunpack::export::texture::load_base_albedo_bytes(assets.vfs(), mfm, texture_lod)
                         && let Ok(dds) = image_dds::ddsfile::Dds::read(&mut std::io::Cursor::new(&dds_bytes))
                         && let Ok(img) = image_dds::image_from_dds(&dds, 0)
                     {
@@ -4245,60 +4253,27 @@ pub(crate) fn upload_trajectory_visualization(
     id
 }
 
-/// Categorize a hull mesh name into a display group.
-///
-/// Mounted parts have names like `"RenderSet [HP_AGM_1]"` — the HP_ prefix determines the group.
-/// Non-mounted hull render sets (no `[HP_...]` suffix) go into a group named after themselves
-/// (e.g. "Hull", "Superstructure", "DeckHouse").
-fn hull_part_group(name: &str) -> &'static str {
-    if let Some(start) = name.find("[HP_") {
-        let hp = &name[start + 1..name.len() - 1]; // strip brackets
-        if hp.starts_with("HP_AGM") {
-            "Main Battery"
-        } else if hp.starts_with("HP_AGS") {
-            "Secondary Battery"
-        } else if hp.starts_with("HP_AGA") {
-            "AA Guns"
-        } else if hp.starts_with("HP_ATB") || hp.starts_with("HP_AT_") {
-            "Torpedoes"
-        } else {
-            "Other"
-        }
-    } else {
-        "Hull"
-    }
-}
-
-/// Fixed display order for hull part groups.
-fn hull_group_order(group: &str) -> u32 {
-    match group {
-        "Hull" => 0,
-        "Main Battery" => 1,
-        "Secondary Battery" => 2,
-        "AA Guns" => 3,
-        "Torpedoes" => 4,
-        "Other" => 5,
-        _ => 6,
-    }
-}
-
 /// Build hull part groups from a list of hull meshes.
+///
+/// The group rides on each mesh, assigned from the mount's GameParams species when
+/// the ship was loaded, so this only has to bucket and order.
 pub(crate) fn build_hull_part_groups(
     hull_meshes: &[wowsunpack::export::gltf_export::InteractiveHullMesh],
 ) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
-    use std::collections::HashMap;
 
-    let mut group_map: HashMap<&str, BTreeSet<String>> = HashMap::new();
+    use wowsunpack::export::part_group::PartGroup;
+
+    let mut group_map: BTreeMap<PartGroup, BTreeSet<String>> = BTreeMap::new();
     for mesh in hull_meshes {
-        let group = hull_part_group(&mesh.name);
-        group_map.entry(group).or_default().insert(mesh.name.clone());
+        group_map.entry(mesh.group).or_default().insert(mesh.name.clone());
     }
 
-    let mut groups: Vec<(String, Vec<String>)> =
-        group_map.into_iter().map(|(group, names)| (group.to_string(), names.into_iter().collect())).collect();
-    groups.sort_by_key(|(g, _)| hull_group_order(g));
-    groups
+    let mut groups: Vec<(PartGroup, Vec<String>)> =
+        group_map.into_iter().map(|(group, names)| (group, names.into_iter().collect())).collect();
+    groups.sort_by_key(|(g, _)| g.order());
+    groups.into_iter().map(|(g, names)| (g.display_name().to_string(), names)).collect()
 }
 
 /// Create a water plane quad at the given Y height, extending beyond the hull bounding box.

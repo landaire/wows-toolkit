@@ -18,6 +18,98 @@ pub enum TextureError {
     PngEncode(String),
 }
 
+/// Longest-edge pixel budget for a decoded texture.
+///
+/// Zero is not representable: a budget of no pixels describes no image.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MaxEdge(u32);
+
+impl MaxEdge {
+    pub fn new(pixels: u32) -> Option<Self> {
+        (pixels > 0).then_some(Self(pixels))
+    }
+
+    pub fn pixels(self) -> u32 {
+        self.0
+    }
+
+    /// Whether an image of `width` by `height` already fits the budget.
+    fn fits(self, width: u32, height: u32) -> bool {
+        width.max(height) <= self.0
+    }
+}
+
+/// Requested detail level for a game texture.
+///
+/// WoWs stores a texture as a ladder of successive halvings: a `.dds` file
+/// holding the mip chain from 512 down, plus up to three single-mip files above
+/// it (`.dd2`, `.dd1`, `.dd0`), each double the one below. Only the tiers a
+/// texture needs exist, and the ones present always form a contiguous chain down
+/// to the `.dds` top mip, so `.dd0` is 2x, 4x, or 8x that mip depending on how
+/// many tiers there are.
+///
+/// [`Full`](Self::Full) takes the largest tier. [`Capped`](Self::Capped) takes
+/// the largest tier and stored mip that stay within budget, so a small budget
+/// skips the multi-megabyte read outright instead of decoding 4096 pixels and
+/// scaling the result down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TextureLod {
+    #[default]
+    Full,
+    Capped(MaxEdge),
+}
+
+impl TextureLod {
+    /// Build from a longest-edge pixel count. `None`, and any count that is not
+    /// a valid [`MaxEdge`], mean full detail.
+    pub fn from_max_edge(pixels: Option<u32>) -> Self {
+        match pixels.and_then(MaxEdge::new) {
+            Some(edge) => Self::Capped(edge),
+            None => Self::Full,
+        }
+    }
+
+    fn budget(self) -> Option<MaxEdge> {
+        match self {
+            Self::Full => None,
+            Self::Capped(edge) => Some(edge),
+        }
+    }
+}
+
+/// Single-mip tier suffixes stacked above the `.dds` mip tail, largest first.
+const DDS_TIER_SUFFIXES: [&str; 3] = ["dd0", "dd1", "dd2"];
+
+/// Read a whole file from the VFS, treating an empty file as absent.
+fn read_vfs_file(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<u8>> {
+    let vfs_path = vfs.join(path).ok()?;
+    let mut file = vfs_path.open_file().ok()?;
+    let mut data = Vec::new();
+    std::io::Read::read_to_end(&mut file, &mut data).ok()?;
+    (!data.is_empty()).then_some(data)
+}
+
+fn vfs_file_exists(vfs: &vfs::VfsPath, path: &str) -> bool {
+    vfs.join(path).and_then(|p| p.exists()).unwrap_or(false)
+}
+
+/// Top-mip dimensions of a DDS buffer, without decoding any pixels.
+fn dds_top_edge(dds_bytes: &[u8]) -> Option<u32> {
+    let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes)).ok()?;
+    Some(dds.get_width().max(dds.get_height()))
+}
+
+/// Read the highest-resolution tier available for `stem`, falling back down the
+/// ladder to the `.dds` tail.
+fn read_highest_tier(vfs: &vfs::VfsPath, stem: &str, tail_path: &str) -> Option<Vec<u8>> {
+    for suffix in DDS_TIER_SUFFIXES {
+        if let Some(data) = read_vfs_file(vfs, &format!("{stem}.{suffix}")) {
+            return Some(data);
+        }
+    }
+    read_vfs_file(vfs, tail_path)
+}
+
 /// Force all alpha values to 255 in an RGBA8 PNG buffer.
 /// Re-decodes and re-encodes the PNG. Used for model textures where the DDS alpha
 /// channel stores non-opacity data (height, roughness).
@@ -40,87 +132,94 @@ pub fn force_png_opaque(png_bytes: &mut Vec<u8>) {
     }
 }
 
-/// Decode DDS bytes to PNG bytes (RGBA8), optionally downsampling to a max size.
-///
-/// If `max_size` is `Some(n)`, the image is downsampled using box filtering so
-/// that neither dimension exceeds `n`. This is a simple but effective way to
-/// reduce texture memory for map-scale visualization.
-pub fn dds_to_png_resized(dds_bytes: &[u8], max_size: Option<u32>) -> Result<Vec<u8>, Report<TextureError>> {
-    let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes))
-        .map_err(|e| Report::new(TextureError::DdsParse(e.to_string())))?;
+/// Box-filter `image` down so that neither dimension exceeds `edge`.
+fn downsample(image: &RgbaImage, edge: MaxEdge) -> RgbaImage {
+    let (w, h) = (image.width(), image.height());
+    let max = edge.pixels();
+    let scale = (max as f32 / w as f32).min(max as f32 / h as f32);
+    let nw = ((w as f32 * scale) as u32).max(1);
+    let nh = ((h as f32 * scale) as u32).max(1);
 
-    let rgba_image =
-        image_dds::image_from_dds(&dds, 0).map_err(|e| Report::new(TextureError::DdsDecode(e.to_string())))?;
-
-    let (w, h) = (rgba_image.width(), rgba_image.height());
-
-    // Downsample if needed.
-    let (out_w, out_h, pixels) = if let Some(max) = max_size
-        && (w > max || h > max)
-    {
-        let scale = (max as f32 / w as f32).min(max as f32 / h as f32);
-        let nw = ((w as f32 * scale) as u32).max(1);
-        let nh = ((h as f32 * scale) as u32).max(1);
-        let src = rgba_image.as_raw();
-        let mut dst = vec![0u8; (nw * nh * 4) as usize];
-        // Box filter: average source pixels that map to each destination pixel.
-        for dy in 0..nh {
-            let sy0 = (dy as f64 * h as f64 / nh as f64) as u32;
-            let sy1 = (((dy + 1) as f64 * h as f64 / nh as f64) as u32).min(h);
-            for dx in 0..nw {
-                let sx0 = (dx as f64 * w as f64 / nw as f64) as u32;
-                let sx1 = (((dx + 1) as f64 * w as f64 / nw as f64) as u32).min(w);
-                let mut r = 0u32;
-                let mut g = 0u32;
-                let mut b = 0u32;
-                let mut a = 0u32;
-                let mut count = 0u32;
-                for sy in sy0..sy1 {
-                    for sx in sx0..sx1 {
-                        let i = (sy * w + sx) as usize * 4;
-                        r += src[i] as u32;
-                        g += src[i + 1] as u32;
-                        b += src[i + 2] as u32;
-                        a += src[i + 3] as u32;
-                        count += 1;
+    let src = image.as_raw();
+    let mut dst = vec![0u8; (nw as usize) * (nh as usize) * 4];
+    // Average the source pixels covered by each destination pixel.
+    for dy in 0..nh {
+        let sy0 = (dy as f64 * h as f64 / nh as f64) as u32;
+        let sy1 = (((dy + 1) as f64 * h as f64 / nh as f64) as u32).min(h);
+        for dx in 0..nw {
+            let sx0 = (dx as f64 * w as f64 / nw as f64) as u32;
+            let sx1 = (((dx + 1) as f64 * w as f64 / nw as f64) as u32).min(w);
+            let mut acc = [0u32; 4];
+            let mut count = 0u32;
+            for sy in sy0..sy1 {
+                for sx in sx0..sx1 {
+                    let i = (sy * w + sx) as usize * 4;
+                    for (c, a) in acc.iter_mut().enumerate() {
+                        *a += src[i + c] as u32;
                     }
+                    count += 1;
                 }
-                if count > 0 {
-                    let di = (dy * nw + dx) as usize * 4;
-                    dst[di] = (r / count) as u8;
-                    dst[di + 1] = (g / count) as u8;
-                    dst[di + 2] = (b / count) as u8;
-                    dst[di + 3] = (a / count) as u8;
+            }
+            if count > 0 {
+                let di = (dy * nw + dx) as usize * 4;
+                for (c, a) in acc.iter().enumerate() {
+                    dst[di + c] = (a / count) as u8;
                 }
             }
         }
-        (nw, nh, dst)
-    } else {
-        (w, h, rgba_image.into_raw())
-    };
+    }
 
-    let mut png_buf = Vec::new();
-    PngEncoder::new(&mut png_buf)
-        .write_image(&pixels, out_w, out_h, ExtendedColorType::Rgba8)
-        .map_err(|e| Report::new(TextureError::PngEncode(e.to_string())))?;
-
-    Ok(png_buf)
+    RgbaImage::from_raw(nw, nh, dst).unwrap_or_else(|| RgbaImage::new(nw, nh))
 }
 
-/// Decode DDS bytes to PNG bytes (RGBA8).
-pub fn dds_to_png(dds_bytes: &[u8]) -> Result<Vec<u8>, Report<TextureError>> {
+/// Largest stored mip level of `dds` that fits `lod`'s budget.
+///
+/// Returns the smallest stored mip when even that exceeds the budget; the caller
+/// box-filters the remainder.
+fn best_mip(dds: &image_dds::ddsfile::Dds, lod: TextureLod) -> u32 {
+    let Some(edge) = lod.budget() else {
+        return 0;
+    };
+    let levels = dds.get_num_mipmap_levels().max(1);
+    let (mut w, mut h) = (dds.get_width().max(1), dds.get_height().max(1));
+    for mip in 0..levels {
+        if edge.fits(w, h) {
+            return mip;
+        }
+        w = (w / 2).max(1);
+        h = (h / 2).max(1);
+    }
+    levels - 1
+}
+
+/// Decode DDS bytes to an RGBA8 image at no more than `lod`'s budget.
+///
+/// Prefers a stored mip over box filtering, so a texture whose own chain can
+/// serve the request never pays for a full-size decode.
+fn decode_dds(dds_bytes: &[u8], lod: TextureLod) -> Result<RgbaImage, Report<TextureError>> {
     let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes))
         .map_err(|e| Report::new(TextureError::DdsParse(e.to_string())))?;
 
-    let rgba_image =
-        image_dds::image_from_dds(&dds, 0).map_err(|e| Report::new(TextureError::DdsDecode(e.to_string())))?;
+    let image = image_dds::image_from_dds(&dds, best_mip(&dds, lod))
+        .map_err(|e| Report::new(TextureError::DdsDecode(e.to_string())))?;
 
+    Ok(match lod.budget() {
+        Some(edge) if !edge.fits(image.width(), image.height()) => downsample(&image, edge),
+        _ => image,
+    })
+}
+
+fn encode_png(image: &RgbaImage) -> Result<Vec<u8>, Report<TextureError>> {
     let mut png_buf = Vec::new();
     PngEncoder::new(&mut png_buf)
-        .write_image(rgba_image.as_raw(), rgba_image.width(), rgba_image.height(), ExtendedColorType::Rgba8)
+        .write_image(image.as_raw(), image.width(), image.height(), ExtendedColorType::Rgba8)
         .map_err(|e| Report::new(TextureError::PngEncode(e.to_string())))?;
-
     Ok(png_buf)
+}
+
+/// Decode DDS bytes to PNG bytes (RGBA8) at no more than `lod`'s budget.
+pub fn dds_to_png(dds_bytes: &[u8], lod: TextureLod) -> Result<Vec<u8>, Report<TextureError>> {
+    encode_png(&decode_dds(dds_bytes, lod)?)
 }
 
 /// Bake a color-indexed camouflage mask into RGBA using a color scheme.
@@ -138,12 +237,9 @@ pub fn bake_tiled_camo_png(
     tile_dds_bytes: &[u8],
     colors: &[[f32; 4]; 4],
     black_passthrough: bool,
+    lod: TextureLod,
 ) -> Result<Vec<u8>, Report<TextureError>> {
-    let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(tile_dds_bytes))
-        .map_err(|e| Report::new(TextureError::DdsParse(e.to_string())))?;
-
-    let mut rgba_image =
-        image_dds::image_from_dds(&dds, 0).map_err(|e| Report::new(TextureError::DdsDecode(e.to_string())))?;
+    let mut rgba_image = decode_dds(tile_dds_bytes, lod)?;
 
     let black_alpha = if black_passthrough { 0 } else { 255 };
     for pixel in rgba_image.pixels_mut() {
@@ -168,12 +264,7 @@ pub fn bake_tiled_camo_png(
         ];
     }
 
-    let mut png_buf = Vec::new();
-    PngEncoder::new(&mut png_buf)
-        .write_image(rgba_image.as_raw(), rgba_image.width(), rgba_image.height(), ExtendedColorType::Rgba8)
-        .map_err(|e| Report::new(TextureError::PngEncode(e.to_string())))?;
-
-    Ok(png_buf)
+    encode_png(&rgba_image)
 }
 
 /// Fraction of pixels that look like a colorizable zone mask: red/green/blue-dominant
@@ -181,6 +272,10 @@ pub fn bake_tiled_camo_png(
 /// near-black (all channels <= 30). A high fraction (>= 0.9) means the texture is a zone
 /// mask to colorize with a color scheme; a low fraction means a real painted albedo that
 /// must render raw.
+///
+/// Judges the top mip of whatever tier the caller loaded. Compression blends zone
+/// edges, so a lower tier scores marginally lower; a mask near the threshold can
+/// therefore classify differently across [`TextureLod`] settings.
 pub fn zone_mask_fraction(dds_bytes: &[u8]) -> Option<f32> {
     let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes)).ok()?;
     let img = image_dds::image_from_dds(&dds, 0).ok()?;
@@ -211,26 +306,50 @@ fn linear_to_srgb(c: f32) -> f32 {
 
 const TEXTURE_BASE: &str = "content/gameplay/common/camouflage/textures";
 
-/// Load raw DDS bytes from an absolute VFS path.
+/// Load raw DDS bytes for a `.dds` path, choosing the tier `lod` asks for.
 ///
-/// Prefers the high-res .dd0 tier over the low-res .dds mip tail (mirrors load_base_albedo_bytes).
-pub fn load_dds_from_vfs(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<u8>> {
-    let mut candidates = Vec::new();
-    if let Some(stem) = path.strip_suffix(".dds") {
-        candidates.push(format!("{stem}.dd0"));
+/// A capped request reads the `.dds` tail first: it is the cheapest file and its
+/// top mip anchors the ladder, so the size of every tier above follows from how
+/// many of them exist. That lets the largest tier within budget be read directly,
+/// with no speculative reads of the tiers above it.
+pub fn load_dds_from_vfs(vfs: &vfs::VfsPath, path: &str, lod: TextureLod) -> Option<Vec<u8>> {
+    let Some(stem) = path.strip_suffix(".dds") else {
+        return read_vfs_file(vfs, path);
+    };
+
+    let Some(budget) = lod.budget() else {
+        return read_highest_tier(vfs, stem, path);
+    };
+
+    // Without the tail there is nothing to size the ladder against.
+    let Some(tail) = read_vfs_file(vfs, path) else {
+        return read_highest_tier(vfs, stem, path);
+    };
+    let Some(tail_edge) = dds_top_edge(&tail) else {
+        return Some(tail);
+    };
+    if budget.pixels() <= tail_edge {
+        // The tail's own chain covers the request; the decode picks the mip.
+        return Some(tail);
     }
-    candidates.push(path.to_string());
-    for cand in &candidates {
-        if let Ok(vfs_path) = vfs.join(cand)
-            && let Ok(mut file) = vfs_path.open_file()
+
+    let present: Vec<&str> =
+        DDS_TIER_SUFFIXES.into_iter().filter(|s| vfs_file_exists(vfs, &format!("{stem}.{s}"))).collect();
+
+    // Tiers double going up, so the i-th of `n` present tiers (largest first)
+    // sits `n - i` doublings above the tail. Largest first means the first tier
+    // that fits the budget is the best one that does.
+    for (i, suffix) in present.iter().enumerate() {
+        let doublings = (present.len() - i) as u32;
+        let edge = tail_edge.checked_shl(doublings).unwrap_or(u32::MAX);
+        if edge <= budget.pixels()
+            && let Some(data) = read_vfs_file(vfs, &format!("{stem}.{suffix}"))
         {
-            let mut data = Vec::new();
-            if std::io::Read::read_to_end(&mut file, &mut data).is_ok() && !data.is_empty() {
-                return Some(data);
-            }
+            return Some(data);
         }
     }
-    None
+
+    Some(tail)
 }
 
 /// MFM name suffixes that don't appear in texture filenames.
@@ -274,24 +393,20 @@ const TEXTURE_CHANNEL_SUFFIXES: &[&str] = &["_a", "_mg", "_mgn"];
 /// turret models where the texture name differs from the MFM name.
 ///
 /// Returns `(base_name, dds_bytes)` if found, or `None`.
-pub fn load_texture_bytes(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> Option<(String, Vec<u8>)> {
+pub fn load_texture_bytes(
+    vfs: &vfs::VfsPath,
+    mfm_stem: &str,
+    scheme: &str,
+    lod: TextureLod,
+) -> Option<(String, Vec<u8>)> {
     for base in texture_base_names(mfm_stem) {
         // Try explicit albedo channel first ({base}_{scheme}_a), then direct ({base}_{scheme}).
-        let candidates = [
-            format!("{TEXTURE_BASE}/{base}_{scheme}_a.dd0"),
-            format!("{TEXTURE_BASE}/{base}_{scheme}_a.dds"),
-            format!("{TEXTURE_BASE}/{base}_{scheme}.dd0"),
-            format!("{TEXTURE_BASE}/{base}_{scheme}.dds"),
-        ];
+        let candidates =
+            [format!("{TEXTURE_BASE}/{base}_{scheme}_a.dds"), format!("{TEXTURE_BASE}/{base}_{scheme}.dds")];
 
         for path in &candidates {
-            if let Ok(vfs_path) = vfs.join(path)
-                && let Ok(mut file) = vfs_path.open_file()
-            {
-                let mut data = Vec::new();
-                if std::io::Read::read_to_end(&mut file, &mut data).is_ok() && !data.is_empty() {
-                    return Some((base, data));
-                }
+            if let Some(data) = load_dds_from_vfs(vfs, path, lod) {
+                return Some((base, data));
             }
         }
     }
@@ -306,12 +421,12 @@ pub fn load_texture_bytes(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> O
 /// the ship folder, e.g.:
 /// `content/gameplay/japan/ship/battleship/textures/JSB039_Yamato_1945_Hull_a.dd0`
 ///
-/// Prefers `.dd0` (highest resolution, typically 4096x4096) over `.dds` (low-res
-/// 512x512 mip tail). Falls back to searching the MFM's own directory.
+/// The tier within each candidate is chosen by `lod`. Falls back to searching the
+/// MFM's own directory.
 ///
 /// `mfm_full_path` is the full VFS path to the MFM file (e.g. ending in `.mfm`).
 /// Returns DDS bytes if found.
-pub fn load_base_albedo_bytes(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option<Vec<u8>> {
+pub fn load_base_albedo_bytes(vfs: &vfs::VfsPath, mfm_full_path: &str, lod: TextureLod) -> Option<Vec<u8>> {
     let dir = mfm_full_path.rsplit_once('/')?.0;
     let mfm_filename = mfm_full_path.rsplit_once('/')?.1;
     let stem = mfm_filename.strip_suffix(".mfm")?;
@@ -328,27 +443,18 @@ pub fn load_base_albedo_bytes(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option
     let tiled_subdir = format!("{dir}/TILED");
 
     for base in texture_base_names(stem) {
-        // Build candidate paths: prefer dd0 (high-res) over dds (low-res mip tail).
         let mut candidates = Vec::new();
         for suffix in &albedo_suffixes {
             if let Some(tex_dir) = &tex_sibling_dir {
-                candidates.push(format!("{tex_dir}/{base}{suffix}.dd0"));
                 candidates.push(format!("{tex_dir}/{base}{suffix}.dds"));
             }
-            candidates.push(format!("{dir}/{base}{suffix}.dd0"));
             candidates.push(format!("{dir}/{base}{suffix}.dds"));
-            candidates.push(format!("{tiled_subdir}/{base}{suffix}.dd0"));
             candidates.push(format!("{tiled_subdir}/{base}{suffix}.dds"));
         }
 
         for path in &candidates {
-            if let Ok(vfs_path) = vfs.join(path)
-                && let Ok(mut file) = vfs_path.open_file()
-            {
-                let mut data = Vec::new();
-                if std::io::Read::read_to_end(&mut file, &mut data).is_ok() && !data.is_empty() {
-                    return Some(data);
-                }
+            if let Some(data) = load_dds_from_vfs(vfs, path, lod) {
+                return Some(data);
             }
         }
     }
@@ -443,19 +549,11 @@ fn load_texture_by_hash(
     db: &PrototypeDatabase<'_>,
     self_id_index: &HashMap<u64, usize>,
     texture_hash: u64,
+    lod: TextureLod,
 ) -> Option<Vec<u8>> {
     let &path_idx = self_id_index.get(&texture_hash)?;
     let full_path = db.reconstruct_path(path_idx, self_id_index);
-
-    // Try .dd0 (high-res) first, then the path as-is (.dds).
-    let dd0_path = if full_path.ends_with(".dds") { Some(full_path.replace(".dds", ".dd0")) } else { None };
-
-    for path in dd0_path.iter().chain(std::iter::once(&full_path)) {
-        if let Some(data) = load_dds_from_vfs(vfs, path) {
-            return Some(data);
-        }
-    }
-    None
+    load_dds_from_vfs(vfs, &full_path, lod)
 }
 
 /// Parse an MFM material from assets.bin given its selfId (material_mfm_path_id).
@@ -498,7 +596,7 @@ pub fn bake_tiledland_albedo(
     vfs: &vfs::VfsPath,
     db: &PrototypeDatabase<'_>,
     self_id_index: &HashMap<u64, usize>,
-    max_size: Option<u32>,
+    lod: TextureLod,
 ) -> Option<Vec<u8>> {
     // Extract material properties.
     let ah_hash = mat.get_texture_hash("AHArray")?;
@@ -512,7 +610,7 @@ pub fn bake_tiledland_albedo(
     let sheen_amount = mat.get_float("sheen").unwrap_or(0.0);
 
     // Load and decode the tile atlas (array texture).
-    let ah_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, ah_hash)?;
+    let ah_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, ah_hash, lod)?;
     let ah_dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&ah_dds_bytes)).ok()?;
     let num_layers = ah_dds.get_num_array_layers().max(1);
     // Decode only mip 0 of all layers.
@@ -527,12 +625,10 @@ pub fn bake_tiledland_albedo(
     let tile_layers: Vec<Option<RgbaImage>> =
         layer_indices.iter().map(|&idx| ah_surface.get_image(idx, 0, 0)).collect();
 
-    // Load and decode the blend map.
-    let blend_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, blend_hash)?;
-    let blend_img = {
-        let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(&blend_dds_bytes)).ok()?;
-        image_dds::image_from_dds(&dds, 0).ok()?
-    };
+    // Load and decode the blend map. It sets the output resolution, so decoding it
+    // within budget is what keeps the bake itself within budget.
+    let blend_dds_bytes = load_texture_by_hash(vfs, db, self_id_index, blend_hash, lod)?;
+    let blend_img = decode_dds(&blend_dds_bytes, lod).ok()?;
     let blend_w = blend_img.width();
     let blend_h = blend_img.height();
 
@@ -611,53 +707,13 @@ pub fn bake_tiledland_albedo(
         }
     }
 
-    // Downsample if needed.
-    let (final_w, final_h, pixels) = if let Some(max) = max_size
-        && (out_w > max || out_h > max)
-    {
-        let scale = (max as f32 / out_w as f32).min(max as f32 / out_h as f32);
-        let nw = ((out_w as f32 * scale) as u32).max(1);
-        let nh = ((out_h as f32 * scale) as u32).max(1);
-        let src = output.as_raw();
-        let mut dst = vec![0u8; (nw * nh * 4) as usize];
-        for dy in 0..nh {
-            let sy0 = (dy as f64 * out_h as f64 / nh as f64) as u32;
-            let sy1 = (((dy + 1) as f64 * out_h as f64 / nh as f64) as u32).min(out_h);
-            for dx in 0..nw {
-                let sx0 = (dx as f64 * out_w as f64 / nw as f64) as u32;
-                let sx1 = (((dx + 1) as f64 * out_w as f64 / nw as f64) as u32).min(out_w);
-                let mut ra = 0u32;
-                let mut ga = 0u32;
-                let mut ba = 0u32;
-                let mut count = 0u32;
-                for sy in sy0..sy1 {
-                    for sx in sx0..sx1 {
-                        let i = (sy * out_w + sx) as usize * 4;
-                        ra += src[i] as u32;
-                        ga += src[i + 1] as u32;
-                        ba += src[i + 2] as u32;
-                        count += 1;
-                    }
-                }
-                if count > 0 {
-                    let di = (dy * nw + dx) as usize * 4;
-                    dst[di] = (ra / count) as u8;
-                    dst[di + 1] = (ga / count) as u8;
-                    dst[di + 2] = (ba / count) as u8;
-                    dst[di + 3] = 255;
-                }
-            }
-        }
-        (nw, nh, dst)
-    } else {
-        (out_w, out_h, output.into_raw())
+    // The bake writes opaque pixels throughout, so averaging alpha keeps it at 255.
+    let final_image = match lod.budget() {
+        Some(edge) if !edge.fits(out_w, out_h) => downsample(&output, edge),
+        _ => output,
     };
 
-    // Encode to PNG.
-    let mut png_buf = Vec::new();
-    PngEncoder::new(&mut png_buf).write_image(&pixels, final_w, final_h, ExtendedColorType::Rgba8).ok()?;
-
-    Some(png_buf)
+    encode_png(&final_image).ok()
 }
 
 /// Try to load a texture for a model mesh, with TILEDLAND baking support.
@@ -674,7 +730,7 @@ pub fn load_or_bake_albedo(
     mfm_path_id: u64,
     db: Option<&PrototypeDatabase<'_>>,
     self_id_index: Option<&HashMap<u64, usize>>,
-    max_size: Option<u32>,
+    lod: TextureLod,
 ) -> Option<Vec<u8>> {
     // Try MFM-based TILEDLAND baking first (terrain materials).
     // This must come before filename-based lookup because _od files exist for
@@ -686,7 +742,7 @@ pub fn load_or_bake_albedo(
         && is_tiledland_material(&mat)
     {
         eprintln!("  Baking TILEDLAND texture for: {mfm_full_path}");
-        if let Some(png) = bake_tiledland_albedo(&mat, vfs, db, idx, max_size) {
+        if let Some(png) = bake_tiledland_albedo(&mat, vfs, db, idx, lod) {
             return Some(png);
         }
         eprintln!("    Warning: TILEDLAND bake failed, falling back to filename lookup");
@@ -695,8 +751,8 @@ pub fn load_or_bake_albedo(
     // Fall back to simple filename-based lookup (works for standard PBS materials).
     // Force alpha=255 since model albedo textures often store non-opacity data
     // (height, roughness) in the alpha channel which would cause unwanted transparency.
-    let dds_bytes = load_base_albedo_bytes(vfs, mfm_full_path)?;
-    let mut png = dds_to_png_resized(&dds_bytes, max_size).ok()?;
+    let dds_bytes = load_base_albedo_bytes(vfs, mfm_full_path, lod)?;
+    let mut png = dds_to_png(&dds_bytes, lod).ok()?;
     force_png_opaque(&mut png);
     Some(png)
 }

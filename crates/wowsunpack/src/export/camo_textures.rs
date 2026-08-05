@@ -41,13 +41,14 @@ pub(crate) fn decode_legacy_scheme(
     vfs: &crate::vfs::VfsPath,
     unique_infos: &[&MfmInfo],
     scheme: &str,
+    lod: texture::TextureLod,
 ) -> SchemeTextures {
     let mut out = SchemeTextures::new();
     for info in unique_infos {
-        let Some((_base_name, dds_bytes)) = texture::load_texture_bytes(vfs, &info.stem, scheme) else {
+        let Some((_base_name, dds_bytes)) = texture::load_texture_bytes(vfs, &info.stem, scheme, lod) else {
             continue;
         };
-        match texture::dds_to_png(&dds_bytes) {
+        match texture::dds_to_png(&dds_bytes, lod) {
             Ok(png) => {
                 out.insert(info.stem.clone(), png);
             }
@@ -73,6 +74,7 @@ pub(crate) fn decode_mat_scheme(
     vfs: &crate::vfs::VfsPath,
     scheme: &MatCamoSchemeView<'_>,
     stems: &[String],
+    lod: texture::TextureLod,
 ) -> SchemeTextures {
     let mut decoded: HashMap<String, Vec<u8>> = HashMap::new();
     let mut out = SchemeTextures::new();
@@ -82,7 +84,7 @@ pub(crate) fn decode_mat_scheme(
             continue;
         };
         if !decoded.contains_key(path) {
-            let Some(dds) = texture::load_dds_from_vfs(vfs, path) else {
+            let Some(dds) = texture::load_dds_from_vfs(vfs, path, lod) else {
                 continue;
             };
             // Bake (colorize) only a zone mask that has a color scheme; a real painted
@@ -92,7 +94,7 @@ pub(crate) fn decode_mat_scheme(
                 // A per-ship painted mask (tiled=false) uses black as passthrough to the
                 // base; a repeating tile uses black as an opaque pattern color (full cover).
                 let black_passthrough = !scheme.tiled;
-                match texture::bake_tiled_camo_png(&dds, scheme.color_scheme_colors.unwrap(), black_passthrough) {
+                match texture::bake_tiled_camo_png(&dds, scheme.color_scheme_colors.unwrap(), black_passthrough, lod) {
                     Ok(p) => p,
                     Err(e) => {
                         eprintln!("  Warning: failed to bake camo {path}: {e}");
@@ -104,7 +106,7 @@ pub(crate) fn decode_mat_scheme(
                 // material data (gloss/height), not camo coverage. Force it opaque so
                 // the only textures carrying sub-255 alpha are baked passthrough masks,
                 // which lets the compositor identify passthrough reliably.
-                match texture::dds_to_png(&dds) {
+                match texture::dds_to_png(&dds, lod) {
                     Ok(mut p) => {
                         texture::force_png_opaque(&mut p);
                         p
@@ -162,6 +164,7 @@ pub struct CamoTextureSource {
     legacy_schemes: Vec<String>,
     mat_schemes: Vec<OwnedMatScheme>,
     kinds: Vec<CamoSchemeKind>,
+    lod: texture::TextureLod,
 }
 
 impl CamoTextureSource {
@@ -170,6 +173,7 @@ impl CamoTextureSource {
         unique_infos: Vec<MfmInfo>,
         legacy_schemes: Vec<String>,
         mat_schemes: Vec<OwnedMatScheme>,
+        lod: texture::TextureLod,
     ) -> Self {
         let unique_stems = unique_infos.iter().map(|i| i.stem.clone()).collect();
         let mut kinds = Vec::with_capacity(legacy_schemes.len() + mat_schemes.len());
@@ -179,7 +183,7 @@ impl CamoTextureSource {
         for i in 0..mat_schemes.len() {
             kinds.push(CamoSchemeKind::Mat(i));
         }
-        Self { vfs, unique_infos, unique_stems, legacy_schemes, mat_schemes, kinds }
+        Self { vfs, unique_infos, unique_stems, legacy_schemes, mat_schemes, kinds, lod }
     }
 
     pub fn scheme_infos(&self) -> Vec<CamoSchemeInfo> {
@@ -231,8 +235,12 @@ impl CamoTextureSource {
         let kind = self.kinds.get(id.0).ok_or(CamoDecodeError::UnknownId(id))?;
         let unique_refs: Vec<&MfmInfo> = self.unique_infos.iter().collect();
         Ok(match kind {
-            CamoSchemeKind::Legacy(i) => decode_legacy_scheme(&self.vfs, &unique_refs, &self.legacy_schemes[*i]),
-            CamoSchemeKind::Mat(i) => decode_mat_scheme(&self.vfs, &self.mat_schemes[*i].view(), &self.unique_stems),
+            CamoSchemeKind::Legacy(i) => {
+                decode_legacy_scheme(&self.vfs, &unique_refs, &self.legacy_schemes[*i], self.lod)
+            }
+            CamoSchemeKind::Mat(i) => {
+                decode_mat_scheme(&self.vfs, &self.mat_schemes[*i].view(), &self.unique_stems, self.lod)
+            }
         })
     }
 }

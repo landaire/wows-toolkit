@@ -25,6 +25,7 @@ use crate::models::vertex_format::AttributeSemantic;
 use crate::models::vertex_format::VertexFormat;
 use crate::models::visual::VisualPrototype;
 
+use super::part_group::PartGroup;
 use super::texture;
 
 #[derive(Debug, Error)]
@@ -320,7 +321,7 @@ pub struct BuildMapSceneParams<'a> {
     pub vfs: Option<&'a vfs::VfsPath>,
     pub env: &'a MapEnvironment<'a>,
     pub bounds: SpaceBounds,
-    pub max_texture_size: Option<u32>,
+    pub texture_lod: texture::TextureLod,
     pub vegetation: Option<&'a VegetationData>,
     pub vegetation_density: f32,
 }
@@ -335,7 +336,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
         vfs,
         env,
         ref bounds,
-        max_texture_size,
+        texture_lod,
         vegetation,
         vegetation_density,
     } = *params;
@@ -386,7 +387,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                         prim.mfm_path_id,
                         db,
                         self_id_index.as_ref(),
-                        max_texture_size,
+                        texture_lod,
                     )
                     .map(|png_bytes| {
                         let idx = textures.len();
@@ -457,7 +458,7 @@ pub fn build_map_scene(params: &BuildMapSceneParams<'_>) -> Result<MapScene, Rep
                 if buf.is_empty() { None } else { Some(buf) }
             })();
             match dds_bytes {
-                Some(dds_bytes) => match texture::dds_to_png_resized(&dds_bytes, max_texture_size) {
+                Some(dds_bytes) => match texture::dds_to_png(&dds_bytes, texture_lod) {
                     Ok(mut png_bytes) => {
                         // Force alpha=255: the lightmap DDS stores shadow data in
                         // the alpha channel which causes terrain transparency in viewers.
@@ -2740,6 +2741,10 @@ pub struct InteractiveHullMesh {
     /// Optional world-space transform (column-major 4x4) for turret mounts.
     #[cfg_attr(feature = "serde", serde(skip_serializing_if = "Option::is_none"))]
     pub transform: Option<[f32; 16]>,
+    /// Category this mesh is listed under. [`collect_hull_meshes`] cannot know it,
+    /// so it defaults to [`PartGroup::Hull`] and the ship loader assigns the real
+    /// group alongside the mount transform.
+    pub group: PartGroup,
 }
 
 /// Collect hull visual meshes (render sets) from a visual prototype and geometry.
@@ -2883,6 +2888,7 @@ pub fn collect_hull_meshes(
             mfm_path_id: rs.material_mfm_path_id,
             colors: Vec::new(),
             transform: None,
+            group: PartGroup::Hull,
         });
     }
 
@@ -3159,8 +3165,8 @@ pub struct SubModel<'a> {
     /// Optional world-space transform (column-major 4x4 matrix).
     /// If `None`, the sub-model is placed at the origin.
     pub transform: Option<[f32; 16]>,
-    /// Group name for Blender outliner hierarchy (e.g. "Hull", "Main Battery").
-    pub group: &'static str,
+    /// Category this sub-model is listed under in the scene hierarchy.
+    pub group: PartGroup,
     /// If set, apply a pitch rotation to vertices weighted to barrel bones.
     pub barrel_pitch: Option<BarrelPitch>,
 }
@@ -3203,7 +3209,7 @@ pub fn export_ship_glb(
     let mut mat_cache = MaterialCache::new();
 
     // Collect mesh nodes grouped by category.
-    let mut grouped_nodes: BTreeMap<&str, Vec<json::Index<json::Node>>> = BTreeMap::new();
+    let mut grouped_nodes: BTreeMap<PartGroup, Vec<json::Index<json::Node>>> = BTreeMap::new();
 
     let self_id_index = db.build_self_id_index();
 
@@ -3288,15 +3294,15 @@ pub fn export_ship_glb(
         armor_nodes.push(node);
     }
     if !armor_nodes.is_empty() {
-        grouped_nodes.insert("Armor", armor_nodes);
+        grouped_nodes.insert(PartGroup::Armor, armor_nodes);
     }
 
     // Build scene hierarchy: one parent node per group.
     let mut scene_nodes = Vec::new();
-    for (group_name, children) in &grouped_nodes {
+    for (group, children) in &grouped_nodes {
         let parent = root.push(json::Node {
             children: Some(children.clone()),
-            name: Some(group_name.to_string()),
+            name: Some(group.display_name().to_string()),
             ..Default::default()
         });
         scene_nodes.push(parent);

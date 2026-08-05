@@ -28,6 +28,7 @@ use wowsunpack::data::idx_vfs::IdxVfs;
 use wowsunpack::data::serialization;
 use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::export::gltf_export;
+use wowsunpack::export::texture::TextureLod;
 use wowsunpack::game_params::convert::game_params_to_pickle;
 
 use clap::Parser;
@@ -223,6 +224,11 @@ enum Commands {
         #[arg(long)]
         damaged: bool,
 
+        /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
+        /// texture tier that meets the limit instead of the full-resolution one
+        #[arg(long)]
+        max_texture_size: Option<u32>,
+
         /// List available camouflage texture schemes, then exit
         #[arg(long)]
         list_textures: bool,
@@ -262,6 +268,16 @@ enum Commands {
         /// Export the damaged/destroyed hull state (crack geometry instead of patches)
         #[arg(long)]
         damaged: bool,
+
+        /// Include armor plating geometry: a per-zone triangle soup for the hull
+        /// and every mount, grouped under "Armor"
+        #[arg(long)]
+        armor: bool,
+
+        /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
+        /// texture tier that meets the limit instead of the full-resolution one
+        #[arg(long)]
+        max_texture_size: Option<u32>,
 
         /// List available camouflage texture schemes, then exit
         #[arg(long)]
@@ -1065,19 +1081,32 @@ fn run() -> Result<(), Report> {
             let file_data = read_file_data(&file, no_vfs, vfs.as_ref())?;
             run_geometry(&file_data, &file.to_string_lossy(), decode)?;
         }
-        Commands::ExportModel { file, output, lod, no_textures, damaged, list_textures, no_vfs } => {
+        Commands::ExportModel { file, output, lod, no_textures, damaged, max_texture_size, list_textures, no_vfs } => {
             run_export_model(&ExportModelParams {
                 file: &file,
                 output: &output,
                 lod,
                 no_textures,
                 damaged,
+                texture_lod: TextureLod::from_max_edge(max_texture_size),
                 list_textures,
                 no_vfs,
                 vfs: vfs.as_ref(),
             })?;
         }
-        Commands::ExportShip { name, output, lod, list_upgrades, hull, no_textures, damaged, list_textures, debug } => {
+        Commands::ExportShip {
+            name,
+            output,
+            lod,
+            list_upgrades,
+            hull,
+            no_textures,
+            damaged,
+            armor,
+            max_texture_size,
+            list_textures,
+            debug,
+        } => {
             let Some(vfs) = &vfs else {
                 bail!("VFS required for export-ship. Use --game-dir to specify a game install.");
             };
@@ -1093,6 +1122,8 @@ fn run() -> Result<(), Report> {
                 hull.as_deref(),
                 no_textures,
                 damaged,
+                armor,
+                max_texture_size,
                 list_textures,
                 debug,
             )?;
@@ -1497,13 +1528,15 @@ struct ExportModelParams<'a> {
     lod: usize,
     no_textures: bool,
     damaged: bool,
+    texture_lod: TextureLod,
     list_textures: bool,
     no_vfs: bool,
     vfs: Option<&'a VfsPath>,
 }
 
 fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
-    let ExportModelParams { file, output, lod, no_textures, damaged, list_textures, no_vfs, vfs } = *params;
+    let ExportModelParams { file, output, lod, no_textures, damaged, texture_lod, list_textures, no_vfs, vfs } =
+        *params;
     use wowsunpack::export::gltf_export;
     use wowsunpack::export::ship::build_texture_set;
     use wowsunpack::export::ship::collect_mfm_info;
@@ -1593,7 +1626,7 @@ fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
             gltf_export::TextureSet::empty()
         } else {
             let mfm_infos = collect_mfm_info(vp, db);
-            build_texture_set(&mfm_infos, vfs, &HashSet::new())
+            build_texture_set(&mfm_infos, vfs, &HashSet::new(), texture_lod)
         };
 
         let mut out_file = std::fs::File::create(output).context("Failed to create output file")?;
@@ -1664,6 +1697,7 @@ fn run_export_map(
     no_textures: bool,
     max_texture_size: Option<u32>,
 ) -> Result<(), Report> {
+    let texture_lod = TextureLod::from_max_edge(max_texture_size);
     use wowsunpack::export::gltf_export;
     use wowsunpack::export::texture;
     use wowsunpack::models::assets_bin;
@@ -1857,7 +1891,7 @@ fn run_export_map(
                                         read_file_data(&PathBuf::from(&dd0_path), no_vfs, vfs)
                                     })
                                     .ok()?;
-                                texture::dds_to_png_resized(&tex_data, max_texture_size).ok()
+                                texture::dds_to_png(&tex_data, texture_lod).ok()
                             } else {
                                 None
                             };
@@ -1916,7 +1950,7 @@ fn run_export_map(
         vfs: vfs_for_textures,
         env: &env,
         bounds: bounds.clone(),
-        max_texture_size,
+        texture_lod,
         vegetation: vegetation_data.as_ref(),
         vegetation_density,
     })
@@ -1944,6 +1978,8 @@ fn run_export_ship(
     hull_selection: Option<&str>,
     no_textures: bool,
     damaged: bool,
+    armor: bool,
+    max_texture_size: Option<u32>,
     list_textures: bool,
     debug: bool,
 ) -> Result<(), Report> {
@@ -2000,6 +2036,8 @@ fn run_export_ship(
         hull: hull_selection.map(|s| s.to_string()),
         textures: !no_textures,
         damaged,
+        armor,
+        texture_lod: TextureLod::from_max_edge(max_texture_size),
         ..Default::default()
     };
     let ctx = assets.load_ship(name, &options)?;
@@ -2013,7 +2051,7 @@ fn run_export_ship(
         ctx.unique_misc_count()
     );
 
-    let has_armor = ctx.armor_map().is_some() || ctx.hull_splash_bytes().is_some();
+    let exported_armor = armor && (ctx.armor_map().is_some() || ctx.hull_splash_bytes().is_some());
 
     wowsunpack::export::set_debug(debug);
     let mut file = std::fs::File::create(output).context("Failed to create output file")?;
@@ -2022,7 +2060,7 @@ fn run_export_ship(
     let file_size = std::fs::metadata(output).map(|m| m.len()).unwrap_or(0);
     println!("Exported to {} ({} bytes)", output.display(), file_size);
 
-    if has_armor {
+    if exported_armor {
         print_armor_legend();
     }
 

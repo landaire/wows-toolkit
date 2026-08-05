@@ -186,56 +186,23 @@ pub(crate) fn transform_normal(t: &[f32; 16], n: [f32; 3]) -> [f32; 3] {
     if len < 1e-10 { [0.0, 0.0, 0.0] } else { [x / len, y / len, z / len] }
 }
 
-/// Classifies a hull render-set name into a display group, by its `[HP_...]`
-/// mount tag. Ports `armor_viewer::ui::tab::hull_part_group` verbatim.
-fn hull_part_group(name: &str) -> &'static str {
-    if let Some(start) = name.find("[HP_") {
-        let hp = &name[start + 1..name.len() - 1];
-        if hp.starts_with("HP_AGM") {
-            "Main Battery"
-        } else if hp.starts_with("HP_AGS") {
-            "Secondary Battery"
-        } else if hp.starts_with("HP_AGA") {
-            "AA Guns"
-        } else if hp.starts_with("HP_ATB") || hp.starts_with("HP_AT_") {
-            "Torpedoes"
-        } else {
-            "Other"
-        }
-    } else {
-        "Hull"
-    }
-}
-
-/// Fixed display order for hull part groups. Ports
-/// `armor_viewer::ui::tab::hull_group_order` verbatim.
-fn hull_group_order(group: &str) -> u32 {
-    match group {
-        "Hull" => 0,
-        "Main Battery" => 1,
-        "Secondary Battery" => 2,
-        "AA Guns" => 3,
-        "Torpedoes" => 4,
-        "Other" => 5,
-        _ => 6,
-    }
-}
-
-/// Build hull part groups from a list of hull meshes. Ports
-/// `armor_viewer::ui::tab::build_hull_part_groups` verbatim.
+/// Build hull part groups from a list of hull meshes. The group rides on each
+/// mesh, assigned from the mount's GameParams species when the ship was loaded.
 pub(crate) fn build_hull_part_groups(hull_meshes: &[InteractiveHullMesh]) -> Vec<(String, Vec<String>)> {
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
 
-    let mut group_map: HashMap<&str, BTreeSet<String>> = HashMap::new();
+    use wowsunpack::export::part_group::PartGroup;
+
+    let mut group_map: BTreeMap<PartGroup, BTreeSet<String>> = BTreeMap::new();
     for mesh in hull_meshes {
-        let group = hull_part_group(&mesh.name);
-        group_map.entry(group).or_default().insert(mesh.name.clone());
+        group_map.entry(mesh.group).or_default().insert(mesh.name.clone());
     }
 
-    let mut groups: Vec<(String, Vec<String>)> =
-        group_map.into_iter().map(|(group, names)| (group.to_string(), names.into_iter().collect())).collect();
-    groups.sort_by_key(|(g, _)| hull_group_order(g));
-    groups
+    let mut groups: Vec<(PartGroup, Vec<String>)> =
+        group_map.into_iter().map(|(group, names)| (group, names.into_iter().collect())).collect();
+    groups.sort_by_key(|(g, _)| g.order());
+    groups.into_iter().map(|(g, names)| (g.display_name().to_string(), names)).collect()
 }
 
 /// Build sorted hull upgrade labels with diff-based suffixes. Ports
@@ -344,6 +311,7 @@ fn load_ship_armor(
         textures: false,
         damaged: false,
         module_overrides: options.module_overrides,
+        ..Default::default()
     };
     let ctx = ship_assets
         .load_ship_from_vehicle(vehicle, &export_options)
@@ -550,7 +518,8 @@ pub(crate) fn export_options_from_selection(
     selected_hull: Option<String>,
     module_overrides: HashMap<ComponentType, String>,
 ) -> ShipExportOptions {
-    ShipExportOptions { lod, hull: selected_hull, textures: true, damaged: false, module_overrides }
+    // The armor viewer exports the armored model by definition.
+    ShipExportOptions { lod, hull: selected_hull, textures: true, damaged: false, armor: true, module_overrides, ..Default::default() }
 }
 
 /// Exports `param_index`'s ship model to `path` as a glTF Binary (GLB) file,
@@ -632,28 +601,6 @@ mod tests {
     }
 
     #[test]
-    fn hull_part_group_classifies_known_hp_prefixes_and_falls_back_to_hull() {
-        assert_eq!(hull_part_group("Turret[HP_AGM_1]"), "Main Battery");
-        assert_eq!(hull_part_group("Turret[HP_AGS_1]"), "Secondary Battery");
-        assert_eq!(hull_part_group("Mount[HP_AGA_1]"), "AA Guns");
-        assert_eq!(hull_part_group("Mount[HP_ATB_1]"), "Torpedoes");
-        assert_eq!(hull_part_group("Mount[HP_AT_1]"), "Torpedoes");
-        assert_eq!(hull_part_group("Mount[HP_XYZ_1]"), "Other");
-        assert_eq!(hull_part_group("Hull_Main"), "Hull");
-    }
-
-    #[test]
-    fn hull_group_order_ranks_hull_first_and_unknown_groups_last() {
-        assert_eq!(hull_group_order("Hull"), 0);
-        assert_eq!(hull_group_order("Main Battery"), 1);
-        assert_eq!(hull_group_order("Secondary Battery"), 2);
-        assert_eq!(hull_group_order("AA Guns"), 3);
-        assert_eq!(hull_group_order("Torpedoes"), 4);
-        assert_eq!(hull_group_order("Other"), 5);
-        assert_eq!(hull_group_order("Nonsense"), 6);
-    }
-
-    #[test]
     fn build_hull_part_groups_sorts_by_fixed_order_and_dedupes_within_a_group() {
         let meshes = vec![
             InteractiveHullMesh {
@@ -666,6 +613,7 @@ mod tests {
                 mfm_path_id: 0,
                 colors: Vec::new(),
                 transform: None,
+                group: wowsunpack::export::part_group::PartGroup::MainBattery,
             },
             InteractiveHullMesh {
                 name: "Hull_Main".to_string(),
@@ -677,6 +625,7 @@ mod tests {
                 mfm_path_id: 0,
                 colors: Vec::new(),
                 transform: None,
+                group: wowsunpack::export::part_group::PartGroup::Hull,
             },
             InteractiveHullMesh {
                 name: "Hull_Main".to_string(),
@@ -688,6 +637,7 @@ mod tests {
                 mfm_path_id: 0,
                 colors: Vec::new(),
                 transform: None,
+                group: wowsunpack::export::part_group::PartGroup::Hull,
             },
         ];
         let groups = build_hull_part_groups(&meshes);
