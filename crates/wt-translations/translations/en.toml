@@ -675,6 +675,9 @@ stats_unplayed_ship = "No battles recorded in this ship"
 pr_account_hover = "Account PR. The service reports no per-ship PR."
 win_rate_hover_overall = "Ship: %{rate} over %{battles} battles"
 win_rate_hover_ship = "Overall: %{rate} over %{battles} battles"
+debug_replay_picker = "Debug: treat a replay as the current match"
+debug_replay_picker_hover = "Loads a finished replay's roster into this tab so the stats path can be exercised outside a battle."
+debug_replay_none = "Pick a replay"
 
 [ui.player_tracker.column]
 clan = "Clan"

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use egui::Color32;
 use egui::Image;
@@ -8,8 +9,12 @@ use egui::RichText;
 use egui::UiKind;
 use egui::Vec2;
 use jiff::Timestamp;
+use jiff::civil::DateTime;
+use jiff::tz::TimeZone;
 use rust_i18n::t;
+use wows_replays::ReplayFile;
 use wows_replays::types::AccountId;
+use wowsunpack::data::Version;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::match_stats::PlayerStatsOut;
@@ -44,6 +49,8 @@ const MAX_COL_WIDTH: f32 = 180.0;
 
 impl ToolkitTabViewer<'_> {
     pub(crate) fn build_current_match_sub_tab(&mut self, ui: &mut egui::Ui) {
+        self.debug_replay_picker(ui);
+
         // Collected during the table pass and applied after, because the
         // player-tracker lock is held while rendering rows.
         let mut actions = TeamActions::default();
@@ -181,6 +188,85 @@ impl ToolkitTabViewer<'_> {
             });
         }
     }
+
+    /// Debug-only: install a finished replay's roster as the current match, so the
+    /// stats path can be exercised without being in a battle.
+    fn debug_replay_picker(&mut self, ui: &mut egui::Ui) {
+        if !self.tab_state.persisted.read().settings.app.debug_mode {
+            return;
+        }
+
+        // `date_time` is `dd.mm.yyyy HH:MM:SS`, which does not order lexically, so
+        // it is parsed before sorting. A row whose stamp will not parse sorts last
+        // rather than being dropped: it is still a replay the picker can load.
+        let mut replays: Vec<(PathBuf, String, Option<Timestamp>)> = self
+            .tab_state
+            .all_workspaces()
+            .filter_map(|workspace| workspace.replay_files.as_ref())
+            .flatten()
+            .map(|(path, listed)| {
+                let stamp = parse_replay_list_timestamp(&listed.date_time);
+                let label = format!("{} - {} - {}", listed.date_time, listed.map_name, listed.scenario);
+                (path.clone(), label, stamp)
+            })
+            .collect();
+        replays.sort_by(|a, b| {
+            match (a.2, b.2) {
+                (Some(a), Some(b)) => b.cmp(&a),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => std::cmp::Ordering::Equal,
+            }
+            .then_with(|| a.1.cmp(&b.1))
+        });
+
+        let id = egui::Id::new("current_match_debug_replay");
+        let selected: Option<PathBuf> = ui.data(|d| d.get_temp(id));
+        let label = selected
+            .as_ref()
+            .and_then(|path| {
+                replays.iter().find(|(candidate, ..)| candidate == path).map(|(_, label, _)| label.clone())
+            })
+            .unwrap_or_else(|| t!("ui.player_tracker.debug_replay_none").to_string());
+
+        let mut picked = None;
+        ui.horizontal(|ui| {
+            egui::ComboBox::from_id_salt(id).selected_text(label).show_ui(ui, |ui| {
+                for (path, label, _) in &replays {
+                    if ui.selectable_label(selected.as_ref() == Some(path), label).clicked() {
+                        picked = Some(path.clone());
+                    }
+                }
+            });
+            ui.label(t!("ui.player_tracker.debug_replay_picker"))
+                .on_hover_text(t!("ui.player_tracker.debug_replay_picker_hover"));
+        });
+
+        let Some(path) = picked else {
+            return;
+        };
+        ui.data_mut(|d| d.insert_temp(id, path.clone()));
+
+        let Ok(meta) = ReplayFile::meta_from_file(&path) else {
+            return;
+        };
+        let build = Version::try_from_client_exe(&meta.clientVersionFromExe).and_then(|v| v.build_number());
+        self.tab_state.player_tracker.write().update_from_live_arena_info(&meta);
+        let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
+            tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted {
+                replay: path,
+                build,
+                flush: FlushState::Complete,
+            })
+        });
+    }
+}
+
+/// Parses the `dd.mm.yyyy HH:MM:SS` stamp `replay_timestamp` uses, without
+/// panicking on a row it cannot parse.
+fn parse_replay_list_timestamp(date_time: &str) -> Option<Timestamp> {
+    const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
+    DateTime::strptime(REPLAY_DATE_FORMAT, date_time).ok()?.to_zoned(TimeZone::system()).ok().map(Into::into)
 }
 
 /// Everything both team tables read. Bundled because the two calls differ only
