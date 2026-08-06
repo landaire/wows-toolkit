@@ -88,12 +88,11 @@ pub(crate) struct LiveIdentity {
 /// `tempArenaInfo` roster is exact.
 #[derive(Debug, Clone)]
 pub(crate) struct LiveIdentities {
-    pub arena_id: ArenaId,
     pub by_name: HashMap<String, LiveIdentity>,
 }
 
 impl LiveIdentities {
-    pub(crate) fn from_player_states(arena_id: ArenaId, players: &[PlayerStateData]) -> Self {
+    pub(crate) fn from_player_states(_arena_id: ArenaId, players: &[PlayerStateData]) -> Self {
         let by_name = players
             .iter()
             .filter(|player| !player.is_bot())
@@ -103,7 +102,7 @@ impl LiveIdentities {
             })
             .collect();
 
-        Self { arena_id, by_name }
+        Self { by_name }
     }
 }
 
@@ -152,8 +151,6 @@ pub(crate) struct ResolvedRoster {
     /// Tracked-player count the name join was built against, so the join is
     /// rebuilt after new replays are indexed.
     pub tracked_count: usize,
-    /// Arena id the identity scan reported, if one has landed for this match.
-    pub arena_id: Option<ArenaId>,
     /// Identity count the name join was built against, so the join is rebuilt
     /// once the scan lands.
     pub identity_count: usize,
@@ -212,7 +209,6 @@ pub(crate) fn resolve_roster(
         started_at: live.started_at,
         ships_resolved: metadata.is_some(),
         tracked_count: tracked.len(),
-        arena_id: identities.map(|ids| ids.arena_id),
         identity_count: identities.map_or(0, |ids| ids.by_name.len()),
         friendly,
         enemy,
@@ -411,7 +407,6 @@ mod tests {
     #[test]
     fn identities_key_on_a_lower_cased_name() {
         let identities = LiveIdentities {
-            arena_id: ArenaId::from(5i64),
             by_name: HashMap::from([(
                 "harvey635".to_string(),
                 LiveIdentity { account_id: AccountId(42), region: Some(Region::Na) },
@@ -423,7 +418,6 @@ mod tests {
 
         let resolved = resolve_roster(&live, &HashMap::new(), Some(&identities), None);
 
-        assert_eq!(resolved.arena_id, Some(ArenaId::from(5i64)));
         assert_eq!(resolved.enemy[0].account_id, Some(AccountId(42)));
         assert_eq!(resolved.enemy[0].region, Some(Region::Na));
         assert_eq!(resolved.identity_count, 1);
@@ -437,7 +431,6 @@ mod tests {
 
         let resolved = resolve_roster(&live, &HashMap::new(), None, None);
 
-        assert_eq!(resolved.arena_id, None);
         assert_eq!(resolved.enemy[0].account_id, None);
         assert_eq!(resolved.enemy[0].region, None);
         assert_eq!(resolved.identity_count, 0);
@@ -446,7 +439,6 @@ mod tests {
     #[test]
     fn a_player_the_scan_missed_gets_no_identity() {
         let identities = LiveIdentities {
-            arena_id: ArenaId::from(5i64),
             by_name: HashMap::from([(
                 "someone_else".to_string(),
                 LiveIdentity { account_id: AccountId(42), region: Some(Region::Eu) },

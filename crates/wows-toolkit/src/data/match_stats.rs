@@ -200,11 +200,6 @@ impl MatchStatsClient {
         Self { http, limiter: RateLimiter::new(), cache: HashMap::new() }
     }
 
-    /// The cached answer for `arena_id`, if this client already fetched it.
-    pub fn cached(&self, arena_id: ArenaId) -> Option<&MatchStatsResponse> {
-        self.cache.get(&arena_id)
-    }
-
     pub fn fetch(&mut self, request: &MatchStatsRequest) -> Result<MatchStatsResponse, MatchStatsError> {
         if let Some(cached) = self.cache.get(&request.arena_id) {
             return Ok(cached.clone());
