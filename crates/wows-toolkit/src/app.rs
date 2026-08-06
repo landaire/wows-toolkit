@@ -1881,12 +1881,9 @@ impl WowsToolkitApp {
                             .context("failed to rename current process")?;
                         std::fs::rename(new_exe, &current_process).context("failed to rename new process")?;
 
-                        std::process::Command::new(current_process)
-                            .arg("finalize-update")
-                            .arg("--replaced")
-                            .arg(current_process_new_path)
-                            .spawn()
-                            .context("failed to execute updated process")
+                        let mut command = std::process::Command::new(current_process);
+                        command.arg("finalize-update").arg("--replaced").arg(current_process_new_path);
+                        crate::gpu::unpin_child(&mut command).spawn().context("failed to execute updated process")
                     };
 
                     match rename_process() {
@@ -3518,7 +3515,9 @@ impl WowsToolkitApp {
             crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
                 let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                 let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
-                let _ = std::process::Command::new(exe).arg(&replay_path).spawn();
+                let mut command = std::process::Command::new(exe);
+                command.arg(&replay_path);
+                let _ = crate::gpu::unpin_child(&mut command).spawn();
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {
@@ -4266,6 +4265,16 @@ impl WowsToolkitApp {
 impl eframe::App for WowsToolkitApp {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.update_impl(ctx, frame);
+    }
+
+    /// eframe evaluates this only while assembling a real paint, so it is the
+    /// one hook that proves pixels were produced. `logic` is not: egui runs the
+    /// UI closure repeatedly for multi-pass layout, and eframe calls `logic`
+    /// even for an invisible viewport it never paints.
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        #[cfg(not(target_arch = "wasm32"))]
+        crate::boot::note_frame();
+        egui::Color32::from_rgba_unmultiplied(12, 12, 12, 180).to_normalized_gamma_f32()
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {

@@ -97,6 +97,14 @@ fn main() {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("../../assets/wows_toolkit.ico");
         res.compile().unwrap();
+
+        // The vendor hybrid-graphics shims look these up in the export table by
+        // name. Defining the statics is not enough; an executable exports
+        // nothing unless the linker is told to.
+        if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
+            println!("cargo:rustc-link-arg-bins=/EXPORT:NvOptimusEnablement,DATA");
+            println!("cargo:rustc-link-arg-bins=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");
+        }
     }
 
     println!("cargo:rustc-check-cfg=cfg(has_game_data)");

@@ -56,11 +56,24 @@ fn main() -> eframe::Result<()> {
     use std::io::Write;
     use std::sync::Once;
 
-    match wows_toolkit::cli::resolve(env::args_os()) {
+    use wows_toolkit::gpu::select::RenderMode;
+
+    let cli = match wows_toolkit::cli::resolve(env::args_os()) {
         Ok(wows_toolkit::cli::Invocation::FinalizeUpdate { replaced }) => {
             finalize_update(&replaced);
+            // The updater relaunch carries no render flags in either form, and
+            // the app still has to start afterwards.
+            wows_toolkit::cli::Cli::default()
         }
-        Ok(wows_toolkit::cli::Invocation::Run(_)) => {}
+        Ok(wows_toolkit::cli::Invocation::ListGpus) => {
+            let (message, failed) = match wows_toolkit::gpu::probe::probe() {
+                Ok(adapters) => (wows_toolkit::cli::describe_adapters(&adapters), false),
+                Err(error) => (format!("Failed to read the display adapter registry: {error}\n"), true),
+            };
+            wows_toolkit::cli::report_startup_message("wows_toolkit: display adapters", &message, failed);
+            std::process::exit(i32::from(failed));
+        }
+        Ok(wows_toolkit::cli::Invocation::Run(cli)) => cli,
         Err(error) => {
             // use_stderr() is false exactly for --help/--version, which arrive
             // through this same arm and are not failures; pick the icon and
@@ -70,7 +83,7 @@ fn main() -> eframe::Result<()> {
             wows_toolkit::cli::report_startup_message(title, &error.render().to_string(), is_error);
             std::process::exit(error.exit_code());
         }
-    }
+    };
 
     // Enable the panic handler if the feature is explicitly enabled or
     // debug assertions are not enabled.
@@ -129,40 +142,47 @@ fn main() -> eframe::Result<()> {
         viewport = viewport.with_inner_size([600.0, 400.0]);
     }
 
+    // An unreadable adapter registry is not fatal: without a probe there is
+    // nothing to pin, which is exactly the full-enumeration behaviour that
+    // existed before pinning.
+    let adapters = wows_toolkit::gpu::probe::probe().unwrap_or_else(|error| {
+        tracing::warn!("Failed to probe display adapters, falling back to full enumeration: {error}");
+        Vec::new()
+    });
+    let overrides = cli.render_overrides();
+    let fingerprint = wows_toolkit::gpu::probe::fingerprint(&adapters);
+    // A run driven by explicit render flags is a diagnostic, not evidence about
+    // any mode: recording it would make the next bare launch trust a
+    // configuration that was never attempted, and killing it would demote a
+    // fallback it never exercised.
+    let remember_mode_for_next_launch = !overrides.are_set();
+    let mode =
+        if remember_mode_for_next_launch { wows_toolkit::boot::planned_mode(&fingerprint) } else { RenderMode::FIRST };
+
+    let render_config = match wows_toolkit::gpu::select::resolve(&adapters, &overrides, None, mode) {
+        Ok(config) => config,
+        Err(error) => {
+            wows_toolkit::cli::report_startup_message("wows_toolkit: adapter selection", &error.to_string(), true);
+            std::process::exit(2);
+        }
+    };
+    // Record the mode that will actually run, not the one that was asked for.
+    // `resolve` skips modes the present adapters cannot satisfy, and recording
+    // an unsatisfiable one would spend a launch per skipped mode re-attempting
+    // an identical configuration.
+    if remember_mode_for_next_launch {
+        wows_toolkit::boot::remember_mode(&fingerprint, render_config.mode);
+    }
+    tracing::info!(
+        "Render configuration: mode {}, backends {:?}, adapter {:?}",
+        render_config.mode.as_token(),
+        render_config.backends,
+        render_config.adapter
+    );
+
     let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut setup) = wgpu_options.wgpu_setup {
-        // Keep the default wide backend set (PRIMARY | GL, overridable with WGPU_BACKEND) so we
-        // run on Vulkan/Metal/DX12/GL across platforms. Bias adapter selection toward DX12 on
-        // Windows, otherwise prefer a discrete GPU on a real graphics API over a GL fallback.
-        setup.native_adapter_selector = Some(std::sync::Arc::new(|adapters, surface| {
-            adapters
-                .iter()
-                .filter(|adapter| surface.is_none_or(|surface| adapter.is_surface_supported(surface)))
-                .min_by_key(|adapter| {
-                    let info = adapter.get_info();
-                    // Pick the most capable GPU first.
-                    let device_rank = match info.device_type {
-                        wgpu::DeviceType::DiscreteGpu => 0u8,
-                        wgpu::DeviceType::IntegratedGpu => 1,
-                        wgpu::DeviceType::VirtualGpu => 2,
-                        wgpu::DeviceType::Cpu => 3,
-                        wgpu::DeviceType::Other => 4,
-                    };
-                    // Then prefer Vulkan/Metal over DX12: the DXGI flip-model swapchain
-                    // stutters during native window moves and non-client hover animations on
-                    // Windows. GL avoids it too but is the least battle-tested backend, so it
-                    // stays the last resort. DX12 remains the fallback when Vulkan is absent.
-                    let backend_rank = match info.backend {
-                        wgpu::Backend::Vulkan | wgpu::Backend::Metal => 0u8,
-                        wgpu::Backend::Dx12 => 1,
-                        wgpu::Backend::Gl => 2,
-                        _ => 3,
-                    };
-                    (device_rank, backend_rank)
-                })
-                .cloned()
-                .ok_or_else(|| "no compatible wgpu adapter available".to_string())
-        }));
+        apply_render_config(&render_config, setup);
     }
 
     let native_options = eframe::NativeOptions { viewport, wgpu_options, ..Default::default() };
@@ -174,6 +194,147 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// Ask the hybrid-graphics shim for the discrete GPU.
+///
+/// These are read by the vendor shims at process start, before any of our code
+/// runs, which is why they are link-time exports rather than a runtime decision.
+/// They only bias which GPU a muxed laptop hands the process; `VK_DRIVER_FILES`
+/// is what actually decides whose driver code gets loaded, and it wins.
+#[cfg(all(windows, target_env = "msvc"))]
+#[allow(non_upper_case_globals)]
+#[unsafe(no_mangle)]
+pub static NvOptimusEnablement: u32 = 1;
+
+#[cfg(all(windows, target_env = "msvc"))]
+#[allow(non_upper_case_globals)]
+#[unsafe(no_mangle)]
+pub static AmdPowerXpressRequestHighPerformance: u32 = 1;
+
+/// Point wgpu at exactly the device and driver that were resolved.
+///
+/// The ICD pin and the backend narrowing both have to happen before the wgpu
+/// instance is created: adapter enumeration loads every installed ICD, so a
+/// selector callback runs far too late to keep a vendor's code out of the
+/// process.
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_render_config(
+    config: &wows_toolkit::gpu::select::RenderConfig,
+    setup: &mut eframe::egui_wgpu::WgpuSetupCreateNew,
+) {
+    use wows_toolkit::gpu::select::AdapterChoice;
+    use wows_toolkit::gpu::select::BackendSelection;
+    use wows_toolkit::gpu::select::RenderBackend;
+
+    if let BackendSelection::Only(backend) = config.backends {
+        setup.instance_descriptor.backends = match backend {
+            RenderBackend::Vulkan => wgpu::Backends::VULKAN,
+            RenderBackend::Dx12 => wgpu::Backends::DX12,
+        };
+    }
+
+    if let AdapterChoice::Pinned { icd, .. } = &config.adapter {
+        // On Windows the loader discovers ICDs from the PnP adapter registry,
+        // not only from manifest files, and that path ignores VK_DRIVER_FILES
+        // entirely: with it set to the NVIDIA manifest the loader still logged
+        // "Located json file ...amd-vulkan64.json from PnP registry" and loaded
+        // amdvlk64.dll. VK_LOADER_DRIVERS_SELECT filters what that enumeration
+        // yields, and is what actually keeps the other vendor out. The manifest
+        // variables stay set for loaders older than 1.3.234, which do not
+        // implement the select filter.
+        let manifest = icd.as_path().as_os_str();
+        // The select filter matches manifest file names. Handing it a full path
+        // would match nothing and select zero drivers, which fails the launch
+        // outright, so a path with no file name drops the filter rather than
+        // applying a broken one.
+        let name = icd.as_path().file_name();
+        // SAFETY: Rust's set_var on Windows is SetEnvironmentVariableW and
+        // reads go through GetEnvironmentVariableW, both internally
+        // synchronised by the OS. Threads do exist by this point (the settings
+        // read above builds a tokio runtime and an sqlx pool), and no code in
+        // this process reads these variables; the Vulkan loader reads them
+        // later, on this thread, during instance creation.
+        unsafe {
+            match name {
+                Some(name) => std::env::set_var("VK_LOADER_DRIVERS_SELECT", name),
+                None => std::env::remove_var("VK_LOADER_DRIVERS_SELECT"),
+            }
+            std::env::set_var("VK_DRIVER_FILES", manifest);
+            std::env::set_var("VK_ICD_FILENAMES", manifest);
+            // Implicit layers load into every Vulkan process regardless of
+            // which driver was selected. AMD's switchable-graphics layer pulls
+            // in amdvlk64.dll on its own, which defeats the pin, and the same
+            // mechanism is how OBS and the Steam overlay inject. Disabling them
+            // removed every third-party module from the process.
+            std::env::set_var("VK_LOADER_LAYERS_DISABLE", "~implicit~");
+        }
+    } else {
+        // An unpinned mode must actually be unpinned. These can be inherited:
+        // the updater relaunches this binary, and a user can export them by
+        // hand. Leaving an inherited pin in place would keep this stuck on a
+        // driver that a safer mode was chosen specifically to escape.
+        // SAFETY: as above.
+        unsafe {
+            for name in wows_toolkit::gpu::PIN_VARS {
+                std::env::remove_var(name);
+            }
+        }
+    }
+
+    let choice = config.adapter.clone();
+    setup.native_adapter_selector =
+        Some(std::sync::Arc::new(move |adapters: &[wgpu::Adapter], surface: Option<&wgpu::Surface<'_>>| {
+            let usable = || adapters.iter().filter(|a| surface.is_none_or(|s| a.is_surface_supported(s)));
+
+            if let AdapterChoice::Cpu = choice {
+                // WARP is the whole point of this mode; falling back to a hardware
+                // adapter here would defeat it.
+                return usable()
+                    .find(|adapter| adapter.get_info().device_type == wgpu::DeviceType::Cpu)
+                    .cloned()
+                    .ok_or_else(|| "no CPU (WARP) adapter available".to_string());
+            }
+
+            // Select the pinned device by name where possible. The ICD filter
+            // matches a manifest file name, and one manifest can serve several
+            // devices: two NVIDIA cards share nv-vk64.json, as do an Intel iGPU
+            // and an Arc dGPU. Ranking alone would then re-pick the device the
+            // alternate mode exists to avoid. DX12 has no filter at all, so
+            // there this is the only thing honouring the choice.
+            if let AdapterChoice::Pinned { adapter: pinned, .. } = &choice
+                && let Some(found) = usable().find(|adapter| adapter.get_info().name == pinned.as_str())
+            {
+                return Ok(found.clone());
+            }
+
+            // A pinned ICD usually leaves exactly one adapter, but a vendor can
+            // expose several. Rank within whatever the pin admitted.
+            usable()
+                .min_by_key(|adapter| {
+                    let info = adapter.get_info();
+                    let device_rank = match info.device_type {
+                        wgpu::DeviceType::DiscreteGpu => 0u8,
+                        wgpu::DeviceType::IntegratedGpu => 1,
+                        wgpu::DeviceType::VirtualGpu => 2,
+                        wgpu::DeviceType::Cpu => 3,
+                        wgpu::DeviceType::Other => 4,
+                    };
+                    // Prefer Vulkan/Metal over DX12: the DXGI flip-model swapchain
+                    // stutters during native window moves and non-client hover
+                    // animations on Windows. GL avoids it too but is the least
+                    // battle-tested backend, so it stays the last resort.
+                    let backend_rank = match info.backend {
+                        wgpu::Backend::Vulkan | wgpu::Backend::Metal => 0u8,
+                        wgpu::Backend::Dx12 => 1,
+                        wgpu::Backend::Gl => 2,
+                        _ => 3,
+                    };
+                    (device_rank, backend_rank)
+                })
+                .cloned()
+                .ok_or_else(|| "no compatible wgpu adapter available".to_string())
+        }));
 }
 
 /// Delete the binary this process replaced. Failures are not worth surfacing:

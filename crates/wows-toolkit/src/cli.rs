@@ -85,11 +85,41 @@ pub fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
     Some(PathBuf::from(single))
 }
 
-#[derive(Debug, Parser)]
+#[derive(Debug, Default, Parser)]
 #[command(name = "wows_toolkit", version, about)]
 pub struct Cli {
+    /// Render with WARP, the Microsoft software rasterizer, loading no vendor
+    /// driver code at all.
+    #[arg(long, conflicts_with_all = ["gpu_adapter", "gpu_safe_mode"])]
+    pub cpu_renderer: bool,
+
+    /// Pin rendering to the adapter whose name contains NAME, matched
+    /// case-insensitively.
+    #[arg(long, value_name = "NAME", conflicts_with = "gpu_safe_mode")]
+    pub gpu_adapter: Option<String>,
+
+    /// Skip adapter pinning and enumerate every backend, as before pinning
+    /// existed.
+    #[arg(long)]
+    pub gpu_safe_mode: bool,
+
+    /// Print the display adapters found in the driver registry, then exit.
+    #[arg(long)]
+    pub list_gpus: bool,
+
     #[command(subcommand)]
     pub command: Option<Command>,
+}
+
+impl Cli {
+    /// The render overrides these arguments express.
+    pub fn render_overrides(&self) -> crate::gpu::select::Overrides {
+        crate::gpu::select::Overrides {
+            cpu_renderer: self.cpu_renderer,
+            gpu_safe_mode: self.gpu_safe_mode,
+            gpu_adapter: self.gpu_adapter.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Subcommand)]
@@ -102,8 +132,13 @@ pub enum Command {
 }
 
 /// What this process was asked to do.
+#[derive(Debug)]
 pub enum Invocation {
-    FinalizeUpdate { replaced: PathBuf },
+    FinalizeUpdate {
+        replaced: PathBuf,
+    },
+    /// Report the adapter probe and exit without creating a window.
+    ListGpus,
     Run(Cli),
 }
 
@@ -125,8 +160,34 @@ where
     let cli = Cli::try_parse_from(&args)?;
     match &cli.command {
         Some(Command::FinalizeUpdate { replaced }) => Ok(Invocation::FinalizeUpdate { replaced: replaced.clone() }),
+        None if cli.list_gpus => Ok(Invocation::ListGpus),
         None => Ok(Invocation::Run(cli)),
     }
+}
+
+/// Render the adapter probe for `--list-gpus`.
+///
+/// Reports the manifests the probe passed over as well as the one it pinned, so
+/// a machine that picked the wrong driver can be diagnosed without a registry
+/// dump.
+pub fn describe_adapters(adapters: &[crate::gpu::probe::AdapterRecord]) -> String {
+    if adapters.is_empty() {
+        return "No display adapters with a Vulkan driver were found.\n".to_string();
+    }
+
+    let mut out = String::new();
+    for adapter in adapters {
+        out.push_str(&format!("{}\n", adapter.description));
+        match adapter.memory {
+            Some(memory) => out.push_str(&format!("  memory: {memory}\n")),
+            None => out.push_str("  memory: not reported by the driver\n"),
+        }
+        out.push_str(&format!("  driver: {}\n", adapter.icd));
+        for discarded in &adapter.discarded_icds {
+            out.push_str(&format!("  unused: {discarded}\n"));
+        }
+    }
+    out
 }
 
 /// Obtain a writer for the console that launched this process.
@@ -395,5 +456,101 @@ mod tests {
     #[test]
     fn rejects_unknown_flag() {
         assert!(resolve(args(&["wows_toolkit.exe", "--nonsense"])).is_err());
+    }
+
+    fn run_overrides(argv: &[&str]) -> crate::gpu::select::Overrides {
+        match resolve(args(argv)).expect("resolve") {
+            Invocation::Run(cli) => cli.render_overrides(),
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bare_launch_expresses_no_render_override() {
+        let overrides = run_overrides(&["wows_toolkit.exe"]);
+
+        assert!(!overrides.cpu_renderer);
+        assert!(!overrides.gpu_safe_mode);
+        assert_eq!(overrides.gpu_adapter, None);
+    }
+
+    #[test]
+    fn cpu_renderer_flag_parses() {
+        assert!(run_overrides(&["wows_toolkit.exe", "--cpu-renderer"]).cpu_renderer);
+    }
+
+    #[test]
+    fn gpu_safe_mode_flag_parses() {
+        assert!(run_overrides(&["wows_toolkit.exe", "--gpu-safe-mode"]).gpu_safe_mode);
+    }
+
+    #[test]
+    fn gpu_adapter_flag_carries_its_value() {
+        let overrides = run_overrides(&["wows_toolkit.exe", "--gpu-adapter", "nvidia"]);
+
+        assert_eq!(overrides.gpu_adapter.as_deref(), Some("nvidia"));
+    }
+
+    #[test]
+    fn contradictory_render_flags_are_rejected_by_the_parser() {
+        assert!(resolve(args(&["wows_toolkit.exe", "--cpu-renderer", "--gpu-adapter", "nvidia"])).is_err());
+        assert!(resolve(args(&["wows_toolkit.exe", "--cpu-renderer", "--gpu-safe-mode"])).is_err());
+        assert!(resolve(args(&["wows_toolkit.exe", "--gpu-adapter", "nvidia", "--gpu-safe-mode"])).is_err());
+    }
+
+    #[test]
+    fn list_gpus_resolves_without_constructing_a_window() {
+        assert!(matches!(resolve(args(&["wows_toolkit.exe", "--list-gpus"])).expect("resolve"), Invocation::ListGpus));
+    }
+
+    #[test]
+    fn render_flags_do_not_disturb_the_updater_contract() {
+        let legacy = resolve(args(&["wows_toolkit.exe", "C:\\app\\wows_toolkit.exe.old"])).expect("resolve");
+        assert!(matches!(legacy, Invocation::FinalizeUpdate { .. }));
+
+        let subcommand =
+            resolve(args(&["wows_toolkit.exe", "finalize-update", "--replaced", "C:\\app\\wows_toolkit.exe.old"]))
+                .expect("resolve");
+        assert!(matches!(subcommand, Invocation::FinalizeUpdate { .. }));
+    }
+
+    #[test]
+    fn adapter_listing_reports_memory_and_discarded_manifests() {
+        use crate::gpu::probe::AdapterDescription;
+        use crate::gpu::probe::AdapterRecord;
+        use crate::gpu::probe::IcdManifestPath;
+        use crate::gpu::probe::VideoMemoryBytes;
+
+        let listing = describe_adapters(&[AdapterRecord {
+            description: AdapterDescription::new("NVIDIA GeForce RTX 5080"),
+            icd: IcdManifestPath::new(r"C:\nvidia\nv-vk64.json"),
+            discarded_icds: vec![IcdManifestPath::new(r"C:\nvidia\old\nv-vk64.json")],
+            memory: VideoMemoryBytes::new(17_094_934_528),
+        }]);
+
+        assert!(listing.contains("NVIDIA GeForce RTX 5080"));
+        assert!(listing.contains("15.9 GiB"));
+        assert!(listing.contains(r"unused: C:\nvidia\old\nv-vk64.json"));
+    }
+
+    #[test]
+    fn adapter_listing_distinguishes_an_unreported_memory_size() {
+        use crate::gpu::probe::AdapterDescription;
+        use crate::gpu::probe::AdapterRecord;
+        use crate::gpu::probe::IcdManifestPath;
+
+        let listing = describe_adapters(&[AdapterRecord {
+            description: AdapterDescription::new("Mystery Display Adapter"),
+            icd: IcdManifestPath::new(r"C:\mystery\vk.json"),
+            discarded_icds: Vec::new(),
+            memory: None,
+        }]);
+
+        assert!(listing.contains("not reported by the driver"));
+    }
+
+    #[test]
+    fn adapter_listing_says_so_when_nothing_was_found() {
+        assert!(describe_adapters(&[]).contains("No display adapters"));
     }
 }
