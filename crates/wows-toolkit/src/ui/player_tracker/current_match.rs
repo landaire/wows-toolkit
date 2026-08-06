@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use egui::Color32;
 use egui::Image;
 use egui::ImageSource;
+use egui::OpenUrl;
 use egui::RichText;
+use egui::UiKind;
 use egui::Vec2;
 use jiff::Timestamp;
 use rust_i18n::t;
@@ -20,6 +22,8 @@ use crate::twitch::TwitchState;
 use crate::ui::replay_parser::ship_class_icon_from_species;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::util::formatting::separate_number;
+use crate::util::formatting::shipbuilds_player_url;
+use crate::util::formatting::wows_numbers_player_url;
 use crate::util::personal_rating::PersonalRatingCategory;
 use crate::util::personal_rating::PersonalRatingCategorySwatch;
 
@@ -405,6 +409,34 @@ fn render_team(
                             .clicked()
                     {
                         actions.find_matches_target = Some(id);
+                    }
+
+                    if let (Some(account_id), Some(region)) = (row_data.account_id, row_data.region) {
+                        ui.menu_button(icons::DOTS_THREE, |ui| {
+                            if ui
+                                .small_button(wt_translations::icon_t(
+                                    icons::ARROW_SQUARE_OUT,
+                                    &t!("ui.player_tracker.open_wows_numbers"),
+                                ))
+                                .clicked()
+                            {
+                                let url = wows_numbers_player_url(region, account_id, &row_data.name);
+                                ui.ctx().open_url(OpenUrl::new_tab(url));
+                                ui.close_kind(UiKind::Menu);
+                            }
+
+                            if ui
+                                .small_button(wt_translations::icon_t(
+                                    icons::ARROW_SQUARE_OUT,
+                                    &t!("ui.player_tracker.open_shipbuilds"),
+                                ))
+                                .clicked()
+                            {
+                                let url = shipbuilds_player_url(region, account_id, &row_data.name);
+                                ui.ctx().open_url(OpenUrl::new_tab(url));
+                                ui.close_kind(UiKind::Menu);
+                            }
+                        });
                     }
                 });
 

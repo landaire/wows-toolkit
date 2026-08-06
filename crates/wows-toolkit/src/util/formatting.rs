@@ -1,3 +1,4 @@
+use crate::data::match_stats::Region;
 use crate::icons;
 use crate::ui::theme::semantic::semantic;
 use egui::Color32;
@@ -13,6 +14,7 @@ use wows_replay_insights::ResolvedBuild;
 use wows_replay_insights::build::wowssb;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::Player;
+use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -50,6 +52,18 @@ pub fn build_wows_numbers_url(player: &Player) -> Option<String> {
     let state = player.initial_state();
     let realm = state.realm()?;
     Some(format!("https://{}.wows-numbers.com/player/{},{}", realm, state.db_id(), state.username()))
+}
+
+/// A player's wows-numbers page. The realm is a subdomain there, so a region
+/// this client does not support has no page and cannot be linked.
+pub fn wows_numbers_player_url(region: Region, account_id: AccountId, name: &str) -> String {
+    format!("https://{}.wows-numbers.com/player/{},{}", region.as_wire(), account_id.0, name)
+}
+
+/// A player's shipbuilds page. Only the `EU` form of the region segment is
+/// confirmed against the live site; `NA` and `ASIA` follow the same shape.
+pub fn shipbuilds_player_url(region: Region, account_id: AccountId, name: &str) -> String {
+    format!("https://shipbuilds.com/player/{}/{}/{}", region.as_url_segment(), account_id.0, name)
 }
 
 pub fn build_ship_config_url(player: &Player, metadata_provider: &GameMetadataProvider) -> Option<String> {
@@ -200,5 +214,24 @@ pub fn open_directory(path: &Path) {
         {
             let _ = Command::new("explorer.exe").arg(path).spawn();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wows_numbers_url_is_scoped_by_its_regional_subdomain() {
+        let url = wows_numbers_player_url(Region::Na, AccountId(1_003_924_023), "G4ngB4r3ng");
+
+        assert_eq!(url, "https://na.wows-numbers.com/player/1003924023,G4ngB4r3ng");
+    }
+
+    #[test]
+    fn a_shipbuilds_url_uppercases_its_region() {
+        let url = shipbuilds_player_url(Region::Eu, AccountId(533_130_923), "G4ngB4r3ng");
+
+        assert_eq!(url, "https://shipbuilds.com/player/EU/533130923/G4ngB4r3ng");
     }
 }
