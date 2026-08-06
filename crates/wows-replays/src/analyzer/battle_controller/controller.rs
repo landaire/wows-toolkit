@@ -26,10 +26,10 @@ use crate::analyzer::decoder::PlayerStateData;
 use crate::analyzer::decoder::Recognized;
 use crate::analyzer::decoder::WeaponType;
 use crate::game_constants::GameConstants;
-use crate::types::AccountId;
 use crate::types::EntityId;
 use crate::types::GameClock;
 use crate::types::GameParamId;
+use crate::types::PlayerId;
 use crate::types::Relation;
 use crate::types::VisibilityFlags;
 
@@ -324,14 +324,14 @@ impl Player {
 #[derive(Debug)]
 /// Players that were parsed from just the replay metadata
 pub struct MetadataPlayer {
-    id: AccountId,
+    id: PlayerId,
     name: String,
     relation: Relation,
     vehicle: Rc<Param>,
 }
 
 impl MetadataPlayer {
-    pub fn new(id: AccountId, name: String, relation: Relation, vehicle: Rc<Param>) -> Self {
+    pub fn new(id: PlayerId, name: String, relation: Relation, vehicle: Rc<Param>) -> Self {
         Self { id, name, relation, vehicle }
     }
 
@@ -347,7 +347,7 @@ impl MetadataPlayer {
         self.vehicle.as_ref()
     }
 
-    pub fn id(&self) -> AccountId {
+    pub fn id(&self) -> PlayerId {
         self.id
     }
 }

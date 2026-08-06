@@ -23,7 +23,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 38750
-        meta_ship_id: 939778948
+        player_id: 939778948
         raw:
           "0": I64(510625475)
           "1": Bool(true)
@@ -376,7 +376,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 102200
-        meta_ship_id: 805618693
+        player_id: 805618693
         raw:
           "0": I64(579022016)
           "1": Bool(true)
@@ -737,7 +737,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 52400
-        meta_ship_id: 939932564
+        player_id: 939932564
         raw:
           "0": I64(534176657)
           "1": Bool(true)
@@ -1098,7 +1098,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 15900
-        meta_ship_id: 805501090
+        player_id: 805501090
         raw:
           "0": I64(571469806)
           "1": Bool(true)
@@ -1427,7 +1427,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 97200
-        meta_ship_id: 805637927
+        player_id: 805637927
         raw:
           "0": I64(663457529)
           "1": Bool(true)
@@ -1780,7 +1780,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 101150
-        meta_ship_id: 939555624
+        player_id: 939555624
         raw:
           "0": I64(548063795)
           "1": Bool(true)
@@ -2149,7 +2149,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 70000
-        meta_ship_id: 939920425
+        player_id: 939920425
         raw:
           "0": I64(557682673)
           "1": Bool(true)
@@ -2490,7 +2490,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 25750
-        meta_ship_id: 939685419
+        player_id: 939685419
         raw:
           "0": I64(597475423)
           "1": Bool(true)
@@ -2843,7 +2843,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 55300
-        meta_ship_id: 939625783
+        player_id: 939625783
         raw:
           "0": I64(511233664)
           "1": Bool(true)
@@ -3176,7 +3176,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 86950
-        meta_ship_id: 805681083
+        player_id: 805681083
         raw:
           "0": I64(598140744)
           "1": Bool(true)
@@ -3513,7 +3513,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 45300
-        meta_ship_id: 939565121
+        player_id: 939565121
         raw:
           "0": I64(702040473)
           "1": Bool(true)
@@ -3874,7 +3874,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 36150
-        meta_ship_id: 805412802
+        player_id: 805412802
         raw:
           "0": I64(541894400)
           "1": Bool(true)
@@ -4239,7 +4239,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 14100
-        meta_ship_id: 805328452
+        player_id: 805328452
         raw:
           "0": I64(502714305)
           "1": Bool(true)
@@ -4600,7 +4600,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 66900
-        meta_ship_id: 805503559
+        player_id: 805503559
         raw:
           "0": I64(540493840)
           "1": Bool(true)
@@ -4933,7 +4933,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 15100
-        meta_ship_id: 805527500
+        player_id: 805527500
         raw:
           "0": I64(519779991)
           "1": Bool(true)
@@ -5262,7 +5262,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 107950
-        meta_ship_id: 939699791
+        player_id: 939699791
         raw:
           "0": I64(586000161)
           "1": Bool(true)
@@ -5635,7 +5635,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 97200
-        meta_ship_id: 805472336
+        player_id: 805472336
         raw:
           "0": I64(581663139)
           "1": Bool(true)
@@ -5976,7 +5976,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 33200
-        meta_ship_id: 805353176
+        player_id: 805353176
         raw:
           "0": I64(573002055)
           "1": Bool(true)
@@ -6337,7 +6337,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 58000
-        meta_ship_id: 805650268
+        player_id: 805650268
         raw:
           "0": I64(598048869)
           "1": Bool(true)
@@ -6670,7 +6670,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 101150
-        meta_ship_id: 805405371
+        player_id: 805405371
         raw:
           "0": I64(556220771)
           "1": Bool(true)
@@ -7031,7 +7031,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 26900
-        meta_ship_id: 805618790
+        player_id: 805618790
         raw:
           "0": I64(683959628)
           "1": Bool(true)
@@ -7396,7 +7396,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 111100
-        meta_ship_id: 805583335
+        player_id: 805583335
         raw:
           "0": I64(602163403)
           "1": Bool(true)
@@ -7765,7 +7765,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 72450
-        meta_ship_id: 805373930
+        player_id: 805373930
         raw:
           "0": I64(504191427)
           "1": Bool(true)
@@ -8126,7 +8126,7 @@ payload:
         is_bot: false
         is_hidden: false
         max_health: 22500
-        meta_ship_id: 805448105
+        player_id: 805448105
         raw:
           "0": I64(575990609)
           "1": Bool(true)

@@ -16,6 +16,9 @@ serde = { workspace = true, optional = true }
 rkyv = { workspace = true, optional = true }
 roxmltree = { workspace = true, optional = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [features]
 # Unify Rc/Arc across the workspace: with `arc`, shared pointers are `Arc`.
 arc = []

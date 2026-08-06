@@ -19,7 +19,7 @@ players:
     name: Gobstoper
     entity_id: 795222
     team_id: 1
-    meta_ship_id: 269131667
+    player_id: 269131667
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -28,7 +28,7 @@ players:
     name: DamienLarkspur
     entity_id: 795218
     team_id: 1
-    meta_ship_id: 403409538
+    player_id: 403409538
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -37,7 +37,7 @@ players:
     name: Dadecoy11
     entity_id: 795220
     team_id: 1
-    meta_ship_id: 403322223
+    player_id: 403322223
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074649392)
@@ -46,7 +46,7 @@ players:
     name: TheJohnny_Tank
     entity_id: 795204
     team_id: 1
-    meta_ship_id: 269036288
+    player_id: 269036288
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
@@ -55,7 +55,7 @@ players:
     name: BigDaddy061
     entity_id: 795210
     team_id: 0
-    meta_ship_id: 403455491
+    player_id: 403455491
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -64,7 +64,7 @@ players:
     name: infmaze
     entity_id: 795216
     team_id: 0
-    meta_ship_id: 269112811
+    player_id: 269112811
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
@@ -73,7 +73,7 @@ players:
     name: Crummy_One
     entity_id: 795224
     team_id: 0
-    meta_ship_id: 403328278
+    player_id: 403328278
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -82,7 +82,7 @@ players:
     name: Nimzaj
     entity_id: 795212
     team_id: 1
-    meta_ship_id: 403389799
+    player_id: 403389799
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -91,7 +91,7 @@ players:
     name: CPT_Benson
     entity_id: 795230
     team_id: 0
-    meta_ship_id: 403392991
+    player_id: 403392991
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
@@ -100,7 +100,7 @@ players:
     name: Papercannon
     entity_id: 795208
     team_id: 0
-    meta_ship_id: 403376738
+    player_id: 403376738
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -109,7 +109,7 @@ players:
     name: Knightow
     entity_id: 795206
     team_id: 0
-    meta_ship_id: 403416865
+    player_id: 403416865
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3338548944)
@@ -118,7 +118,7 @@ players:
     name: k35_
     entity_id: 795226
     team_id: 1
-    meta_ship_id: 269070487
+    player_id: 269070487
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -127,7 +127,7 @@ players:
     name: _Miscreant_
     entity_id: 795228
     team_id: 1
-    meta_ship_id: 403512988
+    player_id: 403512988
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -136,7 +136,7 @@ players:
     name: hupking
     entity_id: 795214
     team_id: 0
-    meta_ship_id: 269062440
+    player_id: 269062440
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3338548944)

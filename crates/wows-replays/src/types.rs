@@ -11,6 +11,7 @@ pub use wowsunpack::game_types::GunBits;
 pub use wowsunpack::game_types::GunId;
 pub use wowsunpack::game_types::NormalizedPos;
 pub use wowsunpack::game_types::PlaneId;
+pub use wowsunpack::game_types::PlayerId;
 pub use wowsunpack::game_types::Relation;
 pub use wowsunpack::game_types::ShotId;
 pub use wowsunpack::game_types::TeamId;

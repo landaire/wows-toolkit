@@ -468,7 +468,7 @@ mod tests {
         wows_replays::VehicleInfoMeta {
             shipId: GameParamId::from(ship_id),
             relation,
-            id: wows_replays::types::AccountId(1),
+            id: wows_replays::types::PlayerId::from(1i64),
             name: "Someone".to_string(),
         }
     }

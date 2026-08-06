@@ -273,6 +273,40 @@ impl From<i64> for AccountId {
     }
 }
 
+/// The game's per-battle player id: `id` in the client's player data and in
+/// `tempArenaInfo`'s `vehicles[]`. Distinct from the account database id
+/// (`accountDBID`) and from the avatar entity id. It does not resolve against
+/// Vortex, so it must never be sent where a WG account id is expected.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(transparent))]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub struct PlayerId(i64);
+
+impl PlayerId {
+    pub fn raw(self) -> i64 {
+        self.0
+    }
+}
+
+impl fmt::Display for PlayerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl From<i64> for PlayerId {
+    fn from(v: i64) -> Self {
+        PlayerId(v)
+    }
+}
+
+impl From<u32> for PlayerId {
+    fn from(v: u32) -> Self {
+        PlayerId(v as i64)
+    }
+}
+
 /// A game parameter type identifier from GameParams (ships, equipment, etc.).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -3571,5 +3605,22 @@ mod tests {
             assert_eq!(PersonalRatingCategory::from_pr(boundary), upper);
             assert_eq!(PersonalRatingCategory::from_pr(boundary - 1.0), lower);
         }
+    }
+
+    #[test]
+    fn player_id_round_trips_through_raw_and_from() {
+        let id = PlayerId::from(805405371i64);
+        assert_eq!(id.raw(), 805405371);
+        assert_eq!(PlayerId::from(id.raw()), id);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn player_id_round_trips_through_serde() {
+        let id = PlayerId::from(805405371i64);
+        let json = serde_json::to_string(&id).expect("PlayerId serializes");
+        assert_eq!(json, "805405371");
+        let back: PlayerId = serde_json::from_str(&json).expect("PlayerId deserializes");
+        assert_eq!(back, id);
     }
 }

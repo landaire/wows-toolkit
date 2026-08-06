@@ -45,6 +45,10 @@ pub fn dispatch<G: ResourceLoader>(
 ) {
     match payload {
         DecodedPacketPayload::Chat { entity_id, sender_id, audience, message, extra_data } => {
+            // The wire type is AccountId, but in the PLAYER_ID era (see
+            // chat_sender_is_account_id) the value it carries is actually the
+            // sender's player id, not their account id.
+            let sender_id = wows_replays::types::PlayerId::from(sender_id.raw());
             chat::handle_chat_message(
                 chat::ChatMessage { entity_id, sender_id, audience, message, extra_data },
                 clock,

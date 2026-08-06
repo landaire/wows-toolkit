@@ -10,6 +10,7 @@ use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::ArenaId;
 use wows_replays::types::GameClock;
+use wows_replays::types::PlayerId;
 use wows_replays::types::TeamId;
 use wowsunpack::data::Version;
 use wowsunpack::game_types::BattleStage;
@@ -108,18 +109,14 @@ pub fn handle_game_room_state_changed(
     world: &mut World,
 ) {
     for player_state in player_states {
-        let Some(meta_ship_id) = player_state.get(PlayerStateData::KEY_ID) else {
+        let Some(player_id) = player_state.get(PlayerStateData::KEY_ID) else {
             continue;
         };
-        let meta_ship_id = *meta_ship_id.i64_ref().expect("player_id is not an i64");
+        let player_id = *player_id.i64_ref().expect("player_id is not an i64");
 
         let player = {
             let index = world.resource::<PlayerIndex>();
-            index
-                .0
-                .values()
-                .find(|p| p.initial_state().meta_ship_id() == wows_replays::types::AccountId::from(meta_ship_id))
-                .cloned()
+            index.0.values().find(|p| p.initial_state().player_id() == PlayerId::from(player_id)).cloned()
         };
         let Some(player) = player else {
             continue;

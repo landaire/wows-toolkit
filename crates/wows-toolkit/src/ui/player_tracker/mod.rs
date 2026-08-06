@@ -527,7 +527,7 @@ mod tests {
             "clan_color": 0,
             "db_id": db_id,
             "realm": "na",
-            "meta_ship_id": 0,
+            "player_id": 0,
             "entity_id": 0,
             "team_id": 0,
             "max_health": 40_000,

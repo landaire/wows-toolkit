@@ -261,8 +261,8 @@ impl wows_replays::analyzer::Analyzer for InvestigativePrinter {
                         println!(
                             "{} {} ({:x?})",
                             player.username(),
-                            player.meta_ship_id(),
-                            (player.meta_ship_id().raw() as u32).to_le_bytes(),
+                            player.player_id(),
+                            (player.player_id().raw() as u32).to_le_bytes(),
                         );
                     }
                 }

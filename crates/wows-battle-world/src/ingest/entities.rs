@@ -440,14 +440,14 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
 
         // Build Player if not already in the index.
         if !world.resource::<PlayerIndex>().0.contains_key(&entity_id) {
-            let meta = metadata.iter().find(|m| m.id() == player.meta_ship_id()).or_else(|| {
+            let meta = metadata.iter().find(|m| m.id() == player.player_id()).or_else(|| {
                 let name = player.username();
                 if name.is_empty() { None } else { metadata.iter().find(|m| m.name() == name) }
             });
 
             match meta {
                 None => {
-                    warn!("could not map arena player to metadata player (meta_ship_id={})", player.meta_ship_id());
+                    warn!("could not map arena player to metadata player (player_id={})", player.player_id());
                 }
                 Some(meta) => {
                     if let Some(battle_player) = Player::from_arena_player(player, meta.as_ref(), resources) {
@@ -971,7 +971,7 @@ mod presence_tests {
             "clan_color": 0,
             "db_id": 0,
             "realm": null,
-            "meta_ship_id": 500,
+            "player_id": 500,
             "entity_id": 9,
             "team_id": 1,
             "max_health": 50000,

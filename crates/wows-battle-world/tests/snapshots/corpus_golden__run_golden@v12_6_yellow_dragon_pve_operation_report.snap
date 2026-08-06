@@ -19,7 +19,7 @@ players:
     name: IDS_OP_02_02_EN43
     entity_id: 1219456
     team_id: 1
-    meta_ship_id: 26
+    player_id: 26
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4076779504)
@@ -28,7 +28,7 @@ players:
     name: IDS_OP_02_02_EN45
     entity_id: 1219458
     team_id: 1
-    meta_ship_id: 28
+    player_id: 28
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3762206704)
@@ -37,7 +37,7 @@ players:
     name: IDS_OP_02_02_DDG_02
     entity_id: 1219336
     team_id: 1
-    meta_ship_id: 18
+    player_id: 18
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4264441840)
@@ -46,7 +46,7 @@ players:
     name: IDS_OP_02_02_INTRMDT_2
     entity_id: 1219319
     team_id: 1
-    meta_ship_id: 12
+    player_id: 12
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4248745968)
@@ -55,7 +55,7 @@ players:
     name: IDS_OP_02_02_EN_RBA_2
     entity_id: 1219412
     team_id: 1
-    meta_ship_id: 24
+    player_id: 24
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289607664)
@@ -64,7 +64,7 @@ players:
     name: IDS_OP_02_02_EN35
     entity_id: 1219409
     team_id: 1
-    meta_ship_id: 22
+    player_id: 22
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4076779504)
@@ -73,7 +73,7 @@ players:
     name: IDS_OP_02_02_BOT_01_1
     entity_id: 1206314
     team_id: 1
-    meta_ship_id: 1
+    player_id: 1
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4280170480)
@@ -82,7 +82,7 @@ players:
     name: IDS_OP_02_02_EN44
     entity_id: 1219457
     team_id: 1
-    meta_ship_id: 27
+    player_id: 27
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3761190896)
@@ -91,7 +91,7 @@ players:
     name: IDS_OP_02_02_BOT_ALLY
     entity_id: 1206321
     team_id: 0
-    meta_ship_id: 8
+    player_id: 8
     relation: Relation(1)
     is_bot: true
     vehicle_id: GameParamId(4287542992)
@@ -100,7 +100,7 @@ players:
     name: IDS_OP_02_02_BOT_03_3
     entity_id: 1219252
     team_id: 1
-    meta_ship_id: 11
+    player_id: 11
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288591856)
@@ -109,7 +109,7 @@ players:
     name: IDS_OP_02_02_BOT_CRR_1
     entity_id: 1206320
     team_id: 1
-    meta_ship_id: 7
+    player_id: 7
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3448747280)
@@ -118,7 +118,7 @@ players:
     name: IDS_OP_02_02_DDG_01
     entity_id: 1219335
     team_id: 1
-    meta_ship_id: 17
+    player_id: 17
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289607664)
@@ -127,7 +127,7 @@ players:
     name: IDS_OP_02_02_EN34
     entity_id: 1219408
     team_id: 1
-    meta_ship_id: 21
+    player_id: 21
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4282333168)
@@ -136,7 +136,7 @@ players:
     name: IDS_OP_02_02_BOT_03_4
     entity_id: 1219219
     team_id: 1
-    meta_ship_id: 10
+    player_id: 10
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4078876656)
@@ -145,7 +145,7 @@ players:
     name: IDS_OP_02_02_EN41
     entity_id: 1219459
     team_id: 1
-    meta_ship_id: 29
+    player_id: 29
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289607664)
@@ -154,7 +154,7 @@ players:
     name: IDS_OP_02_02_EN25
     entity_id: 1219332
     team_id: 1
-    meta_ship_id: 16
+    player_id: 16
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
@@ -163,7 +163,7 @@ players:
     name: IDS_OP_02_02_BOT_01_9
     entity_id: 1206319
     team_id: 1
-    meta_ship_id: 6
+    player_id: 6
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4290721776)
@@ -172,7 +172,7 @@ players:
     name: IDS_OP_02_02_BOT_01_5
     entity_id: 1206316
     team_id: 1
-    meta_ship_id: 3
+    player_id: 3
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(3763255280)
@@ -181,7 +181,7 @@ players:
     name: IDS_OP_02_02_EN33
     entity_id: 1219407
     team_id: 1
-    meta_ship_id: 20
+    player_id: 20
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
@@ -190,7 +190,7 @@ players:
     name: IDS_OP_02_02_EN24
     entity_id: 1219331
     team_id: 1
-    meta_ship_id: 15
+    player_id: 15
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4183734256)
@@ -199,7 +199,7 @@ players:
     name: IDS_OP_02_02_BOT_01_14
     entity_id: 1219337
     team_id: 1
-    meta_ship_id: 19
+    player_id: 19
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4078876656)
@@ -208,7 +208,7 @@ players:
     name: IDS_OP_02_02_BOT_03_1
     entity_id: 1219218
     team_id: 1
-    meta_ship_id: 9
+    player_id: 9
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
@@ -217,7 +217,7 @@ players:
     name: IDS_OP_02_02_EN23
     entity_id: 1219330
     team_id: 1
-    meta_ship_id: 14
+    player_id: 14
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4289640432)
@@ -226,7 +226,7 @@ players:
     name: IDS_OP_02_02_BOT_01_8
     entity_id: 1206318
     team_id: 1
-    meta_ship_id: 5
+    player_id: 5
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288624624)
@@ -235,7 +235,7 @@ players:
     name: IDS_OP_02_02_EN42
     entity_id: 1219460
     team_id: 1
-    meta_ship_id: 30
+    player_id: 30
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4286461936)
@@ -244,7 +244,7 @@ players:
     name: IDS_OP_02_02_EN_RBA_1
     entity_id: 1219411
     team_id: 1
-    meta_ship_id: 23
+    player_id: 23
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288559088)
@@ -253,7 +253,7 @@ players:
     name: IDS_OP_02_02_BOT_01_7
     entity_id: 1206317
     team_id: 1
-    meta_ship_id: 4
+    player_id: 4
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4259264496)
@@ -262,7 +262,7 @@ players:
     name: IDS_OP_02_02_INTRMDT_3
     entity_id: 1219320
     team_id: 1
-    meta_ship_id: 13
+    player_id: 13
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4269717488)
@@ -271,7 +271,7 @@ players:
     name: IDS_OP_02_02_BOT_01_2
     entity_id: 1206315
     team_id: 1
-    meta_ship_id: 2
+    player_id: 2
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4288559088)
@@ -280,7 +280,7 @@ players:
     name: IDS_OP_02_02_EN_RBA_3
     entity_id: 1219413
     team_id: 1
-    meta_ship_id: 25
+    player_id: 25
     relation: Relation(2)
     is_bot: true
     vehicle_id: GameParamId(4280170480)
@@ -289,7 +289,7 @@ players:
     name: kut750
     entity_id: 1206311
     team_id: 0
-    meta_ship_id: 807196010
+    player_id: 807196010
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4077860816)
@@ -298,7 +298,7 @@ players:
     name: stevandac
     entity_id: 1206307
     team_id: 0
-    meta_ship_id: 807025526
+    player_id: 807025526
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4078876368)
@@ -307,7 +307,7 @@ players:
     name: coeur69lion
     entity_id: 1206309
     team_id: 0
-    meta_ship_id: 941040956
+    player_id: 941040956
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4284430032)
@@ -316,7 +316,7 @@ players:
     name: HarryPotterSniper
     entity_id: 1206313
     team_id: 0
-    meta_ship_id: 806765854
+    player_id: 806765854
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(3543054032)
@@ -325,7 +325,7 @@ players:
     name: adarkandstormyknight
     entity_id: 1206305
     team_id: 0
-    meta_ship_id: 806813292
+    player_id: 806813292
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4181636912)
@@ -334,7 +334,7 @@ players:
     name: paulakis90
     entity_id: 1206301
     team_id: 0
-    meta_ship_id: 807261064
+    player_id: 807261064
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4076779472)
@@ -343,7 +343,7 @@ players:
     name: "8468484"
     entity_id: 1206303
     team_id: 0
-    meta_ship_id: 941070634
+    player_id: 941070634
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4076812080)

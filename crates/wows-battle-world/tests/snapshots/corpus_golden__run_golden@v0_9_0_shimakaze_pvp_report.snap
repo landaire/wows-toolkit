@@ -19,7 +19,7 @@ players:
     name: jegan
     entity_id: 667290
     team_id: 0
-    meta_ship_id: 537038333
+    player_id: 537038333
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760142288)
@@ -28,7 +28,7 @@ players:
     name: f23390178
     entity_id: 667270
     team_id: 0
-    meta_ship_id: 536985150
+    player_id: 536985150
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539696)
@@ -37,7 +37,7 @@ players:
     name: Lasagna7
     entity_id: 667262
     team_id: 0
-    meta_ship_id: 671153078
+    player_id: 671153078
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3655251408)
@@ -46,7 +46,7 @@ players:
     name: Puggsley
     entity_id: 667250
     team_id: 0
-    meta_ship_id: 671198363
+    player_id: 671198363
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -55,7 +55,7 @@ players:
     name: styri
     entity_id: 667272
     team_id: 1
-    meta_ship_id: 536956785
+    player_id: 536956785
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -64,7 +64,7 @@ players:
     name: seasofjoytoy
     entity_id: 667284
     team_id: 0
-    meta_ship_id: 536965875
+    player_id: 536965875
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
@@ -73,7 +73,7 @@ players:
     name: battleshipmaster
     entity_id: 667256
     team_id: 0
-    meta_ship_id: 671141159
+    player_id: 671141159
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179605488)
@@ -82,7 +82,7 @@ players:
     name: lBAEKl
     entity_id: 667266
     team_id: 1
-    meta_ship_id: 671368761
+    player_id: 671368761
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
@@ -91,7 +91,7 @@ players:
     name: Tejo_Adi_Prabowo
     entity_id: 667248
     team_id: 1
-    meta_ship_id: 671155345
+    player_id: 671155345
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4276041424)
@@ -100,7 +100,7 @@ players:
     name: law84897
     entity_id: 667268
     team_id: 1
-    meta_ship_id: 671334714
+    player_id: 671334714
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179506992)
@@ -109,7 +109,7 @@ players:
     name: Curtain_Flowers
     entity_id: 667254
     team_id: 0
-    meta_ship_id: 671337507
+    player_id: 671337507
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539920)
@@ -118,7 +118,7 @@ players:
     name: martz57
     entity_id: 667276
     team_id: 0
-    meta_ship_id: 671263323
+    player_id: 671263323
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4281219056)
@@ -127,7 +127,7 @@ players:
     name: coupe0513
     entity_id: 667278
     team_id: 1
-    meta_ship_id: 671105005
+    player_id: 671105005
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(3655251408)
@@ -136,7 +136,7 @@ players:
     name: aina_suzuki723
     entity_id: 667264
     team_id: 1
-    meta_ship_id: 536894008
+    player_id: 536894008
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539760)
@@ -145,7 +145,7 @@ players:
     name: MrRingNAW
     entity_id: 667286
     team_id: 0
-    meta_ship_id: 537083124
+    player_id: 537083124
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4259231440)
@@ -154,7 +154,7 @@ players:
     name: RIGHTCC
     entity_id: 667282
     team_id: 1
-    meta_ship_id: 537177329
+    player_id: 537177329
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572528)
@@ -163,7 +163,7 @@ players:
     name: sugumou
     entity_id: 667280
     team_id: 1
-    meta_ship_id: 536945006
+    player_id: 536945006
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539696)
@@ -172,7 +172,7 @@ players:
     name: soraka_1986
     entity_id: 667274
     team_id: 1
-    meta_ship_id: 671289416
+    player_id: 671289416
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4273911792)
@@ -181,7 +181,7 @@ players:
     name: bosinmy
     entity_id: 667244
     team_id: 1
-    meta_ship_id: 671316748
+    player_id: 671316748
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539792)
@@ -190,7 +190,7 @@ players:
     name: JEEOO
     entity_id: 667246
     team_id: 1
-    meta_ship_id: 671166991
+    player_id: 671166991
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179605200)
@@ -199,7 +199,7 @@ players:
     name: Chocolate_QIN
     entity_id: 667258
     team_id: 0
-    meta_ship_id: 671145515
+    player_id: 671145515
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
@@ -208,7 +208,7 @@ players:
     name: "2192117835"
     entity_id: 667260
     team_id: 0
-    meta_ship_id: 536994989
+    player_id: 536994989
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4276041424)
@@ -217,7 +217,7 @@ players:
     name: kimuchides
     entity_id: 667288
     team_id: 1
-    meta_ship_id: 671340763
+    player_id: 671340763
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
@@ -226,7 +226,7 @@ players:
     name: smith2335
     entity_id: 667252
     team_id: 0
-    meta_ship_id: 671338273
+    player_id: 671338273
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539696)

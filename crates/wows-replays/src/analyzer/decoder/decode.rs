@@ -12,6 +12,7 @@ use crate::types::GameParamId;
 use crate::types::GunBits;
 use crate::types::NormalizedPos;
 use crate::types::PlaneId;
+use crate::types::PlayerId;
 use crate::types::ShotId;
 use crate::types::Vec3;
 use crate::types::Velocity;
@@ -121,8 +122,8 @@ pub struct PlayerStateData {
     pub(crate) db_id: AccountId,
     /// The realm this player belongs to
     pub(crate) realm: Option<String>,
-    /// Their meta ID in the game (account-level identifier)
-    pub(crate) meta_ship_id: AccountId,
+    /// The game's per-battle player id (`id` in the client's player data)
+    pub(crate) player_id: PlayerId,
     /// This player's entity created by a CreateEntity packet
     pub(crate) entity_id: EntityId,
     /// Which team they're on.
@@ -447,7 +448,7 @@ impl PlayerStateData {
         let clan_id = get_i64(Self::KEY_CLAN_ID).unwrap_or(0);
 
         let shipid = get_i64(Self::KEY_SHIP_ID).unwrap_or(0);
-        let meta_ship_id = get_i64(Self::KEY_ID).unwrap_or(0);
+        let player_id = get_i64(Self::KEY_ID).unwrap_or(0);
         let team = get_i64(Self::KEY_TEAM_ID).unwrap_or(0);
         let health = get_i64(Self::KEY_MAX_HEALTH).unwrap_or(0);
 
@@ -498,7 +499,7 @@ impl PlayerStateData {
             clan_color,
             realm,
             db_id: AccountId::from(db_id),
-            meta_ship_id: AccountId::from(meta_ship_id),
+            player_id: PlayerId::from(player_id),
             entity_id: EntityId::from(shipid),
             team_id: team,
             max_health: health,
@@ -548,7 +549,7 @@ impl PlayerStateData {
         if let Some(v) = values.get(Self::KEY_ID)
             && let Some(id) = v.i64_ref()
         {
-            self.meta_ship_id = AccountId::from(*id);
+            self.player_id = PlayerId::from(*id);
         }
         if let Some(v) = values.get(Self::KEY_TEAM_ID)
             && let Some(id) = v.i64_ref()
@@ -638,8 +639,8 @@ impl PlayerStateData {
         self.human_properties.as_ref().map(|hp| hp.avatar_id)
     }
 
-    pub fn meta_ship_id(&self) -> AccountId {
-        self.meta_ship_id
+    pub fn player_id(&self) -> PlayerId {
+        self.player_id
     }
 
     pub fn entity_id(&self) -> EntityId {

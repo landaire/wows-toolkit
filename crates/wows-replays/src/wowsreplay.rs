@@ -1,6 +1,7 @@
 use crate::error::*;
 use crate::types::AccountId;
 use crate::types::GameParamId;
+use crate::types::PlayerId;
 use blowfish::Blowfish;
 use byteorder::BE;
 use cipher::BlockDecrypt;
@@ -21,7 +22,7 @@ use winnow::token::take;
 pub struct VehicleInfoMeta {
     pub shipId: GameParamId,
     pub relation: u32,
-    pub id: AccountId,
+    pub id: PlayerId,
     pub name: String,
 }
 

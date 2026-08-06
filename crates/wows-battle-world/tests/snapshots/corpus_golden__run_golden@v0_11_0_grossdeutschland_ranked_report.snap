@@ -19,7 +19,7 @@ players:
     name: r3leased
     entity_id: 1961009
     team_id: 1
-    meta_ship_id: 940220796
+    player_id: 940220796
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
@@ -28,7 +28,7 @@ players:
     name: Korolko
     entity_id: 1961005
     team_id: 1
-    meta_ship_id: 805828888
+    player_id: 805828888
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760076496)
@@ -37,7 +37,7 @@ players:
     name: milgra
     entity_id: 1961011
     team_id: 1
-    meta_ship_id: 940242621
+    player_id: 940242621
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4179539920)
@@ -46,7 +46,7 @@ players:
     name: rafall777
     entity_id: 1960997
     team_id: 0
-    meta_ship_id: 940256674
+    player_id: 940256674
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179572176)
@@ -55,7 +55,7 @@ players:
     name: limivorous
     entity_id: 1960989
     team_id: 0
-    meta_ship_id: 940054019
+    player_id: 940054019
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074649296)
@@ -64,7 +64,7 @@ players:
     name: Gurgel100
     entity_id: 1960991
     team_id: 0
-    meta_ship_id: 939648869
+    player_id: 939648869
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4277090288)
@@ -73,7 +73,7 @@ players:
     name: silvio16
     entity_id: 1961003
     team_id: 0
-    meta_ship_id: 805536662
+    player_id: 805536662
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074714928)
@@ -82,7 +82,7 @@ players:
     name: wetCgoe
     entity_id: 1960999
     team_id: 1
-    meta_ship_id: 939677426
+    player_id: 939677426
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4273911792)
@@ -91,7 +91,7 @@ players:
     name: yusufbaskent2009
     entity_id: 1961001
     team_id: 1
-    meta_ship_id: 940304373
+    player_id: 940304373
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4282267344)
@@ -100,7 +100,7 @@ players:
     name: Mastervdemon
     entity_id: 1960995
     team_id: 1
-    meta_ship_id: 939667790
+    player_id: 939667790
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(4179572528)
@@ -109,7 +109,7 @@ players:
     name: Amiral_PUJOL
     entity_id: 1960987
     team_id: 0
-    meta_ship_id: 806210626
+    player_id: 806210626
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4074682352)
@@ -118,7 +118,7 @@ players:
     name: Tasos_Mauromixalis
     entity_id: 1961013
     team_id: 0
-    meta_ship_id: 806305317
+    player_id: 806305317
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4179539760)
@@ -127,7 +127,7 @@ players:
     name: Mikey2111
     entity_id: 1961007
     team_id: 1
-    meta_ship_id: 806277743
+    player_id: 806277743
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3760142320)
@@ -136,7 +136,7 @@ players:
     name: Tigris31_2020
     entity_id: 1960993
     team_id: 0
-    meta_ship_id: 940398914
+    player_id: 940398914
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4282267344)

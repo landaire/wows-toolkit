@@ -6,9 +6,9 @@ use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::analyzer::battle_controller::GameMessage;
 use wows_replays::analyzer::decoder::ChatMessageExtra;
 use wows_replays::analyzer::decoder::chat_sender_is_account_id;
-use wows_replays::types::AccountId;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
+use wows_replays::types::PlayerId;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
@@ -21,7 +21,7 @@ use crate::resources::ReplayVehicles;
 /// The decoded fields of an onChatMessage RPC.
 pub struct ChatMessage<'a> {
     pub entity_id: EntityId,
-    pub sender_id: AccountId,
+    pub sender_id: PlayerId,
     pub audience: &'a str,
     pub message: &'a str,
     pub extra_data: Option<ChatMessageExtra>,
@@ -59,14 +59,14 @@ pub fn handle_chat_message<G: ResourceLoader>(
         .find(|p| {
             let state = p.initial_state();
             if by_account {
-                state.meta_ship_id() == sender_id
+                state.player_id() == sender_id
             } else {
-                state.avatar_id().is_some_and(|avatar| AccountId::from(avatar.raw()) == sender_id)
+                state.avatar_id().is_some_and(|avatar| PlayerId::from(avatar.raw()) == sender_id)
             }
         })
         .cloned();
 
-    // Metadata vehicles are keyed by account id; only useful in the PLAYER_ID era.
+    // Metadata vehicles are keyed by the player id, same as the comparison above.
     let meta_vehicle = if by_account && player.is_none() {
         world.resource::<ReplayVehicles>().0.iter().find(|v| v.id == sender_id).cloned()
     } else {

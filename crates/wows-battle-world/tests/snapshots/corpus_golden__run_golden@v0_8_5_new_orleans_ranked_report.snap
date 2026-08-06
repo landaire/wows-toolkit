@@ -19,7 +19,7 @@ players:
     name: BoxTona
     entity_id: 861270
     team_id: 1
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4182717904)
@@ -28,7 +28,7 @@ players:
     name: tcar128
     entity_id: 861272
     team_id: 1
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4182652624)
@@ -37,7 +37,7 @@ players:
     name: Vladodes
     entity_id: 861264
     team_id: 0
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4284430032)
@@ -46,7 +46,7 @@ players:
     name: 1serb
     entity_id: 861280
     team_id: 1
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4288559088)
@@ -55,7 +55,7 @@ players:
     name: Loader88
     entity_id: 861262
     team_id: 1
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(4182718288)
@@ -64,7 +64,7 @@ players:
     name: ___777____boec
     entity_id: 861284
     team_id: 1
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(1)
     is_bot: false
     vehicle_id: GameParamId(3752802256)
@@ -73,7 +73,7 @@ players:
     name: wolna20
     entity_id: 861268
     team_id: 0
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4182652112)
@@ -82,7 +82,7 @@ players:
     name: KiLLoGraM2015
     entity_id: 861274
     team_id: 0
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4182718256)
@@ -91,7 +91,7 @@ players:
     name: Blakseamen
     entity_id: 861278
     team_id: 0
-    meta_ship_id: 1
+    player_id: 1
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4182652880)
@@ -100,7 +100,7 @@ players:
     name: bobi7777777
     entity_id: 861276
     team_id: 0
-    meta_ship_id: 1
+    player_id: 1
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4182685136)
@@ -109,7 +109,7 @@ players:
     name: JleJluk_u_6oJluk
     entity_id: 861266
     team_id: 1
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(0)
     is_bot: false
     vehicle_id: GameParamId(4182685680)
@@ -118,7 +118,7 @@ players:
     name: GVpro2503_1
     entity_id: 861282
     team_id: 0
-    meta_ship_id: 0
+    player_id: 0
     relation: Relation(2)
     is_bot: false
     vehicle_id: GameParamId(4182717904)
