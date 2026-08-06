@@ -35,6 +35,7 @@ wgpu = { workspace = true }
 tracing = { workspace = true }
 wows_replays = { workspace = true, features = ["arc", "parsing", "vfs"] }
 serde = { workspace = true }
+bson = { version = "3.1", features = ["serde"] }
 wowsunpack = { workspace = true, features = [
     "arc",
     "cbor",
