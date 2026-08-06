@@ -186,14 +186,29 @@ fn main() -> eframe::Result<()> {
     }
 
     let native_options = eframe::NativeOptions { viewport, wgpu_options, ..Default::default() };
-    eframe::run_native(
+    let result = eframe::run_native(
         wows_toolkit::APP_NAME,
         native_options,
         Box::new(|cc| {
             let app = wows_toolkit::WowsToolkitApp::new(cc);
             Ok(Box::new(app))
         }),
-    )
+    );
+
+    // A release build is a windows subsystem binary with no console, so a
+    // returned error would otherwise be a silent exit with no window: the app
+    // would look like it simply did nothing. Pinning can cause exactly that, by
+    // selecting an adapter the driver then declines to enumerate.
+    if let Err(ref error) = result {
+        let message = format!(
+            "The app could not start with render mode {}.\n\n{error}\n\n\
+             The next launch will try a safer mode. To choose one now, run with \
+             --cpu-renderer or --gpu-safe-mode.",
+            render_config.mode.as_token()
+        );
+        wows_toolkit::cli::report_startup_message("wows_toolkit: startup failed", &message, true);
+    }
+    result
 }
 
 /// Ask the hybrid-graphics shim for the discrete GPU.
