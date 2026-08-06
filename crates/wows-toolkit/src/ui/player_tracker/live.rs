@@ -2,7 +2,9 @@ use std::collections::HashMap;
 
 use jiff::Timestamp;
 use wows_replays::ReplayMeta;
+use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::types::AccountId;
+use wows_replays::types::ArenaId;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
@@ -11,6 +13,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
 use super::TrackedPlayer;
+use crate::data::match_stats::Region;
 use crate::data::wows_data::WorldOfWarshipsData;
 use crate::ui::replay_parser::PlayerTint;
 
@@ -47,6 +50,10 @@ pub(crate) struct LiveRosterRow {
     /// Tracked account this entry joined to. `tempArenaInfo` carries no account
     /// id, so the join is by name and misses across a rename.
     pub tracked: Option<AccountId>,
+    /// Account id joined from the live-match identity scan, by name. `None`
+    /// until a scan lands, or if the scan never named this player.
+    pub account_id: Option<AccountId>,
+    pub region: Option<Region>,
 }
 
 impl LiveMatch {
@@ -63,6 +70,40 @@ impl LiveMatch {
             .collect();
 
         Self { started_at: crate::util::replay_timestamp(meta), build, players }
+    }
+}
+
+/// The identity of one live-match player, read off `onArenaStateReceived`.
+/// `tempArenaInfo` carries neither field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct LiveIdentity {
+    pub account_id: AccountId,
+    /// `None` where the replay's realm is one the stats service does not
+    /// cover, which is distinct from a realm that was never recorded.
+    pub region: Option<Region>,
+}
+
+/// Every identity one `onArenaStateReceived` packet carried, keyed by
+/// lower-cased name. Names are unique within a match, so the join onto the
+/// `tempArenaInfo` roster is exact.
+#[derive(Debug, Clone)]
+pub(crate) struct LiveIdentities {
+    pub arena_id: ArenaId,
+    pub by_name: HashMap<String, LiveIdentity>,
+}
+
+impl LiveIdentities {
+    pub(crate) fn from_player_states(arena_id: ArenaId, players: &[PlayerStateData]) -> Self {
+        let by_name = players
+            .iter()
+            .filter(|player| !player.is_bot())
+            .map(|player| {
+                let region = player.realm().and_then(Region::from_realm);
+                (player.username().to_ascii_lowercase(), LiveIdentity { account_id: player.db_id(), region })
+            })
+            .collect();
+
+        Self { arena_id, by_name }
     }
 }
 
@@ -111,6 +152,11 @@ pub(crate) struct ResolvedRoster {
     /// Tracked-player count the name join was built against, so the join is
     /// rebuilt after new replays are indexed.
     pub tracked_count: usize,
+    /// Arena id the identity scan reported, if one has landed for this match.
+    pub arena_id: Option<ArenaId>,
+    /// Identity count the name join was built against, so the join is rebuilt
+    /// once the scan lands.
+    pub identity_count: usize,
     pub friendly: Vec<LiveRosterRow>,
     pub enemy: Vec<LiveRosterRow>,
 }
@@ -118,6 +164,7 @@ pub(crate) struct ResolvedRoster {
 pub(crate) fn resolve_roster(
     live: &LiveMatch,
     tracked: &HashMap<AccountId, TrackedPlayer>,
+    identities: Option<&LiveIdentities>,
     wows_data: Option<&WorldOfWarshipsData>,
 ) -> ResolvedRoster {
     let metadata = wows_data.and_then(|data| data.game_metadata.as_ref());
@@ -142,12 +189,16 @@ pub(crate) fn resolve_roster(
             _ => None,
         };
 
+        let identity = identities.and_then(|ids| ids.by_name.get(&player.name.to_ascii_lowercase()));
+
         let row = LiveRosterRow {
             tint: PlayerTint::from_relation(player.relation),
             species,
             ship_name,
             species_text,
             tracked: name_index.get(&player.name.to_ascii_lowercase()).copied(),
+            account_id: identity.map(|identity| identity.account_id),
+            region: identity.and_then(|identity| identity.region),
             name: player.name.clone(),
         };
 
@@ -161,6 +212,8 @@ pub(crate) fn resolve_roster(
         started_at: live.started_at,
         ships_resolved: metadata.is_some(),
         tracked_count: tracked.len(),
+        arena_id: identities.map(|ids| ids.arena_id),
+        identity_count: identities.map_or(0, |ids| ids.by_name.len()),
         friendly,
         enemy,
     }
@@ -211,6 +264,8 @@ mod tests {
             ship_name: ship_name.map(str::to_string),
             species_text: None,
             tracked: None,
+            account_id: None,
+            region: None,
         }
     }
 
@@ -309,7 +364,7 @@ mod tests {
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
         let live = LiveMatch::from_meta(&meta);
 
-        let resolved = resolve_roster(&live, &HashMap::new(), None);
+        let resolved = resolve_roster(&live, &HashMap::new(), None, None);
 
         let friendly: Vec<&str> = resolved.friendly.iter().map(|r| r.name.as_str()).collect();
         let enemy: Vec<&str> = resolved.enemy.iter().map(|r| r.name.as_str()).collect();
@@ -325,7 +380,7 @@ mod tests {
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
         let live = LiveMatch::from_meta(&meta);
 
-        let resolved = resolve_roster(&live, &HashMap::new(), None);
+        let resolved = resolve_roster(&live, &HashMap::new(), None, None);
 
         assert!(!resolved.ships_resolved);
         assert_eq!(resolved.friendly[0].ship_name, None);
@@ -344,12 +399,65 @@ mod tests {
         let mut players = HashMap::new();
         players.insert(AccountId(42), tracked("Harvey635", &[]));
 
-        let resolved = resolve_roster(&live, &players, None);
+        let resolved = resolve_roster(&live, &players, None, None);
 
         let harvey = resolved.enemy.iter().find(|r| r.name == "Harvey635").expect("roster keeps the tracked player");
         let stranger = resolved.enemy.iter().find(|r| r.name == "Stranger").expect("roster keeps the unknown player");
         assert_eq!(harvey.tracked, Some(AccountId(42)));
         assert_eq!(stranger.tracked, None);
         assert_eq!(resolved.tracked_count, 1);
+    }
+
+    #[test]
+    fn identities_key_on_a_lower_cased_name() {
+        let identities = LiveIdentities {
+            arena_id: ArenaId::from(5i64),
+            by_name: HashMap::from([(
+                "harvey635".to_string(),
+                LiveIdentity { account_id: AccountId(42), region: Some(Region::Na) },
+            )]),
+        };
+        let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+        let live = LiveMatch::from_meta(&meta);
+
+        let resolved = resolve_roster(&live, &HashMap::new(), Some(&identities), None);
+
+        assert_eq!(resolved.arena_id, Some(ArenaId::from(5i64)));
+        assert_eq!(resolved.enemy[0].account_id, Some(AccountId(42)));
+        assert_eq!(resolved.enemy[0].region, Some(Region::Na));
+        assert_eq!(resolved.identity_count, 1);
+    }
+
+    #[test]
+    fn a_roster_without_identities_keeps_todays_behaviour() {
+        let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+        let live = LiveMatch::from_meta(&meta);
+
+        let resolved = resolve_roster(&live, &HashMap::new(), None, None);
+
+        assert_eq!(resolved.arena_id, None);
+        assert_eq!(resolved.enemy[0].account_id, None);
+        assert_eq!(resolved.enemy[0].region, None);
+        assert_eq!(resolved.identity_count, 0);
+    }
+
+    #[test]
+    fn a_player_the_scan_missed_gets_no_identity() {
+        let identities = LiveIdentities {
+            arena_id: ArenaId::from(5i64),
+            by_name: HashMap::from([(
+                "someone_else".to_string(),
+                LiveIdentity { account_id: AccountId(42), region: Some(Region::Eu) },
+            )]),
+        };
+        let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+        let live = LiveMatch::from_meta(&meta);
+
+        let resolved = resolve_roster(&live, &HashMap::new(), Some(&identities), None);
+
+        assert_eq!(resolved.enemy[0].account_id, None);
     }
 }

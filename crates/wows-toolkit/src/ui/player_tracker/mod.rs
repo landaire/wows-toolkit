@@ -40,12 +40,36 @@ use wows_replays::types::AccountId;
 use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
+use crate::data::match_stats::PlayerStatsOut;
 use crate::data::wows_data::WorldOfWarshipsData;
 use crate::ui::replay_parser::Replay;
 use crate::util;
 
+use live::LiveIdentities;
 use live::LiveMatch;
 use live::ResolvedRoster;
+
+/// Which win rate the Current Match table shows. Drives the row banding and
+/// the battle counts with it, so a row never mixes account and ship scopes.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum WinRateMode {
+    #[default]
+    Overall,
+    Ship,
+}
+
+/// How far the current match's stats have got.
+#[derive(Debug, Clone, Default)]
+pub(crate) enum MatchStatsState {
+    #[default]
+    Idle,
+    Resolving,
+    Fetching,
+    Ready(HashMap<AccountId, PlayerStatsOut>),
+    /// A rendered reason. The structured `MatchStatsError` is matched on in
+    /// the worker; only its text crosses to the UI.
+    Failed(String),
+}
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
@@ -117,17 +141,31 @@ pub struct PlayerTracker {
     pub(crate) live_match: Option<LiveMatch>,
     #[serde(skip)]
     pub(crate) resolved_roster: Option<ResolvedRoster>,
+
+    #[serde(default)]
+    pub win_rate_mode: WinRateMode,
+    /// Identities recovered from `onArenaStateReceived`, joined onto the roster
+    /// by name. `tempArenaInfo` carries neither account id nor realm.
+    #[serde(skip)]
+    pub(crate) live_identities: Option<LiveIdentities>,
+    #[serde(skip)]
+    pub(crate) match_stats: MatchStatsState,
 }
 
 impl PlayerTracker {
     pub fn update_from_live_arena_info(&mut self, meta: &ReplayMeta) {
         self.live_match = Some(LiveMatch::from_meta(meta));
         self.resolved_roster = None;
+        // A new match invalidates any identities and stats the previous one
+        // gathered.
+        self.live_identities = None;
+        self.match_stats = MatchStatsState::Idle;
     }
 
     /// The current roster, resolved against `wows_data` and tracked history.
     /// Rebuilds when the match changes, when game data arrives after a roster was
-    /// resolved without it, or when the tracked-player set changes.
+    /// resolved without it, when the tracked-player set changes, or when
+    /// identities arrive after a roster was resolved without them.
     pub(crate) fn roster(&mut self, wows_data: Option<&WorldOfWarshipsData>) -> Option<&ResolvedRoster> {
         let live = self.live_match.as_ref()?;
 
@@ -141,15 +179,26 @@ impl PlayerTracker {
                 resolved.started_at != live.started_at
                     || (!resolved.ships_resolved && metadata_available)
                     || resolved.tracked_count != self.tracked_players.len()
+                    || resolved.identity_count != self.live_identities.as_ref().map_or(0, |ids| ids.by_name.len())
             }
             None => true,
         };
 
         if stale {
-            self.resolved_roster = Some(live::resolve_roster(live, &self.tracked_players, wows_data));
+            self.resolved_roster =
+                Some(live::resolve_roster(live, &self.tracked_players, self.live_identities.as_ref(), wows_data));
         }
 
         self.resolved_roster.as_ref()
+    }
+
+    pub(crate) fn set_live_identities(&mut self, identities: LiveIdentities) {
+        self.live_identities = Some(identities);
+        self.resolved_roster = None;
+    }
+
+    pub(crate) fn set_match_stats(&mut self, state: MatchStatsState) {
+        self.match_stats = state;
     }
 
     /// Record that the tracked encounter set changed, so aggregates cached over
