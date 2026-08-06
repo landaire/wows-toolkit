@@ -873,7 +873,7 @@ mod tests {
 
     /// Encode a solid RGBA color as a PNG, the form `SchemeTextures` carries.
     fn png(width: u32, height: u32, rgba: [u8; 4]) -> Vec<u8> {
-        let buf: Vec<u8> = std::iter::repeat(rgba).take((width * height) as usize).flatten().collect();
+        let buf: Vec<u8> = std::iter::repeat_n(rgba, (width * height) as usize).flatten().collect();
         let img = image::RgbaImage::from_raw(width, height, buf).expect("build image");
         let mut out = std::io::Cursor::new(Vec::new());
         image::DynamicImage::ImageRgba8(img).write_to(&mut out, image::ImageFormat::Png).expect("encode png");

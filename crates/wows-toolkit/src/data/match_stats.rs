@@ -101,7 +101,7 @@ use std::time::Instant;
 
 const ENDPOINT: &str = "https://shipbuilds.com/api/match_stats";
 const API_KEY: &str = "WTK-PleaseDontAbuseMyServer";
-const CONTENT_TYPE: &str = "application/bson";
+const CONTENT_TYPE: &str = "application/cbor";
 
 /// The service's cap on one request's roster.
 pub const MAX_PLAYERS: usize = 24;
@@ -216,7 +216,8 @@ impl MatchStatsClient {
             return Err(MatchStatsError::RateLimited { retry_after });
         }
 
-        let body = bson::serialize_to_vec(request).map_err(|e| MatchStatsError::Encode(e.to_string()))?;
+        let mut body = Vec::new();
+        ciborium::into_writer(request, &mut body).map_err(|e| MatchStatsError::Encode(e.to_string()))?;
 
         self.limiter.record(now);
         let response = self
@@ -247,7 +248,7 @@ impl MatchStatsClient {
 
         let bytes = response.bytes().map_err(|e| MatchStatsError::Transport(crate::util::http::error_chain(&e)))?;
         let decoded: MatchStatsResponse =
-            bson::deserialize_from_slice(&bytes).map_err(|e| MatchStatsError::Decode(e.to_string()))?;
+            ciborium::from_reader(bytes.as_ref()).map_err(|e| MatchStatsError::Decode(e.to_string()))?;
 
         self.cache.insert(request.arena_id, decoded.clone());
         Ok(decoded)
@@ -258,8 +259,13 @@ impl MatchStatsClient {
 mod tests {
     use super::*;
 
+    /// Looks a key up in a decoded CBOR map without assuming key order.
+    fn map_get<'a>(map: &'a [(ciborium::Value, ciborium::Value)], key: &str) -> Option<&'a ciborium::Value> {
+        map.iter().find(|(k, _)| k.as_text() == Some(key)).map(|(_, v)| v)
+    }
+
     #[test]
-    fn a_request_round_trips_through_bson_with_integer_ids() {
+    fn a_request_round_trips_with_integer_ids() {
         let request = MatchStatsRequest {
             arena_id: ArenaId::from(9_876_543_210i64),
             players: vec![PlayerRef {
@@ -269,16 +275,25 @@ mod tests {
             }],
         };
 
-        let bytes = bson::serialize_to_vec(&request).expect("request encodes");
-        let document: bson::Document = bson::deserialize_from_slice(&bytes).expect("bytes are a document");
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&request, &mut bytes).expect("request encodes");
+        // Decoded as a raw `Value`, not back into `MatchStatsRequest`, so this
+        // pins the actual wire shape rather than only proving serde round-trips
+        // with itself.
+        let value: ciborium::Value = ciborium::from_reader(bytes.as_slice()).expect("bytes are a value");
 
-        assert_eq!(document.get_i64("arena_id").expect("arena_id is an int64"), 9_876_543_210);
-        let player = document.get_array("players").expect("players is an array")[0]
-            .as_document()
-            .expect("a player is a document");
-        assert_eq!(player.get_i64("account_id").expect("account_id is an int64"), 1_003_924_023);
-        assert_eq!(player.get_i64("ship_id").expect("ship_id must land as an int64"), 4_179_539_664);
-        assert_eq!(player.get_str("region").expect("region is a string"), "na");
+        let map = value.as_map().expect("request is a map");
+        let arena_id = map_get(map, "arena_id").expect("arena_id present");
+        assert_eq!(arena_id.as_integer().and_then(|i| i64::try_from(i).ok()), Some(9_876_543_210));
+
+        let players = map_get(map, "players").expect("players present").as_array().expect("players is an array");
+        let player = players[0].as_map().expect("a player is a map");
+        let account_id = map_get(player, "account_id").expect("account_id present");
+        assert_eq!(account_id.as_integer().and_then(|i| i64::try_from(i).ok()), Some(1_003_924_023));
+        let ship_id = map_get(player, "ship_id").expect("ship_id present");
+        assert_eq!(ship_id.as_integer().and_then(|i| u64::try_from(i).ok()), Some(4_179_539_664));
+        let region = map_get(player, "region").expect("region present");
+        assert_eq!(region.as_text(), Some("na"));
     }
 
     #[test]
@@ -298,8 +313,9 @@ mod tests {
             }],
         };
 
-        let bytes = bson::serialize_to_vec(&response).expect("response encodes");
-        let decoded: MatchStatsResponse = bson::deserialize_from_slice(&bytes).expect("response decodes");
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&response, &mut bytes).expect("response encodes");
+        let decoded: MatchStatsResponse = ciborium::from_reader(bytes.as_slice()).expect("response decodes");
 
         assert_eq!(decoded.players[0].status, PlayerStatsStatus::Hidden);
         assert_eq!(decoded.players[0].battles, None);
@@ -310,18 +326,28 @@ mod tests {
     /// the whole response and lose the other 23 players with it.
     #[test]
     fn an_unrecognised_status_decodes_as_unknown() {
-        let document = bson::doc! {
-            "arena_id": 1i64,
-            "players": [ bson::doc! {
-                "account_id": 1i64, "region": "eu", "ship_id": 2i64, "status": "throttled",
-                "battles": bson::Bson::Null, "overall_win_rate": bson::Bson::Null,
-                "ship_win_rate": bson::Bson::Null, "ship_battles": bson::Bson::Null,
-                "pr": bson::Bson::Null,
-            } ],
-        };
-        let bytes = bson::serialize_to_vec(&document).expect("document encodes");
+        use ciborium::Value;
 
-        let decoded: MatchStatsResponse = bson::deserialize_from_slice(&bytes).expect("response decodes");
+        let player = Value::Map(vec![
+            (Value::Text("account_id".into()), Value::Integer(1i64.into())),
+            (Value::Text("region".into()), Value::Text("eu".into())),
+            (Value::Text("ship_id".into()), Value::Integer(2i64.into())),
+            (Value::Text("status".into()), Value::Text("throttled".into())),
+            (Value::Text("battles".into()), Value::Null),
+            (Value::Text("overall_win_rate".into()), Value::Null),
+            (Value::Text("ship_win_rate".into()), Value::Null),
+            (Value::Text("ship_battles".into()), Value::Null),
+            (Value::Text("pr".into()), Value::Null),
+        ]);
+        let document = Value::Map(vec![
+            (Value::Text("arena_id".into()), Value::Integer(1i64.into())),
+            (Value::Text("players".into()), Value::Array(vec![player])),
+        ]);
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&document, &mut bytes).expect("document encodes");
+
+        let decoded: MatchStatsResponse = ciborium::from_reader(bytes.as_slice()).expect("response decodes");
 
         assert_eq!(decoded.players[0].status, PlayerStatsStatus::Unknown);
     }
