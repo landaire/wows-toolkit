@@ -66,6 +66,8 @@ pub use networking::load_versioned_constants_from_disk_with_fallback;
 pub use networking::start_download_update_task;
 pub use networking::start_networking_thread;
 pub use networking::start_twitch_task;
+pub use replay_upload::ReplayCount;
+pub use replay_upload::SendAllReplaysProgress;
 pub use replay_upload::SendReplayCachePolicy;
 pub use replays::BackgroundParserThread;
 pub use replays::DataExportSettings;
@@ -83,6 +85,8 @@ pub use replays::start_load_row_summaries;
 pub use replays::start_populating_player_inspector;
 pub use replays::start_read_directory;
 pub use replays::start_reconcile_index;
+#[allow(unused_imports)]
+pub use replays::start_send_all_replays_to_shipbuilds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DownloadProgress {
@@ -171,6 +175,10 @@ pub enum BackgroundTaskKind {
     ReconcilingIndex {
         rx: mpsc::Receiver<IndexProgress>,
         last_progress: Option<IndexProgress>,
+    },
+    SendingReplaysToShipBuilds {
+        rx: mpsc::Receiver<SendAllReplaysProgress>,
+        last_progress: Option<SendAllReplaysProgress>,
     },
     LoadingRowSummaries {
         workspace: crate::db::index::rows::WorkspaceId,
@@ -430,6 +438,7 @@ impl BackgroundTask {
                             }
                         }
                     }
+                    BackgroundTaskKind::SendingReplaysToShipBuilds { .. } => {}
                     BackgroundTaskKind::LoadingRowSummaries { .. } => {
                         ui.spinner();
                         ui.label(t!("ui.messages.loading_row_summaries"));
@@ -502,6 +511,11 @@ pub enum BackgroundTaskCompletion {
     ReconcileIndexComplete {
         indexed: usize,
         total: usize,
+    },
+    ReplaysSentToShipBuilds {
+        attempted: ReplayCount,
+        sent: ReplayCount,
+        total: ReplayCount,
     },
     /// The replay-listing row summaries finished loading for `generation`, for
     /// the listing identified by `workspace`.
@@ -582,6 +596,12 @@ impl std::fmt::Debug for BackgroundTaskCompletion {
             Self::ReconcileIndexComplete { indexed, total } => {
                 f.debug_struct("ReconcileIndexComplete").field("indexed", indexed).field("total", total).finish()
             }
+            Self::ReplaysSentToShipBuilds { attempted, sent, total } => f
+                .debug_struct("ReplaysSentToShipBuilds")
+                .field("attempted", attempted)
+                .field("sent", sent)
+                .field("total", total)
+                .finish(),
             Self::RowSummariesLoaded { summaries, generation, workspace } => f
                 .debug_struct("RowSummariesLoaded")
                 .field("summaries", &summaries.len())

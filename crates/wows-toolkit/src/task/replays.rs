@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
@@ -34,15 +35,19 @@ use wowsunpack::vfs::VfsPath;
 use crate::data::replay_reconcile::ParseOutcome;
 use crate::data::settings::DataSharingMode;
 use crate::data::wows_data::GameAsset;
+use crate::data::wows_data::ReplayDependencies;
+use crate::data::wows_data::ReplayLoader;
 use crate::data::wows_data::WorldOfWarshipsData;
-use crate::task::replay_upload::ReplayUploadAction;
-use crate::task::replay_upload::decide_upload_action;
+use crate::task::replay_upload::ReplayCount;
+use crate::task::replay_upload::SendAllReplaysProgress;
+use crate::task::replay_upload::SendReplayCachePolicy;
+use crate::task::replay_upload::ShipBuildsUploadOutcome;
+use crate::task::replay_upload::upload_parsed_replay;
 use crate::twitch::TwitchState;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::replay_parser::ListedReplay;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
-use crate::util::build_tracker;
 use crate::util::error::ToolkitError;
 use crate::util::game_params::load_game_params;
 use crate::util::replay_export::FlattenedVehicle;
@@ -677,9 +682,6 @@ fn parse_replay_data_in_background(
         match ReplayFile::from_file(path) {
             Ok(replay_file) => {
                 debug!("replay parsed successfully");
-                // We only send back random battles
-                let game_type = replay_file.meta.gameType.clone().unwrap_or_default();
-
                 // Resolve version-matched data for this replay's build
                 let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
                 let Some(wows_data_for_build) = data.wows_data_map.resolve(&replay_version) else {
@@ -741,91 +743,18 @@ fn parse_replay_data_in_background(
                     let mut upload_transient = false;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
-                            let battle_type =
-                                wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
-                            let is_valid_game_type_for_shipbuilds = matches!(
-                                battle_type.known(),
-                                Some(
-                                    wowsunpack::game_types::BattleType::Random
-                                        | wowsunpack::game_types::BattleType::Ranked
-                                )
-                            );
-                            if !is_valid_game_type_for_shipbuilds {
-                                debug!("game type is: {}", &game_type);
-                            }
                             if !replay_parsed_before {
-                                let self_confirmed_non_test = report
-                                    .players()
-                                    .iter()
-                                    .find(|p| p.relation().is_self())
-                                    .and_then(|p| p.vehicle().vehicle())
-                                    .map(|v| !v.is_test_ship())
-                                    .unwrap_or(false);
-
-                                match decide_upload_action(
-                                    data.data_sharing_mode,
-                                    is_valid_game_type_for_shipbuilds,
-                                    self_confirmed_non_test,
-                                ) {
-                                    ReplayUploadAction::Skip => {}
-                                    ReplayUploadAction::BuildData => {
-                                        for player in report.players().iter().filter(|player| !player.is_bot()) {
-                                            let Some(realm) = player.initial_state().realm() else {
-                                                continue;
-                                            };
-                                            #[cfg(not(feature = "shipbuilds_debugging"))]
-                                            let url = "https://shipbuilds.com/api/ship_builds";
-                                            #[cfg(feature = "shipbuilds_debugging")]
-                                            let url = "http://192.168.1.215:3000/api/ship_builds";
-
-                                            if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
-                                                player,
-                                                realm.to_string(),
-                                                report.version(),
-                                                game_type.to_string(),
-                                                &metadata_provider,
-                                            ) {
-                                                let res = shipbuilds_client.http().post(url).json(&payload).send();
-                                                if let Err(e) = res {
-                                                    error!("error sending request: {:?}", e);
-                                                    if e.is_connect() {
-                                                        upload_transient = true;
-                                                        break;
-                                                    }
-                                                }
-                                            } else {
-                                                error!("no vehicle entity for player?");
-                                            }
-                                        }
-                                        debug!("Successfully sent all builds");
-                                    }
-                                    ReplayUploadAction::RawReplay => {
-                                        #[cfg(not(feature = "shipbuilds_debugging"))]
-                                        let url = "https://shipbuilds.com/api/replays";
-                                        #[cfg(feature = "shipbuilds_debugging")]
-                                        let url = "http://192.168.1.215:3000/api/replays";
-
-                                        match std::fs::read(path) {
-                                            Ok(bytes) => {
-                                                let res = shipbuilds_client
-                                                    .http()
-                                                    .post(url)
-                                                    .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                                                    .body(bytes)
-                                                    .send();
-                                                if let Err(e) = res {
-                                                    error!("error sending replay: {:?}", e);
-                                                    if e.is_connect() {
-                                                        upload_transient = true;
-                                                    }
-                                                }
-                                            }
-                                            Err(e) => {
-                                                error!("failed to read replay file for upload {:?}: {:?}", path, e)
-                                            }
-                                        }
-                                    }
-                                }
+                                upload_transient = matches!(
+                                    upload_parsed_replay(
+                                        path,
+                                        &replay,
+                                        &report,
+                                        metadata_provider.as_ref(),
+                                        data.data_sharing_mode,
+                                        shipbuilds_client,
+                                    ),
+                                    ShipBuildsUploadOutcome::TransientFailure
+                                );
 
                                 data.player_tracker.write().update_from_replay(&replay);
                             }
@@ -1302,6 +1231,135 @@ pub fn start_populating_player_inspector(
     });
 
     BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::PopulatePlayerInspectorFromReplays }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SendAllReplaysBatchResult {
+    attempted: ReplayCount,
+    sent: ReplayCount,
+    total: ReplayCount,
+}
+
+#[allow(dead_code)]
+pub fn start_send_all_replays_to_shipbuilds(
+    paths: BTreeSet<PathBuf>,
+    cache_policy: SendReplayCachePolicy,
+    deps: ReplayDependencies,
+    data_sharing_mode: DataSharingMode,
+    sent_replays: Arc<RwLock<HashSet<String>>>,
+    db_pool: sqlx::SqlitePool,
+    tokio_runtime: Arc<tokio::runtime::Runtime>,
+) -> BackgroundTask {
+    let (completion_tx, completion_rx) = mpsc::channel();
+    let (progress_tx, progress_rx) = mpsc::channel();
+    let total = ReplayCount(paths.len());
+
+    crate::util::thread::spawn_logged("send-replays-to-shipbuilds", move || {
+        let _ = progress_tx.send(SendAllReplaysProgress::new(ReplayCount(0), total));
+        let result = run_send_all_replays_to_shipbuilds(
+            paths,
+            cache_policy,
+            sent_replays.as_ref(),
+            &progress_tx,
+            |path| upload_replay_path_to_shipbuilds(path, &deps, data_sharing_mode),
+            |path| persist_sent_replay(&tokio_runtime, &db_pool, path),
+        );
+
+        let _ = completion_tx.send(Ok(BackgroundTaskCompletion::ReplaysSentToShipBuilds {
+            attempted: result.attempted,
+            sent: result.sent,
+            total: result.total,
+        }));
+    });
+
+    BackgroundTask {
+        receiver: Some(completion_rx),
+        kind: BackgroundTaskKind::SendingReplaysToShipBuilds { rx: progress_rx, last_progress: None },
+    }
+}
+
+fn persist_sent_replay(
+    tokio_runtime: &tokio::runtime::Runtime,
+    db_pool: &sqlx::SqlitePool,
+    path: &Path,
+) -> Result<(), Report> {
+    let path_text = path.to_string_lossy();
+    tokio_runtime
+        .block_on(wows_toolkit_config::queries::insert_sent_replay(db_pool, path_text.as_ref()))
+        .into_report()
+        .map_err(|error| error.attach(format!("path: {}", path.display())).into_dynamic())
+}
+
+#[allow(dead_code)]
+fn upload_replay_path_to_shipbuilds(
+    path: &Path,
+    deps: &ReplayDependencies,
+    data_sharing_mode: DataSharingMode,
+) -> ShipBuildsUploadOutcome {
+    let (replay, wows_data) = match ReplayLoader::build_replay_from_path(deps, path.to_path_buf()) {
+        Ok(replay) => replay,
+        Err(error) => {
+            error!("failed to load replay for ShipBuilds upload {}: {:?}", path.display(), error);
+            return ShipBuildsUploadOutcome::TransientFailure;
+        }
+    };
+    let game_version = wows_data.read().patch_version;
+    let replay = replay.read();
+    let report = match replay.parse(game_version.to_string().as_str()) {
+        Ok(report) => report,
+        Err(error) => {
+            error!("failed to parse replay for ShipBuilds upload {}: {:?}", path.display(), error);
+            return ShipBuildsUploadOutcome::TransientFailure;
+        }
+    };
+
+    upload_parsed_replay(
+        path,
+        &replay,
+        &report,
+        replay.resource_loader.as_ref(),
+        data_sharing_mode,
+        &deps.shipbuilds_client,
+    )
+}
+
+fn run_send_all_replays_to_shipbuilds<U, P>(
+    paths: BTreeSet<PathBuf>,
+    cache_policy: SendReplayCachePolicy,
+    sent_replays: &RwLock<HashSet<String>>,
+    progress_tx: &mpsc::Sender<SendAllReplaysProgress>,
+    mut upload: U,
+    mut persist: P,
+) -> SendAllReplaysBatchResult
+where
+    U: FnMut(&Path) -> ShipBuildsUploadOutcome,
+    P: FnMut(&Path) -> Result<(), Report>,
+{
+    let total = ReplayCount(paths.len());
+    let mut attempted = ReplayCount(0);
+    let mut sent = ReplayCount(0);
+
+    for (index, path) in paths.into_iter().enumerate() {
+        let path_text = path.to_string_lossy();
+        let ledger_contains = { sent_replays.read().contains(path_text.as_ref()) };
+        if cache_policy.should_attempt(ledger_contains) {
+            attempted.0 += 1;
+            match upload(&path) {
+                ShipBuildsUploadOutcome::Skipped | ShipBuildsUploadOutcome::TransientFailure => {}
+                ShipBuildsUploadOutcome::Sent => {
+                    sent.0 += 1;
+                    sent_replays.write().insert(path_text.into_owned());
+                    if let Err(error) = persist(&path) {
+                        error!("ShipBuilds upload completed but sent-replay persistence failed: {:?}", error);
+                    }
+                }
+            }
+        }
+
+        let _ = progress_tx.send(SendAllReplaysProgress::new(ReplayCount(index + 1), total));
+    }
+
+    SendAllReplaysBatchResult { attempted, sent, total }
 }
 
 /// Parse and index a single replay for the on-demand "Index all replays" pass.
@@ -2169,6 +2227,180 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::*;
+
+    mod send_all {
+        use std::collections::HashSet;
+
+        use super::*;
+        use crate::task::replay_upload::ReplayCount;
+        use crate::task::replay_upload::SendAllReplaysProgress;
+        use crate::task::replay_upload::SendReplayCachePolicy;
+        use crate::task::replay_upload::ShipBuildsUploadOutcome;
+
+        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+        enum TestOutcome {
+            Skipped,
+            Sent,
+            TransientFailure,
+        }
+
+        struct TestBatchResult {
+            attempted: ReplayCount,
+            sent: ReplayCount,
+            progress: Vec<SendAllReplaysProgress>,
+            sent_paths: HashSet<String>,
+        }
+
+        fn path(name: &str) -> PathBuf {
+            PathBuf::from(name)
+        }
+
+        fn progress(completed: usize, total: usize) -> SendAllReplaysProgress {
+            SendAllReplaysProgress::new(ReplayCount(completed), ReplayCount(total))
+        }
+
+        fn ledger<const N: usize>(paths: [&str; N]) -> Arc<RwLock<HashSet<String>>> {
+            Arc::new(RwLock::new(paths.into_iter().map(str::to_owned).collect()))
+        }
+
+        fn run_test_batch<F>(
+            paths: BTreeSet<PathBuf>,
+            policy: SendReplayCachePolicy,
+            sent_replays: Arc<RwLock<HashSet<String>>>,
+            mut upload: F,
+        ) -> TestBatchResult
+        where
+            F: FnMut(&Path) -> TestOutcome,
+        {
+            let (progress_tx, progress_rx) = mpsc::channel();
+            let completion = run_send_all_replays_to_shipbuilds(
+                paths,
+                policy,
+                sent_replays.as_ref(),
+                &progress_tx,
+                |path| match upload(path) {
+                    TestOutcome::Skipped => ShipBuildsUploadOutcome::Skipped,
+                    TestOutcome::Sent => ShipBuildsUploadOutcome::Sent,
+                    TestOutcome::TransientFailure => ShipBuildsUploadOutcome::TransientFailure,
+                },
+                |_| Ok(()),
+            );
+            drop(progress_tx);
+
+            TestBatchResult {
+                attempted: completion.attempted,
+                sent: completion.sent,
+                progress: progress_rx.into_iter().collect(),
+                sent_paths: sent_replays.read().clone(),
+            }
+        }
+
+        #[test]
+        fn batch_advances_for_cached_skipped_failed_and_sent_paths() {
+            let paths = BTreeSet::from([path("cached"), path("failed"), path("sent")]);
+            let result = run_test_batch(paths, SendReplayCachePolicy::UseLedger, ledger(["cached"]), |path| {
+                if path.ends_with("failed") { TestOutcome::TransientFailure } else { TestOutcome::Sent }
+            });
+
+            assert_eq!(result.attempted, ReplayCount(2));
+            assert_eq!(result.sent, ReplayCount(1));
+            assert_eq!(result.progress, vec![progress(1, 3), progress(2, 3), progress(3, 3)]);
+            assert_eq!(result.sent_paths, HashSet::from(["cached".to_owned(), "sent".to_owned()]));
+        }
+
+        #[test]
+        fn ignore_ledger_attempts_and_records_an_already_cached_path() {
+            let result = run_test_batch(
+                BTreeSet::from([path("cached")]),
+                SendReplayCachePolicy::IgnoreLedger,
+                ledger(["cached"]),
+                |_| TestOutcome::Sent,
+            );
+
+            assert_eq!(result.attempted, ReplayCount(1));
+            assert_eq!(result.sent, ReplayCount(1));
+            assert_eq!(result.progress.last(), Some(&progress(1, 1)));
+            assert_eq!(result.sent_paths, HashSet::from(["cached".to_owned()]));
+        }
+
+        #[test]
+        fn ineligible_path_advances_without_entering_the_sent_ledger() {
+            let result = run_test_batch(
+                BTreeSet::from([path("ineligible")]),
+                SendReplayCachePolicy::UseLedger,
+                ledger([]),
+                |_| TestOutcome::Skipped,
+            );
+
+            assert_eq!(result.attempted, ReplayCount(1));
+            assert_eq!(result.sent, ReplayCount(0));
+            assert_eq!(result.progress, vec![progress(1, 1)]);
+            assert!(result.sent_paths.is_empty());
+        }
+
+        #[test]
+        fn persistence_failure_is_attempted_and_does_not_stop_progress() {
+            let sent_replays = ledger([]);
+            let (progress_tx, progress_rx) = mpsc::channel();
+            let persistence_attempts = std::cell::Cell::new(0);
+            let completion = run_send_all_replays_to_shipbuilds(
+                BTreeSet::from([path("sent")]),
+                SendReplayCachePolicy::UseLedger,
+                sent_replays.as_ref(),
+                &progress_tx,
+                |_| ShipBuildsUploadOutcome::Sent,
+                |_| {
+                    persistence_attempts.set(persistence_attempts.get() + 1);
+                    Err(report!("database unavailable"))
+                },
+            );
+            drop(progress_tx);
+
+            assert_eq!(completion.attempted, ReplayCount(1));
+            assert_eq!(completion.sent, ReplayCount(1));
+            assert_eq!(progress_rx.into_iter().last(), Some(progress(1, 1)));
+            assert_eq!(persistence_attempts.get(), 1);
+            assert_eq!(&*sent_replays.read(), &HashSet::from(["sent".to_owned()]));
+        }
+
+        #[test]
+        fn disconnected_progress_receiver_does_not_stop_the_batch() {
+            let sent_replays = ledger([]);
+            let (progress_tx, progress_rx) = mpsc::channel();
+            drop(progress_rx);
+
+            let completion = run_send_all_replays_to_shipbuilds(
+                BTreeSet::from([path("first"), path("second")]),
+                SendReplayCachePolicy::UseLedger,
+                sent_replays.as_ref(),
+                &progress_tx,
+                |_| ShipBuildsUploadOutcome::Sent,
+                |_| Ok(()),
+            );
+
+            assert_eq!(completion.attempted, ReplayCount(2));
+            assert_eq!(completion.sent, ReplayCount(2));
+            assert_eq!(sent_replays.read().len(), 2);
+        }
+
+        #[test]
+        fn a_successful_send_path_is_persisted_in_sqlite() {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let pool = runtime
+                .block_on(sqlx::sqlite::SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:"))
+                .unwrap();
+            runtime
+                .block_on(sqlx::query("CREATE TABLE sent_replays (replay_path TEXT PRIMARY KEY)").execute(&pool))
+                .unwrap();
+
+            persist_sent_replay(&runtime, &pool, Path::new("persisted.wowsreplay")).unwrap();
+
+            assert_eq!(
+                runtime.block_on(wows_toolkit_config::queries::get_all_sent_replays(&pool)).unwrap(),
+                vec!["persisted.wowsreplay".to_owned()]
+            );
+        }
+    }
 
     /// Creates `root/relative`, including any parent directories.
     fn touch(root: &Path, relative: &str) -> PathBuf {

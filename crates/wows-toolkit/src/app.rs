@@ -1379,6 +1379,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
                             BackgroundTaskKind::ReconcilingIndex { .. } => {}
+                            BackgroundTaskKind::SendingReplaysToShipBuilds { .. } => {}
                             BackgroundTaskKind::LoadingRowSummaries { workspace } => {
                                 let workspace_id = *workspace;
                                 if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
@@ -2016,6 +2017,7 @@ impl WowsToolkitApp {
                         target.replay_rows_need_reindex_scan = true;
                     }
                 }
+                BackgroundTaskCompletion::ReplaysSentToShipBuilds { .. } => {}
                 #[cfg(feature = "mod_manager")]
                 BackgroundTaskCompletion::ModManager(mod_manager_info) => match *mod_manager_info {
                     crate::mod_manager::ModTaskCompletion::DatabaseLoaded(index) => {
