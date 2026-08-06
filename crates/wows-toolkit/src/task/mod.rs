@@ -1,5 +1,6 @@
 pub mod build_request;
 pub mod game_data_download;
+pub mod live_match_stats;
 pub mod networking;
 pub mod replay_upload;
 pub mod replays;
@@ -56,6 +57,7 @@ pub use game_data_download::start_game_data_download_task;
 pub use game_data_download::start_game_data_plan_task;
 pub use game_data_download::start_game_data_update_check_task;
 pub use game_data_download::start_game_data_validation_task;
+pub use live_match_stats::FlushState;
 pub use networking::NetworkJob;
 pub use networking::NetworkResult;
 pub use networking::load_personal_rating_data;

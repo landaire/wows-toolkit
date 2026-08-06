@@ -1,0 +1,253 @@
+//! Reads the roster off the replay a live battle is writing, then fetches
+//! that roster's stats. Runs on the background replay-parser thread.
+
+use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
+use std::time::Instant;
+
+use parking_lot::RwLock;
+use rust_i18n::t;
+use tracing::debug;
+use wows_replays::ReplayFile;
+use wows_replays::analyzer::battle_controller::merged::ArenaState;
+use wows_replays::analyzer::battle_controller::merged::scan_arena_state;
+use wows_replays::analyzer::decoder::PlayerStateData;
+use wows_replays::types::ArenaId;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
+
+use crate::data::match_stats::MatchStatsClient;
+use crate::data::match_stats::MatchStatsError;
+use crate::data::match_stats::MatchStatsRequest;
+use crate::data::match_stats::PlayerRef;
+use crate::data::match_stats::Region;
+use crate::data::wows_data::WoWsDataMap;
+use crate::ui::player_tracker::MatchStatsState;
+use crate::ui::player_tracker::PlayerTracker;
+use crate::ui::player_tracker::live::LiveIdentities;
+
+/// Turn a scanned roster into a request, or say why it cannot be one.
+///
+/// Every human in a match shares its realm, so an unsupported one rejects the
+/// whole request rather than dropping players until the roster is empty.
+pub(crate) fn build_request(
+    arena_id: ArenaId,
+    players: &[PlayerStateData],
+) -> Result<MatchStatsRequest, MatchStatsError> {
+    let mut refs = Vec::new();
+    for player in players.iter().filter(|player| !player.is_bot()) {
+        let Some(realm) = player.realm() else {
+            continue;
+        };
+        let Some(region) = Region::from_realm(realm) else {
+            return Err(MatchStatsError::UnsupportedRegion { realm: realm.to_string() });
+        };
+        let Some(ship_id) = player.ship_params_id() else {
+            continue;
+        };
+        refs.push(PlayerRef { account_id: player.db_id(), region, ship_id });
+    }
+
+    let request = MatchStatsRequest { arena_id, players: refs };
+    request.validate()?;
+    Ok(request)
+}
+
+/// Whether the replay being read is one the game is still writing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlushState {
+    /// A battle in progress. Read tolerantly and retry: the packet stream
+    /// arrives in flushes and `onArenaStateReceived` may not be in one yet.
+    InProgress,
+    /// A finished file. Read strictly and try once.
+    Complete,
+}
+
+/// How often a battle in progress is re-read while waiting for the roster.
+const RETRY_INTERVAL: Duration = Duration::from_secs(3);
+/// How long to keep waiting before giving up on a battle's roster.
+const RETRY_BUDGET: Duration = Duration::from_secs(90);
+
+/// Read the live roster off `replay`, then fetch its stats.
+///
+/// Every failure lands on the tracker as a `MatchStatsState`; none of them
+/// toast, because a match starting is not a moment to interrupt.
+pub(crate) fn resolve_and_fetch(
+    replay: &Path,
+    build: Option<u32>,
+    flush: FlushState,
+    wows_data_map: &WoWsDataMap,
+    tracker: &Arc<RwLock<PlayerTracker>>,
+    client: &mut MatchStatsClient,
+) {
+    tracker.write().set_match_stats(MatchStatsState::Resolving);
+
+    // No build means no entity specs, and no later attempt can produce one.
+    let Some(build) = build else {
+        tracker.write().set_match_stats(MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()));
+        return;
+    };
+
+    let deadline = Instant::now() + RETRY_BUDGET;
+    let state = loop {
+        if let Some(state) = try_scan(replay, build, flush, wows_data_map) {
+            break Some(state);
+        }
+        if flush == FlushState::Complete || Instant::now() >= deadline {
+            break None;
+        }
+        std::thread::sleep(RETRY_INTERVAL);
+    };
+
+    let Some(state) = state else {
+        tracker.write().set_match_stats(MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()));
+        return;
+    };
+
+    // Written before the fetch so the links and the identity join light up
+    // even when the fetch then fails.
+    tracker.write().set_live_identities(LiveIdentities::from_player_states(state.arena_id, &state.players));
+    tracker.write().set_match_stats(MatchStatsState::Fetching);
+
+    let outcome = build_request(state.arena_id, &state.players).and_then(|request| client.fetch(&request));
+    let next = match outcome {
+        Ok(response) => {
+            let by_account = response.players.into_iter().map(|player| (player.account_id, player)).collect();
+            MatchStatsState::Ready(by_account)
+        }
+        Err(error) => MatchStatsState::Failed(error.to_string()),
+    };
+    tracker.write().set_match_stats(next);
+}
+
+/// One attempt at reading the roster. `None` means "not yet": the file is
+/// absent, the flushed prefix is too short, game data has not loaded, or
+/// `onArenaStateReceived` has not been written.
+fn try_scan(replay: &Path, build: u32, flush: FlushState, wows_data_map: &WoWsDataMap) -> Option<ArenaState> {
+    let replay_file = match flush {
+        FlushState::InProgress => ReplayFile::from_partial_file(replay),
+        FlushState::Complete => ReplayFile::from_file(replay),
+    };
+    let replay_file = match replay_file {
+        Ok(file) => file,
+        Err(e) => {
+            debug!("live roster scan: replay not readable yet: {e:?}");
+            return None;
+        }
+    };
+
+    let shared = wows_data_map.get(build)?;
+    let guard = shared.read();
+    let metadata = guard.game_metadata.as_ref()?;
+    let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
+
+    scan_arena_state(metadata.entity_specs(), version, &replay_file)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use wows_replays::types::AccountId;
+
+    use super::*;
+
+    /// One human roster entry, deserialized because `PlayerStateData`'s fields
+    /// are crate-private to the parser. `raw_with_names` (which backs
+    /// `ship_params_id()`) is `#[serde(skip_deserializing)]`, so the ship id
+    /// is added afterward through the parser's public `update_from_dict`.
+    fn player_state(name: &str, db_id: i64, realm: &str, ship_id: i64) -> PlayerStateData {
+        let mut player: PlayerStateData = serde_json::from_value(serde_json::json!({
+            "username": name,
+            "clan": "RAIN",
+            "clan_id": 7,
+            "clan_color": 0,
+            "db_id": db_id,
+            "realm": realm,
+            "meta_ship_id": 0,
+            "entity_id": 0,
+            "team_id": 0,
+            "max_health": 40_000,
+            "is_abuser": false,
+            "is_hidden": false,
+            "is_bot": false,
+            "human_properties": {
+                "avatar_id": 0,
+                "prebattle_id": 0,
+                "is_client_loaded": true,
+                "is_connected": true,
+            },
+        }))
+        .expect("the roster fixture matches PlayerStateData's shape");
+
+        let mut ship_fields = HashMap::new();
+        ship_fields.insert("shipParamsId", pickled::Value::I64(ship_id));
+        player.update_from_dict(&ship_fields);
+        player
+    }
+
+    /// One bot roster entry, with a realm and ship id that would pass the rest
+    /// of `build_request`'s checks. This is deliberate: only `is_bot()` may be
+    /// the reason a bot is dropped, so the fixture must not also fail the
+    /// realm or ship-id checks, or a deleted `is_bot()` filter would still
+    /// drop it for the wrong reason and the test would not catch the loss.
+    fn bot_state(name: &str, db_id: i64, ship_id: i64) -> PlayerStateData {
+        let mut player: PlayerStateData = serde_json::from_value(serde_json::json!({
+            "username": name,
+            "clan": "",
+            "clan_id": 0,
+            "clan_color": 0,
+            "db_id": db_id,
+            "realm": "na",
+            "meta_ship_id": 0,
+            "entity_id": 0,
+            "team_id": 0,
+            "max_health": 40_000,
+            "is_abuser": false,
+            "is_hidden": false,
+            "is_bot": true,
+            "human_properties": {
+                "avatar_id": 0,
+                "prebattle_id": 0,
+                "is_client_loaded": true,
+                "is_connected": true,
+            },
+        }))
+        .expect("the bot fixture matches PlayerStateData's shape");
+
+        let mut ship_fields = HashMap::new();
+        ship_fields.insert("shipParamsId", pickled::Value::I64(ship_id));
+        player.update_from_dict(&ship_fields);
+        player
+    }
+
+    /// A realm the service does not cover must be refused here, not by a 400.
+    #[test]
+    fn an_unsupported_realm_stops_the_request() {
+        let players = vec![player_state("Someone", 1, "ru", 100)];
+
+        let error = build_request(ArenaId::from(1i64), &players).expect_err("ru is unsupported");
+
+        assert!(matches!(error, MatchStatsError::UnsupportedRegion { .. }));
+    }
+
+    #[test]
+    fn bots_are_left_out_of_the_request() {
+        let players = vec![player_state("Human", 1, "eu", 100), bot_state("Bot", 200, 300)];
+
+        let request = build_request(ArenaId::from(1i64), &players).expect("one human is enough");
+
+        assert_eq!(request.players.len(), 1);
+        assert_eq!(request.players[0].account_id, AccountId(1));
+    }
+
+    #[test]
+    fn a_roster_of_only_bots_sends_nothing() {
+        let players = vec![bot_state("Bot", 200, 300)];
+
+        let error = build_request(ArenaId::from(1i64), &players).expect_err("bots are not lookups");
+
+        assert!(matches!(error, MatchStatsError::NoEligiblePlayers));
+    }
+}

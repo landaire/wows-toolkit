@@ -1,7 +1,7 @@
 mod clans;
 mod current_match;
 mod historical;
-mod live;
+pub(crate) mod live;
 mod model;
 
 pub(crate) use clans::BreakdownWindow;

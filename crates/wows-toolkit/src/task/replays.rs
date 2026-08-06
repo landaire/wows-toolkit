@@ -969,6 +969,13 @@ pub enum ReplayBackgroundParserThreadMessage {
     DataSharingModeChanged(DataSharingMode),
     DataAutoExportSettingChange(DataExportSettings),
     DebugStateChange(bool),
+    /// A match started, or the debug picker chose a replay to treat as one.
+    /// Carries the file whose `onArenaStateReceived` names the roster.
+    LiveMatchStarted {
+        replay: PathBuf,
+        build: Option<u32>,
+        flush: crate::task::live_match_stats::FlushState,
+    },
 }
 
 pub struct BackgroundParserThread {
@@ -997,6 +1004,8 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
     debug!("starting background parsing thread");
     let _join_handle = crate::util::thread::spawn_logged("background-replay-parser", move || {
         let client = crate::util::http::blocking_client().expect("failed to build HTTP client");
+        // Built once so its arena cache and rate limiter survive across matches.
+        let mut match_stats_client = crate::data::match_stats::MatchStatsClient::new(client.clone());
 
         #[cfg(not(feature = "shipbuilds_debugging"))]
         {
@@ -1195,6 +1204,16 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                 }
                 ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state) => {
                     data.is_debug = new_debug_state;
+                }
+                ReplayBackgroundParserThreadMessage::LiveMatchStarted { replay, build, flush } => {
+                    crate::task::live_match_stats::resolve_and_fetch(
+                        &replay,
+                        build,
+                        flush,
+                        &data.wows_data_map,
+                        &data.player_tracker,
+                        &mut match_stats_client,
+                    );
                 }
             }
         }

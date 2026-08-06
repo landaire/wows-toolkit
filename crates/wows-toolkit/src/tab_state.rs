@@ -37,6 +37,7 @@ use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
+use crate::task::FlushState;
 use crate::task::NetworkJob;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplaySource;
@@ -1185,6 +1186,20 @@ impl TabState {
                     match parsed {
                         Ok(replay_file) => {
                             self.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+
+                            let build = Version::try_from_client_exe(&replay_file.meta.clientVersionFromExe)
+                                .and_then(|v| v.build_number());
+                            // tempArenaInfo.json and temp.wowsreplay are written as
+                            // siblings by the game, so the roster lives next to it.
+                            if let Some(replay) = path.parent().map(|dir| dir.join("temp.wowsreplay")) {
+                                let _ = self.background_parser_tx.as_ref().map(|tx| {
+                                    tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted {
+                                        replay,
+                                        build,
+                                        flush: FlushState::InProgress,
+                                    })
+                                });
+                            }
                         }
                         // The game writes this file at match start and may not
                         // have finished flushing it yet; skip this event and let
