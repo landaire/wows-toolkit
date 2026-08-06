@@ -8,6 +8,12 @@ use egui::OpenUrl;
 use egui::RichText;
 use egui::UiKind;
 use egui::Vec2;
+use egui_taffy::TuiBuilderLogic as _;
+use egui_taffy::taffy;
+use egui_taffy::taffy::prelude::auto;
+use egui_taffy::taffy::prelude::fr;
+use egui_taffy::taffy::prelude::length;
+use egui_taffy::taffy::prelude::percent;
 use jiff::Timestamp;
 use jiff::civil::DateTime;
 use jiff::tz::TimeZone;
@@ -24,6 +30,8 @@ use crate::icons;
 use crate::task::live_match_stats::FlushState;
 use crate::task::replays::ReplayBackgroundParserThreadMessage;
 use crate::twitch::TwitchState;
+use crate::ui::replay_parser::ClanColor;
+use crate::ui::replay_parser::PlayerTint;
 use crate::ui::replay_parser::ship_class_icon_from_species;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::util::formatting::separate_number;
@@ -32,6 +40,7 @@ use crate::util::formatting::wows_numbers_player_url;
 use crate::util::personal_rating::PersonalRatingCategory;
 use crate::util::personal_rating::PersonalRatingCategorySwatch;
 
+use super::CurrentMatchViewMode;
 use super::MatchStatsState;
 use super::PlayerTracker;
 use super::TrackedPlayer;
@@ -40,12 +49,34 @@ use super::encounter_severity_color;
 use super::last_seen_text;
 use super::live::LiveRosterRow;
 
-/// Both teams share these so their headers line up: two independently sized
-/// grids would otherwise drift apart column by column.
-const MIN_COL_WIDTH: f32 = 44.0;
-/// `egui::Grid` only exposes a wrapping soft-max for column width, not a hard
-/// cell size: rows are left to size to their content's height.
-const MAX_COL_WIDTH: f32 = 180.0;
+const ROW_EDGE_PADDING_X: i8 = 10;
+const ROW_EDGE_PADDING_Y: i8 = 3;
+const DETAIL_LINE_GAP: f32 = 2.0;
+const ROW_COLUMN_GAP: f32 = 4.0;
+const CLASS_COLUMN_WIDTH: f32 = 24.0;
+const SHIP_COLUMN_WIDTH: f32 = 112.0;
+const WIN_RATE_COLUMN_WIDTH: f32 = 48.0;
+const PERSONAL_RATING_COLUMN_WIDTH: f32 = 48.0;
+const BATTLES_COLUMN_WIDTH: f32 = 48.0;
+const ENCOUNTERS_COLUMN_WIDTH: f32 = 60.0;
+const ACTIONS_COLUMN_WIDTH: f32 = 24.0;
+
+/// Below this width, the fixed stat columns leave too little space for both
+/// identity cells, so the teams stack instead.
+const STACK_TEAMS_BELOW_WIDTH: f32 = 1080.0;
+/// Gap between the two teams, whether they sit side by side or stacked.
+const TEAM_GAP: f32 = 16.0;
+
+/// Defensive floor on a team column's width. Not reachable through
+/// `team_width` today: the smallest input it is ever called with is
+/// `STACK_TEAMS_BELOW_WIDTH`, which already clears this floor with room to
+/// spare, so the two columns can never be asked to sum to more than the
+/// space available. Kept as a floor anyway so the function stays correct on
+/// its own terms if that threshold ever changes.
+const TEAM_MIN_WIDTH: f32 = 200.0;
+/// Ceiling on a team column's width. Wider rows add empty identity space
+/// without making the fixed stat columns easier to scan.
+const TEAM_MAX_WIDTH: f32 = 560.0;
 
 impl ToolkitTabViewer<'_> {
     pub(crate) fn build_current_match_sub_tab(&mut self, ui: &mut egui::Ui) {
@@ -70,13 +101,21 @@ impl ToolkitTabViewer<'_> {
             // Resolve first, then reborrow the tracker's fields disjointly so the
             // roster and the tracked-player map can be read at the same time.
             player_tracker.roster(wows_data_ref);
-            let PlayerTracker { resolved_roster, tracked_players, win_rate_mode, match_stats, .. } = &*player_tracker;
+            let PlayerTracker {
+                resolved_roster,
+                tracked_players,
+                win_rate_mode,
+                current_match_view_mode,
+                match_stats,
+                ..
+            } = &*player_tracker;
             let Some(roster) = resolved_roster.as_ref() else {
                 ui.label(RichText::new(t!("ui.player_tracker.no_live_match")).weak());
                 return;
             };
 
             let mode = *win_rate_mode;
+            let view_mode = *current_match_view_mode;
 
             ui.horizontal(|ui| {
                 let mut new_mode = mode;
@@ -86,6 +125,23 @@ impl ToolkitTabViewer<'_> {
                     .on_hover_text(t!("ui.player_tracker.win_rate_mode_hover"));
                 if new_mode != mode {
                     actions.set_win_rate_mode = Some(new_mode);
+                }
+
+                ui.separator();
+
+                let mut new_view_mode = view_mode;
+                ui.selectable_value(
+                    &mut new_view_mode,
+                    CurrentMatchViewMode::Compact,
+                    t!("ui.player_tracker.view_compact"),
+                );
+                ui.selectable_value(
+                    &mut new_view_mode,
+                    CurrentMatchViewMode::Detailed,
+                    t!("ui.player_tracker.view_detailed"),
+                );
+                if new_view_mode != view_mode {
+                    actions.set_view_mode = Some(new_view_mode);
                 }
 
                 ui.separator();
@@ -127,32 +183,16 @@ impl ToolkitTabViewer<'_> {
                 filter_range,
                 stats,
                 mode,
+                view_mode,
                 locale: &locale,
             };
 
-            ui.columns(2, |columns| {
-                let win = columns[0].sem().win;
-                render_team(
-                    &mut columns[0],
-                    t!("ui.player_tracker.your_team", count = roster.friendly.len()).to_string(),
-                    win,
-                    &roster.friendly,
-                    "current_match_friendly",
-                    &ctx,
-                    &mut actions,
-                );
+            let win = ui.sem().win;
+            let loss = ui.sem().loss;
+            let your_team = t!("ui.player_tracker.your_team", count = roster.friendly.len()).to_string();
+            let enemy_team = t!("ui.player_tracker.enemy_team", count = roster.enemy.len()).to_string();
 
-                let loss = columns[1].sem().loss;
-                render_team(
-                    &mut columns[1],
-                    t!("ui.player_tracker.enemy_team", count = roster.enemy.len()).to_string(),
-                    loss,
-                    &roster.enemy,
-                    "current_match_enemy",
-                    &ctx,
-                    &mut actions,
-                );
-            });
+            render_rosters(ui, your_team, enemy_team, win, loss, &roster.friendly, &roster.enemy, &ctx, &mut actions);
         }
 
         if let Some(login) = actions.copy_login {
@@ -164,6 +204,9 @@ impl ToolkitTabViewer<'_> {
         }
         if let Some(mode) = actions.set_win_rate_mode {
             self.tab_state.player_tracker.write().win_rate_mode = mode;
+        }
+        if let Some(view_mode) = actions.set_view_mode {
+            self.tab_state.player_tracker.write().current_match_view_mode = view_mode;
         }
     }
 
@@ -260,6 +303,7 @@ struct TeamContext<'a> {
     filter_range: Option<Timestamp>,
     stats: &'a HashMap<AccountId, PlayerStatsOut>,
     mode: WinRateMode,
+    view_mode: CurrentMatchViewMode,
     locale: &'a str,
 }
 
@@ -270,6 +314,7 @@ struct TeamActions {
     find_matches_target: Option<AccountId>,
     copy_login: Option<String>,
     set_win_rate_mode: Option<WinRateMode>,
+    set_view_mode: Option<CurrentMatchViewMode>,
 }
 
 /// What one row shows, once the mode has chosen between the account and ship
@@ -297,17 +342,135 @@ pub(crate) fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> Ro
     RowStats { win_rate, battles, pr: stats.pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
 }
 
-/// Row background for the win-rate band, falling back to the striped colour so
-/// a roster with no stats yet still reads as a table. Row 0 is the header.
-fn row_color_picker(
-    bands: Vec<Option<PersonalRatingCategory>>,
-) -> impl Fn(usize, &egui::Style) -> Option<Color32> + Send + Sync + 'static {
-    move |row, style| {
-        if let Some(Some(band)) = bands.get(row) {
-            return Some(band.swatch(&style.visuals).tint);
-        }
-        (row > 0 && row % 2 == 1).then_some(style.visuals.faint_bg_color)
+fn visible_stat_modes(view_mode: CurrentMatchViewMode, selected_mode: WinRateMode) -> Vec<WinRateMode> {
+    match view_mode {
+        CurrentMatchViewMode::Compact => vec![selected_mode],
+        CurrentMatchViewMode::Detailed => vec![WinRateMode::Overall, WinRateMode::Ship],
     }
+}
+
+/// The width given to each team column when they sit side by side: half the
+/// available width net of the gap between them, clamped to a range that
+/// keeps a roster row's content comfortable. The same value is used for both
+/// teams, so they are always equal.
+fn team_width(available_width: f32, item_spacing: f32) -> f32 {
+    ((available_width - TEAM_GAP - item_spacing) / 2.0).clamp(TEAM_MIN_WIDTH, TEAM_MAX_WIDTH)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_rosters(
+    ui: &mut egui::Ui,
+    friendly_heading: String,
+    enemy_heading: String,
+    friendly_color: Color32,
+    enemy_color: Color32,
+    friendly: &[LiveRosterRow],
+    enemy: &[LiveRosterRow],
+    ctx: &TeamContext<'_>,
+    actions: &mut TeamActions,
+) {
+    let available_width = ui.available_width();
+    if available_width >= STACK_TEAMS_BELOW_WIDTH {
+        let width = team_width(available_width, ui.spacing().item_spacing.x);
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                render_team(ui, friendly_heading, friendly_color, friendly, "current_match_friendly", ctx, actions);
+            });
+            ui.add_space(TEAM_GAP);
+            ui.vertical(|ui| {
+                ui.set_width(width);
+                render_team(ui, enemy_heading, enemy_color, enemy, "current_match_enemy", ctx, actions);
+            });
+        });
+    } else {
+        let width = available_width.min(TEAM_MAX_WIDTH);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            render_team(ui, friendly_heading, friendly_color, friendly, "current_match_friendly", ctx, actions);
+        });
+        ui.add_space(TEAM_GAP);
+        ui.vertical(|ui| {
+            ui.set_width(width);
+            render_team(ui, enemy_heading, enemy_color, enemy, "current_match_enemy", ctx, actions);
+        });
+    }
+}
+
+/// A team's win rate, averaged over the rows that have one in `mode`. Rows
+/// with no rate yet (no stats entry, a hidden profile, an unplayed ship) are
+/// skipped rather than counted as zero, and the average is `None` when no row
+/// on the team has a rate at all: the same "absent, not zero" rule the row
+/// cells follow.
+fn team_average_win_rate(
+    rows: &[LiveRosterRow],
+    stats: &HashMap<AccountId, PlayerStatsOut>,
+    mode: WinRateMode,
+) -> Option<f64> {
+    let rates: Vec<f64> = rows
+        .iter()
+        .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
+        .filter_map(|entry| row_stats(Some(entry), mode).win_rate)
+        .collect();
+
+    if rates.is_empty() {
+        return None;
+    }
+    Some(rates.iter().sum::<f64>() / rates.len() as f64)
+}
+
+fn team_average_personal_rating(
+    rows: &[LiveRosterRow],
+    stats: &HashMap<AccountId, PlayerStatsOut>,
+    mode: WinRateMode,
+) -> Option<f64> {
+    let ratings: Vec<f64> = rows
+        .iter()
+        .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
+        .filter_map(|entry| row_stats(Some(entry), mode).pr)
+        .collect();
+
+    if ratings.is_empty() {
+        return None;
+    }
+    Some(ratings.iter().sum::<f64>() / ratings.len() as f64)
+}
+
+/// The clan tag's colour: the server-supplied clan colour when the scan
+/// carried one, otherwise the row's relation tint so the tag still renders on
+/// older data.
+fn clan_color_from_raw(raw: i64, fallback: PlayerTint) -> ClanColor {
+    if raw == 0 {
+        return ClanColor::Relation(fallback);
+    }
+    ClanColor::Fixed(Color32::from_rgb(
+        ((raw & 0xFF_00_00) >> 16) as u8,
+        ((raw & 0xFF_00) >> 8) as u8,
+        (raw & 0xFF) as u8,
+    ))
+}
+
+/// `swatch()`'s chip tint is tuned for a small chip; laid across an entire
+/// row it reads oversaturated, so the row fill uses the same hue at a lower
+/// alpha. `swatch()` itself is untouched -- PR chips and other surfaces still
+/// use its alpha as designed.
+const ROW_FILL_ALPHA_SCALE: f32 = 0.5;
+
+/// A row's background: its win-rate band tint when it has one, otherwise the
+/// striped fallback so a roster with no stats yet still reads as a list.
+/// Each player picks this straight from its own index; there is no header row
+/// to offset past any more.
+fn row_fill(band: Option<PersonalRatingCategory>, index: usize, visuals: &egui::Visuals) -> Option<Color32> {
+    if let Some(band) = band {
+        let tint = band.swatch(visuals).tint;
+        // `Color32` stores premultiplied alpha, so `r()`/`g()`/`b()` are not the
+        // hue's own channels at this alpha; unmultiply first, then reapply the
+        // scaled-down alpha to that hue.
+        let [r, g, b, a] = tint.to_srgba_unmultiplied();
+        let alpha = (a as f32 * ROW_FILL_ALPHA_SCALE).round() as u8;
+        return Some(Color32::from_rgba_unmultiplied(r, g, b, alpha));
+    }
+    (index % 2 == 1).then_some(visuals.faint_bg_color)
 }
 
 /// The reason a row shows no win rate, or `None` when the row has no stats
@@ -320,7 +483,7 @@ fn no_rate_hover_key(status: PlayerStatsStatus) -> &'static str {
     }
 }
 
-/// One team's table.
+/// One team's roster: a heading, then one fixed-column grid row per player.
 fn render_team(
     ui: &mut egui::Ui,
     heading: String,
@@ -330,204 +493,448 @@ fn render_team(
     ctx: &TeamContext<'_>,
     actions: &mut TeamActions,
 ) {
-    ui.label(RichText::new(heading).heading().color(heading_color));
+    let row_width = ui.available_width();
+    let grid_width = row_width - 2.0 * f32::from(ROW_EDGE_PADDING_X);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(heading).heading().color(heading_color));
+        if let Some(rate) = team_average_win_rate(rows, ctx.stats, ctx.mode) {
+            let swatch = PersonalRatingCategory::from_win_rate(rate).swatch(ui.visuals());
+            ui.label(
+                RichText::new(t!("ui.player_tracker.team_average_win_rate", rate = format!("{rate:.1}%")))
+                    .color(swatch.text),
+            );
+        }
+        if let Some(pr) = team_average_personal_rating(rows, ctx.stats, ctx.mode) {
+            let swatch = PersonalRatingCategory::from_pr(pr).swatch(ui.visuals());
+            ui.label(RichText::new(format!("{}: {pr:.0}", t!("stat.avg_pr"))).color(swatch.text));
+        }
+    });
 
-    let bands: Vec<Option<PersonalRatingCategory>> = std::iter::once(None)
-        .chain(rows.iter().map(|row| row_stats(row.account_id.and_then(|id| ctx.stats.get(&id)), ctx.mode).band))
-        .collect();
+    render_team_header(ui, id_salt, grid_width, ctx.view_mode);
 
-    egui::Grid::new(id_salt)
-        .num_columns(7)
-        .min_col_width(MIN_COL_WIDTH)
-        .max_col_width(MAX_COL_WIDTH)
-        .with_row_color(row_color_picker(bands))
-        .show(ui, |ui| {
-            ui.strong(t!("ui.player_tracker.column.ship"));
-            ui.strong(t!("ui.player_tracker.column.player_name"));
-            ui.strong(t!("ui.player_tracker.column.win_rate"));
-            ui.strong(t!("ui.player_tracker.column.personal_rating"));
-            ui.strong(t!("ui.player_tracker.column.battles"));
-            ui.strong(t!("ui.player_tracker.column.encounters"));
-            ui.label("");
-            ui.end_row();
-
-            for row_data in rows {
+    contiguous_row_layout(ui, |ui| {
+        ui.push_id(id_salt, |ui| {
+            for (index, row_data) in rows.iter().enumerate() {
                 let stats_entry = row_data.account_id.and_then(|id| ctx.stats.get(&id));
-                let resolved = row_stats(stats_entry, ctx.mode);
+                let band = row_stats(stats_entry, ctx.mode).band;
+                let fill = row_fill(band, index, ui.visuals()).unwrap_or(Color32::TRANSPARENT);
 
-                ui.horizontal(|ui| {
-                    let icon = row_data
-                        .species
-                        .zip(ctx.wows_data)
-                        .and_then(|(species, data)| ship_class_icon_from_species(species, data));
-                    if let Some(icon) = icon {
-                        let image = Image::new(ImageSource::Bytes {
-                            uri: icon.path.clone().into(),
-                            bytes: icon.data.clone().into(),
-                        })
-                        .tint(row_data.tint.color(ui.visuals()))
-                        .fit_to_exact_size((20.0, 20.0).into())
-                        .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
-                        let response = ui.add(image);
-                        if let Some(species_text) = row_data.species_text.as_ref() {
-                            response.on_hover_text(species_text);
-                        }
-                    }
-                    if let Some(ship_name) = row_data.ship_name.as_ref() {
-                        ui.label(ship_name);
-                    } else if let Some(species_text) = row_data.species_text.as_ref() {
-                        ui.label(species_text);
-                    }
-                });
-
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(&row_data.name).color(row_data.tint.color(ui.visuals())));
-
-                    if let Some(candidates) =
-                        ctx.twitch_state.player_is_potential_stream_sniper(&row_data.name, ctx.started_at)
-                        && let Some(login) = crate::ui::widgets::twitch_chip(ui, &candidates, ctx.started_at)
-                    {
-                        actions.copy_login = Some(login);
-                    }
-
-                    if let Some(player) = row_data.tracked.and_then(|id| ctx.tracked.get(&id))
-                        && !player.notes.is_empty()
-                    {
-                        ui.label(icons::NOTE_PENCIL).on_hover_text(&player.notes);
-                    }
-                });
-
-                match resolved.win_rate {
-                    None => {
-                        let label = ui.label(RichText::new("-").weak());
-                        if let Some(entry) = stats_entry {
-                            label.on_hover_text(t!(no_rate_hover_key(entry.status)));
-                        }
-                    }
-                    Some(rate) => {
-                        let band = resolved.band.expect("a resolved win rate always has a band");
-                        let swatch = band.swatch(ui.visuals());
-                        let response = ui.label(RichText::new(format!("{rate:.1}%")).color(swatch.text));
-                        if let Some(hover) = other_scope_hover(stats_entry, ctx.mode, ctx.locale) {
-                            response.on_hover_text(hover);
-                        }
-                    }
-                }
-
-                match resolved.pr {
-                    Some(pr) => {
-                        crate::ui::widgets::pr_chip(
-                            ui,
-                            PersonalRatingCategory::from_pr(pr),
-                            &format!("{pr:.0}"),
-                            false,
-                        )
-                        .on_hover_text(t!("ui.player_tracker.pr_account_hover"));
-                    }
-                    None => {
-                        ui.label(RichText::new("-").weak());
-                    }
-                }
-
-                match resolved.battles {
-                    Some(battles) => {
-                        ui.label(separate_number(battles, Some(ctx.locale)));
-                    }
-                    None => {
-                        ui.label(RichText::new("-").weak());
-                    }
-                }
-
-                match row_data.tracked.and_then(|id| ctx.tracked.get(&id)) {
-                    None => {
-                        ui.label(RichText::new("-").weak()).on_hover_text(t!("ui.player_tracker.never_encountered"));
-                    }
-                    Some(player) => {
-                        let total = player.arena_ids.len();
-                        let in_range = match ctx.filter_range {
-                            Some(range) => player.timestamps.iter().filter(|ts| **ts > range).count(),
-                            None => total,
-                        };
-                        // The live roster is about who is in front of you now, so
-                        // it counts every past meeting: the division-mate toggle
-                        // belongs to the Historical and Clans tables.
-                        let last = last_seen_text(player.timestamps.last().copied(), ctx.now);
-
-                        let mut text = RichText::new(format!("x{total}"));
-                        if let Some(color) = encounter_severity_color(ui, in_range) {
-                            text = text.color(color);
-                        }
-                        ui.label(text).on_hover_text(t!(
-                            "ui.player_tracker.encounters_hover",
-                            total = total,
-                            range = in_range,
-                            last = last
-                        ));
-                    }
-                }
-
-                ui.horizontal(|ui| {
-                    if let Some(id) = row_data.tracked
-                        && ui
-                            .button(icons::MAGNIFYING_GLASS)
-                            .on_hover_text(t!("ui.player_tracker.find_matches"))
-                            .clicked()
-                    {
-                        actions.find_matches_target = Some(id);
-                    }
-
-                    if let (Some(account_id), Some(region)) = (row_data.account_id, row_data.region) {
-                        ui.menu_button(icons::DOTS_THREE, |ui| {
-                            if ui
-                                .small_button(wt_translations::icon_t(
-                                    icons::ARROW_SQUARE_OUT,
-                                    &t!("ui.player_tracker.open_wows_numbers"),
-                                ))
-                                .clicked()
-                            {
-                                let url = wows_numbers_player_url(region, account_id, &row_data.name);
-                                ui.ctx().open_url(OpenUrl::new_tab(url));
-                                ui.close_kind(UiKind::Menu);
-                            }
-
-                            if ui
-                                .small_button(wt_translations::icon_t(
-                                    icons::ARROW_SQUARE_OUT,
-                                    &t!("ui.player_tracker.open_shipbuilds"),
-                                ))
-                                .clicked()
-                            {
-                                let url = shipbuilds_player_url(region, account_id, &row_data.name);
-                                ui.ctx().open_url(OpenUrl::new_tab(url));
-                                ui.close_kind(UiKind::Menu);
-                            }
-                        });
-                    }
-                });
-
-                ui.end_row();
+                let background = ui.painter().add(egui::Shape::Noop);
+                let response = egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(ROW_EDGE_PADDING_X, ROW_EDGE_PADDING_Y))
+                    .show(ui, |ui| {
+                        egui_taffy::tui(ui, ui.id().with(index))
+                            .reserve_width(grid_width)
+                            .style(roster_row_style(ctx.view_mode))
+                            .show(|tui| {
+                                tui.style(class_column_style()).wrap_mode(egui::TextWrapMode::Truncate).ui(|ui| {
+                                    render_class_icon(ui, row_data, ctx);
+                                });
+                                tui.style(player_column_style()).wrap_mode(egui::TextWrapMode::Truncate).ui(|ui| {
+                                    render_player_identity(ui, row_data, stats_entry, ctx, actions);
+                                });
+                                tui.style(ship_column_style()).wrap_mode(egui::TextWrapMode::Truncate).ui(|ui| {
+                                    render_ship_name(ui, row_data);
+                                });
+                                tui.style(fixed_column_style(WIN_RATE_COLUMN_WIDTH))
+                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                    .ui(|ui| {
+                                        render_win_rate_cell(ui, stats_entry, ctx);
+                                    });
+                                tui.style(fixed_column_style(PERSONAL_RATING_COLUMN_WIDTH))
+                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                    .ui(|ui| {
+                                        render_personal_rating(ui, stats_entry, ctx.mode);
+                                    });
+                                tui.style(fixed_column_style(BATTLES_COLUMN_WIDTH))
+                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                    .ui(|ui| {
+                                        render_battles_cell(ui, stats_entry, ctx);
+                                    });
+                                tui.style(fixed_column_style(ENCOUNTERS_COLUMN_WIDTH))
+                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                    .ui(|ui| {
+                                        render_encounters(ui, row_data, ctx);
+                                    });
+                                tui.style(fixed_column_style(ACTIONS_COLUMN_WIDTH))
+                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                    .ui(|ui| {
+                                        render_action_menu(ui, row_data, actions);
+                                    });
+                            });
+                    });
+                ui.painter().set(
+                    background,
+                    egui::Shape::rect_filled(full_width_row_rect(response.response.rect, row_width), 0.0, fill),
+                );
             }
         });
+    });
 }
 
-/// The other scope's rate and battle count for the WR hover: when the row
-/// shows the overall rate, the hover names the ship's; when it shows the
-/// ship's, the hover names the overall. `None` when that scope has no rate of
-/// its own to show, matching `row_stats`'s "absent, not zero" rule.
-fn other_scope_hover(stats: Option<&PlayerStatsOut>, mode: WinRateMode, locale: &str) -> Option<String> {
-    let stats = stats?;
-    let (key, rate, battles) = match mode {
-        WinRateMode::Overall => ("ui.player_tracker.win_rate_hover_overall", stats.ship_win_rate, stats.ship_battles),
-        WinRateMode::Ship => ("ui.player_tracker.win_rate_hover_ship", stats.overall_win_rate, stats.battles),
-    };
-    let (rate, battles) = (rate?, battles?);
+fn render_team_header(ui: &mut egui::Ui, id_salt: &'static str, grid_width: f32, view_mode: CurrentMatchViewMode) {
+    egui::Frame::new().inner_margin(egui::Margin::symmetric(ROW_EDGE_PADDING_X, 0)).show(ui, |ui| {
+        egui_taffy::tui(ui, ui.id().with((id_salt, "header")))
+            .reserve_width(grid_width)
+            .style(roster_row_style(view_mode))
+            .show(|tui| {
+                tui.style(class_column_style())
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.search.field.class"));
+                tui.style(player_column_style())
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.search.field.player_present"));
+                tui.style(ship_column_style())
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.replay.column.ship_name"));
+                tui.style(fixed_column_style(WIN_RATE_COLUMN_WIDTH))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.player_tracker.column.win_rate"));
+                tui.style(fixed_column_style(PERSONAL_RATING_COLUMN_WIDTH))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.player_tracker.column.personal_rating"));
+                tui.style(fixed_column_style(BATTLES_COLUMN_WIDTH))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.player_tracker.column.battles"));
+                tui.style(fixed_column_style(ENCOUNTERS_COLUMN_WIDTH))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.player_tracker.column.encounters"));
+                tui.style(fixed_column_style(ACTIONS_COLUMN_WIDTH)).add_empty();
+            });
+    });
+}
 
-    Some(t!(key, rate = format!("{rate:.1}%"), battles = separate_number(battles, Some(locale))).to_string())
+fn roster_row_style(view_mode: CurrentMatchViewMode) -> taffy::Style {
+    taffy::Style {
+        display: taffy::Display::Grid,
+        align_items: Some(match view_mode {
+            CurrentMatchViewMode::Compact => taffy::AlignItems::Center,
+            CurrentMatchViewMode::Detailed => taffy::AlignItems::Start,
+        }),
+        gap: length(ROW_COLUMN_GAP),
+        size: taffy::Size { width: percent(1.0), height: auto() },
+        grid_template_columns: vec![
+            length(CLASS_COLUMN_WIDTH),
+            fr(1.0),
+            length(SHIP_COLUMN_WIDTH),
+            length(WIN_RATE_COLUMN_WIDTH),
+            length(PERSONAL_RATING_COLUMN_WIDTH),
+            length(BATTLES_COLUMN_WIDTH),
+            length(ENCOUNTERS_COLUMN_WIDTH),
+            length(ACTIONS_COLUMN_WIDTH),
+        ],
+        ..Default::default()
+    }
+}
+
+fn class_column_style() -> taffy::Style {
+    fixed_column_style(CLASS_COLUMN_WIDTH)
+}
+
+fn ship_column_style() -> taffy::Style {
+    fixed_column_style(SHIP_COLUMN_WIDTH)
+}
+
+fn player_column_style() -> taffy::Style {
+    taffy::Style {
+        flex_grow: 1.0,
+        flex_shrink: 1.0,
+        min_size: taffy::Size { width: length(0.0), height: auto() },
+        ..Default::default()
+    }
+}
+
+fn contiguous_row_layout<R>(ui: &mut egui::Ui, add_rows: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        add_rows(ui)
+    })
+    .inner
+}
+
+fn full_width_row_rect(content_rect: egui::Rect, width: f32) -> egui::Rect {
+    egui::Rect::from_min_size(content_rect.min, egui::vec2(width, content_rect.height()))
+}
+
+fn fixed_column_style(width: f32) -> taffy::Style {
+    taffy::Style {
+        flex_shrink: 0.0,
+        size: taffy::Size { width: length(width), height: auto() },
+        min_size: taffy::Size { width: length(width), height: auto() },
+        max_size: taffy::Size { width: length(width), height: auto() },
+        ..Default::default()
+    }
+}
+
+fn render_class_icon(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamContext<'_>) {
+    let icon =
+        row_data.species.zip(ctx.wows_data).and_then(|(species, data)| ship_class_icon_from_species(species, data));
+    if let Some(icon) = icon {
+        let image = Image::new(ImageSource::Bytes { uri: icon.path.clone().into(), bytes: icon.data.clone().into() })
+            .tint(row_data.tint.color(ui.visuals()))
+            .fit_to_exact_size((16.0, 16.0).into())
+            .rotate(90.0_f32.to_radians(), Vec2::splat(0.5));
+        let response = ui.add(image);
+        if let Some(species_text) = row_data.species_text.as_ref() {
+            response.on_hover_text(species_text);
+        }
+    }
+}
+
+fn render_ship_name(ui: &mut egui::Ui, row_data: &LiveRosterRow) {
+    let ship_name = row_data.ship_name.as_ref().or(row_data.species_text.as_ref());
+    if let Some(ship_name) = ship_name {
+        ui.add(egui::Label::new(ship_name).truncate()).on_hover_text(ship_name);
+    }
+}
+
+fn render_player_identity(
+    ui: &mut egui::Ui,
+    row_data: &LiveRosterRow,
+    stats_entry: Option<&PlayerStatsOut>,
+    ctx: &TeamContext<'_>,
+    actions: &mut TeamActions,
+) {
+    if ctx.view_mode == CurrentMatchViewMode::Detailed {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
+            ui.allocate_ui_with_layout(
+                egui::vec2(ui.available_width(), ui.text_style_height(&egui::TextStyle::Body)),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| render_player_identity_line(ui, row_data, stats_entry, ctx, actions),
+            );
+            ui.label(RichText::new(t!("ui.player_tracker.ship_stats")).small().weak());
+        });
+        return;
+    }
+    render_player_identity_line(ui, row_data, stats_entry, ctx, actions);
+}
+
+fn render_player_identity_line(
+    ui: &mut egui::Ui,
+    row_data: &LiveRosterRow,
+    stats_entry: Option<&PlayerStatsOut>,
+    ctx: &TeamContext<'_>,
+    actions: &mut TeamActions,
+) {
+    ui.spacing_mut().item_spacing.x = 2.0;
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+        if stats_entry.is_some_and(|entry| entry.status == PlayerStatsStatus::Hidden) {
+            ui.label(icons::EYE_SLASH).on_hover_text(t!("ui.player_tracker.stats_hidden"));
+        }
+
+        if let Some(player) = row_data.tracked.and_then(|id| ctx.tracked.get(&id))
+            && !player.notes.is_empty()
+        {
+            ui.label(icons::NOTE_PENCIL).on_hover_text(&player.notes);
+        }
+
+        if let Some(candidates) = ctx.twitch_state.player_is_potential_stream_sniper(&row_data.name, ctx.started_at)
+            && let Some(login) = crate::ui::widgets::twitch_chip(ui, &candidates, ctx.started_at)
+        {
+            actions.copy_login = Some(login);
+        }
+
+        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            render_clan(ui, row_data);
+            ui.add(egui::Label::new(RichText::new(&row_data.name).color(row_data.tint.color(ui.visuals()))).truncate())
+                .on_hover_text(&row_data.name);
+        });
+    });
+}
+
+fn render_clan(ui: &mut egui::Ui, row_data: &LiveRosterRow) {
+    let Some(clan) = row_data.clan.as_ref() else {
+        return;
+    };
+    let color = clan_color_from_raw(row_data.clan_color, row_data.tint).color(ui.visuals());
+    ui.add(egui::Label::new(RichText::new(format!("[{clan}]")).color(color)).truncate()).on_hover_text(clan);
+}
+
+fn render_win_rate_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
+    let modes = visible_stat_modes(ctx.view_mode, ctx.mode);
+    if modes.len() == 1 {
+        render_win_rate(ui, stats_entry, ctx, modes[0]);
+        return;
+    }
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
+        for mode in modes {
+            render_win_rate(ui, stats_entry, ctx, mode);
+        }
+    });
+}
+
+fn render_win_rate(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
+    let resolved = row_stats(stats_entry, mode);
+    if let Some(rate) = resolved.win_rate {
+        let band = resolved.band.expect("a resolved win rate always has a band");
+        let response = ui.label(RichText::new(format!("{rate:.1}%")).color(band.swatch(ui.visuals()).text));
+        if let Some(hover) = win_rate_hover(stats_entry, ctx.locale) {
+            response.on_hover_text(hover);
+        }
+        return;
+    }
+
+    let response = ui.label(RichText::new("-").weak());
+    if let Some(entry) = stats_entry {
+        response.on_hover_text(t!(no_rate_hover_key(entry.status)));
+    }
+}
+
+fn render_personal_rating(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, mode: WinRateMode) {
+    let Some(pr) = row_stats(stats_entry, mode).pr else {
+        ui.label(RichText::new("-").weak());
+        return;
+    };
+    crate::ui::widgets::pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false)
+        .on_hover_text(t!("ui.player_tracker.pr_account_hover"));
+}
+
+fn render_battles_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
+    let modes = visible_stat_modes(ctx.view_mode, ctx.mode);
+    if modes.len() == 1 {
+        render_battles(ui, stats_entry, ctx, modes[0]);
+        return;
+    }
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
+        for mode in modes {
+            render_battles(ui, stats_entry, ctx, mode);
+        }
+    });
+}
+
+fn render_battles(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
+    let scope = match mode {
+        WinRateMode::Overall => t!("ui.player_tracker.win_rate_overall"),
+        WinRateMode::Ship => t!("ui.player_tracker.win_rate_ship"),
+    };
+    let hover = format!("{scope}: {}", t!("ui.player_tracker.column.battles"));
+    let Some(battles) = row_stats(stats_entry, mode).battles else {
+        ui.label(RichText::new("-").weak());
+        return;
+    };
+    ui.label(separate_number(battles, Some(ctx.locale))).on_hover_text(hover);
+}
+
+fn render_encounters(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamContext<'_>) {
+    let Some(player) = row_data.tracked.and_then(|id| ctx.tracked.get(&id)) else {
+        return;
+    };
+    let total = player.arena_ids.len();
+    let in_range = match ctx.filter_range {
+        Some(range) => player.timestamps.iter().filter(|ts| **ts > range).count(),
+        None => total,
+    };
+    let last = last_seen_text(player.timestamps.last().copied(), ctx.now);
+
+    let mut text = RichText::new(separate_number(total, Some(ctx.locale)));
+    if let Some(color) = encounter_severity_color(ui, in_range) {
+        text = text.color(color);
+    }
+    ui.label(text).on_hover_text(t!(
+        "ui.player_tracker.encounters_hover",
+        total = total,
+        range = in_range,
+        last = last
+    ));
+}
+
+fn row_has_action_menu(row_data: &LiveRosterRow) -> bool {
+    row_data.tracked.is_some() || row_data.account_id.zip(row_data.region).is_some()
+}
+
+fn render_action_menu(ui: &mut egui::Ui, row_data: &LiveRosterRow, actions: &mut TeamActions) {
+    if !row_has_action_menu(row_data) {
+        return;
+    }
+
+    ui.menu_button(icons::DOTS_THREE, |ui| {
+        if let Some(id) = row_data.tracked
+            && ui
+                .small_button(wt_translations::icon_t(icons::MAGNIFYING_GLASS, &t!("ui.player_tracker.find_matches")))
+                .clicked()
+        {
+            actions.find_matches_target = Some(id);
+            ui.close_kind(UiKind::Menu);
+        }
+
+        if row_data.tracked.is_some() && row_data.account_id.zip(row_data.region).is_some() {
+            ui.separator();
+        }
+
+        if let (Some(account_id), Some(region)) = (row_data.account_id, row_data.region) {
+            if ui
+                .small_button(wt_translations::icon_t(
+                    icons::ARROW_SQUARE_OUT,
+                    &t!("ui.player_tracker.open_wows_numbers"),
+                ))
+                .clicked()
+            {
+                let url = wows_numbers_player_url(region, account_id, &row_data.name);
+                ui.ctx().open_url(OpenUrl::new_tab(url));
+                ui.close_kind(UiKind::Menu);
+            }
+
+            if ui
+                .small_button(wt_translations::icon_t(
+                    icons::ARROW_SQUARE_OUT,
+                    &t!("ui.player_tracker.open_shipbuilds"),
+                ))
+                .clicked()
+            {
+                let url = shipbuilds_player_url(region, account_id, &row_data.name);
+                ui.ctx().open_url(OpenUrl::new_tab(url));
+                ui.close_kind(UiKind::Menu);
+            }
+        }
+    });
+}
+
+/// The WR cell's hover: both scopes, each explicitly labelled. A tooltip on a
+/// number reads as labelling that number, so a hover naming only the other
+/// scope (the previous design) read as saying the shown value belonged to
+/// that scope. Independent of `mode`: whichever scope is showing in the cell,
+/// the hover names both. A scope with no rate of its own is omitted rather
+/// than shown as 0%, matching `row_stats`'s "absent, not zero" rule; `None`
+/// when neither scope has one.
+fn win_rate_hover(stats: Option<&PlayerStatsOut>, locale: &str) -> Option<String> {
+    let stats = stats?;
+    let scopes = [
+        (t!("ui.player_tracker.win_rate_overall"), stats.overall_win_rate, stats.battles),
+        (t!("ui.player_tracker.win_rate_ship"), stats.ship_win_rate, stats.ship_battles),
+    ];
+
+    let lines: Vec<String> = scopes
+        .into_iter()
+        .filter_map(|(label, rate, battles)| {
+            let (rate, battles) = (rate?, battles?);
+            Some(
+                t!(
+                    "ui.player_tracker.win_rate_hover_line",
+                    label = label.to_string(),
+                    rate = format!("{rate:.1}%"),
+                    battles = separate_number(battles, Some(locale))
+                )
+                .to_string(),
+            )
+        })
+        .collect();
+
+    if lines.is_empty() { None } else { Some(lines.join("\n")) }
 }
 
 #[cfg(test)]
 mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::SnapshotOptions;
+    use egui_kittest::kittest::NodeT as _;
+    use egui_kittest::kittest::Queryable as _;
+    use wows_replays::types::ArenaId;
     use wows_replays::types::GameParamId;
+
+    use crate::data::match_stats::Region;
 
     use super::*;
 
@@ -611,5 +1018,634 @@ mod tests {
         assert_eq!(resolved.pr, None);
         assert_eq!(resolved.battles, None);
         assert_eq!(resolved.band, None);
+    }
+
+    #[test]
+    fn win_rate_hover_labels_both_scopes_when_both_are_present() {
+        rust_i18n::set_locale("en");
+        let stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(42.2));
+
+        let hover = win_rate_hover(Some(&stats), "en").expect("both scopes are present");
+
+        assert!(hover.contains("Overall: 48.3%"), "hover was: {hover}");
+        assert!(hover.contains("Ship: 42.2%"), "hover was: {hover}");
+    }
+
+    /// An unplayed ship reports `ok` with a null ship rate: an absent rate, not
+    /// a zero one, so the hover must omit that line rather than show 0%.
+    #[test]
+    fn win_rate_hover_omits_a_scope_with_no_rate() {
+        rust_i18n::set_locale("en");
+        let stats = stats(PlayerStatsStatus::Ok, Some(52.5), None);
+
+        let hover = win_rate_hover(Some(&stats), "en").expect("the overall scope is present");
+
+        assert!(hover.contains("Overall"));
+        assert!(!hover.contains("Ship"), "hover was: {hover}");
+    }
+
+    #[test]
+    fn win_rate_hover_is_none_when_neither_scope_has_a_rate() {
+        let stats = stats(PlayerStatsStatus::Hidden, None, None);
+
+        assert_eq!(win_rate_hover(Some(&stats), "en"), None);
+    }
+
+    #[test]
+    fn win_rate_hover_is_none_without_a_stats_entry() {
+        assert_eq!(win_rate_hover(None, "en"), None);
+    }
+
+    /// The row fill keeps the band's hue but at a lower alpha than the chip
+    /// tint, since the same alpha spread across a whole row reads
+    /// oversaturated compared to a small chip.
+    #[test]
+    fn row_fill_uses_the_band_hue_at_a_lower_alpha_than_the_chip_tint() {
+        let visuals = egui::Visuals::dark();
+        let chip_tint = PersonalRatingCategory::Unicum.swatch(&visuals).tint;
+        let [r, g, b, chip_alpha] = chip_tint.to_srgba_unmultiplied();
+        let expected =
+            Color32::from_rgba_unmultiplied(r, g, b, (chip_alpha as f32 * ROW_FILL_ALPHA_SCALE).round() as u8);
+
+        let fill = row_fill(Some(PersonalRatingCategory::Unicum), 4, &visuals).expect("a band always fills");
+        assert_eq!(fill, expected);
+        let [fill_r, fill_g, fill_b, fill_alpha] = fill.to_srgba_unmultiplied();
+        assert_eq!((fill_r, fill_g, fill_b), (r, g, b), "the hue itself must be unchanged");
+        assert!(fill_alpha < chip_alpha, "row fill alpha {fill_alpha} should be lower than the chip's {chip_alpha}");
+    }
+
+    /// With no header row to offset past any more, striping runs straight off
+    /// each player's own index.
+    #[test]
+    fn row_fill_stripes_bandless_rows_by_index_with_no_header_offset() {
+        let visuals = egui::Visuals::dark();
+
+        assert_eq!(row_fill(None, 0, &visuals), None);
+        assert_eq!(row_fill(None, 1, &visuals), Some(visuals.faint_bg_color));
+        assert_eq!(row_fill(None, 2, &visuals), None);
+    }
+
+    fn roster_row(account_id: Option<AccountId>) -> LiveRosterRow {
+        LiveRosterRow {
+            name: "P".to_string(),
+            tint: PlayerTint::Enemy,
+            species: None,
+            ship_name: None,
+            species_text: None,
+            tracked: None,
+            account_id,
+            region: None,
+            clan: None,
+            clan_color: 0,
+        }
+    }
+
+    fn visual_row(account_id: i64, ship: &str, clan: Option<&str>, player: &str) -> LiveRosterRow {
+        LiveRosterRow {
+            name: player.to_string(),
+            tint: PlayerTint::Enemy,
+            species: None,
+            ship_name: Some(ship.to_string()),
+            species_text: None,
+            tracked: None,
+            account_id: Some(AccountId(account_id)),
+            region: Some(Region::Eu),
+            clan: clan.map(str::to_string),
+            clan_color: 0,
+        }
+    }
+
+    #[test]
+    fn kittest_current_match_columns_are_visually_aligned() {
+        rust_i18n::set_locale("en");
+        let mut friendly = vec![
+            visual_row(1, "Bourgogne", Some("PL-WY"), "ORKANIN"),
+            visual_row(2, "C. Colombo", Some("VENIK"), "MarshalPiten"),
+            visual_row(3, "Mecklenburg", None, "ConstantinXII"),
+        ];
+        let enemy = vec![
+            visual_row(4, "Libertad", None, "DontThankMe"),
+            visual_row(5, "Rhode Island", Some("SKIFF"), "soth_1_81757720"),
+            visual_row(6, "Cerberus", Some("BHT"), "ultrasailor15"),
+        ];
+        let stats_by_account = friendly
+            .iter()
+            .chain(&enemy)
+            .enumerate()
+            .map(|(index, row)| {
+                let mut entry = stats(PlayerStatsStatus::Ok, Some(48.3 + index as f64), Some(52.0));
+                entry.account_id = row.account_id.expect("visual rows have identities");
+                (entry.account_id, entry)
+            })
+            .collect();
+        friendly[0].tracked = Some(AccountId(1));
+        let encountered = TrackedPlayer { arena_ids: (1..=7).map(ArenaId::new).collect(), ..Default::default() };
+        let tracked = HashMap::from([(AccountId(1), encountered)]);
+        let twitch = TwitchState::default();
+        let now = Timestamp::now();
+        let ctx = TeamContext {
+            tracked: &tracked,
+            wows_data: None,
+            twitch_state: &twitch,
+            started_at: now,
+            now,
+            filter_range: None,
+            stats: &stats_by_account,
+            mode: WinRateMode::Overall,
+            view_mode: CurrentMatchViewMode::Compact,
+            locale: "en",
+        };
+        let mut actions = TeamActions::default();
+        let options = SnapshotOptions::new().output_path("tests/snapshots");
+        let mut harness = Harness::builder().with_size((1180.0, 150.0)).with_options(options).build_ui(|ui| {
+            render_rosters(
+                ui,
+                "Your Team (3)".to_string(),
+                "Enemy Team (3)".to_string(),
+                Color32::GREEN,
+                Color32::RED,
+                &friendly,
+                &enemy,
+                &ctx,
+                &mut actions,
+            );
+        });
+        harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        harness.ctx.set_fonts(fonts);
+
+        harness.run();
+
+        let class_headers: Vec<_> = harness.get_all_by_label("Class").collect();
+        let player_headers: Vec<_> = harness.get_all_by_label("Player").collect();
+        let ship_headers: Vec<_> = harness.get_all_by_label("Ship Name").collect();
+        let seen_headers: Vec<_> = harness.get_all_by_label("Seen").collect();
+        assert_eq!(class_headers.len(), 2);
+        assert_eq!(player_headers.len(), 2);
+        assert_eq!(ship_headers.len(), 2);
+        assert_eq!(seen_headers.len(), 2);
+        let class_header = class_headers[0].rect();
+        let player_header = player_headers[0].rect();
+        let ship_header = ship_headers[0].rect();
+        let seen_header = seen_headers[0].rect();
+        assert!(class_header.left() < player_header.left());
+        assert!(player_header.left() < ship_header.left());
+        assert!(ship_header.left() < seen_header.left());
+
+        let player_column_x =
+            ["[PL-WY]", "[VENIK]", "ConstantinXII"].map(|label| harness.get_by_label(label).rect().left());
+        assert!(
+            player_column_x.windows(2).all(|pair| (pair[0] - pair[1]).abs() < 0.1),
+            "combined player columns: {player_column_x:?}"
+        );
+
+        let ship_x = ["Bourgogne", "C. Colombo", "Mecklenburg"].map(|label| harness.get_by_label(label).rect().left());
+        assert!(ship_x.windows(2).all(|pair| (pair[0] - pair[1]).abs() < 0.1), "ship columns: {ship_x:?}");
+
+        let win_rate_x: Vec<f32> =
+            ["48.3%", "49.3%", "50.3%"].map(|label| harness.get_by_label(label).rect().left()).into_iter().collect();
+        assert!(win_rate_x.windows(2).all(|pair| (pair[0] - pair[1]).abs() < 0.1), "win-rate columns: {win_rate_x:?}");
+
+        let clan = harness.get_by_label("[PL-WY]").rect();
+        let player = harness.get_by_label("ORKANIN").rect();
+        let ship = harness.get_by_label("Bourgogne").rect();
+        let win_rate = harness.get_by_label("48.3%").rect();
+        assert!(class_header.left() < clan.left());
+        assert!(clan.left() < player.left() && player.right() <= ship.left());
+        assert!(ship.right() <= win_rate.left());
+
+        let seen = harness.get_by_label("7");
+        assert_eq!(seen.accesskit_node().value(), Some("7".to_string()));
+        assert!(!seen.accesskit_node().value().is_some_and(|value| value.contains("Seen") || value.contains('x')));
+
+        let average_pr: Vec<_> = harness.get_all_by_label("Avg PR: 1800").collect();
+        assert_eq!(average_pr.len(), 2);
+        let friendly_average_wr = harness.get_by_label("Avg WR: 49.3%").rect();
+        let enemy_average_wr = harness.get_by_label("Avg WR: 52.3%").rect();
+        assert!(friendly_average_wr.right() < average_pr[0].rect().left());
+        assert!(enemy_average_wr.right() < average_pr[1].rect().left());
+
+        harness.snapshot("current_match_two_teams");
+    }
+
+    #[test]
+    fn kittest_detailed_rows_show_overall_then_ship_stats() {
+        rust_i18n::set_locale("en");
+        let friendly = vec![visual_row(1, "Bourgogne", Some("PL-WY"), "ORKANIN")];
+        let enemy = vec![visual_row(2, "Libertad", None, "DontThankMe")];
+        let mut friendly_stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(61.7));
+        friendly_stats.account_id = AccountId(1);
+        friendly_stats.battles = Some(9000);
+        friendly_stats.ship_battles = Some(321);
+        let mut enemy_stats = stats(PlayerStatsStatus::Ok, Some(52.3), Some(44.4));
+        enemy_stats.account_id = AccountId(2);
+        enemy_stats.battles = Some(8000);
+        enemy_stats.ship_battles = Some(123);
+        let stats_by_account = HashMap::from([(AccountId(1), friendly_stats), (AccountId(2), enemy_stats)]);
+        let tracked = HashMap::new();
+        let twitch = TwitchState::default();
+        let now = Timestamp::now();
+        let ctx = TeamContext {
+            tracked: &tracked,
+            wows_data: None,
+            twitch_state: &twitch,
+            started_at: now,
+            now,
+            filter_range: None,
+            stats: &stats_by_account,
+            mode: WinRateMode::Overall,
+            view_mode: CurrentMatchViewMode::Detailed,
+            locale: "en",
+        };
+        let mut actions = TeamActions::default();
+        let options = SnapshotOptions::new().output_path("tests/snapshots");
+        let mut harness = Harness::builder().with_size((1180.0, 115.0)).with_options(options).build_ui(|ui| {
+            render_rosters(
+                ui,
+                "Your Team (1)".to_string(),
+                "Enemy Team (1)".to_string(),
+                Color32::GREEN,
+                Color32::RED,
+                &friendly,
+                &enemy,
+                &ctx,
+                &mut actions,
+            );
+        });
+        harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        harness.ctx.set_fonts(fonts);
+
+        harness.run();
+
+        let overall_wr = harness.get_by_label("48.3%").rect();
+        let ship_wr = harness.get_by_label("61.7%").rect();
+        let overall_battles = harness.get_by_label("9,000").rect();
+        let ship_battles = harness.get_by_label("321").rect();
+        let player = harness.get_by_label("ORKANIN").rect();
+        let clan = harness.get_by_label("[PL-WY]").rect();
+        let ship_stats_labels: Vec<_> = harness.get_all_by_label("Ship Stats").collect();
+        assert_eq!(ship_stats_labels.len(), 2);
+        let ship_stats = ship_stats_labels[0].rect();
+        assert!(overall_wr.top() < ship_wr.top());
+        assert!(overall_battles.top() < ship_battles.top());
+        assert!((overall_wr.left() - ship_wr.left()).abs() < 0.1);
+        assert!((overall_battles.left() - ship_battles.left()).abs() < 0.1);
+        assert!((ship_stats.top() - ship_wr.top()).abs() < 0.1, "ship stats {ship_stats:?}, ship WR {ship_wr:?}");
+        assert!(
+            (ship_stats.top() - ship_battles.top()).abs() < 0.1,
+            "ship stats {ship_stats:?}, ship battles {ship_battles:?}"
+        );
+        assert!((ship_stats.left() - clan.left()).abs() < 0.1);
+        assert!(ship_stats.top() - player.bottom() >= 2.0);
+        assert!(ship_wr.top() - overall_wr.bottom() >= 2.0);
+        assert!(ship_battles.top() - overall_battles.bottom() >= 2.0);
+
+        harness.snapshot("current_match_two_teams_detailed_overall");
+    }
+
+    #[test]
+    fn kittest_detailed_ship_scope_changes_banding_without_hiding_overall_stats() {
+        rust_i18n::set_locale("en");
+        let friendly = vec![visual_row(1, "Bourgogne", Some("PL-WY"), "ORKANIN")];
+        let enemy = vec![visual_row(2, "Libertad", None, "DontThankMe")];
+        let mut friendly_stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(61.7));
+        friendly_stats.account_id = AccountId(1);
+        friendly_stats.battles = Some(9000);
+        friendly_stats.ship_battles = Some(321);
+        let mut enemy_stats = stats(PlayerStatsStatus::Ok, Some(52.3), Some(44.4));
+        enemy_stats.account_id = AccountId(2);
+        enemy_stats.battles = Some(8000);
+        enemy_stats.ship_battles = Some(123);
+        let stats_by_account = HashMap::from([(AccountId(1), friendly_stats), (AccountId(2), enemy_stats)]);
+        let tracked = HashMap::new();
+        let twitch = TwitchState::default();
+        let now = Timestamp::now();
+        let ctx = TeamContext {
+            tracked: &tracked,
+            wows_data: None,
+            twitch_state: &twitch,
+            started_at: now,
+            now,
+            filter_range: None,
+            stats: &stats_by_account,
+            mode: WinRateMode::Ship,
+            view_mode: CurrentMatchViewMode::Detailed,
+            locale: "en",
+        };
+        let mut actions = TeamActions::default();
+        let options = SnapshotOptions::new().output_path("tests/snapshots");
+        let mut harness = Harness::builder().with_size((1180.0, 115.0)).with_options(options).build_ui(|ui| {
+            render_rosters(
+                ui,
+                "Your Team (1)".to_string(),
+                "Enemy Team (1)".to_string(),
+                Color32::GREEN,
+                Color32::RED,
+                &friendly,
+                &enemy,
+                &ctx,
+                &mut actions,
+            );
+        });
+        harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        harness.ctx.set_fonts(fonts);
+
+        harness.run();
+
+        let overall_wr = harness.get_by_label("48.3%").rect();
+        let ship_wr = harness.get_by_label("61.7%").rect();
+        assert!(overall_wr.top() < ship_wr.top());
+        harness.snapshot("current_match_two_teams_detailed_ship");
+    }
+
+    #[test]
+    fn kittest_compact_full_rosters_fit_the_representative_viewport() {
+        rust_i18n::set_locale("en");
+        let friendly: Vec<_> = (0..12)
+            .map(|index| visual_row(index + 1, &format!("Ship F{index}"), None, &format!("Friendly{index}")))
+            .collect();
+        let enemy: Vec<_> = (0..12)
+            .map(|index| visual_row(index + 101, &format!("Ship E{index}"), None, &format!("Enemy{index}")))
+            .collect();
+        let stats_by_account = friendly
+            .iter()
+            .chain(&enemy)
+            .map(|row| {
+                let account_id = row.account_id.expect("visual rows have accounts");
+                let mut entry = stats(PlayerStatsStatus::Ok, Some(50.0), Some(51.0));
+                entry.account_id = account_id;
+                (account_id, entry)
+            })
+            .collect();
+        let tracked = HashMap::new();
+        let twitch = TwitchState::default();
+        let now = Timestamp::now();
+        let ctx = TeamContext {
+            tracked: &tracked,
+            wows_data: None,
+            twitch_state: &twitch,
+            started_at: now,
+            now,
+            filter_range: None,
+            stats: &stats_by_account,
+            mode: WinRateMode::Overall,
+            view_mode: CurrentMatchViewMode::Compact,
+            locale: "en",
+        };
+        let mut actions = TeamActions::default();
+        let mut harness = Harness::builder().with_size((1180.0, 420.0)).build_ui(|ui| {
+            render_rosters(
+                ui,
+                "Your Team (12)".to_string(),
+                "Enemy Team (12)".to_string(),
+                Color32::GREEN,
+                Color32::RED,
+                &friendly,
+                &enemy,
+                &ctx,
+                &mut actions,
+            );
+        });
+        harness.ctx.set_style_of(egui::Theme::Dark, crate::ui::theme::style::dark_style());
+        let mut fonts = egui::FontDefinitions::default();
+        egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
+        harness.ctx.set_fonts(fonts);
+
+        harness.run();
+
+        assert!(harness.get_by_label("Friendly11").rect().bottom() <= 420.0);
+        assert!(harness.get_by_label("Enemy11").rect().bottom() <= 420.0);
+    }
+
+    #[test]
+    fn action_menu_visibility_tracks_available_entries() {
+        let mut row = roster_row(None);
+        assert!(!row_has_action_menu(&row));
+
+        row.tracked = Some(AccountId(7));
+        assert!(row_has_action_menu(&row));
+
+        row.tracked = None;
+        row.account_id = Some(AccountId(8));
+        assert!(!row_has_action_menu(&row));
+
+        row.region = Some(Region::Eu);
+        assert!(row_has_action_menu(&row));
+    }
+
+    #[test]
+    fn fixed_columns_keep_their_requested_width() {
+        let style = fixed_column_style(48.0);
+        let width = length(48.0);
+
+        assert_eq!(style.flex_shrink, 0.0);
+        assert_eq!(style.size.width, width);
+        assert_eq!(style.min_size.width, width);
+        assert_eq!(style.max_size.width, width);
+    }
+
+    #[test]
+    fn roster_rows_use_one_fixed_track_grid() {
+        let style = roster_row_style(CurrentMatchViewMode::Compact);
+
+        assert_eq!(style.display, taffy::Display::Grid);
+        assert_eq!(style.grid_template_columns.len(), 8);
+        assert_eq!(style.size.width, percent(1.0));
+    }
+
+    #[test]
+    fn identity_styles_take_the_space_outside_fixed_columns() {
+        let class = class_column_style();
+        let ship = ship_column_style();
+        let player = player_column_style();
+
+        assert_eq!(class.size.width, length(CLASS_COLUMN_WIDTH));
+        assert_eq!(class.min_size.width, length(CLASS_COLUMN_WIDTH));
+        assert_eq!(class.max_size.width, length(CLASS_COLUMN_WIDTH));
+        assert_eq!(ship.size.width, length(SHIP_COLUMN_WIDTH));
+        assert_eq!(ship.min_size.width, length(SHIP_COLUMN_WIDTH));
+        assert_eq!(ship.max_size.width, length(SHIP_COLUMN_WIDTH));
+        assert_eq!(player.flex_grow, 1.0);
+        assert_eq!(player.flex_shrink, 1.0);
+        assert_eq!(player.min_size.width, length(0.0));
+    }
+
+    #[test]
+    fn roster_row_content_claims_the_full_team_width() {
+        let content = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(413.0, 24.0));
+        let row = full_width_row_rect(content, 537.0);
+
+        assert_eq!(row.min, content.min);
+        assert_eq!(row.width(), 537.0);
+        assert_eq!(row.height(), content.height());
+    }
+
+    #[test]
+    fn contiguous_row_layout_removes_egui_item_spacing() {
+        let _harness = Harness::builder().build_ui(|ui| {
+            let rects = contiguous_row_layout(ui, |ui| {
+                ["First", "Second"].map(|label| egui::Frame::new().show(ui, |ui| ui.label(label)).response.rect)
+            });
+
+            assert_eq!(rects[0].max.y, rects[1].min.y);
+        });
+    }
+
+    #[test]
+    fn team_average_win_rate_averages_the_rows_that_have_one() {
+        let mut by_account = HashMap::new();
+        by_account.insert(AccountId(1), stats(PlayerStatsStatus::Ok, Some(40.0), Some(70.0)));
+        by_account.insert(AccountId(2), stats(PlayerStatsStatus::Ok, Some(60.0), Some(50.0)));
+        let rows = vec![roster_row(Some(AccountId(1))), roster_row(Some(AccountId(2)))];
+
+        assert_eq!(team_average_win_rate(&rows, &by_account, WinRateMode::Overall), Some(50.0));
+    }
+
+    /// A player with no stats entry, no resolved account and a player whose
+    /// scope has no rate at all are all skipped rather than counted as zero.
+    #[test]
+    fn team_average_win_rate_skips_rows_with_no_rate() {
+        let mut by_account = HashMap::new();
+        by_account.insert(AccountId(1), stats(PlayerStatsStatus::Ok, Some(40.0), None));
+        let rows = vec![
+            roster_row(Some(AccountId(1))),
+            roster_row(Some(AccountId(99))), // no stats entry at all
+            roster_row(None),                // never resolved to an account
+        ];
+
+        assert_eq!(team_average_win_rate(&rows, &by_account, WinRateMode::Overall), Some(40.0));
+        assert_eq!(
+            team_average_win_rate(&rows, &by_account, WinRateMode::Ship),
+            None,
+            "the only stats entry has no ship rate to average"
+        );
+    }
+
+    #[test]
+    fn team_average_win_rate_is_none_when_nobody_on_the_team_has_a_rate() {
+        let rows = vec![roster_row(None), roster_row(Some(AccountId(5)))];
+
+        assert_eq!(team_average_win_rate(&rows, &HashMap::new(), WinRateMode::Overall), None);
+    }
+
+    #[test]
+    fn team_average_win_rate_follows_the_selected_mode() {
+        let mut by_account = HashMap::new();
+        by_account.insert(AccountId(1), stats(PlayerStatsStatus::Ok, Some(40.0), Some(90.0)));
+        let rows = vec![roster_row(Some(AccountId(1)))];
+
+        assert_eq!(team_average_win_rate(&rows, &by_account, WinRateMode::Overall), Some(40.0));
+        assert_eq!(team_average_win_rate(&rows, &by_account, WinRateMode::Ship), Some(90.0));
+    }
+
+    #[test]
+    fn team_average_personal_rating_averages_only_rows_with_pr() {
+        let mut first = stats(PlayerStatsStatus::Ok, Some(40.0), Some(70.0));
+        first.pr = Some(1200.0);
+        let mut second = stats(PlayerStatsStatus::Ok, Some(60.0), Some(50.0));
+        second.account_id = AccountId(2);
+        second.pr = Some(1800.0);
+        let mut missing = stats(PlayerStatsStatus::Hidden, None, None);
+        missing.account_id = AccountId(3);
+        missing.pr = None;
+        let by_account = HashMap::from([(AccountId(1), first), (AccountId(2), second), (AccountId(3), missing)]);
+        let rows = vec![
+            roster_row(Some(AccountId(1))),
+            roster_row(Some(AccountId(2))),
+            roster_row(Some(AccountId(3))),
+            roster_row(Some(AccountId(99))),
+            roster_row(None),
+        ];
+
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall), Some(1500.0));
+    }
+
+    #[test]
+    fn team_average_personal_rating_is_none_without_resolved_pr() {
+        let rows = vec![roster_row(None), roster_row(Some(AccountId(5)))];
+
+        assert_eq!(team_average_personal_rating(&rows, &HashMap::new(), WinRateMode::Overall), None);
+    }
+
+    #[test]
+    fn team_average_personal_rating_is_mode_invariant() {
+        let mut entry = stats(PlayerStatsStatus::Ok, Some(40.0), Some(90.0));
+        entry.pr = Some(1725.0);
+        let by_account = HashMap::from([(AccountId(1), entry)]);
+        let rows = vec![roster_row(Some(AccountId(1)))];
+
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall), Some(1725.0));
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship), Some(1725.0));
+    }
+
+    #[test]
+    fn compact_rows_show_only_the_selected_scope() {
+        assert_eq!(visible_stat_modes(CurrentMatchViewMode::Compact, WinRateMode::Overall), vec![WinRateMode::Overall]);
+        assert_eq!(visible_stat_modes(CurrentMatchViewMode::Compact, WinRateMode::Ship), vec![WinRateMode::Ship]);
+    }
+
+    #[test]
+    fn detailed_rows_always_show_overall_then_ship() {
+        let expected = vec![WinRateMode::Overall, WinRateMode::Ship];
+        assert_eq!(visible_stat_modes(CurrentMatchViewMode::Detailed, WinRateMode::Overall), expected);
+        assert_eq!(visible_stat_modes(CurrentMatchViewMode::Detailed, WinRateMode::Ship), expected);
+    }
+
+    /// Right at `STACK_TEAMS_BELOW_WIDTH`, the width the side-by-side branch
+    /// is first used with, the two columns must fit exactly: the unclamped
+    /// half already sits inside the min/max range, so nothing here should
+    /// need clamping.
+    #[test]
+    fn team_width_splits_the_narrow_case_evenly_with_no_clamping() {
+        let item_spacing = 8.0;
+        let width = team_width(STACK_TEAMS_BELOW_WIDTH, item_spacing);
+
+        assert_eq!(width, (STACK_TEAMS_BELOW_WIDTH - TEAM_GAP - item_spacing) / 2.0);
+        assert!(
+            2.0 * width + TEAM_GAP + item_spacing <= STACK_TEAMS_BELOW_WIDTH,
+            "columns must not overflow the available width"
+        );
+    }
+
+    /// On a very wide window the unclamped half would stretch far past a
+    /// comfortable row, so the ceiling binds.
+    #[test]
+    fn team_width_is_capped_on_a_wide_window() {
+        assert_eq!(team_width(2000.0, 8.0), TEAM_MAX_WIDTH);
+    }
+
+    /// The floor exists for widths `team_width` is never actually called
+    /// with today (the caller stacks below `STACK_TEAMS_BELOW_WIDTH`), but
+    /// the function must still honour its own contract if called directly.
+    #[test]
+    fn team_width_is_floored_below_its_normal_operating_range() {
+        assert_eq!(team_width(300.0, 8.0), TEAM_MIN_WIDTH);
+    }
+
+    /// Both teams read from the same call, so they can never disagree; this
+    /// pins that down explicitly rather than relying on the caller reusing
+    /// one binding.
+    #[test]
+    fn team_width_gives_both_teams_the_same_value() {
+        let available = 1200.0;
+
+        assert_eq!(team_width(available, 8.0), team_width(available, 8.0));
+    }
+
+    #[test]
+    fn clan_color_from_raw_falls_back_to_the_relation_tint_when_the_scan_carried_none() {
+        assert_eq!(clan_color_from_raw(0, PlayerTint::Ally), ClanColor::Relation(PlayerTint::Ally));
+    }
+
+    #[test]
+    fn clan_color_from_raw_decodes_a_nonzero_server_colour() {
+        let color = clan_color_from_raw(0x00_ff_80, PlayerTint::Enemy);
+
+        assert_eq!(color, ClanColor::Fixed(Color32::from_rgb(0x00, 0xff, 0x80)));
     }
 }

@@ -53,6 +53,13 @@ pub(crate) struct LiveRosterRow {
     /// until a scan lands, or if the scan never named this player.
     pub account_id: Option<AccountId>,
     pub region: Option<Region>,
+    /// Clan tag joined from the identity scan. `tempArenaInfo` carries no clan
+    /// info at all, so this is `None` until the scan lands, same as
+    /// `account_id`, and stays `None` for a player with no clan.
+    pub clan: Option<String>,
+    /// Raw server clan colour, `0` when the scan carried none (or hasn't
+    /// landed). Resolved against the row's relation tint at render time.
+    pub clan_color: i64,
 }
 
 impl LiveMatch {
@@ -80,6 +87,12 @@ pub(crate) struct LiveIdentity {
     /// `None` where the replay's realm is one the stats service does not
     /// cover, which is distinct from a realm that was never recorded.
     pub region: Option<Region>,
+    /// `None` for a player with no clan. `tempArenaInfo` carries no clan
+    /// field at all, so this only ever comes from the packet scan.
+    pub clan: Option<String>,
+    /// Raw server clan colour, `0` when the player has no clan or the replay
+    /// predates clan colours.
+    pub clan_color: i64,
 }
 
 /// Every identity one `onArenaStateReceived` packet carried, keyed by
@@ -97,7 +110,10 @@ impl LiveIdentities {
             .filter(|player| !player.is_bot())
             .map(|player| {
                 let region = player.realm().and_then(Region::from_realm);
-                (player.username().to_ascii_lowercase(), LiveIdentity { account_id: player.db_id(), region })
+                let clan = (!player.clan().is_empty()).then(|| player.clan().to_string());
+                let identity =
+                    LiveIdentity { account_id: player.db_id(), region, clan, clan_color: player.clan_color() };
+                (player.username().to_ascii_lowercase(), identity)
             })
             .collect();
 
@@ -195,6 +211,8 @@ pub(crate) fn resolve_roster(
             tracked: name_index.get(&player.name.to_ascii_lowercase()).copied(),
             account_id: identity.map(|identity| identity.account_id),
             region: identity.and_then(|identity| identity.region),
+            clan: identity.and_then(|identity| identity.clan.clone()),
+            clan_color: identity.map_or(0, |identity| identity.clan_color),
             name: player.name.clone(),
         };
 
@@ -261,6 +279,8 @@ mod tests {
             tracked: None,
             account_id: None,
             region: None,
+            clan: None,
+            clan_color: 0,
         }
     }
 
@@ -403,12 +423,71 @@ mod tests {
         assert_eq!(resolved.tracked_count, 1);
     }
 
+    /// A minimal `PlayerStateData` fixture. Its fields are crate-private to the
+    /// parser, so it is built the same way `player_tracker::tests` does: through
+    /// `Deserialize`, with every key `PlayerStateData` requires present.
+    fn player_state(username: &str, db_id: i64, clan: &str, clan_color: i64, is_bot: bool) -> PlayerStateData {
+        serde_json::from_value(serde_json::json!({
+            "username": username,
+            "clan": clan,
+            "clan_id": if clan.is_empty() { 0 } else { 7 },
+            "clan_color": clan_color,
+            "db_id": db_id,
+            "realm": "na",
+            "player_id": 0,
+            "entity_id": 0,
+            "team_id": 0,
+            "max_health": 40_000,
+            "is_abuser": false,
+            "is_hidden": false,
+            "is_bot": is_bot,
+            "human_properties": {
+                "avatar_id": 0,
+                "prebattle_id": 0,
+                "is_client_loaded": true,
+                "is_connected": true,
+            },
+        }))
+        .expect("the fixture matches PlayerStateData's shape")
+    }
+
+    #[test]
+    fn from_player_states_carries_the_clan_tag_and_colour() {
+        let identities =
+            LiveIdentities::from_player_states(&[player_state("Harvey635", 42, "RAIN", 0x00_ff_00, false)]);
+
+        let identity = identities.by_name.get("harvey635").expect("the player is indexed by lower-cased name");
+        assert_eq!(identity.account_id, AccountId(42));
+        assert_eq!(identity.clan, Some("RAIN".to_string()));
+        assert_eq!(identity.clan_color, 0x00_ff_00);
+    }
+
+    #[test]
+    fn from_player_states_leaves_a_clanless_player_with_no_tag() {
+        let identities = LiveIdentities::from_player_states(&[player_state("Stranger", 43, "", 0, false)]);
+
+        let identity = identities.by_name.get("stranger").expect("the player is indexed");
+        assert_eq!(identity.clan, None);
+    }
+
+    #[test]
+    fn from_player_states_skips_bots() {
+        let identities = LiveIdentities::from_player_states(&[player_state("Bot", 0, "", 0, true)]);
+
+        assert!(identities.by_name.is_empty());
+    }
+
     #[test]
     fn identities_key_on_a_lower_cased_name() {
         let identities = LiveIdentities {
             by_name: HashMap::from([(
                 "harvey635".to_string(),
-                LiveIdentity { account_id: AccountId(42), region: Some(Region::Na) },
+                LiveIdentity {
+                    account_id: AccountId(42),
+                    region: Some(Region::Na),
+                    clan: Some("RAIN".to_string()),
+                    clan_color: 0x00_ff_00,
+                },
             )]),
         };
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
@@ -419,6 +498,8 @@ mod tests {
 
         assert_eq!(resolved.enemy[0].account_id, Some(AccountId(42)));
         assert_eq!(resolved.enemy[0].region, Some(Region::Na));
+        assert_eq!(resolved.enemy[0].clan, Some("RAIN".to_string()));
+        assert_eq!(resolved.enemy[0].clan_color, 0x00_ff_00);
         assert_eq!(resolved.identity_count, 1);
     }
 
@@ -432,6 +513,7 @@ mod tests {
 
         assert_eq!(resolved.enemy[0].account_id, None);
         assert_eq!(resolved.enemy[0].region, None);
+        assert_eq!(resolved.enemy[0].clan, None, "a roster without identities carries no clan tags either");
         assert_eq!(resolved.identity_count, 0);
     }
 
@@ -440,7 +522,7 @@ mod tests {
         let identities = LiveIdentities {
             by_name: HashMap::from([(
                 "someone_else".to_string(),
-                LiveIdentity { account_id: AccountId(42), region: Some(Region::Eu) },
+                LiveIdentity { account_id: AccountId(42), region: Some(Region::Eu), clan: None, clan_color: 0 },
             )]),
         };
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));

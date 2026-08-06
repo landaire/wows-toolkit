@@ -58,6 +58,13 @@ pub enum WinRateMode {
     Ship,
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum CurrentMatchViewMode {
+    Compact,
+    #[default]
+    Detailed,
+}
+
 /// How far the current match's stats have got.
 #[derive(Debug, Clone, Default)]
 pub(crate) enum MatchStatsState {
@@ -144,6 +151,8 @@ pub struct PlayerTracker {
 
     #[serde(default)]
     pub win_rate_mode: WinRateMode,
+    #[serde(default)]
+    pub current_match_view_mode: CurrentMatchViewMode,
     /// Identities recovered from `onArenaStateReceived`, joined onto the roster
     /// by name. `tempArenaInfo` carries neither account id nor realm.
     #[serde(skip)]
@@ -801,5 +810,33 @@ mod tests {
             1,
             "and the key that was not written hides nothing, rather than failing the load"
         );
+    }
+
+    #[test]
+    fn current_match_view_mode_defaults_to_detailed() {
+        assert_eq!(CurrentMatchViewMode::default(), CurrentMatchViewMode::Detailed);
+        assert_eq!(PlayerTracker::default().current_match_view_mode, CurrentMatchViewMode::Detailed);
+    }
+
+    #[test]
+    fn current_match_view_mode_round_trips_both_variants() {
+        for mode in [CurrentMatchViewMode::Compact, CurrentMatchViewMode::Detailed] {
+            let encoded = serde_json::to_string(&mode).expect("view mode serializes");
+            assert_eq!(serde_json::from_str::<CurrentMatchViewMode>(&encoded).expect("view mode deserializes"), mode);
+        }
+    }
+
+    #[test]
+    fn legacy_player_tracker_without_view_mode_loads_as_detailed() {
+        let saved = r#"{
+            "tracked_players": {},
+            "filter_time_period": "LastWeek",
+            "sort_order": { "TimesEncountered": "Desc" },
+            "player_filter": ""
+        }"#;
+
+        let tracker: PlayerTracker = serde_json::from_str(saved).expect("legacy tracker loads");
+
+        assert_eq!(tracker.current_match_view_mode, CurrentMatchViewMode::Detailed);
     }
 }

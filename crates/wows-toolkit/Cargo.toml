@@ -111,6 +111,7 @@ walkdir = { workspace = true }
 mimalloc = { version = "0.1.52", optional = true }
 
 [dev-dependencies]
+egui_kittest = { version = "0.35.0", features = ["snapshot", "wgpu"] }
 insta = { workspace = true }
 # `test-support` for `ZoneGuard`: the query bar's tests assert on text the
 # config crate's timestamp printer produces, which reads the local zone.

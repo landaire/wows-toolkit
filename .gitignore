@@ -31,3 +31,6 @@ profile.json.gz
 # Files the finalize-update cli tests create in the crate's cwd; a Drop guard
 # removes them normally, this is the backstop if a test run is interrupted.
 *.exe.old
+**/tests/snapshots/**/*.diff.png
+**/tests/snapshots/**/*.new.png
+**/tests/snapshots/**/*.old.png
