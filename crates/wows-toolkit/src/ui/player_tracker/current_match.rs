@@ -54,7 +54,6 @@ impl ToolkitTabViewer<'_> {
         // Collected during the table pass and applied after, because the
         // player-tracker lock is held while rendering rows.
         let mut actions = TeamActions::default();
-        let refresh_build;
 
         {
             let mut player_tracker = self.tab_state.player_tracker.write();
@@ -62,7 +61,6 @@ impl ToolkitTabViewer<'_> {
             let now = Timestamp::now();
 
             let build = player_tracker.live_match.as_ref().and_then(|live| live.build);
-            refresh_build = build;
             let wows_data = build.zip(self.tab_state.wows_data_map.as_ref()).and_then(|(build, map)| map.get(build));
             let wows_data_guard = wows_data.as_ref().map(|data| data.read());
             // SharedWoWsData is Arc<RwLock<Box<WorldOfWarshipsData>>>, so the
@@ -109,15 +107,6 @@ impl ToolkitTabViewer<'_> {
                                 .color(ui.sem().warn),
                         );
                     }
-                }
-
-                let busy = matches!(match_stats, MatchStatsState::Resolving | MatchStatsState::Fetching);
-                if ui
-                    .add_enabled(!busy, egui::Button::new(icons::ARROWS_CLOCKWISE))
-                    .on_hover_text(t!("ui.player_tracker.stats_refresh"))
-                    .clicked()
-                {
-                    actions.refresh_stats = true;
                 }
             });
 
@@ -175,17 +164,6 @@ impl ToolkitTabViewer<'_> {
         }
         if let Some(mode) = actions.set_win_rate_mode {
             self.tab_state.player_tracker.write().win_rate_mode = mode;
-        }
-        if actions.refresh_stats
-            && let Some(replay) = self.tab_state.live_workspace.root.as_ref().map(|dir| dir.join("temp.wowsreplay"))
-        {
-            let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
-                tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted {
-                    replay,
-                    build: refresh_build,
-                    flush: FlushState::InProgress,
-                })
-            });
         }
     }
 
@@ -251,12 +229,14 @@ impl ToolkitTabViewer<'_> {
             return;
         };
         let build = Version::try_from_client_exe(&meta.clientVersionFromExe).and_then(|v| v.build_number());
+        let started_at = crate::util::replay_timestamp(&meta);
         self.tab_state.player_tracker.write().update_from_live_arena_info(&meta);
         let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
             tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted {
                 replay: path,
                 build,
                 flush: FlushState::Complete,
+                started_at,
             })
         });
     }
@@ -290,7 +270,6 @@ struct TeamActions {
     find_matches_target: Option<AccountId>,
     copy_login: Option<String>,
     set_win_rate_mode: Option<WinRateMode>,
-    refresh_stats: bool,
 }
 
 /// What one row shows, once the mode has chosen between the account and ship
@@ -564,6 +543,17 @@ mod tests {
             ship_battles: Some(120),
             pr: Some(1800.0),
         }
+    }
+
+    /// The per-status hover key a row with no visible rate shows: `Hidden` gets
+    /// its own reason, `Unavailable` and `Unknown` share the generic no-data
+    /// reason, and `Ok` (an unplayed ship) gets the unplayed-ship reason.
+    #[test]
+    fn no_rate_hover_key_picks_the_status_specific_reason() {
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Hidden), "ui.player_tracker.stats_hidden");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Unavailable), "ui.player_tracker.stats_no_data");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Unknown), "ui.player_tracker.stats_no_data");
+        assert_eq!(no_rate_hover_key(PlayerStatsStatus::Ok), "ui.player_tracker.stats_unplayed_ship");
     }
 
     #[test]

@@ -1189,6 +1189,7 @@ impl TabState {
 
                             let build = Version::try_from_client_exe(&replay_file.meta.clientVersionFromExe)
                                 .and_then(|v| v.build_number());
+                            let started_at = crate::util::replay_timestamp(&replay_file.meta);
                             // tempArenaInfo.json and temp.wowsreplay are written as
                             // siblings by the game, so the roster lives next to it.
                             if let Some(replay) = path.parent().map(|dir| dir.join("temp.wowsreplay")) {
@@ -1197,6 +1198,7 @@ impl TabState {
                                         replay,
                                         build,
                                         flush: FlushState::InProgress,
+                                        started_at,
                                     })
                                 });
                             }

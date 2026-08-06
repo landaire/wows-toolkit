@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use jiff::Timestamp;
 use parking_lot::RwLock;
 use rust_i18n::t;
 use tracing::debug;
@@ -73,19 +74,32 @@ const RETRY_BUDGET: Duration = Duration::from_secs(90);
 ///
 /// Every failure lands on the tracker as a `MatchStatsState`; none of them
 /// toast, because a match starting is not a moment to interrupt.
+///
+/// `started_at` is the match this scan was queued for. Every write to the
+/// tracker goes through a setter keyed on it, so a scan that outlives its
+/// match (the player left to port and queued into a new one while this scan
+/// was retrying or waiting on the HTTP call) is refused rather than landing
+/// its stale identities and stats on the new match's roster.
 pub(crate) fn resolve_and_fetch(
     replay: &Path,
     build: Option<u32>,
     flush: FlushState,
+    started_at: Timestamp,
     wows_data_map: &WoWsDataMap,
     tracker: &Arc<RwLock<PlayerTracker>>,
     client: &mut MatchStatsClient,
 ) {
-    tracker.write().set_match_stats(MatchStatsState::Resolving);
+    if !tracker.write().set_match_stats_for(started_at, MatchStatsState::Resolving) {
+        debug!("live roster scan: abandoned before it started, the match already changed");
+        return;
+    }
 
     // No build means no entity specs, and no later attempt can produce one.
     let Some(build) = build else {
-        tracker.write().set_match_stats(MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()));
+        tracker.write().set_match_stats_for(
+            started_at,
+            MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()),
+        );
         return;
     };
 
@@ -101,14 +115,23 @@ pub(crate) fn resolve_and_fetch(
     };
 
     let Some(state) = state else {
-        tracker.write().set_match_stats(MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()));
+        tracker.write().set_match_stats_for(
+            started_at,
+            MatchStatsState::Failed(t!("ui.player_tracker.roster_unavailable").into()),
+        );
         return;
     };
 
     // Written before the fetch so the links and the identity join light up
     // even when the fetch then fails.
-    tracker.write().set_live_identities(LiveIdentities::from_player_states(&state.players));
-    tracker.write().set_match_stats(MatchStatsState::Fetching);
+    if !tracker.write().set_live_identities_for(started_at, LiveIdentities::from_player_states(&state.players)) {
+        debug!("live roster scan: identities dropped, the match already changed");
+        return;
+    }
+    if !tracker.write().set_match_stats_for(started_at, MatchStatsState::Fetching) {
+        debug!("live roster scan: abandoned before the fetch, the match already changed");
+        return;
+    }
 
     let outcome = build_request(state.arena_id, &state.players).and_then(|request| client.fetch(&request));
     let next = match outcome {
@@ -116,9 +139,31 @@ pub(crate) fn resolve_and_fetch(
             let by_account = response.players.into_iter().map(|player| (player.account_id, player)).collect();
             MatchStatsState::Ready(by_account)
         }
-        Err(error) => MatchStatsState::Failed(error.to_string()),
+        Err(error) => MatchStatsState::Failed(failure_reason(error)),
     };
-    tracker.write().set_match_stats(next);
+    if !tracker.write().set_match_stats_for(started_at, next) {
+        debug!("live roster scan: result dropped, the match already changed");
+    }
+}
+
+/// The text a `MatchStatsError` shows on the Current Match status line.
+/// `RateLimited` and `RecentlyFailed` both mean "the service refused this
+/// without answering the roster", so both get the translated rate-limit
+/// message rather than their raw English `Display` text.
+fn failure_reason(error: MatchStatsError) -> String {
+    match error {
+        MatchStatsError::RateLimited { retry_after } | MatchStatsError::RecentlyFailed { retry_after } => {
+            t!("ui.player_tracker.stats_rate_limited", wait = format_wait_minutes(retry_after)).into()
+        }
+        other => other.to_string(),
+    }
+}
+
+/// `retry_after` rounded up to whole minutes, never zero: a sub-minute wait
+/// is still worth telling the user to wait a minute for.
+fn format_wait_minutes(retry_after: Duration) -> String {
+    let minutes = retry_after.as_secs().div_ceil(60).max(1);
+    if minutes == 1 { "1 minute".to_string() } else { format!("{minutes} minutes") }
 }
 
 /// One attempt at reading the roster. `None` means "not yet": the file is
@@ -249,5 +294,33 @@ mod tests {
         let error = build_request(ArenaId::from(1i64), &players).expect_err("bots are not lookups");
 
         assert!(matches!(error, MatchStatsError::NoEligiblePlayers));
+    }
+
+    /// A wait under a minute still reads as "1 minute": rounding down to zero
+    /// would tell the user the retry is available immediately when it is not.
+    #[test]
+    fn format_wait_minutes_rounds_up_and_never_reports_zero() {
+        assert_eq!(format_wait_minutes(Duration::from_secs(1)), "1 minute");
+        assert_eq!(format_wait_minutes(Duration::from_secs(60)), "1 minute");
+        assert_eq!(format_wait_minutes(Duration::from_secs(61)), "2 minutes");
+        assert_eq!(format_wait_minutes(Duration::from_secs(0)), "1 minute");
+    }
+
+    /// `RateLimited` and `RecentlyFailed` both reach the UI as the translated
+    /// rate-limit message rather than their raw English `Display` text.
+    #[test]
+    fn rate_limited_and_recently_failed_get_the_translated_reason() {
+        let rate_limited = failure_reason(MatchStatsError::RateLimited { retry_after: Duration::from_secs(90) });
+        assert!(rate_limited.contains("2 minutes"), "got: {rate_limited}");
+
+        let recently_failed = failure_reason(MatchStatsError::RecentlyFailed { retry_after: Duration::from_secs(30) });
+        assert!(recently_failed.contains("1 minute"), "got: {recently_failed}");
+    }
+
+    /// Every other variant still falls through to its own `Display` text.
+    #[test]
+    fn other_errors_keep_their_own_text() {
+        let reason = failure_reason(MatchStatsError::Http { status: 500 });
+        assert_eq!(reason, MatchStatsError::Http { status: 500 }.to_string());
     }
 }

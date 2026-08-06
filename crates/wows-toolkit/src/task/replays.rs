@@ -975,6 +975,10 @@ pub enum ReplayBackgroundParserThreadMessage {
         replay: PathBuf,
         build: Option<u32>,
         flush: crate::task::live_match_stats::FlushState,
+        /// The match's key, matching `LiveMatch::started_at`. A scan queued
+        /// behind a newer match's start still finishes; this lets its result
+        /// be refused instead of landing on the wrong roster.
+        started_at: jiff::Timestamp,
     },
 }
 
@@ -1205,15 +1209,31 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                 ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state) => {
                     data.is_debug = new_debug_state;
                 }
-                ReplayBackgroundParserThreadMessage::LiveMatchStarted { replay, build, flush } => {
-                    crate::task::live_match_stats::resolve_and_fetch(
-                        &replay,
-                        build,
-                        flush,
-                        &data.wows_data_map,
-                        &data.player_tracker,
-                        &mut match_stats_client,
-                    );
+                ReplayBackgroundParserThreadMessage::LiveMatchStarted { replay, build, flush, started_at } => {
+                    // A truncated, still-being-written packet stream is the likeliest
+                    // panic source on this thread; a panic here must not take
+                    // post-battle indexing and uploads down with it for the session.
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        crate::task::live_match_stats::resolve_and_fetch(
+                            &replay,
+                            build,
+                            flush,
+                            started_at,
+                            &data.wows_data_map,
+                            &data.player_tracker,
+                            &mut match_stats_client,
+                        );
+                    }));
+                    if let Err(payload) = outcome {
+                        let panic_msg = crate::util::thread::panic_payload_to_string(&payload);
+                        error!("live match stats scan panicked: {panic_msg}");
+                        data.player_tracker.write().set_match_stats_for(
+                            started_at,
+                            crate::ui::player_tracker::MatchStatsState::Failed(
+                                rust_i18n::t!("ui.player_tracker.roster_unavailable").into(),
+                            ),
+                        );
+                    }
                 }
             }
         }

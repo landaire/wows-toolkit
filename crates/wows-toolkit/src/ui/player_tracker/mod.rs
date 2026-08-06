@@ -192,13 +192,27 @@ impl PlayerTracker {
         self.resolved_roster.as_ref()
     }
 
-    pub(crate) fn set_live_identities(&mut self, identities: LiveIdentities) {
+    /// Applies `identities` if `started_at` still names the current match,
+    /// otherwise leaves the tracker untouched and returns `false`: a scan can
+    /// outlive the match it started for.
+    pub(crate) fn set_live_identities_for(&mut self, started_at: Timestamp, identities: LiveIdentities) -> bool {
+        if self.live_match.as_ref().map(|live| live.started_at) != Some(started_at) {
+            return false;
+        }
         self.live_identities = Some(identities);
         self.resolved_roster = None;
+        true
     }
 
-    pub(crate) fn set_match_stats(&mut self, state: MatchStatsState) {
+    /// Applies `state` if `started_at` still names the current match,
+    /// otherwise leaves the tracker untouched and returns `false`: a scan can
+    /// outlive the match it started for.
+    pub(crate) fn set_match_stats_for(&mut self, started_at: Timestamp, state: MatchStatsState) -> bool {
+        if self.live_match.as_ref().map(|live| live.started_at) != Some(started_at) {
+            return false;
+        }
         self.match_stats = state;
+        true
     }
 
     /// Record that the tracked encounter set changed, so aggregates cached over
@@ -443,6 +457,59 @@ impl ToolkitTabViewer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn live_match_at(started_at: Timestamp) -> LiveMatch {
+        LiveMatch { started_at, build: None, players: Vec::new() }
+    }
+
+    fn identities() -> LiveIdentities {
+        LiveIdentities { by_name: HashMap::new() }
+    }
+
+    /// A write keyed to the current match's `started_at` is applied.
+    #[test]
+    fn a_write_keyed_to_the_current_match_is_applied() {
+        let current = Timestamp::from_second(2000).unwrap();
+        let mut tracker = PlayerTracker { live_match: Some(live_match_at(current)), ..Default::default() };
+
+        assert!(tracker.set_match_stats_for(current, MatchStatsState::Fetching));
+        assert!(matches!(tracker.match_stats, MatchStatsState::Fetching));
+
+        assert!(tracker.set_live_identities_for(current, identities()));
+        assert!(tracker.live_identities.is_some());
+    }
+
+    /// A write keyed to a match that is no longer the current one is refused and
+    /// leaves the existing state untouched: this is the guard against a scan
+    /// that outlives the match it started for landing on a newer match's roster.
+    #[test]
+    fn a_write_keyed_to_a_stale_match_is_refused_and_changes_nothing() {
+        let current = Timestamp::from_second(2000).unwrap();
+        let stale = Timestamp::from_second(1000).unwrap();
+        let mut tracker = PlayerTracker { live_match: Some(live_match_at(current)), ..Default::default() };
+        tracker.match_stats = MatchStatsState::Fetching;
+
+        assert!(!tracker.set_match_stats_for(stale, MatchStatsState::Ready(HashMap::new())));
+        assert!(
+            matches!(tracker.match_stats, MatchStatsState::Fetching),
+            "the stale write must not touch existing state"
+        );
+
+        assert!(!tracker.set_live_identities_for(stale, identities()));
+        assert!(tracker.live_identities.is_none(), "the stale write must not touch existing state");
+    }
+
+    /// A write that arrives after the match itself was cleared (the tracker
+    /// holds no live match at all) is refused the same way a write for a
+    /// different match is.
+    #[test]
+    fn a_write_with_no_live_match_at_all_is_refused() {
+        let mut tracker = PlayerTracker::default();
+        let started_at = Timestamp::from_second(2000).unwrap();
+
+        assert!(!tracker.set_match_stats_for(started_at, MatchStatsState::Fetching));
+        assert!(matches!(tracker.match_stats, MatchStatsState::Idle));
+    }
 
     /// The roster entry `ingest_roster` reads through its `state_of` accessor.
     /// `BattleReport` cannot be built outside the parser, but the ingest core is
