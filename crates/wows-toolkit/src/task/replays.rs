@@ -661,7 +661,7 @@ pub fn load_wows_data_from_dump(
 
 fn parse_replay_data_in_background(
     path: &Path,
-    client: &reqwest::blocking::Client,
+    shipbuilds_client: &crate::data::shipbuilds::ShipBuildsClient,
     replay_parsed_before: bool,
     data: &BackgroundParserThread,
 ) -> ParseOutcome {
@@ -785,7 +785,7 @@ fn parse_replay_data_in_background(
                                                 game_type.to_string(),
                                                 &metadata_provider,
                                             ) {
-                                                let res = client.post(url).json(&payload).send();
+                                                let res = shipbuilds_client.http().post(url).json(&payload).send();
                                                 if let Err(e) = res {
                                                     error!("error sending request: {:?}", e);
                                                     if e.is_connect() {
@@ -807,7 +807,8 @@ fn parse_replay_data_in_background(
 
                                         match std::fs::read(path) {
                                             Ok(bytes) => {
-                                                let res = client
+                                                let res = shipbuilds_client
+                                                    .http()
                                                     .post(url)
                                                     .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
                                                     .body(bytes)
@@ -861,6 +862,7 @@ fn parse_replay_data_in_background(
                         let (dummy_sender, _) = mpsc::channel();
                         let deps = crate::data::wows_data::ReplayDependencies {
                             wows_data_map: data.wows_data_map.clone(),
+                            shipbuilds_client: data.shipbuilds_client.clone(),
                             twitch_state: Arc::clone(&data.twitch_state),
                             replay_sort: Arc::new(Mutex::new(SortOrder::default())),
                             background_task_sender: dummy_sender,
@@ -986,6 +988,7 @@ pub struct BackgroundParserThread {
     pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
     pub wows_data_map: crate::data::wows_data::WoWsDataMap,
+    pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub data_sharing_mode: DataSharingMode,
     pub data_export_settings: DataExportSettings,
@@ -1007,9 +1010,8 @@ pub struct BackgroundParserThread {
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
     debug!("starting background parsing thread");
     let _join_handle = crate::util::thread::spawn_logged("background-replay-parser", move || {
-        let client = crate::util::http::blocking_client().expect("failed to build HTTP client");
         // Built once so its arena cache and rate limiter survive across matches.
-        let mut match_stats_client = crate::data::match_stats::MatchStatsClient::new(client.clone());
+        let mut match_stats_client = crate::data::match_stats::MatchStatsClient::new(data.shipbuilds_client.clone());
 
         #[cfg(not(feature = "shipbuilds_debugging"))]
         {
@@ -1089,7 +1091,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                             indexed,
                             sent,
                             std::panic::AssertUnwindSafe(|| {
-                                parse_replay_data_in_background(&path, &client, sent, &data)
+                                parse_replay_data_in_background(&path, &data.shipbuilds_client, sent, &data)
                             }),
                         );
 
@@ -1150,7 +1152,12 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                             false,
                             already_parsed_replay,
                             std::panic::AssertUnwindSafe(|| {
-                                parse_replay_data_in_background(&path, &client, already_parsed_replay, &data)
+                                parse_replay_data_in_background(
+                                    &path,
+                                    &data.shipbuilds_client,
+                                    already_parsed_replay,
+                                    &data,
+                                )
                             }),
                         );
                         match outcome {
@@ -1188,7 +1195,12 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                             false,
                             already_parsed_replay,
                             std::panic::AssertUnwindSafe(|| {
-                                parse_replay_data_in_background(&path, &client, already_parsed_replay, &data)
+                                parse_replay_data_in_background(
+                                    &path,
+                                    &data.shipbuilds_client,
+                                    already_parsed_replay,
+                                    &data,
+                                )
                             }),
                         );
                         if let crate::data::replay_reconcile::FileOutcome::HardFailure = outcome
@@ -1305,6 +1317,7 @@ pub fn start_populating_player_inspector(
 fn index_one_replay(
     path: &Path,
     wows_data_map: &crate::data::wows_data::WoWsDataMap,
+    shipbuilds_client: &crate::data::shipbuilds::ShipBuildsClient,
     twitch_state: &Arc<RwLock<TwitchState>>,
     db_pool: &sqlx::SqlitePool,
     tokio_runtime: &tokio::runtime::Runtime,
@@ -1365,6 +1378,7 @@ fn index_one_replay(
     let (dummy_sender, _) = mpsc::channel();
     let deps = crate::data::wows_data::ReplayDependencies {
         wows_data_map: wows_data_map.clone(),
+        shipbuilds_client: shipbuilds_client.clone(),
         twitch_state: Arc::clone(twitch_state),
         replay_sort: Arc::new(Mutex::new(SortOrder::default())),
         background_task_sender: dummy_sender,
@@ -1402,6 +1416,7 @@ fn index_one_replay(
 /// re-parsed.
 pub fn start_reconcile_index(
     wows_data_map: crate::data::wows_data::WoWsDataMap,
+    shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
@@ -1414,6 +1429,7 @@ pub fn start_reconcile_index(
     crate::util::thread::spawn_logged("reconcile-index", move || {
         let _ = tx.send(run_reconcile_index(
             wows_data_map,
+            shipbuilds_client,
             twitch_state,
             db_pool,
             tokio_runtime,
@@ -1431,6 +1447,7 @@ pub fn start_reconcile_index(
 
 fn run_reconcile_index(
     wows_data_map: crate::data::wows_data::WoWsDataMap,
+    shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
@@ -1478,6 +1495,7 @@ fn run_reconcile_index(
                 index_one_replay(
                     &path,
                     &wows_data_map,
+                    &shipbuilds_client,
                     &twitch_state,
                     &db_pool,
                     &tokio_runtime,

@@ -4237,6 +4237,7 @@ impl WowsToolkitApp {
                         self.tab_state.background_tasks,
                         Some(crate::task::start_reconcile_index(
                             wows_data_map,
+                            self.tab_state.shipbuilds_client.clone(),
                             Arc::clone(&self.tab_state.twitch_state),
                             pool,
                             rt,

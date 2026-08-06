@@ -460,6 +460,7 @@ pub struct TabState {
     pub player_tracker: Arc<RwLock<crate::ui::player_tracker::PlayerTracker>>,
     pub sent_replays: Arc<RwLock<std::collections::HashSet<String>>>,
     pub replay_sort: Arc<Mutex<SortOrder>>,
+    pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
 
     // ─── Transient / runtime-only state ──────────────────────────────────
     pub world_of_warships_data: Option<SharedWoWsData>,
@@ -641,6 +642,8 @@ impl Default for TabState {
             player_tracker: Default::default(),
             sent_replays: Default::default(),
             replay_sort: Arc::new(Mutex::new(SortOrder::default())),
+            shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient::new()
+                .expect("failed to build ShipBuilds HTTP client"),
             world_of_warships_data: None,
             items_to_extract: Default::default(),
             translations: Default::default(),
@@ -988,6 +991,7 @@ impl TabState {
         let wows_data_map = self.wows_data_map.as_ref()?;
         Some(ReplayDependencies {
             wows_data_map: wows_data_map.clone(),
+            shipbuilds_client: self.shipbuilds_client.clone(),
             twitch_state: Arc::clone(&self.twitch_state),
             replay_sort: Arc::clone(&self.replay_sort),
             background_task_sender: self.background_task_sender.clone(),
@@ -1395,6 +1399,7 @@ impl TabState {
                 rx: background_rx,
                 sent_replays: Arc::clone(&self.sent_replays),
                 wows_data_map,
+                shipbuilds_client: self.shipbuilds_client.clone(),
                 twitch_state: Arc::clone(&self.twitch_state),
                 data_sharing_mode: p.settings.integrations.data_sharing_mode,
                 data_export_settings: DataExportSettings {

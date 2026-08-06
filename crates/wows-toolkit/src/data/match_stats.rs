@@ -193,7 +193,7 @@ impl RateLimiter {
 /// Fetches match stats, at most once per arena and within the service's
 /// budget.
 pub struct MatchStatsClient {
-    http: reqwest::blocking::Client,
+    http: crate::data::shipbuilds::ShipBuildsClient,
     limiter: RateLimiter,
     cache: HashMap<ArenaId, MatchStatsResponse>,
     /// Arenas that recently got a server-answered failure, and when. Consulted
@@ -203,7 +203,7 @@ pub struct MatchStatsClient {
 }
 
 impl MatchStatsClient {
-    pub fn new(http: reqwest::blocking::Client) -> Self {
+    pub fn new(http: crate::data::shipbuilds::ShipBuildsClient) -> Self {
         Self { http, limiter: RateLimiter::new(), cache: HashMap::new(), failed: HashMap::new() }
     }
 
@@ -250,6 +250,7 @@ impl MatchStatsClient {
         self.limiter.record(now);
         let response = self
             .http
+            .http()
             .post(ENDPOINT)
             .header("X-API-Key", API_KEY)
             .header(reqwest::header::CONTENT_TYPE, CONTENT_TYPE)
@@ -482,7 +483,7 @@ mod tests {
     }
 
     fn test_client() -> MatchStatsClient {
-        MatchStatsClient::new(reqwest::blocking::Client::new())
+        MatchStatsClient::new(crate::data::shipbuilds::ShipBuildsClient::new().expect("test HTTP client"))
     }
 
     #[test]

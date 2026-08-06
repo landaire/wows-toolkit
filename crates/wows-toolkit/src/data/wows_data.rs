@@ -1055,6 +1055,7 @@ impl WorldOfWarshipsData {
 #[derive(Clone)]
 pub struct ReplayDependencies {
     pub wows_data_map: WoWsDataMap,
+    pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     pub twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     pub replay_sort: Arc<Mutex<SortOrder>>,
     pub background_task_sender: mpsc::Sender<BackgroundTask>,
@@ -1178,8 +1179,8 @@ impl ReplayLoader {
                         let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
                         // Send the replay builds to the remote server
                         for player in report.players() {
-                            let client = reqwest::blocking::Client::new();
-                            client
+                            deps.shipbuilds_client
+                                .http()
                                 .post("http://shipbuilds.com/api/ship_builds")
                                 .json(&crate::util::build_tracker::BuildTrackerPayload::build_from(
                                     player,

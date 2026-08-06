@@ -117,6 +117,8 @@ fn headless_deps(wows_data_map: WoWsDataMap) -> ReplayDependencies {
     std::mem::forget(rx);
     ReplayDependencies {
         wows_data_map,
+        shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient::new()
+            .expect("failed to build ShipBuilds HTTP client"),
         twitch_state: Arc::new(RwLock::new(Default::default())),
         replay_sort: Arc::new(Mutex::new(SortOrder::default())),
         background_task_sender: tx,
