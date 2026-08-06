@@ -4,7 +4,6 @@ use jiff::Timestamp;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::types::AccountId;
-use wows_replays::types::ArenaId;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
@@ -92,7 +91,7 @@ pub(crate) struct LiveIdentities {
 }
 
 impl LiveIdentities {
-    pub(crate) fn from_player_states(_arena_id: ArenaId, players: &[PlayerStateData]) -> Self {
+    pub(crate) fn from_player_states(players: &[PlayerStateData]) -> Self {
         let by_name = players
             .iter()
             .filter(|player| !player.is_bot())

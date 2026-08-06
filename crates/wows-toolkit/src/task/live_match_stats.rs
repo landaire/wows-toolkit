@@ -107,7 +107,7 @@ pub(crate) fn resolve_and_fetch(
 
     // Written before the fetch so the links and the identity join light up
     // even when the fetch then fails.
-    tracker.write().set_live_identities(LiveIdentities::from_player_states(state.arena_id, &state.players));
+    tracker.write().set_live_identities(LiveIdentities::from_player_states(&state.players));
     tracker.write().set_match_stats(MatchStatsState::Fetching);
 
     let outcome = build_request(state.arena_id, &state.players).and_then(|request| client.fetch(&request));
