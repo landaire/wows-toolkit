@@ -275,23 +275,33 @@ mod tests {
     fn shipbuilds_entries_follow_runtime_debug_mode() {
         let palette = CommandPalette::default();
         let normal = palette.root_entries(false);
-        assert!(normal.iter().any(|entry| entry.title == "Send all replays to ShipBuilds"));
-        assert!(normal.iter().any(|entry| {
-            matches!(
-                entry.data,
-                PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::UseLedger }
-            )
-        }));
+        let normal_entry = normal
+            .iter()
+            .find(|entry| entry.title == "Send all replays to ShipBuilds")
+            .expect("normal ShipBuilds entry");
+        assert!(matches!(
+            normal_entry.data,
+            PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::UseLedger }
+        ));
         assert!(!normal.iter().any(|entry| entry.title == "Send all replays to ShipBuilds (ignore cache)"));
 
         let debug = palette.root_entries(true);
-        assert!(debug.iter().any(|entry| entry.title == "Send all replays to ShipBuilds (ignore cache)"));
-        assert!(debug.iter().any(|entry| {
-            matches!(
-                entry.data,
-                PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::IgnoreLedger }
-            )
-        }));
+        let debug_normal_entry = debug
+            .iter()
+            .find(|entry| entry.title == "Send all replays to ShipBuilds")
+            .expect("normal ShipBuilds entry in debug mode");
+        assert!(matches!(
+            debug_normal_entry.data,
+            PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::UseLedger }
+        ));
+        let debug_ignore_cache_entry = debug
+            .iter()
+            .find(|entry| entry.title == "Send all replays to ShipBuilds (ignore cache)")
+            .expect("ignore-cache ShipBuilds entry");
+        assert!(matches!(
+            debug_ignore_cache_entry.data,
+            PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::IgnoreLedger }
+        ));
     }
 
     #[test]
