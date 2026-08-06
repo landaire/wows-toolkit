@@ -20,6 +20,7 @@ use crate::db::index::query_ast::MatchExpr;
 use crate::db::index::rows::PlayerFacet;
 use crate::db::index::rows::ShipFacet;
 use crate::db::index::rows::WorkspaceId;
+use crate::task::SendReplayCachePolicy;
 use crate::ui::query_bar::seed;
 
 /// What a picked palette entry does. Carried as the `Entry` payload.
@@ -44,6 +45,9 @@ pub enum PaletteAction {
     OpenReplayDirectory,
     OpenSearchTab,
     IndexAllReplays,
+    SendAllReplaysToShipBuilds {
+        cache_policy: SendReplayCachePolicy,
+    },
     GoToTab(Tab),
     /// Enter a cascade sub-mode. Handled by the render loop before it
     /// reaches `dispatch_palette_action` (the palette stays open).
@@ -110,7 +114,7 @@ impl CommandPalette {
     /// Static root menu: categories that cascade into a sub-search, plus a
     /// handful of direct shortcuts. Always fuzzy-filtered by `egui_palette`
     /// against the raw query (no DB/catalog access).
-    pub fn root_entries(&self) -> Vec<egui_palette::Entry<'static, PaletteAction>> {
+    pub fn root_entries(&self, debug_mode: bool) -> Vec<egui_palette::Entry<'static, PaletteAction>> {
         let mut entries = Vec::new();
 
         entries.push(egui_palette::Entry::new("Search players...", PaletteAction::EnterSub(SubKind::Players)));
@@ -128,6 +132,16 @@ impl CommandPalette {
         ));
         entries.push(egui_palette::Entry::new("Advanced search...", PaletteAction::OpenSearchTab));
         entries.push(egui_palette::Entry::new("Index all replays", PaletteAction::IndexAllReplays));
+        entries.push(egui_palette::Entry::new(
+            "Send all replays to ShipBuilds",
+            PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::UseLedger },
+        ));
+        if debug_mode {
+            entries.push(egui_palette::Entry::new(
+                "Send all replays to ShipBuilds (ignore cache)",
+                PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::IgnoreLedger },
+            ));
+        }
         for (label, choice) in [
             ("Theme: follow system", crate::data::settings::ThemeChoice::System),
             ("Theme: dark", crate::data::settings::ThemeChoice::Dark),
@@ -233,7 +247,7 @@ mod tests {
     #[test]
     fn root_entries_include_categories_and_shortcuts() {
         let p = CommandPalette::default();
-        let entries = p.root_entries();
+        let entries = p.root_entries(false);
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::EnterSub(SubKind::Players))));
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::EnterSub(SubKind::MyShips))));
         assert!(entries.iter().any(|e| matches!(e.data, PaletteAction::EnterSub(SubKind::ArmorShips))));
@@ -255,6 +269,29 @@ mod tests {
         assert_eq!(query_for("Games I died in"), seed::games_i_died_in());
         assert_eq!(query_for("Games I won"), seed::games_i_won());
         assert_ne!(seed::games_i_died_in(), seed::games_i_won(), "the two entries must not carry the same query");
+    }
+
+    #[test]
+    fn shipbuilds_entries_follow_runtime_debug_mode() {
+        let palette = CommandPalette::default();
+        let normal = palette.root_entries(false);
+        assert!(normal.iter().any(|entry| entry.title == "Send all replays to ShipBuilds"));
+        assert!(normal.iter().any(|entry| {
+            matches!(
+                entry.data,
+                PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::UseLedger }
+            )
+        }));
+        assert!(!normal.iter().any(|entry| entry.title == "Send all replays to ShipBuilds (ignore cache)"));
+
+        let debug = palette.root_entries(true);
+        assert!(debug.iter().any(|entry| entry.title == "Send all replays to ShipBuilds (ignore cache)"));
+        assert!(debug.iter().any(|entry| {
+            matches!(
+                entry.data,
+                PaletteAction::SendAllReplaysToShipBuilds { cache_policy: SendReplayCachePolicy::IgnoreLedger }
+            )
+        }));
     }
 
     #[test]

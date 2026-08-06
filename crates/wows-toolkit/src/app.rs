@@ -4248,6 +4248,7 @@ impl WowsToolkitApp {
                 }
             }
             PaletteAction::GoToTab(tab) => self.focus_tab(&tab),
+            PaletteAction::SendAllReplaysToShipBuilds { .. } => {}
             PaletteAction::OpenSearchWith(query) => {
                 self.tab_state.pending_search_query = Some(query);
                 self.focus_tab(&Tab::Search);
@@ -4342,7 +4343,10 @@ impl eframe::App for WowsToolkitApp {
             let (entries, hint): (Vec<egui_palette::Entry<'static, PaletteAction>>, &str) = match palette.mode {
                 PaletteMode::Root => {
                     palette.state.bypass_filter = false;
-                    (palette.root_entries(), "Search ships, players, replays, commands")
+                    (
+                        palette.root_entries(self.tab_state.persisted.read().settings.app.debug_mode),
+                        "Search ships, players, replays, commands",
+                    )
                 }
                 PaletteMode::Sub(kind) => {
                     palette.state.bypass_filter = true;

@@ -1,5 +1,12 @@
 use crate::data::settings::DataSharingMode;
 
+/// Whether a ShipBuilds batch upload consults the sent-replay ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendReplayCachePolicy {
+    UseLedger,
+    IgnoreLedger,
+}
+
 /// What the background parser should upload for a freshly parsed replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayUploadAction {

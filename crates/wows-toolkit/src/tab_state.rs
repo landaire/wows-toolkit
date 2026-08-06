@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
@@ -885,6 +886,14 @@ impl TabState {
         std::iter::once(&self.live_workspace).chain(self.workspaces.values())
     }
 
+    /// Replay paths listed across every open workspace.
+    pub fn open_replay_paths(&self) -> BTreeSet<PathBuf> {
+        self.all_workspaces()
+            .filter_map(|workspace| workspace.replay_files.as_ref())
+            .flat_map(|replay_files| replay_files.keys().cloned())
+            .collect()
+    }
+
     /// Every workspace paired with the id that names it, live one first.
     pub fn all_workspaces_with_ids(&self) -> impl Iterator<Item = (WorkspaceId, &ReplayWorkspace)> {
         std::iter::once((WorkspaceId::LIVE, &self.live_workspace))
@@ -1548,6 +1557,11 @@ impl TabState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
+
+    fn insert_listed_paths<'a>(workspace: &mut ReplayWorkspace, paths: impl IntoIterator<Item = &'a PathBuf>) {
+        workspace.replay_files = Some(paths.into_iter().map(|path| (path.clone(), listed_replay())).collect());
+    }
 
     /// The save task wakes on any generation change and then re-serializes the
     /// whole persisted state, so a per-frame mutation that changes nothing has
@@ -1573,6 +1587,19 @@ mod tests {
             std::ptr::eq(via_workspace, via_active),
             "workspace(LIVE) and active_workspace() must resolve to the same ReplayWorkspace by default"
         );
+    }
+
+    #[test]
+    fn open_replay_paths_deduplicate_across_every_workspace() {
+        let mut state = TabState::default();
+        let shared = PathBuf::from("replays/shared.wowsreplay");
+        let live_only = PathBuf::from("replays/live.wowsreplay");
+        let ad_hoc_only = PathBuf::from("import/ad-hoc.wowsreplay");
+        insert_listed_paths(&mut state.live_workspace, [&shared, &live_only]);
+        let id = state.open_directory_workspace(PathBuf::from("import"));
+        insert_listed_paths(state.workspace_mut(id).unwrap(), [&shared, &ad_hoc_only]);
+
+        assert_eq!(state.open_replay_paths(), BTreeSet::from([shared, live_only, ad_hoc_only]));
     }
 
     #[test]

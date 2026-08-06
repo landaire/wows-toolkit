@@ -66,6 +66,7 @@ pub use networking::load_versioned_constants_from_disk_with_fallback;
 pub use networking::start_download_update_task;
 pub use networking::start_networking_thread;
 pub use networking::start_twitch_task;
+pub use replay_upload::SendReplayCachePolicy;
 pub use replays::BackgroundParserThread;
 pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;
