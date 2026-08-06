@@ -94,6 +94,166 @@ pub struct MatchStatsResponse {
     pub players: Vec<PlayerStatsOut>,
 }
 
+use std::collections::HashMap;
+use std::collections::VecDeque;
+use std::time::Duration;
+use std::time::Instant;
+
+const ENDPOINT: &str = "https://shipbuilds.com/api/match_stats";
+const API_KEY: &str = "WTK-PleaseDontAbuseMyServer";
+const CONTENT_TYPE: &str = "application/bson";
+
+/// The service's cap on one request's roster.
+pub const MAX_PLAYERS: usize = 24;
+/// The service's published budget, enforced here so a refusal costs no request.
+pub const MAX_REQUESTS_PER_WINDOW: usize = 5;
+pub const RATE_LIMIT_WINDOW: Duration = Duration::from_secs(20 * 60);
+
+#[derive(Debug, thiserror::Error)]
+pub enum MatchStatsError {
+    #[error("the stats service has no data for realm {realm}")]
+    UnsupportedRegion { realm: String },
+    #[error("no players in this match can be looked up")]
+    NoEligiblePlayers,
+    #[error("{count} players is over the {MAX_PLAYERS} the service accepts")]
+    TooManyPlayers { count: usize },
+    #[error("rate limited, retry in {}s", retry_after.as_secs())]
+    RateLimited { retry_after: Duration },
+    #[error("the stats service answered {status}")]
+    Http { status: u16 },
+    #[error("could not reach the stats service: {0}")]
+    Transport(String),
+    #[error("could not encode the request: {0}")]
+    Encode(String),
+    #[error("could not decode the response: {0}")]
+    Decode(String),
+}
+
+impl MatchStatsRequest {
+    /// Reject a roster the service would reject, before spending a request on
+    /// finding that out.
+    pub fn validate(&self) -> Result<(), MatchStatsError> {
+        if self.players.is_empty() {
+            return Err(MatchStatsError::NoEligiblePlayers);
+        }
+        if self.players.len() > MAX_PLAYERS {
+            return Err(MatchStatsError::TooManyPlayers { count: self.players.len() });
+        }
+        Ok(())
+    }
+}
+
+/// The service's budget, tracked locally. `now` is a parameter so the window
+/// can be tested without waiting on the clock.
+#[derive(Debug, Default)]
+pub struct RateLimiter {
+    sent: VecDeque<Instant>,
+}
+
+impl RateLimiter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// `Ok` when a request may be sent, `Err(wait)` with how long until the
+    /// oldest request in the window ages out.
+    pub fn check(&self, now: Instant) -> Result<(), Duration> {
+        // `self.sent` is ordered oldest-first (`record` only pushes to the back),
+        // so the first entry the window filter keeps is the oldest live one.
+        // `front()` alone is not safe here: it can be a stale entry that already
+        // aged out, which would understate the wait.
+        let mut in_window = 0usize;
+        let mut oldest_live = None;
+        for sent in self.sent.iter().copied() {
+            if now.duration_since(sent) < RATE_LIMIT_WINDOW {
+                in_window += 1;
+                oldest_live.get_or_insert(sent);
+            }
+        }
+        if in_window < MAX_REQUESTS_PER_WINDOW {
+            return Ok(());
+        }
+        // in_window >= MAX_REQUESTS_PER_WINDOW, which is > 0, so the loop above
+        // saw at least one live entry and oldest_live is always Some here.
+        let oldest = oldest_live.expect("in_window counted at least one live entry");
+        Err(RATE_LIMIT_WINDOW.saturating_sub(now.duration_since(oldest)))
+    }
+
+    pub fn record(&mut self, now: Instant) {
+        self.sent.push_back(now);
+        while self.sent.front().is_some_and(|sent| now.duration_since(*sent) >= RATE_LIMIT_WINDOW) {
+            self.sent.pop_front();
+        }
+    }
+}
+
+/// Fetches match stats, at most once per arena and within the service's
+/// budget.
+pub struct MatchStatsClient {
+    http: reqwest::blocking::Client,
+    limiter: RateLimiter,
+    cache: HashMap<ArenaId, MatchStatsResponse>,
+}
+
+impl MatchStatsClient {
+    pub fn new(http: reqwest::blocking::Client) -> Self {
+        Self { http, limiter: RateLimiter::new(), cache: HashMap::new() }
+    }
+
+    /// The cached answer for `arena_id`, if this client already fetched it.
+    pub fn cached(&self, arena_id: ArenaId) -> Option<&MatchStatsResponse> {
+        self.cache.get(&arena_id)
+    }
+
+    pub fn fetch(&mut self, request: &MatchStatsRequest) -> Result<MatchStatsResponse, MatchStatsError> {
+        if let Some(cached) = self.cache.get(&request.arena_id) {
+            return Ok(cached.clone());
+        }
+        request.validate()?;
+
+        let now = Instant::now();
+        if let Err(retry_after) = self.limiter.check(now) {
+            return Err(MatchStatsError::RateLimited { retry_after });
+        }
+
+        let body = bson::serialize_to_vec(request).map_err(|e| MatchStatsError::Encode(e.to_string()))?;
+
+        self.limiter.record(now);
+        let response = self
+            .http
+            .post(ENDPOINT)
+            .header("X-API-Key", API_KEY)
+            .header(reqwest::header::CONTENT_TYPE, CONTENT_TYPE)
+            .body(body)
+            .send()
+            .map_err(|e| MatchStatsError::Transport(crate::util::http::error_chain(&e)))?;
+
+        let status = response.status();
+        if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            // The service does not guarantee Retry-After on a 429; falling back to
+            // the full window is the safe assumption when it is absent or malformed.
+            let retry_after = response
+                .headers()
+                .get(reqwest::header::RETRY_AFTER)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(Duration::from_secs)
+                .unwrap_or(RATE_LIMIT_WINDOW);
+            return Err(MatchStatsError::RateLimited { retry_after });
+        }
+        if !status.is_success() {
+            return Err(MatchStatsError::Http { status: status.as_u16() });
+        }
+
+        let bytes = response.bytes().map_err(|e| MatchStatsError::Transport(crate::util::http::error_chain(&e)))?;
+        let decoded: MatchStatsResponse =
+            bson::deserialize_from_slice(&bytes).map_err(|e| MatchStatsError::Decode(e.to_string()))?;
+
+        self.cache.insert(request.arena_id, decoded.clone());
+        Ok(decoded)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -181,5 +341,80 @@ mod tests {
         assert_eq!(Region::Asia.as_url_segment(), "ASIA");
         assert_eq!(Region::Eu.as_wire(), "eu");
         assert_eq!(Region::Eu.as_url_segment(), "EU");
+    }
+
+    #[test]
+    fn the_limiter_allows_the_first_five_requests_in_a_window() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::new();
+
+        for i in 0..MAX_REQUESTS_PER_WINDOW {
+            assert!(limiter.check(start).is_ok(), "request {i} must be allowed");
+            limiter.record(start);
+        }
+
+        let Err(wait) = limiter.check(start) else {
+            panic!("a sixth request inside the window must be refused");
+        };
+        assert!(wait <= RATE_LIMIT_WINDOW && !wait.is_zero(), "the reported wait must be inside the window");
+    }
+
+    /// Once every recorded request has aged out of the window, `check` must
+    /// allow again. This does not on its own prove pruning happens correctly
+    /// for a MIXED fresh/stale deque; see
+    /// `the_limiter_reports_a_wait_from_the_oldest_live_request_not_a_stale_one`
+    /// for that.
+    #[test]
+    fn check_allows_a_request_once_the_whole_window_has_elapsed() {
+        let start = Instant::now();
+        let mut limiter = RateLimiter::new();
+        for _ in 0..MAX_REQUESTS_PER_WINDOW {
+            limiter.record(start);
+        }
+
+        let later = start + RATE_LIMIT_WINDOW + Duration::from_secs(1);
+
+        assert!(limiter.check(later).is_ok());
+    }
+
+    /// A deque can hold both a stale entry (older than the window) and enough
+    /// live ones to be at cap. The reported wait must come from the oldest
+    /// LIVE entry, not from `front()`, which may be the stale one and would
+    /// wrongly report a zero wait while the limiter is genuinely full.
+    #[test]
+    fn the_limiter_reports_a_wait_from_the_oldest_live_request_not_a_stale_one() {
+        let base = Instant::now();
+        let mut limiter = RateLimiter::new();
+        for _ in 0..MAX_REQUESTS_PER_WINDOW + 1 {
+            limiter.record(base);
+        }
+        let fresh = base + Duration::from_secs(19 * 60);
+        for _ in 0..MAX_REQUESTS_PER_WINDOW {
+            limiter.record(fresh);
+        }
+
+        let later = base + Duration::from_secs(21 * 60);
+        let Err(wait) = limiter.check(later) else {
+            panic!("5 live requests from `fresh` must still refuse a 6th");
+        };
+        assert!(!wait.is_zero(), "the oldest live request has not aged out yet, so the wait must not be zero");
+        assert!(wait <= RATE_LIMIT_WINDOW, "the reported wait must be inside the window");
+    }
+
+    #[test]
+    fn a_roster_over_the_player_cap_is_refused_before_it_is_sent() {
+        let players: Vec<PlayerRef> = (0..25)
+            .map(|i| PlayerRef { account_id: AccountId(i), region: Region::Eu, ship_id: GameParamId::from(1u64) })
+            .collect();
+        let request = MatchStatsRequest { arena_id: ArenaId::from(1i64), players };
+
+        assert!(matches!(request.validate(), Err(MatchStatsError::TooManyPlayers { count: 25 })));
+    }
+
+    #[test]
+    fn an_empty_roster_is_refused_before_it_is_sent() {
+        let request = MatchStatsRequest { arena_id: ArenaId::from(1i64), players: Vec::new() };
+
+        assert!(matches!(request.validate(), Err(MatchStatsError::NoEligiblePlayers)));
     }
 }
