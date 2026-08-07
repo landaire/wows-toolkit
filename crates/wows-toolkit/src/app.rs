@@ -517,6 +517,26 @@ const DOWNLOAD_DIALOG_MIN_WIDTH: f32 = 280.0;
 /// sit outside the scroll and stay on screen however many builds are offered.
 const DOWNLOAD_DIALOG_LIST_MAX_HEIGHT: f32 = 320.0;
 
+/// Whether a finished load should add its game to the session stats.
+///
+/// `in_replays_dir` reports whether the file sits in the game's own replays
+/// directory. Which listing was clicked cannot answer this on its own: an
+/// imported directory's listing reaches the same open path the live one does,
+/// so a replay read out of somebody else's directory would otherwise move the
+/// user's damage, win rate and PR.
+fn counts_toward_session_stats(source: crate::task::ReplaySource, in_replays_dir: bool) -> bool {
+    use crate::task::ReplaySource;
+
+    match source {
+        // The watcher only fires inside the replays directory, and the explicit
+        // "Add to Session Stats" batch loads through this source too: naming
+        // replays by hand is a deliberate override, not a passive open.
+        ReplaySource::SessionStatsOnly => true,
+        ReplaySource::FileListing | ReplaySource::AutoLoad | ReplaySource::Reload => in_replays_dir,
+        ReplaySource::ManualOpen | ReplaySource::SearchOpen => false,
+    }
+}
+
 /// How the download offer is laid out on a given screen.
 ///
 /// A directory can span every build the game has ever had, so the row list is
@@ -2020,12 +2040,9 @@ impl WowsToolkitApp {
                 BackgroundTaskCompletion::ReplayLoaded { replay, source } => {
                     use crate::task::ReplaySource;
 
-                    let track_session_stats = matches!(
+                    let track_session_stats = counts_toward_session_stats(
                         source,
-                        ReplaySource::FileListing
-                            | ReplaySource::AutoLoad
-                            | ReplaySource::Reload
-                            | ReplaySource::SessionStatsOnly
+                        self.tab_state.is_primary_replay(replay.read().source_path.as_deref()),
                     );
                     let update_ui = !matches!(source, ReplaySource::SessionStatsOnly);
                     let open_tab =
@@ -5986,6 +6003,62 @@ mod logging_target_tests {
             !targets.would_enable("hyper_util", &tracing::Level::ERROR),
             "the filter must stay an allowlist, not turn into a catch-all"
         );
+    }
+}
+
+#[cfg(test)]
+mod session_stats_gate_tests {
+    use crate::task::ReplaySource;
+
+    use super::counts_toward_session_stats;
+
+    /// The leak this gate closes. Every listing opens through one path, so a
+    /// replay double-clicked in an imported directory arrives as `FileListing`
+    /// exactly as one from the game's own directory does. Only its location
+    /// tells them apart, and counting the imported one moves the user's damage,
+    /// win rate and PR on somebody else's battle.
+    #[test]
+    fn a_listing_open_counts_only_inside_the_replays_directory() {
+        assert!(counts_toward_session_stats(ReplaySource::FileListing, true));
+        assert!(!counts_toward_session_stats(ReplaySource::FileListing, false));
+    }
+
+    /// Reload re-runs a replay already open in a tab, and that tab may belong
+    /// to an imported directory, so it is gated on the same terms.
+    #[test]
+    fn a_reload_counts_only_inside_the_replays_directory() {
+        assert!(counts_toward_session_stats(ReplaySource::Reload, true));
+        assert!(!counts_toward_session_stats(ReplaySource::Reload, false));
+    }
+
+    /// The watcher only reports the replays directory, so an auto-load from
+    /// outside it means the location could not be resolved. Counting it anyway
+    /// would reopen the hole for exactly the replays whose provenance is least
+    /// certain.
+    #[test]
+    fn an_auto_load_counts_only_inside_the_replays_directory() {
+        assert!(counts_toward_session_stats(ReplaySource::AutoLoad, true));
+        assert!(!counts_toward_session_stats(ReplaySource::AutoLoad, false));
+    }
+
+    /// "Add to Session Stats" and "Set as Session Stats" load through this
+    /// source. Naming replays by hand is the user overriding the rule on
+    /// purpose, and a menu entry that silently did nothing would be worse than
+    /// the leak.
+    #[test]
+    fn an_explicit_batch_counts_wherever_its_replays_live() {
+        assert!(counts_toward_session_stats(ReplaySource::SessionStatsOnly, true));
+        assert!(counts_toward_session_stats(ReplaySource::SessionStatsOnly, false));
+    }
+
+    /// Neither ever counted, and neither starts now that location is what the
+    /// other sources are judged on.
+    #[test]
+    fn an_ad_hoc_open_never_counts() {
+        for in_replays_dir in [true, false] {
+            assert!(!counts_toward_session_stats(ReplaySource::ManualOpen, in_replays_dir));
+            assert!(!counts_toward_session_stats(ReplaySource::SearchOpen, in_replays_dir));
+        }
     }
 }
 

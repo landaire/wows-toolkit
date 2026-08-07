@@ -4,6 +4,7 @@ pub mod error;
 pub(crate) mod formatting;
 pub(crate) mod game_params;
 pub(crate) mod http;
+pub(crate) mod paths;
 pub(crate) mod personal_rating;
 pub(crate) mod replay_export;
 pub(crate) mod thread;

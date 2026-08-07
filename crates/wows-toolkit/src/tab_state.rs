@@ -1329,6 +1329,21 @@ impl TabState {
         crate::ui::replay_parser::clear_fire_section_failures();
     }
 
+    /// Whether `path` is a replay the game itself wrote, i.e. one inside the
+    /// configured replays directory.
+    ///
+    /// Session stats describe the user's own play. An imported directory is
+    /// somebody's history being read, and the listing it draws reaches the same
+    /// open path the live listing does, so the file's location is what
+    /// separates the two. A replay with no path, or no configured directory to
+    /// compare against, is not one of the user's own.
+    pub(crate) fn is_primary_replay(&self, path: Option<&Path>) -> bool {
+        let (Some(path), Some(root)) = (path, self.live_workspace.root.as_deref()) else {
+            return false;
+        };
+        crate::util::paths::path_is_within(root, path)
+    }
+
     /// Process replays selected for session stats update.
     /// If `clear_before_session_reset` is true, clears existing stats first.
     /// If any replays haven't been parsed yet, they will be queued for parsing.

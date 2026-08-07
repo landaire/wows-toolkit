@@ -25,10 +25,16 @@ use crate::util::error::ToolkitError;
 
 /// Describes where a replay load request originated from.
 /// This determines what UI actions to take when the replay finishes loading.
+///
+/// Session stats are decided by [`crate::app::counts_toward_session_stats`],
+/// which reads this alongside where the file lives: every listing, imported or
+/// live, opens through the one path, so the source alone cannot say whether a
+/// replay is the user's own.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplaySource {
-    /// Opened from the file listing (tab already managed by the listing handler).
-    /// Tracks session stats but does NOT open a tab.
+    /// Opened from a replay listing (tab already managed by the listing
+    /// handler). Does NOT open a tab. Tracks session stats only for a replay
+    /// in the game's own replays directory.
     FileListing,
     /// Drag-and-drop or manual "Open" button.
     /// Opens in focused tab but does NOT track session stats.
@@ -36,11 +42,13 @@ pub enum ReplaySource {
     /// Auto-loaded from file watcher (new/modified replay detected).
     /// Opens in focused tab and tracks session stats.
     AutoLoad,
-    /// Re-loading the focused replay after constants changed.
-    /// Opens in focused tab and tracks session stats.
+    /// Re-loading the focused replay after constants changed. Opens in focused
+    /// tab, and tracks session stats on the same terms as `FileListing`: the
+    /// replay reloaded may be one an imported listing opened.
     Reload,
-    /// Background batch loading for session stats only.
-    /// No UI update, only tracks session stats.
+    /// Background batch loading for session stats only. No UI update. Always
+    /// tracks: the file watcher only reports the replays directory, and the
+    /// explicit "Add to Session Stats" batch loads through here as well.
     SessionStatsOnly,
     /// Opened from the search results table. The caller has already put the
     /// replay in a sub-tab of the workspace that owns its directory, so this
