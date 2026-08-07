@@ -54,6 +54,8 @@ reset = "Reset"
 download = "Download"
 dismiss = "Dismiss"
 retry = "Retry"
+check_all = "Check All"
+uncheck_all = "Uncheck All"
 
 # -- Menu items --
 

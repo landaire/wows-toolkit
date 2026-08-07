@@ -507,6 +507,139 @@ impl DirectoryReingest {
     }
 }
 
+/// Width of the game data download offer, shared by the window and the build
+/// list scrolling inside it.
+const DOWNLOAD_DIALOG_WIDTH: f32 = 560.0;
+/// Floor for [`DOWNLOAD_DIALOG_WIDTH`] once the screen has been taken into
+/// account, so a narrow window shrinks the dialog rather than inverting it.
+const DOWNLOAD_DIALOG_MIN_WIDTH: f32 = 280.0;
+/// Height cap for the build list. The intro, the object count and the buttons
+/// sit outside the scroll and stay on screen however many builds are offered.
+const DOWNLOAD_DIALOG_LIST_MAX_HEIGHT: f32 = 320.0;
+
+/// How the download offer is laid out on a given screen.
+///
+/// A directory can span every build the game has ever had, so the row list is
+/// capped and scrolled. Everything else in the dialog sits outside that scroll
+/// and stays reachable however many builds are offered.
+#[derive(Clone, Copy)]
+struct DownloadDialogSize {
+    /// Shared by the window and the scroll inside it, so the scrollbar sits at
+    /// the dialog's edge rather than partway across it.
+    width: f32,
+    list_max_height: f32,
+}
+
+impl DownloadDialogSize {
+    fn for_screen(screen: egui::Vec2) -> Self {
+        Self {
+            width: DOWNLOAD_DIALOG_WIDTH.min(screen.x - 32.0).max(DOWNLOAD_DIALOG_MIN_WIDTH),
+            list_max_height: DOWNLOAD_DIALOG_LIST_MAX_HEIGHT.min(screen.y * 0.5),
+        }
+    }
+}
+
+/// What the user asked of the download offer this frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+enum DownloadPromptAction {
+    #[default]
+    None,
+    Download,
+    Retry,
+    Dismiss,
+}
+
+/// The window the offer is drawn in, shared with the layout test so that what
+/// the test measures is the window the user sees.
+fn download_prompt_window() -> egui::Window<'static> {
+    egui::Window::new(t!("ui.windows.download_game_data"))
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+}
+
+/// Draw the offer's contents into an already-opened window.
+fn draw_download_prompt(
+    ui: &mut egui::Ui,
+    prompt: &mut GameDataDownloadPrompt,
+    size: DownloadDialogSize,
+) -> DownloadPromptAction {
+    let mut action = DownloadPromptAction::None;
+
+    ui.set_width(size.width);
+    ui.label(t!("ui.dialogs.download_game_data_intro"));
+    ui.add_space(8.0);
+
+    // Ticking dozens of rows one at a time is not an interaction.
+    if prompt.candidates.len() > 1 {
+        ui.horizontal(|ui| {
+            if ui.add_enabled(prompt.can_check_all(), egui::Button::new(t!("ui.buttons.check_all"))).clicked() {
+                prompt.set_all_selectable(true);
+            }
+            if ui.add_enabled(prompt.can_uncheck_all(), egui::Button::new(t!("ui.buttons.uncheck_all"))).clicked() {
+                prompt.set_all_selectable(false);
+            }
+        });
+        ui.add_space(4.0);
+    }
+
+    egui::ScrollArea::vertical().max_height(size.list_max_height).auto_shrink([false, true]).show(ui, |ui| {
+        for candidate in &mut prompt.candidates {
+            ui.horizontal(|ui| {
+                let selectable = candidate.is_selectable();
+                ui.add_enabled(selectable, egui::Checkbox::without_text(&mut candidate.selected));
+                ui.label(t!("ui.dialogs.download_build_row", version = &candidate.version, build = candidate.build));
+                if let Some(count) = candidate.replays_needing {
+                    ui.label(RichText::new(t!("ui.dialogs.download_replays_needing", count = count)).weak());
+                }
+                let availability = match &candidate.availability {
+                    Some(availability) => availability_label(availability),
+                    None => t!("ui.dialogs.download_availability_resolving").into_owned(),
+                };
+                // Truncated rather than wrapped, so a long availability line
+                // cannot widen the dialog back out.
+                ui.add(egui::Label::new(RichText::new(&availability).weak()).truncate()).on_hover_text(availability);
+            });
+        }
+    });
+
+    ui.add_space(8.0);
+    match &prompt.plan {
+        DownloadPlanState::Idle | DownloadPlanState::Planning => {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(t!("ui.dialogs.download_plan_pending"));
+            });
+        }
+        DownloadPlanState::Ready(plan) => {
+            ui.label(t!("ui.dialogs.download_objects_to_fetch", count = plan.unique_missing_objects));
+        }
+        DownloadPlanState::Failed(message) => {
+            ui.label(RichText::new(message.as_str()).color(ui.sem().error));
+        }
+    }
+
+    ui.add_space(8.0);
+    ui.horizontal(|ui| {
+        let ready = matches!(prompt.plan, DownloadPlanState::Ready(_));
+        let can_download = ready && prompt.candidates.iter().any(|c| c.is_downloadable());
+        if ui.add_enabled(can_download, egui::Button::new(t!("ui.buttons.download"))).clicked() {
+            action = DownloadPromptAction::Download;
+        }
+        // Without this the dialog is a dead end after a network blip: nothing
+        // is resolved, so every checkbox is disabled and no selection change
+        // can ask the planner again.
+        if prompt.can_retry() && ui.button(t!("ui.buttons.retry")).clicked() {
+            action = DownloadPromptAction::Retry;
+        }
+        if ui.button(t!("ui.buttons.dismiss")).clicked() {
+            action = DownloadPromptAction::Dismiss;
+        }
+    });
+
+    action
+}
+
 /// One build the user is being offered a download of.
 struct DownloadCandidate {
     build: u32,
@@ -524,12 +657,19 @@ struct DownloadCandidate {
 }
 
 impl DownloadCandidate {
-    /// A candidate whose remote availability is known. Only an exact match is
-    /// pre-selected: a nearest match may not load the replay that asked for
-    /// it, and the other two states cannot be downloaded at all.
+    /// A candidate whose remote availability is known.
+    ///
+    /// Everything the remote can serve is pre-selected, nearest matches
+    /// included. The remote's fallback only ever offers a build sharing the
+    /// replay's `major.minor.patch` (`BuildsIndex::resolve_build`), and a build
+    /// number that differs within one `major.minor.patch` is what a separate
+    /// server looks like -- the China client ships its own build numbers for
+    /// the same version. That data loads the replay, so leaving it unticked
+    /// only makes the user tick it themselves.
     fn new(build: u32, version: String, replays_needing: Option<usize>, availability: RemoteAvailability) -> Self {
-        let selected = matches!(availability, RemoteAvailability::Exact);
-        Self { build, version, replays_needing, availability: Some(availability), selected }
+        let mut candidate = Self { build, version, replays_needing, availability: Some(availability), selected: false };
+        candidate.selected = candidate.is_selectable();
+        candidate
     }
 
     /// A candidate whose remote availability has not been resolved yet. Ticked
@@ -642,6 +782,27 @@ impl GameDataDownloadPrompt {
     /// The ticked builds the remote can actually serve, as download requests.
     fn downloadable(&self) -> Vec<(u32, String)> {
         self.candidates.iter().filter(|c| c.is_downloadable()).map(|c| (c.build, c.version.clone())).collect()
+    }
+
+    /// Tick or untick every row the user could have ticked by hand.
+    ///
+    /// Rows that are not selectable keep what they have. An unresolved row is
+    /// ticked so the planner is asked about it, and unticking it here would drop
+    /// it from the request and leave it unresolved forever.
+    fn set_all_selectable(&mut self, selected: bool) {
+        for candidate in self.candidates.iter_mut().filter(|c| c.is_selectable()) {
+            candidate.selected = selected;
+        }
+    }
+
+    /// Whether ticking every selectable row would change the selection.
+    fn can_check_all(&self) -> bool {
+        self.candidates.iter().any(|c| c.is_selectable() && !c.selected)
+    }
+
+    /// Whether unticking every selectable row would change the selection.
+    fn can_uncheck_all(&self) -> bool {
+        self.candidates.iter().any(|c| c.is_selectable() && c.selected)
     }
 
     /// The planner's input for the current selection.
@@ -3316,81 +3477,21 @@ impl WowsToolkitApp {
             return;
         };
 
-        let mut start_download = false;
-        let mut retry = false;
-        let mut dismiss = false;
-        egui::Window::new(t!("ui.windows.download_game_data"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-            .show(ctx, |ui| {
-                ui.label(t!("ui.dialogs.download_game_data_intro"));
-                ui.add_space(8.0);
+        let size = DownloadDialogSize::for_screen(ctx.content_rect().size());
+        let action = download_prompt_window()
+            .show(ctx, |ui| draw_download_prompt(ui, prompt, size))
+            .and_then(|response| response.inner)
+            .unwrap_or_default();
 
-                for candidate in &mut prompt.candidates {
-                    ui.horizontal(|ui| {
-                        let selectable = candidate.is_selectable();
-                        ui.add_enabled(selectable, egui::Checkbox::without_text(&mut candidate.selected));
-                        ui.label(t!(
-                            "ui.dialogs.download_build_row",
-                            version = &candidate.version,
-                            build = candidate.build
-                        ));
-                        if let Some(count) = candidate.replays_needing {
-                            ui.label(RichText::new(t!("ui.dialogs.download_replays_needing", count = count)).weak());
-                        }
-                        let availability = match &candidate.availability {
-                            Some(availability) => availability_label(availability),
-                            None => t!("ui.dialogs.download_availability_resolving").into_owned(),
-                        };
-                        ui.label(RichText::new(availability).weak());
-                    });
-                }
-
-                ui.add_space(8.0);
-                match &prompt.plan {
-                    DownloadPlanState::Idle | DownloadPlanState::Planning => {
-                        ui.horizontal(|ui| {
-                            ui.spinner();
-                            ui.label(t!("ui.dialogs.download_plan_pending"));
-                        });
-                    }
-                    DownloadPlanState::Ready(plan) => {
-                        ui.label(t!("ui.dialogs.download_objects_to_fetch", count = plan.unique_missing_objects));
-                    }
-                    DownloadPlanState::Failed(message) => {
-                        ui.label(RichText::new(message.as_str()).color(ui.sem().error));
-                    }
-                }
-
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let ready = matches!(prompt.plan, DownloadPlanState::Ready(_));
-                    let can_download = ready && prompt.candidates.iter().any(|c| c.is_downloadable());
-                    if ui.add_enabled(can_download, egui::Button::new(t!("ui.buttons.download"))).clicked() {
-                        start_download = true;
-                    }
-                    // Without this the dialog is a dead end after a network
-                    // blip: nothing is resolved, so every checkbox is disabled
-                    // and no selection change can ask the planner again.
-                    if prompt.can_retry() && ui.button(t!("ui.buttons.retry")).clicked() {
-                        retry = true;
-                    }
-                    if ui.button(t!("ui.buttons.dismiss")).clicked() {
-                        dismiss = true;
-                    }
-                });
-            });
-
-        if start_download {
+        if action == DownloadPromptAction::Download {
             if let Some(prompt) = self.download_prompt.take() {
                 self.start_game_data_download(prompt);
             }
-        } else if retry {
+        } else if action == DownloadPromptAction::Retry {
             if let Some(prompt) = &mut self.download_prompt {
                 prompt.retry();
             }
-        } else if dismiss {
+        } else if action == DownloadPromptAction::Dismiss {
             // Dismissing closes this offer and nothing more. Going back and
             // opening those replays again is a fresh request and gets a fresh
             // offer; the only offer ever suppressed is the automatic one the
@@ -5005,11 +5106,15 @@ mod download_prompt_tests {
         assert!(c.selected);
     }
 
+    /// The remote only ever falls back within one `major.minor.patch`, which is
+    /// the shape a different server's build numbering takes, so a nearest match
+    /// is data that loads the replay rather than a guess at another version.
     #[test]
-    fn a_nearest_match_candidate_starts_unselected() {
-        let availability = RemoteAvailability::Nearest { version: "13.4.0".into(), build: 9_800 };
+    fn a_nearest_match_candidate_starts_selected() {
+        let availability = RemoteAvailability::Nearest { version: "13.5.0".into(), build: 9_800 };
         let c = DownloadCandidate::new(9_876, "13.5.0".into(), Some(2), availability);
-        assert!(!c.selected, "a nearest match may not fix the replay, so it must not be pre-selected");
+        assert!(c.selected, "anything the remote can serve is pre-selected");
+        assert!(c.is_downloadable());
     }
 
     #[test]
@@ -5076,6 +5181,8 @@ mod download_prompt_tests {
             "ui.buttons.download",
             "ui.buttons.dismiss",
             "ui.buttons.retry",
+            "ui.buttons.check_all",
+            "ui.buttons.uncheck_all",
         ] {
             let rendered = t!(key).into_owned();
             assert_ne!(rendered, key, "no catalog entry for {key}");
@@ -5111,11 +5218,12 @@ mod download_prompt_tests {
     /// The first plan is what turns unresolved rows into rows the user can act
     /// on, and it is where the pre-selection rule is actually applied.
     #[test]
-    fn the_first_plan_resolves_every_row_and_ticks_only_the_exact_ones() {
+    fn the_first_plan_ticks_every_row_the_remote_can_serve() {
         let mut prompt = GameDataDownloadPrompt::new(
             vec![
                 DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2)),
                 DownloadCandidate::unresolved(9_900, "13.6.0".into(), Some(1)),
+                DownloadCandidate::unresolved(9_950, "13.7.0".into(), Some(1)),
             ],
             None,
         );
@@ -5128,15 +5236,143 @@ mod download_prompt_tests {
                 unique_missing_objects: 12,
                 resolved: vec![
                     resolved(9_876, "13.5.0", RemoteAvailability::Exact),
-                    resolved(9_900, "13.6.0", RemoteAvailability::Nearest { version: "13.5.0".into(), build: 9_876 }),
+                    resolved(9_900, "13.6.0", RemoteAvailability::Nearest { version: "13.6.0".into(), build: 9_890 }),
+                    resolved(9_950, "13.7.0", RemoteAvailability::Unpublished),
                 ],
             },
         );
 
         assert!(prompt.candidates[0].selected);
-        assert!(!prompt.candidates[1].selected, "a nearest match must not stay ticked from the unresolved default");
-        assert_eq!(prompt.selected_builds(), BTreeSet::from([9_876]));
-        assert_eq!(prompt.downloadable(), vec![(9_876, "13.5.0".to_string())]);
+        assert!(prompt.candidates[1].selected, "a nearest match is data that loads the replay, so it stays ticked");
+        assert!(!prompt.candidates[2].selected, "an unpublished build has nothing to fetch");
+        assert_eq!(prompt.selected_builds(), BTreeSet::from([9_876, 9_900]));
+        assert_eq!(prompt.downloadable(), vec![(9_876, "13.5.0".to_string()), (9_900, "13.6.0".to_string())]);
+    }
+
+    /// Lay the offer out through real frames on a `screen`-sized viewport and
+    /// report the rect the window settles at.
+    ///
+    /// Two passes before the one that is read: a window's size follows from the
+    /// pass before it, so the first rect is not yet the one it settles at.
+    fn download_dialog_rect(candidate_count: usize, screen: egui::Vec2) -> egui::Rect {
+        let ctx = egui::Context::default();
+        let mut prompt = GameDataDownloadPrompt::new(
+            (0..candidate_count)
+                .map(|i| {
+                    DownloadCandidate::new(
+                        9_000 + i as u32,
+                        format!("13.{i}.0"),
+                        Some(3),
+                        RemoteAvailability::Nearest { version: format!("13.{i}.1"), build: 9_500 + i as u32 },
+                    )
+                })
+                .collect(),
+            None,
+        );
+
+        let mut rect = egui::Rect::NOTHING;
+        for _ in 0..3 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, screen)),
+                ..Default::default()
+            };
+            let _ = ctx.run_ui(input, |root| {
+                let ctx = root.ctx().clone();
+                let size = DownloadDialogSize::for_screen(ctx.content_rect().size());
+                let shown = download_prompt_window().show(&ctx, |ui| draw_download_prompt(ui, &mut prompt, size));
+                if let Some(response) = shown {
+                    rect = response.response.rect;
+                }
+            });
+        }
+        rect
+    }
+
+    /// A directory spanning every build the game has had must not draw an offer
+    /// taller than the screen, with its buttons somewhere off the bottom edge.
+    /// The list scrolls instead, so the window stops growing once it is full and
+    /// the rows past that point cost nothing.
+    #[test]
+    fn the_offer_stops_growing_however_many_builds_it_covers() {
+        let screen = egui::vec2(1400.0, 900.0);
+        let size = DownloadDialogSize::for_screen(screen);
+
+        let few = download_dialog_rect(2, screen);
+        let many = download_dialog_rect(200, screen);
+
+        assert!(many.height() <= screen.y, "the offer must fit on screen: {many:?}");
+        assert!(
+            many.height() <= few.height() + size.list_max_height,
+            "the list is capped, so 200 rows can only add the cap to a 2 row offer: {few:?} vs {many:?}"
+        );
+        assert_eq!(
+            download_dialog_rect(60, screen).height(),
+            many.height(),
+            "past the cap the window is the same size whatever the row count"
+        );
+    }
+
+    /// The list scrolls at the dialog's width rather than at its content's, so
+    /// a long availability line truncates instead of widening the window.
+    #[test]
+    fn the_offer_is_the_same_width_however_long_its_rows_are() {
+        let screen = egui::vec2(1400.0, 900.0);
+        let size = DownloadDialogSize::for_screen(screen);
+        let rect = download_dialog_rect(200, screen);
+
+        assert!(rect.width() >= size.width, "the window is at least as wide as the list it holds: {rect:?}");
+        assert!(
+            rect.width() <= size.width + 32.0,
+            "and no wider than that plus its own frame: {rect:?} against a {} wide list",
+            size.width
+        );
+    }
+
+    /// The bulk tick is the only way through an offer spanning dozens of
+    /// builds, and it has to respect the same rule the individual checkboxes
+    /// do: a row the user cannot tick by hand is not something a bulk action
+    /// gets to tick either. Unticking an unresolved row would be the damaging
+    /// one -- it would drop the build from the next plan request, leaving a row
+    /// that can never resolve and so can never be downloaded.
+    #[test]
+    fn checking_and_unchecking_all_only_moves_the_rows_the_user_could_move() {
+        let mut prompt = GameDataDownloadPrompt::new(
+            vec![
+                DownloadCandidate::unresolved(9_800, "13.4.0".into(), Some(3)),
+                DownloadCandidate::new(9_876, "13.5.0".into(), Some(2), RemoteAvailability::Exact),
+                DownloadCandidate::new(
+                    9_900,
+                    "13.6.0".into(),
+                    Some(1),
+                    RemoteAvailability::Nearest { version: "13.5.0".into(), build: 9_876 },
+                ),
+                DownloadCandidate::new(9_950, "13.7.0".into(), Some(1), RemoteAvailability::Unpublished),
+            ],
+            None,
+        );
+
+        assert!(!prompt.can_check_all(), "everything serviceable is ticked already");
+        assert!(prompt.can_uncheck_all());
+        prompt.set_all_selectable(false);
+        assert!(prompt.candidates[0].selected, "unchecking all must not drop an unresolved build from the plan");
+        assert!(!prompt.candidates[1].selected);
+        assert!(!prompt.candidates[2].selected);
+        assert!(!prompt.can_uncheck_all());
+        assert!(prompt.downloadable().is_empty());
+        assert_eq!(prompt.selected_builds(), BTreeSet::from([9_800]));
+
+        assert!(prompt.can_check_all());
+        prompt.set_all_selectable(true);
+        assert!(prompt.candidates[0].selected);
+        assert!(prompt.candidates[1].selected);
+        assert!(prompt.candidates[2].selected);
+        assert!(!prompt.candidates[3].selected, "an unpublished build has nothing to fetch");
+        assert!(!prompt.can_check_all(), "nothing selectable is left unticked");
+        assert_eq!(
+            prompt.downloadable(),
+            vec![(9_876, "13.5.0".to_string()), (9_900, "13.6.0".to_string())],
+            "checking all must not offer to download what the remote cannot serve"
+        );
     }
 
     /// Unticking a row narrows what the next plan is asked about, and the
@@ -5188,14 +5424,14 @@ mod download_prompt_tests {
         assert_eq!(prompt.downloadable(), vec![(9_900, "13.6.0".to_string())]);
     }
 
-    /// The reachable half of the same rule. A nearest match starts unticked but
-    /// is selectable, so the user can tick it; that puts it in the next plan's
-    /// request, and the answer that comes back is still `Nearest`. Re-deriving
-    /// the row from that answer would silently untick it under the user's
-    /// hands, and the object count would then describe a different selection
-    /// from the one on screen.
+    /// The reachable half of the same rule, now that a nearest match starts
+    /// ticked. The user unticks one, and the answer to a plan already in flight
+    /// arrives afterwards still carrying that row: a planner is dispatched
+    /// against the selection at dispatch time, and unticking does not recall
+    /// it. Re-deriving the row from that answer would tick it again under the
+    /// user's hands, and the download would then fetch a build they declined.
     #[test]
-    fn a_later_plan_does_not_undo_a_tick_the_user_added() {
+    fn a_later_plan_does_not_undo_an_untick_the_user_made() {
         let mut prompt = GameDataDownloadPrompt::new(
             vec![
                 DownloadCandidate::unresolved(9_876, "13.5.0".into(), Some(2)),
@@ -5203,7 +5439,7 @@ mod download_prompt_tests {
             ],
             None,
         );
-        let nearest = RemoteAvailability::Nearest { version: "13.5.0".into(), build: 9_876 };
+        let nearest = RemoteAvailability::Nearest { version: "13.6.0".into(), build: 9_890 };
         let (ticket, _) = prompt.begin_planning();
         prompt.apply_plan(
             ticket,
@@ -5215,23 +5451,11 @@ mod download_prompt_tests {
                 ],
             },
         );
-        assert!(!prompt.candidates[1].selected, "a nearest match starts unticked");
+        assert!(prompt.candidates[1].selected, "a nearest match starts ticked");
 
-        // Unticking itself narrows the selection, so the corrected count for
-        // the ticked rows alone is fetched first, exactly as production does.
-        assert!(prompt.needs_plan());
-        let (ticket, _) = prompt.begin_planning();
-        prompt.apply_plan(
-            ticket,
-            DownloadPlan {
-                unique_missing_objects: 12,
-                resolved: vec![resolved(9_876, "13.5.0", RemoteAvailability::Exact)],
-            },
-        );
-
-        prompt.candidates[1].selected = true;
-        assert!(prompt.needs_plan(), "ticking a row must ask what it costs");
-        let (ticket, _) = prompt.begin_planning();
+        let (ticket, request) = prompt.begin_planning();
+        prompt.candidates[1].selected = false;
+        assert_eq!(request.len(), 2, "the in-flight plan was dispatched before the untick");
         prompt.apply_plan(
             ticket,
             DownloadPlan {
@@ -5243,8 +5467,9 @@ mod download_prompt_tests {
             },
         );
 
-        assert!(prompt.candidates[1].selected, "the user ticked this row; a later answer must not untick it");
-        assert_eq!(prompt.selected_builds(), BTreeSet::from([9_876, 9_900]));
+        assert!(!prompt.candidates[1].selected, "the user unticked this row; a later answer must not tick it again");
+        assert_eq!(prompt.selected_builds(), BTreeSet::from([9_876]));
+        assert_eq!(prompt.downloadable(), vec![(9_876, "13.5.0".to_string())]);
     }
 
     /// A row keeps whatever answer it has, so the only thing that can get a
