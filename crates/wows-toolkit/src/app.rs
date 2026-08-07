@@ -96,14 +96,13 @@ where
         BTreeSet<PathBuf>,
         task::SendReplayCachePolicy,
         crate::data::wows_data::ReplayDependencies,
-        DataSharingMode,
+        crate::tab_state::SharedPersistedState,
         Arc<parking_lot::RwLock<std::collections::HashSet<String>>>,
         sqlx::SqlitePool,
         Arc<tokio::runtime::Runtime>,
     ) -> task::BackgroundTask,
 {
     let paths = tab_state.open_replay_paths();
-    let data_sharing_mode = tab_state.persisted.read().settings.integrations.data_sharing_mode;
     let (replay_dependencies, db_pool, tokio_runtime) = match shipbuilds_batch_dependencies(tab_state) {
         Ok(dependencies) => dependencies,
         Err(message) => {
@@ -115,7 +114,7 @@ where
         paths,
         cache_policy,
         replay_dependencies,
-        data_sharing_mode,
+        Arc::clone(&tab_state.persisted),
         Arc::clone(&tab_state.sent_replays),
         db_pool,
         tokio_runtime,
@@ -886,8 +885,8 @@ impl WowsToolkitApp {
         crate::ui::theme::install(&cc.egui_ctx);
 
         // Open SQLite database for persisting app state.
-        let default_state: Self = Default::default();
-        let db_pool = match default_state.runtime.block_on(crate::db::open_db()) {
+        let mut state: Self = Default::default();
+        let db_pool = match state.runtime.block_on(crate::db::open_db()) {
             Ok(pool) => Some(pool),
             Err(e) => {
                 error!("Failed to open database: {e}");
@@ -902,37 +901,32 @@ impl WowsToolkitApp {
         // 2. app.ron via eframe (legacy) — then migrate to SQLite
         // 3. Fresh defaults
         let mut had_saved_state = false;
-        let mut state = if let Some(ref pool) = db_pool
-            && default_state.runtime.block_on(crate::db::is_migrated(pool))
+        if let Some(ref pool) = db_pool
+            && state.runtime.block_on(crate::db::is_migrated(pool))
         {
             // Load from SQLite.
             info!("Loading app state from SQLite");
-            let mut saved_state: Self = Default::default();
-            if let Err(e) =
-                saved_state.runtime.block_on(crate::db::load::load_tab_state_from_db(pool, &mut saved_state.tab_state))
+            if let Err(e) = state.runtime.block_on(crate::db::load::load_tab_state_from_db(pool, &mut state.tab_state))
             {
                 error!("Failed to load state from SQLite: {e}");
             } else {
                 had_saved_state = true;
             }
-            saved_state
         } else if let Some(legacy_app) = load_from_app_ron() {
             // Legacy: loaded from app.ron on disk — convert to new structure.
             had_saved_state = true;
 
             let (persisted, player_tracker, sent_replays, replay_sort) = legacy_app.into_new_state();
-            let mut saved_state: Self = Default::default();
-            *saved_state.tab_state.persisted.write() = persisted;
-            saved_state.tab_state.player_tracker = player_tracker;
-            saved_state.tab_state.sent_replays = sent_replays;
-            saved_state.tab_state.replay_sort = replay_sort;
+            *state.tab_state.persisted.write() = persisted;
+            state.tab_state.player_tracker = player_tracker;
+            state.tab_state.sent_replays = sent_replays;
+            state.tab_state.replay_sort = replay_sort;
 
             // Migrate converted data to SQLite.
             if let Some(ref pool) = db_pool {
                 info!("Migrating app.ron data to SQLite...");
-                if let Err(e) = saved_state
-                    .runtime
-                    .block_on(crate::db::migrate_ron::migrate_tab_state_to_db(pool, &saved_state.tab_state))
+                if let Err(e) =
+                    state.runtime.block_on(crate::db::migrate_ron::migrate_tab_state_to_db(pool, &state.tab_state))
                 {
                     error!("Failed to migrate app.ron to SQLite: {e}");
                 }
@@ -950,12 +944,9 @@ impl WowsToolkitApp {
                     }
                 }
             }
-
-            saved_state
         } else {
             warn!("Creating new default app settings");
-            Default::default()
-        };
+        }
 
         // Store the DB pool in the app state.
         state.db_pool = db_pool;
@@ -2845,7 +2836,6 @@ impl WowsToolkitApp {
                             p.settings.app.replay_consent_prompt_shown = true;
                             p.settings.integrations.data_sharing_mode = DataSharingMode::Replays;
                         }
-                        self.tab_state.send_replay_consent_changed();
                     }
                     if ui.button(t!("ui.buttons.keep_current")).clicked() {
                         self.replay_migration_window_open = false;
@@ -4003,7 +3993,6 @@ impl WowsToolkitApp {
             p.settings.app.replay_consent_prompt_shown = true;
             p.settings.integrations.data_sharing_mode = mode;
         }
-        self.tab_state.send_replay_consent_changed();
     }
 
     /// Focus the given dock tab, opening it first if it isn't currently docked.
@@ -5915,7 +5904,7 @@ mod shipbuilds_batch_dispatch_tests {
     }
 
     #[test]
-    fn shipbuilds_dispatch_snapshots_inputs_and_enqueues_the_started_task() {
+    fn shipbuilds_dispatch_keeps_live_consent_and_enqueues_the_started_task() {
         let mut tab_state = ready_tab_state();
         let shared = PathBuf::from("C:/replays/shared.wowsreplay");
         let unique = PathBuf::from("D:/archive/unique.wowsreplay");
@@ -5925,6 +5914,7 @@ mod shipbuilds_batch_dispatch_tests {
             Some(HashMap::from([(shared.clone(), listed_replay()), (unique.clone(), listed_replay())]));
         tab_state.persisted.write().settings.integrations.data_sharing_mode = DataSharingMode::Replays;
         tab_state.persisted.write().settings.app.debug_mode = true;
+        let expected_persisted = Arc::clone(&tab_state.persisted);
         let expected_sent_replays = Arc::clone(&tab_state.sent_replays);
         let expected_client = tab_state.shipbuilds_client.clone();
         let expected_twitch = Arc::clone(&tab_state.twitch_state);
@@ -5937,19 +5927,21 @@ mod shipbuilds_batch_dispatch_tests {
         let result = dispatch_shipbuilds_batch(
             &mut tab_state,
             SendReplayCachePolicy::IgnoreLedger,
-            |paths, policy, deps, mode, sent_replays, pool, runtime| {
-                *captured.borrow_mut() = Some((paths, policy, deps, mode, sent_replays, pool, runtime));
+            |paths, policy, deps, persisted, sent_replays, pool, runtime| {
+                *captured.borrow_mut() = Some((paths, policy, deps, persisted, sent_replays, pool, runtime));
                 BackgroundTask { receiver: None, kind: BackgroundTaskKind::LoadingReplay }
             },
         );
 
         assert_eq!(result, Ok(()));
         assert_eq!(tab_state.background_tasks.len(), 1, "the returned task must be enqueued");
-        let (paths, policy, deps, mode, sent_replays, pool, runtime) =
+        tab_state.persisted.write().settings.integrations.data_sharing_mode = DataSharingMode::Off;
+        let (paths, policy, deps, persisted, sent_replays, pool, runtime) =
             captured.into_inner().expect("the worker starter must be called");
         assert_eq!(paths, BTreeSet::from([shared, unique]));
         assert_eq!(policy, SendReplayCachePolicy::IgnoreLedger);
-        assert_eq!(mode, DataSharingMode::Replays);
+        assert!(Arc::ptr_eq(&persisted, &expected_persisted));
+        assert_eq!(persisted.read().settings.integrations.data_sharing_mode, DataSharingMode::Off);
         assert!(Arc::ptr_eq(&sent_replays, &expected_sent_replays));
         assert!(std::ptr::eq(deps.shipbuilds_client.http(), expected_client.http()));
         assert!(Arc::ptr_eq(&deps.twitch_state, &expected_twitch));

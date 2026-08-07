@@ -7,6 +7,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::data::settings::DataSharingMode;
 use crate::data::shipbuilds::ShipBuildsClient;
+use crate::data::wows_data::ReplayBytes;
 use crate::ui::replay_parser::Replay;
 use crate::util::build_tracker;
 
@@ -46,7 +47,7 @@ impl SendAllReplaysProgress {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayUploadAction {
     /// Upload nothing.
-    Skip,
+    Skip(ReplayUploadSkipReason),
     /// Send the per-player build payloads to `/api/ship_builds`.
     BuildData,
     /// Send the raw replay file to `/api/replays`.
@@ -54,8 +55,14 @@ pub enum ReplayUploadAction {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayUploadSkipReason {
+    SharingDisabled,
+    IneligibleGameType,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShipBuildsUploadOutcome {
-    Skipped,
+    Skipped(ReplayUploadSkipReason),
     Sent,
     TransientFailure,
 }
@@ -69,17 +76,20 @@ pub fn decide_upload_action(
     is_valid_game_type: bool,
     self_confirmed_non_test: bool,
 ) -> ReplayUploadAction {
+    if !is_valid_game_type {
+        return ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType);
+    }
+
     match mode {
-        DataSharingMode::Off => ReplayUploadAction::Skip,
-        DataSharingMode::BuildData if is_valid_game_type => ReplayUploadAction::BuildData,
-        DataSharingMode::Replays if is_valid_game_type => {
+        DataSharingMode::Off => ReplayUploadAction::Skip(ReplayUploadSkipReason::SharingDisabled),
+        DataSharingMode::BuildData => ReplayUploadAction::BuildData,
+        DataSharingMode::Replays => {
             if self_confirmed_non_test {
                 ReplayUploadAction::RawReplay
             } else {
                 ReplayUploadAction::BuildData
             }
         }
-        _ => ReplayUploadAction::Skip,
     }
 }
 
@@ -118,10 +128,11 @@ pub(crate) fn upload_parsed_replay(
     metadata: &GameMetadataProvider,
     mode: DataSharingMode,
     client: &ShipBuildsClient,
+    replay_bytes: ReplayBytes,
 ) -> ShipBuildsUploadOutcome {
     let Some(game_type) = replay.replay_file.meta.gameType.as_ref() else {
         debug!("replay {:?} has no game type and is not eligible for upload", path);
-        return ShipBuildsUploadOutcome::Skipped;
+        return ShipBuildsUploadOutcome::Skipped(ReplayUploadSkipReason::IneligibleGameType);
     };
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay.replay_file.meta.clientVersionFromExe);
     let battle_type = wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
@@ -142,7 +153,7 @@ pub(crate) fn upload_parsed_replay(
         .unwrap_or(false);
 
     match decide_upload_action(mode, is_valid_game_type, self_confirmed_non_test) {
-        ReplayUploadAction::Skip => ShipBuildsUploadOutcome::Skipped,
+        ReplayUploadAction::Skip(reason) => ShipBuildsUploadOutcome::Skipped(reason),
         ReplayUploadAction::BuildData => {
             #[cfg(not(feature = "shipbuilds_debugging"))]
             let url = "https://shipbuilds.com/api/ship_builds";
@@ -177,24 +188,27 @@ pub(crate) fn upload_parsed_replay(
             #[cfg(feature = "shipbuilds_debugging")]
             let url = "http://192.168.1.215:3000/api/replays";
 
-            match std::fs::read(path) {
-                Ok(bytes) => send_shipbuilds_requests(
-                    path,
-                    vec![
-                        client
-                            .http()
-                            .post(url)
-                            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                            .body(bytes),
-                    ],
-                ),
-                Err(error) => {
-                    error!("failed to read replay file for upload {:?}: {:?}", path, error);
-                    ShipBuildsUploadOutcome::TransientFailure
-                }
-            }
+            send_raw_replay_snapshot(path, replay_bytes, client, url)
         }
     }
+}
+
+fn send_raw_replay_snapshot(
+    path: &Path,
+    replay_bytes: ReplayBytes,
+    client: &ShipBuildsClient,
+    url: &str,
+) -> ShipBuildsUploadOutcome {
+    send_shipbuilds_requests(
+        path,
+        vec![
+            client
+                .http()
+                .post(url)
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                .body(replay_bytes.into_vec()),
+        ],
+    )
 }
 
 fn send_shipbuilds_requests(path: &Path, requests: Vec<reqwest::blocking::RequestBuilder>) -> ShipBuildsUploadOutcome {
@@ -430,6 +444,65 @@ mod tests {
     }
 
     #[test]
+    fn raw_upload_uses_the_same_file_snapshot_that_was_parsed() {
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("tests")
+            .join("fixtures")
+            .join("replays")
+            .join("20220124_194638_PISB105-Conte-di-Cavour_22_tierra_del_fuego.wowsreplay");
+        let original = std::fs::read(&fixture).unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("race.wowsreplay");
+        std::fs::write(&path, &original).unwrap();
+        let snapshot = crate::data::wows_data::ReplayFileSnapshot::read(&path).unwrap();
+        assert!(!snapshot.replay_file.meta.clientVersionFromExe.is_empty());
+        std::fs::write(&path, b"replacement bytes").unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (body_tx, body_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 16 * 1024];
+            let (header_end, content_length) = loop {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "request ended before its body arrived");
+                request.extend_from_slice(&buffer[..read]);
+                let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
+                    continue;
+                };
+                let header_end = header_end + 4;
+                let headers = std::str::from_utf8(&request[..header_end]).unwrap();
+                let content_length = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length").then(|| value.trim().parse::<usize>().unwrap())
+                    })
+                    .expect("raw replay request has a content length");
+                break (header_end, content_length);
+            };
+            while request.len() < header_end + content_length {
+                let read = stream.read(&mut buffer).unwrap();
+                assert_ne!(read, 0, "request ended before its declared body length");
+                request.extend_from_slice(&buffer[..read]);
+            }
+            body_tx.send(request[header_end..header_end + content_length].to_vec()).unwrap();
+            write!(stream, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        });
+        let client = ShipBuildsClient::new().unwrap();
+
+        let outcome = send_raw_replay_snapshot(&path, snapshot.bytes, &client, &url);
+
+        server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::Sent);
+        assert_eq!(body_rx.recv_timeout(Duration::from_secs(5)).unwrap(), original);
+    }
+
+    #[test]
     fn normal_policy_skips_ledger_entries_but_debug_policy_does_not() {
         assert!(!SendReplayCachePolicy::UseLedger.should_attempt(true));
         assert!(SendReplayCachePolicy::UseLedger.should_attempt(false));
@@ -446,15 +519,26 @@ mod tests {
     fn off_never_uploads() {
         for valid in [true, false] {
             for non_test in [true, false] {
-                assert_eq!(decide_upload_action(DataSharingMode::Off, valid, non_test), ReplayUploadAction::Skip);
+                let expected = if valid {
+                    ReplayUploadAction::Skip(ReplayUploadSkipReason::SharingDisabled)
+                } else {
+                    ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType)
+                };
+                assert_eq!(decide_upload_action(DataSharingMode::Off, valid, non_test), expected);
             }
         }
     }
 
     #[test]
     fn invalid_game_type_never_uploads() {
-        assert_eq!(decide_upload_action(DataSharingMode::BuildData, false, true), ReplayUploadAction::Skip);
-        assert_eq!(decide_upload_action(DataSharingMode::Replays, false, true), ReplayUploadAction::Skip);
+        assert_eq!(
+            decide_upload_action(DataSharingMode::BuildData, false, true),
+            ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType)
+        );
+        assert_eq!(
+            decide_upload_action(DataSharingMode::Replays, false, true),
+            ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType)
+        );
     }
 
     #[test]

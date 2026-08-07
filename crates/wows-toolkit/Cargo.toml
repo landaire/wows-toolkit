@@ -63,6 +63,7 @@ flate2 = { workspace = true }
 thousands = "0.2.0"
 notify = "8.2.0"
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
 image = { workspace = true, features = ["jpeg", "png"] }
 image_dds = { workspace = true, features = ["ddsfile", "image"] }
 octocrab = "0.49"

@@ -94,7 +94,6 @@ impl ToolkitTabViewer<'_> {
                     .changed();
                 if mode_changed {
                     self.tab_state.persisted.write().settings.integrations.data_sharing_mode = mode;
-                    self.tab_state.send_replay_consent_changed();
                 }
                 ui.horizontal(|ui| {
                     let mut zoom = ui.ctx().zoom_factor();

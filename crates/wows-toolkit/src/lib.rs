@@ -40,6 +40,8 @@ pub(crate) use timed_stage;
 pub(crate) mod replay;
 mod tab_state;
 mod task;
+#[cfg(test)]
+mod test_utils;
 mod twitch;
 mod ui;
 pub(crate) mod util;

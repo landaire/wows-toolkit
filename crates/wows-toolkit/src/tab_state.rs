@@ -1100,14 +1100,6 @@ impl TabState {
         );
     }
 
-    pub(crate) fn send_replay_consent_changed(&self) {
-        let mode = self.persisted.read().settings.integrations.data_sharing_mode;
-        let _ = self
-            .background_parser_tx
-            .as_ref()
-            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::DataSharingModeChanged(mode)));
-    }
-
     pub(crate) fn try_update_replays(&mut self) {
         // Sometimes we parse the replay too early. Let's try to parse it a couple times
         let parser_lock_arc = Arc::clone(&self.parser_lock);
@@ -1410,7 +1402,7 @@ impl TabState {
                 wows_data_map,
                 shipbuilds_client: self.shipbuilds_client.clone(),
                 twitch_state: Arc::clone(&self.twitch_state),
-                data_sharing_mode: p.settings.integrations.data_sharing_mode,
+                persisted: Arc::clone(&self.persisted),
                 data_export_settings: DataExportSettings {
                     should_auto_export: p.settings.replay.auto_export_data,
                     export_path: PathBuf::from(p.settings.replay.auto_export_path.clone()),
@@ -1428,7 +1420,7 @@ impl TabState {
                 unindexable: crate::data::replay_reconcile::Unindexable::default(),
             };
             drop(p);
-            crate::task::start_background_parsing_thread(background_thread_data);
+            let _ = crate::task::start_background_parsing_thread(background_thread_data);
         }
 
         let mut watcher =
