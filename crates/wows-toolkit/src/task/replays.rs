@@ -740,20 +740,17 @@ fn parse_replay_data_in_background(
                     replay.game_constants = Some(gc);
                     replay.source_path = Some(path.to_path_buf());
                     let mut parsed_ok = false;
-                    let mut upload_transient = false;
+                    let mut upload_outcome = ShipBuildsUploadOutcome::Sent;
                     match replay.parse(game_version.to_string().as_str()) {
                         Ok(report) => {
                             if !replay_parsed_before {
-                                upload_transient = matches!(
-                                    upload_parsed_replay(
-                                        path,
-                                        &replay,
-                                        &report,
-                                        metadata_provider.as_ref(),
-                                        data.data_sharing_mode,
-                                        shipbuilds_client,
-                                    ),
-                                    ShipBuildsUploadOutcome::TransientFailure
+                                upload_outcome = upload_parsed_replay(
+                                    path,
+                                    &replay,
+                                    &report,
+                                    metadata_provider.as_ref(),
+                                    data.data_sharing_mode,
+                                    shipbuilds_client,
                                 );
 
                                 data.player_tracker.write().update_from_replay(&replay);
@@ -768,8 +765,8 @@ fn parse_replay_data_in_background(
                                 .is_some_and(|e| matches!(e, ToolkitError::ReplayVersionMismatch { .. })) =>
                         {
                             // The replay's version can't be parsed with this build's data.
-                            // Not a malformed replay: don't blacklist, just stop retrying.
-                            return ParseOutcome::ParsedAndSent;
+                            // It is not malformed, so do not blacklist it.
+                            return ParseOutcome::ParsedAndSkipped;
                         }
                         Err(e) => {
                             error!("error parsing background replay: {:?}", e);
@@ -859,14 +856,7 @@ fn parse_replay_data_in_background(
                     }
 
                     if parsed_ok {
-                        // Indexing already happened above (independent of upload). The
-                        // upload either completed or hit a transient error; only the
-                        // former marks the file sent.
-                        return if upload_transient {
-                            ParseOutcome::ParsedNotSent
-                        } else {
-                            ParseOutcome::ParsedAndSent
-                        };
+                        return parse_outcome_for_upload(upload_outcome);
                     }
                 } else {
                     // Game data for this build isn't loaded yet; retry next launch.
@@ -881,6 +871,14 @@ fn parse_replay_data_in_background(
     }
 
     ParseOutcome::HardFailure
+}
+
+fn parse_outcome_for_upload(outcome: ShipBuildsUploadOutcome) -> ParseOutcome {
+    match outcome {
+        ShipBuildsUploadOutcome::Skipped => ParseOutcome::ParsedAndSkipped,
+        ShipBuildsUploadOutcome::Sent => ParseOutcome::ParsedAndSent,
+        ShipBuildsUploadOutcome::TransientFailure => ParseOutcome::ParsedNotSent,
+    }
 }
 
 pub use wows_toolkit_config::ReplayExportFormat;
@@ -1025,11 +1023,12 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                         );
 
                         match outcome {
-                            // Parsed: mark sent only when the upload also completed. A
-                            // transient upload failure (sent == false) is left for retry
-                            // but must not be blacklisted -- it was indexed regardless.
-                            crate::data::replay_reconcile::FileOutcome::Parsed { sent: upload_sent } => {
-                                if upload_sent && !sent {
+                            // Mark sent only when the upload completed. Skipped and
+                            // retryable uploads remain distinct but do not enter the ledger.
+                            crate::data::replay_reconcile::FileOutcome::Parsed {
+                                upload: crate::data::replay_reconcile::ParsedUploadDisposition::Sent,
+                            } => {
+                                if !sent {
                                     data.sent_replays.write().insert(path_str.into_owned());
                                 }
                             }
@@ -1041,7 +1040,8 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                             }
                             // Retryable (no game data yet) or already satisfied: no-op.
                             crate::data::replay_reconcile::FileOutcome::Transient
-                            | crate::data::replay_reconcile::FileOutcome::Skipped => {}
+                            | crate::data::replay_reconcile::FileOutcome::Skipped
+                            | crate::data::replay_reconcile::FileOutcome::Parsed { .. } => {}
                         }
                     }
 
@@ -1090,7 +1090,9 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                             }),
                         );
                         match outcome {
-                            crate::data::replay_reconcile::FileOutcome::Parsed { sent: true } => {
+                            crate::data::replay_reconcile::FileOutcome::Parsed {
+                                upload: crate::data::replay_reconcile::ParsedUploadDisposition::Sent,
+                            } => {
                                 data.sent_replays.write().insert(path_str.into_owned());
                             }
                             crate::data::replay_reconcile::FileOutcome::HardFailure => {
@@ -1101,9 +1103,9 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) {
                                     warn!("failed to persist unindexable replay set: {e}");
                                 }
                             }
-                            crate::data::replay_reconcile::FileOutcome::Parsed { sent: false }
-                            | crate::data::replay_reconcile::FileOutcome::Transient
+                            crate::data::replay_reconcile::FileOutcome::Transient
                             | crate::data::replay_reconcile::FileOutcome::Skipped => {}
+                            crate::data::replay_reconcile::FileOutcome::Parsed { .. } => {}
                         }
                     }
                 }
@@ -1344,7 +1346,7 @@ where
         let ledger_contains = { sent_replays.read().contains(path_text.as_ref()) };
         if cache_policy.should_attempt(ledger_contains) {
             attempted.0 += 1;
-            match upload(&path) {
+            let processing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match upload(&path) {
                 ShipBuildsUploadOutcome::Skipped | ShipBuildsUploadOutcome::TransientFailure => {}
                 ShipBuildsUploadOutcome::Sent => {
                     sent.0 += 1;
@@ -1353,6 +1355,9 @@ where
                         error!("ShipBuilds upload completed but sent-replay persistence failed: {:?}", error);
                     }
                 }
+            }));
+            if processing.is_err() {
+                error!("ShipBuilds replay processing panicked for {}; continuing the batch", path.display());
             }
         }
 
@@ -2384,6 +2389,54 @@ mod tests {
         }
 
         #[test]
+        fn a_panicking_replay_does_not_abort_the_remaining_batch() {
+            let previous_hook = std::panic::take_hook();
+            std::panic::set_hook(Box::new(|_| {}));
+            let result = run_test_batch(
+                BTreeSet::from([path("panic"), path("sent")]),
+                SendReplayCachePolicy::UseLedger,
+                ledger([]),
+                |path| {
+                    if path.ends_with("panic") {
+                        panic!("bad replay");
+                    }
+                    TestOutcome::Sent
+                },
+            );
+            std::panic::set_hook(previous_hook);
+
+            assert_eq!(result.attempted, ReplayCount(2));
+            assert_eq!(result.sent, ReplayCount(1));
+            assert_eq!(result.progress, vec![progress(1, 2), progress(2, 2)]);
+            assert_eq!(result.sent_paths, HashSet::from(["sent".to_owned()]));
+        }
+
+        #[test]
+        fn a_panicking_persistence_attempt_does_not_abort_the_remaining_batch() {
+            let sent_replays = ledger([]);
+            let (progress_tx, progress_rx) = mpsc::channel();
+            let completion = run_send_all_replays_to_shipbuilds(
+                BTreeSet::from([path("first"), path("second")]),
+                SendReplayCachePolicy::UseLedger,
+                sent_replays.as_ref(),
+                &progress_tx,
+                |_| ShipBuildsUploadOutcome::Sent,
+                |path| {
+                    if path.ends_with("first") {
+                        panic!("persistence panic");
+                    }
+                    Ok(())
+                },
+            );
+            drop(progress_tx);
+
+            assert_eq!(completion.attempted, ReplayCount(2));
+            assert_eq!(completion.sent, ReplayCount(2));
+            assert_eq!(progress_rx.into_iter().collect::<Vec<_>>(), vec![progress(1, 2), progress(2, 2)]);
+            assert_eq!(&*sent_replays.read(), &HashSet::from(["first".to_owned(), "second".to_owned()]));
+        }
+
+        #[test]
         fn a_successful_send_path_is_persisted_in_sqlite() {
             let runtime = tokio::runtime::Runtime::new().unwrap();
             let pool = runtime
@@ -2400,6 +2453,57 @@ mod tests {
                 vec!["persisted.wowsreplay".to_owned()]
             );
         }
+
+        #[test]
+        fn an_empty_worker_reports_initial_progress_and_completion() {
+            let runtime = Arc::new(tokio::runtime::Runtime::new().unwrap());
+            let pool =
+                runtime.block_on(SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:")).unwrap();
+            runtime
+                .block_on(sqlx::query("CREATE TABLE sent_replays (replay_path TEXT PRIMARY KEY)").execute(&pool))
+                .unwrap();
+            let (background_task_sender, _) = mpsc::channel();
+            let deps = ReplayDependencies {
+                wows_data_map: crate::data::wows_data::WoWsDataMap::new(PathBuf::new(), "en".to_owned(), String::new()),
+                shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient::new().unwrap(),
+                twitch_state: Arc::new(RwLock::new(crate::twitch::TwitchState::default())),
+                replay_sort: Arc::new(Mutex::new(SortOrder::default())),
+                background_task_sender,
+                is_debug_mode: false,
+                personal_rating_data: Arc::new(RwLock::new(crate::util::personal_rating::PersonalRatingData::new())),
+            };
+
+            let mut task = start_send_all_replays_to_shipbuilds(
+                BTreeSet::new(),
+                SendReplayCachePolicy::UseLedger,
+                deps,
+                DataSharingMode::Off,
+                ledger([]),
+                pool,
+                runtime,
+            );
+            let progress_rx = match task.kind {
+                BackgroundTaskKind::SendingReplaysToShipBuilds { rx, .. } => rx,
+                _ => panic!("unexpected task kind"),
+            };
+            assert_eq!(progress_rx.recv_timeout(Duration::from_secs(5)).unwrap(), progress(0, 0));
+            let completion = task.receiver.take().unwrap().recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            assert!(matches!(
+                completion,
+                BackgroundTaskCompletion::ReplaysSentToShipBuilds {
+                    attempted: ReplayCount(0),
+                    sent: ReplayCount(0),
+                    total: ReplayCount(0),
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn upload_outcome_preserves_skipped_sent_and_retryable_states() {
+        assert_eq!(parse_outcome_for_upload(ShipBuildsUploadOutcome::Skipped), ParseOutcome::ParsedAndSkipped);
+        assert_eq!(parse_outcome_for_upload(ShipBuildsUploadOutcome::Sent), ParseOutcome::ParsedAndSent);
+        assert_eq!(parse_outcome_for_upload(ShipBuildsUploadOutcome::TransientFailure), ParseOutcome::ParsedNotSent);
     }
 
     /// Creates `root/relative`, including any parent directories.

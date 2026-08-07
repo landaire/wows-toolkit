@@ -91,8 +91,10 @@ pub(crate) fn upload_parsed_replay(
     mode: DataSharingMode,
     client: &ShipBuildsClient,
 ) -> ShipBuildsUploadOutcome {
-    // A missing game type remains ineligible because the empty value is unknown.
-    let game_type = replay.replay_file.meta.gameType.clone().unwrap_or_default();
+    let Some(game_type) = replay.replay_file.meta.gameType.as_ref() else {
+        debug!("replay {:?} has no game type and is not eligible for upload", path);
+        return ShipBuildsUploadOutcome::Skipped;
+    };
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay.replay_file.meta.clientVersionFromExe);
     let battle_type = wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
     let is_valid_game_type = matches!(
@@ -114,9 +116,11 @@ pub(crate) fn upload_parsed_replay(
     match decide_upload_action(mode, is_valid_game_type, self_confirmed_non_test) {
         ReplayUploadAction::Skip => ShipBuildsUploadOutcome::Skipped,
         ReplayUploadAction::BuildData => {
+            let mut requests = Vec::new();
             for player in report.players().iter().filter(|player| !player.is_bot()) {
                 let Some(realm) = player.initial_state().realm() else {
-                    continue;
+                    error!("failed to build ShipBuilds payload for replay {:?}: player realm is missing", path);
+                    return ShipBuildsUploadOutcome::TransientFailure;
                 };
                 #[cfg(not(feature = "shipbuilds_debugging"))]
                 let url = "https://shipbuilds.com/api/ship_builds";
@@ -127,21 +131,20 @@ pub(crate) fn upload_parsed_replay(
                     player,
                     realm.to_string(),
                     report.version(),
-                    game_type.to_string(),
+                    game_type.clone(),
                     metadata,
                 ) {
-                    if let Err(error) = client.http().post(url).json(&payload).send() {
-                        error!("error sending request for replay {:?}: {:?}", path, error);
-                        if error.is_connect() {
-                            return ShipBuildsUploadOutcome::TransientFailure;
-                        }
-                    }
+                    requests.push(client.http().post(url).json(&payload));
                 } else {
-                    error!("no vehicle entity for player?");
+                    error!("failed to build ShipBuilds payload for replay {:?}: player vehicle is missing", path);
+                    return ShipBuildsUploadOutcome::TransientFailure;
                 }
             }
-            debug!("Successfully sent all builds");
-            ShipBuildsUploadOutcome::Sent
+            let outcome = send_shipbuilds_requests(path, requests);
+            if outcome == ShipBuildsUploadOutcome::Sent {
+                debug!("Successfully sent all builds");
+            }
+            outcome
         }
         ReplayUploadAction::RawReplay => {
             #[cfg(not(feature = "shipbuilds_debugging"))]
@@ -150,33 +153,153 @@ pub(crate) fn upload_parsed_replay(
             let url = "http://192.168.1.215:3000/api/replays";
 
             match std::fs::read(path) {
-                Ok(bytes) => {
-                    if let Err(error) = client
-                        .http()
-                        .post(url)
-                        .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                        .body(bytes)
-                        .send()
-                    {
-                        error!("error sending replay {:?}: {:?}", path, error);
-                        if error.is_connect() {
-                            return ShipBuildsUploadOutcome::TransientFailure;
-                        }
-                    }
-                }
+                Ok(bytes) => send_shipbuilds_requests(
+                    path,
+                    vec![
+                        client
+                            .http()
+                            .post(url)
+                            .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                            .body(bytes),
+                    ],
+                ),
                 Err(error) => {
                     error!("failed to read replay file for upload {:?}: {:?}", path, error);
-                    return ShipBuildsUploadOutcome::TransientFailure;
+                    ShipBuildsUploadOutcome::TransientFailure
                 }
             }
-            ShipBuildsUploadOutcome::Sent
         }
     }
 }
 
+fn send_shipbuilds_requests(path: &Path, requests: Vec<reqwest::blocking::RequestBuilder>) -> ShipBuildsUploadOutcome {
+    if requests.is_empty() {
+        error!("no valid ShipBuilds payloads for replay {:?}", path);
+        return ShipBuildsUploadOutcome::TransientFailure;
+    }
+
+    for request in requests {
+        match request.send() {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                error!("ShipBuilds rejected replay {:?} with HTTP {}", path, response.status());
+                return ShipBuildsUploadOutcome::TransientFailure;
+            }
+            Err(error) => {
+                error!("error sending replay {:?}: {:?}", path, error);
+                return ShipBuildsUploadOutcome::TransientFailure;
+            }
+        }
+    }
+
+    ShipBuildsUploadOutcome::Sent
+}
+
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+    use std::io::Write;
+    use std::net::TcpListener;
+    use std::sync::mpsc;
+    use std::time::Duration;
+
     use super::*;
+
+    fn status_server(statuses: &[u16]) -> (String, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let statuses = statuses.to_vec();
+        let handle = std::thread::spawn(move || {
+            for status in statuses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = [0; 4096];
+                let _ = stream.read(&mut request).unwrap();
+                let reason = if (200..300).contains(&status) { "OK" } else { "Error" };
+                write!(stream, "HTTP/1.1 {status} {reason}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            }
+        });
+        (format!("http://{address}"), handle)
+    }
+
+    #[test]
+    fn every_2xx_request_is_a_completed_send() {
+        let (url, server) = status_server(&[200, 204]);
+        let client = reqwest::blocking::Client::new();
+
+        let outcome = send_shipbuilds_requests(
+            Path::new("success.wowsreplay"),
+            vec![client.post(&url).body("first"), client.post(&url).body("second")],
+        );
+
+        server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::Sent);
+    }
+
+    #[test]
+    fn an_http_error_response_is_retryable() {
+        for status in [302, 400, 500] {
+            let (url, server) = status_server(&[status]);
+            let client = reqwest::blocking::Client::new();
+
+            let outcome =
+                send_shipbuilds_requests(Path::new("http-error.wowsreplay"), vec![client.post(&url).body("request")]);
+
+            server.join().unwrap();
+            assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure, "HTTP {status}");
+        }
+    }
+
+    #[test]
+    fn a_partial_build_upload_is_retryable() {
+        let (url, server) = status_server(&[200, 500]);
+        let client = reqwest::blocking::Client::new();
+
+        let outcome = send_shipbuilds_requests(
+            Path::new("partial.wowsreplay"),
+            vec![client.post(&url).body("first"), client.post(&url).body("second")],
+        );
+
+        server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+    }
+
+    #[test]
+    fn an_empty_build_request_set_is_retryable() {
+        let outcome = send_shipbuilds_requests(Path::new("empty.wowsreplay"), Vec::new());
+
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+    }
+
+    #[test]
+    fn a_request_error_is_retryable() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        drop(listener);
+        let client = reqwest::blocking::Client::new();
+
+        let outcome =
+            send_shipbuilds_requests(Path::new("request-error.wowsreplay"), vec![client.post(url).body("request")]);
+
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+    }
+
+    #[test]
+    fn a_timeout_is_retryable() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (release_tx, release_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            let _ = release_rx.recv();
+        });
+        let client = reqwest::blocking::Client::builder().timeout(Duration::from_millis(25)).build().unwrap();
+
+        let outcome = send_shipbuilds_requests(Path::new("timeout.wowsreplay"), vec![client.post(url).body("request")]);
+
+        let _ = release_tx.send(());
+        server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+    }
 
     #[test]
     fn normal_policy_skips_ledger_entries_but_debug_policy_does_not() {

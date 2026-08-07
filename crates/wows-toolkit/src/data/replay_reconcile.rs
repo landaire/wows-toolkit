@@ -15,8 +15,10 @@ use tracing::warn;
 /// only the former.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParseOutcome {
-    /// Parsed successfully and the upload completed (or was not required).
+    /// Parsed successfully and the upload completed.
     ParsedAndSent,
+    /// Parsed successfully, but the replay was not eligible for upload.
+    ParsedAndSkipped,
     /// Parsed successfully (and indexed) but the upload hit a transient error.
     /// Left unsent so the upload is retried next launch.
     ParsedNotSent,
@@ -27,13 +29,21 @@ pub enum ParseOutcome {
     HardFailure,
 }
 
+/// Upload disposition retained after a successful replay parse.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParsedUploadDisposition {
+    Sent,
+    Skipped,
+    Retryable,
+}
+
 /// Reconciliation decision for one replay file, consumed by the startup scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FileOutcome {
     /// Both ledgers already satisfied; the parse closure was not run.
     Skipped,
-    /// Parsed successfully. `sent` is true when the upload also completed.
-    Parsed { sent: bool },
+    /// Parsed successfully with the upload disposition preserved.
+    Parsed { upload: ParsedUploadDisposition },
     /// A retryable condition; leave the file for a later launch, do not blacklist.
     Transient,
     /// A hard parse failure or a panic; record in the persistent blacklist.
@@ -52,8 +62,9 @@ where
         return FileOutcome::Skipped;
     }
     match catch_unwind(parse_and_index) {
-        Ok(ParseOutcome::ParsedAndSent) => FileOutcome::Parsed { sent: true },
-        Ok(ParseOutcome::ParsedNotSent) => FileOutcome::Parsed { sent: false },
+        Ok(ParseOutcome::ParsedAndSent) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Sent },
+        Ok(ParseOutcome::ParsedAndSkipped) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Skipped },
+        Ok(ParseOutcome::ParsedNotSent) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Retryable },
         Ok(ParseOutcome::Transient) => FileOutcome::Transient,
         Ok(ParseOutcome::HardFailure) => {
             warn!("failed to parse replay {} (blacklisted)", path.display());
@@ -153,7 +164,13 @@ mod tests {
     #[test]
     fn a_parsed_but_unsent_replay_is_not_blacklisted() {
         let out = reconcile_one(Path::new("p"), false, false, AssertUnwindSafe(|| ParseOutcome::ParsedNotSent));
-        assert_eq!(out, FileOutcome::Parsed { sent: false });
+        assert_eq!(out, FileOutcome::Parsed { upload: ParsedUploadDisposition::Retryable });
+    }
+
+    #[test]
+    fn a_parsed_replay_with_a_skipped_upload_is_not_marked_sent() {
+        let out = reconcile_one(Path::new("p"), false, false, AssertUnwindSafe(|| ParseOutcome::ParsedAndSkipped));
+        assert_eq!(out, FileOutcome::Parsed { upload: ParsedUploadDisposition::Skipped });
     }
 
     #[test]
@@ -164,7 +181,7 @@ mod tests {
         std::panic::set_hook(prev);
         let good = reconcile_one(Path::new("c"), false, false, AssertUnwindSafe(|| ParseOutcome::ParsedAndSent));
         assert_eq!(bad, FileOutcome::HardFailure);
-        assert_eq!(good, FileOutcome::Parsed { sent: true });
+        assert_eq!(good, FileOutcome::Parsed { upload: ParsedUploadDisposition::Sent });
     }
 
     #[test]
