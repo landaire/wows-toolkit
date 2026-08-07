@@ -24,11 +24,12 @@ pub fn async_client() -> reqwest::Result<reqwest::Client> {
 }
 
 /// Blocking client with connect + total-request timeouts, for small requests.
-pub fn blocking_client() -> reqwest::Result<reqwest::blocking::Client> {
+pub fn blocking_client(redirect_policy: reqwest::redirect::Policy) -> reqwest::Result<reqwest::blocking::Client> {
     reqwest::blocking::Client::builder()
         .user_agent(USER_AGENT)
         .connect_timeout(CONNECT_TIMEOUT)
         .timeout(BLOCKING_TIMEOUT)
+        .redirect(redirect_policy)
         .build()
 }
 

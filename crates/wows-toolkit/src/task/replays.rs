@@ -1356,8 +1356,12 @@ where
                     }
                 }
             }));
-            if processing.is_err() {
-                error!("ShipBuilds replay processing panicked for {}; continuing the batch", path.display());
+            if let Err(payload) = processing {
+                error!(
+                    "ShipBuilds replay processing panicked for {}: {}; continuing the batch",
+                    path.display(),
+                    panic_payload_message(payload.as_ref())
+                );
             }
         }
 
@@ -1365,6 +1369,16 @@ where
     }
 
     SendAllReplaysBatchResult { attempted, sent, total }
+}
+
+fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&str>() {
+        (*message).to_owned()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_owned()
+    }
 }
 
 /// Parse and index a single replay for the on-demand "Index all replays" pass.
@@ -2256,6 +2270,41 @@ mod tests {
             sent_paths: HashSet<String>,
         }
 
+        #[cfg(feature = "logging")]
+        #[derive(Clone, Default)]
+        struct CapturedLog(Arc<std::sync::Mutex<Vec<u8>>>);
+
+        #[cfg(feature = "logging")]
+        impl std::io::Write for CapturedLog {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap_or_else(|error| error.into_inner()).extend_from_slice(buf);
+                Ok(buf.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        #[cfg(feature = "logging")]
+        impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for CapturedLog {
+            type Writer = Self;
+
+            fn make_writer(&'a self) -> Self::Writer {
+                self.clone()
+            }
+        }
+
+        #[cfg(feature = "logging")]
+        fn captured_log(body: impl FnOnce()) -> String {
+            let captured = CapturedLog::default();
+            let subscriber =
+                tracing_subscriber::fmt().with_writer(captured.clone()).with_ansi(false).without_time().finish();
+            tracing::subscriber::with_default(subscriber, body);
+            let bytes = captured.0.lock().unwrap_or_else(|error| error.into_inner()).clone();
+            String::from_utf8_lossy(&bytes).into_owned()
+        }
+
         fn path(name: &str) -> PathBuf {
             PathBuf::from(name)
         }
@@ -2409,6 +2458,25 @@ mod tests {
             assert_eq!(result.sent, ReplayCount(1));
             assert_eq!(result.progress, vec![progress(1, 2), progress(2, 2)]);
             assert_eq!(result.sent_paths, HashSet::from(["sent".to_owned()]));
+        }
+
+        #[test]
+        #[cfg(feature = "logging")]
+        fn a_panicking_replay_logs_its_path_and_payload() {
+            let log = captured_log(|| {
+                let (progress_tx, _) = mpsc::channel();
+                run_send_all_replays_to_shipbuilds(
+                    BTreeSet::from([path("panic-payload.wowsreplay")]),
+                    SendReplayCachePolicy::UseLedger,
+                    ledger([]).as_ref(),
+                    &progress_tx,
+                    |_| panic!("payload evidence"),
+                    |_| Ok(()),
+                );
+            });
+
+            assert!(log.contains("panic-payload.wowsreplay"), "{log}");
+            assert!(log.contains("payload evidence"), "{log}");
         }
 
         #[test]

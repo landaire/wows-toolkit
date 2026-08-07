@@ -7,7 +7,8 @@ pub struct ShipBuildsClient {
 
 impl ShipBuildsClient {
     pub fn new() -> Result<Self, reqwest::Error> {
-        crate::util::http::blocking_client().map(|http| Self { http: Arc::new(http) })
+        // Upload and match-stats callers classify 3xx responses explicitly.
+        crate::util::http::blocking_client(reqwest::redirect::Policy::none()).map(|http| Self { http: Arc::new(http) })
     }
 
     pub fn http(&self) -> &reqwest::blocking::Client {

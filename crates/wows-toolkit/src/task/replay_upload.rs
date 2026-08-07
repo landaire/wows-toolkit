@@ -250,6 +250,62 @@ mod tests {
     }
 
     #[test]
+    fn a_location_redirect_is_not_followed_or_sent() {
+        let target_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        target_listener.set_nonblocking(true).unwrap();
+        let target_url = format!("http://{}", target_listener.local_addr().unwrap());
+        let (stop_target_tx, stop_target_rx) = mpsc::channel();
+        let (target_hit_tx, target_hit_rx) = mpsc::channel();
+        let target_server = std::thread::spawn(move || {
+            loop {
+                match target_listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        let mut request = [0; 4096];
+                        let _ = stream.read(&mut request).unwrap();
+                        write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+                        target_hit_tx.send(true).unwrap();
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if stop_target_rx.try_recv().is_ok() {
+                            target_hit_tx.send(false).unwrap();
+                            return;
+                        }
+                        std::thread::yield_now();
+                    }
+                    Err(error) => panic!("target accept failed: {error}"),
+                }
+            }
+        });
+
+        let redirect_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect_url = format!("http://{}", redirect_listener.local_addr().unwrap());
+        let redirect_server = std::thread::spawn(move || {
+            let (mut stream, _) = redirect_listener.accept().unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 302 Found\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+        let client = ShipBuildsClient::new().unwrap();
+
+        let outcome = send_shipbuilds_requests(
+            Path::new("redirect.wowsreplay"),
+            vec![client.http().post(redirect_url).body("request")],
+        );
+
+        redirect_server.join().unwrap();
+        let _ = stop_target_tx.send(());
+        target_server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+        assert!(!target_hit_rx.recv_timeout(Duration::from_secs(5)).unwrap());
+    }
+
+    #[test]
     fn a_partial_build_upload_is_retryable() {
         let (url, server) = status_server(&[200, 500]);
         let client = reqwest::blocking::Client::new();
