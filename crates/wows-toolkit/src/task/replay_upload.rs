@@ -83,6 +83,34 @@ pub fn decide_upload_action(
     }
 }
 
+pub(crate) fn build_shipbuilds_payload<T>(
+    replay_path: Option<&Path>,
+    player_id: wows_replays::types::AccountId,
+    realm: Option<&str>,
+    build: impl FnOnce(String) -> Option<T>,
+) -> Option<T> {
+    let Some(realm) = realm.filter(|realm| !realm.trim().is_empty()) else {
+        error!(?replay_path, %player_id, "skipping ShipBuilds player because realm is missing or empty");
+        return None;
+    };
+
+    let payload = build(realm.to_owned());
+    if payload.is_none() {
+        error!(?replay_path, %player_id, "skipping ShipBuilds player because build data is unavailable");
+    }
+    payload
+}
+
+pub(crate) fn send_shipbuilds_payloads<T: serde::Serialize>(
+    replay_path: Option<&Path>,
+    payloads: impl IntoIterator<Item = Option<T>>,
+    client: &ShipBuildsClient,
+    url: &str,
+) -> ShipBuildsUploadOutcome {
+    let requests = payloads.into_iter().flatten().map(|payload| client.http().post(url).json(&payload)).collect();
+    send_shipbuilds_requests_for_replay(replay_path, requests)
+}
+
 pub(crate) fn upload_parsed_replay(
     path: &Path,
     replay: &Replay,
@@ -116,31 +144,28 @@ pub(crate) fn upload_parsed_replay(
     match decide_upload_action(mode, is_valid_game_type, self_confirmed_non_test) {
         ReplayUploadAction::Skip => ShipBuildsUploadOutcome::Skipped,
         ReplayUploadAction::BuildData => {
-            let mut requests = Vec::new();
-            for player in report.players().iter().filter(|player| !player.is_bot()) {
-                let Some(realm) = player.initial_state().realm() else {
-                    error!("failed to build ShipBuilds payload for replay {:?}: player realm is missing", path);
-                    return ShipBuildsUploadOutcome::TransientFailure;
-                };
-                #[cfg(not(feature = "shipbuilds_debugging"))]
-                let url = "https://shipbuilds.com/api/ship_builds";
-                #[cfg(feature = "shipbuilds_debugging")]
-                let url = "http://192.168.1.215:3000/api/ship_builds";
+            #[cfg(not(feature = "shipbuilds_debugging"))]
+            let url = "https://shipbuilds.com/api/ship_builds";
+            #[cfg(feature = "shipbuilds_debugging")]
+            let url = "http://192.168.1.215:3000/api/ship_builds";
 
-                if let Some(payload) = build_tracker::BuildTrackerPayload::build_from(
-                    player,
-                    realm.to_string(),
-                    report.version(),
-                    game_type.clone(),
-                    metadata,
-                ) {
-                    requests.push(client.http().post(url).json(&payload));
-                } else {
-                    error!("failed to build ShipBuilds payload for replay {:?}: player vehicle is missing", path);
-                    return ShipBuildsUploadOutcome::TransientFailure;
-                }
-            }
-            let outcome = send_shipbuilds_requests(path, requests);
+            let payloads = report.players().iter().filter(|player| !player.is_bot()).map(|player| {
+                build_shipbuilds_payload(
+                    Some(path),
+                    player.initial_state().db_id(),
+                    player.initial_state().realm(),
+                    |realm| {
+                        build_tracker::BuildTrackerPayload::build_from(
+                            player,
+                            realm,
+                            report.version(),
+                            game_type.clone(),
+                            metadata,
+                        )
+                    },
+                )
+            });
+            let outcome = send_shipbuilds_payloads(Some(path), payloads, client, url);
             if outcome == ShipBuildsUploadOutcome::Sent {
                 debug!("Successfully sent all builds");
             }
@@ -331,6 +356,46 @@ mod tests {
         let outcome = send_shipbuilds_requests(Path::new("empty.wowsreplay"), Vec::new());
 
         assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+    }
+
+    #[test]
+    fn a_missing_realm_skips_payload_construction_for_that_player() {
+        let payload = build_shipbuilds_payload(
+            Some(Path::new("missing-realm.wowsreplay")),
+            wows_replays::types::AccountId(42),
+            None,
+            |_| -> Option<serde_json::Value> { panic!("payload builder must not receive an invented realm") },
+        );
+
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn an_empty_realm_skips_payload_construction_for_that_player() {
+        let payload = build_shipbuilds_payload(
+            Some(Path::new("empty-realm.wowsreplay")),
+            wows_replays::types::AccountId(42),
+            Some(""),
+            |_| -> Option<serde_json::Value> { panic!("payload builder must not receive an empty realm") },
+        );
+
+        assert!(payload.is_none());
+    }
+
+    #[test]
+    fn a_missing_payload_candidate_is_not_sent_when_a_valid_candidate_remains() {
+        let (url, server) = status_server(&[204]);
+        let client = ShipBuildsClient::new().unwrap();
+
+        let outcome = send_shipbuilds_payloads(
+            Some(Path::new("partial-payloads.wowsreplay")),
+            vec![None, Some(serde_json::json!({ "realm": "NA" }))],
+            &client,
+            &url,
+        );
+
+        server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::Sent);
     }
 
     #[test]

@@ -1095,6 +1095,31 @@ enum ReplayInput {
     Path(PathBuf),
 }
 
+#[cfg(feature = "shipbuilds_debugging")]
+enum DebugShipBuildPayloads<T> {
+    MetadataUnavailable,
+    Available(Vec<Option<T>>),
+}
+
+#[cfg(feature = "shipbuilds_debugging")]
+fn send_debug_shipbuilds_payloads<T: serde::Serialize>(
+    replay_path: Option<&Path>,
+    game_version: Version,
+    payloads: DebugShipBuildPayloads<T>,
+    client: &crate::data::shipbuilds::ShipBuildsClient,
+    url: &str,
+) -> crate::task::replay_upload::ShipBuildsUploadOutcome {
+    let DebugShipBuildPayloads::Available(payloads) = payloads else {
+        error!(
+            ?replay_path,
+            game_version = %game_version.to_path(),
+            "cannot upload debug ShipBuilds data because game metadata is unavailable"
+        );
+        return crate::task::replay_upload::ShipBuildsUploadOutcome::TransientFailure;
+    };
+    crate::task::replay_upload::send_shipbuilds_payloads(replay_path, payloads, client, url)
+}
+
 /// Builder for loading replays in the background with configurable options
 pub struct ReplayLoader {
     deps: ReplayDependencies,
@@ -1175,29 +1200,42 @@ impl ReplayLoader {
                 {
                     #[cfg(feature = "shipbuilds_debugging")]
                     {
-                        let requests = {
-                            let wows_data_inner = wows_data_for_build.read();
-                            let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
-                            report
-                                .players()
-                                .iter()
-                                .map(|player| {
-                                    deps.shipbuilds_client.http().post("http://shipbuilds.com/api/ship_builds").json(
-                                        &crate::util::build_tracker::BuildTrackerPayload::build_from(
-                                            player,
-                                            player.initial_state().realm().unwrap_or_default().to_owned(),
-                                            report.version(),
-                                            report.game_type().to_string(),
-                                            metadata_provider,
-                                        ),
-                                    )
-                                })
-                                .collect()
-                        };
                         let replay_path = replay.read().source_path.clone();
-                        let _ = crate::task::replay_upload::send_shipbuilds_requests_for_replay(
+                        let metadata_provider = {
+                            let wows_data_inner = wows_data_for_build.read();
+                            wows_data_inner.game_metadata.clone()
+                        };
+                        let payloads = match metadata_provider.as_deref() {
+                            Some(metadata_provider) => DebugShipBuildPayloads::Available(
+                                report
+                                    .players()
+                                    .iter()
+                                    .map(|player| {
+                                        crate::task::replay_upload::build_shipbuilds_payload(
+                                            replay_path.as_deref(),
+                                            player.initial_state().db_id(),
+                                            player.initial_state().realm(),
+                                            |realm| {
+                                                crate::util::build_tracker::BuildTrackerPayload::build_from(
+                                                    player,
+                                                    realm,
+                                                    report.version(),
+                                                    report.game_type().to_string(),
+                                                    metadata_provider,
+                                                )
+                                            },
+                                        )
+                                    })
+                                    .collect(),
+                            ),
+                            None => DebugShipBuildPayloads::MetadataUnavailable,
+                        };
+                        let _ = send_debug_shipbuilds_payloads(
                             replay_path.as_deref(),
-                            requests,
+                            report.version(),
+                            payloads,
+                            &deps.shipbuilds_client,
+                            "http://shipbuilds.com/api/ship_builds",
                         );
                     }
 
@@ -1323,31 +1361,130 @@ mod tests {
     use super::*;
 
     #[cfg(feature = "shipbuilds_debugging")]
-    #[test]
-    fn debug_build_upload_rejects_a_visible_redirect() {
+    fn observed_server(
+        response: String,
+    ) -> (String, mpsc::Sender<()>, mpsc::Receiver<bool>, std::thread::JoinHandle<()>) {
         use std::io::Read;
         use std::io::Write;
         use std::net::TcpListener;
 
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (stop_tx, stop_rx) = mpsc::channel();
+        let (hit_tx, hit_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream.set_nonblocking(false).unwrap();
+                        let mut request = [0; 4096];
+                        let _ = stream.read(&mut request).unwrap();
+                        stream.write_all(response.as_bytes()).unwrap();
+                        hit_tx.send(true).unwrap();
+                        return;
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        if stop_rx.try_recv().is_ok() {
+                            hit_tx.send(false).unwrap();
+                            return;
+                        }
+                        std::thread::yield_now();
+                    }
+                    Err(error) => panic!("test server accept failed: {error}"),
+                }
+            }
+        });
+
+        (url, stop_tx, hit_rx, server)
+    }
+
+    #[cfg(feature = "shipbuilds_debugging")]
+    fn stop_observed_server(
+        stop_tx: mpsc::Sender<()>,
+        hit_rx: mpsc::Receiver<bool>,
+        server: std::thread::JoinHandle<()>,
+    ) -> bool {
+        let _ = stop_tx.send(());
+        server.join().unwrap();
+        hit_rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap()
+    }
+
+    #[cfg(feature = "shipbuilds_debugging")]
+    #[test]
+    fn debug_build_upload_with_missing_metadata_makes_no_request() {
         use crate::task::replay_upload::ShipBuildsUploadOutcome;
 
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = [0; 4096];
-            let _ = stream.read(&mut request).unwrap();
-            write!(stream, "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
-        });
+        let (url, stop_tx, hit_rx, server) =
+            observed_server("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned());
         let client = crate::data::shipbuilds::ShipBuildsClient::new().unwrap();
 
-        let outcome = crate::task::replay_upload::send_shipbuilds_requests_for_replay(
-            None,
-            vec![client.http().post(url).body("request")],
+        let outcome = send_debug_shipbuilds_payloads(
+            Some(Path::new("missing-metadata.wowsreplay")),
+            Version::from_client_exe("15,4,0,11965230"),
+            DebugShipBuildPayloads::<serde_json::Value>::MetadataUnavailable,
+            &client,
+            &url,
+        );
+        let endpoint_was_hit = stop_observed_server(stop_tx, hit_rx, server);
+
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+        assert!(!endpoint_was_hit);
+    }
+
+    #[cfg(feature = "shipbuilds_debugging")]
+    #[test]
+    fn debug_build_upload_does_not_serialize_a_missing_payload_as_null() {
+        use crate::task::replay_upload::ShipBuildsUploadOutcome;
+
+        let (url, stop_tx, hit_rx, server) =
+            observed_server("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned());
+        let client = crate::data::shipbuilds::ShipBuildsClient::new().unwrap();
+        let missing_payload = crate::task::replay_upload::build_shipbuilds_payload(
+            Some(Path::new("missing-payload.wowsreplay")),
+            wows_replays::types::AccountId(42),
+            Some("NA"),
+            |_| None::<serde_json::Value>,
         );
 
-        server.join().unwrap();
+        let outcome = send_debug_shipbuilds_payloads(
+            Some(Path::new("missing-payload.wowsreplay")),
+            Version::from_client_exe("15,4,0,11965230"),
+            DebugShipBuildPayloads::Available(vec![missing_payload]),
+            &client,
+            &url,
+        );
+        let endpoint_was_hit = stop_observed_server(stop_tx, hit_rx, server);
+
         assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+        assert!(!endpoint_was_hit);
+    }
+
+    #[cfg(feature = "shipbuilds_debugging")]
+    #[test]
+    fn debug_build_upload_rejects_a_location_redirect_without_touching_its_target() {
+        use crate::task::replay_upload::ShipBuildsUploadOutcome;
+
+        let (target_url, stop_target_tx, target_hit_rx, target_server) =
+            observed_server("HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned());
+        let redirect_response =
+            format!("HTTP/1.1 302 Found\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let (redirect_url, stop_redirect_tx, redirect_hit_rx, redirect_server) = observed_server(redirect_response);
+        let client = crate::data::shipbuilds::ShipBuildsClient::new().unwrap();
+
+        let outcome = send_debug_shipbuilds_payloads(
+            Some(Path::new("redirect.wowsreplay")),
+            Version::from_client_exe("15,4,0,11965230"),
+            DebugShipBuildPayloads::Available(vec![Some(serde_json::json!({ "realm": "NA" }))]),
+            &client,
+            &redirect_url,
+        );
+
+        let redirect_was_hit = stop_observed_server(stop_redirect_tx, redirect_hit_rx, redirect_server);
+        let target_was_hit = stop_observed_server(stop_target_tx, target_hit_rx, target_server);
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+        assert!(redirect_was_hit);
+        assert!(!target_was_hit);
     }
 
     /// A `clientVersionFromExe` whose build field is `0` is what the pre-0.10
