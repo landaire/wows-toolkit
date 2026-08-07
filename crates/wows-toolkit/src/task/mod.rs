@@ -85,7 +85,6 @@ pub use replays::start_load_row_summaries;
 pub use replays::start_populating_player_inspector;
 pub use replays::start_read_directory;
 pub use replays::start_reconcile_index;
-#[allow(unused_imports)]
 pub use replays::start_send_all_replays_to_shipbuilds;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -176,7 +175,7 @@ pub enum BackgroundTaskKind {
         rx: mpsc::Receiver<IndexProgress>,
         last_progress: Option<IndexProgress>,
     },
-    SendingReplaysToShipBuilds {
+    SendingAllReplaysToShipBuilds {
         rx: mpsc::Receiver<SendAllReplaysProgress>,
         last_progress: Option<SendAllReplaysProgress>,
     },
@@ -438,7 +437,17 @@ impl BackgroundTask {
                             }
                         }
                     }
-                    BackgroundTaskKind::SendingReplaysToShipBuilds { .. } => {}
+                    BackgroundTaskKind::SendingAllReplaysToShipBuilds { rx, last_progress } => {
+                        drain_shipbuilds_progress(rx, last_progress);
+                        if let Some(progress) = last_progress {
+                            ui.add(
+                                egui::ProgressBar::new(progress.fraction()).text(shipbuilds_progress_text(*progress)),
+                            );
+                        } else {
+                            ui.spinner();
+                            ui.label("Sending replays to ShipBuilds");
+                        }
+                    }
                     BackgroundTaskKind::LoadingRowSummaries { .. } => {
                         ui.spinner();
                         ui.label(t!("ui.messages.loading_row_summaries"));
@@ -459,6 +468,19 @@ impl BackgroundTask {
             }
             Err(TryRecvError::Disconnected) => Some(Err(ToolkitError::BackgroundTaskCompleted.into())),
         }
+    }
+}
+
+fn shipbuilds_progress_text(progress: SendAllReplaysProgress) -> String {
+    format!("Sending replays to ShipBuilds: {} / {}", progress.completed.0, progress.total.0)
+}
+
+fn drain_shipbuilds_progress(
+    rx: &mpsc::Receiver<SendAllReplaysProgress>,
+    last_progress: &mut Option<SendAllReplaysProgress>,
+) {
+    while let Ok(progress) = rx.try_recv() {
+        *last_progress = Some(progress);
     }
 }
 
@@ -671,5 +693,35 @@ mod batch_progress_tests {
         progress.current_total_frames = Some(100);
         progress.current_frames = 400;
         assert_eq!(progress.fraction(), 0.5, "the first of two replays cannot fill more than half the bar");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use super::ReplayCount;
+    use super::SendAllReplaysProgress;
+    use super::drain_shipbuilds_progress;
+    use super::shipbuilds_progress_text;
+
+    #[test]
+    fn shipbuilds_progress_text_reports_completed_and_total() {
+        let progress = SendAllReplaysProgress::new(ReplayCount(7), ReplayCount(12));
+
+        assert_eq!(shipbuilds_progress_text(progress), "Sending replays to ShipBuilds: 7 / 12");
+    }
+
+    #[test]
+    fn shipbuilds_progress_drain_retains_the_newest_queued_update() {
+        let (tx, rx) = mpsc::channel();
+        for completed in [1, 2, 3] {
+            tx.send(SendAllReplaysProgress::new(ReplayCount(completed), ReplayCount(4))).unwrap();
+        }
+        let mut last_progress = None;
+
+        drain_shipbuilds_progress(&rx, &mut last_progress);
+
+        assert_eq!(last_progress, Some(SendAllReplaysProgress::new(ReplayCount(3), ReplayCount(4))));
     }
 }

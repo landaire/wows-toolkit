@@ -71,6 +71,59 @@ macro_rules! update_background_task {
     };
 }
 
+type ShipBuildsBatchDependencies =
+    (crate::data::wows_data::ReplayDependencies, sqlx::SqlitePool, Arc<tokio::runtime::Runtime>);
+
+fn shipbuilds_batch_dependencies(tab_state: &TabState) -> Result<ShipBuildsBatchDependencies, &'static str> {
+    let dependencies =
+        match (tab_state.replay_dependencies(), tab_state.db_pool.as_ref(), tab_state.tokio_runtime.as_ref()) {
+            (Some(replay_dependencies), Some(pool), Some(runtime)) => {
+                Some((replay_dependencies, pool.clone(), Arc::clone(runtime)))
+            }
+            _ => None,
+        };
+
+    dependencies.ok_or("Cannot send replays to ShipBuilds before game data and application storage are ready")
+}
+
+fn dispatch_shipbuilds_batch<F>(
+    tab_state: &mut TabState,
+    cache_policy: task::SendReplayCachePolicy,
+    start: F,
+) -> Result<(), &'static str>
+where
+    F: FnOnce(
+        BTreeSet<PathBuf>,
+        task::SendReplayCachePolicy,
+        crate::data::wows_data::ReplayDependencies,
+        DataSharingMode,
+        Arc<parking_lot::RwLock<std::collections::HashSet<String>>>,
+        sqlx::SqlitePool,
+        Arc<tokio::runtime::Runtime>,
+    ) -> task::BackgroundTask,
+{
+    let paths = tab_state.open_replay_paths();
+    let data_sharing_mode = tab_state.persisted.read().settings.integrations.data_sharing_mode;
+    let (replay_dependencies, db_pool, tokio_runtime) = match shipbuilds_batch_dependencies(tab_state) {
+        Ok(dependencies) => dependencies,
+        Err(message) => {
+            tab_state.toasts.lock().error(message);
+            return Err(message);
+        }
+    };
+    let task = start(
+        paths,
+        cache_policy,
+        replay_dependencies,
+        data_sharing_mode,
+        Arc::clone(&tab_state.sent_replays),
+        db_pool,
+        tokio_runtime,
+    );
+    update_background_task!(tab_state.background_tasks, Some(task));
+    Ok(())
+}
+
 #[allow(dead_code)]
 #[derive(Clone, PartialEq, Eq)]
 pub enum Tab {
@@ -1379,7 +1432,7 @@ impl WowsToolkitApp {
                             BackgroundTaskKind::CheckingGameDataUpdates => {}
                             BackgroundTaskKind::ValidatingGameData { .. } => {}
                             BackgroundTaskKind::ReconcilingIndex { .. } => {}
-                            BackgroundTaskKind::SendingReplaysToShipBuilds { .. } => {}
+                            BackgroundTaskKind::SendingAllReplaysToShipBuilds { .. } => {}
                             BackgroundTaskKind::LoadingRowSummaries { workspace } => {
                                 let workspace_id = *workspace;
                                 if let Some(target) = self.tab_state.workspace_mut(workspace_id) {
@@ -4250,7 +4303,13 @@ impl WowsToolkitApp {
                 }
             }
             PaletteAction::GoToTab(tab) => self.focus_tab(&tab),
-            PaletteAction::SendAllReplaysToShipBuilds { .. } => {}
+            PaletteAction::SendAllReplaysToShipBuilds { cache_policy } => {
+                let _ = dispatch_shipbuilds_batch(
+                    &mut self.tab_state,
+                    cache_policy,
+                    crate::task::start_send_all_replays_to_shipbuilds,
+                );
+            }
             PaletteAction::OpenSearchWith(query) => {
                 self.tab_state.pending_search_query = Some(query);
                 self.focus_tab(&Tab::Search);
@@ -5790,5 +5849,144 @@ mod sticky_error_tests {
             !should_arm_wows_dir_error(true, false, &mut shown),
             "blurring again with the same problem must not re-arm"
         );
+    }
+}
+
+#[cfg(test)]
+mod shipbuilds_batch_dispatch_tests {
+    use std::cell::RefCell;
+    use std::collections::BTreeSet;
+    use std::collections::HashMap;
+    use std::path::PathBuf;
+    use std::sync::Arc;
+
+    use sqlx::sqlite::SqlitePoolOptions;
+
+    use super::BackgroundTaskKind;
+    use super::DataSharingMode;
+    use super::dispatch_shipbuilds_batch;
+    use super::shipbuilds_batch_dependencies;
+    use crate::data::wows_data::WoWsDataMap;
+    use crate::tab_state::TabState;
+    use crate::task::BackgroundTask;
+    use crate::task::SendReplayCachePolicy;
+    use crate::ui::replay_parser::ListedReplay;
+
+    fn ready_tab_state() -> TabState {
+        let mut tab_state = TabState::default();
+        tab_state.wows_data_map = Some(WoWsDataMap::new(PathBuf::from("C:/wows"), "en".to_string(), String::new()));
+        let runtime = Arc::new(tokio::runtime::Runtime::new().expect("a Tokio runtime"));
+        tab_state.db_pool =
+            Some(runtime.block_on(SqlitePoolOptions::new().connect("sqlite::memory:")).expect("an in-memory pool"));
+        tab_state.tokio_runtime = Some(runtime);
+        tab_state
+    }
+
+    fn listed_replay() -> Arc<ListedReplay> {
+        Arc::new(ListedReplay {
+            ship_id: None,
+            map_name: "spaces".into(),
+            game_type: "RandomBattle".into(),
+            scenario: "Domination".into(),
+            date_time: "06.08.2026 12:00:00".into(),
+        })
+    }
+
+    #[test]
+    fn shipbuilds_batch_requires_game_data_and_application_storage() {
+        let tab_state = TabState::default();
+
+        let error = match shipbuilds_batch_dependencies(&tab_state) {
+            Ok(_) => panic!("dependencies must be unavailable"),
+            Err(error) => error,
+        };
+
+        assert_eq!(error, "Cannot send replays to ShipBuilds before game data and application storage are ready");
+    }
+
+    #[test]
+    fn shipbuilds_batch_snapshots_ready_dependencies() {
+        let tab_state = ready_tab_state();
+
+        let (replay_dependencies, _, _) =
+            shipbuilds_batch_dependencies(&tab_state).expect("all dependencies are ready");
+
+        assert!(replay_dependencies.wows_data_map.get(0).is_none());
+    }
+
+    #[test]
+    fn shipbuilds_dispatch_snapshots_inputs_and_enqueues_the_started_task() {
+        let mut tab_state = ready_tab_state();
+        let shared = PathBuf::from("C:/replays/shared.wowsreplay");
+        let unique = PathBuf::from("D:/archive/unique.wowsreplay");
+        tab_state.live_workspace.replay_files = Some(HashMap::from([(shared.clone(), listed_replay())]));
+        let workspace = tab_state.open_directory_workspace(PathBuf::from("D:/archive"));
+        tab_state.workspace_mut(workspace).expect("workspace is open").replay_files =
+            Some(HashMap::from([(shared.clone(), listed_replay()), (unique.clone(), listed_replay())]));
+        tab_state.persisted.write().settings.integrations.data_sharing_mode = DataSharingMode::Replays;
+        tab_state.persisted.write().settings.app.debug_mode = true;
+        let expected_sent_replays = Arc::clone(&tab_state.sent_replays);
+        let expected_client = tab_state.shipbuilds_client.clone();
+        let expected_twitch = Arc::clone(&tab_state.twitch_state);
+        let expected_sort = Arc::clone(&tab_state.replay_sort);
+        let expected_personal_rating = Arc::clone(&tab_state.personal_rating_data);
+        let expected_runtime = Arc::clone(tab_state.tokio_runtime.as_ref().expect("runtime"));
+        let expected_pool = tab_state.db_pool.as_ref().expect("pool").clone();
+        let captured = RefCell::new(None);
+
+        let result = dispatch_shipbuilds_batch(
+            &mut tab_state,
+            SendReplayCachePolicy::IgnoreLedger,
+            |paths, policy, deps, mode, sent_replays, pool, runtime| {
+                *captured.borrow_mut() = Some((paths, policy, deps, mode, sent_replays, pool, runtime));
+                BackgroundTask { receiver: None, kind: BackgroundTaskKind::LoadingReplay }
+            },
+        );
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(tab_state.background_tasks.len(), 1, "the returned task must be enqueued");
+        let (paths, policy, deps, mode, sent_replays, pool, runtime) =
+            captured.into_inner().expect("the worker starter must be called");
+        assert_eq!(paths, BTreeSet::from([shared, unique]));
+        assert_eq!(policy, SendReplayCachePolicy::IgnoreLedger);
+        assert_eq!(mode, DataSharingMode::Replays);
+        assert!(Arc::ptr_eq(&sent_replays, &expected_sent_replays));
+        assert!(std::ptr::eq(deps.shipbuilds_client.http(), expected_client.http()));
+        assert!(Arc::ptr_eq(&deps.twitch_state, &expected_twitch));
+        assert!(Arc::ptr_eq(&deps.replay_sort, &expected_sort));
+        assert!(Arc::ptr_eq(&deps.personal_rating_data, &expected_personal_rating));
+        assert!(deps.is_debug_mode);
+        assert!(Arc::ptr_eq(&runtime, &expected_runtime));
+        assert!(std::ptr::eq(pool.options(), expected_pool.options()));
+    }
+
+    #[test]
+    fn shipbuilds_dispatch_reports_each_missing_prerequisite_without_starting_a_task() {
+        enum Missing {
+            GameData,
+            Pool,
+            Runtime,
+        }
+
+        for missing in [Missing::GameData, Missing::Pool, Missing::Runtime] {
+            let mut tab_state = ready_tab_state();
+            match missing {
+                Missing::GameData => tab_state.wows_data_map = None,
+                Missing::Pool => tab_state.db_pool = None,
+                Missing::Runtime => tab_state.tokio_runtime = None,
+            }
+
+            let result =
+                dispatch_shipbuilds_batch(&mut tab_state, SendReplayCachePolicy::UseLedger, |_, _, _, _, _, _, _| {
+                    panic!("worker must not start without every prerequisite")
+                });
+
+            assert_eq!(
+                result,
+                Err("Cannot send replays to ShipBuilds before game data and application storage are ready")
+            );
+            assert!(tab_state.background_tasks.is_empty());
+            assert_eq!(tab_state.toasts.lock().len(), 1, "one error toast must be queued");
+        }
     }
 }

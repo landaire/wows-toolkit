@@ -1242,7 +1242,6 @@ struct SendAllReplaysBatchResult {
     total: ReplayCount,
 }
 
-#[allow(dead_code)]
 pub fn start_send_all_replays_to_shipbuilds(
     paths: BTreeSet<PathBuf>,
     cache_policy: SendReplayCachePolicy,
@@ -1276,7 +1275,7 @@ pub fn start_send_all_replays_to_shipbuilds(
 
     BackgroundTask {
         receiver: Some(completion_rx),
-        kind: BackgroundTaskKind::SendingReplaysToShipBuilds { rx: progress_rx, last_progress: None },
+        kind: BackgroundTaskKind::SendingAllReplaysToShipBuilds { rx: progress_rx, last_progress: None },
     }
 }
 
@@ -2256,6 +2255,8 @@ mod tests {
         use crate::task::replay_upload::SendReplayCachePolicy;
         use crate::task::replay_upload::ShipBuildsUploadOutcome;
 
+        static PANIC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum TestOutcome {
             Skipped,
@@ -2439,6 +2440,7 @@ mod tests {
 
         #[test]
         fn a_panicking_replay_does_not_abort_the_remaining_batch() {
+            let _guard = PANIC_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
             let previous_hook = std::panic::take_hook();
             std::panic::set_hook(Box::new(|_| {}));
             let result = run_test_batch(
@@ -2463,6 +2465,7 @@ mod tests {
         #[test]
         #[cfg(feature = "logging")]
         fn a_panicking_replay_logs_its_path_and_payload() {
+            let _guard = PANIC_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
             let log = captured_log(|| {
                 let (progress_tx, _) = mpsc::channel();
                 run_send_all_replays_to_shipbuilds(
@@ -2481,6 +2484,7 @@ mod tests {
 
         #[test]
         fn a_panicking_persistence_attempt_does_not_abort_the_remaining_batch() {
+            let _guard = PANIC_TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
             let sent_replays = ledger([]);
             let (progress_tx, progress_rx) = mpsc::channel();
             let completion = run_send_all_replays_to_shipbuilds(
@@ -2551,7 +2555,7 @@ mod tests {
                 runtime,
             );
             let progress_rx = match task.kind {
-                BackgroundTaskKind::SendingReplaysToShipBuilds { rx, .. } => rx,
+                BackgroundTaskKind::SendingAllReplaysToShipBuilds { rx, .. } => rx,
                 _ => panic!("unexpected task kind"),
             };
             assert_eq!(progress_rx.recv_timeout(Duration::from_secs(5)).unwrap(), progress(0, 0));
