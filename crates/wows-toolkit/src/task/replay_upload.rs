@@ -135,7 +135,7 @@ pub(crate) fn upload_parsed_replay(
         return ShipBuildsUploadOutcome::Skipped(ReplayUploadSkipReason::IneligibleGameType);
     };
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay.replay_file.meta.clientVersionFromExe);
-    let battle_type = wowsunpack::game_types::BattleType::from_value(&game_type, replay_version);
+    let battle_type = wowsunpack::game_types::BattleType::from_value(game_type, replay_version);
     let is_valid_game_type = matches!(
         battle_type.known(),
         Some(wowsunpack::game_types::BattleType::Random | wowsunpack::game_types::BattleType::Ranked)
