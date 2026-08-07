@@ -58,12 +58,14 @@ const SHIP_COLUMN_WIDTH: f32 = 112.0;
 const WIN_RATE_COLUMN_WIDTH: f32 = 48.0;
 const PERSONAL_RATING_COLUMN_WIDTH: f32 = 48.0;
 const BATTLES_COLUMN_WIDTH: f32 = 48.0;
+/// Wider than the battle count beside it, to hold a six-digit grouped figure.
+const DAMAGE_COLUMN_WIDTH: f32 = 56.0;
 const ENCOUNTERS_COLUMN_WIDTH: f32 = 60.0;
 const ACTIONS_COLUMN_WIDTH: f32 = 24.0;
 
 /// Below this width, the fixed stat columns leave too little space for both
 /// identity cells, so the teams stack instead.
-const STACK_TEAMS_BELOW_WIDTH: f32 = 1080.0;
+const STACK_TEAMS_BELOW_WIDTH: f32 = 1140.0;
 /// Gap between the two teams, whether they sit side by side or stacked.
 const TEAM_GAP: f32 = 16.0;
 
@@ -76,7 +78,7 @@ const TEAM_GAP: f32 = 16.0;
 const TEAM_MIN_WIDTH: f32 = 200.0;
 /// Ceiling on a team column's width. Wider rows add empty identity space
 /// without making the fixed stat columns easier to scan.
-const TEAM_MAX_WIDTH: f32 = 560.0;
+const TEAM_MAX_WIDTH: f32 = 620.0;
 
 impl ToolkitTabViewer<'_> {
     pub(crate) fn build_current_match_sub_tab(&mut self, ui: &mut egui::Ui) {
@@ -318,14 +320,14 @@ struct TeamActions {
 }
 
 /// What one row shows, once the mode has chosen between the account and ship
-/// scopes. The band follows the rate that is actually shown, so the row colour
-/// and the number can never disagree.
+/// scopes. Every figure here belongs to the chosen scope, so a row can never
+/// pair one scope's number with another's. The band follows the rate that is
+/// actually shown, so the row colour and the number cannot disagree either.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct RowStats {
     pub win_rate: Option<f64>,
     pub battles: Option<i64>,
-    /// The account PR. The service returns no per-ship PR, so this does not
-    /// move with the mode.
+    pub avg_damage: Option<i64>,
     pub pr: Option<f64>,
     pub band: Option<PersonalRatingCategory>,
 }
@@ -334,12 +336,12 @@ pub(crate) fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> Ro
     let Some(stats) = stats else {
         return RowStats::default();
     };
-    let (win_rate, battles) = match mode {
-        WinRateMode::Overall => (stats.overall_win_rate, stats.battles),
-        WinRateMode::Ship => (stats.ship_win_rate, stats.ship_battles),
+    let (win_rate, battles, avg_damage, pr) = match mode {
+        WinRateMode::Overall => (stats.overall_win_rate, stats.battles, stats.overall_avg_damage, stats.pr),
+        WinRateMode::Ship => (stats.ship_win_rate, stats.ship_battles, stats.ship_avg_damage, stats.ship_pr),
     };
 
-    RowStats { win_rate, battles, pr: stats.pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
+    RowStats { win_rate, battles, avg_damage, pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
 }
 
 fn visible_stat_modes(view_mode: CurrentMatchViewMode, selected_mode: WinRateMode) -> Vec<WinRateMode> {
@@ -534,7 +536,7 @@ fn render_team(
                                     render_player_identity(ui, row_data, stats_entry, ctx, actions);
                                 });
                                 tui.style(ship_column_style()).wrap_mode(egui::TextWrapMode::Truncate).ui(|ui| {
-                                    render_ship_name(ui, row_data);
+                                    render_ship_name(ui, row_data, ctx);
                                 });
                                 tui.style(fixed_column_style(WIN_RATE_COLUMN_WIDTH))
                                     .wrap_mode(egui::TextWrapMode::Truncate)
@@ -544,12 +546,17 @@ fn render_team(
                                 tui.style(fixed_column_style(PERSONAL_RATING_COLUMN_WIDTH))
                                     .wrap_mode(egui::TextWrapMode::Truncate)
                                     .ui(|ui| {
-                                        render_personal_rating(ui, stats_entry, ctx.mode);
+                                        render_personal_rating_cell(ui, stats_entry, ctx);
                                     });
                                 tui.style(fixed_column_style(BATTLES_COLUMN_WIDTH))
                                     .wrap_mode(egui::TextWrapMode::Truncate)
                                     .ui(|ui| {
                                         render_battles_cell(ui, stats_entry, ctx);
+                                    });
+                                tui.style(fixed_column_style(DAMAGE_COLUMN_WIDTH))
+                                    .wrap_mode(egui::TextWrapMode::Truncate)
+                                    .ui(|ui| {
+                                        render_damage_cell(ui, stats_entry, ctx);
                                     });
                                 tui.style(fixed_column_style(ENCOUNTERS_COLUMN_WIDTH))
                                     .wrap_mode(egui::TextWrapMode::Truncate)
@@ -596,6 +603,9 @@ fn render_team_header(ui: &mut egui::Ui, id_salt: &'static str, grid_width: f32,
                 tui.style(fixed_column_style(BATTLES_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
                     .small(t!("ui.player_tracker.column.battles"));
+                tui.style(fixed_column_style(DAMAGE_COLUMN_WIDTH))
+                    .wrap_mode(egui::TextWrapMode::Truncate)
+                    .small(t!("ui.player_tracker.column.avg_damage"));
                 tui.style(fixed_column_style(ENCOUNTERS_COLUMN_WIDTH))
                     .wrap_mode(egui::TextWrapMode::Truncate)
                     .small(t!("ui.player_tracker.column.encounters"));
@@ -620,6 +630,7 @@ fn roster_row_style(view_mode: CurrentMatchViewMode) -> taffy::Style {
             length(WIN_RATE_COLUMN_WIDTH),
             length(PERSONAL_RATING_COLUMN_WIDTH),
             length(BATTLES_COLUMN_WIDTH),
+            length(DAMAGE_COLUMN_WIDTH),
             length(ENCOUNTERS_COLUMN_WIDTH),
             length(ACTIONS_COLUMN_WIDTH),
         ],
@@ -681,11 +692,39 @@ fn render_class_icon(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamCont
     }
 }
 
-fn render_ship_name(ui: &mut egui::Ui, row_data: &LiveRosterRow) {
+/// The ship cell. In Detailed view it also carries the "Ship Stats" caption on
+/// a second line, labelling the per-ship figures on the detail line beside it.
+fn render_ship_name(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamContext<'_>) {
+    if ctx.view_mode != CurrentMatchViewMode::Detailed {
+        render_ship_name_line(ui, row_data);
+        return;
+    }
+    ui.vertical(|ui| {
+        ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
+        first_detail_line(ui, |ui| render_ship_name_line(ui, row_data));
+        ui.label(RichText::new(t!("ui.player_tracker.ship_stats")).small().weak());
+    });
+}
+
+/// None of the row's truncating labels carry an explicit hover: `truncate()`
+/// already reveals the full text when the label elides, so adding one stacks a
+/// second identical tooltip under the first.
+fn render_ship_name_line(ui: &mut egui::Ui, row_data: &LiveRosterRow) {
     let ship_name = row_data.ship_name.as_ref().or(row_data.species_text.as_ref());
     if let Some(ship_name) = ship_name {
-        ui.add(egui::Label::new(ship_name).truncate()).on_hover_text(ship_name);
+        ui.add(egui::Label::new(ship_name).truncate());
     }
+}
+
+/// Pins a cell's first line to one line's height, so it sits on the row's top
+/// line rather than centring itself across both detail lines.
+fn first_detail_line<R>(ui: &mut egui::Ui, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), ui.text_style_height(&egui::TextStyle::Body)),
+        egui::Layout::left_to_right(egui::Align::Center),
+        add_contents,
+    )
+    .inner
 }
 
 fn render_player_identity(
@@ -696,15 +735,7 @@ fn render_player_identity(
     actions: &mut TeamActions,
 ) {
     if ctx.view_mode == CurrentMatchViewMode::Detailed {
-        ui.vertical(|ui| {
-            ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
-            ui.allocate_ui_with_layout(
-                egui::vec2(ui.available_width(), ui.text_style_height(&egui::TextStyle::Body)),
-                egui::Layout::left_to_right(egui::Align::Center),
-                |ui| render_player_identity_line(ui, row_data, stats_entry, ctx, actions),
-            );
-            ui.label(RichText::new(t!("ui.player_tracker.ship_stats")).small().weak());
-        });
+        first_detail_line(ui, |ui| render_player_identity_line(ui, row_data, stats_entry, ctx, actions));
         return;
     }
     render_player_identity_line(ui, row_data, stats_entry, ctx, actions);
@@ -737,8 +768,7 @@ fn render_player_identity_line(
 
         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
             render_clan(ui, row_data);
-            ui.add(egui::Label::new(RichText::new(&row_data.name).color(row_data.tint.color(ui.visuals()))).truncate())
-                .on_hover_text(&row_data.name);
+            ui.add(egui::Label::new(RichText::new(&row_data.name).color(row_data.tint.color(ui.visuals()))).truncate());
         });
     });
 }
@@ -748,21 +778,11 @@ fn render_clan(ui: &mut egui::Ui, row_data: &LiveRosterRow) {
         return;
     };
     let color = clan_color_from_raw(row_data.clan_color, row_data.tint).color(ui.visuals());
-    ui.add(egui::Label::new(RichText::new(format!("[{clan}]")).color(color)).truncate()).on_hover_text(clan);
+    ui.add(egui::Label::new(RichText::new(format!("[{clan}]")).color(color)).truncate());
 }
 
 fn render_win_rate_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
-    let modes = visible_stat_modes(ctx.view_mode, ctx.mode);
-    if modes.len() == 1 {
-        render_win_rate(ui, stats_entry, ctx, modes[0]);
-        return;
-    }
-    ui.vertical(|ui| {
-        ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
-        for mode in modes {
-            render_win_rate(ui, stats_entry, ctx, mode);
-        }
-    });
+    render_scoped_cell(ui, ctx, |ui, mode| render_win_rate(ui, stats_entry, ctx, mode));
 }
 
 fn render_win_rate(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
@@ -782,40 +802,75 @@ fn render_win_rate(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx:
     }
 }
 
+fn render_personal_rating_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
+    render_scoped_cell(ui, ctx, |ui, mode| render_personal_rating(ui, stats_entry, mode));
+}
+
+/// PR is the one figure here left ungrouped. Every other `pr_chip` in the app
+/// renders the bare rating, and a chip that grouped its digits on only this
+/// surface would read as a different quantity.
 fn render_personal_rating(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, mode: WinRateMode) {
     let Some(pr) = row_stats(stats_entry, mode).pr else {
         ui.label(RichText::new("-").weak());
         return;
     };
+    let hover = match mode {
+        WinRateMode::Overall => t!("ui.player_tracker.pr_overall_hover"),
+        WinRateMode::Ship => t!("ui.player_tracker.pr_ship_hover"),
+    };
     crate::ui::widgets::pr_chip(ui, PersonalRatingCategory::from_pr(pr), &format!("{pr:.0}"), false)
-        .on_hover_text(t!("ui.player_tracker.pr_account_hover"));
+        .on_hover_text(hover);
 }
 
 fn render_battles_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
+    render_scoped_cell(ui, ctx, |ui, mode| render_battles(ui, stats_entry, ctx, mode));
+}
+
+fn render_battles(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
+    let Some(battles) = row_stats(stats_entry, mode).battles else {
+        ui.label(RichText::new("-").weak());
+        return;
+    };
+    let hover = format!("{}: {}", scope_label(mode), t!("ui.player_tracker.column.battles"));
+    ui.label(separate_number(battles, Some(ctx.locale))).on_hover_text(hover);
+}
+
+fn render_damage_cell(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>) {
+    render_scoped_cell(ui, ctx, |ui, mode| render_damage(ui, stats_entry, ctx, mode));
+}
+
+fn render_damage(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
+    let Some(damage) = row_stats(stats_entry, mode).avg_damage else {
+        ui.label(RichText::new("-").weak());
+        return;
+    };
+    let hover = format!("{}: {}", scope_label(mode), t!("ui.player_tracker.avg_damage"));
+    ui.label(separate_number(damage, Some(ctx.locale))).on_hover_text(hover);
+}
+
+/// Draws a stat cell once per scope the view mode shows: the selected scope
+/// alone in Compact, Overall stacked over Ship in Detailed. Every stat column
+/// shares this so their lines stay on the same baselines across the row.
+fn render_scoped_cell(ui: &mut egui::Ui, ctx: &TeamContext<'_>, mut render: impl FnMut(&mut egui::Ui, WinRateMode)) {
     let modes = visible_stat_modes(ctx.view_mode, ctx.mode);
-    if modes.len() == 1 {
-        render_battles(ui, stats_entry, ctx, modes[0]);
+    if let [only] = modes[..] {
+        render(ui, only);
         return;
     }
     ui.vertical(|ui| {
         ui.spacing_mut().item_spacing.y = DETAIL_LINE_GAP;
         for mode in modes {
-            render_battles(ui, stats_entry, ctx, mode);
+            render(ui, mode);
         }
     });
 }
 
-fn render_battles(ui: &mut egui::Ui, stats_entry: Option<&PlayerStatsOut>, ctx: &TeamContext<'_>, mode: WinRateMode) {
-    let scope = match mode {
+fn scope_label(mode: WinRateMode) -> String {
+    match mode {
         WinRateMode::Overall => t!("ui.player_tracker.win_rate_overall"),
         WinRateMode::Ship => t!("ui.player_tracker.win_rate_ship"),
-    };
-    let hover = format!("{scope}: {}", t!("ui.player_tracker.column.battles"));
-    let Some(battles) = row_stats(stats_entry, mode).battles else {
-        ui.label(RichText::new("-").weak());
-        return;
-    };
-    ui.label(separate_number(battles, Some(ctx.locale))).on_hover_text(hover);
+    }
+    .to_string()
 }
 
 fn render_encounters(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamContext<'_>) {
@@ -898,27 +953,32 @@ fn render_action_menu(ui: &mut egui::Ui, row_data: &LiveRosterRow, actions: &mut
 /// that scope. Independent of `mode`: whichever scope is showing in the cell,
 /// the hover names both. A scope with no rate of its own is omitted rather
 /// than shown as 0%, matching `row_stats`'s "absent, not zero" rule; `None`
-/// when neither scope has one.
+/// when neither scope has one. Average damage joins the line only when that
+/// scope reports one, under the same rule.
 fn win_rate_hover(stats: Option<&PlayerStatsOut>, locale: &str) -> Option<String> {
     let stats = stats?;
     let scopes = [
-        (t!("ui.player_tracker.win_rate_overall"), stats.overall_win_rate, stats.battles),
-        (t!("ui.player_tracker.win_rate_ship"), stats.ship_win_rate, stats.ship_battles),
+        (scope_label(WinRateMode::Overall), stats.overall_win_rate, stats.battles, stats.overall_avg_damage),
+        (scope_label(WinRateMode::Ship), stats.ship_win_rate, stats.ship_battles, stats.ship_avg_damage),
     ];
 
     let lines: Vec<String> = scopes
         .into_iter()
-        .filter_map(|(label, rate, battles)| {
+        .filter_map(|(label, rate, battles, damage)| {
             let (rate, battles) = (rate?, battles?);
-            Some(
-                t!(
-                    "ui.player_tracker.win_rate_hover_line",
-                    label = label.to_string(),
-                    rate = format!("{rate:.1}%"),
-                    battles = separate_number(battles, Some(locale))
-                )
-                .to_string(),
-            )
+            let rate = format!("{rate:.1}%");
+            let battles = separate_number(battles, Some(locale));
+            let line = match damage {
+                Some(damage) => t!(
+                    "ui.player_tracker.win_rate_hover_line_damage",
+                    label = label,
+                    rate = rate,
+                    battles = battles,
+                    damage = separate_number(damage, Some(locale))
+                ),
+                None => t!("ui.player_tracker.win_rate_hover_line", label = label, rate = rate, battles = battles),
+            };
+            Some(line.to_string())
         })
         .collect();
 
@@ -946,8 +1006,11 @@ mod tests {
             status,
             battles: Some(9000),
             overall_win_rate: overall,
+            overall_avg_damage: Some(96_047),
             ship_win_rate: ship,
             ship_battles: Some(120),
+            ship_avg_damage: Some(83_266),
+            ship_pr: Some(2834.0),
             pr: Some(1800.0),
         }
     }
@@ -978,13 +1041,38 @@ mod tests {
         assert_eq!(ship.band, Some(PersonalRatingCategory::Unicum));
     }
 
-    /// PR is the account PR in both modes; the service returns no per-ship PR.
+    /// Every figure in a row belongs to one scope, so PR and average damage
+    /// move with the mode alongside the rate and the battle count. A row must
+    /// never pair one scope's rate with another's PR.
     #[test]
-    fn pr_does_not_move_with_the_mode() {
+    fn pr_and_average_damage_move_with_the_mode() {
         let stats = stats(PlayerStatsStatus::Ok, Some(48.0), Some(61.0));
 
-        assert_eq!(row_stats(Some(&stats), WinRateMode::Overall).pr, Some(1800.0));
-        assert_eq!(row_stats(Some(&stats), WinRateMode::Ship).pr, Some(1800.0));
+        let overall = row_stats(Some(&stats), WinRateMode::Overall);
+        assert_eq!(overall.pr, Some(1800.0));
+        assert_eq!(overall.avg_damage, Some(96_047));
+
+        let ship = row_stats(Some(&stats), WinRateMode::Ship);
+        assert_eq!(ship.pr, Some(2834.0));
+        assert_eq!(ship.avg_damage, Some(83_266));
+    }
+
+    /// A server still on the previous response shape sends no ship PR and no
+    /// damage. Those cells go empty; the rest of the row is unaffected.
+    #[test]
+    fn a_response_without_the_newer_fields_empties_only_those_cells() {
+        let mut stats = stats(PlayerStatsStatus::Ok, Some(48.0), Some(61.0));
+        stats.ship_pr = None;
+        stats.overall_avg_damage = None;
+        stats.ship_avg_damage = None;
+
+        let ship = row_stats(Some(&stats), WinRateMode::Ship);
+        assert_eq!(ship.pr, None);
+        assert_eq!(ship.avg_damage, None);
+        assert_eq!(ship.win_rate, Some(61.0), "the rest of the scope still resolves");
+        assert_eq!(ship.battles, Some(120));
+
+        assert_eq!(row_stats(Some(&stats), WinRateMode::Overall).pr, Some(1800.0), "the account PR is unaffected");
     }
 
     #[test]
@@ -1017,6 +1105,7 @@ mod tests {
         assert_eq!(resolved.win_rate, None);
         assert_eq!(resolved.pr, None);
         assert_eq!(resolved.battles, None);
+        assert_eq!(resolved.avg_damage, None);
         assert_eq!(resolved.band, None);
     }
 
@@ -1029,6 +1118,34 @@ mod tests {
 
         assert!(hover.contains("Overall: 48.3%"), "hover was: {hover}");
         assert!(hover.contains("Ship: 42.2%"), "hover was: {hover}");
+    }
+
+    /// Average damage joins each scope's line, grouped for the locale.
+    #[test]
+    fn win_rate_hover_carries_average_damage_when_the_scope_reports_it() {
+        rust_i18n::set_locale("en");
+        let stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(42.2));
+
+        let hover = win_rate_hover(Some(&stats), "en").expect("both scopes are present");
+
+        assert!(hover.contains("96,047"), "hover was: {hover}");
+        assert!(hover.contains("83,266"), "hover was: {hover}");
+    }
+
+    /// A scope with a rate but no damage keeps its line and drops the damage
+    /// clause, rather than reporting a fabricated 0.
+    #[test]
+    fn win_rate_hover_drops_the_damage_clause_when_the_scope_has_none() {
+        rust_i18n::set_locale("en");
+        let mut stats = stats(PlayerStatsStatus::Ok, Some(48.3), Some(42.2));
+        stats.overall_avg_damage = None;
+
+        let hover = win_rate_hover(Some(&stats), "en").expect("both scopes are present");
+
+        let overall = hover.lines().find(|line| line.starts_with("Overall")).expect("the overall line survives");
+        assert!(overall.contains("48.3%"), "overall line was: {overall}");
+        assert!(!overall.contains("damage"), "overall line was: {overall}");
+        assert!(hover.contains("83,266"), "the ship line keeps its damage: {hover}");
     }
 
     /// An unplayed ship reports `ok` with a null ship rate: an absent rate, not
@@ -1157,7 +1274,7 @@ mod tests {
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
-        let mut harness = Harness::builder().with_size((1180.0, 150.0)).with_options(options).build_ui(|ui| {
+        let mut harness = Harness::builder().with_size((1240.0, 150.0)).with_options(options).build_ui(|ui| {
             render_rosters(
                 ui,
                 "Your Team (3)".to_string(),
@@ -1180,18 +1297,26 @@ mod tests {
         let class_headers: Vec<_> = harness.get_all_by_label("Class").collect();
         let player_headers: Vec<_> = harness.get_all_by_label("Player").collect();
         let ship_headers: Vec<_> = harness.get_all_by_label("Ship Name").collect();
+        let battles_headers: Vec<_> = harness.get_all_by_label("Battles").collect();
+        let damage_headers: Vec<_> = harness.get_all_by_label("Dmg").collect();
         let seen_headers: Vec<_> = harness.get_all_by_label("Seen").collect();
         assert_eq!(class_headers.len(), 2);
         assert_eq!(player_headers.len(), 2);
         assert_eq!(ship_headers.len(), 2);
+        assert_eq!(battles_headers.len(), 2);
+        assert_eq!(damage_headers.len(), 2);
         assert_eq!(seen_headers.len(), 2);
         let class_header = class_headers[0].rect();
         let player_header = player_headers[0].rect();
         let ship_header = ship_headers[0].rect();
+        let battles_header = battles_headers[0].rect();
+        let damage_header = damage_headers[0].rect();
         let seen_header = seen_headers[0].rect();
         assert!(class_header.left() < player_header.left());
         assert!(player_header.left() < ship_header.left());
-        assert!(ship_header.left() < seen_header.left());
+        assert!(ship_header.left() < battles_header.left());
+        assert!(battles_header.left() < damage_header.left(), "Dmg sits between Battles and Seen");
+        assert!(damage_header.left() < seen_header.left());
 
         let player_column_x =
             ["[PL-WY]", "[VENIK]", "ConstantinXII"].map(|label| harness.get_by_label(label).rect().left());
@@ -1207,6 +1332,13 @@ mod tests {
             ["48.3%", "49.3%", "50.3%"].map(|label| harness.get_by_label(label).rect().left()).into_iter().collect();
         assert!(win_rate_x.windows(2).all(|pair| (pair[0] - pair[1]).abs() < 0.1), "win-rate columns: {win_rate_x:?}");
 
+        // Every row carries the same account damage, so the cells are matched to
+        // their team by taking the first three (friendly) of the six.
+        let damage_cells: Vec<_> = harness.get_all_by_label("96,047").collect();
+        assert_eq!(damage_cells.len(), 6, "one localized damage cell per player");
+        let damage_x: Vec<f32> = damage_cells.iter().take(3).map(|cell| cell.rect().left()).collect();
+        assert!(damage_x.windows(2).all(|pair| (pair[0] - pair[1]).abs() < 0.1), "damage columns: {damage_x:?}");
+
         let clan = harness.get_by_label("[PL-WY]").rect();
         let player = harness.get_by_label("ORKANIN").rect();
         let ship = harness.get_by_label("Bourgogne").rect();
@@ -1214,6 +1346,7 @@ mod tests {
         assert!(class_header.left() < clan.left());
         assert!(clan.left() < player.left() && player.right() <= ship.left());
         assert!(ship.right() <= win_rate.left());
+        assert!(win_rate.right() <= damage_x[0]);
 
         let seen = harness.get_by_label("7");
         assert_eq!(seen.accesskit_node().value(), Some("7".to_string()));
@@ -1260,7 +1393,7 @@ mod tests {
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
-        let mut harness = Harness::builder().with_size((1180.0, 115.0)).with_options(options).build_ui(|ui| {
+        let mut harness = Harness::builder().with_size((1240.0, 115.0)).with_options(options).build_ui(|ui| {
             render_rosters(
                 ui,
                 "Your Team (1)".to_string(),
@@ -1284,8 +1417,22 @@ mod tests {
         let ship_wr = harness.get_by_label("61.7%").rect();
         let overall_battles = harness.get_by_label("9,000").rect();
         let ship_battles = harness.get_by_label("321").rect();
-        let player = harness.get_by_label("ORKANIN").rect();
-        let clan = harness.get_by_label("[PL-WY]").rect();
+        let ship_name = harness.get_by_label("Bourgogne").rect();
+
+        // Both rows carry the same fixture damage and PR, so the friendly row's
+        // cells are the first of each pair.
+        let overall_damage: Vec<_> = harness.get_all_by_label("96,047").collect();
+        let ship_damage: Vec<_> = harness.get_all_by_label("83,266").collect();
+        let overall_pr: Vec<_> = harness.get_all_by_label("1800").collect();
+        let ship_pr: Vec<_> = harness.get_all_by_label("2834").collect();
+        assert_eq!(overall_damage.len(), 2);
+        assert_eq!(ship_damage.len(), 2);
+        assert_eq!(overall_pr.len(), 2, "the account PR chip, once per row");
+        assert_eq!(ship_pr.len(), 2, "the ship PR chip, once per row");
+        assert!(overall_damage[0].rect().top() < ship_damage[0].rect().top());
+        assert!((overall_damage[0].rect().left() - ship_damage[0].rect().left()).abs() < 0.1);
+        assert!(overall_pr[0].rect().top() < ship_pr[0].rect().top());
+        assert!(ship_battles.right() <= overall_damage[0].rect().left(), "damage sits right of battles");
         let ship_stats_labels: Vec<_> = harness.get_all_by_label("Ship Stats").collect();
         assert_eq!(ship_stats_labels.len(), 2);
         let ship_stats = ship_stats_labels[0].rect();
@@ -1298,8 +1445,12 @@ mod tests {
             (ship_stats.top() - ship_battles.top()).abs() < 0.1,
             "ship stats {ship_stats:?}, ship battles {ship_battles:?}"
         );
-        assert!((ship_stats.left() - clan.left()).abs() < 0.1);
-        assert!(ship_stats.top() - player.bottom() >= 2.0);
+        // The caption belongs to the ship column, on the line under the name.
+        assert!(
+            (ship_stats.left() - ship_name.left()).abs() < 0.1,
+            "ship stats {ship_stats:?}, ship name {ship_name:?}"
+        );
+        assert!(ship_stats.top() >= ship_name.bottom());
         assert!(ship_wr.top() - overall_wr.bottom() >= 2.0);
         assert!(ship_battles.top() - overall_battles.bottom() >= 2.0);
 
@@ -1337,7 +1488,7 @@ mod tests {
         };
         let mut actions = TeamActions::default();
         let options = SnapshotOptions::new().output_path("tests/snapshots");
-        let mut harness = Harness::builder().with_size((1180.0, 115.0)).with_options(options).build_ui(|ui| {
+        let mut harness = Harness::builder().with_size((1240.0, 115.0)).with_options(options).build_ui(|ui| {
             render_rosters(
                 ui,
                 "Your Team (1)".to_string(),
@@ -1360,6 +1511,9 @@ mod tests {
         let overall_wr = harness.get_by_label("48.3%").rect();
         let ship_wr = harness.get_by_label("61.7%").rect();
         assert!(overall_wr.top() < ship_wr.top());
+        // The Ship scope drives the team header, so it reports the ship PR.
+        let team_average_pr: Vec<_> = harness.get_all_by_label("Avg PR: 2834").collect();
+        assert_eq!(team_average_pr.len(), 2, "each team header averages the scope its rows show");
         harness.snapshot("current_match_two_teams_detailed_ship");
     }
 
@@ -1454,7 +1608,7 @@ mod tests {
         let style = roster_row_style(CurrentMatchViewMode::Compact);
 
         assert_eq!(style.display, taffy::Display::Grid);
-        assert_eq!(style.grid_template_columns.len(), 8);
+        assert_eq!(style.grid_template_columns.len(), 9);
         assert_eq!(style.size.width, percent(1.0));
     }
 
@@ -1572,15 +1726,30 @@ mod tests {
         assert_eq!(team_average_personal_rating(&rows, &HashMap::new(), WinRateMode::Overall), None);
     }
 
+    /// The team average reads the same scoped PR the rows do, so the header
+    /// figure cannot name a different scope than the column under it.
     #[test]
-    fn team_average_personal_rating_is_mode_invariant() {
+    fn team_average_personal_rating_follows_the_mode() {
         let mut entry = stats(PlayerStatsStatus::Ok, Some(40.0), Some(90.0));
         entry.pr = Some(1725.0);
+        entry.ship_pr = Some(2400.0);
         let by_account = HashMap::from([(AccountId(1), entry)]);
         let rows = vec![roster_row(Some(AccountId(1)))];
 
         assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Overall), Some(1725.0));
-        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship), Some(1725.0));
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship), Some(2400.0));
+    }
+
+    /// A team where nobody's ship PR came back averages to nothing rather than
+    /// silently falling back to the account figure.
+    #[test]
+    fn team_average_personal_rating_skips_rows_with_no_pr_in_scope() {
+        let mut entry = stats(PlayerStatsStatus::Ok, Some(40.0), Some(90.0));
+        entry.ship_pr = None;
+        let by_account = HashMap::from([(AccountId(1), entry)]);
+        let rows = vec![roster_row(Some(AccountId(1)))];
+
+        assert_eq!(team_average_personal_rating(&rows, &by_account, WinRateMode::Ship), None);
     }
 
     #[test]

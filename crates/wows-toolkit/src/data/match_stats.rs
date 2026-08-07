@@ -72,9 +72,15 @@ pub enum PlayerStatsStatus {
     Unknown,
 }
 
-/// One player's stats. `pr_tier` is deliberately absent: the band is derived
-/// from `pr` through `PersonalRatingCategory::from_pr`, so the chips here and
-/// the ones in the replay inspector cannot disagree.
+/// One player's stats. `pr_tier` and `ship_pr_tier` are deliberately absent:
+/// both bands are derived from their number through
+/// `PersonalRatingCategory::from_pr`, so the chips here and the ones in the
+/// replay inspector cannot disagree.
+///
+/// The fields carrying `#[serde(default)]` postdate the rest of the shape. A
+/// server that has not deployed them yet omits the key entirely, and absent is
+/// what `None` already means for every field here, so defaulting costs that one
+/// cell rather than the whole roster.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlayerStatsOut {
     pub account_id: AccountId,
@@ -83,8 +89,14 @@ pub struct PlayerStatsOut {
     pub status: PlayerStatsStatus,
     pub battles: Option<i64>,
     pub overall_win_rate: Option<f64>,
+    #[serde(default)]
+    pub overall_avg_damage: Option<i64>,
     pub ship_win_rate: Option<f64>,
     pub ship_battles: Option<i64>,
+    #[serde(default)]
+    pub ship_avg_damage: Option<i64>,
+    #[serde(default)]
+    pub ship_pr: Option<f64>,
     pub pr: Option<f64>,
 }
 
@@ -345,8 +357,11 @@ mod tests {
                 status: PlayerStatsStatus::Hidden,
                 battles: None,
                 overall_win_rate: None,
+                overall_avg_damage: None,
                 ship_win_rate: None,
                 ship_battles: None,
+                ship_avg_damage: None,
+                ship_pr: None,
                 pr: None,
             }],
         };
@@ -358,6 +373,117 @@ mod tests {
         assert_eq!(decoded.players[0].status, PlayerStatsStatus::Hidden);
         assert_eq!(decoded.players[0].battles, None);
         assert_eq!(decoded.players[0].pr, None);
+        assert_eq!(decoded.players[0].ship_pr, None);
+        assert_eq!(decoded.players[0].overall_avg_damage, None);
+        assert_eq!(decoded.players[0].ship_avg_damage, None);
+    }
+
+    /// The full current shape decodes into every field, including the ones that
+    /// postdate the original response.
+    #[test]
+    fn the_current_response_shape_decodes_every_field() {
+        use ciborium::Value;
+
+        let player = Value::Map(vec![
+            (Value::Text("account_id".into()), Value::Integer(503_278_143i64.into())),
+            (Value::Text("region".into()), Value::Text("eu".into())),
+            (Value::Text("ship_id".into()), Value::Integer(4_273_911_792i64.into())),
+            (Value::Text("status".into()), Value::Text("ok".into())),
+            (Value::Text("battles".into()), Value::Integer(30_550i64.into())),
+            (Value::Text("overall_win_rate".into()), Value::Float(63.5)),
+            (Value::Text("overall_avg_damage".into()), Value::Integer(96_047i64.into())),
+            (Value::Text("ship_win_rate".into()), Value::Float(58.0)),
+            (Value::Text("ship_battles".into()), Value::Integer(816i64.into())),
+            (Value::Text("ship_avg_damage".into()), Value::Integer(83_266i64.into())),
+            (Value::Text("ship_pr".into()), Value::Float(2834.3)),
+            (Value::Text("ship_pr_tier".into()), Value::Text("Super Unicum".into())),
+            (Value::Text("pr".into()), Value::Float(2057.6)),
+            (Value::Text("pr_tier".into()), Value::Text("Great".into())),
+        ]);
+        let document = Value::Map(vec![
+            (Value::Text("arena_id".into()), Value::Integer(1_234_567_890i64.into())),
+            (Value::Text("players".into()), Value::Array(vec![player])),
+        ]);
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&document, &mut bytes).expect("document encodes");
+
+        let decoded: MatchStatsResponse = ciborium::from_reader(bytes.as_slice()).expect("response decodes");
+
+        let player = &decoded.players[0];
+        assert_eq!(player.battles, Some(30_550));
+        assert_eq!(player.overall_avg_damage, Some(96_047));
+        assert_eq!(player.ship_battles, Some(816));
+        assert_eq!(player.ship_avg_damage, Some(83_266));
+        assert_eq!(player.ship_pr, Some(2834.3));
+        assert_eq!(player.pr, Some(2057.6));
+    }
+
+    /// The tier strings the server sends are ignored: both bands are derived
+    /// from their number so the chips cannot disagree with the replay
+    /// inspector's. They must not fail the decode either.
+    #[test]
+    fn the_server_supplied_tier_strings_are_ignored_not_rejected() {
+        use ciborium::Value;
+
+        let player = Value::Map(vec![
+            (Value::Text("account_id".into()), Value::Integer(1i64.into())),
+            (Value::Text("region".into()), Value::Text("eu".into())),
+            (Value::Text("ship_id".into()), Value::Integer(2i64.into())),
+            (Value::Text("status".into()), Value::Text("ok".into())),
+            (Value::Text("battles".into()), Value::Integer(10i64.into())),
+            (Value::Text("overall_win_rate".into()), Value::Float(50.0)),
+            (Value::Text("ship_win_rate".into()), Value::Float(50.0)),
+            (Value::Text("ship_battles".into()), Value::Integer(5i64.into())),
+            (Value::Text("pr".into()), Value::Float(1500.0)),
+            (Value::Text("pr_tier".into()), Value::Text("Good".into())),
+            (Value::Text("ship_pr_tier".into()), Value::Text("Unicum".into())),
+        ]);
+        let document = Value::Map(vec![
+            (Value::Text("arena_id".into()), Value::Integer(1i64.into())),
+            (Value::Text("players".into()), Value::Array(vec![player])),
+        ]);
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&document, &mut bytes).expect("document encodes");
+
+        let decoded: MatchStatsResponse = ciborium::from_reader(bytes.as_slice()).expect("response decodes");
+
+        assert_eq!(decoded.players[0].pr, Some(1500.0));
+    }
+
+    /// A server still answering the previous shape omits the newer keys
+    /// entirely. That must cost those cells, not the whole roster.
+    #[test]
+    fn a_response_without_the_newer_fields_still_decodes() {
+        use ciborium::Value;
+
+        let player = Value::Map(vec![
+            (Value::Text("account_id".into()), Value::Integer(1i64.into())),
+            (Value::Text("region".into()), Value::Text("eu".into())),
+            (Value::Text("ship_id".into()), Value::Integer(2i64.into())),
+            (Value::Text("status".into()), Value::Text("ok".into())),
+            (Value::Text("battles".into()), Value::Integer(9000i64.into())),
+            (Value::Text("overall_win_rate".into()), Value::Float(52.5)),
+            (Value::Text("ship_win_rate".into()), Value::Float(48.0)),
+            (Value::Text("ship_battles".into()), Value::Integer(120i64.into())),
+            (Value::Text("pr".into()), Value::Float(1800.0)),
+        ]);
+        let document = Value::Map(vec![
+            (Value::Text("arena_id".into()), Value::Integer(1i64.into())),
+            (Value::Text("players".into()), Value::Array(vec![player])),
+        ]);
+
+        let mut bytes = Vec::new();
+        ciborium::into_writer(&document, &mut bytes).expect("document encodes");
+
+        let decoded: MatchStatsResponse = ciborium::from_reader(bytes.as_slice()).expect("response decodes");
+
+        let player = &decoded.players[0];
+        assert_eq!(player.battles, Some(9000), "the fields the old shape does carry still arrive");
+        assert_eq!(player.overall_avg_damage, None);
+        assert_eq!(player.ship_avg_damage, None);
+        assert_eq!(player.ship_pr, None);
     }
 
     /// A status the server adds later must degrade one player's row, not fail
