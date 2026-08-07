@@ -1175,24 +1175,30 @@ impl ReplayLoader {
                 {
                     #[cfg(feature = "shipbuilds_debugging")]
                     {
-                        let wows_data_inner = wows_data_for_build.read();
-                        let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
-                        // Send the replay builds to the remote server
-                        for player in report.players() {
-                            deps.shipbuilds_client
-                                .http()
-                                .post("http://shipbuilds.com/api/ship_builds")
-                                .json(&crate::util::build_tracker::BuildTrackerPayload::build_from(
-                                    player,
-                                    player.initial_state().realm().unwrap_or_default().to_owned(),
-                                    report.version(),
-                                    report.game_type().to_string(),
-                                    metadata_provider,
-                                ))
-                                .send()
-                                .expect("failed to POST build data");
-                        }
-                        drop(wows_data_inner);
+                        let requests = {
+                            let wows_data_inner = wows_data_for_build.read();
+                            let metadata_provider = wows_data_inner.game_metadata.as_ref().unwrap();
+                            report
+                                .players()
+                                .iter()
+                                .map(|player| {
+                                    deps.shipbuilds_client.http().post("http://shipbuilds.com/api/ship_builds").json(
+                                        &crate::util::build_tracker::BuildTrackerPayload::build_from(
+                                            player,
+                                            player.initial_state().realm().unwrap_or_default().to_owned(),
+                                            report.version(),
+                                            report.game_type().to_string(),
+                                            metadata_provider,
+                                        ),
+                                    )
+                                })
+                                .collect()
+                        };
+                        let replay_path = replay.read().source_path.clone();
+                        let _ = crate::task::replay_upload::send_shipbuilds_requests_for_replay(
+                            replay_path.as_deref(),
+                            requests,
+                        );
                     }
 
                     let mut replay_guard = replay.write();
@@ -1315,6 +1321,34 @@ fn read_replay_file_with_retry(path: &Path) -> Result<ReplayFile, rootcause::Rep
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "shipbuilds_debugging")]
+    #[test]
+    fn debug_build_upload_rejects_a_visible_redirect() {
+        use std::io::Read;
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        use crate::task::replay_upload::ShipBuildsUploadOutcome;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            write!(stream, "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+        });
+        let client = crate::data::shipbuilds::ShipBuildsClient::new().unwrap();
+
+        let outcome = crate::task::replay_upload::send_shipbuilds_requests_for_replay(
+            None,
+            vec![client.http().post(url).body("request")],
+        );
+
+        server.join().unwrap();
+        assert_eq!(outcome, ShipBuildsUploadOutcome::TransientFailure);
+    }
 
     /// A `clientVersionFromExe` whose build field is `0` is what the pre-0.10
     /// era records, and [`WoWsDataMap::resolve`] returns `None` for any version

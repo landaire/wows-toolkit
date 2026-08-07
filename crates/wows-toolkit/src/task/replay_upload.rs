@@ -173,8 +173,15 @@ pub(crate) fn upload_parsed_replay(
 }
 
 fn send_shipbuilds_requests(path: &Path, requests: Vec<reqwest::blocking::RequestBuilder>) -> ShipBuildsUploadOutcome {
+    send_shipbuilds_requests_for_replay(Some(path), requests)
+}
+
+pub(crate) fn send_shipbuilds_requests_for_replay(
+    replay_path: Option<&Path>,
+    requests: Vec<reqwest::blocking::RequestBuilder>,
+) -> ShipBuildsUploadOutcome {
     if requests.is_empty() {
-        error!("no valid ShipBuilds payloads for replay {:?}", path);
+        error!(?replay_path, "no valid ShipBuilds payloads for replay");
         return ShipBuildsUploadOutcome::TransientFailure;
     }
 
@@ -182,11 +189,11 @@ fn send_shipbuilds_requests(path: &Path, requests: Vec<reqwest::blocking::Reques
         match request.send() {
             Ok(response) if response.status().is_success() => {}
             Ok(response) => {
-                error!("ShipBuilds rejected replay {:?} with HTTP {}", path, response.status());
+                error!(?replay_path, status = %response.status(), "ShipBuilds rejected replay");
                 return ShipBuildsUploadOutcome::TransientFailure;
             }
             Err(error) => {
-                error!("error sending replay {:?}: {:?}", path, error);
+                error!(?replay_path, ?error, "error sending replay");
                 return ShipBuildsUploadOutcome::TransientFailure;
             }
         }
