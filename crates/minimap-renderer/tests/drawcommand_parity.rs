@@ -364,7 +364,7 @@ fn capture_frames(filename: &str) -> String {
 
     // Main pass: drive BattleWorld and collect frames
     let replay_main = ReplayFile::from_file(&path).unwrap_or_else(|e| panic!("failed to parse {filename}: {e:?}"));
-    let meta: &'static wows_replays::ReplayMeta = Box::leak(Box::new(replay_main.meta));
+    let meta: &'static wows_replays::ReplayMeta = Box::leak(Box::new(replay_main.meta.clone()));
 
     let mut world = wows_battle_world::BattleWorld::new(meta, res.provider, Some(res.constants));
     for (entity_id, fact) in &facts {

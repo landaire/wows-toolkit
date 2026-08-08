@@ -957,7 +957,7 @@ mod tests {
     fn plan_a_build_adding_only_shared_objects_adds_nothing_to_the_total() {
         let a = hashes(&["h1", "h2"]);
         let b = hashes(&["h1", "h2"]);
-        assert_eq!(plan_objects_to_fetch(&[a.clone()], |_| false), 2);
+        assert_eq!(plan_objects_to_fetch(std::slice::from_ref(&a), |_| false), 2);
         assert_eq!(plan_objects_to_fetch(&[a, b], |_| false), 2);
     }
 
