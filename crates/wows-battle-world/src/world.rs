@@ -54,7 +54,11 @@ pub struct BattleWorld<'res, 'replay, G: ResourceLoader> {
     world: World,
     meta: &'replay ReplayMeta,
     resources: &'res G,
-    constants: Option<&'res GameConstants>,
+    /// Caller-supplied constants with the default fallback applied.
+    resolved_constants: &'res GameConstants,
+    /// Built once; constructing it per packet is wasted work (its docs say
+    /// "create once per replay").
+    packet_decoder: wows_replays::analyzer::decoder::PacketDecoder<'res>,
     version: Version,
     options: IngestOptions,
     /// Cached read-side query states, built on the first `view` call.
@@ -68,7 +72,25 @@ impl<'res, 'replay, G: ResourceLoader> BattleWorld<'res, 'replay, G> {
         insert_empty_resources(&mut world);
         seed_metadata_players(&mut world, meta, resources);
         world.resource_mut::<ReplayVehicles>().0 = meta.vehicles.clone();
-        Self { world, meta, resources, constants, version, options: IngestOptions::default(), query_cache: None }
+        // DEFAULT_GAME_CONSTANTS is the correct fallback for replays that were
+        // recorded without extracting constants from the game install.
+        let resolved_constants = constants.unwrap_or_else(|| &*wows_replays::game_constants::DEFAULT_GAME_CONSTANTS);
+        let packet_decoder = wows_replays::analyzer::decoder::PacketDecoder::builder()
+            .version(version)
+            .battle_constants(resolved_constants.battle())
+            .common_constants(resolved_constants.common())
+            .ships_constants(resolved_constants.ships())
+            .build();
+        Self {
+            world,
+            meta,
+            resources,
+            resolved_constants,
+            packet_decoder,
+            version,
+            options: IngestOptions::default(),
+            query_cache: None,
+        }
     }
 
     /// Reset all mutable state for seeking (re-parse from start).
@@ -320,26 +342,14 @@ impl<'res, 'replay, G: ResourceLoader> wows_replays::analyzer::Analyzer for Batt
             self.world.resource_mut::<ShotHitLog>().0.clear();
         }
 
-        // DEFAULT_GAME_CONSTANTS is the correct fallback for replays that were
-        // recorded without extracting constants from the game install.
-        let default_constants = &*wows_replays::game_constants::DEFAULT_GAME_CONSTANTS;
-        let constants = self.constants.unwrap_or(default_constants);
-
-        let packet_decoder = wows_replays::analyzer::decoder::PacketDecoder::builder()
-            .version(self.version)
-            .battle_constants(constants.battle())
-            .common_constants(constants.common())
-            .ships_constants(constants.ships())
-            .build();
-
-        let decoded = packet_decoder.decode(packet);
+        let decoded = self.packet_decoder.decode(packet);
         let clock: GameClock = packet.clock;
 
         crate::ingest::dispatch(
             decoded.payload,
             &mut self.world,
             self.resources,
-            constants,
+            self.resolved_constants,
             self.version,
             &self.options,
             clock,

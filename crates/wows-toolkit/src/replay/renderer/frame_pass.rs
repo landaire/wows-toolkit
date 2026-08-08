@@ -30,7 +30,7 @@ pub(crate) trait FrameSink {
 /// can trigger, and inside the trailing final-tick drain, so a cancel lands
 /// within one frame no matter which of those a single call is stalled in.
 pub(crate) fn build_frame_track<G: ResourceLoader>(
-    session: &mut MergedReplays<'_, '_, '_, G>,
+    session: &mut MergedReplays<'_, '_, G>,
     renderer: &mut MinimapRenderer<'_>,
     frame_duration: f32,
     cancel: &AtomicBool,

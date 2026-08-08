@@ -184,10 +184,10 @@ impl Analyzer for Summary {
                             let version = Version::from_client_exe("0,0,0,0");
                             let weapon =
                                 DamageStatWeapon::from_id(weapon_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
-                                    .unwrap_or(Recognized::Unknown(format!("{weapon_raw}")));
+                                    .unwrap_or_else(|| Recognized::Unknown(weapon_raw.to_string()));
                             let category =
                                 DamageStatCategory::from_id(category_raw as i32, &DEFAULT_BATTLE_CONSTANTS, version)
-                                    .unwrap_or(Recognized::Unknown(format!("{category_raw}")));
+                                    .unwrap_or_else(|| Recognized::Unknown(category_raw.to_string()));
                             let key = (weapon.clone(), category.clone());
                             let entry = DamageStatEntry { weapon, category, count, total };
                             self.damage.insert(key, entry);

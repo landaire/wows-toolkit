@@ -28,9 +28,9 @@ pub(crate) fn default_arg_value<'argtype>(arg_type: &'argtype ArgType) -> ArgVal
             PrimitiveType::Float64 => ArgValue::Float64(0.0),
             PrimitiveType::Vector2 => ArgValue::Vector2((0.0, 0.0)),
             PrimitiveType::Vector3 => ArgValue::Vector3((0.0, 0.0, 0.0)),
-            PrimitiveType::String => ArgValue::String(Vec::new()),
-            PrimitiveType::UnicodeString => ArgValue::UnicodeString(Vec::new()),
-            PrimitiveType::Blob => ArgValue::Blob(Vec::new()),
+            PrimitiveType::String => ArgValue::String(&[]),
+            PrimitiveType::UnicodeString => ArgValue::UnicodeString(&[]),
+            PrimitiveType::Blob => ArgValue::Blob(&[]),
         },
         // Fixed-size arrays materialize their slots so element-set updates land;
         // variable arrays start empty and grow via add/extend updates.
@@ -83,18 +83,19 @@ impl<'a> BitReader<'a> {
         result
     }
 
-    /// Read full bytes into `buf`, advancing the bit offset.
-    /// The current bit position must be byte-aligned.
-    pub fn read_u8_slice(&mut self, buf: &mut [u8]) {
-        debug_assert!(self.bit_offset.is_multiple_of(8));
-        let byte_offset = self.bit_offset / 8;
-        buf.copy_from_slice(&self.data[byte_offset..byte_offset + buf.len()]);
-        self.bit_offset += buf.len() * 8;
-    }
-
     /// Number of bits remaining.
     pub fn remaining(&self) -> usize {
         self.data.len() * 8 - self.bit_offset
+    }
+
+    /// The rest of the input as a borrowed byte slice, consuming it. Only
+    /// valid at byte alignment; values parsed from the result borrow the
+    /// original data rather than a copy.
+    pub fn remaining_bytes(&mut self) -> &'a [u8] {
+        debug_assert!(self.bit_offset.is_multiple_of(8));
+        let byte_offset = self.bit_offset / 8;
+        self.bit_offset = self.data.len() * 8;
+        &self.data[byte_offset..]
     }
 }
 
@@ -138,7 +139,7 @@ fn nested_update_command<'argtype>(
     is_slice: bool,
     t: &'argtype ArgType,
     mut prop_value: &mut ArgValue<'argtype>,
-    mut reader: BitReader,
+    mut reader: BitReader<'argtype>,
 ) -> PResult<PropertyNesting<'argtype>> {
     let t = t.peeled();
     match (t, &mut prop_value) {
@@ -149,10 +150,9 @@ fn nested_update_command<'argtype>(
             while !reader.remaining().is_multiple_of(8) {
                 reader.read_u8(1);
             }
-            let mut remaining = vec![0; reader.remaining() / 8];
-            reader.read_u8_slice(&mut remaining[..]);
+            let mut remaining = reader.remaining_bytes();
             let value =
-                entry.prop_type.parse_value(&mut &remaining[..]).map_err(|_| failure(ParseError::InvalidPacketData))?;
+                entry.prop_type.parse_value(&mut remaining).map_err(|_| failure(ParseError::InvalidPacketData))?;
             match prop_value {
                 ArgValue::FixedDict(d) => {
                     d.insert(&entry.name, value.clone());
@@ -173,8 +173,7 @@ fn nested_update_command<'argtype>(
             while !reader.remaining().is_multiple_of(8) {
                 reader.read_u8(1);
             }
-            let mut remaining = vec![0; reader.remaining() / 8];
-            reader.read_u8_slice(&mut remaining[..]);
+            let remaining = reader.remaining_bytes();
 
             if remaining.is_empty() {
                 // An empty payload removes the [idx1, idx2) range (slice form only).
@@ -187,7 +186,7 @@ fn nested_update_command<'argtype>(
             // advancing parse means the bytes are misaligned, not benign padding,
             // so fail rather than fabricate a half-decoded element.
             let mut new_elements = vec![];
-            let mut i = &remaining[..];
+            let mut i = remaining;
             while !i.is_empty() {
                 let before = i.len();
                 match element_type.parse_value(&mut i) {
@@ -230,20 +229,22 @@ fn nested_update_command<'argtype>(
 /// the parent navigation arm reads the value directly via this helper instead of
 /// recursing into [`get_nested_prop_path_helper`], which would consume the
 /// value's leading bits as a spurious continuation flag.
-fn read_aligned_scalar<'argtype>(t: &'argtype ArgType, reader: &mut BitReader) -> PResult<ArgValue<'argtype>> {
+fn read_aligned_scalar<'argtype>(
+    t: &'argtype ArgType,
+    reader: &mut BitReader<'argtype>,
+) -> PResult<ArgValue<'argtype>> {
     while !reader.remaining().is_multiple_of(8) {
         reader.read_u8(1);
     }
-    let mut buf = vec![0; reader.remaining() / 8];
-    reader.read_u8_slice(&mut buf[..]);
-    t.parse_value(&mut &buf[..]).map_err(|_| failure(ParseError::InvalidPacketData))
+    let mut buf = reader.remaining_bytes();
+    t.parse_value(&mut buf).map_err(|_| failure(ParseError::InvalidPacketData))
 }
 
 pub(crate) fn get_nested_prop_path_helper<'argtype>(
     is_slice: bool,
     t: &'argtype ArgType,
     prop_value: &mut ArgValue<'argtype>,
-    mut reader: BitReader,
+    mut reader: BitReader<'argtype>,
 ) -> PResult<PropertyNesting<'argtype>> {
     let t = t.peeled();
     let cont = reader.read_u8(1);

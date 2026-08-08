@@ -486,64 +486,43 @@ trait UpdateFromReplayArgs {
     fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, constants: &GameConstants);
 }
 
-macro_rules! set_arg_value {
-    ($set_var:expr, $args:ident, $key:expr, String) => {
-        $set_var = (*value.string_ref().unwrap_or_else(|| panic!("{} is not a string", $key))).clone()
+/// Lenient typed setter for a property value already matched by name: a
+/// field present with an unexpected type (common across game versions) is
+/// left at its default instead of panicking.
+macro_rules! apply_prop_value {
+    ($set_var:expr, $value:ident, bool) => {
+        if let Some(b) = $value.uint_8_ref() {
+            $set_var = (*b) != 0
+        }
     };
-    ($set_var:expr, $args:ident, $key:expr, i8) => {
-        set_arg_value!($set_var, $args, $key, int_8_ref, i8)
-    };
-    ($set_var:expr, $args:ident, $key:expr, i16) => {
-        set_arg_value!($set_var, $args, $key, int_16_ref, i16)
-    };
-    ($set_var:expr, $args:ident, $key:expr, i32) => {
-        set_arg_value!($set_var, $args, $key, int_32_ref, i32)
-    };
-    ($set_var:expr, $args:ident, $key:expr, u8) => {
-        set_arg_value!($set_var, $args, $key, uint_8_ref, u8)
-    };
-    ($set_var:expr, $args:ident, $key:expr, u16) => {
-        set_arg_value!($set_var, $args, $key, uint_16_ref, u16)
-    };
-    ($set_var:expr, $args:ident, $key:expr, u32) => {
-        set_arg_value!($set_var, $args, $key, uint_32_ref, u32)
-    };
-    ($set_var:expr, $args:ident, $key:expr, f32) => {
+    ($set_var:expr, $value:ident, f32) => {
         // Accept Float32, Float64, or integer encodings. Older clients vary the
         // wire type (e.g. 0.9.10 sends `health` as Float64); a strict
         // `float_32_ref()` would silently drop those, freezing the value (HP bars
         // never moved). `as_f32()` converts any numeric variant.
-        if let Some(value) = $args.get($key)
-            && let Some(converted) = value.as_f32()
-        {
+        if let Some(converted) = $value.as_f32() {
             $set_var = converted
         }
     };
-    ($set_var:expr, $args:ident, $key:expr, bool) => {
-        // Skip rather than panic if an older version encodes this field with a
-        // different type than expected.
-        if let Some(value) = $args.get($key)
-            && let Some(b) = value.uint_8_ref()
-        {
-            $set_var = (*b) != 0
+    ($set_var:expr, $value:ident, Vec<u8>) => {
+        if let Some(blob) = $value.blob_ref() {
+            $set_var = blob.to_vec()
         }
     };
-    ($set_var:expr, $args:ident, $key:expr, Vec<u8>) => {
-        if let Some(value) = $args.get($key)
-            && let Some(blob) = value.blob_ref()
-        {
-            $set_var = blob.clone()
-        }
+    ($set_var:expr, $value:ident, i8) => {
+        apply_prop_value!($set_var, $value, int_8_ref)
     };
-    ($set_var:expr, $args:ident, $key:expr, &[()]) => {
-        set_arg_value!($set_var, $args, $key, array_ref, &[()])
+    ($set_var:expr, $value:ident, u8) => {
+        apply_prop_value!($set_var, $value, uint_8_ref)
     };
-    ($set_var:expr, $args:ident, $key:expr, $conversion_func:ident, $ty:ty) => {
-        // A field present with an unexpected type (common across game versions)
-        // is left at its default instead of panicking.
-        if let Some(value) = $args.get($key)
-            && let Some(converted) = value.$conversion_func()
-        {
+    ($set_var:expr, $value:ident, u16) => {
+        apply_prop_value!($set_var, $value, uint_16_ref)
+    };
+    ($set_var:expr, $value:ident, u32) => {
+        apply_prop_value!($set_var, $value, uint_32_ref)
+    };
+    ($set_var:expr, $value:ident, $conversion_func:ident) => {
+        if let Some(converted) = $value.$conversion_func() {
             $set_var = converted.clone()
         }
     };
@@ -1038,222 +1017,152 @@ impl VehicleProps {
     }
 }
 
+impl VehicleProps {
+    /// Apply one named property. Dispatching on the name once (instead of
+    /// probing every known key against the incoming one, as the old
+    /// `update_from_args` body did) makes a single-property update one string
+    /// match rather than ~fifty comparisons.
+    fn apply_prop(&mut self, name: &str, value: &ArgValue<'_>, version: Version, constants: &GameConstants) {
+        match name {
+            "ignoreMapBorders" => apply_prop_value!(self.ignore_map_borders, value, bool),
+            "airDefenseDispRadius" => apply_prop_value!(self.air_defense_dispersion_radius, value, f32),
+            "deathSettings" => apply_prop_value!(self.death_settings, value, Vec<u8>),
+            "owner" => {
+                self.owner = *value.int_32_ref().unwrap_or_else(|| panic!("owner is not a i32")) as u32;
+            }
+            "atbaTargets" => {
+                self.atba_targets = value
+                    .array_ref()
+                    .unwrap_or_else(|| panic!("atbaTargets is not an array"))
+                    .iter()
+                    .map(|elem| *elem.uint_32_ref().expect("atbaTargets elem is not a u32"))
+                    .collect();
+            }
+            "effects" => {
+                self.effects = value
+                    .array_ref()
+                    .unwrap_or_else(|| panic!("effects is not an array"))
+                    .iter()
+                    .map(|elem| {
+                        String::from_utf8(elem.string_ref().expect("effects elem is not a string").to_vec())
+                            .expect("could not convert effects elem to string")
+                    })
+                    .collect();
+            }
+            "crewModifiersCompactParams" => {
+                let dict = value.fixed_dict_ref().unwrap_or_else(|| panic!("crewModifiersCompactParams is not a dict"));
+                self.crew_modifiers_compact_params.update_from_args(PropertyArgs::Map(dict), version, constants);
+            }
+            "laserTargetLocalPos" => apply_prop_value!(self.laser_target_local_pos, value, u16),
+            // TODO: AntiAirAuras
+            "selectedWeapon" => {
+                let id = *value.uint_32_ref().unwrap_or_else(|| panic!("selectedWeapon is not a u32"));
+                if let Some(wt) = WeaponType::from_id(id as i32, constants.ships(), version) {
+                    self.selected_weapon = wt;
+                }
+            }
+            "isOnForsage" => apply_prop_value!(self.is_on_forsage, value, bool),
+            "isInRageMode" => apply_prop_value!(self.is_in_rage_mode, value, bool),
+            "hasAirTargetsInRange" => apply_prop_value!(self.has_air_targets_in_range, value, bool),
+            "torpedoLocalPos" => apply_prop_value!(self.torpedo_local_pos, value, u16),
+            // TODO: airDefenseTargetIds
+            "buoyancy" => apply_prop_value!(self.buoyancy, value, f32),
+            "maxHealth" => {
+                apply_prop_value!(self.max_health, value, f32);
+                self.max_health_explicit = true;
+            }
+            "draught" => apply_prop_value!(self.draught, value, f32),
+            "ruddersAngle" => apply_prop_value!(self.rudders_angle, value, f32),
+            "targetLocalPos" => apply_prop_value!(self.target_local_pos, value, u16),
+            "triggeredSkillsData" => apply_prop_value!(self.triggered_skills_data, value, Vec<u8>),
+            "regeneratedHealth" => apply_prop_value!(self.regenerated_health, value, f32),
+            "regenerationHealth" => apply_prop_value!(self.regeneration_health, value, f32),
+            "blockedControls" => apply_prop_value!(self.blocked_controls, value, u8),
+            "isInvisible" => apply_prop_value!(self.is_invisible, value, bool),
+            "isFogHornOn" => apply_prop_value!(self.is_fog_horn_on, value, bool),
+            "serverSpeedRaw" => apply_prop_value!(self.server_speed_raw, value, u16),
+            "regenCrewHpLimit" => apply_prop_value!(self.regen_crew_hp_limit, value, f32),
+            // TODO: miscs_presets_status
+            "buoyancyCurrentWaterline" => apply_prop_value!(self.buoyancy_current_waterline, value, f32),
+            "isAlive" => apply_prop_value!(self.is_alive, value, bool),
+            "isBot" => apply_prop_value!(self.is_bot, value, bool),
+            // Read leniently: a field present with an unexpected width across game
+            // versions leaves the flags untouched rather than aborting the parse.
+            "visibilityFlags" => {
+                if let Some(flags) = value.as_u32() {
+                    self.visibility_flags = Some(VisibilityFlags::new(flags));
+                }
+            }
+            // TODO: heatInfos
+            "buoyancyRudderIndex" => apply_prop_value!(self.buoyancy_rudder_index, value, u8),
+            "isAntiAirMode" => apply_prop_value!(self.is_anti_air_mode, value, bool),
+            "speedSignDir" => apply_prop_value!(self.speed_sign_dir, value, i8),
+            "oilLeakState" => apply_prop_value!(self.oil_leak_state, value, u8),
+            // TODO: sounds
+            // Modern builds encode the ship config as a top-level blob; <=0.11.x wrap it
+            // in a FIXED_DICT { shipId, cd }. `parse_ship_config_value` handles both.
+            // Skip rather than panic if absent or unparseable.
+            "shipConfig" => {
+                if let Some(ship_config) = parse_ship_config_value(value, &version) {
+                    self.ship_config = ship_config;
+                }
+            }
+            "waveLocalPos" => apply_prop_value!(self.wave_local_pos, value, u16),
+            "hasActiveMainSquadron" => apply_prop_value!(self.has_active_main_squadron, value, bool),
+            "weaponLockFlags" => apply_prop_value!(self.weapon_lock_flags, value, u16),
+            "deepRuddersAngle" => apply_prop_value!(self.deep_rudders_angle, value, f32),
+            // TODO: debugText
+            "health" => {
+                apply_prop_value!(self.health, value, f32);
+                // Old clients never broadcast maxHealth; treat the highest observed
+                // health as the max so the HP-bar fraction stays valid. Gated on
+                // never having seen an explicit maxHealth so a legitimate mid-match
+                // decrease is not overridden.
+                if !self.max_health_explicit && self.health > self.max_health {
+                    self.max_health = self.health;
+                }
+            }
+            "engineDir" => apply_prop_value!(self.engine_dir, value, i8),
+            // TODO: state
+            "teamId" => apply_prop_value!(self.team_id, value, i8),
+            "buoyancyCurrentState" => {
+                let id = *value.uint_8_ref().unwrap_or_else(|| panic!("buoyancyCurrentState is not a u8"));
+                if let Some(ds) = BuoyancyState::from_id(id as i32, constants.battle(), version) {
+                    self.buoyancy_current_state = ds;
+                }
+            }
+            "uiEnabled" => apply_prop_value!(self.ui_enabled, value, bool),
+            "respawnTime" => apply_prop_value!(self.respawn_time, value, u16),
+            "enginePower" => apply_prop_value!(self.engine_power, value, u8),
+            "maxServerSpeedRaw" => apply_prop_value!(self.max_server_speed_raw, value, u32),
+            // Read leniently, matching visibilityFlags: a strict u16 read drops the
+            // field on any build that encodes it at another width, and a burn mask
+            // stuck at 0 reads downstream as "nothing ever burned" rather than
+            // "unknown". Bits 0-9 are all that is defined, so narrowing to u16
+            // keeps every meaningful bit.
+            "burningFlags" => {
+                if let Some(flags) = value.as_u32() {
+                    self.burning_flags = flags as u16;
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 impl UpdateFromReplayArgs for VehicleProps {
+    fn update_by_name(&mut self, name: &str, value: &ArgValue<'_>, version: Version, constants: &GameConstants) {
+        self.apply_prop(name, value, version, constants);
+    }
+
     fn update_from_args(&mut self, args: PropertyArgs<'_, '_>, version: Version, constants: &GameConstants) {
-        const IGNORE_MAP_BORDERS_KEY: &str = "ignoreMapBorders";
-        const AIR_DEFENSE_DISPERSION_RADIUS_KEY: &str = "airDefenseDispRadius";
-        const DEATH_SETTINGS_KEY: &str = "deathSettings";
-        const OWNER_KEY: &str = "owner";
-        const ATBA_TARGETS_KEY: &str = "atbaTargets";
-        const EFFECTS_KEY: &str = "effects";
-        const CREW_MODIFIERS_COMPACT_PARAMS_KEY: &str = "crewModifiersCompactParams";
-        const LASER_TARGET_LOCAL_POS_KEY: &str = "laserTargetLocalPos";
-
-        const SELECTED_WEAPON_KEY: &str = "selectedWeapon";
-
-        const IS_ON_FORSAGE_KEY: &str = "isOnForsage";
-        const IS_IN_RAGE_MODE_KEY: &str = "isInRageMode";
-        const HAS_AIR_TARGETS_IN_RANGE_KEY: &str = "hasAirTargetsInRange";
-        const TORPEDO_LOCAL_POS_KEY: &str = "torpedoLocalPos";
-
-        const BUOYANCY_KEY: &str = "buoyancy";
-        const MAX_HEALTH_KEY: &str = "maxHealth";
-        const DRAUGHT_KEY: &str = "draught";
-        const RUDDERS_ANGLE_KEY: &str = "ruddersAngle";
-        const TARGET_LOCAL_POSITION_KEY: &str = "targetLocalPos";
-        const TRIGGERED_SKILLS_DATA_KEY: &str = "triggeredSkillsData";
-        const REGENERATED_HEALTH_KEY: &str = "regeneratedHealth";
-        const REGENERATION_HEALTH_KEY: &str = "regenerationHealth";
-        const BLOCKED_CONTROLS_KEY: &str = "blockedControls";
-        const IS_INVISIBLE_KEY: &str = "isInvisible";
-        const IS_FOG_HORN_ON_KEY: &str = "isFogHornOn";
-        const SERVER_SPEED_RAW_KEY: &str = "serverSpeedRaw";
-        const REGEN_CREW_HP_LIMIT_KEY: &str = "regenCrewHpLimit";
-
-        const BUOYANCY_CURRENT_WATERLINE_KEY: &str = "buoyancyCurrentWaterline";
-        const IS_ALIVE_KEY: &str = "isAlive";
-        const IS_BOT_KEY: &str = "isBot";
-        const VISIBILITY_FLAGS_KEY: &str = "visibilityFlags";
-
-        const BUOYANCY_RUDDER_INDEX_KEY: &str = "buoyancyRudderIndex";
-        const IS_ANTI_AIR_MODE_KEY: &str = "isAntiAirMode";
-        const SPEED_SIGN_DIR_KEY: &str = "speedSignDir";
-        const OIL_LEAK_STATE_KEY: &str = "oilLeakState";
-
-        const SHIP_CONFIG_KEY: &str = "shipConfig";
-        const WAVE_LOCAL_POS_KEY: &str = "waveLocalPos";
-        const HAS_ACTIVE_MAIN_SQUADRON_KEY: &str = "hasActiveMainSquadron";
-        const WEAPON_LOCK_FLAGS_KEY: &str = "weaponLockFlags";
-        const DEEP_RUDDERS_ANGLE_KEY: &str = "deepRuddersAngle";
-
-        const HEALTH_KEY: &str = "health";
-        const ENGINE_DIR_KEY: &str = "engineDir";
-
-        const TEAM_ID_KEY: &str = "teamId";
-        const BUOYANCY_CURRENT_STATE_KEY: &str = "buoyancyCurrentState";
-        const UI_ENABLED_KEY: &str = "uiEnabled";
-        const RESPAWN_TIME_KEY: &str = "respawnTime";
-        const ENGINE_POWER_KEY: &str = "enginePower";
-        const MAX_SERVER_SPEED_RAW_KEY: &str = "maxServerSpeedRaw";
-        const BURNING_FLAGS_KEY: &str = "burningFlags";
-
-        set_arg_value!(self.ignore_map_borders, args, IGNORE_MAP_BORDERS_KEY, bool);
-        set_arg_value!(self.air_defense_dispersion_radius, args, AIR_DEFENSE_DISPERSION_RADIUS_KEY, f32);
-
-        set_arg_value!(self.death_settings, args, DEATH_SETTINGS_KEY, Vec<u8>);
-        if args.contains_key(OWNER_KEY) {
-            let value: u32 = arg_value_to_type!(args, OWNER_KEY, i32) as u32;
-            self.owner = value;
-        }
-
-        if args.contains_key(ATBA_TARGETS_KEY) {
-            let value: Vec<u32> = arg_value_to_type!(args, ATBA_TARGETS_KEY, &[()])
-                .iter()
-                .map(|elem| *elem.uint_32_ref().expect("atbaTargets elem is not a u32"))
-                .collect();
-            self.atba_targets = value;
-        }
-
-        if args.contains_key(EFFECTS_KEY) {
-            let value: Vec<String> = arg_value_to_type!(args, EFFECTS_KEY, &[()])
-                .iter()
-                .map(|elem| {
-                    String::from_utf8(elem.string_ref().expect("effects elem is not a string").clone())
-                        .expect("could not convert effects elem to string")
-                })
-                .collect();
-            self.effects = value;
-        }
-
-        if args.contains_key(CREW_MODIFIERS_COMPACT_PARAMS_KEY) {
-            self.crew_modifiers_compact_params.update_from_args(
-                PropertyArgs::Map(arg_value_to_type!(args, CREW_MODIFIERS_COMPACT_PARAMS_KEY, HashMap<(), ()>)),
-                version,
-                constants,
-            );
-        }
-
-        set_arg_value!(self.laser_target_local_pos, args, LASER_TARGET_LOCAL_POS_KEY, u16);
-
-        // TODO: AntiAirAuras
-        if args.contains_key(SELECTED_WEAPON_KEY)
-            && let Some(wt) = WeaponType::from_id(
-                arg_value_to_type!(args, SELECTED_WEAPON_KEY, u32) as i32,
-                constants.ships(),
-                version,
-            )
-        {
-            self.selected_weapon = wt;
-        }
-
-        set_arg_value!(self.is_on_forsage, args, IS_ON_FORSAGE_KEY, bool);
-
-        set_arg_value!(self.is_in_rage_mode, args, IS_IN_RAGE_MODE_KEY, bool);
-
-        set_arg_value!(self.has_air_targets_in_range, args, HAS_AIR_TARGETS_IN_RANGE_KEY, bool);
-
-        set_arg_value!(self.torpedo_local_pos, args, TORPEDO_LOCAL_POS_KEY, u16);
-
-        // TODO: airDefenseTargetIds
-
-        set_arg_value!(self.buoyancy, args, BUOYANCY_KEY, f32);
-
-        set_arg_value!(self.max_health, args, MAX_HEALTH_KEY, f32);
-        if args.contains_key(MAX_HEALTH_KEY) {
-            self.max_health_explicit = true;
-        }
-
-        set_arg_value!(self.draught, args, DRAUGHT_KEY, f32);
-
-        set_arg_value!(self.rudders_angle, args, RUDDERS_ANGLE_KEY, f32);
-
-        set_arg_value!(self.target_local_pos, args, TARGET_LOCAL_POSITION_KEY, u16);
-
-        set_arg_value!(self.triggered_skills_data, args, TRIGGERED_SKILLS_DATA_KEY, Vec<u8>);
-
-        set_arg_value!(self.regenerated_health, args, REGENERATED_HEALTH_KEY, f32);
-
-        set_arg_value!(self.regeneration_health, args, REGENERATION_HEALTH_KEY, f32);
-
-        set_arg_value!(self.blocked_controls, args, BLOCKED_CONTROLS_KEY, u8);
-
-        set_arg_value!(self.is_invisible, args, IS_INVISIBLE_KEY, bool);
-
-        set_arg_value!(self.is_fog_horn_on, args, IS_FOG_HORN_ON_KEY, bool);
-
-        set_arg_value!(self.server_speed_raw, args, SERVER_SPEED_RAW_KEY, u16);
-
-        set_arg_value!(self.regen_crew_hp_limit, args, REGEN_CREW_HP_LIMIT_KEY, f32);
-
-        // TODO: miscs_presets_status
-
-        set_arg_value!(self.buoyancy_current_waterline, args, BUOYANCY_CURRENT_WATERLINE_KEY, f32);
-        set_arg_value!(self.is_alive, args, IS_ALIVE_KEY, bool);
-        set_arg_value!(self.is_bot, args, IS_BOT_KEY, bool);
-        // Read leniently: a field present with an unexpected width across game
-        // versions leaves the flags untouched rather than aborting the parse.
-        if let Some(flags) = args.get(VISIBILITY_FLAGS_KEY).and_then(ArgValue::as_u32) {
-            self.visibility_flags = Some(VisibilityFlags::new(flags));
-        }
-
-        // TODO: heatInfos
-
-        set_arg_value!(self.buoyancy_rudder_index, args, BUOYANCY_RUDDER_INDEX_KEY, u8);
-        set_arg_value!(self.is_anti_air_mode, args, IS_ANTI_AIR_MODE_KEY, bool);
-        set_arg_value!(self.speed_sign_dir, args, SPEED_SIGN_DIR_KEY, i8);
-        set_arg_value!(self.oil_leak_state, args, OIL_LEAK_STATE_KEY, u8);
-
-        // TODO: sounds
-
-        // Modern builds encode the ship config as a top-level blob; <=0.11.x wrap it
-        // in a FIXED_DICT { shipId, cd }. `parse_ship_config_value` handles both.
-        // Skip rather than panic if absent or unparseable.
-        if let Some(value) = args.get(SHIP_CONFIG_KEY)
-            && let Some(ship_config) = parse_ship_config_value(value, &version)
-        {
-            self.ship_config = ship_config;
-        }
-
-        set_arg_value!(self.wave_local_pos, args, WAVE_LOCAL_POS_KEY, u16);
-        set_arg_value!(self.has_active_main_squadron, args, HAS_ACTIVE_MAIN_SQUADRON_KEY, bool);
-        set_arg_value!(self.weapon_lock_flags, args, WEAPON_LOCK_FLAGS_KEY, u16);
-        set_arg_value!(self.deep_rudders_angle, args, DEEP_RUDDERS_ANGLE_KEY, f32);
-
-        // TODO: debugText
-
-        set_arg_value!(self.health, args, HEALTH_KEY, f32);
-        // Old clients never broadcast maxHealth; treat the highest observed health
-        // as the max so the HP-bar fraction stays valid. Gated on never having
-        // seen an explicit maxHealth so a legitimate mid-match decrease is not
-        // overridden.
-        if !self.max_health_explicit && self.health > self.max_health {
-            self.max_health = self.health;
-        }
-        set_arg_value!(self.engine_dir, args, ENGINE_DIR_KEY, i8);
-
-        // TODO: state
-
-        set_arg_value!(self.team_id, args, TEAM_ID_KEY, i8);
-        if args.contains_key(BUOYANCY_CURRENT_STATE_KEY)
-            && let Some(ds) = BuoyancyState::from_id(
-                arg_value_to_type!(args, BUOYANCY_CURRENT_STATE_KEY, u8) as i32,
-                constants.battle(),
-                version,
-            )
-        {
-            self.buoyancy_current_state = ds;
-        }
-        set_arg_value!(self.ui_enabled, args, UI_ENABLED_KEY, bool);
-        set_arg_value!(self.respawn_time, args, RESPAWN_TIME_KEY, u16);
-        set_arg_value!(self.engine_power, args, ENGINE_POWER_KEY, u8);
-        set_arg_value!(self.max_server_speed_raw, args, MAX_SERVER_SPEED_RAW_KEY, u32);
-        // Read leniently, matching visibilityFlags: a strict u16 read drops the
-        // field on any build that encodes it at another width, and a burn mask
-        // stuck at 0 reads downstream as "nothing ever burned" rather than
-        // "unknown". Bits 0-9 are all that is defined, so narrowing to u16
-        // keeps every meaningful bit.
-        if let Some(flags) = args.get(BURNING_FLAGS_KEY).and_then(ArgValue::as_u32) {
-            self.burning_flags = flags as u16;
+        match args {
+            PropertyArgs::Single { name, value } => self.apply_prop(name, value, version, constants),
+            PropertyArgs::Map(map) => {
+                for (name, value) in map.iter() {
+                    self.apply_prop(name, value, version, constants);
+                }
+            }
         }
     }
 }

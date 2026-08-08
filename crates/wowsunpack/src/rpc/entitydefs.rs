@@ -51,12 +51,24 @@ pub struct Method {
     pub name: String,
     variable_length_header_size: usize,
     pub args: Vec<ArgType>,
+    /// Sum of the args' wire sort sizes, cached at parse time: walking the
+    /// arg-type tree per decoded packet is measurable on large replays.
+    args_fixed_size: usize,
 }
 
 impl Method {
     fn sort_size(&self) -> usize {
-        let size = self.args.iter().map(|arg| arg.sort_size()).sum::<usize>();
-        if size >= 0xffff { 0xffff + self.variable_length_header_size } else { size + self.variable_length_header_size }
+        if self.args_fixed_size >= 0xffff {
+            0xffff + self.variable_length_header_size
+        } else {
+            self.args_fixed_size + self.variable_length_header_size
+        }
+    }
+
+    /// Total fixed wire size of the args; 0xffff or larger means at least one
+    /// arg is variable-length.
+    pub fn args_fixed_size(&self) -> usize {
+        self.args_fixed_size
     }
 }
 
@@ -139,7 +151,8 @@ fn parse_method(method: &roxmltree::Node, aliases: &TypeAliases) -> Method {
         }
         None => 1,
     };
-    Method { name: method.tag_name().name().to_string(), variable_length_header_size, args }
+    let args_fixed_size = args.iter().map(|arg| arg.sort_size()).sum::<usize>();
+    Method { name: method.tag_name().name().to_string(), variable_length_header_size, args, args_fixed_size }
 }
 
 fn parse_method_list(mlist: &roxmltree::Node, aliases: &TypeAliases) -> Vec<Method> {

@@ -58,9 +58,9 @@ pub enum MergeError {
 /// Driver for a primary replay plus zero or more "alt" perspectives of the
 /// same match. All underlying state is exposed through a single
 /// [`BattleWorld`] whose view the caller reads.
-pub struct MergedReplays<'specs, 'res, 'data, G: ResourceLoader> {
+pub struct MergedReplays<'res, 'data, G: ResourceLoader> {
     world: BattleWorld<'res, 'data, G>,
-    parsers: Vec<Parser<'specs>>,
+    parsers: Vec<Parser<'data>>,
     remainings: Vec<&'data [u8]>,
     replays: Vec<&'data ReplayFile>,
     self_teams: Vec<Option<TeamId>>,
@@ -74,7 +74,7 @@ pub struct MergedReplays<'specs, 'res, 'data, G: ResourceLoader> {
     vehicle_facts: HashMap<EntityId, VehicleFacts>,
 }
 
-impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, G> {
+impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
     /// Build a session for `primary` plus `merges`. Validates that every
     /// merge has the same client version as the primary, pre-scans each
     /// replay for its recording player's team id (used to tag packets going
@@ -83,7 +83,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
     ///
     /// [`total_duration`]: Self::total_duration
     pub fn new(
-        specs: &'specs [EntitySpec],
+        specs: &'data [EntitySpec],
         game_params: &'res G,
         game_constants: &'res GameConstants,
         version: Version,
@@ -106,7 +106,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
         replays.push(primary);
         replays.extend(merges.iter());
 
-        let parsers: Vec<Parser<'specs>> = (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
+        let parsers: Vec<Parser<'data>> = (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
         let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data()).collect();
 
         let mut self_teams = Vec::with_capacity(replay_count);

@@ -415,11 +415,11 @@ pub struct Packet<'replay, 'argtype> {
     pub packet_type: PacketTypeId,
     pub clock: GameClock,
     pub payload: PacketType<'replay, 'argtype>,
-    pub raw: &'replay [u8],
+    pub raw: &'argtype [u8],
     /// Bytes remaining after the parser consumed data from the packet payload.
     /// Non-empty means the parser didn't consume the full packet.
     #[serde(skip_serializing_if = "<[u8]>::is_empty")]
-    pub leftover: &'replay [u8],
+    pub leftover: &'argtype [u8],
 }
 
 /// Packet type identifier from the BigWorld replay protocol.
@@ -752,11 +752,11 @@ impl<'argtype> Parser<'argtype> {
         self.diagnostics.borrow_mut().drain(..).collect()
     }
 
-    fn parse_entity_property_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'argtype>> {
+    fn parse_entity_property_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let prop_id = le_u32.parse_next(i)?;
         let payload_length = le_u32.parse_next(i)?;
-        let payload: &'a [u8] = take(payload_length as usize).parse_next(i)?;
+        let payload: &'argtype [u8] = take(payload_length as usize).parse_next(i)?;
 
         // Return structured errors rather than panicking. The caller's
         // parse_packet wraps any Err into an Invalid packet, but the error
@@ -804,11 +804,11 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_entity_method_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_entity_method_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let method_id = le_u32.parse_next(i)?;
         let payload_length = le_u32.parse_next(i)?;
-        let payload: &'a [u8] = take(payload_length as usize).parse_next(i)?;
+        let payload: &'argtype [u8] = take(payload_length as usize).parse_next(i)?;
         if !i.is_empty() {
             return Err(failure(ParseError::InvalidPacketData));
         }
@@ -835,7 +835,7 @@ impl<'argtype> Parser<'argtype> {
         // type). sort_size() reports INFINITY (0xffff) for any variable arg, so a
         // sum below that means the method is wholly fixed-size. Over-long payloads
         // are legitimate (methods can carry trailing data) and are not flagged.
-        let fixed_size: usize = spec.args.iter().map(|a| a.sort_size()).sum();
+        let fixed_size: usize = spec.args_fixed_size();
         if fixed_size < 0xffff && payload.len() < fixed_size {
             return Err(failure(ParseError::ExposedMethodMappingDrift {
                 method: spec.name.to_string(),
@@ -866,10 +866,7 @@ impl<'argtype> Parser<'argtype> {
         Ok(PacketType::EntityMethod(EntityMethodPacket { entity_id: entity_id.into(), method: &spec.name, args }))
     }
 
-    fn parse_battle_results<'replay, 'b>(
-        &'b mut self,
-        i: &mut &'replay [u8],
-    ) -> PResult<PacketType<'replay, 'argtype>> {
+    fn parse_battle_results(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let len = le_u32.parse_next(i)?;
         // A mismatch here means the packet was not really battle-results in this
         // build's layout (packet-id mapping differs by version). Fail gracefully
@@ -877,17 +874,14 @@ impl<'argtype> Parser<'argtype> {
         if len as usize != i.len() {
             return Err(failure(ParseError::BattleResultsLengthMismatch { expected: len, remaining: i.len() }));
         }
-        let battle_results: &'replay [u8] = take(len as usize).parse_next(i)?;
+        let battle_results: &'argtype [u8] = take(len as usize).parse_next(i)?;
 
         let results = std::str::from_utf8(battle_results).map_err(|e| failure(ParseError::from(e)))?;
 
         Ok(PacketType::BattleResults(results))
     }
 
-    fn parse_nested_property_update<'replay, 'b>(
-        &'b mut self,
-        i: &mut &'replay [u8],
-    ) -> PResult<PacketType<'replay, 'argtype>> {
+    fn parse_nested_property_update(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let is_slice = le_u8.parse_next(i)?;
         let payload_size = le_u32.parse_next(i)?;
@@ -945,30 +939,24 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_version_packet<'replay, 'b>(&'b self, i: &mut &'replay [u8]) -> PResult<PacketType<'replay, 'argtype>> {
+    fn parse_version_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let len = le_u32.parse_next(i)?;
         let data: &[u8] = take(len as usize).parse_next(i)?;
         let version = std::str::from_utf8(data).map_err(|e| failure(ParseError::from(e)))?;
         Ok(PacketType::Version(version.to_string()))
     }
 
-    fn parse_camera_mode_packet<'replay, 'b>(
-        &'b self,
-        i: &mut &'replay [u8],
-    ) -> PResult<PacketType<'replay, 'argtype>> {
+    fn parse_camera_mode_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let mode = le_u32.parse_next(i)?;
         Ok(PacketType::CameraMode(mode))
     }
 
-    fn parse_camera_freelook_packet<'replay, 'b>(
-        &'b self,
-        i: &mut &'replay [u8],
-    ) -> PResult<PacketType<'replay, 'argtype>> {
+    fn parse_camera_freelook_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let freelook = le_u8.parse_next(i)?;
         Ok(PacketType::CameraFreeLook(freelook))
     }
 
-    fn parse_position_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_position_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let pid = le_u32.parse_next(i)?;
         let space_id = le_u32.parse_next(i)?;
         let position = parse_vec3.parse_next(i)?;
@@ -986,7 +974,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_player_orientation_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_player_orientation_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         if i.len() != 0x20 {
             return Err(failure(ParseError::InvalidPacketData));
         }
@@ -1002,7 +990,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_camera_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_camera_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         // Pre-~0.11 the packet is 56 bytes and omits the `unknown` f32 that sits
         // between `fov` and `position`; later builds added it (60 bytes total).
         // Detect by payload length so both layouts decode.
@@ -1026,7 +1014,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_entity_control_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_entity_control_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let is_controlled = le_u8.parse_next(i)?;
         Ok(PacketType::EntityControl(EntityControlPacket {
@@ -1035,7 +1023,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_non_volatile_position_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_non_volatile_position_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let space_id = le_u32.parse_next(i)?;
         let position = parse_vec3.parse_next(i)?;
@@ -1048,7 +1036,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_player_net_stats_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_player_net_stats_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let packed = le_u32.parse_next(i)?;
         let stats = RawPlayerNetStats::from_bytes(packed.to_le_bytes());
         Ok(PacketType::PlayerNetStats(PlayerNetStatsPacket {
@@ -1058,24 +1046,24 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_server_timestamp_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_server_timestamp_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         use winnow::binary::le_f64;
         let timestamp = le_f64.parse_next(i)?;
         Ok(PacketType::ServerTimestamp(ServerTimestampPacket { timestamp }))
     }
 
-    fn parse_server_tick_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_server_tick_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         use winnow::binary::le_f64;
         let tick_rate = le_f64.parse_next(i)?;
         Ok(PacketType::ServerTick(tick_rate))
     }
 
-    fn parse_own_ship_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_own_ship_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         Ok(PacketType::OwnShip(OwnShipPacket { entity_id: entity_id.into() }))
     }
 
-    fn parse_set_weapon_lock_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_set_weapon_lock_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let weapon_type = le_u32.parse_next(i)?;
         let lock_type = le_u32.parse_next(i)?;
         let target_id = le_u32.parse_next(i)?;
@@ -1086,18 +1074,18 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_sub_controller_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_sub_controller_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let mode = le_i16.parse_next(i)?;
         Ok(PacketType::SubController(SubControllerPacket { mode }))
     }
 
-    fn parse_shot_tracking_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_shot_tracking_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let value = le_i64.parse_next(i)?;
         Ok(PacketType::ShotTracking(ShotTrackingPacket { entity_id: entity_id.into(), value }))
     }
 
-    fn parse_gun_marker_packet<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_gun_marker_packet(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let target_point = parse_vec3.parse_next(i)?;
         let diameter = le_f32.parse_next(i)?;
         let marker_position = parse_vec3.parse_next(i)?;
@@ -1115,12 +1103,16 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_unknown_packet<'a, 'b>(&'b self, i: &mut &'a [u8], payload_size: u32) -> PResult<PacketType<'a, 'b>> {
-        let contents: &'a [u8] = take(payload_size as usize).parse_next(i)?;
+    fn parse_unknown_packet(
+        &self,
+        i: &mut &'argtype [u8],
+        payload_size: u32,
+    ) -> PResult<PacketType<'argtype, 'argtype>> {
+        let contents: &'argtype [u8] = take(payload_size as usize).parse_next(i)?;
         Ok(PacketType::Unknown(contents))
     }
 
-    fn parse_base_player_create<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_base_player_create(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let entity_type = le_u16.parse_next(i)?;
         let spec = (entity_type as usize)
@@ -1172,7 +1164,7 @@ impl<'argtype> Parser<'argtype> {
     /// Unlike packet 0x0, this packet only has entity_id + entity_type + a small data blob
     /// (typically 4 zero bytes). The entity receives its real property values later via
     /// property-update packets or gets superseded by a full BasePlayerCreate (packet 0x0).
-    fn parse_base_player_create_stub<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_base_player_create_stub(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let entity_type = le_u16.parse_next(i)?;
         let spec = (entity_type as usize)
@@ -1192,7 +1184,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_entity_create<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_entity_create(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let entity_type = le_u16.parse_next(i)?;
         let vehicle_id = le_u32.parse_next(i)?;
@@ -1200,7 +1192,7 @@ impl<'argtype> Parser<'argtype> {
         let position = parse_vec3.parse_next(i)?;
         let rotation = parse_rot3.parse_next(i)?;
         let state_length = le_u32.parse_next(i)?;
-        let state: &'a [u8] = take(i.len()).parse_next(i)?;
+        let state: &'argtype [u8] = take(i.len()).parse_next(i)?;
         if self.entities.contains_key(&entity_id) {
             //println!("DBG: Entity {} got created twice!", entity_id);
         }
@@ -1255,7 +1247,7 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_cell_player_create<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_cell_player_create(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let space_id = le_u32.parse_next(i)?;
         // let _unknown = le_u16.parse_next(i)?;
@@ -1263,7 +1255,7 @@ impl<'argtype> Parser<'argtype> {
         let position = parse_vec3.parse_next(i)?;
         let rotation = parse_rot3.parse_next(i)?;
         let props_len = le_u32.parse_next(i)?;
-        let props_data: &'a [u8] = take(props_len as usize).parse_next(i)?;
+        let props_data: &'argtype [u8] = take(props_len as usize).parse_next(i)?;
 
         if !self.entities.contains_key(&entity_id) {
             return Err(failure(ParseError::UnknownEntity { entity_id }));
@@ -1322,12 +1314,12 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_entity_leave<'a, 'b>(&'b self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_entity_leave(&self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         Ok(PacketType::EntityLeave(EntityLeavePacket { entity_id: entity_id.into() }))
     }
 
-    fn parse_entity_enter<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_entity_enter(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let entity_id = le_u32.parse_next(i)?;
         let space_id = le_u32.parse_next(i)?;
         let vehicle_id = le_u32.parse_next(i)?;
@@ -1338,32 +1330,32 @@ impl<'argtype> Parser<'argtype> {
         }))
     }
 
-    fn parse_cruise_state<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_cruise_state(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let key = le_u32.parse_next(i)?;
         let value = le_i32.parse_next(i)?;
         Ok(PacketType::CruiseState(CruiseState { key, value }))
     }
 
-    fn parse_map_packet<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<PacketType<'a, 'b>> {
+    fn parse_map_packet(&mut self, i: &mut &'argtype [u8]) -> PResult<PacketType<'argtype, 'argtype>> {
         let space_id = le_u32.parse_next(i)?;
         let arena_id = le_i64.parse_next(i)?;
         let unknown1 = le_u32.parse_next(i)?;
         let unknown2 = le_u32.parse_next(i)?;
-        let blob: &'a [u8] = take(128usize).parse_next(i)?;
+        let blob: &'argtype [u8] = take(128usize).parse_next(i)?;
         let string_size = le_u32.parse_next(i)?;
-        let map_name: &'a [u8] = take(string_size as usize).parse_next(i)?;
+        let map_name: &'argtype [u8] = take(string_size as usize).parse_next(i)?;
         let map_name = std::str::from_utf8(map_name).map_err(|e| failure(ParseError::from(e)))?;
-        let matrix: &'a [u8] = take(4usize * 4 * 4).parse_next(i)?;
+        let matrix: &'argtype [u8] = take(4usize * 4 * 4).parse_next(i)?;
         let unknown = le_u8.parse_next(i)?;
         let packet = MapPacket { space_id, arena_id, unknown1, unknown2, blob, map_name, matrix, unknown };
         Ok(PacketType::Map(packet))
     }
 
-    fn parse_naked_packet<'a, 'b>(
-        &'b mut self,
+    fn parse_naked_packet(
+        &mut self,
         packet_type: PacketTypeId,
-        i: &mut &'a [u8],
-    ) -> PResult<PacketType<'a, 'b>> {
+        i: &mut &'argtype [u8],
+    ) -> PResult<PacketType<'argtype, 'argtype>> {
         /*
         PACKETS_MAPPING = {
             0x0: BasePlayerCreate,
@@ -1423,7 +1415,7 @@ impl<'argtype> Parser<'argtype> {
         Ok(payload)
     }
 
-    pub fn parse_packet<'a, 'b>(&'b mut self, i: &mut &'a [u8]) -> PResult<Packet<'a, 'b>> {
+    pub fn parse_packet(&mut self, i: &mut &'argtype [u8]) -> PResult<Packet<'argtype, 'argtype>> {
         let packet_size = le_u32.parse_next(i)?;
         let raw_type = le_u32.parse_next(i)?;
         let packet_type = match &self.version {
@@ -1432,7 +1424,7 @@ impl<'argtype> Parser<'argtype> {
         };
         let raw_clock = le_f32.parse_next(i)?;
         let clock = GameClock(raw_clock);
-        let packet_data: &'a [u8] = take(packet_size as usize).parse_next(i)?;
+        let packet_data: &'argtype [u8] = take(packet_size as usize).parse_next(i)?;
         let raw = packet_data;
         let mut sub = packet_data;
         let (leftover, payload) = match self.parse_naked_packet(packet_type, &mut sub) {

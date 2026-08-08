@@ -485,7 +485,8 @@ pub fn seed_vehicles_from_arena_state<'a, G: ResourceLoader>(
             continue;
         }
 
-        let args = arena_state_to_args(player);
+        let ship_config_dump = player.ship_config_dump();
+        let args = arena_state_to_args(player, ship_config_dump.as_deref());
         let mut props = VehicleProps::from_create_props(&args, version, constants);
         // Arena state does not broadcast live health; seed from max so HP is full
         // instead of 0 until the first EntityProperty(health) arrives.
@@ -687,12 +688,15 @@ fn decode_name(v: Option<&ArgValue<'_>>) -> String {
     }
 }
 
-fn arena_state_to_args(player: &PlayerStateData) -> std::collections::HashMap<&'static str, ArgValue<'static>> {
+fn arena_state_to_args<'a>(
+    player: &PlayerStateData,
+    ship_config: Option<&'a [u8]>,
+) -> std::collections::HashMap<&'static str, ArgValue<'a>> {
     let mut args = std::collections::HashMap::new();
     if player.max_health() > 0 {
         args.insert("maxHealth", ArgValue::Float32(player.max_health() as f32));
     }
-    if let Some(blob) = player.ship_config_dump() {
+    if let Some(blob) = ship_config {
         args.insert("shipConfig", ArgValue::Blob(blob));
     }
     args.insert("teamId", ArgValue::Int8(player.team_id() as i8));

@@ -628,7 +628,7 @@ pub(super) fn playback_thread(
     /// start with a clean slate. The returned [`StepOutcome::cancelled`]
     /// flag lets the caller decide whether to publish a frame.
     fn step_session_to_clock(
-        session: &mut MergedReplays<'_, '_, '_, GameMetadataProvider>,
+        session: &mut MergedReplays<'_, '_, GameMetadataProvider>,
         renderer: &mut MinimapRenderer<'_>,
         mut prev_clock: GameClock,
         target_clock: GameClock,

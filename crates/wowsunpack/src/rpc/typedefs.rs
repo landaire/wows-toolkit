@@ -65,7 +65,7 @@ pub enum PrimitiveType {
 }
 
 impl PrimitiveType {
-    fn parse_value<'argtype>(&'argtype self, input: &mut &[u8]) -> WResult<ArgValue<'argtype>> {
+    fn parse_value<'a>(&self, input: &mut &'a [u8]) -> WResult<ArgValue<'a>> {
         Ok(match self {
             PrimitiveType::Uint8 => ArgValue::Uint8(le_u8.parse_next(input)?),
             PrimitiveType::Uint16 => ArgValue::Uint16(le_u16.parse_next(input)?),
@@ -110,16 +110,14 @@ fn read_u8(input: &mut &[u8]) -> IResult<u8> {
 }
 
 /// Parse a length-prefixed byte sequence: u8 length, or 0xFF then u16 length + u8 unknown.
-fn parse_length_prefixed_bytes(input: &mut &[u8]) -> WResult<Vec<u8>> {
+fn parse_length_prefixed_bytes<'a>(input: &mut &'a [u8]) -> WResult<&'a [u8]> {
     let size = le_u8.parse_next(input)?;
     if size == 0xff {
         let size = le_u16.parse_next(input)?;
         let _unknown = le_u8.parse_next(input)?;
-        let data = take(size as usize).parse_next(input)?;
-        Ok(data.to_vec())
+        take(size as usize).parse_next(input)
     } else {
-        let data = take(size as usize).parse_next(input)?;
-        Ok(data.to_vec())
+        take(size as usize).parse_next(input)
     }
 }
 
@@ -169,9 +167,9 @@ pub enum ArgValue<'argtype> {
     Float64(f64),
     Vector2((f32, f32)),
     Vector3((f32, f32, f32)),
-    String(Vec<u8>),
-    UnicodeString(Vec<u8>),
-    Blob(Vec<u8>),
+    String(&'argtype [u8]),
+    UnicodeString(&'argtype [u8]),
+    Blob(&'argtype [u8]),
     Array(Vec<ArgValue<'argtype>>),
     FixedDict(HashMap<&'argtype str, ArgValue<'argtype>>),
     NullableFixedDict(Option<HashMap<&'argtype str, ArgValue<'argtype>>>),
@@ -191,9 +189,9 @@ variant_accessors!(ArgValue<'argtype> {
     tuple Float64(f64) => float_64;
     tuple Vector2((f32, f32)) => vector_2;
     tuple Vector3((f32, f32, f32)) => vector_3;
-    tuple String(Vec<u8>) => string;
-    tuple UnicodeString(Vec<u8>) => unicode_string;
-    tuple Blob(Vec<u8>) => blob;
+    tuple String(&'argtype [u8]) => string;
+    tuple UnicodeString(&'argtype [u8]) => unicode_string;
+    tuple Blob(&'argtype [u8]) => blob;
     tuple Array(Vec<ArgValue<'argtype>>) => array;
     tuple FixedDict(HashMap<&'argtype str, ArgValue<'argtype>>) => fixed_dict;
     tuple NullableFixedDict(Option<HashMap<&'argtype str, ArgValue<'argtype>>>) => nullable_fixed_dict;
@@ -439,7 +437,7 @@ impl ArgType {
         }
     }
 
-    pub fn parse_value<'a, 'b>(&'b self, input: &mut &'a [u8]) -> IResult<ArgValue<'b>> {
+    pub fn parse_value<'a, 'b: 'a>(&'b self, input: &mut &'a [u8]) -> IResult<ArgValue<'a>> {
         match self {
             Self::Primitive(p) => Ok(p.parse_value(input)?),
             Self::Array((count, atype)) => {
@@ -462,7 +460,7 @@ impl ArgType {
                         return Err(RpcError::UnknownFixedDictFlag { flag });
                     }
                 }
-                let mut dict: HashMap<&'b str, ArgValue<'b>> = HashMap::new();
+                let mut dict: HashMap<&'a str, ArgValue<'a>> = HashMap::new();
                 for property in props.iter() {
                     let element = property.prop_type.parse_value(input)?;
                     dict.insert(&property.name, element);
