@@ -30,7 +30,7 @@ flate2 = { workspace = true }
 rootcause = { workspace = true }
 memmap2 = { version = "0.9", optional = true }
 thiserror = { workspace = true }
-rayon = { version = "1.11", optional = true }
+rayon = { version = "1.12", optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
 csv = { version = "1.4", optional = true }
@@ -43,9 +43,9 @@ tracing = { workspace = true }
 itertools = { workspace = true, optional = true }
 gettext = { workspace = true, optional = true }
 convert_case = { workspace = true, optional = true }
-regex = { version = "1.12.3", optional = true }
+regex = { version = "1.13.1", optional = true }
 indicatif = { workspace = true, optional = true, features = ["rayon"] }
-thread_local = { version = "1.1.9", optional = true }
+thread_local = { version = "1.1.10", optional = true }
 rkyv = { workspace = true, optional = true }
 bon = { workspace = true, optional = true }
 meshopt-rs = { version = "0.1.2", optional = true }
