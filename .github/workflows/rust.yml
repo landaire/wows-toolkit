@@ -11,10 +11,19 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
-# Every job runs inside the repo's nix dev shell (`nix develop`) so the rust
-# toolchain and all system dependencies (GUI libs, openssl, nasm) are identical
-# locally and in CI. The nix store is cached via cachix; cargo artifacts via
-# actions/cache.
+# Every job runs with the repo's nix dev shell environment so the rust
+# toolchain and all system dependencies (GUI libs, openssl, nasm) are
+# identical locally and in CI. The nix store is cached via cachix.
+# nix-develop exports the devShell environment into GITHUB_ENV so later
+# steps (including rust-cache, which needs rustc on PATH) run inside it
+# without re-evaluating the flake per step.
+#
+# Cargo artifacts are cached with rust-cache, which prunes stale artifacts
+# before saving. Each compiling job keeps its own cache key: clippy stores
+# check-mode artifacts, test stores codegen artifacts, and cache entries are
+# immutable once saved, so a shared key would freeze the test cache at
+# whichever job saved first. save-if restricts writes to main; PR-branch
+# caches are unreachable from other PRs anyway.
 env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
@@ -52,15 +61,17 @@ jobs:
           name: landaire-gh-public
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-      - uses: actions/cache@v4
+      - uses: nicknovitski/nix-develop@v1
+      - name: Show toolchain
+        run: |
+          which cargo rustc
+          rustc -vV
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-clippy-${{ hashFiles('**/Cargo.lock') }}
-      - run: nix develop --command cargo clippy --workspace --all-targets --all-features -- -D warnings
+          shared-key: linux-clippy
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   test:
     name: Test
@@ -75,15 +86,17 @@ jobs:
           name: landaire-gh-public
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-      - uses: actions/cache@v4
+      - uses: nicknovitski/nix-develop@v1
+      - name: Show toolchain
+        run: |
+          which cargo rustc
+          rustc -vV
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
-      - run: nix develop --command cargo test --workspace
+          shared-key: linux-test
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - run: cargo test --workspace
 
   check-wasm:
     name: Check (wasm32)
@@ -98,5 +111,15 @@ jobs:
           name: landaire-gh-public
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+      - uses: nicknovitski/nix-develop@v1
+      - name: Show toolchain
+        run: |
+          which cargo rustc
+          rustc -vV
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: wasm
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Clippy wt-web for wasm32
-        run: nix develop --command cargo clippy -p wt-web --target wasm32-unknown-unknown -- -D warnings
+        run: cargo clippy -p wt-web --target wasm32-unknown-unknown -- -D warnings
