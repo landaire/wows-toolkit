@@ -3151,6 +3151,7 @@ mod tests {
             },
             |_| true,
             |_| std::ops::ControlFlow::Continue(()),
+            std::num::NonZeroUsize::MIN,
         )
     }
 

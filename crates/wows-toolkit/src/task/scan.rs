@@ -65,6 +65,12 @@ impl DirectoryScan {
     }
 }
 
+/// What one worker read out of one file's header.
+enum HeaderRead {
+    Version(Option<Version>),
+    Panicked { message: String },
+}
+
 /// Group `paths` by the build their replays report, and record which of those
 /// builds have no data on this machine.
 ///
@@ -72,25 +78,84 @@ impl DirectoryScan {
 /// and the missing-build decision are exercisable without a filesystem or a
 /// game install.
 ///
-/// `on_progress` returns [`ControlFlow::Break`] to abandon the scan: a
-/// workspace closed mid-scan has nothing left to fill, and a large directory
-/// would otherwise keep reading headers for a listing nobody is watching.
+/// Headers are read by `threads` workers pulling from a shared queue. Results
+/// land in one slot per path and are folded in path order after the workers
+/// finish, so the grouping is identical whatever order the reads complete in.
+///
+/// `on_progress` runs on the calling thread, once per completed file. It
+/// returns [`ControlFlow::Break`] to abandon the scan: a workspace closed
+/// mid-scan has nothing left to fill, and a large directory would otherwise
+/// keep reading headers for a listing nobody is watching. Files read while
+/// the abandonment propagates to the workers still count.
 pub fn scan_paths(
     root: PathBuf,
     paths: Vec<PathBuf>,
-    read_version: impl Fn(&Path) -> Option<Version>,
+    read_version: impl Fn(&Path) -> Option<Version> + Sync,
     has_data: impl Fn(&BuildRequest) -> bool,
     mut on_progress: impl FnMut(IngestProgress) -> ControlFlow<()>,
+    threads: std::num::NonZeroUsize,
 ) -> DirectoryScan {
     let total = paths.len();
+
+    let slots: Vec<std::sync::OnceLock<HeaderRead>> = (0..total).map(|_| std::sync::OnceLock::new()).collect();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let abort = std::sync::atomic::AtomicBool::new(false);
+
+    std::thread::scope(|scope| {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+
+        for _ in 0..threads.get().min(total) {
+            let tx = tx.clone();
+            let (slots, paths, next, abort, read_version) = (&slots, &paths, &next, &abort, &read_version);
+            scope.spawn(move || {
+                loop {
+                    if abort.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
+                    let index = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(path) = paths.get(index) else { break };
+
+                    let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_version(path)));
+                    let read = match read {
+                        Ok(version) => HeaderRead::Version(version),
+                        Err(payload) => {
+                            HeaderRead::Panicked { message: crate::util::thread::panic_payload_to_string(&payload) }
+                        }
+                    };
+                    // Cannot already be set: each index is handed to one worker.
+                    let _ = slots[index].set(read);
+
+                    // The coordinator gone means the scan was abandoned;
+                    // finishing the queue would be reads nobody folds.
+                    if tx.send(()).is_err() {
+                        break;
+                    }
+                }
+            });
+        }
+        // The coordinator holding a sender would keep its own recv loop alive
+        // after every worker exits.
+        drop(tx);
+
+        let mut done = 0;
+        while rx.recv().is_ok() {
+            done += 1;
+            if on_progress(IngestProgress { done, total }).is_break() {
+                abort.store(true, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+        }
+    });
+
     let mut by_build: BTreeMap<NonZeroU32, ScanBuild> = BTreeMap::new();
     let mut unreadable = Vec::new();
 
-    for (visited, path) in paths.into_iter().enumerate() {
-        let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| read_version(&path)));
+    for (path, slot) in paths.into_iter().zip(slots) {
+        // An empty slot is a file the abandoned scan never got to.
+        let Some(read) = slot.into_inner() else { continue };
 
         match read {
-            Ok(Some(version)) => match BuildRequest::new(version) {
+            HeaderRead::Version(Some(version)) => match BuildRequest::new(version) {
                 Some(request) => {
                     by_build
                         .entry(request.build())
@@ -100,16 +165,11 @@ pub fn scan_paths(
                 }
                 None => unreadable.push((path, UnreadableReason::NoBuild)),
             },
-            Ok(None) => unreadable.push((path, UnreadableReason::Header)),
-            Err(payload) => {
-                let message = crate::util::thread::panic_payload_to_string(&payload);
+            HeaderRead::Version(None) => unreadable.push((path, UnreadableReason::Header)),
+            HeaderRead::Panicked { message } => {
                 warn!("panic reading the header of {}, skipping it: {message}", path.display());
                 unreadable.push((path, UnreadableReason::Panicked));
             }
-        }
-
-        if on_progress(IngestProgress { done: visited + 1, total }).is_break() {
-            break;
         }
     }
 
@@ -138,6 +198,11 @@ pub fn start_scan_directory(
         let found: std::collections::HashSet<PathBuf> = paths.iter().cloned().collect();
         let _ = update_tx.send(crate::task::replays::IngestUpdate::Walked { workspace, paths: found });
 
+        // Header reads are independent smallish file reads, so one worker per
+        // core keeps the disk queue full. A failed parallelism query falls
+        // back to a single worker, which is correct just slower.
+        let threads = std::thread::available_parallelism().unwrap_or(std::num::NonZeroUsize::MIN);
+
         let scan = scan_paths(
             root,
             paths,
@@ -161,6 +226,7 @@ pub fn start_scan_directory(
                 // would be read for a listing nobody is watching.
                 if sent.is_ok() { ControlFlow::Continue(()) } else { ControlFlow::Break(()) }
             },
+            threads,
         );
 
         let _ =
@@ -185,6 +251,8 @@ mod tests {
         PathBuf::from(name)
     }
 
+    const ONE_THREAD: std::num::NonZeroUsize = std::num::NonZeroUsize::MIN;
+
     /// Replays of one build group under it whatever order the walk found them
     /// in, which is what lets the read stage load that build's data once.
     #[test]
@@ -196,6 +264,7 @@ mod tests {
             |p| files.iter().find(|(name, _)| Path::new(name) == p).map(|(_, v)| *v),
             |_| true,
             |_| ControlFlow::Continue(()),
+            ONE_THREAD,
         );
 
         assert_eq!(scan.total, 3);
@@ -214,6 +283,7 @@ mod tests {
             |_| Some(version(0, 6, 13, 0)),
             |_| true,
             |_| ControlFlow::Continue(()),
+            ONE_THREAD,
         );
 
         assert!(scan.by_build.is_empty(), "no build key may be invented for it");
@@ -230,6 +300,7 @@ mod tests {
             |p| (p == Path::new("good")).then(|| version(15, 0, 0, 100)),
             |_| true,
             |_| ControlFlow::Continue(()),
+            ONE_THREAD,
         );
 
         assert_eq!(scan.unreadable, vec![(path("bad"), UnreadableReason::Header)]);
@@ -247,6 +318,7 @@ mod tests {
             |p| files.iter().find(|(name, _)| Path::new(name) == p).map(|(_, v)| *v),
             |request| request.build_u32() == 100,
             |_| ControlFlow::Continue(()),
+            ONE_THREAD,
         );
 
         assert_eq!(scan.missing_builds, BTreeSet::from([std::num::NonZeroU32::new(90).expect("nonzero")]));
@@ -266,6 +338,7 @@ mod tests {
                 seen.push(progress.done);
                 ControlFlow::Continue(())
             },
+            ONE_THREAD,
         );
 
         assert_eq!(seen, vec![1, 2]);
@@ -283,6 +356,7 @@ mod tests {
             |p| files.iter().find(|(name, _)| Path::new(name) == p).map(|(_, v)| *v),
             |_| true,
             |_| ControlFlow::Continue(()),
+            ONE_THREAD,
         );
 
         let visited: Vec<u32> = scan.read_order().map(|(request, _)| request.build_u32()).collect();
@@ -299,10 +373,119 @@ mod tests {
             |p| files.iter().find(|(name, _)| Path::new(name) == p).map(|(_, v)| *v),
             |_| false,
             |_| ControlFlow::Continue(()),
+            ONE_THREAD,
         );
 
         let build = std::num::NonZeroU32::new(100).expect("nonzero");
         assert_eq!(scan.by_build[&build].paths.len(), 2);
         assert!(scan.missing_builds.contains(&build));
+    }
+
+    /// Reads race across workers, but the fold runs in path order, so the scan
+    /// must come out identical to a single-threaded one however the reads
+    /// interleave. Progress still counts every file exactly once.
+    #[test]
+    fn a_parallel_scan_matches_a_single_threaded_one() {
+        let files: Vec<(String, Option<Version>)> = (0..64)
+            .map(|i| {
+                let version = match i % 4 {
+                    0 => Some(version(15, 0, 0, 100)),
+                    1 => Some(version(14, 11, 0, 90)),
+                    2 => Some(version(0, 6, 13, 0)),
+                    _ => None,
+                };
+                (format!("file-{i:02}"), version)
+            })
+            .collect();
+
+        let run = |threads: std::num::NonZeroUsize| {
+            let mut reports = 0usize;
+            let scan = scan_paths(
+                path("root"),
+                files.iter().map(|(name, _)| path(name)).collect(),
+                |p| files.iter().find(|(name, _)| Path::new(name) == p).and_then(|(_, v)| *v),
+                |request| request.build_u32() == 100,
+                |progress| {
+                    reports += 1;
+                    assert_eq!(progress.done, reports, "done counts each completion exactly once");
+                    ControlFlow::Continue(())
+                },
+                threads,
+            );
+            assert_eq!(reports, files.len());
+            scan
+        };
+
+        let sequential = run(ONE_THREAD);
+        let parallel = run(std::num::NonZeroUsize::new(8).expect("nonzero"));
+
+        assert_eq!(parallel.total, sequential.total);
+        assert_eq!(parallel.unreadable, sequential.unreadable);
+        assert_eq!(parallel.missing_builds, sequential.missing_builds);
+        let groups = |scan: &DirectoryScan| {
+            scan.by_build.iter().map(|(build, group)| (*build, group.paths.clone())).collect::<Vec<_>>()
+        };
+        assert_eq!(groups(&parallel), groups(&sequential));
+    }
+
+    /// Break abandons the queue: the workers stop pulling files well short of
+    /// the whole directory, everything reported before the break is kept, and
+    /// the scan still returns.
+    #[test]
+    fn an_abandoned_parallel_scan_returns_without_reading_everything() {
+        let names: Vec<String> = (0..64).map(|i| format!("file-{i:02}")).collect();
+        let reads = std::sync::atomic::AtomicUsize::new(0);
+        let scan = scan_paths(
+            path("root"),
+            names.iter().map(|name| path(name)).collect(),
+            |_| {
+                reads.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                // Slow enough that the break lands while most of the queue is
+                // still unread, whatever the scheduler does: reading all 64
+                // takes at least 16ms across 8 workers, and the coordinator
+                // breaks microseconds after the fourth completion.
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                Some(version(15, 0, 0, 100))
+            },
+            |_| true,
+            |progress| if progress.done >= 4 { ControlFlow::Break(()) } else { ControlFlow::Continue(()) },
+            std::num::NonZeroUsize::new(8).expect("nonzero"),
+        );
+
+        assert!(reads.load(std::sync::atomic::Ordering::Relaxed) < 64, "the tail of the queue stays unread");
+        let build = std::num::NonZeroU32::new(100).expect("nonzero");
+        let classified = scan.by_build[&build].paths.len() + scan.unreadable.len();
+        assert!(classified >= 4, "everything reported before the break is kept");
+        assert_eq!(scan.total, 64, "total still counts the files the walk found");
+    }
+
+    /// A read_version panic costs only its file, across workers: it lands in
+    /// unreadable as Panicked, every other file classifies normally, and
+    /// progress still counts the whole directory.
+    #[test]
+    fn a_panicking_header_read_costs_only_its_file() {
+        let names: Vec<String> = (0..16).map(|i| format!("file-{i:02}")).collect();
+        let mut reports = 0usize;
+        let scan = scan_paths(
+            path("root"),
+            names.iter().map(|name| path(name)).collect(),
+            |p| {
+                if p == Path::new("file-07") {
+                    panic!("header read gone wrong");
+                }
+                Some(version(15, 0, 0, 100))
+            },
+            |_| true,
+            |progress| {
+                reports = progress.done;
+                ControlFlow::Continue(())
+            },
+            std::num::NonZeroUsize::new(8).expect("nonzero"),
+        );
+
+        assert_eq!(reports, 16, "the panicking file still advances progress");
+        assert_eq!(scan.unreadable, vec![(path("file-07"), UnreadableReason::Panicked)]);
+        let build = std::num::NonZeroU32::new(100).expect("nonzero");
+        assert_eq!(scan.by_build[&build].paths.len(), 15);
     }
 }
