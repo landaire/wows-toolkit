@@ -20,8 +20,6 @@ use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::rpc::entitydefs::parse_scripts;
 use wowsunpack::vfs::VfsPath;
 
-use wows_battle_world::BattleWorld;
-use wows_battle_world::ids::ShotTracking;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
