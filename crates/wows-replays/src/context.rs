@@ -7,18 +7,23 @@
 //! layer asks a [`GameDataContext`] for typed values and stays out of the
 //! sourcing business.
 //!
-//! The layers are opt-in:
-//! - [`FnContext`] adapts two closures with no further behavior; a one-shot
-//!   tool that parses a single replay pays nothing beyond its own load.
-//! - [`CachedContext`] wraps any inner context and memoizes per build,
-//!   including negative results, so directory-scale runs pay each build's
-//!   load cost once.
+//! The layering contract:
+//! - Parsing APIs (`Parser`, `BattleWorld`, the decoder) never take a
+//!   context. They borrow pre-resolved data, so a consumer with its own
+//!   per-build state pays nothing for this module.
+//! - A context returns shared handles (`Arc`) out of whatever store the
+//!   consumer runs; it imposes no caching policy of its own.
+//! - [`CachedContext`] is the opt-in policy for consumers with no store of
+//!   their own (one-shot and batch tools). It wraps loaders, never caches:
+//!   wrapping an already-caching context double-caches with conflicting
+//!   eviction.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 
 use crate::game_constants::GameConstants;
@@ -45,41 +50,13 @@ pub trait GameDataContext {
     /// Game constants for the build, with any caller-configured overrides
     /// (e.g. a constants.json) already merged.
     fn game_constants(&self, version: &Version) -> Result<Arc<GameConstants>, GameDataContextError>;
-}
 
-/// A [`GameDataContext`] built from two closures. Every call loads fresh;
-/// wrap in [`CachedContext`] when parsing more than one replay.
-pub struct FnContext<S, C>
-where
-    S: Fn(&Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError>,
-    C: Fn(&Version) -> Result<Arc<GameConstants>, GameDataContextError>,
-{
-    specs: S,
-    constants: C,
-}
-
-impl<S, C> FnContext<S, C>
-where
-    S: Fn(&Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError>,
-    C: Fn(&Version) -> Result<Arc<GameConstants>, GameDataContextError>,
-{
-    pub fn new(specs: S, constants: C) -> Self {
-        Self { specs, constants }
-    }
-}
-
-impl<S, C> GameDataContext for FnContext<S, C>
-where
-    S: Fn(&Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError>,
-    C: Fn(&Version) -> Result<Arc<GameConstants>, GameDataContextError>,
-{
-    fn entity_specs(&self, version: &Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError> {
-        (self.specs)(version)
-    }
-
-    fn game_constants(&self, version: &Version) -> Result<Arc<GameConstants>, GameDataContextError> {
-        (self.constants)(version)
-    }
+    /// Full metadata provider (game params, localization, entity specs) for
+    /// the build. A context that cannot source game params returns an error
+    /// saying so; callers that only drive the packet parser should ask for
+    /// [`GameDataContext::entity_specs`] instead, which is far cheaper to
+    /// load.
+    fn metadata_provider(&self, version: &Version) -> Result<Arc<GameMetadataProvider>, GameDataContextError>;
 }
 
 type Cache<T> = Mutex<HashMap<Version, Result<T, GameDataContextError>>>;
@@ -93,11 +70,17 @@ pub struct CachedContext<T: GameDataContext> {
     inner: T,
     specs: Cache<Arc<Vec<EntitySpec>>>,
     constants: Cache<Arc<GameConstants>>,
+    providers: Cache<Arc<GameMetadataProvider>>,
 }
 
 impl<T: GameDataContext> CachedContext<T> {
     pub fn new(inner: T) -> Self {
-        Self { inner, specs: Mutex::new(HashMap::new()), constants: Mutex::new(HashMap::new()) }
+        Self {
+            inner,
+            specs: Mutex::new(HashMap::new()),
+            constants: Mutex::new(HashMap::new()),
+            providers: Mutex::new(HashMap::new()),
+        }
     }
 }
 
@@ -110,5 +93,10 @@ impl<T: GameDataContext> GameDataContext for CachedContext<T> {
     fn game_constants(&self, version: &Version) -> Result<Arc<GameConstants>, GameDataContextError> {
         let mut cache = self.constants.lock().expect("constants cache poisoned");
         cache.entry(*version).or_insert_with(|| self.inner.game_constants(version)).clone()
+    }
+
+    fn metadata_provider(&self, version: &Version) -> Result<Arc<GameMetadataProvider>, GameDataContextError> {
+        let mut cache = self.providers.lock().expect("providers cache poisoned");
+        cache.entry(*version).or_insert_with(|| self.inner.metadata_provider(version)).clone()
     }
 }

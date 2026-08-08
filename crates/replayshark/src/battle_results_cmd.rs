@@ -11,19 +11,14 @@ use std::path::PathBuf;
 
 use rootcause::prelude::*;
 use serde_json::Value;
-use wows_battle_world::BattleWorld;
-use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::report::BattleReport;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::battle_report::resolve_battle_results;
 use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::ShipBattleStats;
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::Analyzer;
 use wows_replays::analyzer::battle_controller::BattleResult;
-use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
-use wowsunpack::game_params::provider::GameMetadataProvider;
 
 pub enum ConstantsResolution {
     Exact(serde_json::Value),
@@ -98,6 +93,7 @@ impl Drop for RestorePanicHook {
 /// if any replay in the batch failed, after writing every successful result.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
+    ctx: &dyn wows_replays::context::GameDataContext,
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,
     constants_path: Option<&Path>,
@@ -163,8 +159,7 @@ pub fn run(
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             process_replay(
                 path,
-                game_dir,
-                extracted_dir,
+                ctx,
                 format,
                 explicit_constants.as_ref(),
                 resolver.as_mut(),
@@ -234,8 +229,7 @@ fn assemble_out_file(input_count: usize, oks: Vec<Value>) -> Option<Value> {
 #[allow(clippy::too_many_arguments)]
 fn process_replay(
     path: &Path,
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
+    ctx: &dyn wows_replays::context::GameDataContext,
     format: ResultsFormat,
     explicit_constants: Option<&Value>,
     resolver: Option<&mut ConstantsResolver>,
@@ -247,10 +241,13 @@ fn process_replay(
     let version = Version::try_from_client_exe(&replay_file.meta.clientVersionFromExe)
         .ok_or_else(|| "replay carries an unparsable client version".to_string())?;
 
-    let (provider, game_constants) = crate::load_metadata_provider_and_constants(game_dir, extracted_dir, &version)
-        .map_err(|e| format!("failed to load game data: {e}"))?;
-
-    let report = build_battle_report(&replay_file, &provider, &game_constants, version)?;
+    let provider = ctx.metadata_provider(&version).map_err(|e| format!("failed to load game data: {e}"))?;
+    let report = wows_battle_world::process::battle_report_for(
+        &replay_file,
+        ctx,
+        wows_battle_world::process::ProcessOptions::default(),
+    )
+    .map_err(|e| format!("failed to process replay: {e}"))?;
 
     match format {
         ResultsFormat::Raw => {
@@ -276,30 +273,6 @@ fn process_replay(
             serde_json::to_value(&normalized).map_err(|e| format!("failed to serialize normalized report: {e}"))
         }
     }
-}
-
-/// Parse the replay's packets into a finished `BattleReport`, mirroring
-/// `run_players_query`. Shared by all three output formats.
-fn build_battle_report(
-    replay_file: &ReplayFile,
-    provider: &GameMetadataProvider,
-    game_constants: &wows_replays::game_constants::GameConstants,
-    version: Version,
-) -> Result<BattleReport, String> {
-    let mut world = BattleWorld::new(&replay_file.meta, provider, Some(game_constants));
-    world.set_shot_tracking(ShotTracking::Untracked);
-
-    let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
-    let mut remaining = replay_file.packet_data();
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => world.process(&packet),
-            Err(_) => break,
-        }
-    }
-    world.finish();
-
-    Ok(world.into_report())
 }
 
 /// Resolve the wows-constants JSON to use for a replay: the explicit `-c`

@@ -31,6 +31,48 @@ use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::error::ToolkitError;
 
+/// The app's per-build cache exposed through the library seam, so shared
+/// entry points (e.g. wows-battle-world's `battle_report_for`) can be driven
+/// by the same LRU, load gates, and cross-region resolution the rest of the
+/// app uses. Never wrap this in `CachedContext`; it already caches.
+impl wows_replays::context::GameDataContext for WoWsDataMap {
+    fn entity_specs(
+        &self,
+        version: &Version,
+    ) -> Result<Arc<Vec<wowsunpack::rpc::entitydefs::EntitySpec>>, wows_replays::context::GameDataContextError> {
+        let provider = wows_replays::context::GameDataContext::metadata_provider(self, version)?;
+        Ok(provider.entity_specs_arc())
+    }
+
+    fn game_constants(
+        &self,
+        version: &Version,
+    ) -> Result<Arc<GameConstants>, wows_replays::context::GameDataContextError> {
+        let data = self.resolve(version).ok_or_else(|| {
+            wows_replays::context::GameDataContextError::new("game constants", *version, "build data unavailable")
+        })?;
+        let guard = data.read();
+        Ok(Arc::clone(&guard.game_constants))
+    }
+
+    fn metadata_provider(
+        &self,
+        version: &Version,
+    ) -> Result<Arc<GameMetadataProvider>, wows_replays::context::GameDataContextError> {
+        let data = self.resolve(version).ok_or_else(|| {
+            wows_replays::context::GameDataContextError::new("metadata provider", *version, "build data unavailable")
+        })?;
+        let guard = data.read();
+        guard.game_metadata.clone().ok_or_else(|| {
+            wows_replays::context::GameDataContextError::new(
+                "metadata provider",
+                *version,
+                "game params failed to load for this build",
+            )
+        })
+    }
+}
+
 pub struct GameAsset {
     pub path: String,
     pub data: Vec<u8>,
@@ -1002,7 +1044,6 @@ impl WorldOfWarshipsData {
     /// Returns `false` if versioned constants could not be found on disk.
     #[instrument(skip(self), fields(build = self.build_number))]
     pub fn rebuild_with_new_constants(&mut self) -> bool {
-        use crate::task::build_game_constants;
         use crate::task::load_versioned_constants_from_disk_with_fallback;
 
         debug!("Rebuilding WorldOfWarshipsData for build {}", self.build_number);
@@ -1022,7 +1063,8 @@ impl WorldOfWarshipsData {
             };
 
         // Rebuild game constants from VFS + new replay constants
-        let new_game_constants = build_game_constants(&self.vfs, &new_replay_constants, self.full_version);
+        let new_game_constants =
+            GameConstants::for_build(Some(&self.vfs), Some(&new_replay_constants), self.full_version);
 
         // Reload all icons from game files
         let version = self.full_version.as_ref();

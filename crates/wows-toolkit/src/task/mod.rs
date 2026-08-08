@@ -82,7 +82,6 @@ pub use replays::DataExportSettings;
 pub use replays::ReplayBackgroundParserThreadMessage;
 pub use replays::ReplayExportFormat;
 pub use replays::SourceSelector;
-pub use replays::build_game_constants;
 pub use replays::load_nation_flag;
 pub use replays::load_ribbon_icons;
 pub use replays::load_ship_icons;

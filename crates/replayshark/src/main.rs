@@ -18,6 +18,7 @@ use wowsunpack::game_data;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::rpc::entitydefs::parse_scripts;
+use wowsunpack::vfs::VfsPath;
 
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
@@ -25,7 +26,6 @@ use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::context::CachedContext;
-use wows_replays::context::FnContext;
 use wows_replays::context::GameDataContext;
 use wows_replays::context::GameDataContextError;
 use wows_replays::game_constants::GameConstants;
@@ -420,16 +420,24 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> rootcause::Re
 
     // If the path itself contains metadata.toml, it's already the version dir
     if let Some(meta) = read_metadata(path) {
-        if meta.build != replay_build {
-            bail!(
-                "Extracted data is build {} ({}) but replay is build {}. \
-                 Entity definitions will not match. Use extracted data for the correct build.",
-                meta.build,
-                meta.version,
-                replay_build
-            );
+        if meta.build == replay_build {
+            return Ok(path.to_path_buf());
         }
-        return Ok(path.to_path_buf());
+        // Cross-region: another server's build of the same friendly version
+        // ships interchangeable files.
+        let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
+        if meta.version == version_str {
+            eprintln!("No exact data for build {}; using {} (build {})", replay_build, meta.version, meta.build);
+            return Ok(path.to_path_buf());
+        }
+        bail!(
+            "Extracted data is build {} ({}) but replay is build {} ({}). \
+             Entity definitions will not match. Use extracted data for the correct version.",
+            meta.build,
+            meta.version,
+            replay_build,
+            version_str
+        );
     }
 
     // Scan for version subdirectories with metadata.toml
@@ -956,6 +964,53 @@ fn report_bench(parsed: usize, failed: usize, bytes: usize, sink: usize, elapsed
     );
 }
 
+/// Game data sourced the way the CLI flags describe: a live install (-g), an
+/// extracted/dump directory (-e), and an optional constants.json (-c) merged
+/// over whatever constants the game files provide.
+struct CliGameDataContext<'a> {
+    game_dir: Option<&'a str>,
+    extracted: Option<&'a str>,
+    /// Parsed -c/--constants overrides, read once at startup.
+    constants_overrides: Option<serde_json::Value>,
+}
+
+impl<'a> CliGameDataContext<'a> {
+    fn new(game_dir: Option<&'a str>, extracted: Option<&'a str>, constants_path: Option<&Path>) -> Self {
+        let constants_overrides = constants_path.map(|path| {
+            let data = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", path.display()));
+            serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"))
+        });
+        Self { game_dir, extracted, constants_overrides }
+    }
+}
+
+impl GameDataContext for CliGameDataContext<'_> {
+    fn entity_specs(&self, version: &Version) -> Result<std::sync::Arc<Vec<EntitySpec>>, GameDataContextError> {
+        load_game_data(self.game_dir, self.extracted, version)
+            .map(std::sync::Arc::new)
+            .map_err(|e| GameDataContextError::new("entity specs", *version, e))
+    }
+
+    fn game_constants(&self, version: &Version) -> Result<std::sync::Arc<GameConstants>, GameDataContextError> {
+        let vfs = open_build_vfs(self.game_dir, self.extracted, version);
+        Ok(std::sync::Arc::new(GameConstants::for_build(
+            vfs.as_ref(),
+            self.constants_overrides.as_ref(),
+            Some(*version),
+        )))
+    }
+
+    fn metadata_provider(
+        &self,
+        version: &Version,
+    ) -> Result<std::sync::Arc<GameMetadataProvider>, GameDataContextError> {
+        load_metadata_provider(self.game_dir, self.extracted, version)
+            .map(std::sync::Arc::new)
+            .map_err(|e| GameDataContextError::new("metadata provider", *version, e))
+    }
+}
+
 /// Load a constants JSON file and merge it into a `GameConstants`.
 fn load_game_constants_owned(constants_path: Option<&Path>, version: Version) -> GameConstants {
     let mut gc = GameConstants::defaults();
@@ -978,24 +1033,39 @@ fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'sta
 /// Load the game metadata provider (game params + entity specs + translations)
 /// and battle constants for the given replay version. The provider resolves
 /// ship param ids to localized names; the entity specs drive the packet parser.
-fn load_metadata_provider_and_constants(
+/// Open the game-file VFS for a build from whichever source the CLI flags
+/// name. `None` when neither flag is given or the build's files are absent.
+fn open_build_vfs(game_dir: Option<&str>, extracted_dir: Option<&str>, version: &Version) -> Option<VfsPath> {
+    match (game_dir, extracted_dir) {
+        (Some(game_dir), _) => {
+            game_data::load_game_resources(Path::new(game_dir), version).ok().map(|resources| resources.vfs)
+        }
+        (None, Some(extracted)) => {
+            let dir = resolve_extracted_dir(Path::new(extracted), version).ok()?;
+            let dump = wows_data_mgr::Dump::open(&dir);
+            if dump.has_game_files() { Some(dump.vfs()) } else { None }
+        }
+        (None, None) => None,
+    }
+}
+
+fn load_metadata_provider(
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,
     version: &Version,
-) -> rootcause::Result<(GameMetadataProvider, GameConstants)> {
+) -> rootcause::Result<GameMetadataProvider> {
     match (game_dir, extracted_dir) {
         (Some(game_dir), _) => {
             let resources =
                 game_data::load_game_resources(Path::new(game_dir), version).map_err(|e| report!("{}", e))?;
             let mut provider = GameMetadataProvider::from_vfs(&resources.vfs)
                 .map_err(|e| report!("failed to load game params: {e:?}"))?;
-            let constants = GameConstants::from_vfs(&resources.vfs);
             let mo_path = game_data::translations_path(
                 Path::new(game_dir),
                 version.build_number().expect("replay version carries a build"),
             );
             apply_translations(&mo_path, &mut provider);
-            Ok((provider, constants))
+            Ok(provider)
         }
         (None, Some(extracted)) => {
             let dir = resolve_extracted_dir(Path::new(extracted), version)?;
@@ -1014,10 +1084,9 @@ fn load_metadata_provider_and_constants(
                 None => GameMetadataProvider::from_vfs(&vfs)
                     .map_err(|e| report!("failed to load game params from VFS: {e:?}"))?,
             };
-            let constants = GameConstants::from_vfs(&vfs);
             let mo_path = dir.join("translations/en/LC_MESSAGES/global.mo");
             apply_translations(&mo_path, &mut provider);
-            Ok((provider, constants))
+            Ok(provider)
         }
         (None, None) => Err(report!("Game directory or extracted files directory must be supplied")),
     }
@@ -1041,16 +1110,12 @@ fn apply_translations(mo_path: &Path, provider: &mut GameMetadataProvider) {
 /// metadata header, so a large archive can be swept without decoding packets.
 fn run_roster_query(
     replays: &[PathBuf],
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
+    ctx: &dyn GameDataContext,
     has_class: &[String],
     exclude_own: bool,
     as_json: bool,
 ) -> rootcause::Result<()> {
     let wanted: Vec<String> = has_class.iter().map(|c| c.to_lowercase()).collect();
-    // Loading game params is the expensive step, so keep one provider per game
-    // version across the whole sweep.
-    let mut providers: HashMap<String, Option<GameMetadataProvider>> = HashMap::new();
 
     for replay_path in replays {
         for entry in walkdir::WalkDir::new(replay_path) {
@@ -1062,10 +1127,9 @@ fn run_roster_query(
             let Ok(meta) = ReplayFile::meta_from_file(path) else { continue };
             let Some(version) = Version::try_from_client_exe(&meta.clientVersionFromExe) else { continue };
 
-            let provider = providers.entry(meta.clientVersionFromExe.clone()).or_insert_with(|| {
-                load_metadata_provider_and_constants(game_dir, extracted_dir, &version).ok().map(|(p, _)| p)
-            });
-            let Some(provider) = provider.as_ref() else { continue };
+            // Loading game params is the expensive step; the context caches
+            // one provider per version across the whole sweep.
+            let Ok(provider) = ctx.metadata_provider(&version) else { continue };
 
             // A ship id absent from this version's params (removed test ship,
             // partial dump) has no class to report, so it is grouped as such
@@ -1136,8 +1200,7 @@ struct PlayerRow {
 /// param id, and localized ship name, applying the requested filters.
 fn run_players_query(
     replay: &Path,
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
+    ctx: &dyn GameDataContext,
     name_filter: Option<&str>,
     entity_filter: Option<u32>,
     ship_filter: Option<&str>,
@@ -1145,32 +1208,13 @@ fn run_players_query(
 ) -> rootcause::Result<()> {
     let replay_file = ReplayFile::from_file(replay).map_err(|e| report!("failed to read replay: {e:?}"))?;
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let (provider, constants) = load_metadata_provider_and_constants(game_dir, extracted_dir, &version)?;
-
-    let mut world = BattleWorld::new(&replay_file.meta, &provider, Some(&constants));
-    world.set_shot_tracking(ShotTracking::Untracked);
-
-    let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
-    let mut remaining = replay_file.packet_data();
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => world.process(&packet),
-            Err(_) => break,
-        }
-    }
-    let diagnostics = parser.drain_diagnostics();
-    if !diagnostics.is_empty() {
-        eprintln!("payload validation: {} property payload(s) under-consumed", diagnostics.len());
-        for d in &diagnostics {
-            eprintln!(
-                "  {} (def {:?}): consumed {} of {} bytes",
-                d.context, d.semantic_name, d.consumed, d.payload_len
-            );
-        }
-    }
-    world.finish();
-
-    let report = world.into_report();
+    let provider = ctx.metadata_provider(&version)?;
+    let report = wows_battle_world::process::battle_report_for(
+        &replay_file,
+        ctx,
+        wows_battle_world::process::ProcessOptions::default(),
+    )
+    .map_err(|e| report!("failed to process replay: {e}"))?;
 
     let name_lc = name_filter.map(str::to_lowercase);
     let ship_lc = ship_filter.map(str::to_lowercase);
@@ -1257,16 +1301,9 @@ fn main() {
     let extracted = args.extracted_dir.as_deref().and_then(|p| p.to_str());
     let constants_path = args.constants.as_deref();
 
-    // Per-build caching so directory-scale commands (survey, query) pay each
-    // build's script/constants load once instead of once per replay.
-    let ctx = CachedContext::new(FnContext::new(
-        move |version: &Version| {
-            load_game_data(game_dir, extracted, version)
-                .map(std::sync::Arc::new)
-                .map_err(|e| GameDataContextError::new("entity specs", *version, e))
-        },
-        move |version: &Version| Ok(std::sync::Arc::new(load_game_constants_owned(constants_path, *version))),
-    ));
+    // Per-version caching so directory-scale commands (survey, query,
+    // battle-results) pay each build's load once instead of once per replay.
+    let ctx = CachedContext::new(CliGameDataContext::new(game_dir, extracted, constants_path));
     let ctx: &dyn GameDataContext = &ctx;
 
     match args.command {
@@ -1301,12 +1338,12 @@ fn main() {
         }
         Commands::Spec { version } => {
             let target_version = Version::from_client_exe(&version);
-            let specs = load_game_data(game_dir, extracted, &target_version).expect("failed to load game data");
+            let specs = ctx.entity_specs(&target_version).expect("failed to load game data");
             printspecs(&specs);
         }
         Commands::AuditTypes { version } => {
             let target_version = Version::from_client_exe(&version);
-            let specs = load_game_data(game_dir, extracted, &target_version).expect("failed to load game data");
+            let specs = ctx.entity_specs(&target_version).expect("failed to load game data");
             audit_types(&specs);
         }
         Commands::Decrypt { meta_output, packets_output, replay } => {
@@ -1401,6 +1438,7 @@ fn main() {
             replays,
         } => {
             battle_results_cmd::run(
+                ctx,
                 game_dir,
                 extracted,
                 constants_path,
@@ -1446,7 +1484,7 @@ fn main() {
                 }
             }
             QueryCommands::Players { replay, name, entity_id, ship, json } => {
-                run_players_query(&replay, game_dir, extracted, name.as_deref(), entity_id, ship.as_deref(), json)
+                run_players_query(&replay, ctx, name.as_deref(), entity_id, ship.as_deref(), json)
                     .expect("failed to query players");
             }
             QueryCommands::GameVersion { replays } => {
@@ -1479,8 +1517,7 @@ fn main() {
                 }
             }
             QueryCommands::Roster { replays, has_class, exclude_own, json } => {
-                run_roster_query(&replays, game_dir, extracted, &has_class, exclude_own, json)
-                    .expect("failed to query roster");
+                run_roster_query(&replays, ctx, &has_class, exclude_own, json).expect("failed to query roster");
             }
         },
     }

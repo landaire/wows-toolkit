@@ -40,6 +40,30 @@ impl GameConstants {
         }
     }
 
+    /// The one recipe for a build's decode constants: the game's own
+    /// constants when a VFS is available (defaults otherwise), overlaid with
+    /// wows-constants overrides, then the per-version consumable table (the
+    /// replay's client version is authoritative for consumable ids, so it is
+    /// applied last and wins).
+    #[cfg(feature = "vfs")]
+    pub fn for_build(
+        vfs: Option<&VfsPath>,
+        overrides: Option<&serde_json::Value>,
+        version: Option<wowsunpack::data::Version>,
+    ) -> Self {
+        let mut constants = match vfs {
+            Some(vfs) => Self::from_vfs(vfs),
+            None => Self::defaults(),
+        };
+        if let Some(overrides) = overrides {
+            constants.merge_replay_constants(overrides, version.unwrap_or_default());
+        }
+        if let Some(version) = version {
+            wowsunpack::game_constants::apply_version_consumables(constants.common_mut(), version);
+        }
+        constants
+    }
+
     /// Hardcoded defaults (no game files needed).
     pub fn defaults() -> Self {
         Self {

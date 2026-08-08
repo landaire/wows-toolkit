@@ -10,13 +10,15 @@
 //!   WOWS_DIR          live install root (default `E:\WoWs\World_of_Warships`)
 //!   WOWS_BENCH_REPLAYS  directory of replays (default `<WOWS_DIR>\replays`)
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use wows_replays::ReplayFile;
+use wows_replays::context::CachedContext;
+use wows_replays::context::GameDataContext;
+use wows_replays::context::GameDataContextError;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -24,21 +26,15 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
 use wowsunpack::vfs::VfsPath;
 
-#[derive(Clone, Copy)]
-struct BuildResources {
-    provider: &'static GameMetadataProvider,
-    constants: &'static GameConstants,
-}
-
 /// One benchmark case: a replay plus the game data its build needs.
 pub struct Case {
     pub name: String,
     /// Raw file bytes, so `from_bytes` can be measured without disk I/O.
     pub bytes: Vec<u8>,
     pub replay: ReplayFile,
-    pub provider: &'static GameMetadataProvider,
-    pub constants: &'static GameConstants,
-    pub specs: &'static [EntitySpec],
+    pub provider: Arc<GameMetadataProvider>,
+    pub constants: Arc<GameConstants>,
+    pub specs: Arc<Vec<EntitySpec>>,
     pub version: Version,
 }
 
@@ -46,9 +42,43 @@ fn env_path(key: &str, default: &str) -> PathBuf {
     PathBuf::from(std::env::var(key).unwrap_or_else(|_| default.to_string()))
 }
 
-fn build_cache() -> &'static Mutex<HashMap<u32, Option<BuildResources>>> {
-    static CACHE: OnceLock<Mutex<HashMap<u32, Option<BuildResources>>>> = OnceLock::new();
-    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+/// The dump/install resolver behind the caching context.
+struct BenchGameData;
+
+impl GameDataContext for BenchGameData {
+    fn entity_specs(&self, version: &Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError> {
+        Ok(self.metadata_provider(version)?.entity_specs_arc())
+    }
+
+    fn game_constants(&self, version: &Version) -> Result<Arc<GameConstants>, GameDataContextError> {
+        let build = version
+            .build_number()
+            .ok_or_else(|| GameDataContextError::new("game constants", *version, "version carries no build"))?;
+        let (vfs, _) = from_dump(build, version)
+            .or_else(|| from_install(build))
+            .ok_or_else(|| GameDataContextError::new("game constants", *version, "no game data for build"))?;
+        Ok(Arc::new(GameConstants::from_vfs(&vfs)))
+    }
+
+    fn metadata_provider(&self, version: &Version) -> Result<Arc<GameMetadataProvider>, GameDataContextError> {
+        let build = version
+            .build_number()
+            .ok_or_else(|| GameDataContextError::new("metadata provider", *version, "version carries no build"))?;
+        let (vfs, params_path) = from_dump(build, version)
+            .or_else(|| from_install(build))
+            .ok_or_else(|| GameDataContextError::new("metadata provider", *version, "no game data for build"))?;
+        let provider = match params_path.as_deref().and_then(wowsunpack::game_params::cache::load) {
+            Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs),
+            None => GameMetadataProvider::from_vfs(&vfs),
+        }
+        .map_err(|e| GameDataContextError::new("metadata provider", *version, format!("{e:?}")))?;
+        Ok(Arc::new(provider))
+    }
+}
+
+fn bench_context() -> &'static CachedContext<BenchGameData> {
+    static CTX: OnceLock<CachedContext<BenchGameData>> = OnceLock::new();
+    CTX.get_or_init(|| CachedContext::new(BenchGameData))
 }
 
 /// Game data from the dump archive, via the same `BuildsIndex` lookup the app
@@ -94,44 +124,26 @@ fn from_install(build: u32) -> Option<(VfsPath, Option<PathBuf>)> {
     Some((vfs, params))
 }
 
-/// Resources for a build, cached (including the negative answer, so a missing
-/// build is looked for once).
-fn resources_for(version: &Version) -> Option<BuildResources> {
-    let build = version.build_number()?;
-    if let Some(cached) = build_cache().lock().unwrap().get(&build) {
-        return *cached;
-    }
-
-    let resolved = from_dump(build, version).or_else(|| from_install(build)).and_then(|(vfs, params_path)| {
-        let provider = match params_path.as_deref().and_then(wowsunpack::game_params::cache::load) {
-            Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs).ok()?,
-            None => GameMetadataProvider::from_vfs(&vfs).ok()?,
-        };
-        Some(BuildResources {
-            provider: Box::leak(Box::new(provider)),
-            constants: Box::leak(Box::new(GameConstants::from_vfs(&vfs))),
-        })
-    });
-
-    if resolved.is_none() {
-        eprintln!("no game data for build {build}; skipping its replays");
-    }
-    build_cache().lock().unwrap().insert(build, resolved);
-    resolved
-}
-
 fn load_case(path: &Path) -> Option<Case> {
     let bytes = std::fs::read(path).ok()?;
     let replay = ReplayFile::from_bytes(&bytes).ok()?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)?;
-    let res = resources_for(&version)?;
+    let ctx = bench_context();
+    let provider = ctx
+        .metadata_provider(&version)
+        .map_err(|e| {
+            eprintln!("{e}; skipping its replays");
+        })
+        .ok()?;
+    let constants = ctx.game_constants(&version).ok()?;
+    let specs = provider.entity_specs_arc();
     Some(Case {
         name: path.file_stem()?.to_string_lossy().into_owned(),
         bytes,
         replay,
-        provider: res.provider,
-        constants: res.constants,
-        specs: res.provider.entity_specs(),
+        provider,
+        constants,
+        specs,
         version,
     })
 }

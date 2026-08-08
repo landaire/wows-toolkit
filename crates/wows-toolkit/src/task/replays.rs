@@ -201,25 +201,6 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
     Some(version_str.to_string())
 }
 
-/// Build `GameConstants` from VFS and merge in replay constants (CONSUMABLE_IDS, BATTLE_STAGES).
-#[instrument(skip(vfs, replay_constants))]
-pub fn build_game_constants(
-    vfs: &VfsPath,
-    replay_constants: &serde_json::Value,
-    version: Option<Version>,
-) -> GameConstants {
-    let mut game_constants = GameConstants::from_vfs(vfs);
-    game_constants.merge_replay_constants(replay_constants, version.unwrap_or_default());
-    // The replay's own client version is authoritative for consumable ids: their
-    // ordering shifts across versions, so resolve them against the static per-version
-    // table rather than the latest layout. Applied last so it wins over any bridged
-    // (newer-build) constants merged above.
-    if let Some(version) = version {
-        wowsunpack::game_constants::apply_version_consumables(game_constants.common_mut(), version);
-    }
-    game_constants
-}
-
 /// Load game resources for a specific build number. This can be called for any build
 /// that has a directory in `bin/`. Used both at startup (for the latest build) and
 /// lazily when a replay from a different version is loaded.
@@ -308,7 +289,7 @@ pub fn load_wows_data_for_build(
         None => (fallback_constants.clone(), false),
     };
 
-    let game_constants = build_game_constants(&vfs, &replay_constants, version);
+    let game_constants = GameConstants::for_build(Some(&vfs), Some(&replay_constants), version);
     let game_constants = Arc::new(game_constants);
 
     // Try to determine full version from preferences or leave as None for non-latest builds
@@ -643,7 +624,7 @@ pub fn load_wows_data_from_dump(
     };
     // Prefer the replay's own version; fall back to the version recovered from the dump.
     let constants_version = replay_version.or(full_version);
-    let game_constants = build_game_constants(&vfs, &replay_constants, constants_version);
+    let game_constants = GameConstants::for_build(Some(&vfs), Some(&replay_constants), constants_version);
 
     Ok(WorldOfWarshipsData {
         game_metadata: metadata_provider,

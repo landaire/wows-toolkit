@@ -1687,6 +1687,12 @@ fn build_ship(ship_data: &pickled::Dict) -> Vehicle {
 }
 
 impl GameMetadataProvider {
+    /// Shared handle to the entity specs, for callers that need to hold them
+    /// independently of the provider's lifetime.
+    pub fn entity_specs_arc(&self) -> Arc<Vec<EntitySpec>> {
+        Arc::clone(&self.specs)
+    }
+
     /// Loads game metadata directly from game files. This operation is fairly expensive
     /// considering `GameParams.data` must be deserialized and converted to a strongly-typed
     /// representation.

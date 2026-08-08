@@ -31,7 +31,7 @@ use support::Case;
 /// analysis needs the whole-match hit history and the salvo log, both off by
 /// default.
 fn new_world<'a>(case: &'a Case) -> BattleWorld<'a, 'a, wowsunpack::game_params::provider::GameMetadataProvider> {
-    let mut world = BattleWorld::new(&case.replay.meta, case.provider, Some(case.constants));
+    let mut world = BattleWorld::new(&case.replay.meta, &*case.provider, Some(&*case.constants));
     world.set_record_hit_history(true);
     world.set_record_salvo_history(true);
     world
@@ -41,7 +41,7 @@ fn drive(
     case: &Case,
     world: Option<&mut BattleWorld<'_, '_, wowsunpack::game_params::provider::GameMetadataProvider>>,
 ) {
-    let mut parser = Parser::with_version(case.specs, case.version);
+    let mut parser = Parser::with_version(&case.specs, case.version);
     let mut remaining = case.replay.packet_data();
     match world {
         Some(world) => {
