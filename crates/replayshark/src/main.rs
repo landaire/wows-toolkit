@@ -2,7 +2,6 @@ mod battle_results_cmd;
 
 use battle_results_cmd::ResultsFormat;
 
-use anyhow::Context;
 use anyhow::anyhow;
 use clap::Parser;
 use clap::Subcommand;
@@ -25,6 +24,10 @@ use wows_battle_world::ids::ShotTracking;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
+use wows_replays::context::CachedContext;
+use wows_replays::context::FnContext;
+use wows_replays::context::GameDataContext;
+use wows_replays::context::GameDataContextError;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::EntityId;
 
@@ -513,19 +516,25 @@ fn load_game_data(
             resources.specs
         }
         (None, Some(extracted)) => {
-            let extracted_dir = resolve_extracted_dir(Path::new(extracted), replay_version)?;
-            let vfs_dir = extracted_dir.join("vfs");
-            let scripts_dir = if vfs_dir.exists() { vfs_dir } else { extracted_dir };
+            // Dumps store game files content-addressed; Dump::open resolves
+            // both CAS layouts and plain materialized directories.
+            let dir = resolve_extracted_dir(Path::new(extracted), replay_version)?;
+            let dump = wows_data_mgr::Dump::open(&dir);
+            if !dump.has_game_files() {
+                return Err(anyhow!("no game files found in {}", dir.display()));
+            }
+            let vfs = dump.vfs();
             let loader = DataFileWithCallback::new(|path| {
-                let path = Path::new(path);
-
-                let file_data = std::fs::read(scripts_dir.join(path))
-                    .with_context(|| format!("failed to read game file from extracted dir: {:?}", path))
-                    .unwrap();
-
+                let mut file_data = Vec::new();
+                vfs.join(path)
+                    .map_err(wowsunpack::error::GameDataError::from)?
+                    .open_file()
+                    .map_err(wowsunpack::error::GameDataError::from)?
+                    .read_to_end(&mut file_data)
+                    .map_err(wowsunpack::error::GameDataError::from)?;
                 Ok(Cow::Owned(file_data))
             });
-            parse_scripts(&loader).unwrap()
+            parse_scripts(&loader).map_err(|e| anyhow!("failed to parse entity defs: {e:?}"))?
         }
         (None, None) => {
             return Err(anyhow!("Game directory or extracted files directory must be supplied"));
@@ -565,19 +574,14 @@ fn audit_types(specs: &[EntitySpec]) {
     println!("\n{} of {} semantic names have a domain newtype", covered, names.len());
 }
 
-fn parse_replay<F>(
-    replay: &std::path::Path,
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
-    build: F,
-) -> rootcause::Result<(), ParseError>
+fn parse_replay<F>(replay: &std::path::Path, ctx: &dyn GameDataContext, build: F) -> rootcause::Result<(), ParseError>
 where
     F: FnOnce(&wows_replays::ReplayMeta) -> Box<dyn Analyzer>,
 {
     let replay_file = ReplayFile::from_file(replay)?;
 
     let replay_version = Version::from_client_exe(replay_file.meta.clientVersionFromExe.as_str());
-    let specs = load_game_data(game_dir, extracted_dir, &replay_version).expect("failed to load game specs");
+    let specs = ctx.entity_specs(&replay_version).expect("failed to load game specs");
 
     let mut analyzer = build(&replay_file.meta);
 
@@ -737,8 +741,7 @@ impl SurveyResults {
 
 fn survey_file(
     skip_decode: bool,
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
+    ctx: &dyn GameDataContext,
     game_constants: &'static GameConstants,
     replay: std::path::PathBuf,
 ) -> SurveyResult {
@@ -750,7 +753,7 @@ fn survey_file(
 
     let survey_stats = std::rc::Rc::new(std::cell::RefCell::new(wows_replays::analyzer::survey::SurveyStats::new()));
     let stats_clone = survey_stats.clone();
-    match parse_replay(&replay, game_dir, extracted_dir, |meta| {
+    match parse_replay(&replay, ctx, |meta| {
         wows_replays::analyzer::survey::SurveyBuilder::new(stats_clone, skip_decode)
             .game_constants(game_constants)
             .build(meta)
@@ -807,14 +810,7 @@ fn collect_replay_paths(replays: &[PathBuf], limit: Option<usize>) -> Vec<PathBu
     paths
 }
 
-fn run_bench(
-    mode: &str,
-    iterations: usize,
-    limit: Option<usize>,
-    replays: &[PathBuf],
-    game_dir: Option<&str>,
-    extracted_dir: Option<&str>,
-) {
+fn run_bench(mode: &str, iterations: usize, limit: Option<usize>, replays: &[PathBuf], ctx: &dyn GameDataContext) {
     let paths = collect_replay_paths(replays, limit);
     println!("bench mode={} files={} iterations={}", mode, paths.len(), iterations);
 
@@ -898,7 +894,6 @@ fn run_bench(
             }
         }
         "full" => {
-            let mut spec_cache: HashMap<Option<std::num::NonZero<u32>>, Option<Vec<EntitySpec>>> = HashMap::new();
             for _ in 0..iterations {
                 for path in &paths {
                     let Ok(replay) = ReplayFile::from_file(path) else {
@@ -906,10 +901,7 @@ fn run_bench(
                         continue;
                     };
                     let version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
-                    let specs = spec_cache
-                        .entry(version.build)
-                        .or_insert_with(|| load_game_data(game_dir, extracted_dir, &version).ok());
-                    let Some(specs) = specs else {
+                    let Ok(specs) = ctx.entity_specs(&version) else {
                         failed += 1;
                         continue;
                     };
@@ -957,9 +949,8 @@ fn report_bench(parsed: usize, failed: usize, bytes: usize, sink: usize, elapsed
     );
 }
 
-/// Load a constants JSON file and merge it into a `GameConstants`, returning a
-/// `&'static` reference (leaked, since the CLI is short-lived).
-fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'static GameConstants {
+/// Load a constants JSON file and merge it into a `GameConstants`.
+fn load_game_constants_owned(constants_path: Option<&Path>, version: Version) -> GameConstants {
     let mut gc = GameConstants::defaults();
     if let Some(path) = constants_path {
         let data = std::fs::read_to_string(path)
@@ -968,7 +959,13 @@ fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'sta
             serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
         gc.merge_replay_constants(&json, version);
     }
-    Box::leak(Box::new(gc))
+    gc
+}
+
+/// [`load_game_constants_owned`], leaked for analyzers that require a
+/// `&'static` reference (the CLI is short-lived).
+fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'static GameConstants {
+    Box::leak(Box::new(load_game_constants_owned(constants_path, version)))
 }
 
 /// Load the game metadata provider (game params + entity specs + translations)
@@ -1253,12 +1250,24 @@ fn main() {
     let extracted = args.extracted_dir.as_deref().and_then(|p| p.to_str());
     let constants_path = args.constants.as_deref();
 
+    // Per-build caching so directory-scale commands (survey, query) pay each
+    // build's script/constants load once instead of once per replay.
+    let ctx = CachedContext::new(FnContext::new(
+        move |version: &Version| {
+            load_game_data(game_dir, extracted, version)
+                .map(std::sync::Arc::new)
+                .map_err(|e| GameDataContextError::new("entity specs", *version, e))
+        },
+        move |version: &Version| Ok(std::sync::Arc::new(load_game_constants_owned(constants_path, *version))),
+    ));
+    let ctx: &dyn GameDataContext = &ctx;
+
     match args.command {
         Commands::Dump { output, no_meta, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
             let gc = load_game_constants(constants_path, version);
-            parse_replay(&replay, game_dir, extracted, |meta| {
+            parse_replay(&replay, ctx, |meta| {
                 wows_replays::analyzer::decoder::DecoderBuilder::new(false, no_meta, output.as_deref())
                     .game_constants(gc)
                     .build(meta)
@@ -1270,7 +1279,7 @@ fn main() {
             let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
             let gc = load_game_constants(constants_path, version);
             let no_meta = !meta;
-            parse_replay(&replay, game_dir, extracted, |meta| {
+            parse_replay(&replay, ctx, |meta| {
                 build_investigative_printer(
                     meta,
                     no_meta,
@@ -1302,16 +1311,12 @@ fn main() {
             println!("Wrote {} bytes of packet data to {:?}", replay_file.packet_data().len(), packets_output);
         }
         Commands::Summary { replay } => {
-            parse_replay(&replay, game_dir, extracted, |meta| {
-                wows_replays::analyzer::summary::SummaryBuilder::new().build(meta)
-            })
-            .unwrap();
+            parse_replay(&replay, ctx, |meta| wows_replays::analyzer::summary::SummaryBuilder::new().build(meta))
+                .unwrap();
         }
         Commands::Chat { replay } => {
-            parse_replay(&replay, game_dir, extracted, |meta| {
-                wows_replays::analyzer::chat::ChatLoggerBuilder::new().build(meta)
-            })
-            .unwrap();
+            parse_replay(&replay, ctx, |meta| wows_replays::analyzer::chat::ChatLoggerBuilder::new().build(meta))
+                .unwrap();
         }
         Commands::Survey { skip_decode, replays } => {
             // For survey, we use build 0 since we don't know the build ahead of time.
@@ -1325,14 +1330,14 @@ fn main() {
                         continue;
                     }
                     let replay = entry.path().to_path_buf();
-                    let result = survey_file(skip_decode, game_dir, extracted, gc, replay);
+                    let result = survey_file(skip_decode, ctx, gc, replay);
                     survey_result.add(result);
                 }
             }
             survey_result.print();
         }
         Commands::Bench { mode, iterations, limit, replays } => {
-            run_bench(&mode, iterations, limit, &replays, game_dir, extracted);
+            run_bench(&mode, iterations, limit, &replays, ctx);
         }
         Commands::Search { replays: replay_paths } => {
             let mut replays = vec![];
@@ -1413,7 +1418,7 @@ fn main() {
                         let arena_id = match ReplayFile::from_file(path) {
                             Ok(rf) => {
                                 let version = Version::from_client_exe(&rf.meta.clientVersionFromExe);
-                                match load_game_data(game_dir, extracted, &version) {
+                                match ctx.entity_specs(&version) {
                                     Ok(specs) => wows_replays::analyzer::battle_controller::merged::scan_arena_id(
                                         &specs, version, &rf,
                                     ),
