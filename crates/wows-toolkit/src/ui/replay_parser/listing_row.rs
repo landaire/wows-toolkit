@@ -4,6 +4,7 @@
 
 use rust_i18n::t;
 use wows_replays::ReplayMeta;
+use wows_replays::ReplayMetaRef;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::ReplayGrouping;
 use wowsunpack::data::ResourceLoader;
@@ -43,6 +44,20 @@ impl ListedReplay {
             game_type: meta.gameType.clone().unwrap_or_default(),
             scenario: meta.scenario.clone(),
             date_time: meta.dateTime.clone(),
+        }
+    }
+
+    /// Same extraction from the borrowed metadata parse, so bulk directory
+    /// scans only allocate the handful of fields a row keeps.
+    pub fn from_meta_ref(meta: &ReplayMetaRef<'_>) -> Self {
+        ListedReplay {
+            ship_id: meta.vehicles.iter().find(|vehicle| vehicle.relation == 0).map(|vehicle| vehicle.shipId),
+            map_name: meta.mapName.clone().into_owned(),
+            // Absent gameType renders as an empty mode column, matching
+            // `from_meta`.
+            game_type: meta.gameType.clone().map(std::borrow::Cow::into_owned).unwrap_or_default(),
+            scenario: meta.scenario.clone().into_owned(),
+            date_time: meta.dateTime.clone().into_owned(),
         }
     }
 }
@@ -485,6 +500,25 @@ mod tests {
         assert_eq!(listed.game_type, "RandomBattle");
         assert_eq!(listed.scenario, "Domination");
         assert_eq!(listed.date_time, "28.07.2026 14:23:05");
+    }
+
+    /// The borrowed and owned constructors must extract identically, since the
+    /// bulk scan uses one and single-file paths use the other. One fixture
+    /// carries an escaped vehicle name (forcing serde's owned-Cow fallback)
+    /// and the other an absent gameType, so both divergence-prone branches
+    /// are pinned.
+    #[test]
+    fn from_meta_ref_matches_from_meta() {
+        let mut with_game_type = meta(vec![vehicle(1, 777), vehicle(0, 4_281_269_200), vehicle(2, 999)]);
+        with_game_type.vehicles[0].name = "Some\"one".to_string();
+        let mut without_game_type = meta(vec![vehicle(0, 777)]);
+        without_game_type.gameType = None;
+
+        for owned in [with_game_type, without_game_type] {
+            let json = serde_json::to_vec(&owned).expect("meta serializes");
+            let borrowed = ReplayMetaRef::from_slice(&json).expect("meta parses");
+            assert_eq!(ListedReplay::from_meta_ref(&borrowed), ListedReplay::from_meta(&owned));
+        }
     }
 
     /// A spectator recording has no vehicle of its own, and an absent game type

@@ -278,12 +278,22 @@ pub fn load_wows_files(
     let replays = replay_filepaths(&replays_dir).map(|replays| {
         // Metadata-only parse: reading, decrypting, and inflating packet data
         // here would make large directory scans take minutes instead of
-        // seconds. Packet data is loaded when a replay is opened.
-        let iter = replays.into_iter().filter_map(|path| match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => Some((path, Arc::new(ListedReplay::from_meta(&meta)))),
-            Err(e) => {
-                error!("Failed to parse replay {}: {:?}", path.display(), e);
-                None
+        // seconds. Packet data is loaded when a replay is opened. The borrowed
+        // parse avoids owning metadata fields the listing never keeps.
+        let iter = replays.into_iter().filter_map(|path| {
+            let blob = match ReplayFile::read_meta_blob(&path) {
+                Ok(blob) => blob,
+                Err(e) => {
+                    error!("Failed to read replay header {}: {:?}", path.display(), e);
+                    return None;
+                }
+            };
+            match wows_replays::ReplayMetaRef::from_slice(&blob) {
+                Ok(meta) => Some((path, Arc::new(ListedReplay::from_meta_ref(&meta)))),
+                Err(e) => {
+                    error!("Failed to parse replay {}: {:?}", path.display(), e);
+                    None
+                }
             }
         });
 

@@ -144,9 +144,11 @@ pub fn start_scan_directory(
             |path| {
                 // Only the plaintext header is read: no decrypt, no inflate, no
                 // packet stream. A header that will not parse costs this file.
-                wows_replays::ReplayFile::meta_from_file(path)
-                    .ok()
-                    .and_then(|meta| Version::try_from_client_exe(&meta.clientVersionFromExe))
+                // The borrowed parse keeps the bulk of the metadata strings
+                // unowned when all the scan wants is the client version.
+                let blob = wows_replays::ReplayFile::read_meta_blob(path).ok()?;
+                let meta = wows_replays::ReplayMetaRef::from_slice(&blob).ok()?;
+                Version::try_from_client_exe(&meta.clientVersionFromExe)
             },
             |request| deps.build_cache.has_data_for(request),
             |progress| {
