@@ -19,6 +19,9 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: -D warnings
   RUSTDOCFLAGS: -D warnings
+  # Incremental artifacts only help when a target dir is reused across edits;
+  # on ephemeral runners they are dead weight that bloats every cache entry.
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   fmt:
