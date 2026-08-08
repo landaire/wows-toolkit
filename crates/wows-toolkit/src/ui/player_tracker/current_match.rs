@@ -27,7 +27,7 @@ use crate::data::match_stats::PlayerStatsOut;
 use crate::data::match_stats::PlayerStatsStatus;
 use crate::data::wows_data::BuildData;
 use crate::icons;
-use crate::task::live_match_stats::FlushState;
+use crate::task::live_match_stats::LiveRosterSource;
 use crate::task::replays::ReplayBackgroundParserThreadMessage;
 use crate::twitch::TwitchState;
 use crate::ui::replay_parser::ClanColor;
@@ -278,9 +278,8 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.player_tracker.write().update_from_live_arena_info(&meta);
         let _ = self.tab_state.background_parser_tx.as_ref().map(|tx| {
             tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted {
-                replay: path,
+                source: LiveRosterSource::Complete { replay: path },
                 build,
-                flush: FlushState::Complete,
                 started_at,
             })
         });

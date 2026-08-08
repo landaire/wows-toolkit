@@ -1463,9 +1463,9 @@ fn main() {
                             Ok(rf) => {
                                 let version = Version::from_client_exe(&rf.meta.clientVersionFromExe);
                                 match ctx.entity_specs(&version) {
-                                    Ok(specs) => wows_replays::analyzer::battle_controller::merged::scan_arena_id(
-                                        &specs, version, &rf,
-                                    ),
+                                    Ok(specs) => {
+                                        wows_replays::analyzer::arena_scan::scan_arena_id(&specs, version, &rf)
+                                    }
                                     Err(e) => {
                                         eprintln!("# {} (game data: {})", path.display(), e);
                                         None

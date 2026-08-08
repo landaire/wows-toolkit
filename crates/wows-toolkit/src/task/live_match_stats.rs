@@ -2,17 +2,19 @@
 //! that roster's stats. Runs on the background replay-parser thread.
 
 use std::path::Path;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
 use jiff::Timestamp;
 use parking_lot::RwLock;
+use rootcause::prelude::*;
 use rust_i18n::t;
 use tracing::debug;
 use wows_replays::ReplayFile;
-use wows_replays::analyzer::battle_controller::merged::ArenaState;
-use wows_replays::analyzer::battle_controller::merged::scan_arena_state;
+use wows_replays::analyzer::arena_scan::ArenaState;
+use wows_replays::analyzer::arena_scan::scan_arena_state;
 use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::types::ArenaId;
 use wowsunpack::data::ResourceLoader;
@@ -55,14 +57,21 @@ pub(crate) fn build_request(
     Ok(request)
 }
 
-/// Whether the replay being read is one the game is still writing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FlushState {
-    /// A battle in progress. Read tolerantly and retry: the packet stream
-    /// arrives in flushes and `onArenaStateReceived` may not be in one yet.
-    InProgress,
-    /// A finished file. Read strictly and try once.
-    Complete,
+/// Where a live-roster scan reads its match from.
+///
+/// Which file holds the packets and where the metadata comes from are the same
+/// distinction, so one enum carries both.
+#[derive(Debug, Clone)]
+pub enum LiveRosterSource {
+    /// A battle in progress. The game writes the packets to `temp.wowsreplay`
+    /// as a bare stream and the metadata to its sibling `tempArenaInfo.json`,
+    /// wrapping the two into a replay file only once the battle ends. Read
+    /// tolerantly and retry: the stream arrives in flushes and
+    /// `onArenaStateReceived` may not be in one yet.
+    InProgress { arena_info: PathBuf, stream: PathBuf },
+    /// A finished replay, carrying both halves itself. Read strictly and try
+    /// once.
+    Complete { replay: PathBuf },
 }
 
 /// How often a battle in progress is re-read while waiting for the roster.
@@ -81,9 +90,8 @@ const RETRY_BUDGET: Duration = Duration::from_secs(90);
 /// was retrying or waiting on the HTTP call) is refused rather than landing
 /// its stale identities and stats on the new match's roster.
 pub(crate) fn resolve_and_fetch(
-    replay: &Path,
+    source: &LiveRosterSource,
     build: Option<u32>,
-    flush: FlushState,
     started_at: Timestamp,
     build_cache: &BuildDataCache,
     tracker: &Arc<RwLock<PlayerTracker>>,
@@ -105,10 +113,11 @@ pub(crate) fn resolve_and_fetch(
 
     let deadline = Instant::now() + RETRY_BUDGET;
     let state = loop {
-        if let Some(state) = try_scan(replay, build, flush, build_cache) {
+        if let Some(state) = try_scan(source, build, build_cache) {
             break Some(state);
         }
-        if flush == FlushState::Complete || Instant::now() >= deadline {
+        let retryable = matches!(source, LiveRosterSource::InProgress { .. });
+        if !retryable || Instant::now() >= deadline {
             break None;
         }
         std::thread::sleep(RETRY_INTERVAL);
@@ -166,15 +175,11 @@ fn format_wait_minutes(retry_after: Duration) -> String {
     if minutes == 1 { "1 minute".to_string() } else { format!("{minutes} minutes") }
 }
 
-/// One attempt at reading the roster. `None` means "not yet": the file is
+/// One attempt at reading the roster. `None` means "not yet": a file is
 /// absent, the flushed prefix is too short, game data has not loaded, or
 /// `onArenaStateReceived` has not been written.
-fn try_scan(replay: &Path, build: u32, flush: FlushState, build_cache: &BuildDataCache) -> Option<ArenaState> {
-    let replay_file = match flush {
-        FlushState::InProgress => ReplayFile::from_partial_file(replay),
-        FlushState::Complete => ReplayFile::from_file(replay),
-    };
-    let replay_file = match replay_file {
+fn try_scan(source: &LiveRosterSource, build: u32, build_cache: &BuildDataCache) -> Option<ArenaState> {
+    let replay_file = match read_replay(source) {
         Ok(file) => file,
         Err(e) => {
             debug!("live roster scan: replay not readable yet: {e:?}");
@@ -188,6 +193,30 @@ fn try_scan(replay: &Path, build: u32, flush: FlushState, build_cache: &BuildDat
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
 
     scan_arena_state(metadata.entity_specs(), version, &replay_file)
+}
+
+/// Read the match as one replay, however its two halves are stored.
+///
+/// A battle in progress has them in separate files, which is what
+/// `from_decrypted_parts` is for: `temp.wowsreplay` is the packet stream
+/// already, needing neither decryption nor inflation, and its metadata is the
+/// `tempArenaInfo.json` beside it. Both are re-read on every attempt, so an
+/// attempt that raced the game mid-write is corrected by the next one.
+fn read_replay(source: &LiveRosterSource) -> rootcause::Result<ReplayFile> {
+    match source {
+        LiveRosterSource::InProgress { arena_info, stream } => {
+            let meta = read_file(arena_info, "failed to read tempArenaInfo.json")?;
+            let packets = read_file(stream, "failed to read the live replay")?;
+            ReplayFile::from_decrypted_parts(meta, packets)
+                .context("failed to assemble the live replay from its parts")
+                .map_err(|e| e.into_dynamic())
+        }
+        LiveRosterSource::Complete { replay } => ReplayFile::from_file(replay).map_err(|e| e.into_dynamic()),
+    }
+}
+
+fn read_file(path: &Path, what: &'static str) -> rootcause::Result<Vec<u8>> {
+    std::fs::read(path).context(what).attach_with(|| format!("path: {}", path.display())).map_err(|e| e.into_dynamic())
 }
 
 #[cfg(test)]

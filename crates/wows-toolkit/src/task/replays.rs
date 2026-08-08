@@ -665,9 +665,8 @@ pub enum ReplayBackgroundParserThreadMessage {
     /// A match started, or the debug picker chose a replay to treat as one.
     /// Carries the file whose `onArenaStateReceived` names the roster.
     LiveMatchStarted {
-        replay: PathBuf,
+        source: crate::task::live_match_stats::LiveRosterSource,
         build: Option<u32>,
-        flush: crate::task::live_match_stats::FlushState,
         /// The match's key, matching `LiveMatch::started_at`. A scan queued
         /// behind a newer match's start still finishes; this lets its result
         /// be refused instead of landing on the wrong roster.
@@ -859,15 +858,14 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                 Some(ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state)) => {
                     data.is_debug = new_debug_state;
                 }
-                Some(ReplayBackgroundParserThreadMessage::LiveMatchStarted { replay, build, flush, started_at }) => {
+                Some(ReplayBackgroundParserThreadMessage::LiveMatchStarted { source, build, started_at }) => {
                     // A truncated, still-being-written packet stream is the likeliest
                     // panic source on this thread; a panic here must not take
                     // post-battle indexing and uploads down with it for the session.
                     let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         crate::task::live_match_stats::resolve_and_fetch(
-                            &replay,
+                            &source,
                             build,
-                            flush,
                             started_at,
                             &data.build_cache,
                             &data.player_tracker,

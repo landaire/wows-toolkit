@@ -4435,7 +4435,7 @@ impl ToolkitTabViewer<'_> {
             ))
         } else {
             let primary_arena = replay_file.battle_report.as_ref().map(|r| r.arena_id());
-            let alt_arena = wows_replays::analyzer::battle_controller::merged::scan_arena_id(
+            let alt_arena = wows_replays::analyzer::arena_scan::scan_arena_id(
                 replay_file.resource_loader.entity_specs(),
                 wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe),
                 &alt,

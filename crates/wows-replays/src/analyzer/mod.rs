@@ -1,6 +1,8 @@
 #[cfg(feature = "parsing")]
 mod analyzer;
 #[cfg(feature = "parsing")]
+pub mod arena_scan;
+#[cfg(feature = "parsing")]
 pub mod chat;
 //pub mod damage_trails;
 #[cfg(feature = "parsing")]

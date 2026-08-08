@@ -369,6 +369,15 @@ impl ReplayFile {
         (self.meta, self.raw_meta, self.state.packet_data)
     }
 
+    /// Assemble a replay from a metadata blob and a packet stream that were
+    /// read separately.
+    ///
+    /// This is what a battle in progress needs. The game writes
+    /// `temp.wowsreplay` as the bare packet stream, the same bytes a finished
+    /// replay carries once decrypted and inflated, with no container around
+    /// them and no metadata block; the metadata lives in the sibling
+    /// `tempArenaInfo.json` until the battle ends and the two are wrapped into
+    /// a replay file.
     pub fn from_decrypted_parts(meta: Vec<u8>, packet_data: Vec<u8>) -> Result<ReplayFile, ParseError> {
         let (_raw_meta, parsed_meta) = decode_meta(meta.as_slice())?;
 

@@ -38,7 +38,7 @@ use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskKind;
 use crate::task::DataExportSettings;
-use crate::task::FlushState;
+use crate::task::LiveRosterSource;
 use crate::task::NetworkJob;
 use crate::task::ReplayBackgroundParserThreadMessage;
 use crate::task::ReplaySource;
@@ -1206,43 +1206,50 @@ impl TabState {
                     // debug!("Preferences file changed -- reloading game data");
                     // self.background_task = Some(self.load_game_data(self.settings.wows_dir.clone().into()));
                 }
-                NotifyFileEvent::TempArenaInfoCreated(path) => {
-                    let parsed = std::fs::read(&path)
-                        .context("failed to read tempArenaInfo.json")
-                        .and_then(|meta_data| {
-                            ReplayFile::from_decrypted_parts(meta_data, Vec::new())
-                                .context("failed to parse tempArenaInfo.json")
-                        })
-                        .attach_with(|| format!("path: {}", path.display()));
-
-                    match parsed {
-                        Ok(replay_file) => {
-                            self.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
-
-                            let build = Version::try_from_client_exe(&replay_file.meta.clientVersionFromExe)
-                                .and_then(|v| v.build_number());
-                            let started_at = crate::util::replay_timestamp(&replay_file.meta);
-                            // tempArenaInfo.json and temp.wowsreplay are written as
-                            // siblings by the game, so the roster lives next to it.
-                            if let Some(replay) = path.parent().map(|dir| dir.join("temp.wowsreplay")) {
-                                let _ = self.background_parser_tx.as_ref().map(|tx| {
-                                    tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted {
-                                        replay,
-                                        build,
-                                        flush: FlushState::InProgress,
-                                        started_at,
-                                    })
-                                });
-                            }
-                        }
-                        // The game writes this file at match start and may not
-                        // have finished flushing it yet; skip this event and let
-                        // a later write re-trigger the update.
-                        Err(e) => warn!("live arena info update skipped: {e:?}"),
-                    }
-                }
+                NotifyFileEvent::TempArenaInfoCreated(path) => self.adopt_live_arena_info(&path),
             }
         }
+    }
+
+    /// Make the match `arena_info` describes the current one, and start the
+    /// roster scan for it.
+    ///
+    /// Called both when the watcher sees the game write the file and, at
+    /// startup, when it is already there: the watcher only reports changes, so
+    /// a battle that began before the app did would otherwise go unnoticed.
+    pub(crate) fn adopt_live_arena_info(&mut self, arena_info: &Path) {
+        let parsed = std::fs::read(arena_info)
+            .context("failed to read tempArenaInfo.json")
+            .and_then(|meta_data| {
+                ReplayFile::from_decrypted_parts(meta_data, Vec::new()).context("failed to parse tempArenaInfo.json")
+            })
+            .attach_with(|| format!("path: {}", arena_info.display()));
+
+        let replay_file = match parsed {
+            Ok(replay_file) => replay_file,
+            // The game writes this file at match start and may not have
+            // finished flushing it yet; skip it and let a later write
+            // re-trigger the update.
+            Err(e) => {
+                warn!("live arena info update skipped: {e:?}");
+                return;
+            }
+        };
+
+        self.player_tracker.write().update_from_live_arena_info(&replay_file.meta);
+
+        let build = Version::try_from_client_exe(&replay_file.meta.clientVersionFromExe).and_then(|v| v.build_number());
+        let started_at = crate::util::replay_timestamp(&replay_file.meta);
+        // tempArenaInfo.json and temp.wowsreplay are written as siblings by the
+        // game, so the packet stream lives next to it.
+        let Some(stream) = arena_info.parent().map(|dir| dir.join("temp.wowsreplay")) else {
+            return;
+        };
+        let source = LiveRosterSource::InProgress { arena_info: arena_info.to_owned(), stream };
+        let _ = self
+            .background_parser_tx
+            .as_ref()
+            .map(|tx| tx.send(ReplayBackgroundParserThreadMessage::LiveMatchStarted { source, build, started_at }));
     }
 
     /// Apply one message from a running directory walk to the listing it names.
@@ -1566,6 +1573,25 @@ impl TabState {
 
         self.file_watcher = Some(watcher);
         self.file_receiver = Some(rx);
+
+        // Last, so the scan this may start has the watcher and the parser
+        // thread already in place.
+        self.adopt_match_already_in_progress(replay_dir);
+    }
+
+    /// Adopt the battle `replay_dir` is in the middle of, if it is in one.
+    ///
+    /// The watcher only reports changes, so a battle that began before the app
+    /// did raises no event and would otherwise go unnoticed until the next one
+    /// starts. The game removes `tempArenaInfo.json` when a battle ends, so
+    /// finding one means a battle is in progress.
+    pub(crate) fn adopt_match_already_in_progress(&mut self, replay_dir: &Path) {
+        let arena_info = replay_dir.join("tempArenaInfo.json");
+        if !arena_info.is_file() {
+            return;
+        }
+        debug!("adopting a match already in progress");
+        self.adopt_live_arena_info(&arena_info);
     }
 
     /// Re-check whether `settings.wows_dir` points to a valid WoWs installation.
@@ -1619,6 +1645,83 @@ mod tests {
 
     fn insert_listed_paths<'a>(workspace: &mut ReplayWorkspace, paths: impl IntoIterator<Item = &'a PathBuf>) {
         workspace.replay_files = Some(paths.into_iter().map(|path| (path.clone(), listed_replay())).collect());
+    }
+
+    /// The shape of a `tempArenaInfo.json`: the same metadata a finished
+    /// replay carries in its header, which is why the live scan can pair it
+    /// with a packet stream read separately.
+    const ARENA_INFO: &str = r#"{
+        "gameMode": 7, "clientVersionFromExe": "15, 6, 0, 12830008",
+        "mapDisplayName": "ocean", "mapId": 1, "clientVersionFromXml": "15, 6, 0, 12830008",
+        "duration": 1200, "gameLogic": null, "name": "12x12", "scenario": "Domination",
+        "playerID": 0, "vehicles": [], "playersPerTeam": 12,
+        "dateTime": "08.08.2026 01:48:20", "mapName": "spaces/00_CO_ocean",
+        "playerName": "Me", "scenarioConfigId": 1, "teamsCount": 2, "logic": null,
+        "playerVehicle": "PFSD210-Marceau"
+    }"#;
+
+    /// A replays directory holding a battle in progress: the metadata and the
+    /// packet stream as the two sibling files the game writes.
+    fn replays_dir_mid_battle() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("tempArenaInfo.json"), ARENA_INFO).expect("write arena info");
+        std::fs::write(dir.path().join("temp.wowsreplay"), b"").expect("write live replay");
+        dir
+    }
+
+    /// A battle that began before the app did raises no watcher event, so the
+    /// startup scan is the only thing that can notice it.
+    #[test]
+    fn a_battle_already_in_progress_at_startup_becomes_the_current_match() {
+        let dir = replays_dir_mid_battle();
+        let mut state = TabState::default();
+        let (tx, rx) = mpsc::channel();
+        state.background_parser_tx = Some(tx);
+
+        state.adopt_match_already_in_progress(dir.path());
+
+        assert!(state.player_tracker.read().live_match.is_some(), "the match must become the current one");
+        let message = rx.try_recv().expect("a roster scan must be queued");
+        let ReplayBackgroundParserThreadMessage::LiveMatchStarted { source, .. } = message else {
+            panic!("expected a LiveMatchStarted message");
+        };
+        let LiveRosterSource::InProgress { arena_info, stream } = source else {
+            panic!("a battle in progress must be scanned as one, not as a finished replay");
+        };
+        assert_eq!(arena_info, dir.path().join("tempArenaInfo.json"));
+        assert_eq!(stream, dir.path().join("temp.wowsreplay"), "the stream is the sibling the game writes");
+    }
+
+    /// The game removes `tempArenaInfo.json` when a battle ends, so its absence
+    /// is what "not in a battle" looks like on disk.
+    #[test]
+    fn a_replays_directory_between_battles_adopts_nothing() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let mut state = TabState::default();
+        let (tx, rx) = mpsc::channel();
+        state.background_parser_tx = Some(tx);
+
+        state.adopt_match_already_in_progress(dir.path());
+
+        assert!(state.player_tracker.read().live_match.is_none());
+        assert!(rx.try_recv().is_err(), "no scan may be queued for a battle that is not happening");
+    }
+
+    /// The game writes this file at match start and may still be flushing it.
+    /// A half-written read must leave the previous match alone rather than
+    /// clearing the tab, and a later write re-triggers the adoption.
+    #[test]
+    fn a_half_written_arena_info_is_skipped_rather_than_adopted() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("tempArenaInfo.json"), b"{\"gameMode\"").expect("write partial arena info");
+        let mut state = TabState::default();
+        let (tx, rx) = mpsc::channel();
+        state.background_parser_tx = Some(tx);
+
+        state.adopt_match_already_in_progress(dir.path());
+
+        assert!(state.player_tracker.read().live_match.is_none());
+        assert!(rx.try_recv().is_err());
     }
 
     /// The save task wakes on any generation change and then re-serializes the
