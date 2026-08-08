@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -216,39 +215,67 @@ pub(crate) fn workspace_leaf_salt(id: WorkspaceId, path: &std::path::Path) -> eg
 /// implausibly long). The input's separator style is preserved rather than
 /// normalised, since a root picked via a folder dialog is already in the
 /// platform's native form.
+///
+/// Parsed from the string rather than `Path::components` so Windows prefixes
+/// and backslash separators are recognised on every platform: a root recorded
+/// on Windows renders the same title when the config is opened elsewhere, and
+/// the behaviour under test does not vary by host OS.
 pub(crate) fn shorten_root(path: &Path) -> String {
     let raw = path.to_string_lossy();
     let separator = if raw.contains('\\') { '\\' } else { '/' };
 
-    let mut prefix = String::new();
-    let mut has_root = false;
-    let mut parts: Vec<String> = Vec::new();
+    let (prefix, rest) = raw.split_at(windows_prefix_len(&raw));
+    let has_root = rest.starts_with(['/', '\\']);
 
-    for component in path.components() {
-        match component {
-            Component::Prefix(prefix_component) => {
-                prefix.push_str(&prefix_component.as_os_str().to_string_lossy());
-            }
-            Component::RootDir => has_root = true,
-            Component::CurDir | Component::ParentDir | Component::Normal(_) => {
-                parts.push(component.as_os_str().to_string_lossy().into_owned());
-            }
-        }
-    }
+    let parts: Vec<&str> = rest.split(['/', '\\']).filter(|part| !part.is_empty()).collect();
 
     if parts.is_empty() {
-        return prefix;
+        return prefix.to_string();
     }
 
     let leaf_index = parts.len() - 1;
     let shortened = parts
-        .into_iter()
+        .iter()
         .enumerate()
-        .map(|(i, part)| if i == leaf_index { shorten_leaf(&part) } else { first_char(&part) })
+        .map(|(i, part)| if i == leaf_index { shorten_leaf(part) } else { first_char(part) })
         .collect::<Vec<_>>()
         .join(&separator.to_string());
 
     if prefix.is_empty() && !has_root { shortened } else { format!("{prefix}{separator}{shortened}") }
+}
+
+/// Byte length of the Windows path prefix at the start of `raw`, mirroring
+/// what `Path::components` yields as `Component::Prefix` on Windows: a drive
+/// ("C:"), a UNC root ("\\server\share"), or a verbatim/device form
+/// ("\\?\C:", "\\?\UNC\server\share", "\\.\device"). 0 when there is none.
+/// Separator offsets are ASCII, so byte slicing at the result is UTF-8 safe.
+fn windows_prefix_len(raw: &str) -> usize {
+    fn component_end(raw: &str, start: usize) -> usize {
+        let start = start.min(raw.len());
+        raw[start..].find(['/', '\\']).map_or(raw.len(), |at| start + at)
+    }
+
+    let bytes = raw.as_bytes();
+    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
+        return 2;
+    }
+
+    let is_sep = |b: u8| b == b'/' || b == b'\\';
+    if bytes.len() < 3 || !is_sep(bytes[0]) || !is_sep(bytes[1]) {
+        return 0;
+    }
+
+    if (bytes[2] == b'?' || bytes[2] == b'.') && bytes.len() >= 4 && is_sep(bytes[3]) {
+        let device_end = component_end(raw, 4);
+        if !raw[4..device_end].eq_ignore_ascii_case("UNC") {
+            return device_end;
+        }
+        let server_end = component_end(raw, device_end + 1);
+        return component_end(raw, server_end + 1);
+    }
+
+    let server_end = component_end(raw, 2);
+    component_end(raw, server_end + 1)
 }
 
 fn first_char(component: &str) -> String {
@@ -698,6 +725,23 @@ mod tests {
     fn backslash_separators_are_handled() {
         // Windows paths arrive backslashed from the folder picker.
         assert_eq!(shorten_root(Path::new(r"G:\dev\wows\replays")), r"G:\d\w\replays");
+    }
+
+    /// A network-share root keeps the whole \\server\share prefix: cutting the
+    /// server or share name to one character would make the title unreadable
+    /// and un-navigable.
+    #[test]
+    fn a_unc_prefix_is_kept_whole() {
+        assert_eq!(shorten_root(Path::new(r"\\server\share\dev\replays")), r"\\server\share\d\replays");
+        assert_eq!(shorten_root(Path::new(r"\\server\share")), r"\\server\share");
+    }
+
+    /// Verbatim paths are what fs::canonicalize returns on Windows, so a
+    /// canonicalized root must shorten like its non-verbatim spelling.
+    #[test]
+    fn verbatim_prefixes_are_kept_whole() {
+        assert_eq!(shorten_root(Path::new(r"\\?\G:\dev\wows\replays")), r"\\?\G:\d\w\replays");
+        assert_eq!(shorten_root(Path::new(r"\\?\UNC\server\share\replays")), r"\\?\UNC\server\share\replays");
     }
 
     #[test]
