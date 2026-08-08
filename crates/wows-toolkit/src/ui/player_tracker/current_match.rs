@@ -25,7 +25,7 @@ use wowsunpack::data::Version;
 use crate::app::ToolkitTabViewer;
 use crate::data::match_stats::PlayerStatsOut;
 use crate::data::match_stats::PlayerStatsStatus;
-use crate::data::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::BuildData;
 use crate::icons;
 use crate::task::live_match_stats::FlushState;
 use crate::task::replays::ReplayBackgroundParserThreadMessage;
@@ -94,11 +94,11 @@ impl ToolkitTabViewer<'_> {
             let now = Timestamp::now();
 
             let build = player_tracker.live_match.as_ref().and_then(|live| live.build);
-            let wows_data = build.zip(self.tab_state.wows_data_map.as_ref()).and_then(|(build, map)| map.get(build));
+            let wows_data = build.zip(self.tab_state.build_cache.as_ref()).and_then(|(build, map)| map.get(build));
             let wows_data_guard = wows_data.as_ref().map(|data| data.read());
-            // SharedWoWsData is Arc<RwLock<Box<WorldOfWarshipsData>>>, so the
+            // SharedBuildData is Arc<RwLock<Box<BuildData>>>, so the
             // guard needs three derefs to reach the data itself.
-            let wows_data_ref: Option<&WorldOfWarshipsData> = wows_data_guard.as_ref().map(|guard| &***guard);
+            let wows_data_ref: Option<&BuildData> = wows_data_guard.as_ref().map(|guard| &***guard);
 
             // Resolve first, then reborrow the tracker's fields disjointly so the
             // roster and the tracked-player map can be read at the same time.
@@ -298,7 +298,7 @@ fn parse_replay_list_timestamp(date_time: &str) -> Option<Timestamp> {
 /// in their rows, heading and id salt.
 struct TeamContext<'a> {
     tracked: &'a HashMap<AccountId, TrackedPlayer>,
-    wows_data: Option<&'a WorldOfWarshipsData>,
+    wows_data: Option<&'a BuildData>,
     twitch_state: &'a TwitchState,
     started_at: Timestamp,
     now: Timestamp,

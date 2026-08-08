@@ -23,7 +23,7 @@ use crate::data::match_stats::MatchStatsError;
 use crate::data::match_stats::MatchStatsRequest;
 use crate::data::match_stats::PlayerRef;
 use crate::data::match_stats::Region;
-use crate::data::wows_data::WoWsDataMap;
+use crate::data::wows_data::BuildDataCache;
 use crate::ui::player_tracker::MatchStatsState;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::player_tracker::live::LiveIdentities;
@@ -85,7 +85,7 @@ pub(crate) fn resolve_and_fetch(
     build: Option<u32>,
     flush: FlushState,
     started_at: Timestamp,
-    wows_data_map: &WoWsDataMap,
+    build_cache: &BuildDataCache,
     tracker: &Arc<RwLock<PlayerTracker>>,
     client: &mut MatchStatsClient,
 ) {
@@ -105,7 +105,7 @@ pub(crate) fn resolve_and_fetch(
 
     let deadline = Instant::now() + RETRY_BUDGET;
     let state = loop {
-        if let Some(state) = try_scan(replay, build, flush, wows_data_map) {
+        if let Some(state) = try_scan(replay, build, flush, build_cache) {
             break Some(state);
         }
         if flush == FlushState::Complete || Instant::now() >= deadline {
@@ -169,7 +169,7 @@ fn format_wait_minutes(retry_after: Duration) -> String {
 /// One attempt at reading the roster. `None` means "not yet": the file is
 /// absent, the flushed prefix is too short, game data has not loaded, or
 /// `onArenaStateReceived` has not been written.
-fn try_scan(replay: &Path, build: u32, flush: FlushState, wows_data_map: &WoWsDataMap) -> Option<ArenaState> {
+fn try_scan(replay: &Path, build: u32, flush: FlushState, build_cache: &BuildDataCache) -> Option<ArenaState> {
     let replay_file = match flush {
         FlushState::InProgress => ReplayFile::from_partial_file(replay),
         FlushState::Complete => ReplayFile::from_file(replay),
@@ -182,7 +182,7 @@ fn try_scan(replay: &Path, build: u32, flush: FlushState, wows_data_map: &WoWsDa
         }
     };
 
-    let shared = wows_data_map.get(build)?;
+    let shared = build_cache.get(build)?;
     let guard = shared.read();
     let metadata = guard.game_metadata.as_ref()?;
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);

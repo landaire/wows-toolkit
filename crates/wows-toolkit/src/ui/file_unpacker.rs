@@ -1677,9 +1677,9 @@ impl ToolkitTabViewer<'_> {
         }
     }
 
-    /// Returns the SharedWoWsData for the currently selected browser build.
-    fn selected_browser_data(&self) -> Option<crate::data::wows_data::SharedWoWsData> {
-        let map = self.tab_state.wows_data_map.as_ref()?;
+    /// Returns the SharedBuildData for the currently selected browser build.
+    fn selected_browser_data(&self) -> Option<crate::data::wows_data::SharedBuildData> {
+        let map = self.tab_state.build_cache.as_ref()?;
         map.get(self.tab_state.selected_browser_build)
     }
 
@@ -1817,7 +1817,7 @@ impl ToolkitTabViewer<'_> {
         // ── Top panel: version selector (only when multiple builds) ──────
         if self.tab_state.available_builds.len() > 1 {
             egui::Panel::top("browser_version_bar").show(ui, |ui| {
-                if let Some(map) = &self.tab_state.wows_data_map {
+                if let Some(map) = &self.tab_state.build_cache {
                     let mut builds = self.tab_state.available_builds.clone();
                     builds.sort();
                     builds.reverse();

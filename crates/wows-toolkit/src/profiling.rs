@@ -28,8 +28,8 @@ use wows_replays::ReplayFile;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 
+use crate::data::wows_data::BuildDataCache;
 use crate::data::wows_data::ReplayDependencies;
-use crate::data::wows_data::WoWsDataMap;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 
@@ -111,12 +111,12 @@ impl StageTimings {
 /// personal-rating state are empty: neither is populated during a normal load
 /// either, and the sender is a dead end because the UI report only uses it to
 /// queue follow-up work.
-fn headless_deps(wows_data_map: WoWsDataMap) -> ReplayDependencies {
+fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
     let (tx, rx) = mpsc::channel();
     // Leaking the receiver keeps sends from failing; nothing consumes them.
     std::mem::forget(rx);
     ReplayDependencies {
-        wows_data_map,
+        build_cache,
         shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient::new()
             .expect("failed to build ShipBuilds HTTP client"),
         twitch_state: Arc::new(RwLock::new(Default::default())),
@@ -144,7 +144,7 @@ fn time_one(path: &Path, deps: &ReplayDependencies) -> Result<StageTimings, Stri
     let version = Version::try_from_client_exe(&raw_version).ok_or_else(|| format!("bad version {raw_version:?}"))?;
 
     let start = Instant::now();
-    let wows_data = deps.wows_data_map.resolve(&version).ok_or_else(|| {
+    let wows_data = deps.build_cache.resolve(&version).ok_or_else(|| {
         format!("no game data for build {}", version.build_number().map_or("unknown".to_string(), |b| b.to_string()))
     })?;
     t.resolve = start.elapsed();
@@ -235,7 +235,7 @@ fn replay_paths(dir: &Path) -> Vec<PathBuf> {
 ///
 /// `wows_dir` is a live game install and `dump_dir` a dumped-build archive;
 /// resolution tries the install first and falls back to the archive, which is
-/// what [`WoWsDataMap::resolve`] does for the real app. Replays whose build is
+/// what [`BuildDataCache::resolve`] does for the real app. Replays whose build is
 /// in neither are skipped and listed.
 pub fn run(wows_dir: PathBuf, dump_dir: String, replay_dir: PathBuf, limit: Option<usize>) {
     let paths = replay_paths(&replay_dir);
@@ -253,7 +253,7 @@ pub fn run(wows_dir: PathBuf, dump_dir: String, replay_dir: PathBuf, limit: Opti
     println!("replays      : {} under {}", paths.len(), replay_dir.display());
     println!();
 
-    let deps = headless_deps(WoWsDataMap::new(wows_dir, "en".to_string(), dump_dir));
+    let deps = headless_deps(BuildDataCache::new(wows_dir, "en".to_string(), dump_dir));
 
     let mut total = StageTimings::default();
     let mut succeeded = 0usize;

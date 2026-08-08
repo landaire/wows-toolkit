@@ -236,7 +236,7 @@ impl ToolkitTabViewer<'_> {
         let ship_catalog = state.ship_catalog.clone();
         let ship_icons = {
             let wd = wows_data.read();
-            wd.ship_icons.clone()
+            wd.assets.ship_icons.clone()
         };
         // Poll per-pane ship loading receivers
         poll_pane_loads(

@@ -23,7 +23,7 @@ use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 
 use crate::collab::peer::FrameBroadcast;
-use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedBuildData;
 
 use super::PlaybackCommand;
 use super::PlaybackFrame;
@@ -47,7 +47,7 @@ pub(super) fn playback_thread(
     alt_replays: Vec<crate::replay::renderer::AltReplayBytes>,
     map_name: String,
     game_duration: f32,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     shared_state: Arc<Mutex<SharedRendererState>>,
     command_rx: mpsc::Receiver<PlaybackCommand>,

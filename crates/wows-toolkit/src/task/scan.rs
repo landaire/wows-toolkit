@@ -145,7 +145,7 @@ pub fn start_scan_directory(
                     .ok()
                     .and_then(|meta| Version::try_from_client_exe(&meta.clientVersionFromExe))
             },
-            |request| deps.wows_data_map.has_data_for(request),
+            |request| deps.build_cache.has_data_for(request),
             |progress| {
                 let sent = update_tx.send(crate::task::replays::IngestUpdate::Stage {
                     workspace,

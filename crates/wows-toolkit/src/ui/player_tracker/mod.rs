@@ -41,7 +41,7 @@ use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::match_stats::PlayerStatsOut;
-use crate::data::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::BuildData;
 use crate::ui::replay_parser::Replay;
 use crate::util;
 
@@ -175,7 +175,7 @@ impl PlayerTracker {
     /// Rebuilds when the match changes, when game data arrives after a roster was
     /// resolved without it, when the tracked-player set changes, or when
     /// identities arrive after a roster was resolved without them.
-    pub(crate) fn roster(&mut self, wows_data: Option<&WorldOfWarshipsData>) -> Option<&ResolvedRoster> {
+    pub(crate) fn roster(&mut self, wows_data: Option<&BuildData>) -> Option<&ResolvedRoster> {
         let live = self.live_match.as_ref()?;
 
         // The game-data test must match what `ships_resolved` records: params

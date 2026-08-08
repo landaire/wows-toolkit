@@ -11,7 +11,7 @@ use rootcause::report;
 use tokio::runtime::Runtime;
 use tracing::error;
 
-use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedBuildData;
 use crate::task::BackgroundTask;
 use crate::task::BackgroundTaskCompletion;
 use crate::task::DownloadProgress;
@@ -99,7 +99,7 @@ async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) 
 
 fn unpack_mod(
     tarball: &[u8],
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     mod_info: &ModInfo,
     tx: Sender<DownloadProgress>,
 ) -> rootcause::Result<()> {
@@ -189,7 +189,7 @@ fn unpack_mod(
     Ok(())
 }
 
-fn install_mod(runtime: Arc<Runtime>, wows_data: SharedWoWsData, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) {
+fn install_mod(runtime: Arc<Runtime>, wows_data: SharedBuildData, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) {
     eprintln!("downloading mod");
     let (download_task_tx, download_task_rx) = mpsc::channel();
     let (download_progress_tx, download_progress_rx) = mpsc::channel();
@@ -238,7 +238,7 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: SharedWoWsData, mod_info: ModIn
 }
 
 fn uninstall_mod(
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     mod_info: ModInfo,
     tx: mpsc::Sender<BackgroundTask>,
 ) -> rootcause::Result<()> {
@@ -281,7 +281,7 @@ fn uninstall_mod(
 
 pub fn start_mod_manager_thread(
     runtime: Arc<Runtime>,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     receiver: mpsc::Receiver<ModInfo>,
     background_task_sender: mpsc::Sender<BackgroundTask>,
 ) {

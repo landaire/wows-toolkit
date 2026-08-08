@@ -457,7 +457,7 @@ impl ToolkitTabViewer<'_> {
             // its prerequisites available.
             let index_path_available = self.tab_state.db_pool.is_some() && self.tab_state.tokio_runtime.is_some();
             let fallback_path_available =
-                self.tab_state.active_workspace().replay_files.is_some() && self.tab_state.wows_data_map.is_some();
+                self.tab_state.active_workspace().replay_files.is_some() && self.tab_state.build_cache.is_some();
             let populate_enabled = index_path_available || fallback_path_available;
 
             ui.vertical(|ui| {
@@ -584,13 +584,13 @@ impl ToolkitTabViewer<'_> {
         }
         if populate_from_replays_requested
             && let Some(replay_files) = self.tab_state.active_workspace().replay_files.as_ref()
-            && let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
+            && let Some(build_cache) = self.tab_state.build_cache.as_ref()
         {
             crate::update_background_task!(
                 self.tab_state.background_tasks,
                 Some(task::start_populating_player_inspector(
                     replay_files.keys().cloned().collect(),
-                    wows_data_map.clone(),
+                    build_cache.clone(),
                     Arc::clone(&self.tab_state.player_tracker)
                 ))
             );

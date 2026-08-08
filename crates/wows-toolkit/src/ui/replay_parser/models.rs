@@ -11,16 +11,16 @@ use wows_replays::types::Relation;
 use wowsunpack::game_params::types::Param;
 use wowsunpack::game_params::types::Species;
 
+use crate::data::wows_data::BuildData;
 use crate::data::wows_data::GameAsset;
-use crate::data::wows_data::WorldOfWarshipsData;
 
 // Build/loadout types and their extractor live in wows-replay-insights (egui-free).
 pub use wows_replay_insights::battle_report::TranslatedBuild;
 pub use wows_replay_insights::battle_report::TranslatedModule;
 
 /// Returns the ship class icon for a given species.
-pub fn ship_class_icon_from_species(species: Species, wows_data: &WorldOfWarshipsData) -> Option<Arc<GameAsset>> {
-    wows_data.ship_icons.get(&species).cloned()
+pub fn ship_class_icon_from_species(species: Species, wows_data: &BuildData) -> Option<Arc<GameAsset>> {
+    wows_data.assets.ship_icons.get(&species).cloned()
 }
 
 /// What a player is, for colouring. Resolved to a colour at draw time so the

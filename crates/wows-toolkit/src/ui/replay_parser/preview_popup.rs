@@ -14,7 +14,7 @@ use wowsunpack::vfs::VfsPath;
 use wt_collab_egui::draw_commands::DrawCommandTextures;
 
 use crate::LocalizedTextResolver;
-use crate::data::wows_data::WoWsDataMap;
+use crate::data::wows_data::BuildDataCache;
 use crate::db::index::rows::RowSummary;
 use crate::replay::renderer::IconTextures;
 use crate::replay::renderer::MINIMAP_BACKGROUND;
@@ -60,7 +60,7 @@ const BAKING_REPAINT_INTERVAL: std::time::Duration = std::time::Duration::from_m
 /// Every field is owned so this is `'static`: the grouped listing attaches
 /// its tooltip inside an `egui_ltreeview` `label_ui` move closure that cannot
 /// borrow the tab. Callers hold this behind an `Arc` so cloning it into a
-/// per-leaf closure is one refcount bump, not a `WoWsDataMap` deep copy.
+/// per-leaf closure is one refcount bump, not a `BuildDataCache` deep copy.
 pub(crate) struct PreviewDeps {
     pub cache: Arc<Mutex<PreviewCache>>,
     pub asset_cache: Arc<Mutex<RendererAssetCache>>,
@@ -69,7 +69,7 @@ pub(crate) struct PreviewDeps {
     /// most maps in the game, and eagerly uploading all of them would pay for
     /// VFS reads and textures nobody hovers.
     pub texture_cache: Arc<Mutex<RendererTextureCache>>,
-    pub data_map: WoWsDataMap,
+    pub data_map: BuildDataCache,
     pub icons: Arc<IconTextures>,
     pub vfs: VfsPath,
     pub version: Option<Version>,

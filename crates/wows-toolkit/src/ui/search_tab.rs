@@ -1079,7 +1079,7 @@ impl ToolkitTabViewer<'_> {
     /// when that build is loaded.
     fn search_ship_display_name(&self, hit: &MatchHit) -> Option<String> {
         let ship_id = hit.self_ship_id?;
-        let data = hit.version_build.and_then(|build| self.tab_state.wows_data_map.as_ref()?.get(build));
+        let data = hit.version_build.and_then(|build| self.tab_state.build_cache.as_ref()?.get(build));
         let guard = data.as_ref().map(|d| d.read());
         let provider = guard.as_ref().and_then(|g| g.game_metadata.as_deref());
         ship_display_name(hit, crate::data::session_stats::try_resolve_ship_name(ship_id, provider))

@@ -58,7 +58,7 @@ use crate::collab::SessionStatus;
 use crate::data::settings::ReplayGrouping;
 use crate::data::settings::ReplaySettings;
 use crate::data::wows_data::GameAsset;
-use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedBuildData;
 use crate::db::index::rows::WorkspaceId;
 use crate::icons;
 use crate::replay::timeline::TimelineExtractionError;
@@ -517,7 +517,7 @@ trait FireSectionSource {
 
 /// The real source: `content/assets.bin` out of a resolved build's game data.
 struct GameDataFireSections<'a> {
-    wows_data: &'a crate::data::wows_data::WorldOfWarshipsData,
+    wows_data: &'a crate::data::wows_data::BuildData,
 }
 
 impl FireSectionSource for GameDataFireSections<'_> {
@@ -603,7 +603,7 @@ pub(crate) fn clear_fire_section_failures() {
 }
 
 /// Read `content/assets.bin` from the resolved build's game data.
-fn open_assets_bin(wows_data: &crate::data::wows_data::WorldOfWarshipsData) -> Result<Vec<u8>, FireSectionSourceError> {
+fn open_assets_bin(wows_data: &crate::data::wows_data::BuildData) -> Result<Vec<u8>, FireSectionSourceError> {
     let assets_path =
         wows_data.vfs.join("content/assets.bin").map_err(|e| FireSectionSourceError::Path(e.to_string()))?;
     let mut file = assets_path.open_file().map_err(|e| FireSectionSourceError::Open(e.to_string()))?;
@@ -623,7 +623,7 @@ fn open_assets_bin(wows_data: &crate::data::wows_data::WorldOfWarshipsData) -> R
 /// be resolved) is the same story: resolution still runs, it just is not
 /// persisted.
 fn resolve_fire_section_geometry(
-    wows_data: &crate::data::wows_data::WorldOfWarshipsData,
+    wows_data: &crate::data::wows_data::BuildData,
     cache_dir: Option<&std::path::Path>,
     build_number: u32,
     victims: &HashMap<wows_replays::types::EntityId, wows_replay_insights::fire_chance::analysis::VictimContext>,
@@ -726,7 +726,7 @@ fn resolve_fire_section_geometry_from(
 fn compute_fire_chance(
     report: &BattleReport,
     params: &GameMetadataProvider,
-    wows_data: &crate::data::wows_data::WorldOfWarshipsData,
+    wows_data: &crate::data::wows_data::BuildData,
     deps: &crate::data::wows_data::ReplayDependencies,
 ) -> Option<wows_replay_insights::fire_chance::analysis::EffectiveFireChance> {
     let resolved = match wows_replay_insights::fire_chance::resolve::resolve_fire_chance_input(report, params) {
@@ -738,7 +738,7 @@ fn compute_fire_chance(
     };
 
     let build_number = wows_data.build_number;
-    let cache_dir = crate::task::replays::game_data_dump_base_with_override(deps.wows_data_map.game_data_cache_dir())
+    let cache_dir = crate::task::replays::game_data_dump_base_with_override(deps.build_cache.game_data_cache_dir())
         .map(|base| base.join("fire_sections").join(build_number.to_string()));
 
     let geometry_map = resolve_fire_section_geometry(wows_data, cache_dir.as_deref(), build_number, resolved.victims());
@@ -775,7 +775,7 @@ pub struct UiReport {
     player_reports: Vec<PlayerReport>,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     replay_sort: Arc<Mutex<SortOrder>>,
     columns: Vec<ReplayColumn>,
@@ -791,7 +791,7 @@ pub struct UiReport {
     resolved_results: Option<serde_json::Value>,
     /// Ribbon icons from the newest loaded build, used to fill gaps when this
     /// replay's own build ships none (Flash-era and older). See
-    /// [`crate::data::wows_data::WoWsDataMap::newest_ribbon_icons`].
+    /// [`crate::data::wows_data::BuildDataCache::newest_ribbon_icons`].
     fallback_ribbon_icons: HashMap<String, Arc<GameAsset>>,
     fallback_subribbon_icons: HashMap<String, Arc<GameAsset>>,
     /// Decoded icon textures, cached per build so they stay version-correct
@@ -809,14 +809,14 @@ impl UiReport {
     pub fn new(
         replay_file: &ReplayFile,
         report: &BattleReport,
-        wows_data: &SharedWoWsData,
+        wows_data: &SharedBuildData,
         deps: &crate::data::wows_data::ReplayDependencies,
         merge_active: bool,
     ) -> Self {
         // Captured before locking the replay's build below (sequential, avoids a
         // re-entrant read on the same data). Used to borrow class icons when the
         // replay's own (pre-12.0) build shipped none.
-        let fallback_ship_icons = crate::timed_stage!("newest_ship_icons", deps.wows_data_map.newest_ship_icons());
+        let fallback_ship_icons = crate::timed_stage!("newest_ship_icons", deps.build_cache.newest_ship_icons());
 
         let wows_data_inner = wows_data.read();
         let metadata_provider = wows_data_inner.game_metadata.as_ref().expect("no game metadata?");
@@ -1234,10 +1234,10 @@ impl UiReport {
             debug_mode: deps.is_debug_mode,
             merge_active,
             resolved_results,
-            fallback_ribbon_icons: crate::timed_stage!("newest_ribbon_icons", deps.wows_data_map.newest_ribbon_icons()),
+            fallback_ribbon_icons: crate::timed_stage!("newest_ribbon_icons", deps.build_cache.newest_ribbon_icons()),
             fallback_subribbon_icons: crate::timed_stage!(
                 "newest_subribbon_icons",
-                deps.wows_data_map.newest_subribbon_icons()
+                deps.build_cache.newest_subribbon_icons()
             ),
             icon_textures: Mutex::new(HashMap::new()),
         }
@@ -2480,11 +2480,13 @@ impl UiReport {
                                         let icon = if ribbon.is_subribbon {
                                             let key = format!("sub{}", ribbon.icon_key);
                                             wows_data
+                                                .assets
                                                 .subribbon_icons
                                                 .get(&key)
                                                 .or_else(|| self.fallback_subribbon_icons.get(&key))
                                         } else {
                                             wows_data
+                                                .assets
                                                 .ribbon_icons
                                                 .get(&ribbon.icon_key)
                                                 .or_else(|| self.fallback_ribbon_icons.get(&ribbon.icon_key))
@@ -3786,7 +3788,7 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
 
-                if self.tab_state.wows_data_map.is_some()
+                if self.tab_state.build_cache.is_some()
                     && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
                 {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
@@ -3807,7 +3809,7 @@ impl ToolkitTabViewer<'_> {
                     let replay_version =
                         wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
                     let Some(wows_data) =
-                        self.tab_state.wows_data_map.as_ref().and_then(|map| map.resolve(&replay_version))
+                        self.tab_state.build_cache.as_ref().and_then(|map| map.resolve(&replay_version))
                     else {
                         tracing::warn!(
                             "No data for build {}",
@@ -4003,7 +4005,7 @@ impl ToolkitTabViewer<'_> {
             return None;
         }
         let wows_data = self.tab_state.world_of_warships_data.as_ref()?;
-        let data_map = self.tab_state.wows_data_map.clone()?;
+        let data_map = self.tab_state.build_cache.clone()?;
         let (vfs, version, dump_dir) = {
             let data = wows_data.read();
             (data.vfs.clone(), data.version().copied(), data.dump_dir.clone())
@@ -5809,10 +5811,10 @@ impl ToolkitTabViewer<'_> {
     /// its own rather than a dock tab, so it belongs to no workspace.
     /// Returns whether a renderer was launched.
     pub(crate) fn launch_replay_render(&mut self, path: &std::path::Path, ws_id: Option<WorkspaceId>) -> bool {
-        let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref() else {
+        let Some(build_cache) = self.tab_state.build_cache.as_ref() else {
             return false;
         };
-        let Some(info) = crate::replay::renderer::replay_render_input(path, wows_data_map) else {
+        let Some(info) = crate::replay::renderer::replay_render_input(path, build_cache) else {
             return false;
         };
 
@@ -5860,11 +5862,14 @@ impl ToolkitTabViewer<'_> {
     /// there is nothing renderable. The replays themselves are read on the
     /// render thread: reading is decrypt plus inflate of a whole packet stream,
     /// and a group context menu can select hundreds of them.
-    fn batch_render_inputs(&self, paths: Vec<PathBuf>) -> Option<(Vec<PathBuf>, crate::data::wows_data::WoWsDataMap)> {
+    fn batch_render_inputs(
+        &self,
+        paths: Vec<PathBuf>,
+    ) -> Option<(Vec<PathBuf>, crate::data::wows_data::BuildDataCache)> {
         if paths.is_empty() {
             return None;
         }
-        Some((paths, self.tab_state.wows_data_map.clone()?))
+        Some((paths, self.tab_state.build_cache.clone()?))
     }
 
     fn handle_batch_render_request(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
@@ -5878,7 +5883,7 @@ impl ToolkitTabViewer<'_> {
                 return;
             };
 
-            let Some((paths, wows_data_map)) = self.batch_render_inputs(paths) else {
+            let Some((paths, build_cache)) = self.batch_render_inputs(paths) else {
                 self.tab_state.toasts.lock().warning("No renderable replays in selection");
                 return;
             };
@@ -5896,7 +5901,7 @@ impl ToolkitTabViewer<'_> {
             let task = crate::replay::renderer::batch_render_to_folder(
                 output_dir,
                 paths,
-                wows_data_map,
+                build_cache,
                 options,
                 self.tab_state.renderer_asset_cache.clone(),
                 self.tab_state.toasts.clone(),
@@ -5914,7 +5919,7 @@ impl ToolkitTabViewer<'_> {
         if let Some(paths) = ui.ctx().data_mut(|data| {
             data.remove_temp::<Vec<PathBuf>>(request_slot_id(ws_id, ReplayRequestSlot::BatchRenderClipboard))
         }) {
-            let Some((paths, wows_data_map)) = self.batch_render_inputs(paths) else {
+            let Some((paths, build_cache)) = self.batch_render_inputs(paths) else {
                 self.tab_state.toasts.lock().warning("No renderable replays in selection");
                 return;
             };
@@ -5931,7 +5936,7 @@ impl ToolkitTabViewer<'_> {
 
             let task = crate::replay::renderer::batch_render_to_clipboard(
                 paths,
-                wows_data_map,
+                build_cache,
                 options,
                 self.tab_state.renderer_asset_cache.clone(),
                 self.tab_state.toasts.clone(),
@@ -5949,7 +5954,7 @@ impl ToolkitTabViewer<'_> {
     fn open_replay_controls_window(&mut self) {
         // Parse from VFS on first use, then cache
         if self.tab_state.replay_controls_cache.is_none()
-            && let Some(map) = &self.tab_state.wows_data_map
+            && let Some(map) = &self.tab_state.build_cache
         {
             let result = map.loaded_builds().into_iter().find_map(|data| {
                 let data = data.read();

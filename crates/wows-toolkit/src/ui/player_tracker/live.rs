@@ -13,7 +13,7 @@ use wowsunpack::game_params::types::Species;
 
 use super::TrackedPlayer;
 use crate::data::match_stats::Region;
-use crate::data::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::BuildData;
 use crate::ui::replay_parser::PlayerTint;
 
 /// The roster of the match currently in progress, captured from the game's
@@ -177,7 +177,7 @@ pub(crate) fn resolve_roster(
     live: &LiveMatch,
     tracked: &HashMap<AccountId, TrackedPlayer>,
     identities: Option<&LiveIdentities>,
-    wows_data: Option<&WorldOfWarshipsData>,
+    wows_data: Option<&BuildData>,
 ) -> ResolvedRoster {
     let metadata = wows_data.and_then(|data| data.game_metadata.as_ref());
     let name_index = build_name_index(tracked);

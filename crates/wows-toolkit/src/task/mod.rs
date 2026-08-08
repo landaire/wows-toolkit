@@ -16,7 +16,7 @@ use parking_lot::RwLock;
 use rootcause::Report;
 use rust_i18n::t;
 
-use crate::data::wows_data::WorldOfWarshipsData;
+use crate::data::wows_data::BuildData;
 #[cfg(feature = "mod_manager")]
 use crate::mod_manager::ModTaskCompletion;
 use crate::ui::plaintext_viewer::PlaintextFileViewer;
@@ -85,7 +85,6 @@ pub use replays::SourceSelector;
 pub use replays::load_nation_flag;
 pub use replays::load_ribbon_icons;
 pub use replays::load_ship_icons;
-pub use replays::load_wows_data_for_build;
 pub use replays::load_wows_files;
 pub use replays::start_background_parsing_thread;
 pub use replays::start_load_row_summaries;
@@ -494,7 +493,7 @@ fn drain_shipbuilds_progress(
 pub enum BackgroundTaskCompletion {
     DataLoaded {
         new_dir: PathBuf,
-        wows_data: Box<WorldOfWarshipsData>,
+        wows_data: Box<BuildData>,
         replays: Option<HashMap<PathBuf, Arc<crate::ui::replay_parser::ListedReplay>>>,
         available_builds: Vec<u32>,
     },

@@ -21,7 +21,7 @@ use crate::armor_viewer::state::AnalysisTab;
 use crate::armor_viewer::state::ArmorPane;
 use crate::armor_viewer::state::ArmorViewerState;
 use crate::armor_viewer::state::StoredTrajectory;
-use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedBuildData;
 use crate::icons;
 use crate::ui::theme::semantic::SemanticExt;
 
@@ -77,7 +77,7 @@ struct AnalysisPaneViewer<'a> {
     // Read-only shared data
     comparison_ships: &'a [ComparisonShip],
     ifhe_enabled: bool,
-    wows_data: &'a SharedWoWsData,
+    wows_data: &'a SharedBuildData,
     ship_catalog: Option<&'a crate::armor_viewer::ship_selector::ShipCatalog>,
     translate_part: &'a dyn Fn(&str) -> String,
     active_pane: Option<&'a ArmorPane>,
@@ -131,7 +131,7 @@ pub fn show_analysis_window(
     ctx: &egui::Context,
     state: &mut ArmorViewerState,
     translate_part: &dyn Fn(&str) -> String,
-    wows_data: &SharedWoWsData,
+    wows_data: &SharedBuildData,
     ship_catalog: Option<&crate::armor_viewer::ship_selector::ShipCatalog>,
 ) -> TrajectoryActions {
     if !state.show_comparison_panel {

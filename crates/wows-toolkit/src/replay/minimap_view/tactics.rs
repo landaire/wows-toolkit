@@ -30,7 +30,7 @@ use crate::data::cap_layout::CapLayout;
 use crate::data::cap_layout::CapLayoutDb;
 use crate::data::cap_layout::CapLayoutKey;
 use crate::data::cap_layout::CapPointLayout;
-use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedBuildData;
 use crate::replay::minimap_view::collab_annotation_to_local;
 use crate::replay::minimap_view::get_my_user_id;
 use crate::replay::minimap_view::handle_map_click_ping;
@@ -595,7 +595,7 @@ pub struct TacticsBoardViewer {
     // External references
     cap_layout_db: Arc<Mutex<CapLayoutDb>>,
     asset_cache: Arc<Mutex<RendererAssetCache>>,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
 
     // Database
     db_pool: Option<sqlx::SqlitePool>,
@@ -621,7 +621,7 @@ impl TacticsBoardViewer {
         owner_user_id: u64,
         cap_layout_db: Arc<Mutex<CapLayoutDb>>,
         asset_cache: Arc<Mutex<RendererAssetCache>>,
-        wows_data: SharedWoWsData,
+        wows_data: SharedBuildData,
         db_pool: Option<sqlx::SqlitePool>,
         tokio_runtime: Option<Arc<tokio::runtime::Runtime>>,
         window_settings: crate::tab_state::SharedWindowSettings,
@@ -924,7 +924,7 @@ impl TacticsBoardViewer {
         state: &mut TacticsBoardState,
         cap_layout_db: &Arc<Mutex<CapLayoutDb>>,
         asset_cache: &Arc<Mutex<RendererAssetCache>>,
-        wows_data: &SharedWoWsData,
+        wows_data: &SharedBuildData,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
         board_id: u64,
@@ -1072,7 +1072,7 @@ impl TacticsBoardViewer {
         state: &mut TacticsBoardState,
         annotation_state_arc: &Arc<Mutex<AnnotationState>>,
         asset_cache: &Arc<Mutex<RendererAssetCache>>,
-        wows_data: &SharedWoWsData,
+        wows_data: &SharedBuildData,
         cap_layout_db: &Arc<Mutex<CapLayoutDb>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
         board_id: u64,
@@ -1218,7 +1218,7 @@ impl TacticsBoardViewer {
         ui: &mut egui::Ui,
         state: &mut TacticsBoardState,
         cap_layout_db: &Arc<Mutex<CapLayoutDb>>,
-        wows_data: &SharedWoWsData,
+        wows_data: &SharedBuildData,
         db_pool: &Option<sqlx::SqlitePool>,
         tokio_runtime: &Option<Arc<tokio::runtime::Runtime>>,
     ) {
@@ -1334,7 +1334,7 @@ impl TacticsBoardViewer {
         zoom_pan_arc: &Arc<Mutex<ViewportZoomPan>>,
         annotation_state_arc: &Arc<Mutex<AnnotationState>>,
         asset_cache: &Arc<Mutex<RendererAssetCache>>,
-        wows_data: &SharedWoWsData,
+        wows_data: &SharedBuildData,
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_session_state: &Option<Arc<Mutex<collab::SessionState>>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
@@ -1956,7 +1956,7 @@ impl TacticsBoardViewer {
         collab_local_tx: &Option<mpsc::Sender<LocalEvent>>,
         collab_command_tx: &Option<mpsc::Sender<collab::SessionCommand>>,
         board_id: Option<u64>,
-        wows_data: &SharedWoWsData,
+        wows_data: &SharedBuildData,
     ) {
         let show_menu = annotation_state_arc.lock().show_context_menu;
         if !show_menu {
@@ -2478,7 +2478,7 @@ fn load_map_image(
     state: &mut TacticsBoardState,
     map_name: &str,
     asset_cache: &Arc<Mutex<RendererAssetCache>>,
-    wows_data: &SharedWoWsData,
+    wows_data: &SharedBuildData,
 ) {
     let wdata = wows_data.read();
     let (image, info) = asset_cache.lock().get_or_load_map(map_name, &wdata.vfs, wdata.version());
@@ -2602,7 +2602,7 @@ fn screen_delta_to_world(screen_delta: Vec2, transform: &MapTransform, map_info:
 }
 
 /// Translate a map name to a human-readable string, falling back to a pretty format.
-fn translate_or_pretty(map_name: &str, wows_data: &SharedWoWsData) -> String {
+fn translate_or_pretty(map_name: &str, wows_data: &SharedBuildData) -> String {
     let wdata = wows_data.read();
     if let Some(ref gm) = wdata.game_metadata {
         wowsunpack::game_params::translations::translate_map_name(map_name, gm.as_ref())
@@ -2627,7 +2627,7 @@ fn render_annotation_range_circles(
     transform: &MapTransform,
     map_info: &MapInfo,
     painter: &egui::Painter,
-    wows_data: &SharedWoWsData,
+    wows_data: &SharedBuildData,
     placed_labels: &mut Vec<Rect>,
 ) {
     use wt_collab_egui::rendering::RangeCircleKind;
@@ -2728,7 +2728,7 @@ fn render_annotation_range_circles(
 }
 
 /// Build a human-readable mode label from a cap layout.
-fn pretty_mode_name(layout: &CapLayout, wows_data: &SharedWoWsData) -> String {
+fn pretty_mode_name(layout: &CapLayout, wows_data: &SharedBuildData) -> String {
     let wdata = wows_data.read();
     let scenario_label = if let Some(ref gm) = wdata.game_metadata {
         wowsunpack::game_params::translations::translate_scenario(&layout.scenario, gm.as_ref())

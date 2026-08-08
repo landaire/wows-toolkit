@@ -21,7 +21,7 @@ use super::RgbaAsset;
 use super::SNAPSHOTS_PER_SECOND;
 use super::frame_pass::FrameSink;
 use super::frame_pass::build_frame_track;
-use crate::data::wows_data::WoWsDataMap;
+use crate::data::wows_data::BuildDataCache;
 
 /// Wall-clock length of one full preview loop for a replay long enough to
 /// fill the frame budget.
@@ -217,7 +217,7 @@ pub(crate) fn bake_options() -> RenderOptions {
 /// has already been superseded must not enter one.
 pub(crate) fn bake_preview_track(
     path: &Path,
-    data_map: &WoWsDataMap,
+    data_map: &BuildDataCache,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     cancel: &AtomicBool,
 ) -> Result<PreviewTrack, PreviewError> {
@@ -484,7 +484,7 @@ pub(crate) fn poll_preview(
     cache: &Arc<Mutex<PreviewCache>>,
     key: PreviewKey,
     now: f64,
-    data_map: &WoWsDataMap,
+    data_map: &BuildDataCache,
     asset_cache: &Arc<Mutex<RendererAssetCache>>,
 ) -> PreviewState {
     let mut guard = cache.lock();

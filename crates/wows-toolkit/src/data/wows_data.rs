@@ -17,7 +17,6 @@ use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::CrewSkillName;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
@@ -26,16 +25,20 @@ use crate::task::BackgroundTaskCompletion;
 use crate::task::BackgroundTaskKind;
 use crate::task::NetworkJob;
 use crate::task::ReplaySource;
-use crate::task::load_wows_data_for_build;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::error::ToolkitError;
+
+pub use crate::data::build_data::BuildAssets;
+pub use crate::data::build_data::BuildData;
+pub use crate::data::build_data::GameAsset;
+pub use crate::data::build_data::SharedBuildData;
 
 /// The app's per-build cache exposed through the library seam, so shared
 /// entry points (e.g. wows-battle-world's `battle_report_for`) can be driven
 /// by the same LRU, load gates, and cross-region resolution the rest of the
 /// app uses. Never wrap this in `CachedContext`; it already caches.
-impl wows_replays::context::GameDataContext for WoWsDataMap {
+impl wows_replays::context::GameDataContext for BuildDataCache {
     fn entity_specs(
         &self,
         version: &Version,
@@ -73,40 +76,27 @@ impl wows_replays::context::GameDataContext for WoWsDataMap {
     }
 }
 
-pub struct GameAsset {
-    pub path: String,
-    pub data: Vec<u8>,
-}
-
-impl std::fmt::Debug for GameAsset {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("GameAsset").field("path", &self.path).field("data", &"...").finish()
-    }
-}
-
-pub type SharedWoWsData = Arc<RwLock<Box<WorldOfWarshipsData>>>;
-
 /// How many builds other than the live install's stay loaded. A replay
 /// directory can span dozens of game versions and each build carries its own
 /// game params and VFS index, so old builds are held only long enough to serve
 /// a run of replays from the same era.
 const NON_MAIN_BUILD_CAPACITY: usize = 2;
 
-/// The loaded builds of a [`WoWsDataMap`].
+/// The loaded builds of a [`BuildDataCache`].
 ///
 /// The build of the live WoWs install is pinned, since nearly every replay
 /// wants it. The rest are bounded: the least recently used one is dropped once
 /// there are more than `capacity` of them.
 ///
-/// Dropping is only ever the removal of this cache's `Arc`. [`SharedWoWsData`]
+/// Dropping is only ever the removal of this cache's `Arc`. [`SharedBuildData`]
 /// is reference counted, so a caller that is already holding one keeps reading
 /// through it, and the memory comes back when the last holder lets go. The
 /// build itself is not gone: resolving it again loads it again.
 struct LoadedBuilds {
     /// The live install's build, if it has been loaded.
-    main: Option<(u32, SharedWoWsData)>,
+    main: Option<(u32, SharedBuildData)>,
     /// Every other loaded build, least recently used first.
-    others: VecDeque<(u32, SharedWoWsData)>,
+    others: VecDeque<(u32, SharedBuildData)>,
     capacity: usize,
 }
 
@@ -116,7 +106,7 @@ impl LoadedBuilds {
     }
 
     /// Look up `build`, counting the lookup as a use.
-    fn get(&mut self, build: u32) -> Option<SharedWoWsData> {
+    fn get(&mut self, build: u32) -> Option<SharedBuildData> {
         if let Some((main_build, data)) = &self.main
             && *main_build == build
         {
@@ -132,7 +122,7 @@ impl LoadedBuilds {
 
     /// Data for every loaded build, most recently used last, without counting
     /// as a use of any of them.
-    fn all(&self) -> Vec<SharedWoWsData> {
+    fn all(&self) -> Vec<SharedBuildData> {
         self.main.iter().chain(self.others.iter()).map(|(_, data)| Arc::clone(data)).collect()
     }
 
@@ -143,7 +133,7 @@ impl LoadedBuilds {
             || self.others.iter().any(|(resident, _)| *resident == build)
     }
 
-    fn insert(&mut self, build: u32, data: SharedWoWsData) {
+    fn insert(&mut self, build: u32, data: SharedBuildData) {
         if let Some((main_build, main_data)) = &mut self.main
             && *main_build == build
         {
@@ -158,7 +148,7 @@ impl LoadedBuilds {
         }
     }
 
-    fn insert_main(&mut self, build: u32, data: SharedWoWsData) {
+    fn insert_main(&mut self, build: u32, data: SharedBuildData) {
         self.remove_other(build);
         self.main = Some((build, data));
     }
@@ -173,7 +163,7 @@ impl LoadedBuilds {
 /// Manages all loaded game data versions, keyed by build number.
 /// Provides version resolution for replay parsing and lazy-loading of build data.
 #[derive(Clone)]
-pub struct WoWsDataMap {
+pub struct BuildDataCache {
     builds: Arc<RwLock<LoadedBuilds>>,
     /// Builds that were looked for and are not on this machine. Kept apart from
     /// `builds` so a failure is never confusable with a loaded build.
@@ -192,7 +182,7 @@ pub struct WoWsDataMap {
     game_data_cache_dir: String,
 }
 
-impl WoWsDataMap {
+impl BuildDataCache {
     /// `game_data_cache_dir` is where dumped game data lives; empty means the
     /// default location. It is fixed for the life of the map: editing the
     /// setting takes effect on the next start.
@@ -289,24 +279,24 @@ impl WoWsDataMap {
     /// Insert data for a specific build number. The build is subject to
     /// eviction once [`NON_MAIN_BUILD_CAPACITY`] others are in front of it;
     /// use [`Self::insert_main`] for the live install's build.
-    pub fn insert(&self, build: u32, data: SharedWoWsData) {
+    pub fn insert(&self, build: u32, data: SharedBuildData) {
         self.builds.write().insert(build, data);
     }
 
     /// Insert the build of the live WoWs install, which stays loaded.
-    pub fn insert_main(&self, build: u32, data: SharedWoWsData) {
+    pub fn insert_main(&self, build: u32, data: SharedBuildData) {
         self.builds.write().insert_main(build, data);
     }
 
     /// Look up already-loaded data by build number, counting as a use of that
     /// build. Does NOT lazy-load.
-    pub fn get(&self, build: u32) -> Option<SharedWoWsData> {
+    pub fn get(&self, build: u32) -> Option<SharedBuildData> {
         self.builds.write().get(build)
     }
 
     /// Data for every currently loaded build. Taking a snapshot keeps the
     /// cache's lock held for the clone alone, and leaves eviction order alone.
-    pub fn loaded_builds(&self) -> Vec<SharedWoWsData> {
+    pub fn loaded_builds(&self) -> Vec<SharedBuildData> {
         self.builds.read().all()
     }
 
@@ -387,7 +377,7 @@ impl WoWsDataMap {
     /// Checks the map first, then tries to lazy-load from disk.
     /// Returns None if the version's build data is unavailable.
     #[instrument(skip(self))]
-    pub fn resolve(&self, version: &Version) -> Option<SharedWoWsData> {
+    pub fn resolve(&self, version: &Version) -> Option<SharedBuildData> {
         self.resolve_build_with_version(version.build_number()?, Some(*version))
     }
 
@@ -395,7 +385,7 @@ impl WoWsDataMap {
     /// Checks the map first, then tries to lazy-load from disk.
     /// Returns None if the build data is unavailable.
     #[instrument(skip(self))]
-    pub fn resolve_build(&self, build: u32) -> Option<SharedWoWsData> {
+    pub fn resolve_build(&self, build: u32) -> Option<SharedBuildData> {
         self.resolve_build_with_version(build, None)
     }
 
@@ -432,7 +422,7 @@ impl WoWsDataMap {
             .loaded_builds()
             .into_iter()
             .max_by_key(|data| data.read().build_number)
-            .map(|data| data.read().ship_icons.clone())
+            .map(|data| data.read().assets.ship_icons.clone())
             .unwrap_or_default();
         if !loaded.is_empty() {
             return loaded;
@@ -454,7 +444,7 @@ impl WoWsDataMap {
             .loaded_builds()
             .into_iter()
             .max_by_key(|data| data.read().build_number)
-            .map(|data| data.read().ribbon_icons.clone())
+            .map(|data| data.read().assets.ribbon_icons.clone())
             .unwrap_or_default();
         if !loaded.is_empty() {
             return loaded;
@@ -473,7 +463,7 @@ impl WoWsDataMap {
             .loaded_builds()
             .into_iter()
             .max_by_key(|data| data.read().build_number)
-            .map(|data| data.read().subribbon_icons.clone())
+            .map(|data| data.read().assets.subribbon_icons.clone())
             .unwrap_or_default();
         if !loaded.is_empty() {
             return loaded;
@@ -499,7 +489,7 @@ impl WoWsDataMap {
     /// so version-aware constants (consumable id layouts) resolve against the client
     /// that produced the replay rather than the latest layout.
     #[instrument(skip(self))]
-    pub fn resolve_build_with_version(&self, build: u32, version: Option<Version>) -> Option<SharedWoWsData> {
+    pub fn resolve_build_with_version(&self, build: u32, version: Option<Version>) -> Option<SharedBuildData> {
         // Check if already loaded
         if let Some(data) = self.get(build) {
             return Some(data);
@@ -551,7 +541,7 @@ impl WoWsDataMap {
         let build_dir = self.wows_dir.join("bin").join(build.to_string());
         if build_dir.exists() {
             debug!("Lazily loading game data for build {}", build);
-            match load_wows_data_for_build(&self.wows_dir, build, &self.locale, &fallback_constants, version) {
+            match BuildData::from_live_install(&self.wows_dir, build, &self.locale, &fallback_constants, version) {
                 Ok(wows_data) => {
                     if !wows_data.replay_constants_exact_match
                         && let Some(tx) = &self.network_job_tx
@@ -559,7 +549,7 @@ impl WoWsDataMap {
                         let version = version.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
                         let _ = tx.send(NetworkJob::FetchVersionedConstants { build, version });
                     }
-                    let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                    let shared: SharedBuildData = Arc::new(RwLock::new(Box::new(wows_data)));
                     self.insert(build, Arc::clone(&shared));
                     return Some(shared);
                 }
@@ -591,13 +581,7 @@ impl WoWsDataMap {
                 }
                 let dump_dir = dump_base.join(&entry.dir);
                 debug!("Loading game data for build {} from dump: {}", build, dump_dir.display());
-                match crate::task::replays::load_wows_data_from_dump(
-                    &dump_dir,
-                    build,
-                    &self.locale,
-                    &fallback_constants,
-                    version,
-                ) {
+                match BuildData::from_dump(&dump_dir, build, &self.locale, &fallback_constants, version) {
                     Ok(wows_data) => {
                         if !wows_data.replay_constants_exact_match
                             && let Some(tx) = &self.network_job_tx
@@ -605,7 +589,7 @@ impl WoWsDataMap {
                             let version = version.map(|v| format!("{}.{}.{}", v.major, v.minor, v.patch));
                             let _ = tx.send(NetworkJob::FetchVersionedConstants { build, version });
                         }
-                        let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                        let shared: SharedBuildData = Arc::new(RwLock::new(Box::new(wows_data)));
                         self.insert(build, Arc::clone(&shared));
                         return Some(shared);
                     }
@@ -619,15 +603,10 @@ impl WoWsDataMap {
                     for entry in entries.flatten() {
                         let name_str = entry.file_name().to_string_lossy().to_string();
                         if name_str.ends_with(&format!("_{build}")) && entry.path().join("metadata.toml").exists() {
-                            match crate::task::replays::load_wows_data_from_dump(
-                                &entry.path(),
-                                build,
-                                &self.locale,
-                                &fallback_constants,
-                                version,
-                            ) {
+                            match BuildData::from_dump(&entry.path(), build, &self.locale, &fallback_constants, version)
+                            {
                                 Ok(wows_data) => {
-                                    let shared: SharedWoWsData = Arc::new(RwLock::new(Box::new(wows_data)));
+                                    let shared: SharedBuildData = Arc::new(RwLock::new(Box::new(wows_data)));
                                     self.insert(build, Arc::clone(&shared));
                                     return Some(shared);
                                 }
@@ -653,9 +632,9 @@ mod build_resolution_tests {
     /// A map pointed at directories that hold no game data at all, so every
     /// lookup runs the whole loading path and comes back empty: no live
     /// install, no builds index, no legacy dump.
-    fn test_map_with_no_data() -> WoWsDataMap {
+    fn test_map_with_no_data() -> BuildDataCache {
         let root = std::env::temp_dir().join(format!("wt-no-game-data-{}", std::process::id()));
-        WoWsDataMap::new(root.join("wows"), "en".to_string(), root.join("cache").to_string_lossy().into_owned())
+        BuildDataCache::new(root.join("wows"), "en".to_string(), root.join("cache").to_string_lossy().into_owned())
     }
 
     fn request(major: u32, minor: u32, patch: u32, build: u32) -> crate::task::BuildRequest {
@@ -666,18 +645,11 @@ mod build_resolution_tests {
     /// Game data with nothing in it, standing in for a loaded build. The cache
     /// only ever moves the `Arc` around, so what it points at does not matter
     /// beyond being able to tell one build's data from another's.
-    fn empty_build_data(build: u32) -> SharedWoWsData {
-        Arc::new(RwLock::new(Box::new(WorldOfWarshipsData {
+    fn empty_build_data(build: u32) -> SharedBuildData {
+        Arc::new(RwLock::new(Box::new(BuildData {
             vfs: VfsPath::new(wowsunpack::vfs::MemoryFS::new()),
             game_metadata: None,
-            ship_icons: HashMap::new(),
-            ribbon_icons: HashMap::new(),
-            subribbon_icons: HashMap::new(),
-            achievement_icons: HashMap::new(),
-            consumable_icons: HashMap::new(),
-            crew_skill_icons: HashMap::new(),
-            modernization_icons: HashMap::new(),
-            signal_flag_icons: HashMap::new(),
+            assets: BuildAssets::default(),
             game_constants: Arc::new(GameConstants::defaults()),
             replay_constants: Arc::new(RwLock::new(serde_json::Value::Null)),
             replay_constants_exact_match: false,
@@ -877,226 +849,11 @@ mod build_resolution_tests {
     }
 }
 
-pub struct WorldOfWarshipsData {
-    pub vfs: VfsPath,
-
-    /// We may fail to load game params
-    pub game_metadata: Option<Arc<GameMetadataProvider>>,
-
-    pub ship_icons: HashMap<Species, Arc<GameAsset>>,
-
-    /// Ribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
-    pub ribbon_icons: HashMap<String, Arc<GameAsset>>,
-
-    /// Subribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
-    pub subribbon_icons: HashMap<String, Arc<GameAsset>>,
-
-    /// Achievement icons, lazy-loaded and cached. Keyed by achievement name (lowercase).
-    pub achievement_icons: HashMap<String, Arc<GameAsset>>,
-
-    /// Consumable icons, lazy-loaded and cached. Keyed by PCY name
-    /// (e.g. `"PCY009_CrashCrewPremium"`).
-    pub consumable_icons: HashMap<String, Arc<GameAsset>>,
-
-    /// Captain-skill icons, lazy-loaded and cached. Keyed by skill name.
-    pub crew_skill_icons: HashMap<CrewSkillName, Arc<GameAsset>>,
-
-    /// Modernization (upgrade) icons, lazy-loaded and cached. Keyed by PCM name.
-    pub modernization_icons: HashMap<String, Arc<GameAsset>>,
-
-    /// Signal-flag icons, lazy-loaded and cached. Keyed by PCEF name.
-    pub signal_flag_icons: HashMap<String, Arc<GameAsset>>,
-
-    /// Cached game constants loaded from game files.
-    pub game_constants: Arc<GameConstants>,
-
-    /// Version-matched replay constants (from wows-constants repo).
-    pub replay_constants: Arc<RwLock<serde_json::Value>>,
-
-    /// Whether the replay constants are an exact match for this build,
-    /// or a fallback from a previous build.
-    pub replay_constants_exact_match: bool,
-
-    pub full_version: Option<Version>,
-    pub patch_version: usize,
-
-    /// The build number this data was loaded for.
-    pub build_number: u32,
-
-    pub replays_dir: PathBuf,
-
-    #[allow(dead_code)]
-    pub build_dir: PathBuf,
-
-    /// If this data was loaded from a dump directory (not the live install),
-    /// this holds the dump path for translation reloading.
-    pub dump_dir: Option<PathBuf>,
-}
-
-impl WorldOfWarshipsData {
-    /// The full `major.minor.patch` game version for this data, if known. The
-    /// resolver branches on this (never the build number, which differs across
-    /// servers); `None` means use the newest layout with its fallbacks.
-    pub fn version(&self) -> Option<&Version> {
-        self.full_version.as_ref()
-    }
-
-    /// Load a GUI asset by what it is, letting the resolver pick the right path
-    /// for this build's version. Returns `None` when the asset isn't present.
-    fn load_gui_asset(&self, asset: wowsunpack::game_assets::GuiAsset<'_>) -> Option<Arc<GameAsset>> {
-        let resolved = asset.resolve(&self.vfs, self.version())?;
-        let path = resolved.as_str().trim_start_matches('/').to_owned();
-        let mut data = Vec::new();
-        resolved.open_file().ok()?.read_to_end(&mut data).ok()?;
-        Some(Arc::new(GameAsset { path, data }))
-    }
-
-    /// Look up a cached achievement icon (read-only, no loading).
-    pub fn cached_achievement_icon(&self, icon_key: &str) -> Option<Arc<GameAsset>> {
-        self.achievement_icons.get(icon_key).cloned()
-    }
-
-    /// Load and cache an achievement icon from the game files.
-    /// Only call this on a cache miss (when `cached_achievement_icon` returns None).
-    pub fn load_achievement_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
-        // Double-check in case another call populated it
-        if let Some(icon) = self.achievement_icons.get(icon_key) {
-            return Some(icon.clone());
-        }
-
-        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::Achievement(icon_key))?;
-        self.achievement_icons.insert(icon_key.to_string(), asset.clone());
-        Some(asset)
-    }
-
-    /// Look up a cached consumable icon (read-only, no loading).
-    pub fn cached_consumable_icon(&self, icon_key: &str) -> Option<Arc<GameAsset>> {
-        self.consumable_icons.get(icon_key).cloned()
-    }
-
-    /// Load and cache a consumable icon by PCY identifier.
-    /// Only call this on a cache miss (when `cached_consumable_icon` returns None).
-    pub fn load_consumable_icon(&mut self, icon_key: &str) -> Option<Arc<GameAsset>> {
-        if let Some(icon) = self.consumable_icons.get(icon_key) {
-            return Some(icon.clone());
-        }
-
-        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::Consumable(icon_key))?;
-        self.consumable_icons.insert(icon_key.to_string(), asset.clone());
-        Some(asset)
-    }
-
-    /// Look up a cached crew-skill icon (read-only, no loading).
-    pub fn cached_crew_skill_icon(&self, name: &CrewSkillName) -> Option<Arc<GameAsset>> {
-        self.crew_skill_icons.get(name).cloned()
-    }
-
-    /// Load and cache a crew-skill icon by skill name.
-    /// Only call this on a cache miss (when `cached_crew_skill_icon` returns None).
-    pub fn load_crew_skill_icon(&mut self, name: &CrewSkillName) -> Option<Arc<GameAsset>> {
-        if let Some(icon) = self.crew_skill_icons.get(name) {
-            return Some(icon.clone());
-        }
-
-        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::CrewSkill { name })?;
-        self.crew_skill_icons.insert(name.clone(), asset.clone());
-        Some(asset)
-    }
-
-    /// Look up a cached modernization icon (read-only, no loading).
-    pub fn cached_modernization_icon(&self, name: &str) -> Option<Arc<GameAsset>> {
-        self.modernization_icons.get(name).cloned()
-    }
-
-    /// Load and cache a modernization icon by PCM name.
-    /// Only call this on a cache miss (when `cached_modernization_icon` returns None).
-    pub fn load_modernization_icon(&mut self, name: &str) -> Option<Arc<GameAsset>> {
-        if let Some(icon) = self.modernization_icons.get(name) {
-            return Some(icon.clone());
-        }
-
-        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::Modernization(name))?;
-        self.modernization_icons.insert(name.to_string(), asset.clone());
-        Some(asset)
-    }
-
-    /// Look up a cached signal-flag icon (read-only, no loading).
-    pub fn cached_signal_flag_icon(&self, name: &str) -> Option<Arc<GameAsset>> {
-        self.signal_flag_icons.get(name).cloned()
-    }
-
-    /// Load and cache a signal-flag icon by PCEF name.
-    /// Only call this on a cache miss (when `cached_signal_flag_icon` returns None).
-    pub fn load_signal_flag_icon(&mut self, name: &str) -> Option<Arc<GameAsset>> {
-        if let Some(icon) = self.signal_flag_icons.get(name) {
-            return Some(icon.clone());
-        }
-
-        let asset = self.load_gui_asset(wowsunpack::game_assets::GuiAsset::SignalFlag(name))?;
-        self.signal_flag_icons.insert(name.to_string(), asset.clone());
-        Some(asset)
-    }
-
-    /// Rebuild this data from scratch after constants have changed.
-    /// Retains: build_dir, replays_dir, game_metadata, pkg_loader, file_tree,
-    /// full_version, patch_version, build_number.
-    /// Regenerates everything else (icons, game_constants, replay_constants, etc.).
-    /// Returns `false` if versioned constants could not be found on disk.
-    #[instrument(skip(self), fields(build = self.build_number))]
-    pub fn rebuild_with_new_constants(&mut self) -> bool {
-        use crate::task::load_versioned_constants_from_disk_with_fallback;
-
-        debug!("Rebuilding WorldOfWarshipsData for build {}", self.build_number);
-
-        // Reload version-matched replay constants from disk only (no network I/O).
-        // If not on disk, use our current constants as fallback (better than failing).
-        let (new_replay_constants, exact_match) =
-            match load_versioned_constants_from_disk_with_fallback(self.build_number) {
-                Some((data, exact)) => (data, exact),
-                None => {
-                    debug!(
-                        "No cached versioned constants for build {} during rebuild, using current constants",
-                        self.build_number
-                    );
-                    (self.replay_constants.read().clone(), false)
-                }
-            };
-
-        // Rebuild game constants from VFS + new replay constants
-        let new_game_constants =
-            GameConstants::for_build(Some(&self.vfs), Some(&new_replay_constants), self.full_version);
-
-        // Reload all icons from game files
-        let version = self.full_version.as_ref();
-        let new_ship_icons = crate::task::load_ship_icons(&self.vfs, version);
-        let new_ribbon_icons =
-            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
-        let new_subribbon_icons =
-            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
-
-        // Apply all regenerated fields
-        self.ship_icons = new_ship_icons;
-        self.ribbon_icons = new_ribbon_icons;
-        self.subribbon_icons = new_subribbon_icons;
-        self.achievement_icons = HashMap::new();
-        self.consumable_icons = HashMap::new();
-        self.crew_skill_icons = HashMap::new();
-        self.modernization_icons = HashMap::new();
-        self.signal_flag_icons = HashMap::new();
-        self.game_constants = Arc::new(new_game_constants);
-        *self.replay_constants.write() = new_replay_constants;
-        self.replay_constants_exact_match = exact_match;
-
-        debug!("Rebuild complete for build {}", self.build_number);
-        true
-    }
-}
-
 /// Shared dependencies needed for loading and parsing replays.
 /// This bundles together all the Arc-wrapped state that replay loading requires.
 #[derive(Clone)]
 pub struct ReplayDependencies {
-    pub wows_data_map: WoWsDataMap,
+    pub build_cache: BuildDataCache,
     pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     pub twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     pub replay_sort: Arc<Mutex<SortOrder>>,
@@ -1108,8 +865,8 @@ pub struct ReplayDependencies {
 impl ReplayDependencies {
     /// Resolve version-matched deps for a specific build. Returns None if
     /// the build data can't be loaded.
-    pub fn resolve_versioned_deps(&self, version: &Version) -> Option<SharedWoWsData> {
-        self.wows_data_map.resolve(version)
+    pub fn resolve_versioned_deps(&self, version: &Version) -> Option<SharedBuildData> {
+        self.build_cache.resolve(version)
     }
 
     /// Read a replay file from disk and start loading it in the background.
@@ -1167,7 +924,7 @@ impl ReplayFileSnapshot {
 
 pub(crate) struct LoadedReplaySnapshot {
     pub(crate) replay: Arc<RwLock<Replay>>,
-    pub(crate) wows_data: SharedWoWsData,
+    pub(crate) wows_data: SharedBuildData,
     pub(crate) bytes: ReplayBytes,
 }
 
@@ -1226,7 +983,7 @@ impl ReplayLoader {
                 return;
             };
 
-            let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
+            let Some(wows_data_for_build) = deps.build_cache.resolve(&replay_version) else {
                 error!("Failed to load game data for version {}", replay_version.to_path());
                 let replay_path = replay.read().source_path.clone();
                 let _ = tx.send(Err(missing_build_report(&replay_version, replay_path)));
@@ -1285,7 +1042,7 @@ impl ReplayLoader {
     pub(crate) fn build_replay_from_existing_file(
         deps: &ReplayDependencies,
         path: PathBuf,
-    ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
+    ) -> Result<(Arc<RwLock<Replay>>, SharedBuildData), rootcause::Report> {
         let replay_file =
             ReplayFile::from_file(&path).map_err(|e| e.into_dynamic().attach(format!("path: {}", path.display())))?;
         Self::build_replay_from_file(deps, replay_file, path)
@@ -1295,14 +1052,14 @@ impl ReplayLoader {
         deps: &ReplayDependencies,
         replay_file: ReplayFile,
         path: PathBuf,
-    ) -> Result<(Arc<RwLock<Replay>>, SharedWoWsData), rootcause::Report> {
+    ) -> Result<(Arc<RwLock<Replay>>, SharedBuildData), rootcause::Report> {
         let raw_version = &replay_file.meta.clientVersionFromExe;
         let Some(replay_version) = Version::try_from_client_exe(raw_version) else {
             return Err(rootcause::report!("replay reports an unreadable client version {raw_version:?}")
                 .attach(format!("path: {}", path.display())));
         };
 
-        let Some(wows_data_for_build) = deps.wows_data_map.resolve(&replay_version) else {
+        let Some(wows_data_for_build) = deps.build_cache.resolve(&replay_version) else {
             return Err(missing_build_report(&replay_version, Some(path)));
         };
 
@@ -1372,7 +1129,7 @@ mod tests {
     use super::*;
 
     /// A `clientVersionFromExe` whose build field is `0` is what the pre-0.10
-    /// era records, and [`WoWsDataMap::resolve`] returns `None` for any version
+    /// era records, and [`BuildDataCache::resolve`] returns `None` for any version
     /// carrying no build. Every one of those replays therefore reaches this
     /// failure path, which has to describe the failure rather than assume a
     /// build it can name.
@@ -1419,7 +1176,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         let build = 11_965_230;
         std::fs::create_dir_all(dir.path().join("bin").join(build.to_string())).expect("build dir");
-        let map = WoWsDataMap::new(dir.path().to_path_buf(), "en".to_string(), String::new());
+        let map = BuildDataCache::new(dir.path().to_path_buf(), "en".to_string(), String::new());
         let request = crate::task::BuildRequest::new(Version::from_client_exe("15,4,0,11965230"))
             .expect("the fixture version carries a build");
 

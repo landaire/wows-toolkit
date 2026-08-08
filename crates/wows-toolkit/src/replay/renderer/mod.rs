@@ -47,7 +47,7 @@ use egui_taffy::taffy::prelude::length;
 use crate::collab::SessionStatus;
 use crate::collab::peer::FrameBroadcast;
 use crate::data::settings::SavedRenderOptions;
-use crate::data::wows_data::SharedWoWsData;
+use crate::data::wows_data::SharedBuildData;
 use crate::icons;
 
 use crate::util::controls::CommandGroup;
@@ -1091,7 +1091,7 @@ struct VideoExportData {
     map_name: String,
     replay_name: String,
     game_duration: f32,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
 }
 /// Create and launch a replay renderer in a background thread.
@@ -1108,7 +1108,7 @@ pub fn launch_replay_renderer(
     map_name: String,
     replay_name: String,
     game_duration: f32,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     saved_options: &SavedRenderOptions,
     suppress_gpu_warning: Arc<AtomicBool>,
@@ -1246,7 +1246,7 @@ pub fn launch_client_renderer(
     game_version: String,
     saved_options: &SavedRenderOptions,
     suppress_gpu_warning: Arc<AtomicBool>,
-    wows_data: Option<&SharedWoWsData>,
+    wows_data: Option<&SharedBuildData>,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     window_settings: crate::tab_state::SharedWindowSettings,
     save_notify: Arc<tokio::sync::Notify>,

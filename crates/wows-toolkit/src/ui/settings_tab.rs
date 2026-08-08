@@ -136,7 +136,7 @@ impl ToolkitTabViewer<'_> {
                                 // Swap the gettext catalog so WoWs translations (ship names,
                                 // achievements, etc.) resolve in the new locale without a
                                 // full game data reload.
-                                if let Some(data_map) = &self.tab_state.wows_data_map {
+                                if let Some(data_map) = &self.tab_state.build_cache {
                                     data_map.reload_translations(lang.code);
                                 }
 
@@ -444,10 +444,10 @@ impl ToolkitTabViewer<'_> {
                 let reindex_deps = match (
                     self.tab_state.db_pool.as_ref(),
                     self.tab_state.tokio_runtime.as_ref(),
-                    self.tab_state.wows_data_map.as_ref(),
+                    self.tab_state.build_cache.as_ref(),
                 ) {
-                    (Some(pool), Some(rt), Some(wows_data_map)) => {
-                        Some((pool.clone(), Arc::clone(rt), wows_data_map.clone()))
+                    (Some(pool), Some(rt), Some(build_cache)) => {
+                        Some((pool.clone(), Arc::clone(rt), build_cache.clone()))
                     }
                     _ => None,
                 };
@@ -458,12 +458,12 @@ impl ToolkitTabViewer<'_> {
                             egui::Button::new(t!("ui.settings.replay.index_all_replays")),
                         )
                         .clicked()
-                        && let Some((pool, rt, wows_data_map)) = reindex_deps.clone()
+                        && let Some((pool, rt, build_cache)) = reindex_deps.clone()
                     {
                         crate::update_background_task!(
                             self.tab_state.background_tasks,
                             Some(crate::task::start_reconcile_index(
-                                wows_data_map,
+                                build_cache,
                                 self.tab_state.shipbuilds_client.clone(),
                                 Arc::clone(&self.tab_state.twitch_state),
                                 pool,
@@ -481,12 +481,12 @@ impl ToolkitTabViewer<'_> {
                         )
                         .on_hover_text(t!("ui.settings.replay.reindex_all_replays_hover"))
                         .clicked()
-                        && let Some((pool, rt, wows_data_map)) = reindex_deps
+                        && let Some((pool, rt, build_cache)) = reindex_deps
                     {
                         crate::update_background_task!(
                             self.tab_state.background_tasks,
                             Some(crate::task::start_reconcile_index(
-                                wows_data_map,
+                                build_cache,
                                 self.tab_state.shipbuilds_client.clone(),
                                 Arc::clone(&self.tab_state.twitch_state),
                                 pool,

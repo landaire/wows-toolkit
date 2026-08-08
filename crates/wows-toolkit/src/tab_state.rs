@@ -29,10 +29,10 @@ use wowsunpack::vfs::VfsPath;
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::SessionStats;
 use crate::data::settings::AppSettings;
+use crate::data::wows_data::BuildDataCache;
 use crate::data::wows_data::ReplayDependencies;
 use crate::data::wows_data::ReplayLoader;
-use crate::data::wows_data::SharedWoWsData;
-use crate::data::wows_data::WoWsDataMap;
+use crate::data::wows_data::SharedBuildData;
 use crate::db::index::rows::WorkspaceId;
 use crate::task::BackgroundParserThread;
 use crate::task::BackgroundTask;
@@ -464,7 +464,7 @@ pub struct TabState {
     pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
 
     // ─── Transient / runtime-only state ──────────────────────────────────
-    pub world_of_warships_data: Option<SharedWoWsData>,
+    pub world_of_warships_data: Option<SharedBuildData>,
     pub items_to_extract: Mutex<Vec<VfsPath>>,
     #[allow(dead_code)]
     pub translations: Option<gettext::Catalog>,
@@ -546,7 +546,7 @@ pub struct TabState {
     /// Pending action awaiting user confirmation.
     pub pending_confirmation: Option<ConfirmableAction>,
     /// All loaded version data, keyed by build number.
-    pub wows_data_map: Option<WoWsDataMap>,
+    pub build_cache: Option<BuildDataCache>,
     /// All build numbers available in the game's bin/ directory.
     pub available_builds: Vec<u32>,
     /// Currently selected build in the Resource Browser.
@@ -683,7 +683,7 @@ impl Default for TabState {
             replays_for_session_reset: None,
             clear_before_session_reset: true,
             pending_confirmation: None,
-            wows_data_map: None,
+            build_cache: None,
             available_builds: Vec::new(),
             selected_browser_build: 0,
             browser_state: Default::default(),
@@ -997,9 +997,9 @@ impl TabState {
 
     /// Returns the shared dependencies needed for loading replays, if wows_data is available.
     pub fn replay_dependencies(&self) -> Option<ReplayDependencies> {
-        let wows_data_map = self.wows_data_map.as_ref()?;
+        let build_cache = self.build_cache.as_ref()?;
         Some(ReplayDependencies {
-            wows_data_map: wows_data_map.clone(),
+            build_cache: build_cache.clone(),
             shipbuilds_client: self.shipbuilds_client.clone(),
             twitch_state: Arc::clone(&self.twitch_state),
             replay_sort: Arc::clone(&self.replay_sort),
@@ -1325,7 +1325,7 @@ impl TabState {
         self.selected_browser_build = 0;
         // Dropping the map drops which builds it could not resolve; the
         // fire-section record lives outside it and is cleared on its own.
-        self.wows_data_map = None;
+        self.build_cache = None;
         crate::ui::replay_parser::clear_fire_section_failures();
     }
 
@@ -1409,12 +1409,12 @@ impl TabState {
 
         self.background_parser_tx = Some(background_tx.clone());
 
-        if let Some(wows_data_map) = self.wows_data_map.clone() {
+        if let Some(build_cache) = self.build_cache.clone() {
             let p = self.persisted.read();
             let background_thread_data = BackgroundParserThread {
                 rx: background_rx,
                 sent_replays: Arc::clone(&self.sent_replays),
-                wows_data_map,
+                build_cache,
                 shipbuilds_client: self.shipbuilds_client.clone(),
                 twitch_state: Arc::clone(&self.twitch_state),
                 persisted: Arc::clone(&self.persisted),

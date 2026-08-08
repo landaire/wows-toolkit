@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fs::File;
-use std::fs::read_dir;
 use std::io::Read;
 use std::path::Path;
 use std::path::PathBuf;
@@ -12,8 +11,6 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use gettext::Catalog;
-use language_tags::LanguageTag;
 use parking_lot::Mutex;
 use parking_lot::RwLock;
 use rootcause::Report;
@@ -23,21 +20,17 @@ use tracing::error;
 use tracing::instrument;
 use tracing::warn;
 use wows_replays::ReplayFile;
-use wows_replays::game_constants::GameConstants;
 use wowsunpack::data::Version;
-use wowsunpack::data::idx;
-use wowsunpack::data::idx_vfs::IdxVfs;
-use wowsunpack::data::wrappers::mmap::MmapPkgSource;
 use wowsunpack::game_data;
 use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
 use crate::data::replay_reconcile::ParseOutcome;
 use crate::data::settings::DataSharingMode;
+use crate::data::wows_data::BuildData;
 use crate::data::wows_data::GameAsset;
 use crate::data::wows_data::ReplayDependencies;
 use crate::data::wows_data::ReplayLoader;
-use crate::data::wows_data::WorldOfWarshipsData;
 use crate::tab_state::SharedPersistedState;
 use crate::task::replay_upload::ReplayCount;
 use crate::task::replay_upload::SendAllReplaysProgress;
@@ -50,7 +43,6 @@ use crate::ui::replay_parser::ListedReplay;
 use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::error::ToolkitError;
-use crate::util::game_params::load_game_params;
 use crate::util::replay_export::FlattenedVehicle;
 use crate::util::replay_export::Match;
 
@@ -60,7 +52,6 @@ use super::BackgroundTaskKind;
 use super::IndexProgress;
 
 use crate::task::networking::load_versioned_constants_from_disk;
-use crate::task::networking::load_versioned_constants_from_disk_with_fallback;
 
 pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
@@ -184,7 +175,7 @@ pub fn load_ship_icons(vfs: &VfsPath, version: Option<&Version>) -> HashMap<Spec
 
 /// Parse a dotted version string like `"0.6.13"` or `"15.1.0"` into a
 /// [`Version`], attaching the build number. Missing components default to 0.
-fn parse_dotted_version(version: &str, build: u32) -> Option<Version> {
+pub(crate) fn parse_dotted_version(version: &str, build: u32) -> Option<Version> {
     let mut parts = version.split('.').map(|p| p.trim().parse::<u32>().ok());
     let major = parts.next()??;
     let minor = parts.next().flatten().unwrap_or(0);
@@ -199,123 +190,6 @@ fn current_build_from_preferences(path: &Path) -> Option<String> {
     let version_str = &data[start_of_node + "<last_server_version>".len()..(start_of_node + end_of_node)].trim();
 
     Some(version_str.to_string())
-}
-
-/// Load game resources for a specific build number. This can be called for any build
-/// that has a directory in `bin/`. Used both at startup (for the latest build) and
-/// lazily when a replay from a different version is loaded.
-#[instrument(skip(fallback_constants))]
-pub fn load_wows_data_for_build(
-    wows_directory: &Path,
-    build: u32,
-    locale: &str,
-    fallback_constants: &serde_json::Value,
-    version: Option<Version>,
-) -> Result<WorldOfWarshipsData, Report> {
-    let game_patch = build as usize;
-    let build_dir = wows_directory.join("bin").join(format!("{build}"));
-
-    debug!("Loading game data for build {}", build);
-
-    // Parse IDX files and build VFS
-    let mut idx_files = Vec::new();
-    for file in read_dir(build_dir.join("idx")).context("failed to read idx directory")? {
-        let file = file.context("failed to read idx directory entry")?;
-        if file.file_type().context("failed to get file type for idx entry")?.is_file() {
-            let path = file.path();
-            let file_data =
-                std::fs::read(&path).context_with(|| format!("failed to read idx file {}", path.display()))?;
-            idx_files
-                .push(idx::parse(&file_data).context_with(|| format!("failed to parse idx file {}", path.display()))?);
-        }
-    }
-
-    let pkgs_path = wows_directory.join("res_packages");
-    if !pkgs_path.exists() {
-        Err(crate::util::error::ToolkitError::InvalidWowsDirectory(wows_directory.to_path_buf()))
-            .context("res_packages directory not found")?;
-    }
-
-    let pkg_source = MmapPkgSource::new(&pkgs_path);
-    let idx_vfs = IdxVfs::new(pkg_source, &idx_files);
-    let vfs = VfsPath::new(idx_vfs);
-
-    // Load translations
-    // WoWs locale codes use underscores (e.g. "zh_tw", "pt_br") but BCP 47
-    // language tags use hyphens. Normalize before parsing.
-    let bcp47 = locale.replace('_', "-");
-    let primary_lang = bcp47
-        .parse::<LanguageTag>()
-        .map(|tag| tag.primary_language().to_string())
-        .unwrap_or_else(|_| locale.to_string());
-    let attempted_dirs = [locale, &primary_lang, "en"];
-    let mut found_catalog = None;
-    for dir in attempted_dirs {
-        let localization_path = wows_directory.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
-        if !localization_path.exists() {
-            continue;
-        }
-        let global = File::open(&localization_path)
-            .context_with(|| format!("failed to open localization file {}", localization_path.display()))?;
-        let catalog = Catalog::parse(global)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("{e}")))
-            .context_with(|| format!("failed to parse localization catalog {}", localization_path.display()))?;
-        found_catalog = Some(catalog);
-        break;
-    }
-
-    debug!("Loading GameParams for build {}", build);
-    let metadata_provider = load_game_params(&vfs, game_patch).ok().map(|metadata_provider| {
-        if let Some(catalog) = found_catalog {
-            metadata_provider.set_translations(catalog)
-        }
-        Arc::new(metadata_provider)
-    });
-
-    debug!("Loading icons for build {}", build);
-    // The semantic version isn't resolved at this point for a live install, so
-    // the resolver gets `None` and picks the newest layout with its fallbacks.
-    let icons = load_ship_icons(&vfs, None);
-    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, None);
-    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, None);
-
-    // Load version-matched constants from disk cache only (no network I/O).
-    // If not cached, use fallback constants. The networking thread will fetch
-    // updated constants from GitHub in the background.
-    debug!("Loading versioned constants for build {}", build);
-    let (replay_constants, replay_constants_exact_match) = match load_versioned_constants_from_disk_with_fallback(build)
-    {
-        Some((data, exact)) => (data, exact),
-        None => (fallback_constants.clone(), false),
-    };
-
-    let game_constants = GameConstants::for_build(Some(&vfs), Some(&replay_constants), version);
-    let game_constants = Arc::new(game_constants);
-
-    // Try to determine full version from preferences or leave as None for non-latest builds
-    let full_version = version; // Set by caller (replay version) when known
-
-    Ok(WorldOfWarshipsData {
-        game_metadata: metadata_provider,
-        vfs,
-        patch_version: game_patch,
-        full_version,
-        build_number: build,
-        ship_icons: icons,
-        ribbon_icons,
-        subribbon_icons,
-        achievement_icons: HashMap::new(),
-        consumable_icons: HashMap::new(),
-        crew_skill_icons: HashMap::new(),
-        modernization_icons: HashMap::new(),
-        signal_flag_icons: HashMap::new(),
-        game_constants,
-        replay_constants: Arc::new(RwLock::new(replay_constants)),
-        replay_constants_exact_match,
-        replays_dir: PathBuf::new(), // Set by caller
-        build_dir,
-        dump_dir: None,
-    })
 }
 
 #[instrument(skip(fallback_constants))]
@@ -394,8 +268,9 @@ pub fn load_wows_files(
     }
 
     // Load data for the latest build
-    let mut data = load_wows_data_for_build(&wows_directory, latest_build, locale, fallback_constants, full_version)
-        .context_with(|| format!("failed to load game data for build {latest_build}"))?;
+    let mut data =
+        BuildData::from_live_install(&wows_directory, latest_build, locale, fallback_constants, full_version)
+            .context_with(|| format!("failed to load game data for build {latest_build}"))?;
     data.full_version = full_version;
     data.replays_dir = replays_dir.clone();
 
@@ -489,7 +364,7 @@ pub fn game_data_dump_base_with_override(custom_dir: &str) -> Option<PathBuf> {
 /// Parsing GameParams from a dump's VFS costs seconds; decoding the cache costs
 /// tens of milliseconds. Best-effort: a failure to write only means the next
 /// load pays the parse again.
-fn write_params_override(
+pub(crate) fn write_params_override(
     cas: &wows_data_mgr::cas_vfs::BuildCas,
     provider: &wowsunpack::game_params::provider::GameMetadataProvider,
 ) {
@@ -503,150 +378,6 @@ fn write_params_override(
         Ok(()) => debug!("wrote GameParams override to {}", path.display()),
         Err(e) => warn!("failed to write GameParams override to {}: {e}", path.display()),
     }
-}
-
-pub fn load_wows_data_from_dump(
-    dump_dir: &Path,
-    build: u32,
-    locale: &str,
-    fallback_constants: &serde_json::Value,
-    replay_version: Option<Version>,
-) -> Result<WorldOfWarshipsData, Report> {
-    use wowsunpack::game_params::provider::GameMetadataProvider;
-
-    debug!("Loading game data from dump: {}", dump_dir.display());
-
-    let mut cas = wows_data_mgr::cas_vfs::BuildCas::open(dump_dir)
-        .ok_or_else(|| report!("metadata.toml not found in dump: {}", dump_dir.display()))?;
-
-    // Build numbers are per-server: the China client ships a different one for
-    // the same major.minor.patch, so resolution keys on the friendly version and
-    // a near-neighbour dump is expected to serve. Record which dump actually
-    // answered, since it is otherwise invisible when reading logs.
-    let dump_build = cas.metadata().build;
-    if dump_build != build {
-        tracing::info!(
-            requested_build = build,
-            dump_build,
-            version = %cas.metadata().version,
-            "serving build from a different dump of the same version"
-        );
-    }
-
-    // Key the override directory on the dump's own build rather than its
-    // version: a version does not identify a dump (18 of the 109 versions in
-    // the reference archive have more than one build), so a version-keyed cache
-    // would let one server's params answer for another's.
-    if let Some(root) = crate::util::game_params::build_override_root(dump_build) {
-        cas.set_override_root(root);
-    }
-    let vfs = cas.vfs();
-
-    // Recover the semantic version from the dump's metadata so version-aware
-    // asset resolution works. Build numbers differ across servers (e.g. the
-    // China client) for the same major.minor.patch, so the version is the
-    // server-independent key.
-    let full_version = parse_dotted_version(&cas.metadata().version, build);
-
-    // Load translations from dump
-    let bcp47 = locale.replace('_', "-");
-    let primary_lang = bcp47
-        .parse::<LanguageTag>()
-        .map(|tag| tag.primary_language().to_string())
-        .unwrap_or_else(|_| locale.to_string());
-    let attempted_dirs = [locale, &primary_lang, "en"];
-    let mut found_catalog = None;
-    for dir in attempted_dirs {
-        let Some(mo_path) = cas.derived_path(&format!("translations/{dir}/LC_MESSAGES/global.mo")) else {
-            continue;
-        };
-        if let Ok(file) = File::open(&mo_path)
-            && let Ok(catalog) = Catalog::parse(file)
-        {
-            found_catalog = Some(catalog);
-            break;
-        }
-    }
-
-    // Load GameParams: prefer the dump's rkyv cache when it carries a current
-    // header, otherwise fall back to re-parsing from the dump's VFS (this
-    // happens for caches generated before the current cache format version,
-    // including any pre-WUGP-magic dumps in wows-replay-data).
-    let rkyv_path = cas.derived_path("game_params.rkyv");
-    let cached_params = rkyv_path.as_deref().and_then(wowsunpack::game_params::cache::load);
-    let metadata_provider = match cached_params {
-        Some(params) => {
-            debug!("Loaded GameParams from rkyv cache");
-            // Pair the fast rkyv params with entity specs parsed from the dump's
-            // VFS (`scripts/entity_defs`). The specs are required to parse replay
-            // packets (BasePlayerCreate indexes them by entity type); without them
-            // any dump-loaded replay -- i.e. any build not in the live install --
-            // panics in the packet parser.
-            GameMetadataProvider::from_params_with_vfs(params, &vfs)
-                .map_err(|e| report!("Failed to build GameMetadataProvider from dump: {e:?}"))?
-        }
-        None => {
-            debug!("Falling back to GameParams.data in dump VFS (rkyv missing or stale)");
-            let provider = GameMetadataProvider::from_vfs(&vfs)
-                .map_err(|e| report!("Failed to load GameParams from dump VFS: {e:?}"))?;
-            write_params_override(&cas, &provider);
-            provider
-        }
-    };
-    if let Some(catalog) = found_catalog {
-        metadata_provider.set_translations(catalog);
-    }
-    let metadata_provider = Some(Arc::new(metadata_provider));
-
-    // Load icons, using the semantic version recovered from the dump if present.
-    let version = full_version.as_ref();
-    let icons = load_ship_icons(&vfs, version);
-    let ribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
-    let subribbon_icons = load_ribbon_icons(&vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
-
-    // Load constants: try dump dir first, then disk cache, then fallback
-    let (replay_constants, replay_constants_exact_match) = {
-        let dump_constants_path = dump_dir.join("constants.json");
-        if dump_constants_path.exists() {
-            if let Ok(data) = std::fs::read(&dump_constants_path)
-                && let Ok(json) = serde_json::from_slice::<serde_json::Value>(&data)
-            {
-                (json, true)
-            } else {
-                (fallback_constants.clone(), false)
-            }
-        } else {
-            match load_versioned_constants_from_disk_with_fallback(build) {
-                Some((data, exact)) => (data, exact),
-                None => (fallback_constants.clone(), false),
-            }
-        }
-    };
-    // Prefer the replay's own version; fall back to the version recovered from the dump.
-    let constants_version = replay_version.or(full_version);
-    let game_constants = GameConstants::for_build(Some(&vfs), Some(&replay_constants), constants_version);
-
-    Ok(WorldOfWarshipsData {
-        game_metadata: metadata_provider,
-        vfs,
-        patch_version: build as usize,
-        full_version,
-        build_number: build,
-        ship_icons: icons,
-        ribbon_icons,
-        subribbon_icons,
-        achievement_icons: HashMap::new(),
-        consumable_icons: HashMap::new(),
-        crew_skill_icons: HashMap::new(),
-        modernization_icons: HashMap::new(),
-        signal_flag_icons: HashMap::new(),
-        game_constants: Arc::new(game_constants),
-        replay_constants: Arc::new(RwLock::new(replay_constants)),
-        replay_constants_exact_match,
-        replays_dir: PathBuf::new(),
-        build_dir: dump_dir.to_path_buf(),
-        dump_dir: Some(dump_dir.to_path_buf()),
-    })
 }
 
 fn parse_replay_data_in_background(
@@ -674,7 +405,7 @@ fn parse_replay_data_in_background(
                 debug!("replay parsed successfully");
                 // Resolve version-matched data for this replay's build
                 let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-                let Some(wows_data_for_build) = data.wows_data_map.resolve(&replay_version) else {
+                let Some(wows_data_for_build) = data.build_cache.resolve(&replay_version) else {
                     warn!(
                         "Skipping replay {:?}: no data for build {}",
                         path,
@@ -778,7 +509,7 @@ fn parse_replay_data_in_background(
                         // Create a dummy sender since we don't need to send background tasks from here
                         let (dummy_sender, _) = mpsc::channel();
                         let deps = crate::data::wows_data::ReplayDependencies {
-                            wows_data_map: data.wows_data_map.clone(),
+                            build_cache: data.build_cache.clone(),
                             shipbuilds_client: data.shipbuilds_client.clone(),
                             twitch_state: Arc::clone(&data.twitch_state),
                             replay_sort: Arc::new(Mutex::new(SortOrder::default())),
@@ -912,7 +643,7 @@ pub enum ReplayBackgroundParserThreadMessage {
 pub struct BackgroundParserThread {
     pub rx: mpsc::Receiver<ReplayBackgroundParserThreadMessage>,
     pub sent_replays: Arc<RwLock<HashSet<String>>>,
-    pub wows_data_map: crate::data::wows_data::WoWsDataMap,
+    pub build_cache: crate::data::wows_data::BuildDataCache,
     pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     pub twitch_state: Arc<RwLock<TwitchState>>,
     pub persisted: SharedPersistedState,
@@ -941,7 +672,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
 
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
-            let Some(replays_dir) = data.wows_data_map.loaded_builds().first().map(|d| d.read().replays_dir.clone())
+            let Some(replays_dir) = data.build_cache.loaded_builds().first().map(|d| d.read().replays_dir.clone())
             else {
                 error!("No game data loaded, cannot enumerate replays directory");
                 return;
@@ -1161,7 +892,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                             build,
                             flush,
                             started_at,
-                            &data.wows_data_map,
+                            &data.build_cache,
                             &data.player_tracker,
                             &mut match_stats_client,
                         );
@@ -1185,7 +916,7 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
 #[instrument(skip_all, fields(replay_count = replays.len()))]
 pub fn start_populating_player_inspector(
     replays: Vec<PathBuf>,
-    wows_data_map: crate::data::wows_data::WoWsDataMap,
+    build_cache: crate::data::wows_data::BuildDataCache,
     player_tracker: Arc<RwLock<PlayerTracker>>,
 ) -> BackgroundTask {
     let (tx, rx) = mpsc::channel();
@@ -1194,7 +925,7 @@ pub fn start_populating_player_inspector(
             match ReplayFile::from_file(&path) {
                 Ok(replay_file) => {
                     let replay_version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-                    let Some(wows_data_for_build) = wows_data_map.resolve(&replay_version) else {
+                    let Some(wows_data_for_build) = build_cache.resolve(&replay_version) else {
                         warn!(
                             "Skipping replay {:?}: no data for build {}",
                             path,
@@ -1400,7 +1131,7 @@ fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
 /// re-indexes them once results have landed.
 fn index_one_replay(
     path: &Path,
-    wows_data_map: &crate::data::wows_data::WoWsDataMap,
+    build_cache: &crate::data::wows_data::BuildDataCache,
     shipbuilds_client: &crate::data::shipbuilds::ShipBuildsClient,
     twitch_state: &Arc<RwLock<TwitchState>>,
     db_pool: &sqlx::SqlitePool,
@@ -1417,7 +1148,7 @@ fn index_one_replay(
     };
 
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let Some(wows_data_for_build) = wows_data_map.resolve(&replay_version) else {
+    let Some(wows_data_for_build) = build_cache.resolve(&replay_version) else {
         warn!(
             "Skipping replay {:?}: no data for build {}",
             path,
@@ -1461,7 +1192,7 @@ fn index_one_replay(
 
     let (dummy_sender, _) = mpsc::channel();
     let deps = crate::data::wows_data::ReplayDependencies {
-        wows_data_map: wows_data_map.clone(),
+        build_cache: build_cache.clone(),
         shipbuilds_client: shipbuilds_client.clone(),
         twitch_state: Arc::clone(twitch_state),
         replay_sort: Arc::new(Mutex::new(SortOrder::default())),
@@ -1499,7 +1230,7 @@ fn index_one_replay(
 /// Either way, files in the persistent `Unindexable` blacklist are never
 /// re-parsed.
 pub fn start_reconcile_index(
-    wows_data_map: crate::data::wows_data::WoWsDataMap,
+    build_cache: crate::data::wows_data::BuildDataCache,
     shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
@@ -1512,7 +1243,7 @@ pub fn start_reconcile_index(
 
     crate::util::thread::spawn_logged("reconcile-index", move || {
         let _ = tx.send(run_reconcile_index(
-            wows_data_map,
+            build_cache,
             shipbuilds_client,
             twitch_state,
             db_pool,
@@ -1530,7 +1261,7 @@ pub fn start_reconcile_index(
 }
 
 fn run_reconcile_index(
-    wows_data_map: crate::data::wows_data::WoWsDataMap,
+    build_cache: crate::data::wows_data::BuildDataCache,
     shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     twitch_state: Arc<RwLock<TwitchState>>,
     db_pool: sqlx::SqlitePool,
@@ -1539,7 +1270,7 @@ fn run_reconcile_index(
     force_reindex: bool,
     progress_tx: &mpsc::Sender<IndexProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
-    let Some(replays_dir) = wows_data_map.loaded_builds().first().map(|d| d.read().replays_dir.clone()) else {
+    let Some(replays_dir) = build_cache.loaded_builds().first().map(|d| d.read().replays_dir.clone()) else {
         return Err(report!("no game data loaded, cannot enumerate replays directory"));
     };
 
@@ -1578,7 +1309,7 @@ fn run_reconcile_index(
             std::panic::AssertUnwindSafe(|| {
                 index_one_replay(
                     &path,
-                    &wows_data_map,
+                    &build_cache,
                     &shipbuilds_client,
                     &twitch_state,
                     &db_pool,
@@ -2155,8 +1886,8 @@ fn run_read_directory(
     let needs_index =
         |path: &Path| !indexed_paths.contains(path.to_string_lossy().as_ref()) && !unindexable.contains(path);
 
-    let has_data = |request: &crate::task::BuildRequest| deps.wows_data_map.has_data_for(request);
-    let load = |request: &crate::task::BuildRequest| deps.wows_data_map.resolve(&request.version()).is_some();
+    let has_data = |request: &crate::task::BuildRequest| deps.build_cache.has_data_for(request);
+    let load = |request: &crate::task::BuildRequest| deps.build_cache.resolve(&request.version()).is_some();
     let walk = |paths, slice| ingest_walk(paths, slice, &needs_index, &read, &index, update_tx);
 
     let steps = BuildSteps { has_data: &has_data, load: &load, walk: &walk };
@@ -2601,7 +2332,11 @@ mod tests {
                 .unwrap();
             let (background_task_sender, _) = mpsc::channel();
             let deps = ReplayDependencies {
-                wows_data_map: crate::data::wows_data::WoWsDataMap::new(PathBuf::new(), "en".to_owned(), String::new()),
+                build_cache: crate::data::wows_data::BuildDataCache::new(
+                    PathBuf::new(),
+                    "en".to_owned(),
+                    String::new(),
+                ),
                 shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient::new().unwrap(),
                 twitch_state: Arc::new(RwLock::new(crate::twitch::TwitchState::default())),
                 replay_sort: Arc::new(Mutex::new(SortOrder::default())),
@@ -2700,7 +2435,7 @@ mod tests {
         let data = BackgroundParserThread {
             rx,
             sent_replays: Arc::clone(&sent_replays),
-            wows_data_map: crate::data::wows_data::WoWsDataMap::new(PathBuf::new(), "en".to_owned(), String::new()),
+            build_cache: crate::data::wows_data::BuildDataCache::new(PathBuf::new(), "en".to_owned(), String::new()),
             shipbuilds_client: first_launch.shipbuilds_client.clone(),
             twitch_state: Arc::clone(&first_launch.twitch_state),
             persisted: Arc::clone(&first_launch.persisted),

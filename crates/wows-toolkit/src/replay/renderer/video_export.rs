@@ -18,8 +18,8 @@ use wowsunpack::data::Version;
 use super::PendingVideoExport;
 use super::RendererAssetCache;
 use super::VideoExportData;
-use crate::data::wows_data::SharedWoWsData;
-use crate::data::wows_data::WoWsDataMap;
+use crate::data::wows_data::BuildDataCache;
+use crate::data::wows_data::SharedBuildData;
 
 /// Execute a pending video export action.
 pub(super) fn execute_video_export(
@@ -99,7 +99,7 @@ pub(super) fn save_as_video(
     map_name: String,
     game_duration: f32,
     options: RenderOptions,
-    wows_data: SharedWoWsData,
+    wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     video_exporting: Arc<AtomicBool>,
@@ -222,7 +222,7 @@ pub struct ReplayRenderInput {
     pub map_name: String,
     pub replay_name: String,
     pub game_duration: f32,
-    pub wows_data: SharedWoWsData,
+    pub wows_data: SharedBuildData,
 }
 
 /// Read one replay off disk and pair it with the game data for the build it was
@@ -232,7 +232,7 @@ pub struct ReplayRenderInput {
 /// Reading is decrypt plus inflate of the whole packet stream. A batch runs this
 /// on its render thread, one replay at a time, rather than where the batch is
 /// requested.
-pub fn replay_render_input(path: &std::path::Path, wows_data_map: &WoWsDataMap) -> Option<ReplayRenderInput> {
+pub fn replay_render_input(path: &std::path::Path, build_cache: &BuildDataCache) -> Option<ReplayRenderInput> {
     let replay_file = match ReplayFile::from_file(path) {
         Ok(replay_file) => replay_file,
         Err(error) => {
@@ -248,7 +248,7 @@ pub fn replay_render_input(path: &std::path::Path, wows_data_map: &WoWsDataMap) 
         );
         return None;
     };
-    let Some(wows_data) = wows_data_map.resolve(&replay_version) else {
+    let Some(wows_data) = build_cache.resolve(&replay_version) else {
         tracing::warn!("No data for version {} - skipping replay '{}'", replay_version.to_path(), path.display());
         return None;
     };
@@ -299,7 +299,7 @@ pub struct BatchEncodeOptions {
 /// Returns (succeeded_count, failed_count, output_paths).
 fn render_batch(
     paths: &[std::path::PathBuf],
-    wows_data_map: &WoWsDataMap,
+    build_cache: &BuildDataCache,
     output_dir: &std::path::Path,
     options: &RenderOptions,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -318,7 +318,7 @@ fn render_batch(
             p.current_name = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
         }
 
-        let Some(replay) = replay_render_input(path, wows_data_map) else {
+        let Some(replay) = replay_render_input(path, build_cache) else {
             failed += 1;
             continue;
         };
@@ -387,7 +387,7 @@ fn render_batch(
 pub fn batch_render_to_folder(
     output_dir: std::path::PathBuf,
     paths: Vec<std::path::PathBuf>,
-    wows_data_map: WoWsDataMap,
+    build_cache: BuildDataCache,
     options: RenderOptions,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
@@ -400,7 +400,7 @@ pub fn batch_render_to_folder(
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
         let (succeeded, failed, _) =
-            render_batch(&paths, &wows_data_map, &output_dir, &options, &asset_cache, &progress_clone, &encode);
+            render_batch(&paths, &build_cache, &output_dir, &options, &asset_cache, &progress_clone, &encode);
 
         if failed == 0 {
             toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
@@ -421,7 +421,7 @@ pub fn batch_render_to_folder(
 /// Returns a `BackgroundTask` to plug into the global status bar.
 pub fn batch_render_to_clipboard(
     paths: Vec<std::path::PathBuf>,
-    wows_data_map: WoWsDataMap,
+    build_cache: BuildDataCache,
     options: RenderOptions,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
@@ -443,7 +443,7 @@ pub fn batch_render_to_clipboard(
         };
 
         let (succeeded, failed, rendered) =
-            render_batch(&paths, &wows_data_map, temp_dir.path(), &options, &asset_cache, &progress_clone, &encode);
+            render_batch(&paths, &build_cache, temp_dir.path(), &options, &asset_cache, &progress_clone, &encode);
 
         if !rendered.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()
@@ -477,7 +477,7 @@ pub(super) fn render_video_blocking(
     map_name: &str,
     game_duration: f32,
     options: RenderOptions,
-    wows_data: &SharedWoWsData,
+    wows_data: &SharedBuildData,
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<Option<RenderProgress>>>,
     prefer_cpu: bool,

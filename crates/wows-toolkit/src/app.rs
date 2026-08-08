@@ -1797,8 +1797,8 @@ impl WowsToolkitApp {
                 NetworkResult::VersionedConstantsFetched { build } => {
                     // Versioned constants were downloaded and saved to disk.
                     // If we have this build loaded with inexact constants, rebuild it.
-                    if let Some(wows_data_map) = self.tab_state.wows_data_map.as_ref()
-                        && let Some(data) = wows_data_map.get(build)
+                    if let Some(build_cache) = self.tab_state.build_cache.as_ref()
+                        && let Some(data) = build_cache.get(build)
                         && !data.read().replay_constants_exact_match
                     {
                         debug!("Rebuilding build {} with newly fetched versioned constants", build);
@@ -1886,9 +1886,9 @@ impl WowsToolkitApp {
 
                     // Initialize or update the version data map.
                     // Always create a new map when the directory changed
-                    // (reset_game_state sets wows_data_map to None).
+                    // (reset_game_state sets build_cache to None).
                     let wows_data_ref = self.tab_state.world_of_warships_data.as_ref().unwrap();
-                    if let Some(map) = &self.tab_state.wows_data_map {
+                    if let Some(map) = &self.tab_state.build_cache {
                         map.insert_main(build_number, Arc::clone(wows_data_ref));
                     } else {
                         let (locale, cache_dir) = {
@@ -1899,12 +1899,12 @@ impl WowsToolkitApp {
                             )
                         };
                         let mut map =
-                            crate::data::wows_data::WoWsDataMap::new(PathBuf::from(&new_dir), locale, cache_dir);
+                            crate::data::wows_data::BuildDataCache::new(PathBuf::from(&new_dir), locale, cache_dir);
                         if let Some(tx) = self.tab_state.network_job_tx.clone() {
                             map.set_network_job_tx(tx);
                         }
                         map.insert_main(build_number, Arc::clone(wows_data_ref));
-                        self.tab_state.wows_data_map = Some(map);
+                        self.tab_state.build_cache = Some(map);
                     }
 
                     // If the initial build used fallback constants, request the correct version
@@ -1959,7 +1959,7 @@ impl WowsToolkitApp {
                         // earlier failure to find it says nothing about this
                         // build any more. The requested build is cleared too: a
                         // fallback build can be what makes it resolvable.
-                        if let Some(map) = &self.tab_state.wows_data_map {
+                        if let Some(map) = &self.tab_state.build_cache {
                             map.forget_unresolvable_build(*build);
                             map.forget_unresolvable_build(*requested_build);
                         }
@@ -3285,7 +3285,7 @@ impl WowsToolkitApp {
 
     fn check_constants_version_mismatch(&mut self) {
         // Determine mismatch status under locks, then drop them before acting.
-        // Read the version from the loaded WorldOfWarshipsData's replay constants
+        // Read the version from the loaded BuildData's replay constants
         // rather than a separate copy.
         let mismatch_status = {
             let Some(wows_data) = &self.tab_state.world_of_warships_data else { return };
@@ -3337,13 +3337,9 @@ impl WowsToolkitApp {
                 self.constants_version_mismatch = false;
                 self.tab_state.toasts.lock().dismiss_all_toasts();
 
-                // Rebuild all loaded WorldOfWarshipsData with fresh constants
-                let rebuild_ok = self
-                    .tab_state
-                    .wows_data_map
-                    .as_ref()
-                    .map(|map| map.rebuild_all_with_new_constants())
-                    .unwrap_or(true);
+                // Rebuild all loaded BuildData with fresh constants
+                let rebuild_ok =
+                    self.tab_state.build_cache.as_ref().map(|map| map.rebuild_all_with_new_constants()).unwrap_or(true);
 
                 if rebuild_ok {
                     self.constants_update_error_shown = false;
@@ -4387,18 +4383,18 @@ impl WowsToolkitApp {
                 let reindex_deps = match (
                     self.tab_state.db_pool.as_ref(),
                     self.tab_state.tokio_runtime.as_ref(),
-                    self.tab_state.wows_data_map.as_ref(),
+                    self.tab_state.build_cache.as_ref(),
                 ) {
-                    (Some(pool), Some(rt), Some(wows_data_map)) => {
-                        Some((pool.clone(), Arc::clone(rt), wows_data_map.clone()))
+                    (Some(pool), Some(rt), Some(build_cache)) => {
+                        Some((pool.clone(), Arc::clone(rt), build_cache.clone()))
                     }
                     _ => None,
                 };
-                if let Some((pool, rt, wows_data_map)) = reindex_deps {
+                if let Some((pool, rt, build_cache)) = reindex_deps {
                     update_background_task!(
                         self.tab_state.background_tasks,
                         Some(crate::task::start_reconcile_index(
-                            wows_data_map,
+                            build_cache,
                             self.tab_state.shipbuilds_client.clone(),
                             Arc::clone(&self.tab_state.twitch_state),
                             pool,
@@ -4610,7 +4606,7 @@ fn load_from_app_ron() -> Option<crate::data::legacy_settings::LegacyWowsToolkit
 /// Translate a map name to a human-readable display name using game metadata.
 ///
 /// Falls back to a prettified version of the raw name if game data is unavailable.
-fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::data::wows_data::SharedWoWsData>) -> String {
+fn translate_map_display_name(map_name: &str, wows_data: &Option<crate::data::wows_data::SharedBuildData>) -> String {
     if let Some(wd) = wows_data {
         let wd = wd.read();
         if let Some(ref gm) = wd.game_metadata {
@@ -6153,7 +6149,7 @@ mod shipbuilds_batch_dispatch_tests {
     use super::DataSharingMode;
     use super::dispatch_shipbuilds_batch;
     use super::shipbuilds_batch_dependencies;
-    use crate::data::wows_data::WoWsDataMap;
+    use crate::data::wows_data::BuildDataCache;
     use crate::tab_state::TabState;
     use crate::task::BackgroundTask;
     use crate::task::SendReplayCachePolicy;
@@ -6161,7 +6157,7 @@ mod shipbuilds_batch_dispatch_tests {
 
     fn ready_tab_state() -> TabState {
         let mut tab_state = TabState::default();
-        tab_state.wows_data_map = Some(WoWsDataMap::new(PathBuf::from("C:/wows"), "en".to_string(), String::new()));
+        tab_state.build_cache = Some(BuildDataCache::new(PathBuf::from("C:/wows"), "en".to_string(), String::new()));
         let runtime = Arc::new(tokio::runtime::Runtime::new().expect("a Tokio runtime"));
         tab_state.db_pool =
             Some(runtime.block_on(SqlitePoolOptions::new().connect("sqlite::memory:")).expect("an in-memory pool"));
@@ -6198,7 +6194,7 @@ mod shipbuilds_batch_dispatch_tests {
         let (replay_dependencies, _, _) =
             shipbuilds_batch_dependencies(&tab_state).expect("all dependencies are ready");
 
-        assert!(replay_dependencies.wows_data_map.get(0).is_none());
+        assert!(replay_dependencies.build_cache.get(0).is_none());
     }
 
     #[test]
@@ -6261,7 +6257,7 @@ mod shipbuilds_batch_dispatch_tests {
         for missing in [Missing::GameData, Missing::Pool, Missing::Runtime] {
             let mut tab_state = ready_tab_state();
             match missing {
-                Missing::GameData => tab_state.wows_data_map = None,
+                Missing::GameData => tab_state.build_cache = None,
                 Missing::Pool => tab_state.db_pool = None,
                 Missing::Runtime => tab_state.tokio_runtime = None,
             }
