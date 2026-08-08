@@ -7659,7 +7659,6 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 name = "replayshark"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "clap",
  "gettext",
  "jiff",
@@ -10569,11 +10568,11 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 name = "wgcheck"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "cbc",
  "clap",
  "des",
  "flate2",
+ "rootcause",
 ]
 
 [[package]]

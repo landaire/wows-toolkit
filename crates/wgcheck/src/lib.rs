@@ -14,15 +14,15 @@
 
 use std::collections::HashMap;
 
-use anyhow::anyhow;
-use anyhow::bail;
-use anyhow::Context;
-use anyhow::Result;
 use cbc::cipher::block_padding::NoPadding;
 use cbc::cipher::BlockDecryptMut;
 use cbc::cipher::KeyIvInit;
 use des::Des;
 use flate2::read::GzDecoder;
+use rootcause::bail;
+use rootcause::prelude::ResultExt;
+use rootcause::report;
+use rootcause::Result;
 use std::io::Read;
 
 type DesCbcDec = cbc::Decryptor<Des>;
@@ -43,7 +43,7 @@ pub fn decode_gch(file_bytes: &[u8]) -> Result<Vec<u8>> {
     let mut buf = file_bytes[..usable].to_vec();
     DesCbcDec::new(&KEY_IV.into(), &KEY_IV.into())
         .decrypt_padded_mut::<NoPadding>(&mut buf)
-        .map_err(|e| anyhow!("DES decrypt failed: {e}"))?;
+        .map_err(|e| report!("DES decrypt failed: {e}"))?;
 
     if buf.len() < 2 || buf[0] != 0x1f || buf[1] != 0x8b {
         bail!("decrypted data is not a GZip stream (bad key or not a .gch file)");
@@ -202,7 +202,7 @@ impl<'a> Parser<'a> {
     }
 
     fn into_report(self) -> Result<Report> {
-        let root = self.objects.get(&self.root_id).ok_or_else(|| anyhow!("root object {} not found", self.root_id))?;
+        let root = self.objects.get(&self.root_id).ok_or_else(|| report!("root object {} not found", self.root_id))?;
         let (name, members) = match root {
             Obj::Class { name, members } => (name.clone(), members),
             _ => bail!("root object is not a class"),
@@ -298,7 +298,7 @@ impl<'a> Parser<'a> {
             .layouts
             .get(&meta_id)
             .cloned()
-            .ok_or_else(|| anyhow!("ClassWithId references unknown metadata id {meta_id}"))?;
+            .ok_or_else(|| report!("ClassWithId references unknown metadata id {meta_id}"))?;
         let members = self.read_members(&layout)?;
         self.objects.insert(obj_id, Obj::Class { name: layout.name, members });
         Ok(Value::Ref(obj_id))
@@ -518,8 +518,8 @@ impl<'a> Parser<'a> {
         for _ in 0..extra {
             bytes.push(self.u8()?);
         }
-        let s = std::str::from_utf8(&bytes).map_err(|_| anyhow!("bad char"))?;
-        s.chars().next().ok_or_else(|| anyhow!("empty char"))
+        let s = std::str::from_utf8(&bytes).map_err(|_| report!("bad char"))?;
+        s.chars().next().ok_or_else(|| report!("empty char"))
     }
 
     // -- low-level cursor --------------------------------------------------

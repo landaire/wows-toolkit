@@ -4,10 +4,10 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::Context;
-use anyhow::Result;
 use clap::Parser;
 use clap::Subcommand;
+use rootcause::prelude::ResultExt;
+use rootcause::Result;
 use wgcheck::parse_gch;
 use wgcheck::Member;
 
@@ -48,8 +48,8 @@ fn main() -> Result<()> {
 }
 
 fn read_report(file: &Path) -> Result<wgcheck::Report> {
-    let bytes = fs::read(file).with_context(|| format!("reading {}", file.display()))?;
-    parse_gch(&bytes).with_context(|| format!("parsing {}", file.display()))
+    let bytes = fs::read(file).context_with(|| format!("reading {}", file.display()))?;
+    Ok(parse_gch(&bytes).context_with(|| format!("parsing {}", file.display()))?)
 }
 
 fn dump(file: &Path) -> Result<()> {
@@ -80,7 +80,7 @@ fn dump(file: &Path) -> Result<()> {
 }
 
 fn extract(outdir: &Path, files: &[PathBuf]) -> Result<()> {
-    fs::create_dir_all(outdir).with_context(|| format!("creating {}", outdir.display()))?;
+    fs::create_dir_all(outdir).context_with(|| format!("creating {}", outdir.display()))?;
     for file in files {
         let report = match read_report(file) {
             Ok(r) => r,
@@ -98,7 +98,7 @@ fn extract(outdir: &Path, files: &[PathBuf]) -> Result<()> {
         for (label, text) in logs {
             let suffix = label.replace(['/', '\\'], "_");
             let out = outdir.join(format!("{stem}.{suffix}"));
-            fs::write(&out, text).with_context(|| format!("writing {}", out.display()))?;
+            fs::write(&out, text).context_with(|| format!("writing {}", out.display()))?;
             println!("{} -> {} ({} bytes)", file.display(), out.display(), text.len());
         }
     }

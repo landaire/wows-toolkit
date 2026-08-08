@@ -18,7 +18,6 @@ jiff = { workspace = true }
 serde_json = { workspace = true }
 parse_int = "0.9.0"
 wowsunpack = { workspace = true, features = ["json", "vfs-mmap", "rkyv"] }
-anyhow = { workspace = true }
 toml = { workspace = true }
 gettext = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["battle-report"] }

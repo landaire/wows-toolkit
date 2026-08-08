@@ -2,9 +2,9 @@ mod battle_results_cmd;
 
 use battle_results_cmd::ResultsFormat;
 
-use anyhow::anyhow;
 use clap::Parser;
 use clap::Subcommand;
+use rootcause::prelude::*;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::fs::File;
@@ -410,24 +410,24 @@ fn read_metadata(path: &Path) -> Option<ExtractedMetadata> {
 /// containing version subdirectories (e.g. `15.1.0_11965230/`), auto-detect the
 /// right one. If they passed the version dir itself, use it directly.
 /// Falls back to the legacy `<extracted>/<version>` layout.
-fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Result<PathBuf> {
+fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> rootcause::Result<PathBuf> {
     if !path.exists() {
-        return Err(anyhow!("Extracted data directory does not exist: {}", path.display()));
+        bail!("Extracted data directory does not exist: {}", path.display());
     }
 
     let replay_build =
-        replay_version.build_number().ok_or_else(|| anyhow!("replay version carries no build number"))?;
+        replay_version.build_number().ok_or_else(|| report!("replay version carries no build number"))?;
 
     // If the path itself contains metadata.toml, it's already the version dir
     if let Some(meta) = read_metadata(path) {
         if meta.build != replay_build {
-            return Err(anyhow!(
+            bail!(
                 "Extracted data is build {} ({}) but replay is build {}. \
                  Entity definitions will not match. Use extracted data for the correct build.",
                 meta.build,
                 meta.version,
                 replay_build
-            ));
+            );
         }
         return Ok(path.to_path_buf());
     }
@@ -472,23 +472,23 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
 
         if candidates.len() == 1 {
             let (_, ref meta) = candidates[0];
-            return Err(anyhow!(
+            bail!(
                 "No exact build match for replay (build {}). Only available: {} (build {}). \
                  Download or extract the correct build.",
                 replay_build,
                 meta.version,
                 meta.build
-            ));
+            );
         }
 
         let available: Vec<String> =
             candidates.iter().map(|(_, m)| format!("{} (build {})", m.version, m.build)).collect();
-        return Err(anyhow!(
+        bail!(
             "No extracted data matches replay build {}. Available versions in {}: {}",
             replay_build,
             path.display(),
             available.join(", ")
-        ));
+        );
     }
 
     // Legacy fallback: <extracted>/<major.minor.patch>/
@@ -497,7 +497,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> anyhow::Resul
         return Ok(legacy);
     }
 
-    Err(anyhow!(
+    Err(report!(
         "No extracted game data found in {}. Expected a version directory \
          (containing metadata.toml) or legacy layout (<extracted>/<version>/).",
         path.display()
@@ -508,11 +508,11 @@ fn load_game_data(
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,
     replay_version: &Version,
-) -> anyhow::Result<Vec<EntitySpec>> {
+) -> rootcause::Result<Vec<EntitySpec>> {
     let specs = match (game_dir, extracted_dir) {
         (Some(game_dir), _) => {
             let resources =
-                game_data::load_game_resources(Path::new(game_dir), replay_version).map_err(|e| anyhow!("{}", e))?;
+                game_data::load_game_resources(Path::new(game_dir), replay_version).map_err(|e| report!("{}", e))?;
             resources.specs
         }
         (None, Some(extracted)) => {
@@ -521,7 +521,7 @@ fn load_game_data(
             let dir = resolve_extracted_dir(Path::new(extracted), replay_version)?;
             let dump = wows_data_mgr::Dump::open(&dir);
             if !dump.has_game_files() {
-                return Err(anyhow!("no game files found in {}", dir.display()));
+                bail!("no game files found in {}", dir.display());
             }
             let vfs = dump.vfs();
             let loader = DataFileWithCallback::new(|path| {
@@ -534,10 +534,10 @@ fn load_game_data(
                     .map_err(wowsunpack::error::GameDataError::from)?;
                 Ok(Cow::Owned(file_data))
             });
-            parse_scripts(&loader).map_err(|e| anyhow!("failed to parse entity defs: {e:?}"))?
+            parse_scripts(&loader).map_err(|e| report!("failed to parse entity defs: {e:?}"))?
         }
         (None, None) => {
-            return Err(anyhow!("Game directory or extracted files directory must be supplied"));
+            bail!("Game directory or extracted files directory must be supplied");
         }
     };
 
@@ -975,13 +975,13 @@ fn load_metadata_provider_and_constants(
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,
     version: &Version,
-) -> anyhow::Result<(GameMetadataProvider, GameConstants)> {
+) -> rootcause::Result<(GameMetadataProvider, GameConstants)> {
     match (game_dir, extracted_dir) {
         (Some(game_dir), _) => {
             let resources =
-                game_data::load_game_resources(Path::new(game_dir), version).map_err(|e| anyhow!("{}", e))?;
+                game_data::load_game_resources(Path::new(game_dir), version).map_err(|e| report!("{}", e))?;
             let mut provider = GameMetadataProvider::from_vfs(&resources.vfs)
-                .map_err(|e| anyhow!("failed to load game params: {e:?}"))?;
+                .map_err(|e| report!("failed to load game params: {e:?}"))?;
             let constants = GameConstants::from_vfs(&resources.vfs);
             let mo_path = game_data::translations_path(
                 Path::new(game_dir),
@@ -994,7 +994,7 @@ fn load_metadata_provider_and_constants(
             let dir = resolve_extracted_dir(Path::new(extracted), version)?;
             let dump = wows_data_mgr::Dump::open(&dir);
             if !dump.has_game_files() {
-                return Err(anyhow!("no game files found in {}", dir.display()));
+                bail!("no game files found in {}", dir.display());
             }
             let vfs = dump.vfs();
 
@@ -1003,16 +1003,16 @@ fn load_metadata_provider_and_constants(
                 dump.derived_path("game_params.rkyv").and_then(|path| wowsunpack::game_params::cache::load(&path));
             let mut provider = match cached {
                 Some(params) => GameMetadataProvider::from_params_with_vfs(params, &vfs)
-                    .map_err(|e| anyhow!("failed to build game metadata: {e:?}"))?,
+                    .map_err(|e| report!("failed to build game metadata: {e:?}"))?,
                 None => GameMetadataProvider::from_vfs(&vfs)
-                    .map_err(|e| anyhow!("failed to load game params from VFS: {e:?}"))?,
+                    .map_err(|e| report!("failed to load game params from VFS: {e:?}"))?,
             };
             let constants = GameConstants::from_vfs(&vfs);
             let mo_path = dir.join("translations/en/LC_MESSAGES/global.mo");
             apply_translations(&mo_path, &mut provider);
             Ok((provider, constants))
         }
-        (None, None) => Err(anyhow!("Game directory or extracted files directory must be supplied")),
+        (None, None) => Err(report!("Game directory or extracted files directory must be supplied")),
     }
 }
 
@@ -1039,7 +1039,7 @@ fn run_roster_query(
     has_class: &[String],
     exclude_own: bool,
     as_json: bool,
-) -> anyhow::Result<()> {
+) -> rootcause::Result<()> {
     let wanted: Vec<String> = has_class.iter().map(|c| c.to_lowercase()).collect();
     // Loading game params is the expensive step, so keep one provider per game
     // version across the whole sweep.
@@ -1135,8 +1135,8 @@ fn run_players_query(
     entity_filter: Option<u32>,
     ship_filter: Option<&str>,
     as_json: bool,
-) -> anyhow::Result<()> {
-    let replay_file = ReplayFile::from_file(replay).map_err(|e| anyhow!("failed to read replay: {e:?}"))?;
+) -> rootcause::Result<()> {
+    let replay_file = ReplayFile::from_file(replay).map_err(|e| report!("failed to read replay: {e:?}"))?;
     let version = Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let (provider, constants) = load_metadata_provider_and_constants(game_dir, extracted_dir, &version)?;
 

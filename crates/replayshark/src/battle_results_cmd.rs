@@ -9,8 +9,7 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 
-use anyhow::Context;
-use anyhow::anyhow;
+use rootcause::prelude::*;
 use serde_json::Value;
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
@@ -108,21 +107,21 @@ pub fn run(
     allow_approximate_constants: bool,
     pr_expected_values: Option<PathBuf>,
     replays: Vec<PathBuf>,
-) -> anyhow::Result<()> {
+) -> rootcause::Result<()> {
     if out_dir.is_none() && out_file.is_none() {
-        return Err(anyhow!("one of --out-dir or --out-file is required"));
+        return Err(report!("one of --out-dir or --out-file is required"));
     }
 
     if game_dir.is_none() && extracted_dir.is_none() {
-        return Err(anyhow!("one of -g/--game or -e/--extracted is required"));
+        return Err(report!("one of -g/--game or -e/--extracted is required"));
     }
 
     let explicit_constants: Option<Value> = match constants_path {
         Some(path) => {
             let data = std::fs::read_to_string(path)
-                .with_context(|| format!("failed to read constants file {}", path.display()))?;
+                .context_with(|| format!("failed to read constants file {}", path.display()))?;
             let json: Value = serde_json::from_str(&data)
-                .with_context(|| format!("failed to parse constants JSON {}", path.display()))?;
+                .context_with(|| format!("failed to parse constants JSON {}", path.display()))?;
             Some(json)
         }
         None => None,
@@ -131,10 +130,10 @@ pub fn run(
     let pr_data: Option<PersonalRatingData> = match pr_expected_values {
         Some(path) => {
             let bytes = std::fs::read(&path)
-                .with_context(|| format!("failed to read PR expected values file {}", path.display()))?;
+                .context_with(|| format!("failed to read PR expected values file {}", path.display()))?;
             let mut data = PersonalRatingData::new();
             data.load_from_bytes(&bytes)
-                .with_context(|| format!("failed to parse PR expected values file {}", path.display()))?;
+                .context_with(|| format!("failed to parse PR expected values file {}", path.display()))?;
             Some(data)
         }
         None => None,
@@ -194,18 +193,18 @@ pub fn run(
 
     if let Some(dir) = out_dir {
         std::fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create output directory {}", dir.display()))?;
+            .context_with(|| format!("failed to create output directory {}", dir.display()))?;
         for (stem, value) in results.iter().flatten() {
             let out_path = dir.join(format!("{stem}.json"));
             let text = serde_json::to_string_pretty(value).context("failed to serialize battle results")?;
-            std::fs::write(&out_path, text).with_context(|| format!("failed to write {}", out_path.display()))?;
+            std::fs::write(&out_path, text).context_with(|| format!("failed to write {}", out_path.display()))?;
         }
     } else if let Some(file) = out_file {
         let oks: Vec<Value> = results.iter().filter_map(|r| r.as_ref().ok()).map(|(_, v)| v.clone()).collect();
         match assemble_out_file(replays.len(), oks) {
             Some(out_value) => {
                 let text = serde_json::to_string_pretty(&out_value).context("failed to serialize battle results")?;
-                std::fs::write(&file, text).with_context(|| format!("failed to write {}", file.display()))?;
+                std::fs::write(&file, text).context_with(|| format!("failed to write {}", file.display()))?;
             }
             None => {
                 eprintln!("no replay produced output; not writing {}", file.display());
