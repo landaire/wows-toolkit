@@ -2,6 +2,534 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.0] - 2026-08-08
+
+### 🚀 Features
+
+- *(wowsunpack)* Parse isTileflage on Exterior params
+- *(armor-viewer)* Resolve and store camo schemes on load
+- *(armor-viewer)* Add camo dropdown and apply selected camo to the hull
+- *(armor-viewer)* Render camouflages on ship models
+- *(camo)* Lazy camouflage texture loading
+- Render ship misc parts (propellers, boats, deck fittings)
+- *(insights)* Add egui-free battle-report model types
+- *(insights)* Add NormalizedBattleReport builder
+- *(toolkit)* Build NormalizedBattleReport in UiReport
+- *(replayshark)* Constants resolver with approximate-match classification
+- *(replayshark)* Battle-results dump command
+- *(gpui-port)* Compile-spike window on stock gpui + gpui-component
+- *(gpui-port)* Top-level tab strip with tab switching
+- *(gpui-port)* Pin theme to egui dark palette and zoom scale
+- *(config)* Extract shared SQLite config crate
+- *(gpui-port)* Load window geometry, zoom, and settings from the shared DB
+- *(gpui-port)* Replay report presentation model from normalized data
+- *(gpui-port)* Replay columns + number formatting
+- *(gpui-port)* Replay table sort model
+- *(gpui-port)* Custom virtualized player table (collapsed rows)
+- *(gpui-port)* Player table cell parity (colors, NDA, icons, hovers)
+- *(gpui-port)* Expandable player rows
+- *(gpui-port)* Expanded row content (achievements, ribbons, build, consumables, damage breakdown)
+- *(gpui-port)* Replay file grouping model
+- *(gpui-port)* Replay file browser tree
+- *(gpui-port)* Background replay parse into the table model
+- *(gpui-port)* Replay inspector tab (browser + dock + per-replay view)
+- *(gpui-port)* Replay chat view
+- *(gpui-port)* Preload game data at startup with GameParams cache
+- *(gpui-port)* Translate replay listing ship/map names
+- *(gpui-port)* Wire class/skill/nation/ribbon icons from game data
+- *(gpui-port)* Wire replay inspector debug mode
+- *(gpui-port)* Replay inspector header toolbar (manual open, auto-load, filters)
+- *(gpui-port)* Replay table actions menu (open/copy links)
+- *(gpui-port)* Content-based column auto-sizing
+- *(gpui-port)* Per-column-aligned expanded rows
+- *(gpui-port)* Armor viewport - owned wgpu device, offscreen readback into gpui image
+- *(gpui-port)* Armor viewport camera + nav gizmo (gpui input, on-demand render)
+- *(gpui-port)* Armor viewer ship assets + catalog
+- *(gpui-port)* Armor viewer single-pane ship display
+- *(gpui-port)* Armor thickness legend
+- *(gpui-port)* Armor plate picking, tooltip, hide/show
+- *(gpui-port)* Armor visibility popover + undo/redo
+- *(gpui-port)* Armor display-settings popover (edges, waterline, opacity, lighting)
+- *(gpui-port)* Armor viewer hull mesh display + hull visibility popover
+- *(gpui-port)* Armor viewer camo picker + compositing
+- *(gpui-port)* Armor viewer hull LOD/upgrade/module reload
+- *(gpui-port)* Armor viewer shared gpu device + dock scaffold
+- *(gpui-port)* Armor viewer multi-pane comparison split
+- *(gpui-port)* Armor viewer camera mirror, settings sync, compare-clone
+- *(gpui-port)* Armor viewer GLB model export
+- *(replays)* Typed ship detection flags
+- *(replays)* Decode the submarine hydrophone channel
+- *(replayshark)* Add query roster
+- *(wowsunpack)* Add Vehicle::is_test_ship, reuse in insights
+- *(settings)* DataSharingMode enum with no-escalation migration
+- *(replays)* Pure upload-decision with test-ship fail-safe
+- *(replays)* Upload raw replays or build data per sharing mode
+- *(ui)* Data-sharing mode selector and consent dialogs
+- *(index)* Add replay index schema migration
+- *(index)* Domain types, rows, and MatchFilter
+- *(index)* Source (group) queries
+- *(index)* Ingest upserts and per-source arena ledger
+- *(index)* Search_matches match-level predicates and recent_matches
+- *(index)* EXISTS predicates and player/ship match helpers
+- *(index)* Distinct player and self-ship facet queries
+- *(index)* Mapper from parsed replay to index rows
+- *(index)* Write-index orchestration and live ingestion hook
+- *(index)* Panic-isolated reconcile primitives with tests
+- *(index)* Merge panic-resilient index backfill into startup replay scan
+- *(index)* Player-tracker reconciliation and on-demand reindex
+- *(index)* Index results-absent (left-early) replays on both paths
+- *(palette)* Add egui-palette dep, PaletteAction, sigil parsing
+- *(search)* Tab::Search with MatchFilter filter bar
+- *(search)* Results table with open-replay via replay_path
+- *(palette)* Facet cache and entry sourcing
+- *(palette)* Hotkey, modal render, and action dispatch
+- *(palette)* Player-tracker Find matches action
+- *(search)* Query model types for the chip builder
+- *(search)* Dynamic SQL builder and search_by_query
+- *(search)* Bounded case-insensitive player/ship search queries
+- *(search)* Chip-based query builder UI
+- *(palette)* Cascading modes with on-demand bounded sourcing
+- *(search)* Subject-scoped stat fields, date picker, default-open draft
+- *(search)* Persist query across restarts; horizontal group layout
+- *(index)* Per-player disconnect column and Disconnected filter
+- *(replays)* Add force_reindex backfill for pr/disconnected on already-indexed replays
+- *(index)* Stream-sniper detection
+- *(game-params)* Extract hull burnNodes and length
+- *(models)* Resolve per-hull fire-section geometry
+- *(models)* Cache fire-section geometry per game build
+- *(battle-world)* Log burningFlags burn-bit transitions
+- *(battle-world)* Log self ribbons with timestamps
+- *(battle-world)* Record AOI presence windows and hit history
+- *(battle-world)* Carry fire-analysis logs into BattleReport
+- *(insights)* Expose a resolved build's raw modifier list
+- *(insights)* Map an impact position to a fire section
+- *(insights)* Per-victim burn-state and damage control tracks
+- *(ttx)* Expose the small-projectile caliber threshold
+- *(insights)* Effective fire chance analysis
+- *(insights)* Headless fire-chance resolver and corpus measurement
+- *(replay)* Compute effective fire chance for the self player
+- *(replay-ui)* Show effective fire chance under the player row
+- *(insights)* Count every same-tick section hit, drop the aggregate fire rate
+- *(insights)* Restructure the effective fire chance breakdown
+- *(insights)* Log every artillery salvo so HE shells fired is a real count
+- *(insights)* Narrow total hits to HE hits on a ship before the eligibility split
+- *(fire-chance)* Explain every uncredited SetFire ribbon, and move the breakdown into its own expander
+- *(theme)* WCAG contrast maths for the theme layer
+- *(theme)* Graphite & Bone palette and contrast-enforced semantic colours
+- *(theme)* Graphite & Bone egui and egui_dock styles
+- *(theme)* Theme choice with settings, palette and persistence
+- *(theme)* Render personal rating as a legible badge
+- *(ui)* Migrate replay_parser to semantic colour roles
+- *(ui)* Tinted personal-rating chip replaces full-saturation badge
+- *(search)* Icon buttons, horizontal filter row, editable chips, connector above groups
+- *(search)* Player-or-clan substring field and clearer player lock-in
+- *(player-tracker)* Typed live match roster with name-based history join
+- *(player-tracker)* Non-closeable historical and current match sub-tabs
+- *(replay-inspector)* Click-to-copy twitch chip, shared with the tracker
+- *(player-tracker)* Team-split current match roster with ships and history
+- *(player-tracker)* Collapsed historical rows with an expandable notes detail row
+- *(player-tracker)* Widen the historical detail block to the row
+- *(index)* Per-match clan corrections and indexed arena coverage queries
+- *(player-tracker)* Clans sub-tab breaking encounters down by clan
+- *(player-tracker)* Clans time-range selector, drop the attribution line
+- *(player-tracker)* Division-mate toggle shared by Historical and Clans
+- *(player-tracker)* Default sub-tab order puts Clans before Current Match
+- *(player-tracker)* Mark division mates per encounter, not per account
+- *(replay-ui)* Collapsible replay listing with a caret rail
+- *(timeline)* Add events-only extraction and cross-perspective merge
+- *(replay-ui)* Match timeline window in the replay inspector
+- *(replay-ui)* Make the whole collapse rail a click target
+- *(index)* Add per-source row summaries for the replay listing
+- *(replay-ui)* Pure two-line listing row assembly
+- *(replay-ui)* Mtime freshness check for listing rows
+- *(replay-ui)* Load listing row summaries off the UI thread
+- *(replay-ui)* Draw two-line listing rows from the replay index
+- *(replay-ui)* Re-index listing rows whose file changed since indexing
+- *(command-palette)* Add Open replay file... entry
+- *(index)* Add race-safe ensure_source for any source kind
+- *(index)* Add relocate_source and forget_source
+- *(replay-listing)* Name division mates in the row hover tooltip
+- *(replay-ui)* Add workspace-scoped egui id helpers
+- *(replay-ui)* Closeable per-workspace replay tabs
+- *(replay-ui)* Shorten workspace roots for tab titles
+- *(replay-ui)* Open a replay directory as a workspace
+- *(data-mgr)* Plan a deduplicated multi-build download
+- *(replay-ui)* Tell missing game data apart from unreadable replays
+- *(replay-ui)* Offer to download missing game builds
+- *(data-mgr)* Verify object hashes and name the build a corrupt object breaks
+- *(replay-ui)* Stream and index an imported directory as it loads
+- *(replay-ui)* Search a replay directory from its tab
+- *(replay-ui)* Pair a build with the version that qualifies it
+- *(replay-ui)* Answer build availability without loading the build
+- *(replay-ui)* Scan a replay directory before reading it
+- *(replay-ui)* Report which stage an opening directory is in
+- *(replay-ui)* Walk a replay directory once, one build at a time
+- *(cli)* Validate update finalization targets
+- *(cli)* Recognize the legacy updater argument form
+- *(cli)* Add clap definitions and invocation resolution
+- *(cli)* Attach the parent console for command line output
+- *(cli)* Route update finalization through the command line
+- *(armor-viewer)* Let the display settings reopen the thickness legend
+- *(viewport-3d)* Sample a camo layer over the albedo in the shader
+- *(settings)* Keep settings-error toasts on screen
+- *(settings)* Colour the twitch token button by state
+- *(armor-viewer)* Narrow the armor thickness legend
+- *(search)* Add the query AST and field metadata
+- *(search)* Compile match-level query terms to SQL
+- *(search)* Compile roster quantifiers to correlated subqueries
+- *(search)* Compile free-text query terms
+- *(search)* Add search_by_ast with real-sqlite coverage
+- *(search)* Parse single query terms with spanned errors
+- *(search)* Parse boolean structure with winnow
+- *(search)* Parse quantifiers, scope sugar, and relative dates
+- *(search)* Print queries back to their canonical text form
+- *(query-bar)* Render human-readable pill text for query terms
+- *(query-bar)* Flatten a query tree into a token stream
+- *(query-bar)* Selection model and boolean tree edits
+- *(query-bar)* Line breaking with nested bracket spans
+- *(query-bar)* Suggestion ranking and query presets
+- *(query-bar)* Navigation, append, and operator edits the widget needs
+- *(query-bar)* Pill, bracket, and error-underline painting
+- *(query-bar)* The wrapping pill editor widget
+- *(search)* Rewrite the Search tab onto the query bar
+- *(theme)* Mark the active dock tab with a bone bar
+- *(theme)* Divide neighbouring dock tabs with a rule
+- *(collab-egui)* Derive minimap canvas geometry from render options
+- *(collab-egui)* Add the MinimapView frame-painting widget
+- *(renderer)* Decimate a bounded preview track from the frame pass
+- *(renderer)* Bake a preview track with a single forward pass
+- *(renderer)* Cache preview tracks behind a dwell gate
+- *(replay)* Loop a minimap preview when hovering a replay row
+- *(query-bar)* Split pill text into filter, operator, and value segments
+- *(query-bar)* Carry pill segments through the token stream
+- *(query-bar)* Segment-scoped suggestion sources
+- *(query-bar)* Re-derive a term when its field changes
+- *(query-bar)* Size a pill from its segments
+- *(query-bar)* Paint and hit-test pill segments
+- *(query-bar)* Edit pills by segment
+- *(core)* Type the game's GAME_MODE table
+- *(index)* Store the numeric game mode
+- *(search)* Filter on a typed game mode
+- *(query-bar)* Picking a filter builds a pill
+- *(query-bar)* Double-click a pill to edit it as text
+- *(search)* Surface the game-mode re-index gap in the search tab
+- *(query-bar)* Edit a pill's value in the pill
+- *(query-bar)* List a value's options under its inline box
+- *(search)* Sort the results table by column
+- *(search)* Copy a replay's path, and colour the result and PR
+- *(export)* Opt-in armor, texture LOD tiers, and shared part grouping
+- *(export)* Derive the texture tier from --lod
+- *(search)* Preview a result's map on hover
+- *(search)* Filter a roster by personal rating band
+- *(search)* Open a replay as a sub-tab in its own workspace
+- *(query-bar)* Undo and redo the query's committed edits
+- *(query-bar)* Hang a date picker under a date value box
+- *(query-bar)* Seed a new filter from what the field was last used with
+- *(wows-core)* Band a win rate on the personal-rating ladder
+- *(wows-replays)* Read a replay whose packet stream is still being written
+- *(wows-replays)* Read the arena roster off onArenaStateReceived without a full decode
+- *(toolkit)* Add the match-stats wire types
+- *(toolkit)* Add the match-stats client with a local rate limiter
+- *(render)* Pin one vendor's GPU driver, and fall back when a launch hangs
+- *(toolkit)* Carry live-match identities and stats state on the player tracker
+- *(toolkit)* Resolve the live roster from temp.wowsreplay and fetch its stats
+- *(player-tracker)* Show win rate, PR and battles on the current-match roster
+- *(player-tracker)* Link current-match players to wows-numbers and shipbuilds
+- *(player-tracker)* Add a debug picker that treats a replay as the current match
+- *(player-tracker)* Add current-match stats views
+- *(toolkit)* Add ShipBuilds batch palette actions
+- *(toolkit)* Upload open replay sources to ShipBuilds
+- *(toolkit)* Show ShipBuilds batch upload progress
+- *(toolkit)* Make the game data download offer usable at scale
+- *(toolkit)* Show average damage and per-ship PR on the live roster
+- *(replayshark)* Add bench subcommand for parser profiling
+- *(wows-replays)* Game-data context for the replay parsing layer
+- *(toolkit)* Block third-party code from loading into the process
+- *(toolkit)* Let the user choose whether to block unsigned code
+- *(toolkit)* Lead exported video names with the battle timestamp
+- *(toolkit)* Gate raw replay uploads on end-of-battle results
+
+### 🐛 Bug Fixes
+
+- *(app)* Keep the auto-updater from grabbing the CLI tools zip
+- *(wowsunpack)* Discover universal camos via MSkin isTileflage, skip death skins
+- *(armor-viewer)* Reset camo on ship load, guard tiled UV, doc + import cleanup
+- *(armor-viewer)* Resolve camo schemes regardless of the textures export flag
+- *(armor-viewer)* Render camo picker inline so it does not dismiss the hull popover
+- *(insights)* Restore full UiReport parity in NormalizedBattleReport (self spot/potential fallback, CV hits, full breakdowns, bot names, object-gate)
+- *(insights)* Make fires/floods/citadels/crits Option to match UiReport presence
+- *(toolkit)* Zip normalized players to entities positionally, not by non-unique db_id
+- *(replayshark)* Input-count output shape, batch panic isolation, output tests
+- *(battle-world)* Loss carries the actual winning team id, not hardcoded 1
+- *(gpui-port)* Pin zed revs, surface DB-load errors, tab flex, zoom slider
+- *(gpui-port)* RI M1 parity - uncolor ObservedDamage, PR computation, skill markers
+- *(gpui-port)* Table parity - plain name fallback, sticky columns, theme mono font
+- *(gpui-port)* Expanded-row parity - caret stop_propagation, exact headings, ammo breakdown
+- *(gpui-port)* Browser parity - selection color, copy-path menu, tracing init, scan error type
+- *(gpui-port)* Per-build game-data cache lock + replay-open dedup
+- *(gpui-port)* Remove browser flags (creative liberty), fix subribbon path, async icon decode
+- *(gpui-port)* Expanded ribbons/achievements horizontal wrap layout
+- *(gpui-port)* Subtle egui-style tree selection highlight
+- *(gpui-port)* Expanded ribbons/achievements vertical icon+label rows, tight spacing
+- *(gpui-port)* Debug mode via Ctrl+Shift+D global shortcut + notice
+- *(gpui-port)* Actions raw-metadata viewer, drop dead flag loader + extra filters
+- *(gpui-port)* Tune expanded ribbons/achievements spacing to egui
+- *(gpui-port)* Armor viewport drag-threshold + continuous WASD + input gating
+- *(gpui-port)* Armor viewer stale-load race + lazy assets load + legend color truncation
+- *(gpui-port)* Replay inspector ribbon aspect ratio + column auto-size slack
+- *(gpui-port)* Armor viewer stale tooltip, context-menu overlap, toggle_part plate-clear parity
+- *(gpui-port)* Auto-size columns to expanded-row content (skill grid, consumables)
+- *(gpui-port)* Armor viewer camo id stability, reload invalidation, popover order, visibility defaults
+- *(gpui-port)* Armor viewer dock re-render on close, textured GLB export, pane-activation docs
+- *(gpui-port)* Armor viewer skip reload of already-loaded ship, snapshot export target
+- *(replays)* Stop the filesystem watcher thread dying on a send panic
+- *(replays)* Parse freshly written replays off the UI thread with retry
+- *(settings)* De-escalate on downgrade opt-out; clarify migration copy
+- *(index)* Interpolate sqlx source in IndexError; add record_paths_in_source
+- *(replays)* Only blacklist hard parse failures and panics, not transient conditions
+- *(player-tracker)* Exclude self account from index-based populate
+- *(config)* Bind enum db-str codecs instead of hardcoded SQL literals
+- *(palette)* Close the modal on pick and dismiss
+- *(search)* Honor chip op for Tier and Class predicates
+- *(search)* UI polish for chip builder and player tracker
+- *(replays)* Populate Personal Rating at index time, not only on UI draw
+- *(ttx)* Use the real 160mm small-projectile threshold
+- *(models)* Check BurnNodeIndex on deserialize
+- *(models)* Reject fire-node and burnNodes disagreements instead of truncating
+- *(models)* Key the fire-section cache on derivation and node count
+- *(ttx)* A projectile without a caliber is small; drop unused hull_length_m
+- *(battle-world)* Document BurnStateLog's AOI gap and ordering contract
+- *(battle-world)* Sort RibbonLog events per packet, document ribbon-log gaps
+- *(battle-world)* Stop opening presence windows on arena-state seed
+- *(battle-world)* Cover presence/hit_history in the report test, complete ribbon-gap doc
+- *(replays)* Read burningFlags leniently across game versions
+- *(battle-world)* Baseline burn state at create, close presence on despawn
+- *(insights)* Unrecognized DCP activations must not resolve as Down
+- *(insights)* Decide the secondary contest on hits, not on outcomes
+- *(insights)* Widen the secondary contest to the full hit-to-hit window
+- *(insights)* Place fire sections in the right space, and bound open presence
+- *(wowsunpack)* Bump GameParams cache format version for the burn-node schema
+- *(replay-ui)* Address review findings on the fire-chance breakdown
+- *(insights)* Remove outcome-conditioned bias from effective fire chance
+- *(fire-chance)* Render the expected per-hit rate, gate the block on NDA
+- *(battle-world)* End a presence window at a mid-window silence
+- *(insights,toolkit)* Refuse a hit whose victim pose is unknown
+- *(insights)* Prove DCP down from a work-time observation window
+- *(replay-ui)* Translate victim ship names and lay the block out
+- *(replay-ui)* Resolve victim ship names by index, not by name
+- *(battle-world)* Give BattleReport::players a stable order
+- *(replay-ui)* Let the whole fire-chance row take the hover
+- *(insights)* Resolve a shell's victim per hit, gate the hull axes apart, refuse terrain hits
+- *(insights)* Expect observable fires, saturating per section and tick
+- *(core)* Replay world units are 30 meters, not 15
+- *(insights)* Name the unplaceable-impact exclusion for what it means
+- *(replay-ui)* Stop the name column truncating expanded sections
+- *(replay-ui)* Stack the fire-chance figures instead of one wide line
+- *(replay-ui)* Put expected beside observed
+- *(theme)* Correct readable_on fallback doc + add reachability test
+- *(theme)* Cover faint/selection row surfaces in contrast test, adjust affected colours
+- *(theme)* Square the dock tab bar and fix invisible dragged separator
+- *(theme)* Visible drag-drop overlay highlight for dock tabs
+- Remove section-divider comments from personal_rating tests
+- *(ui)* Restore true historical export fallback colours, drop draw-loop expect, cover PlayerTint precedence
+- *(theme)* Migrate realtime armor viewer to semantic colours
+- *(theme)* Stop borrowing warn for the realtime armor viewer's active-row tint
+- *(theme)* Theme all seven egui_dock TabStyle interaction variants
+- *(ui)* Match Stats tab copy/delete button heights
+- *(ui)* Repair contrast regressions on Settings tab and Session button
+- *(ui)* Retune armor.pen polarity and add crown_host/crown_cohost/notice roles
+- *(ui)* Remaining theme audit fixes (export colour, selection cue, links, playhead tint, theme seed, guard list)
+- *(ui)* Soften dark mode contrast, raised active dock tab, crown_cohost site
+- *(search)* Vertical group body (indent panic) and focus replay tab on open
+- *(theme)* Retire widgets.active inversion breaking strong_text_color app-wide
+- *(player-tracker)* Match roster staleness to resolved params, drop roster clone
+- *(player-tracker)* Span the viewport with the historical detail block
+- *(player-tracker)* Plain-language empty state for the current match roster
+- *(player-tracker)* Keep the historical detail block inside the Player column
+- *(player-tracker)* Key the clan breakdown cache on encounter ingest
+- *(player-tracker)* Keep the clans member list inside the Clan column
+- *(player-tracker)* Read a NOT NULL clan as NOT NULL, reword member matches
+- *(player-tracker)* Key the clan cache on the resolved window
+- *(ui)* Stop the dock take-and-put-back dirtying persisted state
+- *(player-tracker)* Pick the cell's region by its left edge
+- *(player-tracker)* Drop the no-op division-sync latch release on Clear Stats
+- *(replay-ui)* Remove replay listing left padding
+- *(timeline)* Invalidate the cache on merge, put the caret on the divider, dedup caps by index
+- *(replay-ui)* Stop the listing tree drawing into a collapsing panel
+- *(replay-ui)* Let the timeline event list fill the window width
+- *(replay-ui)* Guard the listing tree on the clip rect, not the panel width
+- *(replay-ui)* Drop historical-framing comment, fix vacuous kill-count assertion
+- *(replay-ui)* Add missing test case for both mtimes absent
+- *(replay-ui)* Paint listing rows at the font row_height reserves for, avoid a per-frame summaries clone in the ungrouped path
+- *(replay-ui)* Panic-isolate and blacklist-guard the live NewReplay/ModifiedReplay parse handlers
+- *(replay-ui)* Correct virtualized row height, defer panel auto-size, and stop redundant reindex/reload work
+- *(replay-ui)* Fix grouped-tree row clipping, iconify the stats line, drop the outcome glyph
+- *(replay-ui)* Tooltip the icon-only stats line in grouped listing rows
+- *(replay-ui)* Drop the skull glyph and disambiguate the row timestamp
+- *(index)* Constrain source uniqueness and collapse duplicate live sources
+- *(index)* Make the surviving row genuinely the better one when live sources disagree
+- *(index)* Resolve an existing Live source across the single-live-index conflict path
+- *(index)* Describe SourceCreationFailed's construction condition, not its likelihood
+- *(index)* Boundary-check relocate_source prefixes, reject nested roots, structure root-ownership error
+- *(replay-ui)* Scope player row expansion state to its own report
+- *(replay-ui)* Salt row expansion with a per-report counter, not arena id
+- *(replay-index)* Tighten source-uniqueness docs and test coverage
+- *(replay-ui)* Hoist the live workspace out of the map, route summary handlers by workspace id
+- *(replay-ui)* Unify workspace accessor resolution, type the request slots, and cover reset
+- *(replay-ui)* Route live-directory writes to the live workspace
+- *(replay-ui)* Load each workspace's own summaries
+- *(replay-ui)* Draw each replay tab from its own workspace
+- *(replay-ui)* Scope the no-reentrancy comments correctly, keep floating windows redrawing when a tab's workspace closes mid-frame
+- *(replay-ui)* Stop hoisting the floating-window calls, keep them after the dock write-back on both paths
+- *(replay-ui)* Report ingest prerequisites and panics, pin title-label tests
+- *(replay-ui)* Keep one workspace per frame and per pending request
+- *(data-mgr)* Tell an unreachable build apart from an unpublished one
+- *(replay-ui)* Give the download offer a way out and stop it hiding replays
+- *(replay-ui)* Release a stuck reingest and tighten its tests
+- *(data-mgr)* Bound the corrupt-object message and stop claiming an audit that did not run
+- *(replay-ui)* Keep ingest progress moving and cover the indexing step
+- *(replay-ui)* Keep replay hydration off the UI thread and out of a panic
+- *(wowsunpack)* Stop discarding crew skills on some builds
+- *(replay-ui)* Count a legacy dump as available game data
+- *(data-mgr)* Make the download sequencing test actually detect concurrency
+- *(replay-ui)* Treat a build already proved unloadable as unavailable
+- *(replay-ui)* Report a directory download from the moment it starts
+- *(cli)* Move console_writer before tests, drop owned-path comparisons
+- *(cli)* Show a message box when a parse error has no console to write to
+- *(cli)* Normalize finalize-update paths before comparison
+- *(cli)* Return the normalized path finalize-update deletes
+- *(armor)* Convert fuse travel at the ship-model scale, not BigWorld
+- *(data)* Read dumped builds through BuildCas, not a raw vfs/ tree
+- *(ballistics)* Arm the fuse against effective armor, not nominal
+- *(armor-viewer)* Re-resolve the camo selection after a mid-decode reload
+- *(theme)* Make text_dim actually dimmer than body text
+- *(theme)* Scope DIM_CONTRAST_FLOOR to test builds
+- *(armor-viewer)* Make engaged mode toggles visible
+- *(ui)* Repair review findings from the colour-pass wave
+- *(ui)* Twitch token button reads validation_failed, not is_valid
+- *(settings)* Stop wows-dir focus gate from going stale off-tab
+- *(search)* Order Map's nullary op check before the catalogue special-case
+- *(search)* Add doc comment and strengthen free-text test
+- *(search)* Union alt labels, make | a real or, pin not precedence
+- *(search)* Cut inside a quantifier body and tighten sugar spans
+- *(search)* Double interior quotes and finish deriving the quoting rule
+- *(config/query-ast)* Descend into Not in Expr::children
+- *(config/query-text)* Only split a term on a standalone nullary operator
+- *(config/query-sql)* Make the map catalogue half answer its operator
+- *(replay-ui)* Colour the timeline-failure message from the semantic layer
+- *(query-bar)* Thread locale into pill numbers, reuse the outcome key, cover roster composition
+- *(query-bar)* Canonicalise collapses a single-child root uniformly
+- *(query-bar)* Pin Quant bracket span coverage, rename at_row_start
+- *(query-bar)* Type suggestion category, discriminating tier test
+- *(query-bar)* Paint nested group frames outermost first
+- *(query-bar)* Review round -- fragment rewriting, focus, and depth tint
+- *(query-bar)* Make the focus repair survive the frame, rank the fragment
+- *(query-bar)* Carry nesting on the bracket stroke, drop the fill
+- *(query-bar)* Drop the dead-code allows and offer match-level fields
+- *(search)* Balance the reply count and drop stale value replies
+- *(search)* Let query-bar edits address a one-pill query
+- *(search)* Repaint for catalogue value rows and drop superseded replies
+- *(search)* Harden the query bar's per-keystroke paths
+- *(search)* Name old ships from the index and repair missing PR
+- *(search)* Make a stored rating survive a re-index, prefer the provider
+- *(theme)* Merge the active dock tab into its page
+- *(theme)* Quiet the settings attention tab
+- *(renderer)* Eliminate zoom/pan input lag and correct the lock comment
+- *(renderer)* Restore first-frame collab logs and honor cancel mid-burst
+- *(renderer)* Restore doc comments and add frame/clock alignment test
+- *(renderer)* Key preview bake slot ownership by id, not row
+- *(preview)* Serialize build loads, restart the loop, and bound the map textures
+- *(query-bar)* Pin literal strings and gate pill_text as test-only
+- *(query-bar)* Pin enum-value round trip, label equality, and exhaustive label match
+- *(query-bar)* Pin roster coverage, the nullary invariant, and the no-op trap in set_field
+- *(query-bar)* Fix set_field's contract wording and widen exhaustive seeding
+- *(query-bar)* Square the segment click-target floor to row height
+- *(query-bar)* Dedicated separator colour and hover-wash review fixes
+- *(query-bar)* Keep the keyboard off rows the pointer cannot click
+- *(query-bar)* Sweep every roster shape through the segment resolvers
+- *(query-bar)* Open the value editor whenever the value is replaced
+- *(query-bar)* Keep the dropdown at bar width and the caret hit test on its own row
+- *(core)* Untypo the standart game-mode token, sharpen the id-table test
+- *(battle-world)* Widen game_mode_id's unknown to carry its true u32 value
+- *(search)* Exclude the unrepresentable game mode, narrow its value, fix labels, pin translations
+- *(search)* Typeset game-mode constant-name labels for reading, not shouting
+- *(search)* A typed date means that whole local day
+- *(search)* Real-database date-inequality and fall-back-DST test coverage
+- *(query-bar)* Withdraw a minted placeholder when its editor is dismissed
+- *(query-bar)* Report the restore a segment click performs
+- *(query-bar)* Gate the click retry on identity, not on a restore having happened
+- *(query-bar)* Edit a term where its pill is, and refuse a withdrawn pill's path
+- *(query-bar)* Keep an in-place caret inside the bar and in the pill's slot
+- *(query-bar)* Size the suggestion popup to its content, not the bar
+- *(search)* Refresh the game-mode gap on re-index; log unrecognised ids
+- *(query-bar)* Keep a typed minted value, wire the box's neighbours, mark the box
+- *(query-bar)* Frame the open box, cover the pill it sits in, scope the fill claim
+- *(query-bar)* Let dropdown popup width follow content, not the anchor
+- *(search)* Route the mode alias to game-mode, not game-type
+- *(query-bar)* Vertically centre the inline edit box's text
+- *(replays)* Make ship config dump match closer to in-game description + fix for old versions
+- *(search)* Move map preview to its own icon, fix backwards sort arrows
+- *(search)* Tint outcomes the way the file listing does
+- *(search)* Pad the results table, and trim its column lines to the header
+- *(query-bar)* Backspace removes the filter at the caret in one press
+- *(renderer)* Keep the replay renderer dark under the light theme
+- *(query-bar)* Backspace reaches the filters inside a quantifier
+- *(search)* Pad the results table, and stop the clip eating its dividers
+- *(query-bar)* Stop quoting text values inside the value editor box
+- *(search)* The render action is a play button, not a film strip
+- *(render)* Report a failed startup instead of exiting with no window
+- *(player_tracker)* Use CBOR for API calls
+- *(toolkit)* Stop a stats outage from draining the request budget
+- *(player-tracker)* Key live-match writes to the match they started for
+- *(toolkit)* Require completed ShipBuilds uploads
+- *(toolkit)* Reject redirected ShipBuilds uploads
+- *(toolkit)* Validate debug ShipBuilds responses
+- *(toolkit)* Preflight ShipBuilds payloads
+- *(toolkit)* Harden ShipBuilds replay batches
+- *(toolkit)* Count only the game's own replays towards session stats
+- *(wows-replays)* Review fixes for the game-data context
+- Review fixes for the game-data untangle
+- Unbreak the parity test build and a clippy lint in test targets
+- Close review gaps in the egui_inbox wake paths
+- *(toolkit)* Drop the unread ship_id field from the armor viewer catalog
+- *(toolkit)* Clear remaining clippy -D warnings lints
+- *(toolkit)* Parse workspace root shorthand from the string so drive and UNC prefixes shorten identically on every platform
+- *(toolkit)* Skip kittest snapshot comparison when no wgpu adapter exists
+- *(toolkit)* Skip flush retries when a replay file no longer exists
+- *(toolkit)* Read the live roster from the battle in progress
+
+### ⚡ Performance
+
+- *(gpui-port)* Remove per-frame UI-thread work in replay inspector render paths
+- *(player-tracker)* Precompute historical row expansion factors
+- *(player-tracker)* Hoist the sort boundary and decorate the in-range count
+- *(player-tracker)* Split the clan cache so only a real input change queries
+- *(replay-ui)* Virtualize the ungrouped listing and collapse large groupings
+- *(replays)* Remember which builds could not be resolved
+- *(replay-ui)* Remember when a build has no fire-section geometry
+- *(replays)* Pin the main build and bound the rest with an LRU
+- *(replay-ui)* List replays from the index without parsing them
+- *(replays)* Add a profiling harness for the replay load path
+- *(replays)* Cut per-packet hashing and repeated skill case conversion
+- *(wowsunpack)* Build the VFS index without copying it three times
+- *(replays)* Cache converted GameParams for dumped builds
+- *(data-mgr)* Share one HTTP client across game data requests
+- *(data-mgr)* Download a build selection sequentially into the shared CAS
+- *(armor-viewer)* Composite camos in the shader instead of on the CPU
+- *(armor-viewer)* Decode each camo image once and share bind groups
+- *(armor-viewer)* Decode camos on a worker thread
+- *(armor-viewer)* Decode camos on one worker per pane
+- *(wows-replays)* Zero-copy metadata APIs and streaming interleaved Blowfish decrypt
+- *(wows-toolkit)* Scan replay directories via metadata-only parsing
+- *(wows-replays)* Stop paying for diagnostics and arg growth per packet
+- Cut per-packet dispatch and allocation costs in replay processing
+- *(wows-toolkit)* Use the borrowed metadata parse for bulk directory scans
+- *(wows-toolkit)* Read directory-scan headers on one worker per core
+
+### ◀️ Revert
+
+- *(core)* Replay world units are 15 meters after all
+
 ## [0.1.70] - 2026-06-29
 
 ### 🚀 Features
