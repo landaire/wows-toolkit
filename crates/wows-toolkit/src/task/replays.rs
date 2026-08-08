@@ -507,7 +507,7 @@ fn parse_replay_data_in_background(
                         let results_available = battle_report.battle_results().is_some();
 
                         // Create a dummy sender since we don't need to send background tasks from here
-                        let (dummy_sender, _) = mpsc::channel();
+                        let (dummy_sender, _) = egui_inbox::UiInbox::channel();
                         let deps = crate::data::wows_data::ReplayDependencies {
                             build_cache: data.build_cache.clone(),
                             shipbuilds_client: data.shipbuilds_client.clone(),
@@ -516,6 +516,7 @@ fn parse_replay_data_in_background(
                             background_task_sender: dummy_sender,
                             is_debug_mode: data.is_debug,
                             personal_rating_data: Arc::clone(&data.personal_rating_data),
+                            egui_ctx: data.egui_ctx.clone(),
                         };
                         replay.build_ui_report(&deps);
 
@@ -661,6 +662,9 @@ pub struct BackgroundParserThread {
     /// Replays that panicked or hard-errored during parsing, keyed by path + mtime
     /// and persisted so they are not retried every launch.
     pub unindexable: crate::data::replay_reconcile::Unindexable,
+    /// Wakes the UI after work that mutated shared state (player tracker,
+    /// sent-replay ledger) so the change shows without waiting for input.
+    pub egui_ctx: egui::Context,
 }
 
 pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std::thread::JoinHandle<Option<()>> {
@@ -776,6 +780,8 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                     error!("Error reading replays dir from background parsing thread: {:?}", e)
                 }
             }
+
+            data.egui_ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
 
         debug!("Beginning background replay receive loop");
@@ -909,6 +915,10 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                     }
                 }
             }
+
+            // Deferred: live-match tailing delivers ModifiedReplay at the
+            // game's flush rate, and the UI only shows the latest state.
+            data.egui_ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
     })
 }
@@ -919,7 +929,7 @@ pub fn start_populating_player_inspector(
     build_cache: crate::data::wows_data::BuildDataCache,
     player_tracker: Arc<RwLock<PlayerTracker>>,
 ) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = super::completion_channel();
     crate::util::thread::spawn_logged("player-inspector", move || {
         for path in replays {
             match ReplayFile::from_file(&path) {
@@ -981,8 +991,8 @@ pub fn start_send_all_replays_to_shipbuilds(
     db_pool: sqlx::SqlitePool,
     tokio_runtime: Arc<tokio::runtime::Runtime>,
 ) -> BackgroundTask {
-    let (completion_tx, completion_rx) = mpsc::channel();
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (completion_tx, completion_rx) = super::completion_channel();
+    let (progress_tx, progress_rx) = egui_inbox::UiInbox::channel();
     let total = ReplayCount(paths.len());
 
     crate::util::thread::spawn_logged("send-replays-to-shipbuilds", move || {
@@ -1064,7 +1074,7 @@ fn run_send_all_replays_to_shipbuilds<U, P>(
     paths: BTreeSet<PathBuf>,
     cache_policy: SendReplayCachePolicy,
     sent_replays: &RwLock<HashSet<String>>,
-    progress_tx: &mpsc::Sender<SendAllReplaysProgress>,
+    progress_tx: &egui_inbox::UiInboxSender<SendAllReplaysProgress>,
     persisted: &SharedPersistedState,
     mut upload: U,
     mut persist: P,
@@ -1190,7 +1200,7 @@ fn index_one_replay(
         return ParseOutcome::HardFailure;
     }
 
-    let (dummy_sender, _) = mpsc::channel();
+    let (dummy_sender, _) = egui_inbox::UiInbox::channel();
     let deps = crate::data::wows_data::ReplayDependencies {
         build_cache: build_cache.clone(),
         shipbuilds_client: shipbuilds_client.clone(),
@@ -1199,6 +1209,9 @@ fn index_one_replay(
         background_task_sender: dummy_sender,
         is_debug_mode: false,
         personal_rating_data: Arc::clone(personal_rating_data),
+        // Dead-ended like the sender: these deps only serve build_ui_report,
+        // which queues no background work and wakes nothing.
+        egui_ctx: egui::Context::default(),
     };
     replay.build_ui_report(&deps);
 
@@ -1237,9 +1250,13 @@ pub fn start_reconcile_index(
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
     force_reindex: bool,
+    egui_ctx: egui::Context,
 ) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (tx, rx) = super::completion_channel();
+    // Throttled: already-indexed files are skipped in a tight loop, so the
+    // per-file progress sends can come thousands per second.
+    let (progress_tx, progress_rx) =
+        crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(250));
 
     crate::util::thread::spawn_logged("reconcile-index", move || {
         let _ = tx.send(run_reconcile_index(
@@ -1268,7 +1285,7 @@ fn run_reconcile_index(
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
     force_reindex: bool,
-    progress_tx: &mpsc::Sender<IndexProgress>,
+    progress_tx: &crate::ui_channel::ThrottledSender<IndexProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let Some(replays_dir) = build_cache.loaded_builds().first().map(|d| d.read().replays_dir.clone()) else {
         return Err(report!("no game data loaded, cannot enumerate replays directory"));
@@ -1363,7 +1380,7 @@ pub fn start_load_row_summaries(
     workspace: crate::db::index::rows::WorkspaceId,
     generation: u64,
 ) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = super::completion_channel();
 
     crate::util::thread::spawn_logged("load-row-summaries", move || {
         let result = tokio_runtime.block_on(async {
@@ -1401,8 +1418,11 @@ pub fn start_read_directory(
     workspace: crate::db::index::rows::WorkspaceId,
     scan: Box<crate::task::scan::DirectoryScan>,
 ) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
-    let (update_tx, update_rx) = mpsc::channel();
+    let (tx, rx) = super::completion_channel();
+    // Throttled: the walk reports per file read, which is fast enough on a
+    // large directory to repaint the listing at the disk's pace.
+    let (update_tx, update_rx) =
+        crate::ui_channel::throttled_channel(deps.egui_ctx.clone(), std::time::Duration::from_millis(250));
 
     crate::util::thread::spawn_logged("read-directory", move || {
         // The box carried the scan through the task channel; the read itself
@@ -1681,7 +1701,7 @@ fn read_build_groups<D, L, W>(
     workspace: crate::db::index::rows::WorkspaceId,
     source: crate::db::index::rows::SourceId,
     steps: BuildSteps<'_, D, L, W>,
-    tx: &mpsc::Sender<IngestUpdate>,
+    tx: &crate::ui_channel::ThrottledSender<IngestUpdate>,
 ) -> WalkOutcome
 where
     D: Fn(&crate::task::BuildRequest) -> bool,
@@ -1761,7 +1781,7 @@ fn ingest_walk<N, R, I>(
     needs_index: &N,
     read: &R,
     index: &I,
-    tx: &mpsc::Sender<IngestUpdate>,
+    tx: &crate::ui_channel::ThrottledSender<IngestUpdate>,
 ) -> WalkOutcome
 where
     N: Fn(&Path) -> bool,
@@ -1851,7 +1871,7 @@ fn run_read_directory(
     tokio_runtime: Arc<tokio::runtime::Runtime>,
     workspace: crate::db::index::rows::WorkspaceId,
     scan: crate::task::scan::DirectoryScan,
-    update_tx: &mpsc::Sender<IngestUpdate>,
+    update_tx: &crate::ui_channel::ThrottledSender<IngestUpdate>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let root = &scan.root;
     let source = tokio_runtime
@@ -2071,7 +2091,7 @@ mod tests {
         where
             F: FnMut(&Path) -> TestOutcome,
         {
-            let (progress_tx, progress_rx) = mpsc::channel();
+            let (progress_tx, progress_rx) = egui_inbox::UiInbox::channel();
             let mut persisted_paths = Vec::new();
             let persisted = sharing(DataSharingMode::Replays);
             let completion = run_send_all_replays_to_shipbuilds(
@@ -2097,7 +2117,7 @@ mod tests {
             TestBatchResult {
                 attempted: completion.attempted,
                 sent: completion.sent,
-                progress: progress_rx.into_iter().collect(),
+                progress: progress_rx.read_without_ctx().collect(),
                 sent_paths: sent_replays.read().clone(),
                 persisted_paths,
             }
@@ -2150,7 +2170,7 @@ mod tests {
         #[test]
         fn persistence_failure_is_attempted_and_does_not_stop_progress() {
             let sent_replays = ledger([]);
-            let (progress_tx, progress_rx) = mpsc::channel();
+            let (progress_tx, progress_rx) = egui_inbox::UiInbox::channel();
             let persistence_attempts = std::cell::Cell::new(0);
             let persisted = sharing(DataSharingMode::Replays);
             let completion = run_send_all_replays_to_shipbuilds(
@@ -2169,7 +2189,7 @@ mod tests {
 
             assert_eq!(completion.attempted, ReplayCount(1));
             assert_eq!(completion.sent, ReplayCount(1));
-            assert_eq!(progress_rx.into_iter().last(), Some(progress(1, 1)));
+            assert_eq!(progress_rx.read_without_ctx().last(), Some(progress(1, 1)));
             assert_eq!(persistence_attempts.get(), 1);
             assert_eq!(&*sent_replays.read(), &HashSet::from(["sent".to_owned()]));
         }
@@ -2177,7 +2197,7 @@ mod tests {
         #[test]
         fn disconnected_progress_receiver_does_not_stop_the_batch() {
             let sent_replays = ledger([]);
-            let (progress_tx, progress_rx) = mpsc::channel();
+            let (progress_tx, progress_rx) = egui_inbox::UiInbox::channel();
             drop(progress_rx);
             let persisted = sharing(DataSharingMode::Replays);
 
@@ -2222,7 +2242,7 @@ mod tests {
         fn a_panicking_replay_logs_its_path_and_payload() {
             let log = crate::test_utils::with_silenced_panic_hook(|| {
                 captured_log(|| {
-                    let (progress_tx, _) = mpsc::channel();
+                    let (progress_tx, _inbox) = egui_inbox::UiInbox::channel();
                     let persisted = sharing(DataSharingMode::Replays);
                     run_send_all_replays_to_shipbuilds(
                         BTreeSet::from([path("panic-payload.wowsreplay")]),
@@ -2243,7 +2263,7 @@ mod tests {
         #[test]
         fn a_panicking_persistence_attempt_does_not_abort_the_remaining_batch() {
             let sent_replays = ledger([]);
-            let (progress_tx, progress_rx) = mpsc::channel();
+            let (progress_tx, progress_rx) = egui_inbox::UiInbox::channel();
             let persisted = sharing(DataSharingMode::Replays);
             let completion = crate::test_utils::with_silenced_panic_hook(|| {
                 run_send_all_replays_to_shipbuilds(
@@ -2265,7 +2285,7 @@ mod tests {
 
             assert_eq!(completion.attempted, ReplayCount(2));
             assert_eq!(completion.sent, ReplayCount(2));
-            assert_eq!(progress_rx.into_iter().collect::<Vec<_>>(), vec![progress(1, 2), progress(2, 2)]);
+            assert_eq!(progress_rx.read_without_ctx().collect::<Vec<_>>(), vec![progress(1, 2), progress(2, 2)]);
             assert_eq!(&*sent_replays.read(), &HashSet::from(["first".to_owned(), "second".to_owned()]));
         }
 
@@ -2274,7 +2294,7 @@ mod tests {
             let persisted = Arc::new(crate::tab_state::TrackedPersistedState::default());
             persisted.write().settings.integrations.data_sharing_mode = DataSharingMode::Replays;
             let sent_replays = ledger([]);
-            let (progress_tx, progress_rx) = mpsc::channel();
+            let (progress_tx, progress_rx) = egui_inbox::UiInbox::channel();
             let mut upload_paths = Vec::new();
             let mut persisted_paths = Vec::new();
 
@@ -2300,7 +2320,7 @@ mod tests {
             assert_eq!(completion.sent, ReplayCount(1));
             assert_eq!(upload_paths, vec![path("first")]);
             assert_eq!(persisted_paths, vec![path("first")]);
-            assert_eq!(progress_rx.into_iter().last(), Some(progress(2, 2)));
+            assert_eq!(progress_rx.read_without_ctx().last(), Some(progress(2, 2)));
             assert_eq!(&*sent_replays.read(), &HashSet::from(["first".to_owned()]));
         }
 
@@ -2330,7 +2350,7 @@ mod tests {
             runtime
                 .block_on(sqlx::query("CREATE TABLE sent_replays (replay_path TEXT PRIMARY KEY)").execute(&pool))
                 .unwrap();
-            let (background_task_sender, _) = mpsc::channel();
+            let (background_task_sender, _inbox) = egui_inbox::UiInbox::channel();
             let deps = ReplayDependencies {
                 build_cache: crate::data::wows_data::BuildDataCache::new(
                     PathBuf::new(),
@@ -2343,6 +2363,7 @@ mod tests {
                 background_task_sender,
                 is_debug_mode: false,
                 personal_rating_data: Arc::new(RwLock::new(crate::util::personal_rating::PersonalRatingData::new())),
+                egui_ctx: egui::Context::default(),
             };
 
             let mut task = start_send_all_replays_to_shipbuilds(
@@ -2358,8 +2379,14 @@ mod tests {
                 BackgroundTaskKind::SendingAllReplaysToShipBuilds { rx, .. } => rx,
                 _ => panic!("unexpected task kind"),
             };
-            assert_eq!(progress_rx.recv_timeout(Duration::from_secs(5)).unwrap(), progress(0, 0));
-            let completion = task.receiver.take().unwrap().recv_timeout(Duration::from_secs(5)).unwrap().unwrap();
+            assert_eq!(
+                crate::test_utils::recv_inbox_timeout(&progress_rx, Duration::from_secs(5)).unwrap(),
+                progress(0, 0)
+            );
+            let completion =
+                crate::test_utils::recv_completion_timeout(&task.receiver.take().unwrap(), Duration::from_secs(5))
+                    .unwrap()
+                    .unwrap();
             assert!(matches!(
                 completion,
                 BackgroundTaskCompletion::ReplaysSentToShipBuilds {
@@ -2433,6 +2460,7 @@ mod tests {
         assert_eq!(&*sent_replays.read(), &HashSet::from([offline_text.clone()]));
         let (_tx, rx) = mpsc::channel();
         let data = BackgroundParserThread {
+            egui_ctx: egui::Context::default(),
             rx,
             sent_replays: Arc::clone(&sent_replays),
             build_cache: crate::data::wows_data::BuildDataCache::new(PathBuf::new(), "en".to_owned(), String::new()),
@@ -2549,7 +2577,9 @@ mod tests {
 
         let task =
             start_load_row_summaries(pool, rt, SourceSelector::Live, crate::db::index::rows::WorkspaceId::LIVE, 0);
-        let completion = task.receiver.unwrap().recv().unwrap().unwrap();
+        let completion = crate::test_utils::recv_completion_timeout(&task.receiver.unwrap(), Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
         match completion {
             BackgroundTaskCompletion::RowSummariesLoaded { summaries, .. } => {
                 assert!(summaries.is_empty(), "Live with no live source must yield an empty map, not an error");
@@ -2577,7 +2607,9 @@ mod tests {
             _ => panic!("unexpected task kind: not LoadingRowSummaries"),
         }
 
-        let completion = task.receiver.unwrap().recv().unwrap().unwrap();
+        let completion = crate::test_utils::recv_completion_timeout(&task.receiver.unwrap(), Duration::from_secs(5))
+            .unwrap()
+            .unwrap();
         match completion {
             BackgroundTaskCompletion::RowSummariesLoaded { workspace: tagged, .. } => {
                 assert_eq!(tagged, workspace, "the completion must carry the same workspace passed in");
@@ -2795,12 +2827,12 @@ mod tests {
         R: Fn(&Path) -> Result<ReadReplay, Report>,
         I: Fn(&ReadReplay, crate::db::index::rows::SourceId) -> Result<(), Report>,
     {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crate::ui_channel::throttled_channel(egui::Context::default(), Duration::ZERO);
         let paths: Vec<PathBuf> = paths.iter().map(PathBuf::from).collect();
         let slice = WalkSlice { workspace: WALK_WORKSPACE, source: WALK_SOURCE, offset, total };
         let outcome = ingest_walk(paths, slice, &needs_index, &read, &index, &tx);
         drop(tx);
-        (rx.into_iter().collect(), outcome)
+        (rx.read_without_ctx().collect(), outcome)
     }
 
     /// Every count a walk reported, whichever update carried it.
@@ -3157,7 +3189,7 @@ mod tests {
     {
         let loaded = std::cell::RefCell::new(Vec::new());
         let walks = std::cell::RefCell::new(Vec::new());
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crate::ui_channel::throttled_channel(egui::Context::default(), Duration::ZERO);
 
         let record_load = |request: &crate::task::BuildRequest| {
             loaded.borrow_mut().push(request.build_u32());
@@ -3172,7 +3204,12 @@ mod tests {
         let outcome = read_build_groups(scan, WALK_WORKSPACE, WALK_SOURCE, steps, &tx);
         drop(tx);
 
-        ReadRun { loaded: loaded.into_inner(), walks: walks.into_inner(), updates: rx.into_iter().collect(), outcome }
+        ReadRun {
+            loaded: loaded.into_inner(),
+            walks: walks.into_inner(),
+            updates: rx.read_without_ctx().collect(),
+            outcome,
+        }
     }
 
     /// Every count the run reported, whichever update carried it.

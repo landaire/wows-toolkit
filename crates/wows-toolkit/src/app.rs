@@ -8,7 +8,6 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::TryRecvError;
 
 use egui::Context;
 use egui::KeyboardShortcut;
@@ -413,7 +412,7 @@ pub struct WowsToolkitApp {
 
     /// Receiver for results from the background networking thread.
     #[serde(skip)]
-    pub(crate) network_result_rx: Option<std::sync::mpsc::Receiver<NetworkResult>>,
+    pub(crate) network_result_rx: Option<egui_inbox::UiInbox<NetworkResult>>,
 
     /// Guard for the non-blocking log writer. Dropping this flushes remaining logs.
     #[cfg(feature = "logging")]
@@ -432,6 +431,12 @@ pub struct WowsToolkitApp {
     /// and notify the background save task.
     #[serde(skip)]
     last_persisted_generation: u64,
+
+    /// How many background tasks the status bar saw when it drew this frame.
+    /// Drawing a task is what registers its completion wake, so a task pushed
+    /// later in the frame needs one more frame painted to be registered.
+    #[serde(skip)]
+    status_bar_task_count: usize,
 
     /// Shutdown signal for the background save task. Dropping or sending
     /// triggers a final save before the task exits.
@@ -980,6 +985,7 @@ impl Default for WowsToolkitApp {
             _log_guard: None,
             realtime_armor_viewers: Vec::new(),
             last_persisted_generation: 0,
+            status_bar_task_count: 0,
             db_pool: None,
             shutdown_tx: None,
             save_task_handle: None,
@@ -1067,6 +1073,9 @@ impl WowsToolkitApp {
 
         // Open SQLite database for persisting app state.
         let mut state: Self = Default::default();
+        // Installed before any watcher, worker, or task exists: everything
+        // that wakes the UI clones its context from here.
+        state.tab_state.egui_ctx = cc.egui_ctx.clone();
         let db_pool = match state.runtime.block_on(crate::db::open_db()) {
             Ok(pool) => Some(pool),
             Err(e) => {
@@ -1348,6 +1357,7 @@ impl WowsToolkitApp {
             twitch_token,
             token_rx,
             self.db_pool.clone(),
+            self.tab_state.egui_ctx.clone(),
         );
 
         #[cfg(feature = "mod_manager")]
@@ -1461,10 +1471,9 @@ impl WowsToolkitApp {
     }
 
     pub fn build_bottom_panel(&mut self, ui: &mut Ui) {
-        // Try to update mod update tasks
-        if let Ok(new_task) = self.tab_state.background_task_receiver.try_recv() {
-            self.tab_state.background_tasks.push(new_task);
-        }
+        // Adopt tasks registered by background threads since the last frame
+        let new_tasks: Vec<_> = self.tab_state.background_task_receiver.read(ui).collect();
+        self.tab_state.background_tasks.extend(new_tasks);
 
         if self.tab_state.persisted.read().settings.app.debug_mode {
             ui.label(RichText::new("⚠ Debug build ⚠").heading().color(ui.visuals().warn_fg_color));
@@ -1496,7 +1505,7 @@ impl WowsToolkitApp {
                     continue;
                 }
                 if let BackgroundTaskKind::DownloadingGameData { rx, last_progress, follow_up } = &mut task.kind {
-                    while let Ok(progress) = rx.try_recv() {
+                    if let Some(progress) = rx.read(ui).last() {
                         *last_progress = Some(progress);
                     }
                     if let Some(progress) = last_progress {
@@ -1530,7 +1539,7 @@ impl WowsToolkitApp {
                             ui.spinner();
                             ui.label(t!("ui.labels.loading_replays", count = pending_replay_count));
                         }
-                        task.check_completion()
+                        task.check_completion(ui.ctx())
                     } else if matches!(task.kind, BackgroundTaskKind::DownloadingGameData { .. })
                         && downloading_count > 1
                     {
@@ -1546,7 +1555,7 @@ impl WowsToolkitApp {
                                 ui.label(t!("ui.messages.downloading_game_data"));
                             }
                         }
-                        task.check_completion()
+                        task.check_completion(ui.ctx())
                     } else {
                         task.build_description(ui)
                     };
@@ -1635,7 +1644,7 @@ impl WowsToolkitApp {
                                 // Whatever the walk sent between the drain above
                                 // and now, before the receiver goes away with the
                                 // task.
-                                let tail: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+                                let tail: Vec<_> = rx.read_without_ctx().collect();
                                 for update in tail {
                                     self.tab_state.apply_ingest_update(update);
                                 }
@@ -1649,7 +1658,7 @@ impl WowsToolkitApp {
                             // offer, so it is the stage the record answers.
                             BackgroundTaskKind::ScanningDirectory { workspace, rx } => {
                                 let workspace_id = *workspace;
-                                let tail: Vec<_> = std::iter::from_fn(|| rx.try_recv().ok()).collect();
+                                let tail: Vec<_> = rx.read_without_ctx().collect();
                                 for update in tail {
                                     self.tab_state.apply_ingest_update(update);
                                 }
@@ -1688,25 +1697,16 @@ impl WowsToolkitApp {
                     UNPACKER_STOP.store(true, Ordering::Relaxed);
                 }
                 let mut done = false;
-                loop {
-                    match rx.try_recv() {
-                        Ok(progress) => {
+                for event in rx.read(ui) {
+                    match event {
+                        crate::ui_channel::StreamEvent::Item(progress) => {
                             self.tab_state.last_progress = Some(progress);
                         }
-                        Err(TryRecvError::Empty) => {
-                            if let Some(last_progress) = self.tab_state.last_progress.as_ref() {
-                                ui.add(
-                                    egui::ProgressBar::new(last_progress.progress)
-                                        .text(last_progress.file_name.as_str()),
-                                );
-                            }
-                            break;
-                        }
-                        Err(TryRecvError::Disconnected) => {
-                            done = true;
-                            break;
-                        }
+                        crate::ui_channel::StreamEvent::Closed => done = true,
                     }
+                }
+                if !done && let Some(last_progress) = self.tab_state.last_progress.as_ref() {
+                    ui.add(egui::ProgressBar::new(last_progress.progress).text(last_progress.file_name.as_str()));
                 }
 
                 if done {
@@ -1715,6 +1715,8 @@ impl WowsToolkitApp {
                 }
             }
         });
+
+        self.status_bar_task_count = self.tab_state.background_tasks.len();
     }
 
     /// Move whatever every running directory walk has sent since the last frame
@@ -1728,7 +1730,7 @@ impl WowsToolkitApp {
             match &task.kind {
                 BackgroundTaskKind::IngestingDirectory { rx, .. }
                 | BackgroundTaskKind::ScanningDirectory { rx, .. } => {
-                    updates.extend(std::iter::from_fn(|| rx.try_recv().ok()));
+                    updates.extend(rx.read_without_ctx());
                 }
                 _ => {}
             }
@@ -1757,7 +1759,8 @@ impl WowsToolkitApp {
         let Some(rx) = &self.network_result_rx else {
             return;
         };
-        while let Ok(result) = rx.try_recv() {
+        let results: Vec<_> = rx.read(&self.tab_state.egui_ctx).collect();
+        for result in results {
             match result {
                 NetworkResult::AppUpdateAvailable(release) => {
                     self.update_window_open = true;
@@ -1884,6 +1887,7 @@ impl WowsToolkitApp {
                             wows_data,
                             self.tab_state.mod_action_receiver.take().unwrap(),
                             self.tab_state.background_task_sender.clone(),
+                            self.tab_state.egui_ctx.clone(),
                         );
                     }
 
@@ -2706,7 +2710,7 @@ impl WowsToolkitApp {
     fn poll_armor_viewer_requests(&mut self) {
         // Poll ship assets loading (so it works without the Armor Viewer tab open)
         if let crate::armor_viewer::state::ShipAssetsState::Loading(ref rx) = self.tab_state.armor_viewer.ship_assets
-            && let Ok(result) = rx.try_recv()
+            && let Some(result) = rx.read(&self.tab_state.egui_ctx).last()
         {
             match result {
                 Ok(assets) => {
@@ -2793,7 +2797,7 @@ impl WowsToolkitApp {
                         let vfs = wd.vfs.clone();
                         let game_metadata = wd.game_metadata.clone();
                         drop(wd);
-                        let (tx, rx) = std::sync::mpsc::channel();
+                        let (tx, rx) = egui_inbox::UiInbox::channel();
                         crate::util::thread::spawn_logged("load-ship-assets", move || {
                             let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
                                 let metadata =
@@ -3161,11 +3165,18 @@ impl WowsToolkitApp {
         // When any replay renderer is playing locally, repaint continuously so
         // deferred viewports stay in sync. Client sessions are event-driven:
         // the peer task repaints registered viewports when state changes.
+        // Otherwise the app paints nothing until an input event or a
+        // background producer wakes it: every channel feeding this loop is an
+        // egui_inbox whose sends request a repaint.
         let any_playing = self.tab_state.replay_renderers.lock().iter().any(|r| r.shared_state().lock().playing);
         if any_playing || !self.realtime_armor_viewers.is_empty() {
             ctx.request_repaint();
-        } else {
-            ctx.request_repaint_after_secs(1.0);
+        }
+
+        // A task pushed after the status bar drew has no completion wake
+        // registered yet; paint one more frame so the status bar sees it.
+        if self.tab_state.background_tasks.len() != self.status_bar_task_count {
+            ctx.request_repaint();
         }
     }
 
@@ -3259,7 +3270,11 @@ impl WowsToolkitApp {
                                 #[cfg(target_os = "windows")]
                                 {
                                     if ui.button(t!("ui.buttons.install_update")).clicked() {
-                                        let task = Some(crate::task::start_download_update_task(&self.runtime, asset));
+                                        let task = Some(crate::task::start_download_update_task(
+                                            &self.runtime,
+                                            asset,
+                                            self.tab_state.egui_ctx.clone(),
+                                        ));
                                         update_background_task!(self.tab_state.background_tasks, task);
                                     }
                                 }
@@ -3598,6 +3613,7 @@ impl WowsToolkitApp {
                 runtime,
                 false,
                 prompt.trigger.clone(),
+                self.tab_state.egui_ctx.clone(),
             ))
         );
         true
@@ -4419,6 +4435,7 @@ impl WowsToolkitApp {
                             rt,
                             Arc::clone(&self.tab_state.personal_rating_data),
                             false,
+                            self.tab_state.egui_ctx.clone(),
                         ))
                     );
                 }

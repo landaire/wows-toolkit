@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 
 use egui_dock::DockState;
@@ -167,7 +166,7 @@ impl VisibilityUndoStack {
 pub enum ShipAssetsState {
     #[default]
     NotLoaded,
-    Loading(Receiver<Result<Arc<wowsunpack::export::ship::ShipAssets>, String>>),
+    Loading(egui_inbox::UiInbox<Result<Arc<wowsunpack::export::ship::ShipAssets>, String>>),
     Loaded(Arc<wowsunpack::export::ship::ShipAssets>),
     Failed(String),
 }
@@ -463,13 +462,15 @@ pub struct CamoDecodeFailure {
 /// newest queued request is decoded, so rapid selection cannot pile up work.
 pub struct CamoWorker {
     pub requests: Sender<CamoDecodeRequest>,
-    pub results: Receiver<Result<CamoDecodeResult, CamoDecodeFailure>>,
+    /// Guarded so a worker that dies without sending (panic) still reports
+    /// closure, which the poll turns into a worker restart.
+    pub results: egui_inbox::UiInbox<crate::ui_channel::StreamEvent<Result<CamoDecodeResult, CamoDecodeFailure>>>,
 }
 
 impl CamoWorker {
     pub fn spawn() -> Self {
         let (request_tx, request_rx) = std::sync::mpsc::channel::<CamoDecodeRequest>();
-        let (result_tx, result_rx) = std::sync::mpsc::channel();
+        let (result_tx, result_rx) = crate::ui_channel::guarded_channel();
 
         crate::util::thread::spawn_logged("decode-camo", move || {
             while let Ok(mut req) = request_rx.recv() {
@@ -515,7 +516,7 @@ pub struct ArmorPane {
     /// Whether a ship is currently loading.
     pub loading: bool,
     /// Receiver for background ship loading.
-    pub load_receiver: Option<Receiver<Result<LoadedShipArmor, String>>>,
+    pub load_receiver: Option<egui_inbox::UiInbox<Result<LoadedShipArmor, String>>>,
     /// Currently hovered triangle info.
     pub hovered_info: Option<ArmorTriangleTooltip>,
     /// Per-part visibility toggles, keyed by (zone, material_name).
@@ -604,9 +605,9 @@ pub struct ArmorPane {
     /// GPU mesh IDs for uploaded hull meshes (so they can be selectively removed on LOD change).
     pub hull_mesh_ids: Vec<MeshId>,
     /// Receiver for background hull-only reload (LOD change).
-    pub hull_load_receiver: Option<Receiver<Result<HullReloadData, String>>>,
+    pub hull_load_receiver: Option<egui_inbox::UiInbox<Result<HullReloadData, String>>>,
     /// Receiver for background upgrade-only reload (hull upgrade change without full ship reload).
-    pub upgrade_load_receiver: Option<Receiver<Result<UpgradeReloadData, String>>>,
+    pub upgrade_load_receiver: Option<egui_inbox::UiInbox<Result<UpgradeReloadData, String>>>,
     /// Selected hull upgrade name (GameParam key). `None` = stock (first alphabetically).
     pub selected_hull: Option<String>,
     /// Selected module overrides: component type -> component name.
@@ -774,6 +775,24 @@ pub struct UpgradeReloadData {
 impl ArmorPane {
     pub fn empty(id: u64) -> Self {
         Self::with_defaults(id, &ArmorViewerDefaults::default())
+    }
+
+    /// Point every pending load inbox at `ctx` so a worker finishing while the
+    /// UI is idle wakes it. The armor tab calls this each frame; the realtime
+    /// viewer never does, because it repaints itself while a load is pending.
+    pub fn register_wake_ctx(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &mut self.load_receiver {
+            rx.set_ctx(ctx);
+        }
+        if let Some(rx) = &mut self.hull_load_receiver {
+            rx.set_ctx(ctx);
+        }
+        if let Some(rx) = &mut self.upgrade_load_receiver {
+            rx.set_ctx(ctx);
+        }
+        if let Some(worker) = &mut self.camo_worker {
+            worker.results.set_ctx(ctx);
+        }
     }
 
     pub fn with_defaults(id: u64, defaults: &ArmorViewerDefaults) -> Self {

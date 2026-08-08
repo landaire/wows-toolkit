@@ -127,8 +127,11 @@ pub fn start_scan_directory(
     workspace: crate::db::index::rows::WorkspaceId,
     root: PathBuf,
 ) -> crate::task::BackgroundTask {
-    let (tx, rx) = std::sync::mpsc::channel();
-    let (update_tx, update_rx) = std::sync::mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
+    // Throttled: the scan reports per header read, and headers read fast
+    // enough to wake the UI thousands of times a second.
+    let (update_tx, update_rx) =
+        crate::ui_channel::throttled_channel(deps.egui_ctx.clone(), std::time::Duration::from_millis(250));
 
     crate::util::thread::spawn_logged("scan-directory", move || {
         let paths = crate::task::replays::walk_replay_files(&root);

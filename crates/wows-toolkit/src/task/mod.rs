@@ -9,12 +9,14 @@ pub mod scan;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc;
-use std::sync::mpsc::TryRecvError;
 
+use egui_inbox::UiInbox;
 use parking_lot::RwLock;
 use rootcause::Report;
 use rust_i18n::t;
+
+use crate::ui_channel::GuardedSender;
+use crate::ui_channel::StreamEvent;
 
 use crate::data::wows_data::BuildData;
 #[cfg(feature = "mod_manager")]
@@ -134,8 +136,22 @@ impl ToastMessage {
     }
 }
 
+/// Result a task's worker reports back through its completion channel.
+pub type TaskCompletion = Result<BackgroundTaskCompletion, Report>;
+
+/// What the completion inbox carries: the worker's result, or the
+/// channel-closed marker a dropped worker leaves behind.
+pub type CompletionEvent = StreamEvent<TaskCompletion>;
+
+/// Completion channel for a [`BackgroundTask`]. Sends wake the UI, and a
+/// worker that drops its sender without sending (including by panicking)
+/// still closes the channel so the task entry is reaped.
+pub fn completion_channel() -> (GuardedSender<TaskCompletion>, UiInbox<CompletionEvent>) {
+    crate::ui_channel::guarded_channel()
+}
+
 pub struct BackgroundTask {
-    pub receiver: Option<mpsc::Receiver<Result<BackgroundTaskCompletion, Report>>>,
+    pub receiver: Option<UiInbox<CompletionEvent>>,
     pub kind: BackgroundTaskKind,
 }
 
@@ -146,13 +162,13 @@ pub enum BackgroundTaskKind {
     // Updates only occur on Windows
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     Updating {
-        rx: mpsc::Receiver<DownloadProgress>,
+        rx: UiInbox<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
     },
     PopulatePlayerInspectorFromReplays,
     LoadingPersonalRatingData,
     DownloadingGameData {
-        rx: mpsc::Receiver<DownloadProgress>,
+        rx: UiInbox<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
         /// What is waiting on this build: a replay to reopen or a directory to
         /// walk again. `None` for downloads nothing is waiting on.
@@ -166,7 +182,7 @@ pub enum BackgroundTaskKind {
     },
     CheckingGameDataUpdates,
     ValidatingGameData {
-        rx: mpsc::Receiver<DownloadProgress>,
+        rx: UiInbox<DownloadProgress>,
         last_progress: Option<DownloadProgress>,
     },
     #[cfg(feature = "mod_manager")]
@@ -177,11 +193,11 @@ pub enum BackgroundTaskKind {
         progress: Arc<parking_lot::Mutex<BatchVideoExportProgress>>,
     },
     ReconcilingIndex {
-        rx: mpsc::Receiver<IndexProgress>,
+        rx: UiInbox<IndexProgress>,
         last_progress: Option<IndexProgress>,
     },
     SendingAllReplaysToShipBuilds {
-        rx: mpsc::Receiver<SendAllReplaysProgress>,
+        rx: UiInbox<SendAllReplaysProgress>,
         last_progress: Option<SendAllReplaysProgress>,
     },
     LoadingRowSummaries {
@@ -193,13 +209,13 @@ pub enum BackgroundTaskKind {
     /// fills as the walk runs rather than when it ends.
     IngestingDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
-        rx: mpsc::Receiver<replays::IngestUpdate>,
+        rx: UiInbox<replays::IngestUpdate>,
     },
     /// Reading the header of every replay under a picked directory, to count
     /// them and group them by build before any is read in full.
     ScanningDirectory {
         workspace: crate::db::index::rows::WorkspaceId,
-        rx: mpsc::Receiver<replays::IngestUpdate>,
+        rx: UiInbox<replays::IngestUpdate>,
     },
 }
 
@@ -255,32 +271,46 @@ impl From<crate::mod_manager::ModTaskInfo> for BackgroundTaskKind {
     }
 }
 
+/// Drain a completion inbox: the worker's result if one arrived, `Closed` if
+/// every sender is gone, `None` while the task is still running. Reading also
+/// registers `ctx` so later sends wake the UI.
+fn poll_completion(receiver: &UiInbox<CompletionEvent>, ctx: &egui::Context) -> Option<CompletionEvent> {
+    let mut closed = false;
+    for event in receiver.read(ctx) {
+        match event {
+            StreamEvent::Item(result) => return Some(StreamEvent::Item(result)),
+            StreamEvent::Closed => closed = true,
+        }
+    }
+    closed.then_some(StreamEvent::Closed)
+}
+
 impl BackgroundTask {
     /// Check if the task has completed without rendering any UI.
-    pub fn check_completion(&mut self) -> Option<Result<BackgroundTaskCompletion, Report>> {
-        if self.receiver.is_none() {
+    pub fn check_completion(&mut self, ctx: &egui::Context) -> Option<TaskCompletion> {
+        let Some(receiver) = &self.receiver else {
             return Some(Ok(BackgroundTaskCompletion::NoReceiver));
-        }
+        };
 
-        match self.receiver.as_ref().unwrap().try_recv() {
-            Ok(result) => Some(result),
-            Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => {
+        match poll_completion(receiver, ctx) {
+            Some(StreamEvent::Item(result)) => Some(result),
+            Some(StreamEvent::Closed) => {
                 self.receiver = None;
                 Some(Ok(BackgroundTaskCompletion::NoReceiver))
             }
+            None => None,
         }
     }
 
     /// TODO: has a bug currently where if multiple tasks are running at the same time, the message looks a bit wonky
-    pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<Result<BackgroundTaskCompletion, Report>> {
-        if self.receiver.is_none() {
+    pub fn build_description(&mut self, ui: &mut egui::Ui) -> Option<TaskCompletion> {
+        let Some(receiver) = &self.receiver else {
             return Some(Ok(BackgroundTaskCompletion::NoReceiver));
-        }
+        };
 
-        match self.receiver.as_ref().unwrap().try_recv() {
-            Ok(result) => Some(result),
-            Err(TryRecvError::Empty) => {
+        match poll_completion(receiver, ui.ctx()) {
+            Some(StreamEvent::Item(result)) => Some(result),
+            None => {
                 match &mut self.kind {
                     BackgroundTaskKind::LoadingData => {
                         ui.spinner();
@@ -295,12 +325,8 @@ impl BackgroundTask {
                         ui.label("Loading replay...");
                     }
                     BackgroundTaskKind::Updating { rx, last_progress } => {
-                        match rx.try_recv() {
-                            Ok(progress) => {
-                                *last_progress = Some(progress);
-                            }
-                            Err(TryRecvError::Empty) => {}
-                            Err(TryRecvError::Disconnected) => {}
+                        if let Some(progress) = rx.read(ui).last() {
+                            *last_progress = Some(progress);
                         }
 
                         if let Some(progress) = last_progress {
@@ -315,10 +341,8 @@ impl BackgroundTask {
                         ui.label("Populating player inspector from historical replays...");
                     }
                     BackgroundTaskKind::DownloadingGameData { rx, last_progress, .. } => {
-                        match rx.try_recv() {
-                            Ok(progress) => *last_progress = Some(progress),
-                            Err(TryRecvError::Empty) => {}
-                            Err(TryRecvError::Disconnected) => {}
+                        if let Some(progress) = rx.read(ui).last() {
+                            *last_progress = Some(progress);
                         }
                         match last_progress {
                             Some(progress) if progress.total > 0 => {
@@ -342,10 +366,8 @@ impl BackgroundTask {
                         // pending footer, so the task bar stays quiet.
                     }
                     BackgroundTaskKind::ValidatingGameData { rx, last_progress } => {
-                        match rx.try_recv() {
-                            Ok(progress) => *last_progress = Some(progress),
-                            Err(TryRecvError::Empty) => {}
-                            Err(TryRecvError::Disconnected) => {}
+                        if let Some(progress) = rx.read(ui).last() {
+                            *last_progress = Some(progress);
                         }
                         match last_progress {
                             Some(progress) if progress.total > 0 => {
@@ -367,12 +389,8 @@ impl BackgroundTask {
                             ui.label("Loading mod database...");
                         }
                         crate::mod_manager::ModTaskInfo::DownloadingMod { mod_info, rx, last_progress } => {
-                            match rx.try_recv() {
-                                Ok(progress) => {
-                                    *last_progress = Some(progress);
-                                }
-                                Err(TryRecvError::Empty) => {}
-                                Err(TryRecvError::Disconnected) => {}
+                            if let Some(progress) = rx.read(ui).last() {
+                                *last_progress = Some(progress);
                             }
 
                             if let Some(progress) = last_progress {
@@ -383,12 +401,8 @@ impl BackgroundTask {
                             }
                         }
                         crate::mod_manager::ModTaskInfo::InstallingMod { mod_info, rx, last_progress } => {
-                            match rx.try_recv() {
-                                Ok(progress) => {
-                                    *last_progress = Some(progress);
-                                }
-                                Err(TryRecvError::Empty) => {}
-                                Err(TryRecvError::Disconnected) => {}
+                            if let Some(progress) = rx.read(ui).last() {
+                                *last_progress = Some(progress);
                             }
 
                             if let Some(progress) = last_progress {
@@ -399,10 +413,8 @@ impl BackgroundTask {
                             }
                         }
                         crate::mod_manager::ModTaskInfo::UninstallingMod { mod_info, rx, last_progress } => {
-                            match rx.try_recv() {
-                                Ok(progress) => *last_progress = Some(progress),
-                                Err(TryRecvError::Empty) => {}
-                                Err(TryRecvError::Disconnected) => {}
+                            if let Some(progress) = rx.read(ui).last() {
+                                *last_progress = Some(progress);
                             }
 
                             if let Some(progress) = last_progress {
@@ -423,10 +435,8 @@ impl BackgroundTask {
                         )));
                     }
                     BackgroundTaskKind::ReconcilingIndex { rx, last_progress } => {
-                        match rx.try_recv() {
-                            Ok(progress) => *last_progress = Some(progress),
-                            Err(TryRecvError::Empty) => {}
-                            Err(TryRecvError::Disconnected) => {}
+                        if let Some(progress) = rx.read(ui).last() {
+                            *last_progress = Some(progress);
                         }
                         match last_progress {
                             Some(progress) if progress.total > 0 => {
@@ -443,7 +453,7 @@ impl BackgroundTask {
                         }
                     }
                     BackgroundTaskKind::SendingAllReplaysToShipBuilds { rx, last_progress } => {
-                        drain_shipbuilds_progress(rx, last_progress);
+                        drain_shipbuilds_progress(rx, ui.ctx(), last_progress);
                         if let Some(progress) = last_progress {
                             ui.add(
                                 egui::ProgressBar::new(progress.fraction()).text(shipbuilds_progress_text(*progress)),
@@ -471,7 +481,7 @@ impl BackgroundTask {
                 }
                 None
             }
-            Err(TryRecvError::Disconnected) => Some(Err(ToolkitError::BackgroundTaskCompleted.into())),
+            Some(StreamEvent::Closed) => Some(Err(ToolkitError::BackgroundTaskCompleted.into())),
         }
     }
 }
@@ -481,10 +491,11 @@ fn shipbuilds_progress_text(progress: SendAllReplaysProgress) -> String {
 }
 
 fn drain_shipbuilds_progress(
-    rx: &mpsc::Receiver<SendAllReplaysProgress>,
+    rx: &UiInbox<SendAllReplaysProgress>,
+    ctx: &egui::Context,
     last_progress: &mut Option<SendAllReplaysProgress>,
 ) {
-    while let Ok(progress) = rx.try_recv() {
+    if let Some(progress) = rx.read(ctx).last() {
         *last_progress = Some(progress);
     }
 }
@@ -703,8 +714,6 @@ mod batch_progress_tests {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
-
     use super::ReplayCount;
     use super::SendAllReplaysProgress;
     use super::drain_shipbuilds_progress;
@@ -719,13 +728,13 @@ mod tests {
 
     #[test]
     fn shipbuilds_progress_drain_retains_the_newest_queued_update() {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = egui_inbox::UiInbox::channel();
         for completed in [1, 2, 3] {
             tx.send(SendAllReplaysProgress::new(ReplayCount(completed), ReplayCount(4))).unwrap();
         }
         let mut last_progress = None;
 
-        drain_shipbuilds_progress(&rx, &mut last_progress);
+        drain_shipbuilds_progress(&rx, &egui::Context::default(), &mut last_progress);
 
         assert_eq!(last_progress, Some(SendAllReplaysProgress::new(ReplayCount(3), ReplayCount(4))));
     }

@@ -384,7 +384,7 @@ pub(crate) fn poll_pane_load_receivers(
     let mut ship_loaded = false;
 
     if let Some(rx) = &pane.load_receiver
-        && let Ok(result) = rx.try_recv()
+        && let Some(result) = rx.read_without_ctx().last()
     {
         match result {
             Ok(armor) => {
@@ -401,7 +401,7 @@ pub(crate) fn poll_pane_load_receivers(
     }
 
     if let Some(rx) = &pane.hull_load_receiver
-        && let Ok(result) = rx.try_recv()
+        && let Some(result) = rx.read_without_ctx().last()
     {
         match result {
             Ok(data) => {

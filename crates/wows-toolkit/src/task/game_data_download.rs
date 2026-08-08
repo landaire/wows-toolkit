@@ -2,7 +2,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
 
 use rootcause::Report;
 use rootcause::prelude::*;
@@ -42,9 +41,12 @@ pub fn start_game_data_download_task(
     runtime: Arc<tokio::runtime::Runtime>,
     force: bool,
     follow_up: Option<GameDataFollowUp>,
+    egui_ctx: egui::Context,
 ) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
-    let (progress_tx, progress_rx) = mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
+    // Throttled: progress reports per downloaded chunk.
+    let (progress_tx, progress_rx) =
+        crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(100));
 
     crate::util::thread::spawn_logged("download-game-data", move || {
         let _ = tx.send(download(output_base, requests, &runtime, force, &progress_tx));
@@ -82,7 +84,7 @@ pub fn start_game_data_plan_task(
     builds: Vec<(u32, Option<String>)>,
     ticket: PlanTicket,
 ) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
 
     crate::util::thread::spawn_logged("plan-game-data-download", move || {
         let _ = tx.send(plan(output_base, builds, ticket));
@@ -95,7 +97,7 @@ pub fn start_game_data_plan_task(
 /// `known_tip` is the repository commit recorded at the last check; when it is
 /// unchanged the check returns immediately with no per-build requests.
 pub fn start_game_data_update_check_task(output_base: PathBuf, known_tip: Option<String>) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
 
     crate::util::thread::spawn_logged("check-game-data-updates", move || {
         let _ = tx.send(check_for_updates(output_base, known_tip));
@@ -107,9 +109,11 @@ pub fn start_game_data_update_check_task(output_base: PathBuf, known_tip: Option
 /// Validate every cached build in `output_base` against the remote repository,
 /// the source of truth. Reports missing, corrupt, or stale builds so the user
 /// can re-download them.
-pub fn start_game_data_validation_task(output_base: PathBuf) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
-    let (progress_tx, progress_rx) = mpsc::channel();
+pub fn start_game_data_validation_task(output_base: PathBuf, egui_ctx: egui::Context) -> BackgroundTask {
+    let (tx, rx) = crate::task::completion_channel();
+    // Throttled: progress reports per validated object.
+    let (progress_tx, progress_rx) =
+        crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(100));
 
     crate::util::thread::spawn_logged("validate-game-data", move || {
         let _ = tx.send(validate(output_base, &progress_tx));
@@ -130,7 +134,7 @@ fn download(
     requests: Vec<crate::task::BuildRequest>,
     runtime: &tokio::runtime::Runtime,
     force: bool,
-    progress_tx: &mpsc::Sender<DownloadProgress>,
+    progress_tx: &crate::ui_channel::ThrottledSender<DownloadProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let client = build_client()?;
 
@@ -204,7 +208,7 @@ fn check_for_updates(output_base: PathBuf, known_tip: Option<String>) -> Result<
 
 fn validate(
     output_base: PathBuf,
-    progress_tx: &mpsc::Sender<DownloadProgress>,
+    progress_tx: &crate::ui_channel::ThrottledSender<DownloadProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()

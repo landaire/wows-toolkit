@@ -10,9 +10,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
 
 use crate::icons;
+use crate::ui_channel::StreamEvent;
 use egui::Label;
 use egui::RichText;
 use egui::Sense;
@@ -177,7 +177,7 @@ pub struct ContentSearchTab {
     /// Which VFS source this search was run against.
     pub source: BrowserSource,
     pub stop_flag: Arc<AtomicBool>,
-    pub rx: Option<mpsc::Receiver<ContentSearchMessage>>,
+    pub rx: Option<egui_inbox::UiInbox<crate::ui_channel::StreamEvent<ContentSearchMessage>>>,
     pub results: Vec<ContentSearchHit>,
     pub progress: (usize, usize),
     pub running: bool,
@@ -204,7 +204,7 @@ pub struct ResourceBrowserState {
     /// Next unique ID for search tabs.
     pub next_search_id: u64,
     /// Receiver for background assets.bin parse result.
-    pub assets_bin_rx: Option<mpsc::Receiver<Result<AssetsBinLoadResult, String>>>,
+    pub assets_bin_rx: Option<egui_inbox::UiInbox<crate::ui_channel::StreamEvent<Result<AssetsBinLoadResult, String>>>>,
     /// Build number the assets.bin loading was initiated for.
     pub assets_bin_loading_build: Option<u32>,
     /// When true, batch extraction decodes supported Assets.bin prototypes to JSON.
@@ -883,21 +883,19 @@ fn file_type_label(name: &str) -> &'static str {
 fn poll_search_tab(search: &mut ContentSearchTab) {
     let Some(rx) = &search.rx else { return };
 
-    loop {
-        match rx.try_recv() {
-            Ok(ContentSearchMessage::Hit(hit)) => {
+    // Collected first: `read_without_ctx` takes the whole queue, so stopping
+    // mid-iteration would drop the rest.
+    let messages: Vec<_> = rx.read_without_ctx().collect();
+    for message in messages {
+        match message {
+            StreamEvent::Item(ContentSearchMessage::Hit(hit)) => {
                 search.results.push(hit);
             }
-            Ok(ContentSearchMessage::Progress(searched, total)) => {
+            StreamEvent::Item(ContentSearchMessage::Progress(searched, total)) => {
                 search.progress = (searched, total);
             }
-            Ok(ContentSearchMessage::Done) => {
-                search.running = false;
-                search.rx = None;
-                return;
-            }
-            Err(mpsc::TryRecvError::Empty) => break,
-            Err(mpsc::TryRecvError::Disconnected) => {
+            // Closed covers a worker that panicked before sending Done.
+            StreamEvent::Item(ContentSearchMessage::Done) | StreamEvent::Closed => {
                 search.running = false;
                 search.rx = None;
                 return;
@@ -1415,7 +1413,11 @@ impl ToolkitTabViewer<'_> {
         self.tab_state.browser_state.next_search_id += 1;
 
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let (tx, rx) = mpsc::channel();
+        // Throttled: hits and progress arrive at scan speed.
+        let (tx, rx) = crate::ui_channel::guarded_channel_throttled(
+            self.tab_state.egui_ctx.clone(),
+            std::time::Duration::from_millis(100),
+        );
 
         let search_tab = ContentSearchTab {
             id,
@@ -1533,7 +1535,11 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn extract_files(&mut self, output_dir: &Path, items_to_unpack: &[VfsPath], decode_json: bool) {
-        let (tx, rx) = mpsc::channel();
+        // Throttled: progress reports per extracted file.
+        let (tx, rx) = crate::ui_channel::guarded_channel_throttled(
+            self.tab_state.egui_ctx.clone(),
+            std::time::Duration::from_millis(100),
+        );
 
         self.tab_state.unpacker_progress = Some(rx);
         UNPACKER_STOP.store(false, Ordering::Relaxed);
@@ -1565,11 +1571,10 @@ impl ToolkitTabViewer<'_> {
                     let path = output_dir.join(parent_path);
                     let filename = file.filename();
                     let file_path = path.join(&filename);
-                    tx.send(UnpackerProgress {
+                    let _ = tx.send(UnpackerProgress {
                         file_name: file_path.to_string_lossy().into(),
                         progress: (files_written as f32) / (file_count as f32),
-                    })
-                    .unwrap();
+                    });
                     if !folders_created.contains(&path) {
                         fs::create_dir_all(&path).expect("failed to create folder");
                         folders_created.insert(path.clone());
@@ -1609,7 +1614,7 @@ impl ToolkitTabViewer<'_> {
     }
 
     fn dump_game_params(&mut self, file_path: PathBuf, format: GameParamsFormat, base_params: bool) {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crate::ui_channel::guarded_channel();
 
         self.tab_state.unpacker_progress = Some(rx);
         UNPACKER_STOP.store(false, Ordering::Relaxed);
@@ -1629,7 +1634,7 @@ impl ToolkitTabViewer<'_> {
                         .and_then(|mut f| Ok(f.read_to_end(&mut game_params_data)?))
                         .expect("failed to read GameParams");
 
-                    tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 }).unwrap();
+                    let _ = tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 0.0 });
 
                     let pickle = game_params_to_pickle(game_params_data).expect("failed to deserialize GameParams");
                     let params_dict = if base_params {
@@ -1671,7 +1676,7 @@ impl ToolkitTabViewer<'_> {
                         }
                     }
 
-                    tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 }).unwrap();
+                    let _ = tx.send(UnpackerProgress { file_name: file_path.to_string_lossy().into(), progress: 1.0 });
                 }));
             }
         }
@@ -1727,7 +1732,7 @@ impl ToolkitTabViewer<'_> {
 
         self.tab_state.browser_state.assets_bin_loading_build = Some(current_build);
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crate::ui_channel::guarded_channel();
         self.tab_state.browser_state.assets_bin_rx = Some(rx);
 
         crate::util::thread::spawn_logged("load-assets-bin", move || {
@@ -1754,8 +1759,8 @@ impl ToolkitTabViewer<'_> {
     fn poll_assets_bin_loading(&mut self) {
         let Some(rx) = &self.tab_state.browser_state.assets_bin_rx else { return };
 
-        match rx.try_recv() {
-            Ok(Ok(result)) => {
+        match rx.read_without_ctx().next() {
+            Some(StreamEvent::Item(Ok(result))) => {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 // Find the assets.bin browser pane and populate it
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
@@ -1770,7 +1775,7 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
             }
-            Ok(Err(err)) => {
+            Some(StreamEvent::Item(Err(err))) => {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
                     if let UnpackerPane::Browser(browser) = pane
@@ -1782,8 +1787,8 @@ impl ToolkitTabViewer<'_> {
                     }
                 }
             }
-            Err(mpsc::TryRecvError::Empty) => {} // still loading
-            Err(mpsc::TryRecvError::Disconnected) => {
+            None => {} // still loading
+            Some(StreamEvent::Closed) => {
                 self.tab_state.browser_state.assets_bin_rx = None;
                 for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs_mut() {
                     if let UnpackerPane::Browser(browser) = pane
@@ -1861,7 +1866,7 @@ impl ToolkitTabViewer<'_> {
 
                                         if !is_loaded {
                                             let map = map.clone();
-                                            let (tx, rx) = std::sync::mpsc::channel();
+                                            let (tx, rx) = crate::task::completion_channel();
                                             crate::util::thread::spawn_logged("resolve-build", move || {
                                                 match map.resolve_build(build) {
                                                     Some(_) => {

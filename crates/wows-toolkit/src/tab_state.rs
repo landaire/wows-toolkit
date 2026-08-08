@@ -468,7 +468,7 @@ pub struct TabState {
     pub items_to_extract: Mutex<Vec<VfsPath>>,
     #[allow(dead_code)]
     pub translations: Option<gettext::Catalog>,
-    pub unpacker_progress: Option<mpsc::Receiver<UnpackerProgress>>,
+    pub unpacker_progress: Option<egui_inbox::UiInbox<crate::ui_channel::StreamEvent<UnpackerProgress>>>,
     pub last_progress: Option<UnpackerProgress>,
     pub search_tab: crate::ui::search_tab::SearchTabState,
     /// Command palette state (Ctrl+K / Ctrl+P): cascade mode plus on-demand,
@@ -503,7 +503,7 @@ pub struct TabState {
     live_index_source: Option<crate::db::index::rows::SourceId>,
     pub window_settings: SharedWindowSettings,
     pub file_watcher: Option<RecommendedWatcher>,
-    pub file_receiver: Option<mpsc::Receiver<NotifyFileEvent>>,
+    pub file_receiver: Option<egui_inbox::UiInbox<NotifyFileEvent>>,
     pub background_tasks: Vec<BackgroundTask>,
     pub toasts: SharedToasts,
     pub can_change_wows_dir: bool,
@@ -531,9 +531,13 @@ pub struct TabState {
     /// Consumed via `.take()` in `app.rs` — clippy false positive for "never read".
     #[allow(dead_code)]
     pub mod_action_receiver: Option<Receiver<ModInfo>>,
-    pub background_task_receiver: Receiver<BackgroundTask>,
-    pub background_task_sender: Sender<BackgroundTask>,
+    pub background_task_receiver: egui_inbox::UiInbox<BackgroundTask>,
+    pub background_task_sender: egui_inbox::UiInboxSender<BackgroundTask>,
     pub background_parser_tx: Option<Sender<ReplayBackgroundParserThreadMessage>>,
+    /// The one egui context, for waking the UI from background work. A default
+    /// (headless) context outside the app; the real one is installed at app
+    /// construction, before any watcher or worker that wakes through it exists.
+    pub egui_ctx: egui::Context,
     pub parser_lock: Arc<parking_lot::Mutex<()>>,
     pub personal_rating_data: Arc<RwLock<PersonalRatingData>>,
     /// Replays selected for session stats update. When Some, they will be
@@ -637,7 +641,7 @@ pub struct TabState {
 impl Default for TabState {
     fn default() -> Self {
         let (mod_action_sender, mod_action_receiver) = mpsc::channel();
-        let (background_task_sender, background_task_receiver) = mpsc::channel();
+        let (background_task_sender, background_task_receiver) = egui_inbox::UiInbox::channel();
         Self {
             persisted: Arc::new(TrackedPersistedState::default()),
             player_tracker: Default::default(),
@@ -678,6 +682,7 @@ impl Default for TabState {
             background_task_receiver,
             background_task_sender,
             background_parser_tx: None,
+            egui_ctx: egui::Context::default(),
             parser_lock: Arc::new(parking_lot::Mutex::new(())),
             personal_rating_data: Arc::new(RwLock::new(PersonalRatingData::new())),
             replays_for_session_reset: None,
@@ -1006,6 +1011,7 @@ impl TabState {
             background_task_sender: self.background_task_sender.clone(),
             is_debug_mode: self.persisted.read().settings.app.debug_mode,
             personal_rating_data: Arc::clone(&self.personal_rating_data),
+            egui_ctx: self.egui_ctx.clone(),
         })
     }
 
@@ -1062,7 +1068,14 @@ impl TabState {
         }
         update_background_task!(
             self.background_tasks,
-            Some(crate::task::start_game_data_download_task(output_base, requests, runtime, true, None))
+            Some(crate::task::start_game_data_download_task(
+                output_base,
+                requests,
+                runtime,
+                true,
+                None,
+                self.egui_ctx.clone()
+            ))
         );
     }
 
@@ -1077,7 +1090,10 @@ impl TabState {
             return;
         };
         self.validating_game_data_cache = true;
-        update_background_task!(self.background_tasks, Some(crate::task::start_game_data_validation_task(output_base)));
+        update_background_task!(
+            self.background_tasks,
+            Some(crate::task::start_game_data_validation_task(output_base, self.egui_ctx.clone()))
+        );
     }
 
     /// Re-download every cached build the last validation flagged for repair.
@@ -1096,7 +1112,14 @@ impl TabState {
         }
         update_background_task!(
             self.background_tasks,
-            Some(crate::task::start_game_data_download_task(output_base, requests, runtime, true, None))
+            Some(crate::task::start_game_data_download_task(
+                output_base,
+                requests,
+                runtime,
+                true,
+                None,
+                self.egui_ctx.clone()
+            ))
         );
     }
 
@@ -1105,15 +1128,19 @@ impl TabState {
         let parser_lock_arc = Arc::clone(&self.parser_lock);
         let parser_lock = parser_lock_arc.try_lock();
         if parser_lock.is_none() {
-            // don't make the UI hang
+            // Don't make the UI hang. Any queued watcher events stay in the
+            // inbox, and their wake has already been spent, so schedule the
+            // retry the idle repaint tick used to provide. The inbox cannot be
+            // peeked, so this fires even when it is empty; one second keeps
+            // that no worse than the old tick while the lock is contended.
+            if self.file_receiver.is_some() {
+                self.egui_ctx.request_repaint_after(std::time::Duration::from_secs(1));
+            }
             return;
         }
 
-        let events: Vec<_> = self
-            .file_receiver
-            .as_ref()
-            .map(|file| std::iter::from_fn(|| file.try_recv().ok()).collect())
-            .unwrap_or_default();
+        let events: Vec<_> =
+            self.file_receiver.as_ref().map(|file| file.read(&self.egui_ctx).collect()).unwrap_or_default();
 
         for file_event in events {
             match file_event {
@@ -1404,7 +1431,9 @@ impl TabState {
         self.background_parser_tx = None;
 
         debug!("creating filesystem watcher");
-        let (tx, rx) = mpsc::channel();
+        let rx = egui_inbox::UiInbox::new_with_ctx(&self.egui_ctx);
+        let tx = rx.sender();
+        let watcher_ctx = self.egui_ctx.clone();
         let (background_tx, background_rx) = mpsc::channel();
 
         self.background_parser_tx = Some(background_tx.clone());
@@ -1433,6 +1462,7 @@ impl TabState {
                 personal_rating_data: Arc::clone(&self.personal_rating_data),
                 index_source_id: None,
                 unindexable: crate::data::replay_reconcile::Unindexable::default(),
+                egui_ctx: self.egui_ctx.clone(),
             };
             drop(p);
             let _ = crate::task::start_background_parsing_thread(background_thread_data);
@@ -1448,9 +1478,24 @@ impl TabState {
                     // the app shuts down. Log and drop the event rather than
                     // panicking, which runs on notify's own thread and would kill
                     // the watcher for the rest of the session.
+                    //
+                    // Modified events defer their repaint: the game appends to
+                    // the live replay all match long, and waking per write
+                    // would keep the backgrounded UI repainting while the user
+                    // plays. Everything else is rare and wakes immediately.
                     let send_ui = |file_event: NotifyFileEvent| {
-                        if let Err(e) = tx.send(file_event) {
-                            debug!("file watcher receiver disconnected, dropping event: {e}");
+                        let deferred = matches!(file_event, NotifyFileEvent::Modified(_));
+                        let result = if deferred {
+                            let sent = tx.send_without_request_repaint(file_event);
+                            if sent.is_ok() {
+                                watcher_ctx.request_repaint_after(std::time::Duration::from_millis(500));
+                            }
+                            sent
+                        } else {
+                            tx.send(file_event)
+                        };
+                        if result.is_err() {
+                            debug!("file watcher receiver disconnected, dropping event");
                         }
                     };
 
@@ -1538,7 +1583,7 @@ impl TabState {
 
     #[must_use]
     pub fn load_game_data(&self, wows_directory: PathBuf) -> BackgroundTask {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crate::task::completion_channel();
         let settings = self.persisted.read();
         let locale = settings.settings.app.locale.clone().unwrap();
         let auto_dump = settings.settings.game.auto_dump_game_data;
@@ -1785,7 +1830,7 @@ mod tests {
         state.set_active_workspace(other_id);
         assert_eq!(state.active_workspace_id(), other_id, "the other workspace must actually be active");
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = egui_inbox::UiInbox::channel();
         state.file_receiver = Some(rx);
         tx.send(NotifyFileEvent::Removed(path.clone())).expect("receiver is held by state, not dropped");
 

@@ -48,7 +48,6 @@ use std::sync::LazyLock;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
-use std::sync::mpsc::Sender;
 
 use rootcause::Report;
 
@@ -780,7 +779,7 @@ pub struct UiReport {
     replay_sort: Arc<Mutex<SortOrder>>,
     columns: Vec<ReplayColumn>,
     row_heights: BTreeMap<u64, f32>,
-    background_task_sender: Option<Sender<BackgroundTask>>,
+    background_task_sender: Option<egui_inbox::UiInboxSender<BackgroundTask>>,
     selected_row: Option<(u64, bool)>,
     debug_mode: bool,
     /// `true` when this UiReport was built from a Replay with merged alt
@@ -2347,12 +2346,12 @@ impl UiReport {
                                     };
 
                                     if let Some(sender) = self.background_task_sender.as_ref() {
-                                        sender
-                                            .send(BackgroundTask {
-                                                receiver: None,
-                                                kind: BackgroundTaskKind::OpenFileViewer(viewer),
-                                            })
-                                            .expect("failed to send file viewer task")
+                                        // The app owns the task inbox for its
+                                        // whole life, so this cannot fail.
+                                        let _ = sender.send(BackgroundTask {
+                                            receiver: None,
+                                            kind: BackgroundTaskKind::OpenFileViewer(viewer),
+                                        });
                                     }
 
                                     ui.close_kind(UiKind::Menu);
@@ -5913,6 +5912,7 @@ impl ToolkitTabViewer<'_> {
                     codec: renderer_settings.video_codec,
                     include_pre_battle: renderer_settings.include_pre_battle,
                 },
+                self.tab_state.egui_ctx.clone(),
             );
             self.tab_state.background_tasks.push(task);
             return;
@@ -5948,6 +5948,7 @@ impl ToolkitTabViewer<'_> {
                     codec: renderer_settings.video_codec,
                     include_pre_battle: renderer_settings.include_pre_battle,
                 },
+                self.tab_state.egui_ctx.clone(),
             );
             self.tab_state.background_tasks.push(task);
         }

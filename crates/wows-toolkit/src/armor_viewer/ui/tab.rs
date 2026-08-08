@@ -159,7 +159,7 @@ impl ToolkitTabViewer<'_> {
             let vfs = wd.vfs.clone();
             let game_metadata = wd.game_metadata.clone();
             drop(wd);
-            let (tx, rx) = mpsc::channel();
+            let (tx, rx) = egui_inbox::UiInbox::channel();
             crate::util::thread::spawn_logged("load-ship-assets", move || {
                 let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
                     let metadata = game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;
@@ -174,7 +174,7 @@ impl ToolkitTabViewer<'_> {
 
         // Poll for ShipAssets loading completion
         if let ShipAssetsState::Loading(rx) = &state.ship_assets
-            && let Ok(result) = rx.try_recv()
+            && let Some(result) = rx.read(ui).last()
         {
             match result {
                 Ok(assets) => {
@@ -246,6 +246,7 @@ impl ToolkitTabViewer<'_> {
             &gpu_pipeline,
             &state.comparison_ships,
             state.ifhe_enabled,
+            ui.ctx(),
         );
 
         // If all tabs were closed, create a fresh empty pane so the user isn't stuck.
@@ -1157,13 +1158,15 @@ fn poll_pane_loads(
     pipeline: &GpuPipeline,
     comparison_ships: &[crate::armor_viewer::penetration::ComparisonShip],
     ifhe_enabled: bool,
+    ctx: &egui::Context,
 ) {
     for (_, pane) in dock_state.iter_all_tabs_mut() {
+        pane.register_wake_ctx(ctx);
         crate::armor_viewer::common::poll_pane_load_receivers(pane, device, queue, pipeline);
 
         // Poll upgrade-only reload (hull upgrade change)
         if let Some(rx) = &pane.upgrade_load_receiver
-            && let Ok(result) = rx.try_recv()
+            && let Some(result) = rx.read_without_ctx().last()
         {
             match result {
                 Ok(data) => {
@@ -1178,10 +1181,11 @@ fn poll_pane_loads(
 
         // Poll background camo decodes. Drained in a loop: the worker can finish
         // more than one between frames, and a superseded one still belongs in the cache.
-        loop {
-            match pane.camo_worker.as_ref().map(|worker| worker.results.try_recv()) {
-                None | Some(Err(mpsc::TryRecvError::Empty)) => break,
-                Some(Ok(Ok(data))) => {
+        let camo_outcomes: Vec<_> =
+            pane.camo_worker.as_ref().map(|worker| worker.results.read_without_ctx().collect()).unwrap_or_default();
+        for outcome in camo_outcomes {
+            match outcome {
+                crate::ui_channel::StreamEvent::Item(Ok(data)) => {
                     if let Some(active) = accept_camo_result(pane, data)
                         && let Some(mut armor) = pane.loaded_armor.take()
                     {
@@ -1190,7 +1194,7 @@ fn poll_pane_loads(
                         pane.loaded_armor = Some(armor);
                     }
                 }
-                Some(Ok(Err(failure))) => {
+                crate::ui_channel::StreamEvent::Item(Err(failure)) => {
                     if !camo_result_is_current(pane.camo_pending, failure.request) {
                         tracing::warn!("superseded camo decode failed: {}", failure.message);
                         continue;
@@ -1198,7 +1202,7 @@ fn poll_pane_loads(
                     tracing::error!("Failed to decode camo: {}", failure.message);
                     fail_camo_selection(pane, device, queue, pipeline);
                 }
-                Some(Err(mpsc::TryRecvError::Disconnected)) => {
+                crate::ui_channel::StreamEvent::Closed => {
                     // The worker ended without sending, most likely a panic inside
                     // spawn_logged's catch_unwind. Drop it so the next selection
                     // starts a fresh one, and stop waiting on what it was decoding.
@@ -2545,7 +2549,7 @@ fn load_ship_for_pane_with_lod(
 
     let assets = ship_assets.clone();
     let ship_display_name = display_name.to_string();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = egui_inbox::UiInbox::channel();
     let requested_lod = lod;
 
     // Resolve the Vehicle from GameParams on the main thread so we can use
@@ -2614,7 +2618,7 @@ pub(crate) fn start_hull_lod_reload(
     pane.hull_lod = lod;
 
     let assets = ship_assets.clone();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = egui_inbox::UiInbox::channel();
     let requested_lod = lod;
 
     use wowsunpack::game_params::types::GameParamProvider;
@@ -2909,7 +2913,7 @@ fn start_upgrade_reload(
     param_index: &str,
 ) {
     let assets = ship_assets.clone();
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = egui_inbox::UiInbox::channel();
     let selected_hull = pane.selected_hull.clone();
     let module_overrides = pane.selected_modules.clone();
     let lod = pane.hull_lod;

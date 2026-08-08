@@ -3,10 +3,6 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
-use std::sync::mpsc::TryRecvError;
-use std::sync::mpsc::channel;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -171,8 +167,8 @@ pub struct SearchTabState {
 
     /// Every spawned task sends exactly once, `None` when it produced nothing,
     /// so `in_flight` balances however the task ended.
-    tx: Sender<Option<SearchMsg>>,
-    rx: Receiver<Option<SearchMsg>>,
+    tx: egui_inbox::UiInboxSender<Option<SearchMsg>>,
+    rx: egui_inbox::UiInbox<Option<SearchMsg>>,
     /// The value lookup waiting out its debounce, and when it was asked for.
     debounced: Option<(ValueRequest, Instant)>,
     /// The value lookup whose reply the bar is still waiting for, so a reply to
@@ -202,7 +198,7 @@ pub struct SearchTabState {
 
 impl Default for SearchTabState {
     fn default() -> Self {
-        let (tx, rx) = channel();
+        let (tx, rx) = egui_inbox::UiInbox::channel();
         Self {
             bar: QueryBar::default(),
             results: Vec::new(),
@@ -255,13 +251,10 @@ impl SearchTabState {
 
     /// Applies every reply that has arrived since the last frame.
     fn drain_replies(&mut self) {
-        loop {
-            let reply = match self.rx.try_recv() {
-                Ok(reply) => reply,
-                Err(TryRecvError::Empty) => return,
-                // The tab owns both ends, so the sender outlives every receive.
-                Err(TryRecvError::Disconnected) => return,
-            };
+        // Collected first: `read_without_ctx` takes the whole queue, so a
+        // partial iteration would silently drop the rest.
+        let replies: Vec<_> = self.rx.read_without_ctx().collect();
+        for reply in replies {
             // Counted before the payload is examined, because a task that failed
             // still sends: the count is of tasks, not of results.
             self.in_flight = self.in_flight.saturating_sub(1);
@@ -1086,6 +1079,10 @@ impl ToolkitTabViewer<'_> {
     }
 
     pub fn build_search_tab(&mut self, ui: &mut egui::Ui) {
+        // A worker reply must wake the UI even when the user is idle on this
+        // tab; registering here keeps headless tests (which call
+        // drain_replies directly) free of any context.
+        self.tab_state.search_tab.rx.set_ctx(ui);
         let pool = self.tab_state.db_pool.clone();
         let rt = self.tab_state.tokio_runtime.clone();
         let seeded = self.tab_state.pending_search_query.take();
@@ -1454,7 +1451,7 @@ mod tests {
 
         tab.queue_value_request(ValueRequest::Players { needle: "x".into() });
         let options = vec![ValueOption { label: "Yamato".into(), token: "4179530192".into() }];
-        tab.tx.send(Some(SearchMsg::Values { request: ships, options })).expect("the tab owns the receiver");
+        assert!(tab.tx.send(Some(SearchMsg::Values { request: ships, options })).is_ok(), "the tab owns the receiver");
         tab.drain_replies();
 
         assert!(tab.bar.value_options.is_empty(), "got {:?}", tab.bar.value_options);

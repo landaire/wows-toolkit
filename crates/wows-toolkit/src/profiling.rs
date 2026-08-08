@@ -17,7 +17,6 @@ use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::mpsc;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -112,7 +111,7 @@ impl StageTimings {
 /// either, and the sender is a dead end because the UI report only uses it to
 /// queue follow-up work.
 fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = egui_inbox::UiInbox::channel();
     // Leaking the receiver keeps sends from failing; nothing consumes them.
     std::mem::forget(rx);
     ReplayDependencies {
@@ -124,6 +123,8 @@ fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
         background_task_sender: tx,
         is_debug_mode: false,
         personal_rating_data: Arc::new(RwLock::new(Default::default())),
+        // Headless: nothing paints, so wakes go nowhere by construction.
+        egui_ctx: egui::Context::default(),
     }
 }
 

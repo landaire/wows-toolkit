@@ -365,6 +365,7 @@ fn render_batch(
     asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
     progress: &Arc<Mutex<crate::task::BatchVideoExportProgress>>,
     encode: &BatchEncodeOptions,
+    egui_ctx: &egui::Context,
 ) -> (usize, usize, Vec<std::path::PathBuf>) {
     let mut succeeded_paths = Vec::new();
     let mut failed = 0usize;
@@ -388,6 +389,7 @@ fn render_batch(
             p.current_total_frames = Some(estimated_frames(replay.game_duration));
             p.current_name = replay.replay_name.clone();
         }
+        egui_ctx.request_repaint();
 
         let output_path = output_dir.join(format!("{}.mp4", replay.video_file_stem));
         let output_str = output_path.to_string_lossy().to_string();
@@ -399,11 +401,14 @@ fn render_batch(
             let progress = Arc::clone(progress);
             let per_replay_progress = Arc::clone(&per_replay_progress);
             let stop_flag = Arc::clone(&stop_flag);
+            let egui_ctx = egui_ctx.clone();
             std::thread::spawn(move || {
                 while !stop_flag.load(Ordering::Relaxed) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
                     if let Some(ref p) = *per_replay_progress.lock() {
                         progress.lock().current_frames = p.current;
+                        // Deferred so the sampler does not pin the repaint rate.
+                        egui_ctx.request_repaint_after(std::time::Duration::from_millis(100));
                     }
                 }
             })
@@ -452,15 +457,24 @@ pub fn batch_render_to_folder(
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     encode: BatchEncodeOptions,
+    egui_ctx: egui::Context,
 ) -> crate::task::BackgroundTask {
     let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress::for_batch(paths.len())));
 
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
 
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
-        let (succeeded, failed, _) =
-            render_batch(&paths, &build_cache, &output_dir, &options, &asset_cache, &progress_clone, &encode);
+        let (succeeded, failed, _) = render_batch(
+            &paths,
+            &build_cache,
+            &output_dir,
+            &options,
+            &asset_cache,
+            &progress_clone,
+            &encode,
+            &egui_ctx,
+        );
 
         if failed == 0 {
             toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
@@ -486,10 +500,11 @@ pub fn batch_render_to_clipboard(
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
     toasts: crate::tab_state::SharedToasts,
     encode: BatchEncodeOptions,
+    egui_ctx: egui::Context,
 ) -> crate::task::BackgroundTask {
     let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress::for_batch(paths.len())));
 
-    let (tx, rx) = std::sync::mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
 
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-clipboard", move || {
@@ -502,8 +517,16 @@ pub fn batch_render_to_clipboard(
             }
         };
 
-        let (succeeded, failed, rendered) =
-            render_batch(&paths, &build_cache, temp_dir.path(), &options, &asset_cache, &progress_clone, &encode);
+        let (succeeded, failed, rendered) = render_batch(
+            &paths,
+            &build_cache,
+            temp_dir.path(),
+            &options,
+            &asset_cache,
+            &progress_clone,
+            &encode,
+            &egui_ctx,
+        );
 
         if !rendered.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()

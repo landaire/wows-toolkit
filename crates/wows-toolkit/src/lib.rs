@@ -45,6 +45,7 @@ mod task;
 mod test_utils;
 mod twitch;
 mod ui;
+pub(crate) mod ui_channel;
 pub(crate) mod util;
 pub mod viewport_3d;
 pub use app::WowsToolkitApp;

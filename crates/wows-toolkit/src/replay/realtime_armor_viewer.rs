@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc;
 
 use parking_lot::Mutex;
 
@@ -314,7 +313,9 @@ impl RealtimeArmorViewer {
         self.pane.loading = true;
         let selected_hull = self.pane.selected_hull.clone();
 
-        let (tx, rx) = mpsc::channel();
+        // Plain inbox with no wake ctx: the viewer repaints itself while
+        // `pane.loading` is set, so completion is observed without one.
+        let (tx, rx) = egui_inbox::UiInbox::channel();
         let requested_lod = lod;
 
         crate::util::thread::spawn_logged("load-ship-model", move || {

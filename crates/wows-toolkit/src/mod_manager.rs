@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
-use std::sync::mpsc::Sender;
 
 use http_body_util::BodyExt;
 use reqwest::Url;
@@ -29,14 +28,26 @@ pub enum ModTaskCompletion {
 
 pub enum ModTaskInfo {
     LoadingModDatabase,
-    DownloadingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
-    InstallingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
-    UninstallingMod { mod_info: ModInfo, rx: mpsc::Receiver<DownloadProgress>, last_progress: Option<DownloadProgress> },
+    DownloadingMod {
+        mod_info: ModInfo,
+        rx: egui_inbox::UiInbox<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
+    InstallingMod {
+        mod_info: ModInfo,
+        rx: egui_inbox::UiInbox<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
+    UninstallingMod {
+        mod_info: ModInfo,
+        rx: egui_inbox::UiInbox<DownloadProgress>,
+        last_progress: Option<DownloadProgress>,
+    },
 }
 
 // Used in mod manager feature
 pub fn load_mods_db() -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
     crate::util::thread::spawn_logged("load-mods-db", move || {
         let mods_db = std::fs::read_to_string("../mods.toml").unwrap();
         let result = toml::from_str::<ModManagerIndex>(&mods_db)
@@ -50,7 +61,10 @@ pub fn load_mods_db() -> BackgroundTask {
     BackgroundTask { receiver: Some(rx), kind: ModTaskInfo::LoadingModDatabase.into() }
 }
 
-async fn download_mod_tarball(mod_info: &ModInfo, tx: Sender<DownloadProgress>) -> Result<Vec<u8>, Report> {
+async fn download_mod_tarball(
+    mod_info: &ModInfo,
+    tx: crate::ui_channel::ThrottledSender<DownloadProgress>,
+) -> Result<Vec<u8>, Report> {
     use http_body::Body;
 
     let Ok(url_parse) = Url::parse(mod_info.meta.repo_url()) else {
@@ -101,7 +115,7 @@ fn unpack_mod(
     tarball: &[u8],
     wows_data: SharedBuildData,
     mod_info: &ModInfo,
-    tx: Sender<DownloadProgress>,
+    tx: crate::ui_channel::ThrottledSender<DownloadProgress>,
 ) -> rootcause::Result<()> {
     let tar = flate2::read::GzDecoder::new(tarball);
     let mut archive = tar::Archive::new(tar);
@@ -189,10 +203,18 @@ fn unpack_mod(
     Ok(())
 }
 
-fn install_mod(runtime: Arc<Runtime>, wows_data: SharedBuildData, mod_info: ModInfo, tx: mpsc::Sender<BackgroundTask>) {
+fn install_mod(
+    runtime: Arc<Runtime>,
+    wows_data: SharedBuildData,
+    mod_info: ModInfo,
+    tx: egui_inbox::UiInboxSender<BackgroundTask>,
+    egui_ctx: egui::Context,
+) {
     eprintln!("downloading mod");
-    let (download_task_tx, download_task_rx) = mpsc::channel();
-    let (download_progress_tx, download_progress_rx) = mpsc::channel();
+    let (download_task_tx, download_task_rx) = crate::task::completion_channel();
+    // Throttled: progress reports per downloaded chunk.
+    let (download_progress_tx, download_progress_rx) =
+        crate::ui_channel::throttled_channel(egui_ctx.clone(), std::time::Duration::from_millis(100));
     let _ = tx.send(BackgroundTask {
         receiver: download_task_rx.into(),
         kind: ModTaskInfo::DownloadingMod { mod_info: mod_info.clone(), rx: download_progress_rx, last_progress: None }
@@ -206,8 +228,10 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: SharedBuildData, mod_info: ModI
         Ok(tar_file) => {
             download_task_tx.send(Ok(ModTaskCompletion::ModDownloaded(mod_info.clone()).into())).unwrap();
 
-            let (install_task_tx, install_task_rx) = mpsc::channel();
-            let (install_progress_tx, install_progress_rx) = mpsc::channel();
+            let (install_task_tx, install_task_rx) = crate::task::completion_channel();
+            // Throttled: progress reports per unpacked file.
+            let (install_progress_tx, install_progress_rx) =
+                crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(100));
             let _ = tx.send(BackgroundTask {
                 receiver: install_task_rx.into(),
                 kind: if mod_info.enabled {
@@ -240,11 +264,14 @@ fn install_mod(runtime: Arc<Runtime>, wows_data: SharedBuildData, mod_info: ModI
 fn uninstall_mod(
     wows_data: SharedBuildData,
     mod_info: ModInfo,
-    tx: mpsc::Sender<BackgroundTask>,
+    tx: egui_inbox::UiInboxSender<BackgroundTask>,
+    egui_ctx: egui::Context,
 ) -> rootcause::Result<()> {
     eprintln!("downloading mod");
-    let (uninstall_task_tx, uninstall_task_rx) = mpsc::channel();
-    let (uninstall_progress_tx, uninstall_progress_rx) = mpsc::channel();
+    let (uninstall_task_tx, uninstall_task_rx) = crate::task::completion_channel();
+    // Throttled: progress reports per removed file.
+    let (uninstall_progress_tx, uninstall_progress_rx) =
+        crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(100));
     let _ = tx.send(BackgroundTask {
         receiver: uninstall_task_rx.into(),
         kind: ModTaskInfo::UninstallingMod {
@@ -283,7 +310,8 @@ pub fn start_mod_manager_thread(
     runtime: Arc<Runtime>,
     wows_data: SharedBuildData,
     receiver: mpsc::Receiver<ModInfo>,
-    background_task_sender: mpsc::Sender<BackgroundTask>,
+    background_task_sender: egui_inbox::UiInboxSender<BackgroundTask>,
+    egui_ctx: egui::Context,
 ) {
     crate::util::thread::spawn_logged("mod-watcher", move || {
         while let Ok(mod_info) = receiver.recv() {
@@ -291,10 +319,16 @@ pub fn start_mod_manager_thread(
 
             if mod_info.enabled {
                 eprintln!("installing mod: {:?}", mod_info.meta.name());
-                install_mod(runtime.clone(), wows_data.clone(), mod_info.clone(), background_task_sender.clone());
+                install_mod(
+                    runtime.clone(),
+                    wows_data.clone(),
+                    mod_info.clone(),
+                    background_task_sender.clone(),
+                    egui_ctx.clone(),
+                );
             } else {
                 eprintln!("uninstalling mod: {:?}", mod_info.meta.name());
-                uninstall_mod(wows_data.clone(), mod_info.clone(), background_task_sender.clone())
+                uninstall_mod(wows_data.clone(), mod_info.clone(), background_task_sender.clone(), egui_ctx.clone())
                     .expect("failed to uninstall mod");
             }
         }

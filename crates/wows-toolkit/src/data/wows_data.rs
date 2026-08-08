@@ -856,9 +856,12 @@ pub struct ReplayDependencies {
     pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
     pub twitch_state: Arc<RwLock<crate::twitch::TwitchState>>,
     pub replay_sort: Arc<Mutex<SortOrder>>,
-    pub background_task_sender: mpsc::Sender<BackgroundTask>,
+    pub background_task_sender: egui_inbox::UiInboxSender<BackgroundTask>,
     pub is_debug_mode: bool,
     pub personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+    /// Wakes the UI from the background stages these dependencies feed, and
+    /// paces the throttled progress channels they create.
+    pub egui_ctx: egui::Context,
 }
 
 impl ReplayDependencies {
@@ -953,7 +956,7 @@ impl ReplayLoader {
     pub fn load(self) -> Option<BackgroundTask> {
         let source = self.replay_source;
 
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = crate::task::completion_channel();
 
         let deps = self.deps;
         let input = self.input;

@@ -491,6 +491,7 @@ impl ToolkitTabViewer<'_> {
                                 rt,
                                 Arc::clone(&self.tab_state.personal_rating_data),
                                 false,
+                                self.tab_state.egui_ctx.clone(),
                             ))
                         );
                     }
@@ -514,6 +515,7 @@ impl ToolkitTabViewer<'_> {
                                 rt,
                                 Arc::clone(&self.tab_state.personal_rating_data),
                                 true,
+                                self.tab_state.egui_ctx.clone(),
                             ))
                         );
                     }

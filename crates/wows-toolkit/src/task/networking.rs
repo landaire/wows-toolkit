@@ -69,17 +69,17 @@ pub enum NetworkResult {
 /// State for the background networking thread.
 struct NetworkingThread {
     job_rx: mpsc::Receiver<NetworkJob>,
-    result_tx: mpsc::Sender<NetworkResult>,
+    result_tx: egui_inbox::UiInboxSender<NetworkResult>,
     runtime: Runtime,
     last_constants_check: Option<Instant>,
 }
 
 /// Start the background networking thread.
 ///
-/// Returns the sender for submitting jobs and the receiver for collecting results.
-pub fn start_networking_thread() -> (mpsc::Sender<NetworkJob>, mpsc::Receiver<NetworkResult>) {
+/// Returns the sender for submitting jobs and the inbox results arrive on.
+pub fn start_networking_thread() -> (mpsc::Sender<NetworkJob>, egui_inbox::UiInbox<NetworkResult>) {
     let (job_tx, job_rx) = mpsc::channel();
-    let (result_tx, result_rx) = mpsc::channel();
+    let (result_tx, result_rx) = egui_inbox::UiInbox::channel();
 
     std::thread::Builder::new()
         .name("networking".into())
@@ -356,7 +356,10 @@ pub fn load_versioned_constants_from_disk_with_fallback(target_build: u32) -> Op
 // --- Download update task (stays here, already async with progress) ---
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Result<PathBuf, Report> {
+async fn download_update(
+    tx: crate::ui_channel::ThrottledSender<DownloadProgress>,
+    file: Url,
+) -> Result<PathBuf, Report> {
     let client = crate::util::http::async_client().context("failed to build HTTP client for update download")?;
     let mut body = client
         .get(file)
@@ -410,10 +413,12 @@ async fn download_update(tx: mpsc::Sender<DownloadProgress>, file: Url) -> Resul
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+pub fn start_download_update_task(runtime: &Runtime, release: &Asset, egui_ctx: egui::Context) -> BackgroundTask {
+    let (tx, rx) = crate::task::completion_channel();
 
-    let (progress_tx, progress_rx) = mpsc::channel();
+    // Throttled: progress reports per downloaded chunk.
+    let (progress_tx, progress_rx) =
+        crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(100));
     let url = release.browser_download_url.clone();
 
     runtime.spawn(async move {
@@ -432,7 +437,7 @@ pub fn start_download_update_task(runtime: &Runtime, release: &Asset) -> Backgro
 // --- Constants/PR loading tasks (deserialize JSON in background thread) ---
 
 pub fn load_personal_rating_data(data: Vec<u8>) -> BackgroundTask {
-    let (tx, rx) = mpsc::channel();
+    let (tx, rx) = crate::task::completion_channel();
     crate::util::thread::spawn_logged("load-personal-rating", move || {
         let result: Result<BackgroundTaskCompletion, Report> = serde_json::from_slice(&data)
             .map(BackgroundTaskCompletion::PersonalRatingDataLoaded)
@@ -495,6 +500,7 @@ pub fn start_twitch_task(
     token: Option<Token>,
     mut token_rx: tokio::sync::mpsc::Receiver<TwitchUpdate>,
     db_pool: Option<sqlx::SqlitePool>,
+    egui_ctx: egui::Context,
 ) {
     runtime.spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_secs(60 * 2));
@@ -533,6 +539,7 @@ pub fn start_twitch_task(
                                         state.participants.entry(chatter.clone()).or_default().insert(now);
                                     }
                                 }
+                                egui_ctx.request_repaint();
                                 if let Some(pool) = &db_pool {
                                     persist_twitch_observations(pool, &chatters, now).await;
                                 }
@@ -557,6 +564,7 @@ pub fn start_twitch_task(
                                                     state.participants.entry(chatter.clone()).or_default().insert(now);
                                                 }
                                             }
+                                            egui_ctx.request_repaint();
                                             if let Some(pool) = &db_pool {
                                                 persist_twitch_observations(pool, &chatters, now).await;
                                             }
