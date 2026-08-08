@@ -93,6 +93,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         collab_auto_open,
         zoom_factor,
         theme,
+        code_integrity,
         replay_settings_json,
         search_json,
         output_dir,
@@ -129,6 +130,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             s.collab.disable_auto_open_session_windows,
             s.app.zoom_factor,
             s.app.theme,
+            s.app.code_integrity,
             serde_json::to_string(&s.replay).unwrap_or_default(),
             serde_json::to_string(&s.search).unwrap_or_default(),
             p.output_dir.clone(),
@@ -167,6 +169,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "disable_auto_open_session_windows", &collab_auto_open).await?;
     queries::set_setting(pool, "zoom_factor", &zoom_factor).await?;
     queries::set_setting(pool, "theme", &theme).await?;
+    queries::set_setting(pool, crate::CODE_INTEGRITY_SETTING, &code_integrity).await?;
     queries::set_setting_raw(pool, "replay_settings", &replay_settings_json).await?;
     queries::set_setting_raw(pool, "search", &search_json).await?;
     queries::set_setting(pool, "output_dir", &output_dir).await?;

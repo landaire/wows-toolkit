@@ -122,6 +122,27 @@ impl ToolkitTabViewer<'_> {
                         crate::ui::theme::apply(ui.ctx(), theme);
                     }
                 });
+                // Windows-only: the policy this chooses does not exist on other
+                // platforms, so offering the choice there would be a control
+                // that does nothing.
+                #[cfg(windows)]
+                {
+                    use crate::hardening::CodeIntegrityPreference;
+
+                    ui.horizontal(|ui| {
+                        let mut preference = self.tab_state.persisted.read().settings.app.code_integrity;
+                        ui.label(t!("ui.settings.app.code_integrity"))
+                            .on_hover_text(t!("ui.settings.app.code_integrity_tooltip"));
+                        let mut changed = false;
+                        for choice in CodeIntegrityPreference::ALL {
+                            changed |= ui.radio_value(&mut preference, choice, t!(choice.key())).changed();
+                        }
+                        if changed {
+                            self.tab_state.persisted.write().settings.app.code_integrity = preference;
+                        }
+                    });
+                }
+
                 ui.horizontal(|ui| {
                     ui.label(t!("ui.settings.app.language"));
                     let current_locale =

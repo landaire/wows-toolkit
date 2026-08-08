@@ -215,6 +215,10 @@ impl LegacyWowsToolkitApp {
                 suppress_gpu_encoder_warning: s.suppress_gpu_encoder_warning,
                 zoom_factor: 1.15,
                 theme: crate::data::settings::ThemeChoice::default(),
+                // The legacy `app.ron` predates this setting, so a migrated
+                // install starts on the default rather than inheriting a
+                // choice that was never made.
+                code_integrity: crate::hardening::CodeIntegrityPreference::default(),
             },
             game: GameSettings {
                 wows_dir: s.wows_dir,

@@ -64,23 +64,54 @@ pub fn db_path() -> PathBuf {
 pub fn load_main_window_settings() -> Option<WindowSettings> {
     use std::collections::HashMap;
 
-    let db_path = db_path();
-    if !db_path.exists() {
-        return None;
-    }
-
-    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().ok()?;
-    let pool = rt.block_on(async {
-        let options = SqliteConnectOptions::new()
-            .filename(&db_path)
-            .read_only(true)
-            .busy_timeout(std::time::Duration::from_secs(1));
-        SqlitePoolOptions::new().max_connections(1).connect_with(options).await.ok()
-    })?;
-
-    let sizes: HashMap<WindowKind, WindowSettings> = rt.block_on(queries::get_setting(&pool, "window_sizes"))?;
+    let sizes: HashMap<WindowKind, WindowSettings> = load_startup_setting("window_sizes").ok().flatten()?;
 
     sizes.get(&WindowKind::Main).copied()
+}
+
+/// Why a startup-time settings read did not produce a value.
+///
+/// Separate from the value being absent, because the two call for different
+/// answers: an absent setting has a correct default, and an unreadable one has
+/// none.
+#[derive(Debug, thiserror::Error)]
+pub enum StartupSettingError {
+    #[error("no tokio runtime could be built to read {key}")]
+    Runtime { key: String },
+    #[error("the settings database at {path} could not be opened")]
+    Open { path: PathBuf },
+}
+
+/// Read one setting from the database, synchronously, before the app exists.
+///
+/// For decisions `main()` has to make ahead of `WowsToolkitApp`, which owns the
+/// real connection pool: the initial viewport geometry, and which process
+/// mitigations to apply. Read-only, so it cannot race the running app's writer.
+///
+/// `Ok(None)` is a genuine absence: a first launch with no database at all, or
+/// a key that was never written. `Err` means the read could not be performed,
+/// which callers must not treat as absence.
+pub fn load_startup_setting<T: serde::de::DeserializeOwned>(key: &str) -> Result<Option<T>, StartupSettingError> {
+    let db_path = db_path();
+    if !db_path.exists() {
+        return Ok(None);
+    }
+
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| StartupSettingError::Runtime { key: key.to_string() })?;
+    let pool = rt
+        .block_on(async {
+            let options = SqliteConnectOptions::new()
+                .filename(&db_path)
+                .read_only(true)
+                .busy_timeout(std::time::Duration::from_secs(1));
+            SqlitePoolOptions::new().max_connections(1).connect_with(options).await.ok()
+        })
+        .ok_or(StartupSettingError::Open { path: db_path })?;
+
+    Ok(rt.block_on(queries::get_setting(&pool, key)))
 }
 
 /// Check whether the one-time migration from `app.ron` has already been performed.

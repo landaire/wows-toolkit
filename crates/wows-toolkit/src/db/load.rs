@@ -127,6 +127,13 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<crate::data::settings::ThemeChoice>(pool, "theme").await {
         s.app.theme = v;
     }
+    // Read here only so the settings UI shows what is in force. The value that
+    // decides the policy is read in `main`, before this pool exists.
+    if let Some(v) =
+        queries::get_setting::<crate::hardening::CodeIntegrityPreference>(pool, crate::CODE_INTEGRITY_SETTING).await
+    {
+        s.app.code_integrity = v;
+    }
     if let Some(v) = queries::get_setting::<String>(pool, "collab_display_name").await {
         s.collab.display_name = v;
     }

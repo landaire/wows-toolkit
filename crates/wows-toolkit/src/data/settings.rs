@@ -11,6 +11,7 @@ use wows_toolkit_config::index::query::SortSpec;
 use wows_toolkit_config::index::query_ast::OperatorPreferences;
 
 use crate::data::session_stats::DivisionFilter;
+use crate::hardening::CodeIntegrityPreference;
 use crate::twitch::Token;
 
 pub use wows_toolkit_config::ReplayGrouping;
@@ -369,6 +370,10 @@ pub struct AppPreferences {
     pub zoom_factor: f32,
     /// Which theme to render in.
     pub theme: ThemeChoice,
+    /// Whether to load only Microsoft-signed code into this process. Read at
+    /// startup, before the app exists, because the policy cannot be applied or
+    /// lifted once a window is up.
+    pub code_integrity: CodeIntegrityPreference,
 }
 
 impl Default for AppPreferences {
@@ -384,6 +389,7 @@ impl Default for AppPreferences {
             suppress_gpu_encoder_warning: false,
             zoom_factor: 1.15,
             theme: ThemeChoice::default(),
+            code_integrity: CodeIntegrityPreference::default(),
         }
     }
 }

@@ -12,9 +12,11 @@ mod window;
 
 use std::path::PathBuf;
 
+pub use db::StartupSettingError;
 pub use db::db_path;
 pub use db::is_migrated;
 pub use db::load_main_window_settings;
+pub use db::load_startup_setting;
 pub use db::open_db;
 pub use db::set_migrated;
 pub use settings::ReplayExportFormat;

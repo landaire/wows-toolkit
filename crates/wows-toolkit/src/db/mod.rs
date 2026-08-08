@@ -21,6 +21,7 @@ pub use wows_toolkit_config::db_path;
 pub use wows_toolkit_config::index;
 pub use wows_toolkit_config::is_migrated;
 pub use wows_toolkit_config::load_main_window_settings;
+pub use wows_toolkit_config::load_startup_setting;
 pub use wows_toolkit_config::open_db;
 pub use wows_toolkit_config::queries;
 pub use wows_toolkit_config::set_migrated;
