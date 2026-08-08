@@ -5874,6 +5874,34 @@ impl ToolkitTabViewer<'_> {
         Some((paths, self.tab_state.build_cache.clone()?))
     }
 
+    /// Assemble the shared render/encode context for a batch render from the
+    /// saved renderer settings and the current encoder availability.
+    fn batch_render_context(
+        &self,
+        build_cache: crate::data::wows_data::BuildDataCache,
+    ) -> crate::replay::renderer::BatchRenderContext {
+        let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
+        let options = crate::replay::renderer::render_options_from_saved(&renderer_settings);
+        let status = wows_minimap_renderer::check_encoder();
+        let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
+            renderer_settings.prefer_cpu_encoder,
+            renderer_settings.video_codec,
+            &status,
+        );
+        crate::replay::renderer::BatchRenderContext {
+            build_cache,
+            options,
+            asset_cache: self.tab_state.renderer_asset_cache.clone(),
+            toasts: self.tab_state.toasts.clone(),
+            encode: crate::replay::renderer::BatchEncodeOptions {
+                prefer_cpu,
+                codec: renderer_settings.video_codec,
+                include_pre_battle: renderer_settings.include_pre_battle,
+            },
+            egui_ctx: self.tab_state.egui_ctx.clone(),
+        }
+    }
+
     fn handle_batch_render_request(&mut self, ui: &mut egui::Ui, ws_id: WorkspaceId) {
         // Batch render to folder
         if let Some(paths) = ui.ctx().data_mut(|data| {
@@ -5890,30 +5918,8 @@ impl ToolkitTabViewer<'_> {
                 return;
             };
 
-            let options =
-                crate::replay::renderer::render_options_from_saved(&self.tab_state.persisted.read().settings.renderer);
-            let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
-            let status = wows_minimap_renderer::check_encoder();
-            let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
-                renderer_settings.prefer_cpu_encoder,
-                renderer_settings.video_codec,
-                &status,
-            );
-
-            let task = crate::replay::renderer::batch_render_to_folder(
-                output_dir,
-                paths,
-                build_cache,
-                options,
-                self.tab_state.renderer_asset_cache.clone(),
-                self.tab_state.toasts.clone(),
-                crate::replay::renderer::BatchEncodeOptions {
-                    prefer_cpu,
-                    codec: renderer_settings.video_codec,
-                    include_pre_battle: renderer_settings.include_pre_battle,
-                },
-                self.tab_state.egui_ctx.clone(),
-            );
+            let ctx = self.batch_render_context(build_cache);
+            let task = crate::replay::renderer::batch_render_to_folder(output_dir, paths, ctx);
             self.tab_state.background_tasks.push(task);
             return;
         }
@@ -5927,29 +5933,8 @@ impl ToolkitTabViewer<'_> {
                 return;
             };
 
-            let options =
-                crate::replay::renderer::render_options_from_saved(&self.tab_state.persisted.read().settings.renderer);
-            let renderer_settings = self.tab_state.persisted.read().settings.renderer.clone();
-            let status = wows_minimap_renderer::check_encoder();
-            let prefer_cpu = crate::replay::renderer::resolve_prefer_cpu(
-                renderer_settings.prefer_cpu_encoder,
-                renderer_settings.video_codec,
-                &status,
-            );
-
-            let task = crate::replay::renderer::batch_render_to_clipboard(
-                paths,
-                build_cache,
-                options,
-                self.tab_state.renderer_asset_cache.clone(),
-                self.tab_state.toasts.clone(),
-                crate::replay::renderer::BatchEncodeOptions {
-                    prefer_cpu,
-                    codec: renderer_settings.video_codec,
-                    include_pre_battle: renderer_settings.include_pre_battle,
-                },
-                self.tab_state.egui_ctx.clone(),
-            );
+            let ctx = self.batch_render_context(build_cache);
+            let task = crate::replay::renderer::batch_render_to_clipboard(paths, ctx);
             self.tab_state.background_tasks.push(task);
         }
     }

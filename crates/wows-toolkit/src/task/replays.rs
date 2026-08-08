@@ -1139,6 +1139,34 @@ fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
     }
 }
 
+/// Handles shared by every stage of an "Index all replays" reconciliation
+/// pass: resolving game data per replay build, building UI reports, and
+/// writing index rows.
+#[derive(Clone)]
+pub struct ReconcileIndexDeps {
+    pub build_cache: crate::data::wows_data::BuildDataCache,
+    pub shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
+    pub twitch_state: Arc<RwLock<TwitchState>>,
+    pub db_pool: sqlx::SqlitePool,
+    pub tokio_runtime: Arc<tokio::runtime::Runtime>,
+    pub personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+}
+
+impl ReconcileIndexDeps {
+    /// None until the database pool, tokio runtime, and game data have all
+    /// finished loading; reconciliation cannot run before then.
+    pub fn from_tab_state(tab_state: &crate::tab_state::TabState) -> Option<Self> {
+        Some(Self {
+            build_cache: tab_state.build_cache.clone()?,
+            shipbuilds_client: tab_state.shipbuilds_client.clone(),
+            twitch_state: Arc::clone(&tab_state.twitch_state),
+            db_pool: tab_state.db_pool.clone()?,
+            tokio_runtime: Arc::clone(tab_state.tokio_runtime.as_ref()?),
+            personal_rating_data: Arc::clone(&tab_state.personal_rating_data),
+        })
+    }
+}
+
 /// Parse and index a single replay for the on-demand "Index all replays" pass.
 ///
 /// Distinct from `parse_replay_data_in_background`: no upload, no player-tracker
@@ -1151,12 +1179,7 @@ fn panic_payload_message(payload: &(dyn std::any::Any + Send)) -> String {
 /// re-indexes them once results have landed.
 fn index_one_replay(
     path: &Path,
-    build_cache: &crate::data::wows_data::BuildDataCache,
-    shipbuilds_client: &crate::data::shipbuilds::ShipBuildsClient,
-    twitch_state: &Arc<RwLock<TwitchState>>,
-    db_pool: &sqlx::SqlitePool,
-    tokio_runtime: &tokio::runtime::Runtime,
-    personal_rating_data: &Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+    deps: &ReconcileIndexDeps,
     source_id: crate::db::index::rows::SourceId,
 ) -> ParseOutcome {
     let replay_file = match ReplayFile::from_file(path) {
@@ -1168,7 +1191,7 @@ fn index_one_replay(
     };
 
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
-    let Some(wows_data_for_build) = build_cache.resolve(&replay_version) else {
+    let Some(wows_data_for_build) = deps.build_cache.resolve(&replay_version) else {
         warn!(
             "Skipping replay {:?}: no data for build {}",
             path,
@@ -1211,27 +1234,27 @@ fn index_one_replay(
     }
 
     let (dummy_sender, _) = egui_inbox::UiInbox::channel();
-    let deps = crate::data::wows_data::ReplayDependencies {
-        build_cache: build_cache.clone(),
-        shipbuilds_client: shipbuilds_client.clone(),
-        twitch_state: Arc::clone(twitch_state),
+    let replay_deps = crate::data::wows_data::ReplayDependencies {
+        build_cache: deps.build_cache.clone(),
+        shipbuilds_client: deps.shipbuilds_client.clone(),
+        twitch_state: Arc::clone(&deps.twitch_state),
         replay_sort: Arc::new(Mutex::new(SortOrder::default())),
         background_task_sender: dummy_sender,
         is_debug_mode: false,
-        personal_rating_data: Arc::clone(personal_rating_data),
+        personal_rating_data: Arc::clone(&deps.personal_rating_data),
         // Dead-ended like the sender: these deps only serve build_ui_report,
         // which queues no background work and wakes nothing.
         egui_ctx: egui::Context::default(),
     };
-    replay.build_ui_report(&deps);
+    replay.build_ui_report(&replay_deps);
 
     crate::data::replay_index::index_replay_blocking(
-        tokio_runtime,
-        db_pool,
+        &deps.tokio_runtime,
+        &deps.db_pool,
         &replay,
         source_id,
         jiff::Timestamp::now(),
-        personal_rating_data,
+        &deps.personal_rating_data,
     );
 
     ParseOutcome::ParsedAndSent
@@ -1252,16 +1275,7 @@ fn index_one_replay(
 /// (e.g. personal rating, disconnect state) backfill onto existing rows.
 /// Either way, files in the persistent `Unindexable` blacklist are never
 /// re-parsed.
-pub fn start_reconcile_index(
-    build_cache: crate::data::wows_data::BuildDataCache,
-    shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
-    twitch_state: Arc<RwLock<TwitchState>>,
-    db_pool: sqlx::SqlitePool,
-    tokio_runtime: Arc<tokio::runtime::Runtime>,
-    personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
-    force_reindex: bool,
-    egui_ctx: egui::Context,
-) -> BackgroundTask {
+pub fn start_reconcile_index(deps: ReconcileIndexDeps, force_reindex: bool, egui_ctx: egui::Context) -> BackgroundTask {
     let (tx, rx) = super::completion_channel();
     // Throttled: already-indexed files are skipped in a tight loop, so the
     // per-file progress sends can come thousands per second.
@@ -1269,16 +1283,7 @@ pub fn start_reconcile_index(
         crate::ui_channel::throttled_channel(egui_ctx, std::time::Duration::from_millis(250));
 
     crate::util::thread::spawn_logged("reconcile-index", move || {
-        let _ = tx.send(run_reconcile_index(
-            build_cache,
-            shipbuilds_client,
-            twitch_state,
-            db_pool,
-            tokio_runtime,
-            personal_rating_data,
-            force_reindex,
-            &progress_tx,
-        ));
+        let _ = tx.send(run_reconcile_index(deps, force_reindex, &progress_tx));
     });
 
     BackgroundTask {
@@ -1288,28 +1293,25 @@ pub fn start_reconcile_index(
 }
 
 fn run_reconcile_index(
-    build_cache: crate::data::wows_data::BuildDataCache,
-    shipbuilds_client: crate::data::shipbuilds::ShipBuildsClient,
-    twitch_state: Arc<RwLock<TwitchState>>,
-    db_pool: sqlx::SqlitePool,
-    tokio_runtime: Arc<tokio::runtime::Runtime>,
-    personal_rating_data: Arc<RwLock<crate::util::personal_rating::PersonalRatingData>>,
+    deps: ReconcileIndexDeps,
     force_reindex: bool,
     progress_tx: &crate::ui_channel::ThrottledSender<IndexProgress>,
 ) -> Result<BackgroundTaskCompletion, Report> {
-    let Some(replays_dir) = build_cache.loaded_builds().first().map(|d| d.read().replays_dir.clone()) else {
+    let Some(replays_dir) = deps.build_cache.loaded_builds().first().map(|d| d.read().replays_dir.clone()) else {
         return Err(report!("no game data loaded, cannot enumerate replays directory"));
     };
 
     let now = jiff::Timestamp::now();
-    let source_id = tokio_runtime
-        .block_on(crate::db::index::query::ensure_default_source(&db_pool, &replays_dir, now))
+    let source_id = deps
+        .tokio_runtime
+        .block_on(crate::db::index::query::ensure_default_source(&deps.db_pool, &replays_dir, now))
         .map_err(|e| report!("failed to resolve replay index source: {e}"))?;
 
-    let indexed_paths: HashSet<String> = tokio_runtime
-        .block_on(crate::db::index::query::record_paths_in_source(&db_pool, source_id))
+    let indexed_paths: HashSet<String> = deps
+        .tokio_runtime
+        .block_on(crate::db::index::query::record_paths_in_source(&deps.db_pool, source_id))
         .unwrap_or_default();
-    let mut unindexable = tokio_runtime.block_on(crate::data::replay_reconcile::Unindexable::load(&db_pool));
+    let mut unindexable = deps.tokio_runtime.block_on(crate::data::replay_reconcile::Unindexable::load(&deps.db_pool));
 
     let files = replay_filepaths(&replays_dir).unwrap_or_default();
     let total = files.len();
@@ -1333,18 +1335,7 @@ fn run_reconcile_index(
             &path,
             already_indexed,
             crate::data::replay_reconcile::UploadReconciliation::Satisfied,
-            std::panic::AssertUnwindSafe(|| {
-                index_one_replay(
-                    &path,
-                    &build_cache,
-                    &shipbuilds_client,
-                    &twitch_state,
-                    &db_pool,
-                    &tokio_runtime,
-                    &personal_rating_data,
-                    source_id,
-                )
-            }),
+            std::panic::AssertUnwindSafe(|| index_one_replay(&path, &deps, source_id)),
         );
 
         match outcome {
@@ -1361,7 +1352,7 @@ fn run_reconcile_index(
 
     let _ = progress_tx.send(IndexProgress { done: total as u64, total: total as u64 });
 
-    if unindexable_dirty && let Err(e) = tokio_runtime.block_on(unindexable.save(&db_pool)) {
+    if unindexable_dirty && let Err(e) = deps.tokio_runtime.block_on(unindexable.save(&deps.db_pool)) {
         warn!("failed to persist unindexable replay set: {e}");
     }
 

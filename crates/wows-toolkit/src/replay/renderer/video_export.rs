@@ -350,6 +350,16 @@ pub struct BatchEncodeOptions {
     pub include_pre_battle: bool,
 }
 
+/// Everything a batch render needs beyond the replay list and destination.
+pub struct BatchRenderContext {
+    pub build_cache: BuildDataCache,
+    pub options: RenderOptions,
+    pub asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
+    pub toasts: crate::tab_state::SharedToasts,
+    pub encode: BatchEncodeOptions,
+    pub egui_ctx: egui::Context,
+}
+
 /// Shared helper: render a list of replays sequentially, updating progress.
 ///
 /// Each replay is read off disk here, immediately before it is rendered, so the
@@ -359,13 +369,9 @@ pub struct BatchEncodeOptions {
 /// Returns (succeeded_count, failed_count, output_paths).
 fn render_batch(
     paths: &[std::path::PathBuf],
-    build_cache: &BuildDataCache,
     output_dir: &std::path::Path,
-    options: &RenderOptions,
-    asset_cache: &Arc<parking_lot::Mutex<RendererAssetCache>>,
+    ctx: &BatchRenderContext,
     progress: &Arc<Mutex<crate::task::BatchVideoExportProgress>>,
-    encode: &BatchEncodeOptions,
-    egui_ctx: &egui::Context,
 ) -> (usize, usize, Vec<std::path::PathBuf>) {
     let mut succeeded_paths = Vec::new();
     let mut failed = 0usize;
@@ -379,7 +385,7 @@ fn render_batch(
             p.current_name = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
         }
 
-        let Some(replay) = replay_render_input(path, build_cache) else {
+        let Some(replay) = replay_render_input(path, &ctx.build_cache) else {
             failed += 1;
             continue;
         };
@@ -389,7 +395,7 @@ fn render_batch(
             p.current_total_frames = Some(estimated_frames(replay.game_duration));
             p.current_name = replay.replay_name.clone();
         }
-        egui_ctx.request_repaint();
+        ctx.egui_ctx.request_repaint();
 
         let output_path = output_dir.join(format!("{}.mp4", replay.video_file_stem));
         let output_str = output_path.to_string_lossy().to_string();
@@ -401,7 +407,7 @@ fn render_batch(
             let progress = Arc::clone(progress);
             let per_replay_progress = Arc::clone(&per_replay_progress);
             let stop_flag = Arc::clone(&stop_flag);
-            let egui_ctx = egui_ctx.clone();
+            let egui_ctx = ctx.egui_ctx.clone();
             std::thread::spawn(move || {
                 while !stop_flag.load(Ordering::Relaxed) {
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -421,15 +427,15 @@ fn render_batch(
             &[], // batch rendering doesn't propagate per-replay merge state
             &replay.map_name,
             replay.game_duration,
-            options.clone(),
+            ctx.options.clone(),
             &replay.wows_data,
-            asset_cache,
+            &ctx.asset_cache,
             &per_replay_progress,
-            encode.prefer_cpu,
-            encode.codec,
+            ctx.encode.prefer_cpu,
+            ctx.encode.codec,
             None,
             wows_minimap_renderer::EncoderConfig::default(),
-            encode.include_pre_battle,
+            ctx.encode.include_pre_battle,
         );
 
         stop_flag.store(true, Ordering::Relaxed);
@@ -452,12 +458,7 @@ fn render_batch(
 pub fn batch_render_to_folder(
     output_dir: std::path::PathBuf,
     paths: Vec<std::path::PathBuf>,
-    build_cache: BuildDataCache,
-    options: RenderOptions,
-    asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
-    toasts: crate::tab_state::SharedToasts,
-    encode: BatchEncodeOptions,
-    egui_ctx: egui::Context,
+    ctx: BatchRenderContext,
 ) -> crate::task::BackgroundTask {
     let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress::for_batch(paths.len())));
 
@@ -465,21 +466,12 @@ pub fn batch_render_to_folder(
 
     let progress_clone = Arc::clone(&progress);
     crate::util::thread::spawn_logged("batch-video-export", move || {
-        let (succeeded, failed, _) = render_batch(
-            &paths,
-            &build_cache,
-            &output_dir,
-            &options,
-            &asset_cache,
-            &progress_clone,
-            &encode,
-            &egui_ctx,
-        );
+        let (succeeded, failed, _) = render_batch(&paths, &output_dir, &ctx, &progress_clone);
 
         if failed == 0 {
-            toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
+            ctx.toasts.lock().success(format!("Batch render complete: {} videos saved", succeeded));
         } else {
-            toasts.lock().warning(format!("Batch render: {} succeeded, {} failed", succeeded, failed));
+            ctx.toasts.lock().warning(format!("Batch render: {} succeeded, {} failed", succeeded, failed));
         }
         let _ = tx.send(Ok(crate::task::BackgroundTaskCompletion::NoReceiver));
     });
@@ -495,12 +487,7 @@ pub fn batch_render_to_folder(
 /// Returns a `BackgroundTask` to plug into the global status bar.
 pub fn batch_render_to_clipboard(
     paths: Vec<std::path::PathBuf>,
-    build_cache: BuildDataCache,
-    options: RenderOptions,
-    asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
-    toasts: crate::tab_state::SharedToasts,
-    encode: BatchEncodeOptions,
-    egui_ctx: egui::Context,
+    ctx: BatchRenderContext,
 ) -> crate::task::BackgroundTask {
     let progress = Arc::new(Mutex::new(crate::task::BatchVideoExportProgress::for_batch(paths.len())));
 
@@ -511,22 +498,13 @@ pub fn batch_render_to_clipboard(
         let temp_dir = match tempfile::tempdir() {
             Ok(d) => d,
             Err(e) => {
-                toasts.lock().error(format!("Failed to create temp dir: {e}"));
+                ctx.toasts.lock().error(format!("Failed to create temp dir: {e}"));
                 let _ = tx.send(Ok(crate::task::BackgroundTaskCompletion::NoReceiver));
                 return;
             }
         };
 
-        let (succeeded, failed, rendered) = render_batch(
-            &paths,
-            &build_cache,
-            temp_dir.path(),
-            &options,
-            &asset_cache,
-            &progress_clone,
-            &encode,
-            &egui_ctx,
-        );
+        let (succeeded, failed, rendered) = render_batch(&paths, temp_dir.path(), &ctx, &progress_clone);
 
         if !rendered.is_empty()
             && let Ok(mut clipboard) = arboard::Clipboard::new()
@@ -537,9 +515,9 @@ pub fn batch_render_to_clipboard(
         }
 
         if failed == 0 {
-            toasts.lock().success(format!("{} videos copied to clipboard", succeeded));
+            ctx.toasts.lock().success(format!("{} videos copied to clipboard", succeeded));
         } else {
-            toasts.lock().warning(format!("Batch render: {} copied to clipboard, {} failed", succeeded, failed));
+            ctx.toasts.lock().warning(format!("Batch render: {} copied to clipboard, {} failed", succeeded, failed));
         }
         let _ = tx.send(Ok(crate::task::BackgroundTaskCompletion::NoReceiver));
     });

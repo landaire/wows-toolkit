@@ -4417,29 +4417,10 @@ impl WowsToolkitApp {
                 }
             }
             PaletteAction::IndexAllReplays => {
-                let reindex_deps = match (
-                    self.tab_state.db_pool.as_ref(),
-                    self.tab_state.tokio_runtime.as_ref(),
-                    self.tab_state.build_cache.as_ref(),
-                ) {
-                    (Some(pool), Some(rt), Some(build_cache)) => {
-                        Some((pool.clone(), Arc::clone(rt), build_cache.clone()))
-                    }
-                    _ => None,
-                };
-                if let Some((pool, rt, build_cache)) = reindex_deps {
+                if let Some(deps) = crate::task::ReconcileIndexDeps::from_tab_state(&self.tab_state) {
                     update_background_task!(
                         self.tab_state.background_tasks,
-                        Some(crate::task::start_reconcile_index(
-                            build_cache,
-                            self.tab_state.shipbuilds_client.clone(),
-                            Arc::clone(&self.tab_state.twitch_state),
-                            pool,
-                            rt,
-                            Arc::clone(&self.tab_state.personal_rating_data),
-                            false,
-                            self.tab_state.egui_ctx.clone(),
-                        ))
+                        Some(crate::task::start_reconcile_index(deps, false, self.tab_state.egui_ctx.clone()))
                     );
                 }
             }

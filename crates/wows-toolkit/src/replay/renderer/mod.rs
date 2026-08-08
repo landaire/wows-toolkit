@@ -1417,6 +1417,7 @@ use playback::playback_thread;
 
 mod video_export;
 pub use video_export::BatchEncodeOptions;
+pub use video_export::BatchRenderContext;
 pub use video_export::batch_render_to_clipboard;
 pub use video_export::batch_render_to_folder;
 use video_export::execute_video_export;

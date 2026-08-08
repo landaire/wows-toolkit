@@ -1,6 +1,5 @@
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use egui::OpenUrl;
 use egui::RichText;
@@ -462,16 +461,7 @@ impl ToolkitTabViewer<'_> {
 
                 // Reads all replays into the durable index so the player tracker,
                 // and any future search UI, can query them without re-parsing.
-                let reindex_deps = match (
-                    self.tab_state.db_pool.as_ref(),
-                    self.tab_state.tokio_runtime.as_ref(),
-                    self.tab_state.build_cache.as_ref(),
-                ) {
-                    (Some(pool), Some(rt), Some(build_cache)) => {
-                        Some((pool.clone(), Arc::clone(rt), build_cache.clone()))
-                    }
-                    _ => None,
-                };
+                let reindex_deps = crate::task::ReconcileIndexDeps::from_tab_state(self.tab_state);
                 ui.horizontal(|ui| {
                     if ui
                         .add_enabled(
@@ -479,20 +469,11 @@ impl ToolkitTabViewer<'_> {
                             egui::Button::new(t!("ui.settings.replay.index_all_replays")),
                         )
                         .clicked()
-                        && let Some((pool, rt, build_cache)) = reindex_deps.clone()
+                        && let Some(deps) = reindex_deps.clone()
                     {
                         crate::update_background_task!(
                             self.tab_state.background_tasks,
-                            Some(crate::task::start_reconcile_index(
-                                build_cache,
-                                self.tab_state.shipbuilds_client.clone(),
-                                Arc::clone(&self.tab_state.twitch_state),
-                                pool,
-                                rt,
-                                Arc::clone(&self.tab_state.personal_rating_data),
-                                false,
-                                self.tab_state.egui_ctx.clone(),
-                            ))
+                            Some(crate::task::start_reconcile_index(deps, false, self.tab_state.egui_ctx.clone()))
                         );
                     }
 
@@ -503,20 +484,11 @@ impl ToolkitTabViewer<'_> {
                         )
                         .on_hover_text(t!("ui.settings.replay.reindex_all_replays_hover"))
                         .clicked()
-                        && let Some((pool, rt, build_cache)) = reindex_deps
+                        && let Some(deps) = reindex_deps
                     {
                         crate::update_background_task!(
                             self.tab_state.background_tasks,
-                            Some(crate::task::start_reconcile_index(
-                                build_cache,
-                                self.tab_state.shipbuilds_client.clone(),
-                                Arc::clone(&self.tab_state.twitch_state),
-                                pool,
-                                rt,
-                                Arc::clone(&self.tab_state.personal_rating_data),
-                                true,
-                                self.tab_state.egui_ctx.clone(),
-                            ))
+                            Some(crate::task::start_reconcile_index(deps, true, self.tab_state.egui_ctx.clone()))
                         );
                     }
                 });
