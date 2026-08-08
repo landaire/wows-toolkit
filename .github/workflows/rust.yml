@@ -1,14 +1,17 @@
 on:
   push:
     branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   pull_request:
 
 name: CI
 
-# Cancel superseded runs on PR branches. Runs on main are left to finish so
-# every main commit gets full CI and the post-job cache saves still happen.
+# Cancel superseded runs on PR branches. Main pushes get a unique group per
+# run: a shared group would let a newly queued run cancel the pending one,
+# so rapid pushes would leave middle commits with no CI verdict and no
+# cache save.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.ref == 'refs/heads/main' && format('{0}-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Every job runs with the repo's nix dev shell environment so the rust
