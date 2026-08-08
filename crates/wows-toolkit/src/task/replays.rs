@@ -598,6 +598,14 @@ fn parse_replay_data_in_background(
                 }
             }
             Err(e) => {
+                // The retry sleeps exist for a file the game is still
+                // flushing; waiting cannot fix a missing one. Transient keeps
+                // it off the blacklist, so if the file reappears a later
+                // event parses it normally.
+                if replay_file_is_missing(&e) {
+                    debug!("replay {:?} no longer exists; skipping", path);
+                    return ParseOutcome::Transient;
+                }
                 error!("error attempting to parse replay in background thread: {:?}", e);
                 thread::sleep(Duration::from_secs(5));
             }
@@ -605,6 +613,13 @@ fn parse_replay_data_in_background(
     }
 
     ParseOutcome::HardFailure
+}
+
+/// True when a snapshot read failed because the file no longer exists.
+fn replay_file_is_missing(error: &rootcause::Report) -> bool {
+    error
+        .downcast_current_context::<std::io::Error>()
+        .is_some_and(|io_error| io_error.kind() == std::io::ErrorKind::NotFound)
 }
 
 fn parse_outcome_for_upload(
@@ -2483,6 +2498,27 @@ mod tests {
             parse_outcome_for_upload(ShipBuildsUploadOutcome::TransientFailure, None),
             ParseOutcome::ParsedNotSent
         );
+    }
+
+    #[test]
+    fn a_deleted_replay_reads_as_missing_not_retryable() {
+        let directory = tempfile::tempdir().unwrap();
+        let Err(error) = crate::data::wows_data::ReplayFileSnapshot::read(&directory.path().join("gone.wowsreplay"))
+        else {
+            panic!("reading a nonexistent replay must fail");
+        };
+        assert!(replay_file_is_missing(&error));
+    }
+
+    #[test]
+    fn a_malformed_replay_is_not_reported_as_missing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("garbage.wowsreplay");
+        std::fs::write(&path, b"not a replay").unwrap();
+        let Err(error) = crate::data::wows_data::ReplayFileSnapshot::read(&path) else {
+            panic!("garbage bytes must fail to parse");
+        };
+        assert!(!replay_file_is_missing(&error));
     }
 
     #[test]
