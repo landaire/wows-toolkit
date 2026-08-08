@@ -75,6 +75,11 @@ jobs:
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      # clippy --all-targets resolves features with dev-deps included; this
+      # plain check exercises the no-dev-deps graph that release builds use.
+      # Dependency artifacts are shared with the clippy pass, so only
+      # workspace crates are rechecked.
+      - run: cargo check --workspace --all-features
 
   test:
     name: Test
