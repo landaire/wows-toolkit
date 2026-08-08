@@ -49,6 +49,18 @@ impl RenderMode {
         }
     }
 
+    /// Whether this mode applies process mitigations.
+    ///
+    /// `Unpinned` is the one that does not: it exists as the rung that restores
+    /// the behaviour from before any of this, so it has to suppress nothing.
+    /// `CpuRenderer` sits below it and hardens again, which is deliberate. The
+    /// list is a set of distinct configurations to try, not a sequence of
+    /// loosening ones, and WARP is the single adapter the signature policy
+    /// provably admits, so hardening cannot be what keeps it from starting.
+    pub fn hardens(self) -> bool {
+        !matches!(self, Self::Unpinned)
+    }
+
     /// Stable token for the on-disk record.
     pub fn as_token(self) -> &'static str {
         match self {
@@ -295,6 +307,17 @@ mod tests {
 
         assert_eq!(visited.last(), Some(&RenderMode::CpuRenderer));
         assert_eq!(visited.len(), 6);
+    }
+
+    #[test]
+    fn only_the_restore_previous_behaviour_mode_leaves_the_process_unhardened() {
+        assert!(!RenderMode::Unpinned.hardens());
+
+        let mut mode = Some(RenderMode::FIRST);
+        while let Some(current) = mode {
+            assert_eq!(current.hardens(), current != RenderMode::Unpinned, "{current:?}");
+            mode = current.next();
+        }
     }
 
     #[test]

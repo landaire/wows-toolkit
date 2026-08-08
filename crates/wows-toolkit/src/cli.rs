@@ -99,13 +99,19 @@ pub struct Cli {
     pub gpu_adapter: Option<String>,
 
     /// Skip adapter pinning and enumerate every backend, as before pinning
-    /// existed.
+    /// existed. This also turns off the process mitigations, because it selects
+    /// the one render mode that leaves the process unhardened.
     #[arg(long)]
     pub gpu_safe_mode: bool,
 
     /// Print the display adapters found in the driver registry, then exit.
     #[arg(long)]
     pub list_gpus: bool,
+
+    /// Skip the process mitigations that keep third-party DLLs from loading
+    /// into this process.
+    #[arg(long)]
+    pub no_hardening: bool,
 
     #[command(subcommand)]
     pub command: Option<Command>,
@@ -118,6 +124,24 @@ impl Cli {
             cpu_renderer: self.cpu_renderer,
             gpu_safe_mode: self.gpu_safe_mode,
             gpu_adapter: self.gpu_adapter.clone(),
+        }
+    }
+
+    /// Whether to harden a launch running `mode`.
+    ///
+    /// `--no-hardening` overrides the mode, because it exists so a user whose
+    /// machine the policies break can start the app at all without first
+    /// descending to the one mode that skips them.
+    pub fn hardening(&self, mode: crate::gpu::select::RenderMode) -> crate::hardening::Hardening {
+        use crate::hardening::Hardening;
+        use crate::hardening::SkipReason;
+
+        if self.no_hardening {
+            Hardening::Skip(SkipReason::CommandLine)
+        } else if !mode.hardens() {
+            Hardening::Skip(SkipReason::RenderMode)
+        } else {
+            Hardening::Apply
         }
     }
 }
@@ -496,6 +520,51 @@ mod tests {
         assert!(resolve(args(&["wows_toolkit.exe", "--cpu-renderer", "--gpu-adapter", "nvidia"])).is_err());
         assert!(resolve(args(&["wows_toolkit.exe", "--cpu-renderer", "--gpu-safe-mode"])).is_err());
         assert!(resolve(args(&["wows_toolkit.exe", "--gpu-adapter", "nvidia", "--gpu-safe-mode"])).is_err());
+    }
+
+    fn run_cli(argv: &[&str]) -> Cli {
+        match resolve(args(argv)).expect("resolve") {
+            Invocation::Run(cli) => cli,
+            other => panic!("expected Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bare_launch_hardens_every_mode_but_the_one_that_restores_old_behaviour() {
+        use crate::gpu::select::RenderMode;
+        use crate::hardening::Hardening;
+        use crate::hardening::SkipReason;
+
+        let cli = run_cli(&["wows_toolkit.exe"]);
+
+        assert_eq!(cli.hardening(RenderMode::PinnedVulkan), Hardening::Apply);
+        assert_eq!(cli.hardening(RenderMode::CpuRenderer), Hardening::Apply);
+        assert_eq!(cli.hardening(RenderMode::Unpinned), Hardening::Skip(SkipReason::RenderMode));
+    }
+
+    #[test]
+    fn no_hardening_overrides_the_mode() {
+        use crate::gpu::select::RenderMode;
+        use crate::hardening::Hardening;
+        use crate::hardening::SkipReason;
+
+        let cli = run_cli(&["wows_toolkit.exe", "--no-hardening"]);
+
+        assert_eq!(cli.hardening(RenderMode::PinnedVulkan), Hardening::Skip(SkipReason::CommandLine));
+        // The reason has to survive: a crash report must not confuse a flag
+        // with a render mode that demoted itself.
+        assert_eq!(cli.hardening(RenderMode::Unpinned), Hardening::Skip(SkipReason::CommandLine));
+    }
+
+    /// The flag must not disturb adapter selection: a user turning off the
+    /// policies is not asking for a different GPU.
+    #[test]
+    fn no_hardening_expresses_no_render_override() {
+        let overrides = run_overrides(&["wows_toolkit.exe", "--no-hardening"]);
+
+        assert!(!overrides.cpu_renderer);
+        assert!(!overrides.gpu_safe_mode);
+        assert_eq!(overrides.gpu_adapter, None);
     }
 
     #[test]

@@ -11,6 +11,7 @@ pub mod collab;
 pub mod data;
 pub(crate) mod db;
 pub mod gpu;
+pub mod hardening;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
 #[cfg(feature = "profile-bins")]
@@ -49,7 +50,32 @@ pub mod viewport_3d;
 pub use app::WowsToolkitApp;
 pub use data::replay_index;
 pub use db::load_main_window_settings;
+
+/// The Code Integrity Guard preference to launch with, or `None` when the
+/// setting could not be read.
+///
+/// Read before the app exists, because the policy has to be applied before any
+/// window is created and cannot be changed afterwards.
+///
+/// Absence and failure are kept apart deliberately. A key that was never
+/// written means the user has not chosen, and `Automatic` is the right answer.
+/// A database that could not be opened means the choice is unknown, and the
+/// unknown value may have been the one turning the policy off; defaulting there
+/// would apply an irreversible policy against a preference that said otherwise.
+pub fn load_code_integrity_preference() -> Option<hardening::CodeIntegrityPreference> {
+    match db::load_startup_setting(CODE_INTEGRITY_SETTING) {
+        Ok(stored) => Some(stored.unwrap_or_default()),
+        Err(_) => None,
+    }
+}
+
+/// Settings key for the Code Integrity Guard preference, shared by the startup
+/// read and the save path so the two cannot drift apart.
+pub const CODE_INTEGRITY_SETTING: &str = "code_integrity";
 pub use tab_state::WindowSettingsEguiExt;
+// `util` is crate-private, but this type appears in the public `hardening` and
+// `gpu` error enums, so it has to be nameable from outside.
+pub use util::win32::Win32Status;
 // Narrow re-export so the gated integration test in `tests/replay_index_mapper.rs`
 // can construct a `Replay` and call `replay_index::map_rows` on it without making
 // the whole (egui-coupled) `ui` module public.

@@ -1226,6 +1226,22 @@ impl WowsToolkitApp {
             state._log_guard = Self::init_logging();
         }
 
+        // The mitigations run in `main`, before any subscriber exists, so this
+        // is the first point at which what they did can be recorded.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(report) = crate::hardening::report() {
+                for (mitigation, outcome) in report.entries() {
+                    tracing::info!("Process mitigation {mitigation}: {outcome}");
+                }
+            }
+            // Taken here rather than in `main` because overlays hook at
+            // swapchain creation, which has happened by the time eframe
+            // constructs the app, and rather than in the panic hook because
+            // enumerating modules there could hang a crashing process.
+            crate::hardening::modules::take_snapshot();
+        }
+
         // Capture wgpu render state for 3D viewport rendering
         state.tab_state.wgpu_render_state = cc.wgpu_render_state.clone();
 
@@ -2106,7 +2122,9 @@ impl WowsToolkitApp {
 
                         let mut command = std::process::Command::new(current_process);
                         command.arg("finalize-update").arg("--replaced").arg(current_process_new_path);
-                        crate::gpu::unpin_child(&mut command).spawn().context("failed to execute updated process")
+                        crate::hardening::prepare_child(&mut command)
+                            .spawn()
+                            .context("failed to execute updated process")
                     };
 
                     match rename_process() {
@@ -3676,7 +3694,7 @@ impl WowsToolkitApp {
                 let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
                 let mut command = std::process::Command::new(exe);
                 command.arg(&replay_path);
-                let _ = crate::gpu::unpin_child(&mut command).spawn();
+                let _ = crate::hardening::prepare_child(&mut command).spawn();
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {

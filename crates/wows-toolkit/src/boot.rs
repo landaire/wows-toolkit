@@ -136,6 +136,22 @@ pub fn remember_mode(fingerprint: &AdapterFingerprint, mode: RenderMode) {
     }
 }
 
+/// The mode this launch is running, for the panic hook.
+static ACTIVE_MODE: std::sync::OnceLock<RenderMode> = std::sync::OnceLock::new();
+
+/// The render mode this launch resolved to, once it has been decided.
+pub fn active_mode() -> Option<RenderMode> {
+    ACTIVE_MODE.get().copied()
+}
+
+/// Record the mode this launch is running.
+///
+/// Separate from `remember_mode`, which writes the on-disk state and is skipped
+/// for a run driven by explicit flags. A crash report needs the mode either way.
+pub fn set_active_mode(mode: RenderMode) {
+    let _ = ACTIVE_MODE.set(mode);
+}
+
 /// Frames observed since launch, capped once the marker has been cleared.
 static FRAMES: AtomicU32 = AtomicU32::new(0);
 

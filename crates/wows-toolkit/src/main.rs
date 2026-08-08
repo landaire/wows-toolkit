@@ -110,6 +110,26 @@ fn main() -> eframe::Result<()> {
                 if let Ok(mut file) = std::fs::File::create(&panic_path) {
                     let _ = writeln!(file, "{info}");
                     let _ = writeln!(file, "Backtrace:\n{}", Backtrace::force_capture());
+                    // Which render configuration was running, which policies
+                    // were in force, and what got in anyway. With the policies
+                    // applied the module list should be empty, which makes the
+                    // report evidence that injection was not the cause; without
+                    // them it names the culprit. The render mode has to be here
+                    // rather than only in the log, because a crash is exactly
+                    // when the log may not have been flushed.
+                    if let Some(mode) = wows_toolkit::boot::active_mode() {
+                        let _ = writeln!(file, "\nRender mode: {}", mode.as_token());
+                    }
+                    if let Some(report) = wows_toolkit::hardening::report() {
+                        let _ = write!(file, "{report}");
+                    }
+                    // The snapshot rather than a fresh enumeration: walking the
+                    // module list takes the loader lock, and a fault inside a
+                    // hooked driver can leave another thread holding it, which
+                    // would hang the process instead of letting it exit.
+                    if let Some(inventory) = wows_toolkit::hardening::modules::snapshot() {
+                        let _ = write!(file, "{}", wows_toolkit::hardening::modules::describe(inventory));
+                    }
                 }
             }));
         });
@@ -173,12 +193,22 @@ fn main() -> eframe::Result<()> {
     if remember_mode_for_next_launch {
         wows_toolkit::boot::remember_mode(&fingerprint, render_config.mode);
     }
+    wows_toolkit::boot::set_active_mode(render_config.mode);
     tracing::info!(
         "Render configuration: mode {}, backends {:?}, adapter {:?}",
         render_config.mode.as_token(),
         render_config.backends,
         render_config.adapter
     );
+
+    // Before any window exists and before wgpu creates its instance: the
+    // extension points attach at window creation, and overlays hook at
+    // swapchain creation. The report is stashed for the app to log once the
+    // tracing subscriber exists, and for the panic hook to include.
+    wows_toolkit::hardening::apply_startup_mitigations(wows_toolkit::hardening::HardeningRequest {
+        hardening: cli.hardening(render_config.mode),
+        code_integrity: wows_toolkit::load_code_integrity_preference(),
+    });
 
     let mut wgpu_options = eframe::egui_wgpu::WgpuConfiguration::default();
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(ref mut setup) = wgpu_options.wgpu_setup {
@@ -203,7 +233,9 @@ fn main() -> eframe::Result<()> {
         let message = format!(
             "The app could not start with render mode {}.\n\n{error}\n\n\
              The next launch will try a safer mode. To choose one now, run with \
-             --cpu-renderer or --gpu-safe-mode.",
+             --cpu-renderer or --gpu-safe-mode. If those also fail, add \
+             --no-hardening, which is the only way to reach the software \
+             renderer with the process mitigations turned off.",
             render_config.mode.as_token()
         );
         wows_toolkit::cli::report_startup_message("wows_toolkit: startup failed", &message, true);

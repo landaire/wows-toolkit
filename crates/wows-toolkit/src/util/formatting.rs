@@ -191,7 +191,9 @@ pub fn open_file_explorer(path: &Path) {
 
         #[cfg(target_os = "windows")]
         {
-            Command::new("explorer.exe").arg("/select,").arg(path).spawn().unwrap();
+            let mut command = Command::new("explorer.exe");
+            command.arg("/select,").arg(path);
+            crate::hardening::prepare_child(&mut command).spawn().unwrap();
         }
     }
 }
@@ -212,7 +214,9 @@ pub fn open_directory(path: &Path) {
 
         #[cfg(target_os = "windows")]
         {
-            let _ = Command::new("explorer.exe").arg(path).spawn();
+            let mut command = Command::new("explorer.exe");
+            command.arg(path);
+            let _ = crate::hardening::prepare_child(&mut command).spawn();
         }
     }
 }

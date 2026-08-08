@@ -5,11 +5,19 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::util::win32::Win32Status;
+
 /// Registry class key holding one subkey per installed display adapter.
+#[cfg(windows)]
 const DISPLAY_CLASS_KEY: &str = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}";
 
+// The decoding below is pure and stays under test on every platform, so these
+// are reachable from the tests but not from a non-Windows build of the library.
+#[cfg_attr(not(windows), allow(dead_code))]
 const REG_BINARY: u32 = 3;
+#[cfg_attr(not(windows), allow(dead_code))]
 const REG_DWORD: u32 = 4;
+#[cfg_attr(not(windows), allow(dead_code))]
 const REG_QWORD: u32 = 11;
 
 /// An adapter's marketing name, from the driver's `DriverDesc` value.
@@ -112,23 +120,15 @@ pub struct AdapterRecord {
 
 #[derive(Debug, Error)]
 pub enum ProbeError {
-    #[error("failed to open registry key {key}: win32 status {status}")]
-    OpenKey { key: String, status: u32 },
-    #[error("failed to enumerate subkeys of {key}: win32 status {status}")]
-    EnumerateKeys { key: String, status: u32 },
-}
-
-/// Decode a `REG_SZ` or `REG_MULTI_SZ` payload into its component strings.
-///
-/// `VulkanDriverName` is `REG_SZ` on some drivers and `REG_MULTI_SZ` on others,
-/// and the sibling `UserModeDriverName` is reliably multi. Both forms are
-/// trailing-null terminated, so the same splitter serves each.
-fn decode_reg_strings(units: &[u16]) -> Vec<String> {
-    units.split(|unit| *unit == 0).filter(|part| !part.is_empty()).map(String::from_utf16_lossy).collect()
+    #[error("failed to open registry key {key}: {status}")]
+    OpenKey { key: String, status: Win32Status },
+    #[error("failed to enumerate subkeys of {key}: {status}")]
+    EnumerateKeys { key: String, status: Win32Status },
 }
 
 /// Decode `HardwareInformation.qwMemorySize`, which drivers publish under
 /// several registry types.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn decode_memory_size(reg_type: u32, data: &[u8]) -> Option<VideoMemoryBytes> {
     let bytes = match reg_type {
         REG_QWORD | REG_BINARY => u64::from_le_bytes(data.get(..8)?.try_into().ok()?),
@@ -142,6 +142,7 @@ fn decode_memory_size(reg_type: u32, data: &[u8]) -> Option<VideoMemoryBytes> {
 ///
 /// The class key also carries siblings such as `Properties`, which denies read
 /// access entirely. Only the four-digit instance keys are adapters.
+#[cfg_attr(not(windows), allow(dead_code))]
 fn is_adapter_instance_key(name: &str) -> bool {
     name.len() == 4 && name.bytes().all(|b| b.is_ascii_digit())
 }
@@ -170,16 +171,8 @@ pub fn probe() -> Result<Vec<AdapterRecord>, ProbeError> {
 mod windows_probe {
     use std::path::PathBuf;
 
-    use windows_sys::Win32::Foundation::ERROR_MORE_DATA;
-    use windows_sys::Win32::Foundation::ERROR_NO_MORE_ITEMS;
-    use windows_sys::Win32::Foundation::ERROR_SUCCESS;
-    use windows_sys::Win32::System::Registry::HKEY;
-    use windows_sys::Win32::System::Registry::HKEY_LOCAL_MACHINE;
-    use windows_sys::Win32::System::Registry::KEY_READ;
-    use windows_sys::Win32::System::Registry::RegCloseKey;
-    use windows_sys::Win32::System::Registry::RegEnumKeyExW;
-    use windows_sys::Win32::System::Registry::RegOpenKeyExW;
-    use windows_sys::Win32::System::Registry::RegQueryValueExW;
+    use crate::util::registry::HKEY_LOCAL_MACHINE;
+    use crate::util::registry::RegKey;
 
     use super::AdapterDescription;
     use super::AdapterRecord;
@@ -187,105 +180,13 @@ mod windows_probe {
     use super::IcdManifestPath;
     use super::ProbeError;
     use super::decode_memory_size;
-    use super::decode_reg_strings;
     use super::is_adapter_instance_key;
-
-    fn wide(value: &str) -> Vec<u16> {
-        value.encode_utf16().chain(std::iter::once(0)).collect()
-    }
-
-    /// Owns an open registry key so every early return closes it.
-    struct RegKey(HKEY);
-
-    impl RegKey {
-        fn open(parent: HKEY, path: &str) -> Result<Self, u32> {
-            let mut key: HKEY = std::ptr::null_mut();
-            let status = unsafe { RegOpenKeyExW(parent, wide(path).as_ptr(), 0, KEY_READ, &mut key) };
-            if status == ERROR_SUCCESS { Ok(Self(key)) } else { Err(status) }
-        }
-
-        fn raw(&self) -> HKEY {
-            self.0
-        }
-
-        /// Raw value bytes and their registry type, or `None` when the value is
-        /// absent.
-        fn query(&self, name: &str) -> Option<(u32, Vec<u8>)> {
-            let name = wide(name);
-            let mut reg_type: u32 = 0;
-            let mut size: u32 = 0;
-            let status = unsafe {
-                RegQueryValueExW(
-                    self.0,
-                    name.as_ptr(),
-                    std::ptr::null(),
-                    &mut reg_type,
-                    std::ptr::null_mut(),
-                    &mut size,
-                )
-            };
-            if status != ERROR_SUCCESS && status != ERROR_MORE_DATA {
-                return None;
-            }
-
-            let mut data = vec![0u8; size as usize];
-            let status = unsafe {
-                RegQueryValueExW(self.0, name.as_ptr(), std::ptr::null(), &mut reg_type, data.as_mut_ptr(), &mut size)
-            };
-            if status != ERROR_SUCCESS {
-                return None;
-            }
-            data.truncate(size as usize);
-            Some((reg_type, data))
-        }
-
-        /// A string value, decoded from either single or multi form.
-        fn query_strings(&self, name: &str) -> Vec<String> {
-            let Some((_, data)) = self.query(name) else {
-                return Vec::new();
-            };
-            let units: Vec<u16> = data.chunks_exact(2).map(|pair| u16::from_le_bytes([pair[0], pair[1]])).collect();
-            decode_reg_strings(&units)
-        }
-    }
-
-    impl Drop for RegKey {
-        fn drop(&mut self) {
-            unsafe { RegCloseKey(self.0) };
-        }
-    }
-
-    fn subkey_names(key: &RegKey) -> Result<Vec<String>, u32> {
-        let mut names = Vec::new();
-        // Registry key names are capped at 255 characters plus a terminator.
-        let mut buffer = [0u16; 256];
-        for index in 0.. {
-            let mut length = buffer.len() as u32;
-            let status = unsafe {
-                RegEnumKeyExW(
-                    key.raw(),
-                    index,
-                    buffer.as_mut_ptr(),
-                    &mut length,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                )
-            };
-            match status {
-                ERROR_SUCCESS => names.push(String::from_utf16_lossy(&buffer[..length as usize])),
-                ERROR_NO_MORE_ITEMS => break,
-                other => return Err(other),
-            }
-        }
-        Ok(names)
-    }
 
     pub(super) fn probe() -> Result<Vec<AdapterRecord>, ProbeError> {
         let class_key = RegKey::open(HKEY_LOCAL_MACHINE, DISPLAY_CLASS_KEY)
             .map_err(|status| ProbeError::OpenKey { key: DISPLAY_CLASS_KEY.to_string(), status })?;
-        let names = subkey_names(&class_key)
+        let names = class_key
+            .subkey_names()
             .map_err(|status| ProbeError::EnumerateKeys { key: DISPLAY_CLASS_KEY.to_string(), status })?;
 
         let mut adapters = Vec::new();
@@ -334,36 +235,6 @@ mod tests {
 
     /// A string type, which carries no memory size.
     const REG_SZ: u32 = 1;
-
-    fn utf16(value: &str) -> Vec<u16> {
-        value.encode_utf16().collect()
-    }
-
-    #[test]
-    fn single_string_value_decodes_to_one_entry() {
-        let mut units = utf16(r"C:\drivers\nv-vk64.json");
-        units.push(0);
-
-        assert_eq!(decode_reg_strings(&units), vec![r"C:\drivers\nv-vk64.json".to_string()]);
-    }
-
-    #[test]
-    fn multi_string_value_decodes_to_every_entry() {
-        let mut units = Vec::new();
-        for path in [r"C:\a.json", r"C:\b.json"] {
-            units.extend(utf16(path));
-            units.push(0);
-        }
-        units.push(0);
-
-        assert_eq!(decode_reg_strings(&units), vec![r"C:\a.json".to_string(), r"C:\b.json".to_string()]);
-    }
-
-    #[test]
-    fn empty_value_decodes_to_no_entries() {
-        assert!(decode_reg_strings(&[]).is_empty());
-        assert!(decode_reg_strings(&[0, 0]).is_empty());
-    }
 
     #[test]
     fn memory_size_decodes_from_every_published_registry_type() {
