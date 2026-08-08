@@ -1185,6 +1185,9 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
     let viewer_clone = viewer.clone();
     let window_open = open.clone();
     let parent_ctx = ctx.clone();
+    // request_repaint inside the callback targets this viewport; the parent's
+    // id has to be captured out here for the sibling-update wake to land.
+    let parent_viewport = ctx.viewport_id();
 
     // Apply persisted window size if available.
     let builder = egui::ViewportBuilder::default().with_title(&*title).with_min_inner_size([600.0, 400.0]);
@@ -1239,7 +1242,7 @@ pub fn draw_realtime_armor_viewer(viewer: &Arc<Mutex<RealtimeArmorViewer>>, ctx:
             // (e.g. replay renderer) also update while this window has focus.
             if std::mem::take(&mut viewer.needs_repaint) {
                 ctx.request_repaint();
-                parent_ctx.request_repaint();
+                parent_ctx.request_repaint_of(parent_viewport);
             }
         }
     });

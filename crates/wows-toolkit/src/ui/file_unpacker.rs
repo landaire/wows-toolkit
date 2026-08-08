@@ -1732,7 +1732,7 @@ impl ToolkitTabViewer<'_> {
 
         self.tab_state.browser_state.assets_bin_loading_build = Some(current_build);
 
-        let (tx, rx) = crate::ui_channel::guarded_channel();
+        let (tx, rx) = crate::ui_channel::guarded_channel_with_ctx(&self.tab_state.egui_ctx);
         self.tab_state.browser_state.assets_bin_rx = Some(rx);
 
         crate::util::thread::spawn_logged("load-assets-bin", move || {

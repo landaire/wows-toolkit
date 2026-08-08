@@ -159,7 +159,7 @@ impl ToolkitTabViewer<'_> {
             let vfs = wd.vfs.clone();
             let game_metadata = wd.game_metadata.clone();
             drop(wd);
-            let (tx, rx) = egui_inbox::UiInbox::channel();
+            let (tx, rx) = egui_inbox::UiInbox::channel_with_ctx(ui);
             crate::util::thread::spawn_logged("load-ship-assets", move || {
                 let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
                     let metadata = game_metadata.ok_or_else(|| "GameMetadataProvider not loaded".to_string())?;

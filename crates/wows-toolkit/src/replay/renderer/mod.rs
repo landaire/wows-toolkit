@@ -1471,6 +1471,11 @@ impl ReplayRendererViewer {
         let window_settings = self.window_settings.clone();
         let save_notify = self.save_notify.clone();
         let parent_ctx = ctx.clone();
+        // Captured outside the callback: request_repaint inside a deferred
+        // viewport targets the viewport being drawn, so waking the parent
+        // (whose logic pass spawns armor viewers and reaps closed renderers)
+        // needs its id.
+        let parent_viewport = ctx.viewport_id();
         let viewport_id = egui::ViewportId::from_hash_of(&*self.title);
 
         // Apply persisted window size if available.
@@ -3426,7 +3431,7 @@ impl ReplayRendererViewer {
                     // Repaint both this viewport AND the parent so sibling
                     // viewports (e.g. armor viewer) also update in realtime.
                     ctx.request_repaint();
-                    parent_ctx.request_repaint();
+                    parent_ctx.request_repaint_of(parent_viewport);
                 }
             },
         );

@@ -1528,6 +1528,11 @@ impl WowsToolkitApp {
 
             self.drain_ingest_updates();
 
+            // Snapshotted before the loop: a completion handler inside it can
+            // push follow-up tasks, and those are not drawn (or wake-registered)
+            // until the next frame, which the count mismatch forces.
+            self.status_bar_task_count = self.tab_state.background_tasks.len();
+
             for i in 0..self.tab_state.background_tasks.len() {
                 let task = &mut self.tab_state.background_tasks[i];
 
@@ -1715,8 +1720,6 @@ impl WowsToolkitApp {
                 }
             }
         });
-
-        self.status_bar_task_count = self.tab_state.background_tasks.len();
     }
 
     /// Move whatever every running directory walk has sent since the last frame
@@ -2797,7 +2800,7 @@ impl WowsToolkitApp {
                         let vfs = wd.vfs.clone();
                         let game_metadata = wd.game_metadata.clone();
                         drop(wd);
-                        let (tx, rx) = egui_inbox::UiInbox::channel();
+                        let (tx, rx) = egui_inbox::UiInbox::channel_with_ctx(&self.tab_state.egui_ctx);
                         crate::util::thread::spawn_logged("load-ship-assets", move || {
                             let result = (|| -> Result<Arc<wowsunpack::export::ship::ShipAssets>, String> {
                                 let metadata =

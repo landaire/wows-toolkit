@@ -1128,11 +1128,11 @@ impl TabState {
         let parser_lock_arc = Arc::clone(&self.parser_lock);
         let parser_lock = parser_lock_arc.try_lock();
         if parser_lock.is_none() {
-            // Don't make the UI hang. Any queued watcher events stay in the
-            // inbox, and their wake has already been spent, so schedule the
-            // retry the idle repaint tick used to provide. The inbox cannot be
-            // peeked, so this fires even when it is empty; one second keeps
-            // that no worse than the old tick while the lock is contended.
+            // Don't make the UI hang. Queued watcher events keep their spot
+            // in the inbox but their wake has already fired, so arm a retry.
+            // The inbox cannot be peeked, so this fires even when it is empty;
+            // one second bounds the extra repaints while the lock stays
+            // contended.
             if self.file_receiver.is_some() {
                 self.egui_ctx.request_repaint_after(std::time::Duration::from_secs(1));
             }

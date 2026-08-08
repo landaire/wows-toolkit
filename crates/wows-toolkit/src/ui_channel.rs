@@ -88,21 +88,32 @@ impl<T> GuardedSender<T> {
 }
 
 /// Channel whose receiver can distinguish "no message yet" from "every sender
-/// is gone", with sends waking the UI immediately.
+/// is gone". Sends wake the UI only once the inbox has a context (its first
+/// `read` registers one); use [`guarded_channel_with_ctx`] when the consumer
+/// drains with `read_without_ctx`.
 pub fn guarded_channel<T>() -> (GuardedSender<T>, UiInbox<StreamEvent<T>>) {
     let inbox = UiInbox::new();
     let sender = GuardedSender { shared: Arc::new(GuardedSenderShared { tx: inbox.sender(), wake: Wake::Immediate }) };
     (sender, inbox)
 }
 
+/// [`guarded_channel`] with the wake context registered up front, so every
+/// send wakes the UI even when the consumer never reads with a context.
+pub fn guarded_channel_with_ctx<T>(ctx: &egui::Context) -> (GuardedSender<T>, UiInbox<StreamEvent<T>>) {
+    let inbox = UiInbox::new_with_ctx(ctx);
+    let sender = GuardedSender { shared: Arc::new(GuardedSenderShared { tx: inbox.sender(), wake: Wake::Immediate }) };
+    (sender, inbox)
+}
+
 /// [`guarded_channel`] for hot producers: items are queued immediately, but
 /// repaints are deferred by `delay` so a tight send loop paints at most once
-/// per window. `Closed` still wakes immediately.
+/// per window. The context is registered on the inbox as well, so `Closed`
+/// wakes immediately even for consumers that drain with `read_without_ctx`.
 pub fn guarded_channel_throttled<T>(
     ctx: egui::Context,
     delay: Duration,
 ) -> (GuardedSender<T>, UiInbox<StreamEvent<T>>) {
-    let inbox = UiInbox::new();
+    let inbox = UiInbox::new_with_ctx(&ctx);
     let sender = GuardedSender {
         shared: Arc::new(GuardedSenderShared { tx: inbox.sender(), wake: Wake::Deferred { ctx, delay } }),
     };
