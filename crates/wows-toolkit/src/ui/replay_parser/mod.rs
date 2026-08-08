@@ -3796,15 +3796,16 @@ impl ToolkitTabViewer<'_> {
                     let map_name = replay_file.replay_file.meta.mapName.clone();
                     let translated_map = replay_file.map_name(metadata_provider);
                     let base = format!("{} - {}", replay_file.replay_file.meta.playerName, translated_map);
-                    let replay_name = if let Some(stem) = replay_file
+                    let source_stem = replay_file
                         .source_path
                         .as_ref()
-                        .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()))
-                    {
-                        format!("{} - {}", base, stem)
-                    } else {
-                        base
-                    };
+                        .and_then(|p: &PathBuf| p.file_stem().map(|s| s.to_string_lossy().into_owned()));
+                    let replay_name = if let Some(stem) = &source_stem { format!("{} - {}", base, stem) } else { base };
+                    let video_file_stem = crate::replay::renderer::video_file_stem(
+                        &replay_file.replay_file.meta,
+                        &translated_map,
+                        source_stem.as_deref(),
+                    );
                     let game_duration = replay_file.replay_file.meta.duration as f32;
                     let replay_version =
                         wowsunpack::data::Version::from_client_exe(&replay_file.replay_file.meta.clientVersionFromExe);
@@ -3833,6 +3834,7 @@ impl ToolkitTabViewer<'_> {
                         alt_replays,
                         map_name,
                         replay_name,
+                        video_file_stem,
                         game_duration,
                         wows_data,
                         asset_cache,
@@ -5845,6 +5847,7 @@ impl ToolkitTabViewer<'_> {
             alt_replays,
             info.map_name,
             info.replay_name,
+            info.video_file_stem,
             info.game_duration,
             info.wows_data,
             asset_cache,

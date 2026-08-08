@@ -1089,7 +1089,8 @@ struct VideoExportData {
     packet_data: Vec<u8>,
     alt_replays: Vec<AltReplayBytes>,
     map_name: String,
-    replay_name: String,
+    /// Default file name (without extension) for an exported video.
+    video_file_stem: String,
     game_duration: f32,
     wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -1107,6 +1108,7 @@ pub fn launch_replay_renderer(
     alt_replays: Vec<AltReplayBytes>,
     map_name: String,
     replay_name: String,
+    video_file_stem: String,
     game_duration: f32,
     wows_data: SharedBuildData,
     asset_cache: Arc<parking_lot::Mutex<RendererAssetCache>>,
@@ -1177,7 +1179,7 @@ pub fn launch_replay_renderer(
         packet_data: packet_data.clone(),
         alt_replays: alt_replays.clone(),
         map_name: map_name.clone(),
-        replay_name,
+        video_file_stem,
         game_duration,
         wows_data: wows_data.clone(),
         asset_cache: Arc::clone(&asset_cache),
@@ -1419,6 +1421,7 @@ pub use video_export::batch_render_to_clipboard;
 pub use video_export::batch_render_to_folder;
 use video_export::execute_video_export;
 pub use video_export::replay_render_input;
+pub use video_export::video_file_stem;
 
 mod shapes;
 use shapes::*;
@@ -2943,7 +2946,7 @@ impl ReplayRendererViewer {
                                                             overrides.get(&eid).copied()
                                                         }));
                                                     }
-                                                    let default_name = format!("{}.mp4", video_export_data.replay_name);
+                                                    let default_name = format!("{}.mp4", video_export_data.video_file_stem);
                                                     if let Some(path) = rfd::FileDialog::new()
                                                         .set_file_name(&default_name)
                                                         .add_filter("MP4 Video", &["mp4"])

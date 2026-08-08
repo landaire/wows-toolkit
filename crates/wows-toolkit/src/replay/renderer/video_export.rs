@@ -11,6 +11,7 @@ use wows_minimap_renderer::renderer::RenderOptions;
 
 use wows_battle_world::merged::MergedReplays;
 use wows_replays::ReplayFile;
+use wows_replays::ReplayMeta;
 use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
@@ -70,7 +71,7 @@ pub(super) fn execute_video_export(
             encoder_config,
             include_pre_battle,
         } => {
-            let file_name = format!("{}.mp4", video_export_data.replay_name);
+            let file_name = format!("{}.mp4", video_export_data.video_file_stem);
             render_video_to_clipboard(
                 file_name,
                 Arc::clone(video_export_data),
@@ -221,8 +222,64 @@ pub struct ReplayRenderInput {
     pub packet_data: Vec<u8>,
     pub map_name: String,
     pub replay_name: String,
+    pub video_file_stem: String,
     pub game_duration: f32,
     pub wows_data: SharedBuildData,
+}
+
+/// Reformat the replay `dateTime` field (`DD.MM.YYYY HH:MM:SS`) so that it
+/// sorts lexically. `None` when the field is not in that form.
+fn sortable_stamp(date_time: &str) -> Option<String> {
+    const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
+
+    let parsed = jiff::civil::DateTime::strptime(REPLAY_DATE_FORMAT, date_time).ok()?;
+    Some(parsed.strftime("%Y-%m-%d_%H-%M-%S").to_string())
+}
+
+/// Split the game's own `YYYYMMDD_HHMMSS_<rest>` replay file stem into a
+/// sortable timestamp and the remainder (the ship the replay was recorded on).
+/// `None` for a stem the user has renamed away from that shape.
+fn split_recorded_stem(stem: &str) -> Option<(String, &str)> {
+    let (date, rest) = stem.split_at_checked(8)?;
+    let (time, rest) = rest.strip_prefix('_')?.split_at_checked(6)?;
+    if !date.bytes().all(|b| b.is_ascii_digit()) || !time.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let stamp = format!("{}-{}-{}_{}-{}-{}", &date[..4], &date[4..6], &date[6..], &time[..2], &time[2..4], &time[4..]);
+    Some((stamp, rest.strip_prefix('_').unwrap_or(rest)))
+}
+
+/// The file name (without extension) an exported video gets. It leads with the
+/// battle's start time in a lexically sortable form so that a folder of exports
+/// orders chronologically by name alone.
+///
+/// `source_stem` is the replay file's own name, which the game builds from the
+/// same start time plus the recording player's ship; its timestamp is dropped
+/// as redundant, keeping the ship.
+pub fn video_file_stem(meta: &ReplayMeta, translated_map: &str, source_stem: Option<&str>) -> String {
+    let recorded = source_stem.and_then(split_recorded_stem);
+    let tail = match &recorded {
+        Some((_, tail)) => Some(*tail),
+        None => source_stem,
+    }
+    .filter(|tail| !tail.is_empty());
+    // A replay whose dateTime is unreadable can still be placed by the stamp the
+    // game put in its file name.
+    let stamp = sortable_stamp(&meta.dateTime).or_else(|| recorded.map(|(stamp, _)| stamp));
+
+    let mut name = String::new();
+    if let Some(stamp) = stamp {
+        name.push_str(&stamp);
+        name.push_str(" - ");
+    }
+    name.push_str(&meta.playerName);
+    name.push_str(" - ");
+    name.push_str(translated_map);
+    if let Some(tail) = tail {
+        name.push_str(" - ");
+        name.push_str(tail);
+    }
+    name
 }
 
 /// Read one replay off disk and pair it with the game data for the build it was
@@ -259,10 +316,12 @@ pub fn replay_render_input(path: &std::path::Path, build_cache: &BuildDataCache)
         None => map_name.clone(),
     };
     let base = format!("{} - {}", replay_file.meta.playerName, translated_map);
-    let replay_name = match path.file_stem().map(|stem| stem.to_string_lossy().into_owned()) {
+    let source_stem = path.file_stem().map(|stem| stem.to_string_lossy().into_owned());
+    let replay_name = match &source_stem {
         Some(stem) => format!("{} - {}", base, stem),
         None => base,
     };
+    let video_file_stem = video_file_stem(&replay_file.meta, &translated_map, source_stem.as_deref());
 
     let game_duration = replay_file.meta.duration as f32;
     let (_, raw_meta, packet_data) = replay_file.into_parts();
@@ -271,6 +330,7 @@ pub fn replay_render_input(path: &std::path::Path, build_cache: &BuildDataCache)
         packet_data,
         map_name,
         replay_name,
+        video_file_stem,
         game_duration,
         wows_data,
     })
@@ -329,7 +389,7 @@ fn render_batch(
             p.current_name = replay.replay_name.clone();
         }
 
-        let output_path = output_dir.join(format!("{}.mp4", replay.replay_name));
+        let output_path = output_dir.join(format!("{}.mp4", replay.video_file_stem));
         let output_str = output_path.to_string_lossy().to_string();
 
         let per_replay_progress: Arc<Mutex<Option<RenderProgress>>> = Arc::new(Mutex::new(None));
@@ -711,4 +771,30 @@ pub(super) fn render_video_blocking(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sortable_stamp;
+    use super::split_recorded_stem;
+
+    #[test]
+    fn date_time_reorders_to_sortable_stamp() {
+        assert_eq!(sortable_stamp("07.08.2026 14:23:05").as_deref(), Some("2026-08-07_14-23-05"));
+        assert_eq!(sortable_stamp("not a date"), None);
+    }
+
+    #[test]
+    fn game_stem_splits_into_stamp_and_ship() {
+        let (stamp, tail) = split_recorded_stem("20260807_142305_PJSB018-Yamato").expect("game stem");
+        assert_eq!(stamp, "2026-08-07_14-23-05");
+        assert_eq!(tail, "PJSB018-Yamato");
+    }
+
+    #[test]
+    fn renamed_stem_has_no_recorded_prefix() {
+        assert!(split_recorded_stem("my favourite game").is_none());
+        assert!(split_recorded_stem("2026080_142305_x").is_none());
+        assert!(split_recorded_stem("short").is_none());
+    }
 }
