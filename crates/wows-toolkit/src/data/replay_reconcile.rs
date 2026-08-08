@@ -13,6 +13,11 @@ use tracing::warn;
 
 use crate::data::settings::DataSharingMode;
 
+/// Wall-clock instant after which an incomplete replay's raw upload proceeds
+/// without end-of-battle results.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RawUploadDeadline(pub jiff::Timestamp);
+
 /// Result of a single background parse attempt, distinguishing genuinely
 /// un-processable files from retryable conditions so the caller can blacklist
 /// only the former.
@@ -20,6 +25,9 @@ use crate::data::settings::DataSharingMode;
 pub enum ParseOutcome {
     /// Parsed successfully and the upload completed.
     ParsedAndSent,
+    /// Parsed successfully, but the raw upload waits for end-of-battle results
+    /// until the deadline lapses.
+    ParsedAwaitingResults { deadline: RawUploadDeadline },
     /// Parsed successfully, but replay contents make it permanently ineligible.
     ParsedAndStableSkipped { identity: Option<ReplayFileIdentity> },
     /// Parsed successfully while sharing was disabled.
@@ -38,6 +46,7 @@ pub enum ParseOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedUploadDisposition {
     Sent,
+    AwaitingResults { deadline: RawUploadDeadline },
     StableSkipped { identity: Option<ReplayFileIdentity> },
     Deferred,
     Retryable,
@@ -89,6 +98,9 @@ where
     }
     match catch_unwind(parse_and_index) {
         Ok(ParseOutcome::ParsedAndSent) => FileOutcome::Parsed { upload: ParsedUploadDisposition::Sent },
+        Ok(ParseOutcome::ParsedAwaitingResults { deadline }) => {
+            FileOutcome::Parsed { upload: ParsedUploadDisposition::AwaitingResults { deadline } }
+        }
         Ok(ParseOutcome::ParsedAndStableSkipped { identity }) => {
             FileOutcome::Parsed { upload: ParsedUploadDisposition::StableSkipped { identity } }
         }
@@ -289,6 +301,18 @@ mod tests {
             AssertUnwindSafe(|| ParseOutcome::Transient),
         );
         assert_eq!(out, FileOutcome::Transient);
+    }
+
+    #[test]
+    fn a_parse_awaiting_results_carries_its_deadline_through() {
+        let deadline = RawUploadDeadline(jiff::Timestamp::from_second(1_200).unwrap());
+        let out = reconcile_one(
+            Path::new("w"),
+            false,
+            UploadReconciliation::Pending,
+            AssertUnwindSafe(|| ParseOutcome::ParsedAwaitingResults { deadline }),
+        );
+        assert_eq!(out, FileOutcome::Parsed { upload: ParsedUploadDisposition::AwaitingResults { deadline } });
     }
 
     #[test]

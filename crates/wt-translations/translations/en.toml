@@ -81,8 +81,8 @@ about = "About"
 # -- Dialog / message text --
 
 [ui.dialogs]
-build_consent_message = "Choose what battle data to share from ranked and random battles. Sending replays enables much richer matchmaking analysis on the server; sending build data shares only your ship setup. Battles where you play a test ship always fall back to build data. You can change this any time in settings."
-replay_migration_message = "Toolkit can now share full replays, which enables much richer matchmaking analysis than build data alone. Battles where you play a test ship automatically fall back to build data. Would you like to switch to sharing raw replays?"
+build_consent_message = "Choose what battle data to share from ranked and random battles. Sending replays enables much richer matchmaking analysis on the server; sending build data shares only your ship setup. Battles where you play a test ship are never shared as replays. You can change this any time in settings."
+replay_migration_message = "Toolkit can now share full replays, which enables much richer matchmaking analysis than build data alone. Battles where you play a test ship are not shared. Would you like to switch to sharing raw replays?"
 crash_message = "It looks like WoWs Toolkit crashed the last time it ran. If you would like to report this issue, please either post an issue on GitHub or join the Discord server and provide the below information."
 crash_clear_settings = "If for some reason data that the application persists may be responsible, you can try clearing settings by pressing the button below. This will clear all settings, including tracked players. Your replays and any WoWs data will be safe."
 update_message = "Version %{tag} of WoWs Toolkit is available"

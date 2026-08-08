@@ -26,6 +26,7 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::vfs::VfsPath;
 
 use crate::data::replay_reconcile::ParseOutcome;
+use crate::data::replay_reconcile::RawUploadDeadline;
 use crate::data::settings::DataSharingMode;
 use crate::data::wows_data::BuildData;
 use crate::data::wows_data::GameAsset;
@@ -614,10 +615,18 @@ fn parse_outcome_for_upload(
         ShipBuildsUploadOutcome::Skipped(crate::task::replay_upload::ReplayUploadSkipReason::IneligibleGameType) => {
             ParseOutcome::ParsedAndStableSkipped { identity: replay_identity }
         }
+        // Also content-stable: the same bytes always resolve to the same self
+        // vehicle, and without a terminal state these replays would re-parse
+        // on every launch. The cost is that switching to BuildData mode later
+        // does not retroactively upload builds for them.
+        ShipBuildsUploadOutcome::Skipped(crate::task::replay_upload::ReplayUploadSkipReason::PossibleTestShip) => {
+            ParseOutcome::ParsedAndStableSkipped { identity: replay_identity }
+        }
         ShipBuildsUploadOutcome::Skipped(crate::task::replay_upload::ReplayUploadSkipReason::SharingDisabled) => {
             ParseOutcome::ParsedAndDeferred
         }
         ShipBuildsUploadOutcome::Sent => ParseOutcome::ParsedAndSent,
+        ShipBuildsUploadOutcome::AwaitingResults { deadline } => ParseOutcome::ParsedAwaitingResults { deadline },
         ShipBuildsUploadOutcome::TransientFailure => ParseOutcome::ParsedNotSent,
     }
 }
@@ -683,6 +692,10 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
         // Built once so its arena cache and rate limiter survive across matches.
         let mut match_stats_client = crate::data::match_stats::MatchStatsClient::new(data.shipbuilds_client.clone());
         let mut stable_upload_skips = crate::data::replay_reconcile::StableUploadSkips::default();
+        // Raw uploads held back until end-of-battle results arrive; the value
+        // is the mtime-anchored fallback instant. Rebuilt from file state every
+        // launch, so it needs no persistence.
+        let mut pending_raw_uploads: HashMap<PathBuf, RawUploadDeadline> = HashMap::new();
 
         {
             debug!("Attempting to enumerate replays directory to see if there are any new ones to send");
@@ -760,6 +773,14 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                                     data.sent_replays.write().insert(path_str.into_owned());
                                 }
                             }
+                            // Still inside its grace window; the receive loop's
+                            // timer fires the fallback upload.
+                            crate::data::replay_reconcile::FileOutcome::Parsed {
+                                upload:
+                                    crate::data::replay_reconcile::ParsedUploadDisposition::AwaitingResults { deadline },
+                            } => {
+                                pending_raw_uploads.insert(path.clone(), deadline);
+                            }
                             // Only a hard parse failure or panic gets blacklisted.
                             crate::data::replay_reconcile::FileOutcome::HardFailure => {
                                 if data.unindexable.insert(&path) {
@@ -795,110 +816,35 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
         }
 
         debug!("Beginning background replay receive loop");
-        while let Ok(message) = data.rx.recv() {
-            match message {
-                ReplayBackgroundParserThreadMessage::NewReplay(path) => {
-                    let path_str = path.to_string_lossy();
-                    let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
+        loop {
+            // Block on the channel, but only until the earliest pending raw
+            // upload is due; a timeout wakes the loop to fire it.
+            let received = match pending_raw_uploads.values().min().copied() {
+                Some(deadline) => match data.rx.recv_timeout(wait_until(deadline, jiff::Timestamp::now())) {
+                    Ok(message) => Some(message),
+                    Err(mpsc::RecvTimeoutError::Timeout) => None,
+                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                },
+                None => match data.rx.recv() {
+                    Ok(message) => Some(message),
+                    Err(_) => break,
+                },
+            };
 
-                    if data.unindexable.contains(&path) {
-                        debug!("Skipping blacklisted replay at {}", path_str);
-                    } else {
-                        debug!("Attempting to parse replay at {}", path_str);
-                        // `indexed` is forced false so reconcile_one's indexed-and-sent skip
-                        // cannot apply: a message on this channel is a request to parse this
-                        // file now, not a candidate for the startup ledger's skip. Mark sent
-                        // only when the parse fully completed and the upload succeeded;
-                        // transient conditions are left for a later attempt. A hard failure or
-                        // panic is caught by reconcile_one and blacklisted instead of unwinding
-                        // through the receive loop.
-                        let outcome = crate::data::replay_reconcile::reconcile_one(
-                            &path,
-                            false,
-                            crate::data::replay_reconcile::UploadReconciliation::Pending,
-                            std::panic::AssertUnwindSafe(|| {
-                                parse_replay_data_in_background(
-                                    &path,
-                                    &data.shipbuilds_client,
-                                    already_parsed_replay,
-                                    &data,
-                                )
-                            }),
-                        );
-                        match outcome {
-                            crate::data::replay_reconcile::FileOutcome::Parsed {
-                                upload: crate::data::replay_reconcile::ParsedUploadDisposition::Sent,
-                            } => {
-                                data.sent_replays.write().insert(path_str.into_owned());
-                            }
-                            crate::data::replay_reconcile::FileOutcome::Parsed {
-                                upload:
-                                    crate::data::replay_reconcile::ParsedUploadDisposition::StableSkipped {
-                                        identity: Some(identity),
-                                    },
-                            } => {
-                                if stable_upload_skips.insert(identity)
-                                    && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
-                                    && let Err(e) = rt.block_on(stable_upload_skips.save(pool))
-                                {
-                                    warn!("failed to persist stable ShipBuilds upload skip: {e}");
-                                }
-                            }
-                            crate::data::replay_reconcile::FileOutcome::HardFailure => {
-                                if data.unindexable.insert(&path)
-                                    && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
-                                    && let Err(e) = rt.block_on(data.unindexable.save(pool))
-                                {
-                                    warn!("failed to persist unindexable replay set: {e}");
-                                }
-                            }
-                            crate::data::replay_reconcile::FileOutcome::Transient
-                            | crate::data::replay_reconcile::FileOutcome::Skipped => {}
-                            crate::data::replay_reconcile::FileOutcome::Parsed { .. } => {}
-                        }
-                    }
+            match received {
+                Some(
+                    ReplayBackgroundParserThreadMessage::NewReplay(path)
+                    | ReplayBackgroundParserThreadMessage::ModifiedReplay(path),
+                ) => {
+                    process_replay_file(&path, &mut data, &mut stable_upload_skips, &mut pending_raw_uploads);
                 }
-                ReplayBackgroundParserThreadMessage::ModifiedReplay(path) => {
-                    let path_str = path.to_string_lossy();
-                    let already_parsed_replay = { data.sent_replays.read().contains(path_str.as_ref()) };
-
-                    if data.unindexable.contains(&path) {
-                        debug!("Skipping blacklisted replay at {}", path_str);
-                    } else {
-                        // A modified replay always re-parses: `indexed` is forced false so
-                        // reconcile_one's indexed-and-sent skip never applies, and the
-                        // outcome is never used to mark the path sent. A hard failure or
-                        // panic is caught by reconcile_one and blacklisted instead of
-                        // unwinding through the receive loop.
-                        let outcome = crate::data::replay_reconcile::reconcile_one(
-                            &path,
-                            false,
-                            crate::data::replay_reconcile::UploadReconciliation::Pending,
-                            std::panic::AssertUnwindSafe(|| {
-                                parse_replay_data_in_background(
-                                    &path,
-                                    &data.shipbuilds_client,
-                                    already_parsed_replay,
-                                    &data,
-                                )
-                            }),
-                        );
-                        if let crate::data::replay_reconcile::FileOutcome::HardFailure = outcome
-                            && data.unindexable.insert(&path)
-                            && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
-                            && let Err(e) = rt.block_on(data.unindexable.save(pool))
-                        {
-                            warn!("failed to persist unindexable replay set: {e}");
-                        }
-                    }
-                }
-                ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(new_data_export_settings) => {
+                Some(ReplayBackgroundParserThreadMessage::DataAutoExportSettingChange(new_data_export_settings)) => {
                     data.data_export_settings = new_data_export_settings;
                 }
-                ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state) => {
+                Some(ReplayBackgroundParserThreadMessage::DebugStateChange(new_debug_state)) => {
                     data.is_debug = new_debug_state;
                 }
-                ReplayBackgroundParserThreadMessage::LiveMatchStarted { replay, build, flush, started_at } => {
+                Some(ReplayBackgroundParserThreadMessage::LiveMatchStarted { replay, build, flush, started_at }) => {
                     // A truncated, still-being-written packet stream is the likeliest
                     // panic source on this thread; a panic here must not take
                     // post-battle indexing and uploads down with it for the session.
@@ -924,6 +870,18 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
                         );
                     }
                 }
+                None => {}
+            }
+
+            let now = jiff::Timestamp::now();
+            let due: Vec<PathBuf> = pending_raw_uploads
+                .iter()
+                .filter(|(_, deadline)| deadline.0 <= now)
+                .map(|(path, _)| path.clone())
+                .collect();
+            for path in due {
+                debug!("raw upload grace lapsed for {}", path.display());
+                process_replay_file(&path, &mut data, &mut stable_upload_skips, &mut pending_raw_uploads);
             }
 
             // Deferred: live-match tailing delivers ModifiedReplay at the
@@ -931,6 +889,93 @@ pub fn start_background_parsing_thread(mut data: BackgroundParserThread) -> std:
             data.egui_ctx.request_repaint_after(std::time::Duration::from_millis(500));
         }
     })
+}
+
+/// Time to block on the channel before the earliest pending raw upload is due.
+/// Negative remaining time means due now, hence the zero fallback.
+fn wait_until(deadline: RawUploadDeadline, now: jiff::Timestamp) -> Duration {
+    Duration::try_from(deadline.0.duration_since(now)).unwrap_or(Duration::ZERO)
+}
+
+/// Parse one replay event (new file, modification, or a lapsed grace deadline)
+/// and reconcile every ledger it can touch: the sent set on upload success,
+/// stable skips, the blacklist on hard failure, and the pending raw-upload
+/// deadline map.
+fn process_replay_file(
+    path: &Path,
+    data: &mut BackgroundParserThread,
+    stable_upload_skips: &mut crate::data::replay_reconcile::StableUploadSkips,
+    pending_raw_uploads: &mut HashMap<PathBuf, RawUploadDeadline>,
+) {
+    // Cleared before the guards so no early return can leave a lapsed
+    // deadline armed and spinning the receive loop; AwaitingResults re-arms.
+    pending_raw_uploads.remove(path);
+    // The live battle file is rewritten all match long and is never eligible.
+    if path.file_name().is_some_and(|name| name == "temp.wowsreplay") {
+        return;
+    }
+    let path_str = path.to_string_lossy();
+    if data.unindexable.contains(path) {
+        debug!("Skipping blacklisted replay at {}", path_str);
+        return;
+    }
+    let already_sent = { data.sent_replays.read().contains(path_str.as_ref()) };
+
+    debug!("Attempting to parse replay at {}", path_str);
+    // `indexed` is forced false so reconcile_one's indexed-and-sent skip cannot
+    // apply: an event here is a request to parse this file now, not a candidate
+    // for the startup ledger's skip. A hard failure or panic is caught by
+    // reconcile_one and blacklisted instead of unwinding through the loop.
+    let outcome = {
+        let data_ref: &BackgroundParserThread = data;
+        crate::data::replay_reconcile::reconcile_one(
+            path,
+            false,
+            crate::data::replay_reconcile::UploadReconciliation::Pending,
+            std::panic::AssertUnwindSafe(|| {
+                parse_replay_data_in_background(path, &data_ref.shipbuilds_client, already_sent, data_ref)
+            }),
+        )
+    };
+
+    // Only AwaitingResults re-arms the deadline. Transient (no game data yet)
+    // stays cleared rather than letting a lapsed deadline spin the loop; the
+    // startup sweep retries next launch.
+    match outcome {
+        crate::data::replay_reconcile::FileOutcome::Parsed {
+            upload: crate::data::replay_reconcile::ParsedUploadDisposition::Sent,
+        } => {
+            if !already_sent {
+                data.sent_replays.write().insert(path_str.into_owned());
+            }
+        }
+        crate::data::replay_reconcile::FileOutcome::Parsed {
+            upload: crate::data::replay_reconcile::ParsedUploadDisposition::AwaitingResults { deadline },
+        } => {
+            pending_raw_uploads.insert(path.to_path_buf(), deadline);
+        }
+        crate::data::replay_reconcile::FileOutcome::Parsed {
+            upload: crate::data::replay_reconcile::ParsedUploadDisposition::StableSkipped { identity: Some(identity) },
+        } => {
+            if stable_upload_skips.insert(identity)
+                && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
+                && let Err(e) = rt.block_on(stable_upload_skips.save(pool))
+            {
+                warn!("failed to persist stable ShipBuilds upload skip: {e}");
+            }
+        }
+        crate::data::replay_reconcile::FileOutcome::HardFailure => {
+            if data.unindexable.insert(path)
+                && let (Some(pool), Some(rt)) = (data.db_pool.as_ref(), data.tokio_runtime.as_ref())
+                && let Err(e) = rt.block_on(data.unindexable.save(pool))
+            {
+                warn!("failed to persist unindexable replay set: {e}");
+            }
+        }
+        crate::data::replay_reconcile::FileOutcome::Parsed { .. }
+        | crate::data::replay_reconcile::FileOutcome::Transient
+        | crate::data::replay_reconcile::FileOutcome::Skipped => {}
+    }
 }
 
 #[instrument(skip_all, fields(replay_count = replays.len()))]
@@ -1104,7 +1149,11 @@ where
             attempted.0 += 1;
             if configured_data_sharing_mode(persisted).shares_anything() {
                 let processing = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match upload(&path) {
-                    ShipBuildsUploadOutcome::Skipped(_) | ShipBuildsUploadOutcome::TransientFailure => {}
+                    // AwaitingResults stays unsent here: the batch does not run
+                    // a timer, and the background parser owns the fallback.
+                    ShipBuildsUploadOutcome::Skipped(_)
+                    | ShipBuildsUploadOutcome::TransientFailure
+                    | ShipBuildsUploadOutcome::AwaitingResults { .. } => {}
                     ShipBuildsUploadOutcome::Sent => {
                         sent.0 += 1;
                         sent_replays.write().insert(path_text.into_owned());
@@ -2417,11 +2466,31 @@ mod tests {
             ),
             ParseOutcome::ParsedAndDeferred
         );
+        assert_eq!(
+            parse_outcome_for_upload(
+                ShipBuildsUploadOutcome::Skipped(crate::task::replay_upload::ReplayUploadSkipReason::PossibleTestShip,),
+                None,
+            ),
+            ParseOutcome::ParsedAndStableSkipped { identity: None }
+        );
+        let deadline = RawUploadDeadline(jiff::Timestamp::from_second(1_200).unwrap());
+        assert_eq!(
+            parse_outcome_for_upload(ShipBuildsUploadOutcome::AwaitingResults { deadline }, None),
+            ParseOutcome::ParsedAwaitingResults { deadline }
+        );
         assert_eq!(parse_outcome_for_upload(ShipBuildsUploadOutcome::Sent, None), ParseOutcome::ParsedAndSent);
         assert_eq!(
             parse_outcome_for_upload(ShipBuildsUploadOutcome::TransientFailure, None),
             ParseOutcome::ParsedNotSent
         );
+    }
+
+    #[test]
+    fn the_channel_wait_ends_at_the_earliest_deadline_and_never_goes_negative() {
+        let deadline = RawUploadDeadline(jiff::Timestamp::from_second(1_000).unwrap());
+        assert_eq!(wait_until(deadline, jiff::Timestamp::from_second(940).unwrap()), Duration::from_secs(60));
+        assert_eq!(wait_until(deadline, jiff::Timestamp::from_second(1_000).unwrap()), Duration::ZERO);
+        assert_eq!(wait_until(deadline, jiff::Timestamp::from_second(2_000).unwrap()), Duration::ZERO);
     }
 
     #[test]

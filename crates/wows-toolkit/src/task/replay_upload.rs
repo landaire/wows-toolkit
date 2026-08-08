@@ -5,11 +5,48 @@ use tracing::error;
 use wows_battle_world::report::BattleReport;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
+use crate::data::replay_reconcile::RawUploadDeadline;
 use crate::data::settings::DataSharingMode;
 use crate::data::shipbuilds::ShipBuildsClient;
 use crate::data::wows_data::ReplayBytes;
 use crate::ui::replay_parser::Replay;
 use crate::util::build_tracker;
+
+/// Grace window measured from the replay file's mtime. When it lapses, a
+/// results-less replay is uploaded as-is; the file is not going to improve.
+pub const RAW_UPLOAD_GRACE: jiff::SignedDuration = jiff::SignedDuration::from_secs(20 * 60);
+
+/// Whether the raw replay file is ready for `/api/replays`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RawReplaySnapshotState {
+    /// End-of-battle results are in the file.
+    Complete,
+    /// No results yet; hold the upload until they arrive or the deadline fires.
+    IncompleteWithinGrace { deadline: RawUploadDeadline },
+    /// No results and the grace window has lapsed.
+    IncompleteGraceLapsed,
+}
+
+pub fn raw_replay_snapshot_state(
+    results_available: bool,
+    mtime: Option<jiff::Timestamp>,
+    now: jiff::Timestamp,
+) -> RawReplaySnapshotState {
+    if results_available {
+        return RawReplaySnapshotState::Complete;
+    }
+    // A missing mtime anchors the window at `now`: the fallback upload is
+    // delayed by at most one full window, never issued early.
+    let anchor = mtime.unwrap_or(now);
+    // Saturate: an anchor close enough to jiff's range edge to overflow is
+    // garbage, and holding the upload for results is the conservative reading.
+    let deadline = anchor.checked_add(RAW_UPLOAD_GRACE).unwrap_or(jiff::Timestamp::MAX);
+    if deadline <= now {
+        RawReplaySnapshotState::IncompleteGraceLapsed
+    } else {
+        RawReplaySnapshotState::IncompleteWithinGrace { deadline: RawUploadDeadline(deadline) }
+    }
+}
 
 /// Whether a ShipBuilds batch upload consults the sent-replay ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,29 +89,38 @@ pub enum ReplayUploadAction {
     BuildData,
     /// Send the raw replay file to `/api/replays`.
     RawReplay,
+    /// Send nothing yet; retry when results arrive or the deadline fires.
+    AwaitResults { deadline: RawUploadDeadline },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayUploadSkipReason {
     SharingDisabled,
     IneligibleGameType,
+    /// Replays mode only shares raw replays, and a possible test-ship battle
+    /// must stay off `/api/replays`.
+    PossibleTestShip,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShipBuildsUploadOutcome {
     Skipped(ReplayUploadSkipReason),
     Sent,
+    AwaitingResults { deadline: RawUploadDeadline },
     TransientFailure,
 }
 
 /// Decide what to upload. `self_confirmed_non_test` must be `true` only when the
 /// self player's ship is positively known not to be a test ship; any
 /// uncertainty is `false`, which keeps a possible test-ship replay off
-/// `/api/replays` (hard rule) by falling back to build data.
+/// `/api/replays` (hard rule). Replays mode never falls back to build data;
+/// the two payloads are mutually exclusive. A raw upload additionally waits
+/// for end-of-battle results until the grace deadline fires.
 pub fn decide_upload_action(
     mode: DataSharingMode,
     is_valid_game_type: bool,
     self_confirmed_non_test: bool,
+    raw_snapshot: RawReplaySnapshotState,
 ) -> ReplayUploadAction {
     if !is_valid_game_type {
         return ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType);
@@ -84,10 +130,17 @@ pub fn decide_upload_action(
         DataSharingMode::Off => ReplayUploadAction::Skip(ReplayUploadSkipReason::SharingDisabled),
         DataSharingMode::BuildData => ReplayUploadAction::BuildData,
         DataSharingMode::Replays => {
-            if self_confirmed_non_test {
-                ReplayUploadAction::RawReplay
+            if !self_confirmed_non_test {
+                ReplayUploadAction::Skip(ReplayUploadSkipReason::PossibleTestShip)
             } else {
-                ReplayUploadAction::BuildData
+                match raw_snapshot {
+                    RawReplaySnapshotState::Complete | RawReplaySnapshotState::IncompleteGraceLapsed => {
+                        ReplayUploadAction::RawReplay
+                    }
+                    RawReplaySnapshotState::IncompleteWithinGrace { deadline } => {
+                        ReplayUploadAction::AwaitResults { deadline }
+                    }
+                }
             }
         }
     }
@@ -152,8 +205,19 @@ pub(crate) fn upload_parsed_replay(
         .map(|vehicle| !vehicle.is_test_ship())
         .unwrap_or(false);
 
-    match decide_upload_action(mode, is_valid_game_type, self_confirmed_non_test) {
+    let mtime = std::fs::metadata(path).and_then(|meta| meta.modified()).ok().and_then(|mtime| {
+        // A file time outside jiff's range is garbage; treat it as missing so
+        // the grace window anchors at now.
+        jiff::Timestamp::try_from(mtime).ok()
+    });
+    let raw_snapshot = raw_replay_snapshot_state(report.battle_results().is_some(), mtime, jiff::Timestamp::now());
+
+    match decide_upload_action(mode, is_valid_game_type, self_confirmed_non_test, raw_snapshot) {
         ReplayUploadAction::Skip(reason) => ShipBuildsUploadOutcome::Skipped(reason),
+        ReplayUploadAction::AwaitResults { deadline } => {
+            debug!("holding raw upload for {:?} until results or {:?}", path, deadline);
+            ShipBuildsUploadOutcome::AwaitingResults { deadline }
+        }
         ReplayUploadAction::BuildData => {
             #[cfg(not(feature = "shipbuilds_debugging"))]
             let url = "https://shipbuilds.com/api/ship_builds";
@@ -515,6 +579,14 @@ mod tests {
         assert_eq!(progress.fraction(), 0.0);
     }
 
+    fn timestamp(second: i64) -> jiff::Timestamp {
+        jiff::Timestamp::from_second(second).unwrap()
+    }
+
+    fn within_grace() -> RawReplaySnapshotState {
+        RawReplaySnapshotState::IncompleteWithinGrace { deadline: RawUploadDeadline(timestamp(1_200)) }
+    }
+
     #[test]
     fn off_never_uploads() {
         for valid in [true, false] {
@@ -524,7 +596,10 @@ mod tests {
                 } else {
                     ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType)
                 };
-                assert_eq!(decide_upload_action(DataSharingMode::Off, valid, non_test), expected);
+                assert_eq!(
+                    decide_upload_action(DataSharingMode::Off, valid, non_test, RawReplaySnapshotState::Complete),
+                    expected
+                );
             }
         }
     }
@@ -532,28 +607,107 @@ mod tests {
     #[test]
     fn invalid_game_type_never_uploads() {
         assert_eq!(
-            decide_upload_action(DataSharingMode::BuildData, false, true),
+            decide_upload_action(DataSharingMode::BuildData, false, true, RawReplaySnapshotState::Complete),
             ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType)
         );
         assert_eq!(
-            decide_upload_action(DataSharingMode::Replays, false, true),
+            decide_upload_action(DataSharingMode::Replays, false, true, RawReplaySnapshotState::Complete),
             ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType)
         );
     }
 
     #[test]
-    fn build_data_mode_sends_build_data() {
-        assert_eq!(decide_upload_action(DataSharingMode::BuildData, true, true), ReplayUploadAction::BuildData);
-        assert_eq!(decide_upload_action(DataSharingMode::BuildData, true, false), ReplayUploadAction::BuildData);
+    fn build_data_mode_sends_build_data_regardless_of_completeness() {
+        for snapshot in
+            [RawReplaySnapshotState::Complete, within_grace(), RawReplaySnapshotState::IncompleteGraceLapsed]
+        {
+            assert_eq!(
+                decide_upload_action(DataSharingMode::BuildData, true, true, snapshot),
+                ReplayUploadAction::BuildData
+            );
+            assert_eq!(
+                decide_upload_action(DataSharingMode::BuildData, true, false, snapshot),
+                ReplayUploadAction::BuildData
+            );
+        }
     }
 
     #[test]
-    fn replays_mode_sends_raw_only_when_confirmed_non_test() {
-        assert_eq!(decide_upload_action(DataSharingMode::Replays, true, true), ReplayUploadAction::RawReplay);
+    fn replays_mode_sends_raw_when_confirmed_non_test_and_complete() {
+        assert_eq!(
+            decide_upload_action(DataSharingMode::Replays, true, true, RawReplaySnapshotState::Complete),
+            ReplayUploadAction::RawReplay
+        );
     }
 
     #[test]
-    fn replays_mode_falls_back_to_build_data_when_test_or_indeterminate() {
-        assert_eq!(decide_upload_action(DataSharingMode::Replays, true, false), ReplayUploadAction::BuildData);
+    fn replays_mode_never_sends_builds_for_test_or_indeterminate_ships() {
+        for snapshot in
+            [RawReplaySnapshotState::Complete, within_grace(), RawReplaySnapshotState::IncompleteGraceLapsed]
+        {
+            assert_eq!(
+                decide_upload_action(DataSharingMode::Replays, true, false, snapshot),
+                ReplayUploadAction::Skip(ReplayUploadSkipReason::PossibleTestShip)
+            );
+        }
+    }
+
+    #[test]
+    fn replays_mode_defers_an_incomplete_replay_within_grace() {
+        let deadline = RawUploadDeadline(timestamp(1_200));
+        assert_eq!(
+            decide_upload_action(
+                DataSharingMode::Replays,
+                true,
+                true,
+                RawReplaySnapshotState::IncompleteWithinGrace { deadline }
+            ),
+            ReplayUploadAction::AwaitResults { deadline }
+        );
+    }
+
+    #[test]
+    fn replays_mode_uploads_an_incomplete_replay_after_grace() {
+        assert_eq!(
+            decide_upload_action(DataSharingMode::Replays, true, true, RawReplaySnapshotState::IncompleteGraceLapsed),
+            ReplayUploadAction::RawReplay
+        );
+    }
+
+    #[test]
+    fn results_in_the_file_are_complete_regardless_of_mtime() {
+        for mtime in [None, Some(timestamp(0)), Some(timestamp(10_000_000))] {
+            assert_eq!(raw_replay_snapshot_state(true, mtime, timestamp(100)), RawReplaySnapshotState::Complete);
+        }
+    }
+
+    #[test]
+    fn a_fresh_results_less_file_waits_until_mtime_plus_grace() {
+        let mtime = timestamp(1_000);
+        let now = timestamp(1_060);
+        assert_eq!(
+            raw_replay_snapshot_state(false, Some(mtime), now),
+            RawReplaySnapshotState::IncompleteWithinGrace {
+                deadline: RawUploadDeadline(timestamp(1_000 + 20 * 60))
+            }
+        );
+    }
+
+    #[test]
+    fn a_stale_results_less_file_has_lapsed() {
+        let mtime = timestamp(1_000);
+        let now = timestamp(1_000 + 20 * 60);
+        assert_eq!(raw_replay_snapshot_state(false, Some(mtime), now), RawReplaySnapshotState::IncompleteGraceLapsed);
+    }
+
+    #[test]
+    fn a_missing_mtime_anchors_the_grace_window_at_now() {
+        let now = timestamp(5_000);
+        assert_eq!(
+            raw_replay_snapshot_state(false, None, now),
+            RawReplaySnapshotState::IncompleteWithinGrace {
+                deadline: RawUploadDeadline(timestamp(5_000 + 20 * 60))
+            }
+        );
     }
 }

@@ -471,8 +471,9 @@ pub enum DataSharingMode {
     Off,
     /// Send per-player build payloads to `/api/ship_builds`.
     BuildData,
-    /// Send the raw replay file to `/api/replays`; test-ship battles fall back
-    /// to build data.
+    /// Send the raw replay file to `/api/replays` once end-of-battle results
+    /// are in the file or a post-battle grace window lapses. Never sends build
+    /// data; test-ship battles are not shared at all in this mode.
     Replays,
 }
 
