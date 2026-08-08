@@ -29,7 +29,6 @@ use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::error::ToolkitError;
 
-pub use crate::data::build_data::BuildAssets;
 pub use crate::data::build_data::BuildData;
 pub use crate::data::build_data::GameAsset;
 pub use crate::data::build_data::SharedBuildData;
@@ -649,7 +648,7 @@ mod build_resolution_tests {
         Arc::new(RwLock::new(Box::new(BuildData {
             vfs: VfsPath::new(wowsunpack::vfs::MemoryFS::new()),
             game_metadata: None,
-            assets: BuildAssets::default(),
+            assets: crate::data::build_data::BuildAssets::default(),
             game_constants: Arc::new(GameConstants::defaults()),
             replay_constants: Arc::new(RwLock::new(serde_json::Value::Null)),
             replay_constants_exact_match: false,

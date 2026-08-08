@@ -84,6 +84,8 @@ impl<T: GameDataContext> CachedContext<T> {
     }
 }
 
+// Each map's lock is held across the inner load, so concurrent lookups
+// serialize; fine for the single-threaded batch tools this is meant for.
 impl<T: GameDataContext> GameDataContext for CachedContext<T> {
     fn entity_specs(&self, version: &Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError> {
         let mut cache = self.specs.lock().expect("specs cache poisoned");

@@ -424,7 +424,7 @@ fn resolve_extracted_dir(path: &Path, replay_version: &Version) -> rootcause::Re
         // Cross-region: another server's build of the same friendly version
         // ships interchangeable files.
         let version_str = format!("{}.{}.{}", replay_version.major, replay_version.minor, replay_version.patch);
-        if meta.version == version_str {
+        if meta.version == version_str || meta.version.starts_with(&format!("{version_str}.")) {
             eprintln!("No exact data for build {}; using {} (build {})", replay_build, meta.version, meta.build);
             return Ok(path.to_path_buf());
         }
@@ -968,18 +968,19 @@ fn report_bench(parsed: usize, failed: usize, bytes: usize, sink: usize, elapsed
 struct CliGameDataContext<'a> {
     game_dir: Option<&'a str>,
     extracted: Option<&'a str>,
-    /// Parsed -c/--constants overrides, read once at startup.
-    constants_overrides: Option<serde_json::Value>,
+    constants_path: Option<&'a Path>,
+    /// Parsed -c/--constants overrides, read on first use so commands that
+    /// never touch constants never pay for (or fail on) the file.
+    constants_overrides: std::sync::OnceLock<Option<serde_json::Value>>,
 }
 
 impl<'a> CliGameDataContext<'a> {
-    fn new(game_dir: Option<&'a str>, extracted: Option<&'a str>, constants_path: Option<&Path>) -> Self {
-        let constants_overrides = constants_path.map(|path| {
-            let data = std::fs::read_to_string(path)
-                .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", path.display()));
-            serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"))
-        });
-        Self { game_dir, extracted, constants_overrides }
+    fn new(game_dir: Option<&'a str>, extracted: Option<&'a str>, constants_path: Option<&'a Path>) -> Self {
+        Self { game_dir, extracted, constants_path, constants_overrides: std::sync::OnceLock::new() }
+    }
+
+    fn constants_overrides(&self) -> Option<&serde_json::Value> {
+        self.constants_overrides.get_or_init(|| self.constants_path.map(read_constants_overrides)).as_ref()
     }
 }
 
@@ -992,11 +993,7 @@ impl GameDataContext for CliGameDataContext<'_> {
 
     fn game_constants(&self, version: &Version) -> Result<std::sync::Arc<GameConstants>, GameDataContextError> {
         let vfs = open_build_vfs(self.game_dir, self.extracted, version);
-        Ok(std::sync::Arc::new(GameConstants::for_build(
-            vfs.as_ref(),
-            self.constants_overrides.as_ref(),
-            Some(*version),
-        )))
+        Ok(std::sync::Arc::new(GameConstants::for_build(vfs.as_ref(), self.constants_overrides(), Some(*version))))
     }
 
     fn metadata_provider(
@@ -1009,15 +1006,19 @@ impl GameDataContext for CliGameDataContext<'_> {
     }
 }
 
+/// Read and parse a -c/--constants overrides file; a bad file is a usage
+/// error worth dying over.
+fn read_constants_overrides(path: &Path) -> serde_json::Value {
+    let data = std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", path.display()));
+    serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"))
+}
+
 /// Load a constants JSON file and merge it into a `GameConstants`.
 fn load_game_constants_owned(constants_path: Option<&Path>, version: Version) -> GameConstants {
     let mut gc = GameConstants::defaults();
     if let Some(path) = constants_path {
-        let data = std::fs::read_to_string(path)
-            .unwrap_or_else(|e| panic!("Failed to read constants file {}: {e}", path.display()));
-        let json: serde_json::Value =
-            serde_json::from_str(&data).unwrap_or_else(|e| panic!("Failed to parse constants JSON: {e}"));
-        gc.merge_replay_constants(&json, version);
+        gc.merge_replay_constants(&read_constants_overrides(path), version);
     }
     gc
 }
@@ -1028,9 +1029,6 @@ fn load_game_constants(constants_path: Option<&Path>, version: Version) -> &'sta
     Box::leak(Box::new(load_game_constants_owned(constants_path, version)))
 }
 
-/// Load the game metadata provider (game params + entity specs + translations)
-/// and battle constants for the given replay version. The provider resolves
-/// ship param ids to localized names; the entity specs drive the packet parser.
 /// Open the game-file VFS for a build from whichever source the CLI flags
 /// name. `None` when neither flag is given or the build's files are absent.
 fn open_build_vfs(game_dir: Option<&str>, extracted_dir: Option<&str>, version: &Version) -> Option<VfsPath> {
@@ -1047,6 +1045,9 @@ fn open_build_vfs(game_dir: Option<&str>, extracted_dir: Option<&str>, version: 
     }
 }
 
+/// Load the game metadata provider (game params + entity specs + translations)
+/// for the given replay version. The provider resolves ship param ids to
+/// localized names; the entity specs drive the packet parser.
 fn load_metadata_provider(
     game_dir: Option<&str>,
     extracted_dir: Option<&str>,

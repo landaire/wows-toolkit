@@ -20,7 +20,6 @@ use wows_replays::context::CachedContext;
 use wows_replays::context::GameDataContext;
 use wows_replays::context::GameDataContextError;
 use wows_replays::game_constants::GameConstants;
-use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::rpc::entitydefs::EntitySpec;
@@ -46,6 +45,8 @@ fn env_path(key: &str, default: &str) -> PathBuf {
 struct BenchGameData;
 
 impl GameDataContext for BenchGameData {
+    // Specs ride on a full provider load here; benches only ever ask the
+    // caching layer for the provider, so the cheap-specs path is unused.
     fn entity_specs(&self, version: &Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError> {
         Ok(self.metadata_provider(version)?.entity_specs_arc())
     }
@@ -94,7 +95,7 @@ fn from_dump(build: u32, version: &Version) -> Option<(VfsPath, Option<PathBuf>)
 }
 
 /// Game data from a live install: an `IdxVfs` over the build's `idx/` plus the
-/// app's own params cache in APPDATA, mirroring `load_wows_data_for_build`.
+/// app's own params cache in APPDATA, mirroring the toolkit loader.
 fn from_install(build: u32) -> Option<(VfsPath, Option<PathBuf>)> {
     use wowsunpack::data::idx;
     use wowsunpack::data::idx_vfs::IdxVfs;

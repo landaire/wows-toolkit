@@ -55,21 +55,21 @@ pub type SharedBuildData = Arc<RwLock<Box<BuildData>>>;
 /// touch them.
 #[derive(Default)]
 pub struct BuildAssets {
-    /// Signal-flag icons, lazy-loaded and cached. Keyed by PCEF name.
-    /// Modernization (upgrade) icons, lazy-loaded and cached. Keyed by PCM name.
-    /// Captain-skill icons, lazy-loaded and cached. Keyed by skill name.
+    pub ship_icons: HashMap<Species, Arc<GameAsset>>,
+    /// Ribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
+    pub ribbon_icons: HashMap<String, Arc<GameAsset>>,
+    /// Subribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
+    pub subribbon_icons: HashMap<String, Arc<GameAsset>>,
+    /// Achievement icons, lazy-loaded and cached. Keyed by achievement name (lowercase).
+    pub achievement_icons: HashMap<String, Arc<GameAsset>>,
     /// Consumable icons, lazy-loaded and cached. Keyed by PCY name
     /// (e.g. `"PCY009_CrashCrewPremium"`).
-    /// Achievement icons, lazy-loaded and cached. Keyed by achievement name (lowercase).
-    /// Subribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
-    /// Ribbon icons keyed by ribbon name (e.g., "ribbon_main_caliber")
-    pub ship_icons: HashMap<Species, Arc<GameAsset>>,
-    pub ribbon_icons: HashMap<String, Arc<GameAsset>>,
-    pub subribbon_icons: HashMap<String, Arc<GameAsset>>,
-    pub achievement_icons: HashMap<String, Arc<GameAsset>>,
     pub consumable_icons: HashMap<String, Arc<GameAsset>>,
+    /// Captain-skill icons, lazy-loaded and cached. Keyed by skill name.
     pub crew_skill_icons: HashMap<CrewSkillName, Arc<GameAsset>>,
+    /// Modernization (upgrade) icons, lazy-loaded and cached. Keyed by PCM name.
     pub modernization_icons: HashMap<String, Arc<GameAsset>>,
+    /// Signal-flag icons, lazy-loaded and cached. Keyed by PCEF name.
     pub signal_flag_icons: HashMap<String, Arc<GameAsset>>,
 }
 
@@ -218,8 +218,6 @@ impl BuildData {
     /// Returns `false` if versioned constants could not be found on disk.
     #[instrument(skip(self), fields(build = self.build_number))]
     pub fn rebuild_with_new_constants(&mut self) -> bool {
-        use crate::task::load_versioned_constants_from_disk_with_fallback;
-
         debug!("Rebuilding BuildData for build {}", self.build_number);
 
         // Reload version-matched replay constants from disk only (no network I/O).
@@ -242,11 +240,10 @@ impl BuildData {
 
         // Reload all icons from game files
         let version = self.full_version.as_ref();
-        let new_ship_icons = crate::task::load_ship_icons(&self.vfs, version);
-        let new_ribbon_icons =
-            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
+        let new_ship_icons = load_ship_icons(&self.vfs, version);
+        let new_ribbon_icons = load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::Ribbons, version);
         let new_subribbon_icons =
-            crate::task::load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
+            load_ribbon_icons(&self.vfs, wowsunpack::game_assets::GuiAssetDir::SubRibbons, version);
 
         // Apply all regenerated fields
         self.assets.ship_icons = new_ship_icons;

@@ -4,7 +4,7 @@
 //!
 //! `map_rows` requires a `Replay` with both `battle_report` and `ui_report`
 //! populated. Building `ui_report` (`UiReport::new`) needs the full GUI-app
-//! pipeline: a `SharedWoWsData` with loaded icon caches and `egui::TextureHandle`s,
+//! pipeline: a `SharedBuildData` with loaded icon caches and `egui::TextureHandle`s,
 //! plus `ReplayDependencies` (background-task channel, twitch state, sort
 //! order). None of that is constructible from a headless integration test, and
 //! it is intentionally not part of this crate's public API. So this test can
