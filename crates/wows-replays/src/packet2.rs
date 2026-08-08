@@ -784,12 +784,16 @@ impl<'argtype> Parser<'argtype> {
         })?;
 
         let consumed = payload.len() - pslice.len();
-        if let Some(d) = PayloadDiagnostic::for_leftover(
-            format!("EntityProperty::{}::{}", spec_entity.name, spec.name),
-            spec.prop_type.semantic_name().map(str::to_string),
-            payload.len(),
-            consumed,
-        ) {
+        // Leftover is the rare case; do not pay for the context strings on
+        // every packet.
+        if consumed < payload.len()
+            && let Some(d) = PayloadDiagnostic::for_leftover(
+                format!("EntityProperty::{}::{}", spec_entity.name, spec.name),
+                spec.prop_type.semantic_name().map(str::to_string),
+                payload.len(),
+                consumed,
+            )
+        {
             self.diagnostics.borrow_mut().push(d);
         }
 
@@ -842,7 +846,7 @@ impl<'argtype> Parser<'argtype> {
             }));
         }
         let mut sub = payload;
-        let mut args = vec![];
+        let mut args = Vec::with_capacity(spec.args.len());
         for (idx, arg) in spec.args.iter().enumerate() {
             let pval = match arg.parse_value(&mut sub) {
                 Ok(x) => x,
