@@ -4,7 +4,6 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Species;
-use wowsunpack::game_types::GameParamId;
 
 /// Pre-built catalog of all ships, organized for the tree selector.
 pub struct ShipCatalog {
@@ -25,7 +24,6 @@ pub struct ClassGroup {
 #[derive(Clone)]
 pub struct ShipEntry {
     pub param_index: String,
-    pub ship_id: GameParamId,
     pub display_name: String,
     /// Lowercased, ASCII-folded display name for search matching.
     pub search_name: String,
@@ -114,13 +112,7 @@ impl ShipCatalog {
             let display_name = metadata.localized_name_from_param(param).unwrap_or_else(|| param.name().to_string());
 
             let search_name = unidecode::unidecode(&display_name).to_lowercase();
-            let entry = ShipEntry {
-                param_index: param.index().to_string(),
-                ship_id: param.id(),
-                display_name,
-                search_name,
-                tier,
-            };
+            let entry = ShipEntry { param_index: param.index().to_string(), display_name, search_name, tier };
 
             nation_map.entry(nation).or_default().entry(species).or_default().push(entry);
         }
