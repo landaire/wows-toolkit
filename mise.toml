@@ -35,6 +35,10 @@ depends_post = ["fmt"]
 description = "Runs clippy fix, fmt, lints the publish (default-feature) config, and checks WASM target"
 run = [
     "cargo clippy --fix --all-features --all-targets --allow-dirty",
+    # Mirror CI's strict pass: `cargo clippy --fix` exits 0 even when
+    # non-auto-fixable lints remain, so without this a warning anywhere in the
+    # workspace sails through locally and fails CI.
+    "cargo clippy --workspace --all-targets --all-features -- -D warnings",
     # Lint the default-feature config the published crates build with: --all-features
     # hides feature-gated dead code (e.g. a helper used only by a parsing-gated fn).
     # wows_minimap_renderer is omitted (native rav1e build dep); the all-features pass covers it.
