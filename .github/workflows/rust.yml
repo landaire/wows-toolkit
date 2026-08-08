@@ -95,11 +95,5 @@ jobs:
           name: landaire-gh-public
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-      - name: Check wt-web for wasm32
-        run: nix develop --command cargo check -p wt-web --target wasm32-unknown-unknown
-        env:
-          RUSTFLAGS: -D warnings
       - name: Clippy wt-web for wasm32
         run: nix develop --command cargo clippy -p wt-web --target wasm32-unknown-unknown -- -D warnings
-        env:
-          RUSTFLAGS: ""
