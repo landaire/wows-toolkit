@@ -101,9 +101,15 @@ fn main() {
         // The vendor hybrid-graphics shims look these up in the export table by
         // name. Defining the statics is not enough; an executable exports
         // nothing unless the linker is told to.
+        //
+        // Scoped to the GUI binary, which is where the statics are defined and
+        // the only target that opens a surface. `-bins` would put the directive
+        // on every binary in the crate, and the headless helpers in src/bin
+        // define no such symbol, so the linker would fail them on an export it
+        // cannot resolve.
         if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
-            println!("cargo:rustc-link-arg-bins=/EXPORT:NvOptimusEnablement,DATA");
-            println!("cargo:rustc-link-arg-bins=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");
+            println!("cargo:rustc-link-arg-bin=wows_toolkit=/EXPORT:NvOptimusEnablement,DATA");
+            println!("cargo:rustc-link-arg-bin=wows_toolkit=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");
         }
     }
 

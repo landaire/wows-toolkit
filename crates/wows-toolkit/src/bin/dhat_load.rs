@@ -89,8 +89,3 @@ fn main() {
     drop(profiler);
     eprintln!("done");
 }
-
-#[cfg(not(feature = "dhat-heap"))]
-fn main() {
-    eprintln!("rebuild with --features dhat-heap");
-}

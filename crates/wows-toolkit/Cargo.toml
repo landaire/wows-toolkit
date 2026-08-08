@@ -147,6 +147,20 @@ windows-sys = { version = "0.61", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 
+# The helper binaries are declared only to carry `required-features`, which an
+# auto-discovered target cannot. Without it cargo builds and links both on every
+# `cargo build` and `cargo test`, purely to produce a `main` that prints how to
+# rebuild them.
+[[bin]]
+name = "dhat_load"
+path = "src/bin/dhat_load.rs"
+required-features = ["dhat-heap"]
+
+[[bin]]
+name = "profile_replay"
+path = "src/bin/profile_replay.rs"
+required-features = ["profile-bins"]
+
 [features]
 default = ["logging"]
 shipbuilds_debugging = []

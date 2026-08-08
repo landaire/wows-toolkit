@@ -36,8 +36,3 @@ fn main() {
 
     wows_toolkit::profiling::run(PathBuf::from(wows_dir), dump_dir, replay_dir, limit);
 }
-
-#[cfg(not(feature = "profile-bins"))]
-fn main() {
-    eprintln!("rebuild with --features profile-bins");
-}
