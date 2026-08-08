@@ -1,6 +1,15 @@
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
 
 name: CI
+
+# Cancel superseded runs on PR branches. Runs on main are left to finish so
+# every main commit gets full CI and the post-job cache saves still happen.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Every job runs inside the repo's nix dev shell (`nix develop`) so the rust
 # toolchain and all system dependencies (GUI libs, openssl, nasm) are identical
