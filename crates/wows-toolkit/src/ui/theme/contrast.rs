@@ -254,11 +254,13 @@ mod tests {
     #[test]
     fn extremes_cover_every_background_at_this_floor() {
         // Guards the reachability argument in readable_on's doc comment.
-        assert!(
-            CONTRAST_FLOOR * CONTRAST_FLOOR <= 21.0,
-            "floor {CONTRAST_FLOOR} exceeds sqrt(21); the fallback in readable_on is now reachable \
-             and its doc comment needs revisiting"
-        );
+        const {
+            assert!(
+                CONTRAST_FLOOR * CONTRAST_FLOOR <= 21.0,
+                "the contrast floor exceeds sqrt(21); the fallback in readable_on is reachable \
+                 and its doc comment needs revisiting"
+            )
+        };
         for v in 0..=255u8 {
             let bg = Color32::from_gray(v);
             assert!(

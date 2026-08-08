@@ -1664,8 +1664,7 @@ mod tests {
 
     #[test]
     fn unknown_id_misses_workspace_but_active_workspace_still_resolves() {
-        let mut state = TabState::default();
-        state.active_workspace_id = WorkspaceId(9999);
+        let state = TabState { active_workspace_id: WorkspaceId(9999), ..Default::default() };
         assert!(state.workspace(WorkspaceId(9999)).is_none());
         let via_active = state.active_workspace();
         assert!(
@@ -2075,7 +2074,7 @@ mod tests {
 
         state.close_workspace(id);
 
-        assert!(state.workspaces.get(&id).is_none(), "the closed workspace must be dropped from the map");
+        assert!(!state.workspaces.contains_key(&id), "the closed workspace must be dropped from the map");
         assert_eq!(
             state.active_workspace_id(),
             WorkspaceId::LIVE,
@@ -2097,7 +2096,7 @@ mod tests {
         state.close_workspace(id);
         state.close_workspace(id);
 
-        assert!(state.workspaces.get(&id).is_none());
+        assert!(!state.workspaces.contains_key(&id));
         assert_eq!(state.active_workspace_id(), WorkspaceId::LIVE);
     }
 
@@ -2219,7 +2218,7 @@ mod tests {
 
         state.close_workspace(other_id);
 
-        assert!(state.workspaces.get(&other_id).is_none(), "the closed workspace must be dropped from the map");
+        assert!(!state.workspaces.contains_key(&other_id), "the closed workspace must be dropped from the map");
         assert_eq!(
             state.active_workspace_id(),
             active_id,

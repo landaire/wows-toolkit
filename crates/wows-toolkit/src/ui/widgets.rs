@@ -57,9 +57,7 @@ pub fn twitch_chip(
     let mut logins: Vec<&String> = candidates.keys().collect();
     logins.sort();
 
-    let Some(first) = logins.first().copied() else {
-        return None;
-    };
+    let first = logins.first().copied()?;
 
     let hover = logins
         .iter()
