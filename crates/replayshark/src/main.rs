@@ -517,24 +517,31 @@ fn load_game_data(
         }
         (None, Some(extracted)) => {
             // Dumps store game files content-addressed; Dump::open resolves
-            // both CAS layouts and plain materialized directories.
+            // both CAS layouts and materialized vfs/ directories.
             let dir = resolve_extracted_dir(Path::new(extracted), replay_version)?;
             let dump = wows_data_mgr::Dump::open(&dir);
-            if !dump.has_game_files() {
-                bail!("no game files found in {}", dir.display());
+            if dump.has_game_files() {
+                let vfs = dump.vfs();
+                let loader = DataFileWithCallback::new(|path| {
+                    let mut file_data = Vec::new();
+                    vfs.join(path)
+                        .map_err(wowsunpack::error::GameDataError::from)?
+                        .open_file()
+                        .map_err(wowsunpack::error::GameDataError::from)?
+                        .read_to_end(&mut file_data)
+                        .map_err(wowsunpack::error::GameDataError::from)?;
+                    Ok(Cow::Owned(file_data))
+                });
+                parse_scripts(&loader).map_err(|e| report!("failed to parse entity defs: {e:?}"))?
+            } else {
+                // Legacy hand-extracted layout: game files sit directly under
+                // the version dir with no dump manifest.
+                let loader = DataFileWithCallback::new(|path| {
+                    let file_data = std::fs::read(dir.join(path)).map_err(wowsunpack::error::GameDataError::from)?;
+                    Ok(Cow::Owned(file_data))
+                });
+                parse_scripts(&loader).map_err(|e| report!("failed to parse entity defs: {e:?}"))?
             }
-            let vfs = dump.vfs();
-            let loader = DataFileWithCallback::new(|path| {
-                let mut file_data = Vec::new();
-                vfs.join(path)
-                    .map_err(wowsunpack::error::GameDataError::from)?
-                    .open_file()
-                    .map_err(wowsunpack::error::GameDataError::from)?
-                    .read_to_end(&mut file_data)
-                    .map_err(wowsunpack::error::GameDataError::from)?;
-                Ok(Cow::Owned(file_data))
-            });
-            parse_scripts(&loader).map_err(|e| report!("failed to parse entity defs: {e:?}"))?
         }
         (None, None) => {
             bail!("Game directory or extracted files directory must be supplied");

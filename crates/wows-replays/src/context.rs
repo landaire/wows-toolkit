@@ -82,11 +82,13 @@ where
     }
 }
 
-type Build = Option<u32>;
-type Cache<T> = Mutex<HashMap<Build, Result<T, GameDataContextError>>>;
+type Cache<T> = Mutex<HashMap<Version, Result<T, GameDataContextError>>>;
 
-/// Per-build memoization over any inner context. Failures are cached too, so
-/// a build whose data is absent is looked for once, not once per replay.
+/// Per-version memoization over any inner context. Failures are cached too,
+/// so a build whose data is absent is looked for once, not once per replay.
+/// That makes this layer a fit for batch runs and short-lived tools; a
+/// long-lived process that wants to retry transient failures should hold its
+/// own cache policy instead.
 pub struct CachedContext<T: GameDataContext> {
     inner: T,
     specs: Cache<Arc<Vec<EntitySpec>>>,
@@ -102,11 +104,11 @@ impl<T: GameDataContext> CachedContext<T> {
 impl<T: GameDataContext> GameDataContext for CachedContext<T> {
     fn entity_specs(&self, version: &Version) -> Result<Arc<Vec<EntitySpec>>, GameDataContextError> {
         let mut cache = self.specs.lock().expect("specs cache poisoned");
-        cache.entry(version.build_number()).or_insert_with(|| self.inner.entity_specs(version)).clone()
+        cache.entry(*version).or_insert_with(|| self.inner.entity_specs(version)).clone()
     }
 
     fn game_constants(&self, version: &Version) -> Result<Arc<GameConstants>, GameDataContextError> {
         let mut cache = self.constants.lock().expect("constants cache poisoned");
-        cache.entry(version.build_number()).or_insert_with(|| self.inner.game_constants(version)).clone()
+        cache.entry(*version).or_insert_with(|| self.inner.game_constants(version)).clone()
     }
 }
