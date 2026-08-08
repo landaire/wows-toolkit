@@ -350,7 +350,7 @@ fn build_report(replay: &ReplayFile, provider: &GameMetadataProvider, constants:
     world.set_record_salvo_history(true);
 
     let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
-    let mut remaining = replay.packet_data.as_slice();
+    let mut remaining = replay.packet_data();
     let mut truncated = false;
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {

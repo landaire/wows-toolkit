@@ -312,20 +312,69 @@ fn inflate_prefix(deflated: impl Read) -> Vec<u8> {
     out
 }
 
+/// Packet-stream state of a [`ReplayFile`]: the stream was decrypted and
+/// inflated. Only this state can hand out packet data, so an API that needs
+/// packets takes `&ReplayFile` (which defaults to `ReplayFile<Full>`) and the
+/// requirement is checked at compile time.
 #[derive(Debug, Clone)]
-pub struct ReplayFile {
+pub struct Full {
+    packet_data: Vec<u8>,
+}
+
+/// Packet-stream state of a [`ReplayFile`]: only the plaintext metadata
+/// header was read. Produced by [`ReplayFile::meta_only_from_file`];
+/// upgrade with [`ReplayFile::load_packets`].
+#[derive(Debug, Clone)]
+pub struct MetaOnly;
+
+#[derive(Debug, Clone)]
+pub struct ReplayFile<S = Full> {
     pub meta: ReplayMeta,
     pub raw_meta: String,
-    pub packet_data: Vec<u8>,
+    state: S,
+}
+
+impl ReplayFile<MetaOnly> {
+    /// Reads only the metadata header off disk; see
+    /// [`ReplayFile::meta_from_file`] for the bare-metadata variant.
+    pub fn meta_only_from_file(replay: &std::path::Path) -> rootcause::Result<ReplayFile<MetaOnly>, ParseError> {
+        let path_context = || format!("path: {}", replay.display());
+
+        let blob = ReplayFile::read_meta_blob(replay)?;
+        let raw_meta = String::from_utf8(blob).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        let meta: ReplayMeta =
+            serde_json::from_str(&raw_meta).map_err(|e| report!(ParseError::from(e))).attach_with(path_context)?;
+        Ok(ReplayFile { meta, raw_meta, state: MetaOnly })
+    }
+
+    /// Loads the packet stream from `replay`, upgrading to the full state.
+    /// The file is re-read in whole; the metadata is re-parsed from it so the
+    /// result is consistent even if the file changed since the scan.
+    pub fn load_packets(self, replay: &std::path::Path) -> rootcause::Result<ReplayFile, ParseError> {
+        ReplayFile::from_file(replay)
+    }
 }
 
 impl ReplayFile {
+    /// Assembles a replay from already-parsed metadata and packet data.
+    pub fn from_parts(meta: ReplayMeta, raw_meta: String, packet_data: Vec<u8>) -> ReplayFile {
+        ReplayFile { meta, raw_meta, state: Full { packet_data } }
+    }
+
+    pub fn packet_data(&self) -> &[u8] {
+        &self.state.packet_data
+    }
+
+    pub fn into_parts(self) -> (ReplayMeta, String, Vec<u8>) {
+        (self.meta, self.raw_meta, self.state.packet_data)
+    }
+
     pub fn from_decrypted_parts(meta: Vec<u8>, packet_data: Vec<u8>) -> Result<ReplayFile, ParseError> {
         let (_raw_meta, parsed_meta) = decode_meta(meta.as_slice())?;
 
         let raw_meta = String::from_utf8(meta)?;
 
-        Ok(ReplayFile { meta: parsed_meta, raw_meta, packet_data })
+        Ok(ReplayFile::from_parts(parsed_meta, raw_meta, packet_data))
     }
 
     /// Parse a replay entirely from an in-memory byte slice (sans-io).
@@ -345,7 +394,7 @@ impl ReplayFile {
         let mut packet_data = Vec::with_capacity((result.decompressed_size as usize).min(MAX_PREALLOC));
         deflater.read_to_end(&mut packet_data).map_err(|e| report!(ParseError::from(e)))?;
 
-        Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data })
+        Ok(ReplayFile::from_parts(result.meta, result.raw_meta.to_string(), packet_data))
     }
 
     pub fn from_file(replay: &std::path::Path) -> rootcause::Result<ReplayFile, ParseError> {
@@ -373,7 +422,7 @@ impl ReplayFile {
         let result = replay_format(&mut input).map_err(|e| report!(ParseError::from(e)))?;
         let packet_data = inflate_prefix(BlowfishXorReader::new(input));
 
-        Ok(ReplayFile { meta: result.meta, raw_meta: result.raw_meta.to_string(), packet_data })
+        Ok(ReplayFile::from_parts(result.meta, result.raw_meta.to_string(), packet_data))
     }
 
     /// Read [`ReplayFile::from_partial_bytes`] from a file on disk.

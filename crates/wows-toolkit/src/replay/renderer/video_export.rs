@@ -264,12 +264,14 @@ pub fn replay_render_input(path: &std::path::Path, wows_data_map: &WoWsDataMap) 
         None => base,
     };
 
+    let game_duration = replay_file.meta.duration as f32;
+    let (_, raw_meta, packet_data) = replay_file.into_parts();
     Some(ReplayRenderInput {
-        raw_meta: replay_file.raw_meta.clone().into_bytes(),
-        packet_data: replay_file.packet_data,
+        raw_meta: raw_meta.into_bytes(),
+        packet_data,
         map_name,
         replay_name,
-        game_duration: replay_file.meta.duration as f32,
+        game_duration,
         wows_data,
     })
 }

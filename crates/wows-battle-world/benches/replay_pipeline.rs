@@ -42,7 +42,7 @@ fn drive(
     world: Option<&mut BattleWorld<'_, '_, wowsunpack::game_params::provider::GameMetadataProvider>>,
 ) {
     let mut parser = Parser::with_version(case.specs, case.version);
-    let mut remaining = case.replay.packet_data.as_slice();
+    let mut remaining = case.replay.packet_data();
     match world {
         Some(world) => {
             while !remaining.is_empty() {
@@ -83,14 +83,14 @@ fn bench(c: &mut Criterion) {
 
     let mut parse_only = c.benchmark_group("parse_only");
     for case in &cases {
-        parse_only.throughput(Throughput::Bytes(case.replay.packet_data.len() as u64));
+        parse_only.throughput(Throughput::Bytes(case.replay.packet_data().len() as u64));
         parse_only.bench_function(&case.name, |b| b.iter(|| drive(case, None)));
     }
     parse_only.finish();
 
     let mut full = c.benchmark_group("parse_and_process");
     for case in &cases {
-        full.throughput(Throughput::Bytes(case.replay.packet_data.len() as u64));
+        full.throughput(Throughput::Bytes(case.replay.packet_data().len() as u64));
         full.bench_function(&case.name, |b| {
             b.iter_batched_ref(|| new_world(case), |world| drive(case, Some(world)), BatchSize::LargeInput)
         });

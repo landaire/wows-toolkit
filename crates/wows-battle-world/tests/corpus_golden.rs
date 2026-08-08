@@ -233,7 +233,7 @@ fn drive<G: ResourceLoader>(
     version: Version,
 ) {
     let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
-    let mut remaining = &replay.packet_data[..];
+    let mut remaining = replay.packet_data();
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).expect("packet parse");
         world.process(&packet);

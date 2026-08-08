@@ -70,7 +70,7 @@ fn snapshot_first_n_packets(replay_filename: &str, n: usize) {
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(&snapshot_dir);
 
-    let mut remaining = &replay.packet_data[..];
+    let mut remaining = replay.packet_data();
     let mut i = 0;
 
     settings.bind(|| {

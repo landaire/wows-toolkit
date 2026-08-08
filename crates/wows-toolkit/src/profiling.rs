@@ -138,7 +138,7 @@ fn time_one(path: &Path, deps: &ReplayDependencies) -> Result<StageTimings, Stri
     let start = Instant::now();
     let replay_file = ReplayFile::from_bytes(&bytes).map_err(|e| format!("container parse failed: {e:?}"))?;
     t.container = start.elapsed();
-    t.packet_bytes = replay_file.packet_data.len() as u64;
+    t.packet_bytes = replay_file.packet_data().len() as u64;
 
     let raw_version = replay_file.meta.clientVersionFromExe.clone();
     let version = Version::try_from_client_exe(&raw_version).ok_or_else(|| format!("bad version {raw_version:?}"))?;
@@ -169,7 +169,7 @@ fn time_one(path: &Path, deps: &ReplayDependencies) -> Result<StageTimings, Stri
     world.set_record_salvo_history(true);
 
     let mut parser = wows_replays::packet2::Parser::with_version(metadata_provider.entity_specs(), version);
-    let mut remaining = replay_file.packet_data.as_slice();
+    let mut remaining = replay_file.packet_data();
     while !remaining.is_empty() {
         let start = Instant::now();
         let packet = parser.parse_packet(&mut remaining);

@@ -291,7 +291,7 @@ fn build_battle_report(
     world.set_shot_tracking(ShotTracking::Untracked);
 
     let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
-    let mut remaining = replay_file.packet_data.as_slice();
+    let mut remaining = replay_file.packet_data();
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
             Ok(packet) => world.process(&packet),

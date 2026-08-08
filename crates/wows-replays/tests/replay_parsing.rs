@@ -178,7 +178,7 @@ fn packet_data_present() {
             continue;
         }
         let replay = ReplayFile::from_file(&path).unwrap();
-        assert!(!replay.packet_data.is_empty(), "packet_data empty for {}", path.display());
+        assert!(!replay.packet_data().is_empty(), "packet_data empty for {}", path.display());
     }
 }
 

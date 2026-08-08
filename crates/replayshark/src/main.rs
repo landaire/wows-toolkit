@@ -582,7 +582,7 @@ where
     let mut analyzer = build(&replay_file.meta);
 
     let mut parser = wows_replays::packet2::Parser::with_version(&specs, replay_version);
-    let mut remaining = &replay_file.packet_data[..];
+    let mut remaining = replay_file.packet_data();
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).map_err(|e| rootcause::report!(ParseError::from(e)))?;
         analyzer.process(&packet);
@@ -889,7 +889,7 @@ fn run_bench(
                     match ReplayFile::from_file(path) {
                         Ok(replay) => {
                             parsed += 1;
-                            bytes += replay.packet_data.len();
+                            bytes += replay.packet_data().len();
                             sink = sink.wrapping_add(replay.meta.vehicles.len());
                         }
                         Err(_) => failed += 1,
@@ -919,7 +919,7 @@ fn run_bench(
                     let mut local_sink = 0usize;
                     let ok = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         let mut parser = wows_replays::packet2::Parser::new(specs_ref);
-                        let mut remaining = &replay.packet_data[..];
+                        let mut remaining = replay.packet_data();
                         while !remaining.is_empty() {
                             match parser.parse_packet(&mut remaining) {
                                 Ok(packet) => local_sink = local_sink.wrapping_add(packet.packet_size as usize),
@@ -932,7 +932,7 @@ fn run_bench(
                     sink = sink.wrapping_add(local_sink);
                     if ok {
                         parsed += 1;
-                        bytes += replay.packet_data.len();
+                        bytes += replay.packet_data().len();
                     } else {
                         failed += 1;
                     }
@@ -1147,7 +1147,7 @@ fn run_players_query(
     world.set_shot_tracking(ShotTracking::Untracked);
 
     let mut parser = wows_replays::packet2::Parser::with_version(provider.entity_specs(), version);
-    let mut remaining = replay_file.packet_data.as_slice();
+    let mut remaining = replay_file.packet_data();
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
             Ok(packet) => world.process(&packet),
@@ -1296,10 +1296,10 @@ fn main() {
         Commands::Decrypt { meta_output, packets_output, replay } => {
             let replay_file = ReplayFile::from_file(&replay).unwrap();
             std::fs::write(&meta_output, &replay_file.raw_meta).unwrap();
-            std::fs::write(&packets_output, &replay_file.packet_data).unwrap();
+            std::fs::write(&packets_output, replay_file.packet_data()).unwrap();
 
             println!("Wrote {} bytes of metadata to {:?}", replay_file.raw_meta.len(), meta_output);
-            println!("Wrote {} bytes of packet data to {:?}", replay_file.packet_data.len(), packets_output);
+            println!("Wrote {} bytes of packet data to {:?}", replay_file.packet_data().len(), packets_output);
         }
         Commands::Summary { replay } => {
             parse_replay(&replay, game_dir, extracted, |meta| {

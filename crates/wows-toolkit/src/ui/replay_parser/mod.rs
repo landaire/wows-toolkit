@@ -3257,7 +3257,7 @@ impl Replay {
             world.set_record_salvo_history(true);
             let mut p =
                 wows_replays::packet2::Parser::with_version(self.resource_loader.entity_specs(), replay_version);
-            let mut remaining = self.replay_file.packet_data.as_slice();
+            let mut remaining = self.replay_file.packet_data();
             while !remaining.is_empty() {
                 match p.parse_packet(&mut remaining) {
                     Ok(packet) => world.process(&packet),
@@ -3790,7 +3790,7 @@ impl ToolkitTabViewer<'_> {
                     && ui.button(wt_translations::icon_t(icons::PLAY, &t!("ui.replay.render"))).clicked()
                 {
                     let raw_meta = replay_file.replay_file.raw_meta.clone().into_bytes();
-                    let pkt_data = replay_file.replay_file.packet_data.clone();
+                    let pkt_data = replay_file.replay_file.packet_data().to_vec();
                     let map_name = replay_file.replay_file.meta.mapName.clone();
                     let translated_map = replay_file.map_name(metadata_provider);
                     let base = format!("{} - {}", replay_file.replay_file.meta.playerName, translated_map);
@@ -3821,7 +3821,7 @@ impl ToolkitTabViewer<'_> {
                         .iter()
                         .map(|r| crate::replay::renderer::AltReplayBytes {
                             raw_meta: r.raw_meta.clone().into_bytes(),
-                            packet_data: r.packet_data.clone(),
+                            packet_data: r.packet_data().to_vec(),
                         })
                         .collect();
                     let is_debug_mode = self.tab_state.persisted.read().settings.app.debug_mode;
@@ -5638,9 +5638,9 @@ impl ToolkitTabViewer<'_> {
             return;
         }
         let raw_meta = guard.replay_file.raw_meta.clone().into_bytes();
-        let packet_data = guard.replay_file.packet_data.clone();
+        let packet_data = guard.replay_file.packet_data().to_vec();
         let alt_bytes: Vec<(Vec<u8>, Vec<u8>)> =
-            guard.alt_replays.iter().map(|r| (r.raw_meta.clone().into_bytes(), r.packet_data.clone())).collect();
+            guard.alt_replays.iter().map(|r| (r.raw_meta.clone().into_bytes(), r.packet_data().to_vec())).collect();
         let resource_loader = guard.resource_loader.clone();
         let game_constants = guard.game_constants.clone();
         guard.timeline = TimelineState::Extracting;
@@ -5829,7 +5829,7 @@ impl ToolkitTabViewer<'_> {
                     .iter()
                     .map(|alt| crate::replay::renderer::AltReplayBytes {
                         raw_meta: alt.raw_meta.clone().into_bytes(),
-                        packet_data: alt.packet_data.clone(),
+                        packet_data: alt.packet_data().to_vec(),
                     })
                     .collect()
             })

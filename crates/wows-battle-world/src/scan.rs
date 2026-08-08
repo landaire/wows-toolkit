@@ -95,7 +95,7 @@ pub fn scan_replay(
         .common_constants(game_constants.common())
         .ships_constants(game_constants.ships())
         .build();
-    let mut remaining = &replay.packet_data[..];
+    let mut remaining = replay.packet_data();
     while !remaining.is_empty() {
         let Ok(packet) = parser.parse_packet(&mut remaining) else {
             break;
@@ -303,7 +303,7 @@ pub fn scan_replay_world<G: ResourceLoader>(
 ) {
     let mut world = BattleWorld::new(meta, game_params, Some(game_constants));
     let mut parser = Parser::with_version(game_params.entity_specs(), version);
-    let mut remaining = &replay.packet_data[..];
+    let mut remaining = replay.packet_data();
     let mut prev_clock = GameClock(0.0);
     while let Ok(packet) = parser.parse_packet(&mut remaining) {
         {

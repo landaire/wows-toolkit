@@ -75,7 +75,7 @@ fn build_report(loaded: &Loaded) -> BattleReport {
     world.set_shot_tracking(ShotTracking::Untracked);
 
     let mut parser = wows_replays::packet2::Parser::with_version(loaded.provider.entity_specs(), loaded.version);
-    let mut remaining = loaded.replay.packet_data.as_slice();
+    let mut remaining = loaded.replay.packet_data();
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
             Ok(packet) => world.process(&packet),

@@ -107,7 +107,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
         replays.extend(merges.iter());
 
         let parsers: Vec<Parser<'specs>> = (0..replay_count).map(|_| Parser::with_version(specs, version)).collect();
-        let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data.as_slice()).collect();
+        let remainings: Vec<&[u8]> = replays.iter().map(|r| r.packet_data()).collect();
 
         let mut self_teams = Vec::with_capacity(replay_count);
         let mut total_duration = GameClock(0.0);
@@ -319,7 +319,7 @@ impl<'specs, 'res, 'data, G: ResourceLoader> MergedReplays<'specs, 'res, 'data, 
 /// don't belong to the same match before a full re-parse is kicked off.
 pub fn scan_arena_id(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaId> {
     let mut parser = Parser::with_version(specs, version);
-    let mut remaining = &replay.packet_data[..];
+    let mut remaining = replay.packet_data();
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).ok()?;
         if let PacketType::EntityMethod(em) = &packet.payload
@@ -403,7 +403,7 @@ pub fn gather_damage_events<G: ResourceLoader>(
     for replay in replays {
         let mut world = BattleWorld::new(&replay.meta, game_resources, Some(constants));
         let mut parser = Parser::with_version(specs, version);
-        let mut remaining = &replay.packet_data[..];
+        let mut remaining = replay.packet_data();
         while !remaining.is_empty() {
             let Ok(packet) = parser.parse_packet(&mut remaining) else { break };
             world.process(&packet);

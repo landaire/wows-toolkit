@@ -162,7 +162,7 @@ pub fn extract_cap_layout_from_replay<G: ResourceLoader>(
 
     let replay_version = wowsunpack::data::Version::from_client_exe(&replay_file.meta.clientVersionFromExe);
     let mut parser = Parser::with_version(resource_loader.entity_specs(), replay_version);
-    let mut remaining = replay_file.packet_data.as_slice();
+    let mut remaining = replay_file.packet_data();
 
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {

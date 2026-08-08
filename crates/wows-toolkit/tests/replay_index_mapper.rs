@@ -70,7 +70,7 @@ fn build_report(loaded: &Loaded) -> BattleReport {
         loaded.provider.entity_specs(),
         Version::from_client_exe(&loaded.replay_file.meta.clientVersionFromExe),
     );
-    let mut remaining = loaded.replay_file.packet_data.as_slice();
+    let mut remaining = loaded.replay_file.packet_data();
     while !remaining.is_empty() {
         match parser.parse_packet(&mut remaining) {
             Ok(packet) => world.process(&packet),

@@ -43,7 +43,7 @@ pub struct ArenaState {
 /// runs against files the game is still writing.
 pub fn scan_arena_state(specs: &[EntitySpec], version: Version, replay: &ReplayFile) -> Option<ArenaState> {
     let mut parser = Parser::with_version(specs, version);
-    let mut remaining = &replay.packet_data[..];
+    let mut remaining = replay.packet_data();
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).ok()?;
         let PacketType::EntityMethod(em) = &packet.payload else {
@@ -220,7 +220,7 @@ pub fn gather_replay_facts(
         let before = combined.len();
         let mut acc = VehicleFactsAccumulator::new(version, constants);
         let mut parser = Parser::with_version(specs, version);
-        let mut remaining = &replay.packet_data[..];
+        let mut remaining = replay.packet_data();
         while !remaining.is_empty() {
             let Ok(packet) = parser.parse_packet(&mut remaining) else { break };
             let decoded = decoder.decode(&packet);
@@ -301,11 +301,11 @@ mod tests {
     /// give the same answer through both.
     #[test]
     fn an_empty_stream_yields_no_arena_state() {
-        let replay = ReplayFile {
-            meta: serde_json::from_str(EMPTY_META).expect("meta parses"),
-            raw_meta: EMPTY_META.to_string(),
-            packet_data: Vec::new(),
-        };
+        let replay = ReplayFile::from_parts(
+            serde_json::from_str(EMPTY_META).expect("meta parses"),
+            EMPTY_META.to_string(),
+            Vec::new(),
+        );
 
         assert!(scan_arena_state(&[], Version::default(), &replay).is_none());
         assert!(scan_arena_id(&[], Version::default(), &replay).is_none());

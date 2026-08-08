@@ -341,7 +341,7 @@ fn capture_frames(filename: &str) -> String {
 
     let total_packets = {
         let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
-        let mut remaining = &replay_count.packet_data[..];
+        let mut remaining = replay_count.packet_data();
         let mut n = 0usize;
         while !remaining.is_empty() {
             match parser.parse_packet(&mut remaining) {
@@ -387,7 +387,7 @@ fn capture_frames(filename: &str) -> String {
     renderer.set_salvo_flight_times(std::sync::Arc::new(salvo_flight_times));
 
     let mut parser = wows_replays::packet2::Parser::with_version(specs, version);
-    let mut remaining = &replay_main.packet_data[..];
+    let mut remaining = replay_main.packet_data();
     let mut count = 0usize;
     let mut mid_frame: Option<Vec<DrawCommand>> = None;
 

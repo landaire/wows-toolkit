@@ -6,7 +6,7 @@ fn run_ingest(filename: &str) {
     let h = support::load(filename);
     let mut world = wows_battle_world::BattleWorld::new(&h.replay.meta, h.game_params, Some(h.game_constants));
     let mut parser = wows_replays::packet2::Parser::with_version(h.specs, h.version);
-    let mut remaining = &h.replay.packet_data[..];
+    let mut remaining = h.replay.packet_data();
     use wows_replays::analyzer::Analyzer;
     while !remaining.is_empty() {
         let packet = parser.parse_packet(&mut remaining).expect("parse");
