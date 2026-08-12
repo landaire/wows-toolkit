@@ -2,6 +2,47 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.1] - 2026-08-12
+
+### 🚀 Features
+
+- *(toolkit)* Always offer the ignore-cache ShipBuilds batch
+- *(wowsunpack)* Count translation catalog swaps on the metadata provider
+- *(toolkit)* Judge whether replay constants belong to a build
+- *(toolkit)* Read and install a user-supplied constants.json
+- *(toolkit)* Let a forced re-index rewrite every stored value
+- *(toolkit)* Import a constants.json and refresh persisted replay data from the palette
+- *(data-mgr)* Report why a constants fetch failed instead of discarding it
+- *(toolkit)* Route HTTP through the configured system or manual proxy
+- *(toolkit)* Send GitHub and Twitch requests through the configured proxy
+- *(toolkit)* Copy the newest log to the clipboard from the palette
+
+### 🐛 Bug Fixes
+
+- *(toolkit)* Parse translations at startup instead of compiling them in
+- *(toolkit)* Detect end-of-battle from the packet stream, not the report
+- Fix some entity-related packet fields + parse more BigWorld protocol info
+- *(toolkit)* Withhold results decoded with constants from another build
+- *(toolkit)* Fit constants by release, not by build number alone
+- *(toolkit)* Keep stored results when a pass cannot vouch for them
+- *(toolkit)* Tighten proxy client scoping, redirect handling, and credential redaction
+- *(toolkit)* Source the not-found log message from a translation key
+- *(toolkit)* Stop rebuilding on cached constants and align mismatch checks with ConstantsFit
+- *(toolkit)* Rebuild dump-resolved builds whose on-disk constants already fit
+- *(data-mgr)* Model split depot manifests
+- *(entity_spec)* Handle FLOAT64 which caused crash in version 15.7
+- *(data-mgr)* Download split game depots
+- *(data-mgr)* Allow local game source selectors
+- *(data-mgr)* Tolerate stale local builds
+- *(data-mgr)* Address multi-depot review
+- *(ci)* Attempt to fix linux/mac builds
+- Disable prefer-post-quantum
+- *(wows-data-mgr)* Fix issues with game version manifest + being unable to specify versions with --game-dir
+
+### ⚡ Performance
+
+- *(toolkit)* Cache replay listing state across frames
+
 ## [1.0.0] - 2026-08-08
 
 ### 🚀 Features
