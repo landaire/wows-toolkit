@@ -1,0 +1,22 @@
+load("@prelude//rust:cargo_package.bzl", "cargo")
+
+cargo.rust_library(
+    name = "wows_core",
+    srcs = glob(["**"], exclude = ["BUCK"]),
+    crate = "wows_core",
+    crate_root = "src/lib.rs",
+    edition = "2024",
+    features = [
+        "default",
+        "rkyv",
+        "roxmltree",
+        "serde",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust:rkyv",
+        "//third-party/rust:roxmltree",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+    ],
+)
