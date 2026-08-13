@@ -170,7 +170,10 @@ def _make_cc_shim(ctx: AnalysisContext, name: str, cmd: cmd_args) -> cmd_args:
                 "cc_original_dir=$(pwd)",
                 # Change directory to the script's location in buck-out, then up
                 # to the repo root.
-                'cd -- "$(dirname -- "$(realpath "${BASH_SOURCE[0]}")")"',
+                'cd -- "$({}/bin/dirname -- "$({}/bin/realpath "${{BASH_SOURCE[0]}}")")"'.format(
+                    read_root_config("nix_toolchain", "root"),
+                    read_root_config("nix_toolchain", "root"),
+                ),
                 cmd_args(ctx.label.project_root, relative_to = script, parent = 1, format = "cd {}"),
                 # Run from_any_dir.py.
                 cmd_args(
@@ -245,7 +248,32 @@ def _cargo_buildscript_impl(ctx: AnalysisContext) -> list[Provider]:
         cmd_args("--manifest-dir=", manifest_dir, delimiter = ""),
         cmd_args("--create-cwd=", cwd.as_output(), delimiter = ""),
         cmd_args("--outfile=", rustc_flags.as_output(), delimiter = ""),
+        "--safe-path=/buck-buildscript-path-is-disabled",
     ]
+
+    allowed_env = [
+        "AR",
+        "CARGO",
+        "CARGO_ENCODED_RUSTFLAGS",
+        "CARGO_PKG_NAME",
+        "CARGO_PKG_VERSION",
+        "CC",
+        "CXX",
+        "HOST",
+        "LD",
+        "OUT_DIR",
+        "RUST_BACKTRACE",
+        "RUSTC",
+        "RUSTC_LINKER",
+        "TARGET",
+    ] + ctx.attrs.env.keys() + [
+        "CARGO_FEATURE_{}".format(feature.upper().replace("-", "_"))
+        for feature in ctx.attrs.features
+    ]
+    cmd.extend([
+        cmd_args("--allowed-env=", name, delimiter = "")
+        for name in allowed_env
+    ])
 
     if ctx.attrs.rustc_link_lib:
         cmd.append("--rustc-link-lib")

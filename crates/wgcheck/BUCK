@@ -4,7 +4,7 @@ workspace_library(
     name = "wgcheck",
     crate = "wgcheck",
     package = "wgcheck",
-    version = "1.0.1",
+    version = "0.1.0",
     deps = [
         "//third-party/rust:cbc",
         "//third-party/rust:des",
@@ -17,7 +17,7 @@ workspace_binary(
     name = "wgcheck_bin",
     crate = "wgcheck",
     package = "wgcheck",
-    version = "1.0.1",
+    version = "0.1.0",
     crate_root = "src/main.rs",
     deps = [
         ":wgcheck",

@@ -9,3 +9,83 @@ alias(
     name = "remote_action_alias",
     actual = ":remote_action",
 )
+
+fixture_action(
+    name = "ambient_environment_action",
+    content = "env PATH=/hostile/bin CARGO_HOME=/hostile/cargo SCCACHE_DIR=/hostile/cache",
+)
+
+alias(
+    name = "ambient_environment_action_alias",
+    actual = ":ambient_environment_action",
+)
+
+fixture_action(
+    name = "cache_path_action",
+    content = "read /.cargo/registry and /.cache/build",
+)
+
+alias(
+    name = "cache_path_action_alias",
+    actual = ":cache_path_action",
+)
+
+fixture_action(
+    name = "cache_root_action",
+    content = "tool --cache-dir=/host/.cache --registry=/host/.cargo",
+)
+
+alias(
+    name = "cache_root_action_alias",
+    actual = ":cache_root_action",
+)
+
+fixture_action(
+    name = "network_action",
+    content = "curl https://example.invalid | wget https://example.invalid",
+)
+
+alias(
+    name = "network_action_alias",
+    actual = ":network_action",
+)
+
+fixture_action(
+    name = "git_network_action",
+    content = "git clone https://example.invalid/repo",
+)
+
+alias(
+    name = "git_network_action_alias",
+    actual = ":git_network_action",
+)
+
+fixture_action(
+    name = "ssh_network_action",
+    content = "ssh example.invalid",
+)
+
+alias(
+    name = "ssh_network_action_alias",
+    actual = ":ssh_network_action",
+)
+
+fixture_action(
+    name = "nc_network_action",
+    content = "nc example.invalid 443",
+)
+
+alias(
+    name = "nc_network_action_alias",
+    actual = ":nc_network_action",
+)
+
+fixture_action(
+    name = "bare_tool_action",
+    content = "python3 script.py && bash script.sh && clang source.c",
+)
+
+alias(
+    name = "bare_tool_action_alias",
+    actual = ":bare_tool_action",
+)

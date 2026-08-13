@@ -2,6 +2,8 @@
 
 def main [] {
     ^nu scripts/test-native-build-modes.nu
+    ^nu scripts/test-buildscript-environment.nu
+    ^nu scripts/test-workspace-package-metadata.nu
 
     let aliases = [
         "wows_toolkit"
