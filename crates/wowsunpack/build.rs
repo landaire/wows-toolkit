@@ -103,6 +103,12 @@ struct RegistryEntry {
     version: String,
 }
 
+struct GameDataSource {
+    registry_path: PathBuf,
+    data_dir: PathBuf,
+    scan_data_directories: bool,
+}
+
 fn find_workspace_root() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
     let mut dir = manifest_dir.as_path();
@@ -112,6 +118,26 @@ fn find_workspace_root() -> Option<PathBuf> {
         }
         dir = dir.parent()?;
     }
+}
+
+fn game_data_source() -> Option<GameDataSource> {
+    if let Some(path) = std::env::var_os("WOWS_GAME_DATA") {
+        let path = PathBuf::from(path);
+        let registry_path = if path.file_name().is_some_and(|name| name == "versions.toml") {
+            path.clone()
+        } else {
+            path.join("versions.toml")
+        };
+        let data_dir = registry_path.parent()?.to_path_buf();
+        return Some(GameDataSource {
+            registry_path,
+            data_dir,
+            scan_data_directories: std::env::var_os("WOWS_HERMETIC_BUILD").is_none(),
+        });
+    }
+
+    let data_dir = find_workspace_root()?.join("game_data");
+    Some(GameDataSource { registry_path: data_dir.join("versions.toml"), data_dir, scan_data_directories: true })
 }
 
 fn scan_bin_dir(path: &Path) -> Vec<u32> {
@@ -126,49 +152,45 @@ fn scan_bin_dir(path: &Path) -> Vec<u32> {
         .collect()
 }
 
-fn discover_builds(workspace_root: &Path) -> Vec<u32> {
-    let data_dir = match std::env::var("WOWS_GAME_DATA") {
-        Ok(d) => PathBuf::from(d),
-        Err(_) => workspace_root.join("game_data"),
-    };
-
-    let registry_path = data_dir.join("versions.toml");
+fn discover_builds(source: &GameDataSource) -> Vec<u32> {
     let registry: Registry =
-        std::fs::read_to_string(&registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+        std::fs::read_to_string(&source.registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
 
     let mut builds: Vec<u32> = Vec::new();
 
-    // Builds from registry
-    for key in registry.builds.keys() {
-        if let Ok(build) = key.parse::<u32>() {
-            // For downloaded builds, verify the directory exists
-            let build_dir = data_dir.join("builds").join(key);
-            if build_dir.exists() {
-                builds.push(build);
+    if source.scan_data_directories {
+        // Builds from registry
+        for key in registry.builds.keys() {
+            if let Ok(build) = key.parse::<u32>() {
+                // For downloaded builds, verify the directory exists
+                let build_dir = source.data_dir.join("builds").join(key);
+                if build_dir.exists() {
+                    builds.push(build);
+                }
             }
         }
-    }
 
-    // Builds from latest_path
-    if let Some(ref latest) = registry.latest_path {
-        for build in scan_bin_dir(latest) {
-            if !builds.contains(&build) {
-                builds.push(build);
+        // Builds from latest_path
+        if let Some(ref latest) = registry.latest_path {
+            for build in scan_bin_dir(latest) {
+                if !builds.contains(&build) {
+                    builds.push(build);
+                }
             }
         }
-    }
 
-    // Also scan game_data/builds/ for any unregistered builds
-    let builds_dir = data_dir.join("builds");
-    if builds_dir.exists()
-        && let Ok(entries) = std::fs::read_dir(&builds_dir)
-    {
-        for entry in entries.filter_map(|e| e.ok()) {
-            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
-                && let Some(build) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok())
-                && !builds.contains(&build)
-            {
-                builds.push(build);
+        // Also scan game_data/builds/ for any unregistered builds
+        let builds_dir = source.data_dir.join("builds");
+        if builds_dir.exists()
+            && let Ok(entries) = std::fs::read_dir(&builds_dir)
+        {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
+                    && let Some(build) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok())
+                    && !builds.contains(&build)
+                {
+                    builds.push(build);
+                }
             }
         }
     }
@@ -197,11 +219,11 @@ fn main() {
         println!("cargo:rustc-check-cfg=cfg(has_build_{build})");
     }
 
-    let Some(workspace_root) = find_workspace_root() else {
+    let Some(source) = game_data_source() else {
         return;
     };
 
-    let builds = discover_builds(&workspace_root);
+    let builds = discover_builds(&source);
 
     for &build in &builds {
         // Declare check-cfg for any discovered build not in the known list
@@ -216,10 +238,7 @@ fn main() {
     }
 
     // Re-run if registry changes
-    let data_dir = match std::env::var("WOWS_GAME_DATA") {
-        Ok(d) => PathBuf::from(d),
-        Err(_) => workspace_root.join("game_data"),
-    };
-    println!("cargo:rerun-if-changed={}", data_dir.join("versions.toml").display());
+    println!("cargo:rerun-if-changed={}", source.registry_path.display());
     println!("cargo:rerun-if-env-changed=WOWS_GAME_DATA");
+    println!("cargo:rerun-if-env-changed=WOWS_HERMETIC_BUILD");
 }

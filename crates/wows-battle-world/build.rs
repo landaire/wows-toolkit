@@ -31,6 +31,12 @@ struct RegistryEntry {
     path: Option<PathBuf>,
 }
 
+struct GameDataSource {
+    registry_path: PathBuf,
+    data_dir: PathBuf,
+    scan_data_directories: bool,
+}
+
 fn find_workspace_root() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").ok()?);
     let mut dir = manifest_dir.as_path();
@@ -40,6 +46,26 @@ fn find_workspace_root() -> Option<PathBuf> {
         }
         dir = dir.parent()?;
     }
+}
+
+fn game_data_source() -> Option<GameDataSource> {
+    if let Some(path) = std::env::var_os("WOWS_GAME_DATA") {
+        let path = PathBuf::from(path);
+        let registry_path = if path.file_name().is_some_and(|name| name == "versions.toml") {
+            path.clone()
+        } else {
+            path.join("versions.toml")
+        };
+        let data_dir = registry_path.parent()?.to_path_buf();
+        return Some(GameDataSource {
+            registry_path,
+            data_dir,
+            scan_data_directories: std::env::var_os("WOWS_HERMETIC_BUILD").is_none(),
+        });
+    }
+
+    let data_dir = find_workspace_root()?.join("game_data");
+    Some(GameDataSource { registry_path: data_dir.join("versions.toml"), data_dir, scan_data_directories: true })
 }
 
 #[derive(Deserialize)]
@@ -113,15 +139,13 @@ fn is_usable_build(dump_dir: &Path, build: u32) -> bool {
         })
 }
 
-fn discover_builds(workspace_root: &Path) -> Discovery {
-    let data_dir = match std::env::var("WOWS_GAME_DATA") {
-        Ok(d) => PathBuf::from(d),
-        Err(_) => workspace_root.join("game_data"),
-    };
-
-    let registry_path = data_dir.join("versions.toml");
+fn discover_builds(source: &GameDataSource) -> Discovery {
     let registry: Registry =
-        std::fs::read_to_string(&registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+        std::fs::read_to_string(&source.registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
+
+    if !source.scan_data_directories {
+        return Discovery { builds: Vec::new(), watched_paths: BTreeSet::new() };
+    }
 
     let mut candidates: BTreeSet<u32> = registry.builds.keys().filter_map(|key| key.parse().ok()).collect();
 
@@ -130,7 +154,7 @@ fn discover_builds(workspace_root: &Path) -> Discovery {
     }
 
     // Also scan game_data/builds/ for unregistered builds.
-    let builds_dir = data_dir.join("builds");
+    let builds_dir = source.data_dir.join("builds");
     if builds_dir.exists()
         && let Ok(entries) = std::fs::read_dir(&builds_dir)
     {
@@ -149,7 +173,7 @@ fn discover_builds(workspace_root: &Path) -> Discovery {
         watched_paths.insert(latest.join("bin"));
     }
     for build in candidates {
-        if let Some(dir) = resolved_build_dir(&registry, &data_dir, build) {
+        if let Some(dir) = resolved_build_dir(&registry, &source.data_dir, build) {
             watched_paths.insert(dir.join("metadata.toml"));
             watched_paths.insert(dir.join("vfs"));
             if let Some(base) = dir.parent() {
@@ -194,11 +218,11 @@ fn main() {
         println!("cargo:rustc-check-cfg=cfg(has_build_{build})");
     }
 
-    let Some(workspace_root) = find_workspace_root() else {
+    let Some(source) = game_data_source() else {
         return;
     };
 
-    let discovery = discover_builds(&workspace_root);
+    let discovery = discover_builds(&source);
 
     for &build in &discovery.builds {
         // Declare check-cfg for any discovered build not in the known list
@@ -213,13 +237,10 @@ fn main() {
     }
 
     // Re-run if registry changes
-    let data_dir = match std::env::var("WOWS_GAME_DATA") {
-        Ok(d) => PathBuf::from(d),
-        Err(_) => workspace_root.join("game_data"),
-    };
-    println!("cargo:rerun-if-changed={}", data_dir.join("versions.toml").display());
+    println!("cargo:rerun-if-changed={}", source.registry_path.display());
     for watched_path in discovery.watched_paths {
         println!("cargo:rerun-if-changed={}", watched_path.display());
     }
     println!("cargo:rerun-if-env-changed=WOWS_GAME_DATA");
+    println!("cargo:rerun-if-env-changed=WOWS_HERMETIC_BUILD");
 }

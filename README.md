@@ -120,3 +120,7 @@ nix build .#wowsunpack
 nix build .#minimap-renderer
 nix build .#replayshark
 ```
+
+## Buck Dependency Maintenance
+
+Run `nu scripts/update-buck-deps.nu` from a Nix-capable macOS or Linux environment. Native Windows dependency regeneration is not supported; use WSL2 or another supported maintenance host. This requirement applies only to regeneration. Generated native Rust rules do not invoke Nix or Cargo. Legacy Cargo-backed aliases remain until Task 3.

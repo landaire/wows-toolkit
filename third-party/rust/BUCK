@@ -28673,32 +28673,6 @@ cargo.rust_library(
     ],
 )
 
-extract_archive(
-    name = "version_check-0.9.5.crate",
-    src = "vendor/version_check-0.9.5.crate",
-    strip_prefix = "version_check-0.9.5",
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "version_check-0.9.5",
-    srcs = [":version_check-0.9.5.crate"],
-    crate = "version_check",
-    crate_root = "version_check-0.9.5.crate/src/lib.rs",
-    edition = "2015",
-    env = {
-        "CARGO_CRATE_NAME": "version_check",
-        "CARGO_MANIFEST_DIR": "version_check-0.9.5.crate",
-        "CARGO_PKG_NAME": "version_check",
-        "CARGO_PKG_VERSION": "0.9.5",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "9",
-        "CARGO_PKG_VERSION_PATCH": "5",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    visibility = [],
-)
-
 alias(
     name = "vfs",
     actual = ":vfs-0.13.0",
@@ -30759,46 +30733,6 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
-)
-
-alias(
-    name = "winresource",
-    actual = ":winresource-0.1.31",
-    visibility = ["PUBLIC"],
-)
-
-extract_archive(
-    name = "winresource-0.1.31.crate",
-    src = "vendor/winresource-0.1.31.crate",
-    strip_prefix = "winresource-0.1.31",
-    visibility = [],
-)
-
-cargo.rust_library(
-    name = "winresource-0.1.31",
-    srcs = [":winresource-0.1.31.crate"],
-    crate = "winresource",
-    crate_root = "winresource-0.1.31.crate/lib.rs",
-    edition = "2021",
-    env = {
-        "CARGO_CRATE_NAME": "winresource",
-        "CARGO_MANIFEST_DIR": "winresource-0.1.31.crate",
-        "CARGO_PKG_NAME": "winresource",
-        "CARGO_PKG_VERSION": "0.1.31",
-        "CARGO_PKG_VERSION_MAJOR": "0",
-        "CARGO_PKG_VERSION_MINOR": "1",
-        "CARGO_PKG_VERSION_PATCH": "31",
-        "CARGO_PKG_VERSION_PRE": "",
-    },
-    features = [
-        "default",
-        "toml",
-    ],
-    visibility = [],
-    deps = [
-        ":toml-1.1.4+spec-1.1.0",
-        ":version_check-0.9.5",
-    ],
 )
 
 extract_archive(
