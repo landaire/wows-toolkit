@@ -115,6 +115,19 @@
 
           default = self.packages.${system}.wows-toolkit;
 
+          buck-toolchain = symlinkJoin {
+            name = "wows-toolkit-buck-toolchain";
+            paths = [
+              rustToolchain
+              clang
+              lld
+              nasm
+              bash
+              coreutils
+              python3
+            ];
+          };
+
           wowsunpack = craneLib.buildPackage (commonArgs
             // {
               inherit cargoArtifacts;
@@ -160,6 +173,11 @@
               trunk
               mise
               cargo-edit
+              cargo-local-registry
+              buck2
+              reindeer
+              direnv
+              nushell
 
               # WASM build (ring C crypto → wasm32)
               # Use unwrapped clang — the nix wrapper adds hardening flags

@@ -65,3 +65,5 @@ alias(name = "wgcheck", actual = ":cargo_binaries[wgcheck]")
 alias(name = "dhat_load", actual = ":cargo_binaries[dhat_load]")
 alias(name = "profile_replay", actual = ":cargo_binaries[profile_replay]")
 alias(name = "dhat_parse", actual = ":cargo_binaries[dhat_parse]")
+
+alias(name = "wgcheck_native", actual = "//crates/wgcheck:wgcheck_bin")

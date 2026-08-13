@@ -1,0 +1,30 @@
+load("@prelude//rust:cargo_package.bzl", "cargo")
+
+cargo.rust_library(
+    name = "wgcheck",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "wgcheck",
+    crate_root = "src/lib.rs",
+    edition = "2021",
+    visibility = ["PUBLIC"],
+    deps = [
+        "//third-party/rust:cbc",
+        "//third-party/rust:des",
+        "//third-party/rust:flate2",
+        "//third-party/rust:rootcause",
+    ],
+)
+
+cargo.rust_binary(
+    name = "wgcheck_bin",
+    srcs = glob(["src/**/*.rs"]),
+    crate = "wgcheck",
+    crate_root = "src/main.rs",
+    edition = "2021",
+    visibility = ["PUBLIC"],
+    deps = [
+        ":wgcheck",
+        "//third-party/rust:clap",
+        "//third-party/rust:rootcause",
+    ],
+)

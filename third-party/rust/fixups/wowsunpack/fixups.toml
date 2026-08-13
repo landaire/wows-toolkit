@@ -1,0 +1,2 @@
+extra_srcs = ["consumable_layouts.toml"]
+buildscript.run = true

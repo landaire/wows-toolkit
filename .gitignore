@@ -1,5 +1,6 @@
 target/
 buck-out/
+.buckconfig.local
 dist/
 .cargo/config.toml
 wows_toolkit.log.*
