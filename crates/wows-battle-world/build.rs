@@ -13,6 +13,7 @@
 
 use serde::Deserialize;
 use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
@@ -27,6 +28,7 @@ struct Registry {
 struct RegistryEntry {
     #[allow(dead_code)]
     version: String,
+    path: Option<PathBuf>,
 }
 
 fn find_workspace_root() -> Option<PathBuf> {
@@ -40,19 +42,78 @@ fn find_workspace_root() -> Option<PathBuf> {
     }
 }
 
+#[derive(Deserialize)]
+struct BuildMetadata {
+    #[allow(dead_code)]
+    version: String,
+    #[allow(dead_code)]
+    build: u32,
+    #[serde(default)]
+    files: BTreeMap<String, String>,
+}
+
+struct Discovery {
+    builds: Vec<u32>,
+    watched_paths: BTreeSet<PathBuf>,
+}
+
 fn scan_bin_dir(path: &Path) -> Vec<u32> {
     let bin_dir = path.join("bin");
     let Ok(entries) = std::fs::read_dir(&bin_dir) else {
         return Vec::new();
     };
     entries
-        .filter_map(|e| e.ok())
-        .filter(|e| e.file_type().map(|t| t.is_dir()).unwrap_or(false))
-        .filter_map(|e| e.file_name().to_str().and_then(|s| s.parse::<u32>().ok()))
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+        .filter_map(|entry| entry.file_name().to_str().and_then(|name| name.parse::<u32>().ok()))
         .collect()
 }
 
-fn discover_builds(workspace_root: &Path) -> Vec<u32> {
+fn resolved_build_dir(registry: &Registry, data_dir: &Path, build: u32) -> Option<PathBuf> {
+    let downloaded = data_dir.join("builds").join(build.to_string());
+    if let Some(entry) = registry.builds.get(&build.to_string()) {
+        if let Some(path) = &entry.path
+            && path.exists()
+        {
+            return Some(path.clone());
+        }
+        if downloaded.exists() {
+            return Some(downloaded);
+        }
+    }
+    if let Some(latest) = &registry.latest_path
+        && scan_bin_dir(latest).contains(&build)
+    {
+        return Some(latest.clone());
+    }
+    downloaded.exists().then_some(downloaded)
+}
+
+fn cas_object_path(dump_dir: &Path, hash: &str) -> Option<PathBuf> {
+    let Some((prefix, suffix)) = hash.get(..2).zip(hash.get(2..)) else {
+        return None;
+    };
+    dump_dir.parent().map(|base| base.join("common").join(prefix).join(suffix))
+}
+
+fn has_vfs_file(dump_dir: &Path, metadata: &BuildMetadata, path: &str) -> bool {
+    metadata.files.get(path).and_then(|hash| cas_object_path(dump_dir, hash)).is_some_and(|path| path.exists())
+        || dump_dir.join("vfs").join(path).exists()
+}
+
+fn is_usable_build(dump_dir: &Path, build: u32) -> bool {
+    std::fs::read_to_string(dump_dir.join("metadata.toml"))
+        .ok()
+        .and_then(|contents| toml::from_str::<BuildMetadata>(&contents).ok())
+        .is_some_and(|metadata| {
+            metadata.build == build
+                && ["content/GameParams.data", "scripts/entity_defs/alias.xml", "scripts/entities.xml"]
+                    .into_iter()
+                    .all(|path| has_vfs_file(dump_dir, &metadata, path))
+        })
+}
+
+fn discover_builds(workspace_root: &Path) -> Discovery {
     let data_dir = match std::env::var("WOWS_GAME_DATA") {
         Ok(d) => PathBuf::from(d),
         Err(_) => workspace_root.join("game_data"),
@@ -62,29 +123,13 @@ fn discover_builds(workspace_root: &Path) -> Vec<u32> {
     let registry: Registry =
         std::fs::read_to_string(&registry_path).ok().and_then(|s| toml::from_str(&s).ok()).unwrap_or_default();
 
-    let mut builds: Vec<u32> = Vec::new();
+    let mut candidates: BTreeSet<u32> = registry.builds.keys().filter_map(|key| key.parse().ok()).collect();
 
-    // Builds from registry
-    for key in registry.builds.keys() {
-        if let Ok(build) = key.parse::<u32>() {
-            // For downloaded builds, verify the directory exists
-            let build_dir = data_dir.join("builds").join(key);
-            if build_dir.exists() {
-                builds.push(build);
-            }
-        }
+    if let Some(latest) = &registry.latest_path {
+        candidates.extend(scan_bin_dir(latest));
     }
 
-    // Builds from latest_path
-    if let Some(ref latest) = registry.latest_path {
-        for build in scan_bin_dir(latest) {
-            if !builds.contains(&build) {
-                builds.push(build);
-            }
-        }
-    }
-
-    // Also scan game_data/builds/ for any unregistered builds
+    // Also scan game_data/builds/ for unregistered builds.
     let builds_dir = data_dir.join("builds");
     if builds_dir.exists()
         && let Ok(entries) = std::fs::read_dir(&builds_dir)
@@ -92,15 +137,30 @@ fn discover_builds(workspace_root: &Path) -> Vec<u32> {
         for entry in entries.filter_map(|e| e.ok()) {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
                 && let Some(build) = entry.file_name().to_str().and_then(|s| s.parse::<u32>().ok())
-                && !builds.contains(&build)
             {
-                builds.push(build);
+                candidates.insert(build);
             }
         }
     }
 
-    builds.sort();
-    builds
+    let mut builds = Vec::new();
+    let mut watched_paths = BTreeSet::from([builds_dir]);
+    if let Some(latest) = &registry.latest_path {
+        watched_paths.insert(latest.join("bin"));
+    }
+    for build in candidates {
+        if let Some(dir) = resolved_build_dir(&registry, &data_dir, build) {
+            watched_paths.insert(dir.join("metadata.toml"));
+            watched_paths.insert(dir.join("vfs"));
+            if let Some(base) = dir.parent() {
+                watched_paths.insert(base.join("common"));
+            }
+            if is_usable_build(&dir, build) {
+                builds.push(build);
+            }
+        }
+    }
+    Discovery { builds, watched_paths }
 }
 
 /// Build numbers referenced by tests that may not be locally available.
@@ -138,9 +198,9 @@ fn main() {
         return;
     };
 
-    let builds = discover_builds(&workspace_root);
+    let discovery = discover_builds(&workspace_root);
 
-    for &build in &builds {
+    for &build in &discovery.builds {
         // Declare check-cfg for any discovered build not in the known list
         if !KNOWN_TEST_BUILDS.contains(&build) {
             println!("cargo:rustc-check-cfg=cfg(has_build_{build})");
@@ -148,7 +208,7 @@ fn main() {
         println!("cargo:rustc-cfg=has_build_{build}");
     }
 
-    if !builds.is_empty() {
+    if !discovery.builds.is_empty() {
         println!("cargo:rustc-cfg=has_game_data");
     }
 
@@ -158,5 +218,8 @@ fn main() {
         Err(_) => workspace_root.join("game_data"),
     };
     println!("cargo:rerun-if-changed={}", data_dir.join("versions.toml").display());
+    for watched_path in discovery.watched_paths {
+        println!("cargo:rerun-if-changed={}", watched_path.display());
+    }
     println!("cargo:rerun-if-env-changed=WOWS_GAME_DATA");
 }
