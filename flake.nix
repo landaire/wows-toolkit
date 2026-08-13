@@ -121,6 +121,7 @@
               rustToolchain
               clang
               lld
+              llvmPackages.llvm
               nasm
               bash
               coreutils

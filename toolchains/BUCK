@@ -1,29 +1,20 @@
-load("@prelude//toolchains:cxx.bzl", "system_cxx_toolchain")
-load("@prelude//toolchains:python.bzl", "system_python_bootstrap_toolchain")
-load(":hermetic_rust.bzl", "hermetic_rust_toolchain")
+load(":hermetic_rust.bzl", "hermetic_cxx_toolchain", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "validate_nix_toolchain")
 
-NIX_TOOLCHAIN_ROOT = read_root_config("nix_toolchain", "root", "/run/invalid-buck-toolchain")
+validate_nix_toolchain()
 
-system_cxx_toolchain(
+hermetic_cxx_toolchain(
     name = "cxx",
-    archiver = NIX_TOOLCHAIN_ROOT + "/bin/ar",
-    compiler = NIX_TOOLCHAIN_ROOT + "/bin/clang",
-    compiler_type = "clang",
-    cxx_compiler = NIX_TOOLCHAIN_ROOT + "/bin/clang++",
-    linker = NIX_TOOLCHAIN_ROOT + "/bin/clang++",
     visibility = ["PUBLIC"],
 )
 
-system_python_bootstrap_toolchain(
+hermetic_python_bootstrap_toolchain(
     name = "python_bootstrap",
-    interpreter = NIX_TOOLCHAIN_ROOT + "/bin/python3",
     visibility = ["PUBLIC"],
 )
 
 hermetic_rust_toolchain(
     name = "rust",
     default_edition = "2024",
-    nix_toolchain_root = NIX_TOOLCHAIN_ROOT,
     rustc_target_triple = "aarch64-apple-darwin",
     visibility = ["PUBLIC"],
 )

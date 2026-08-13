@@ -1,5 +1,6 @@
 target/
 buck-out/
+# Machine-local Nix toolchain root written by scripts/refresh-buck-toolchain.nu.
 .buckconfig.local
 dist/
 .cargo/config.toml
