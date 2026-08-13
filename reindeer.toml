@@ -1,7 +1,16 @@
 manifest_path = "Cargo.toml"
 third_party_dir = "third-party/rust"
 vendor = "local-registry"
-cargo_env = true
+cargo_env = [
+    "CARGO_CRATE_NAME",
+    "CARGO_MANIFEST_DIR",
+    "CARGO_PKG_NAME",
+    "CARGO_PKG_VERSION",
+    "CARGO_PKG_VERSION_MAJOR",
+    "CARGO_PKG_VERSION_MINOR",
+    "CARGO_PKG_VERSION_PATCH",
+    "CARGO_PKG_VERSION_PRE",
+]
 
 [buck]
 file_name = "BUCK"
@@ -22,3 +31,6 @@ target = "aarch64-apple-darwin"
 
 [platform.linux-x86_64]
 target = "x86_64-unknown-linux-gnu"
+
+[platform.windows-x86_64]
+target = "x86_64-pc-windows-msvc"

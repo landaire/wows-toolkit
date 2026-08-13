@@ -1,2 +1,5 @@
-[buildscript]
-run = true
+buildscript.run = false
+extra_deps = ["//third-party/rust/fixups/rustversion:out_dir"]
+
+[env]
+OUT_DIR = "$(location //third-party/rust/fixups/rustversion:out_dir)"

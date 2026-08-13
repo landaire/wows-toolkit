@@ -1,0 +1,11 @@
+load(":fixture_rules.bzl", "fixture_action")
+
+fixture_action(
+    name = "remote_action",
+    content = "http_archive( http_file( git_fetch( git_repository( https://example.invalid",
+)
+
+alias(
+    name = "remote_action_alias",
+    actual = ":remote_action",
+)

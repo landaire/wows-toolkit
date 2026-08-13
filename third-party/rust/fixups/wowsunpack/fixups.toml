@@ -1,2 +1,7 @@
 extra_srcs = ["consumable_layouts.toml"]
-buildscript.run = true
+
+[buildscript.build]
+extra_srcs = ["../../build-support/no-game-data/versions.toml"]
+
+[buildscript.run]
+env = { WOWS_GAME_DATA = "build-support/no-game-data" }

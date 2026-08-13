@@ -2,9 +2,17 @@
 
 ^nix develop --command reindeer vendor
 ^nix develop --command reindeer buckify
-rm -rf third-party/rust/.cargo
+rm -r -f third-party/rust/.cargo
 
-let download_rules = (^rg -n 'http_archive\(|git_fetch\(' third-party/rust/BUCK | complete)
+let rustc = (^nix develop --command rustc --version | parse -r 'rustc 1\.(?<minor>\d+)\.(?<patch>\d+)' | first)
+$"crate::version::Version {
+    minor: ($rustc.minor),
+    patch: ($rustc.patch),
+    channel: crate::version::Channel::Stable,
+}
+" | save -f third-party/rust/fixups/rustversion/version.expr
+
+let download_rules = (^rg -n 'http_(archive|file)\(|git_(fetch|repository)\(|https?://' third-party/rust/BUCK | complete)
 if $download_rules.exit_code == 0 {
     error make "Reindeer generated a network download rule; vendoring is incomplete."
 }

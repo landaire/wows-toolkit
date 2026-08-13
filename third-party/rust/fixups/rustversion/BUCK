@@ -1,0 +1,5 @@
+filegroup(
+    name = "out_dir",
+    srcs = ["version.expr"],
+    visibility = ["PUBLIC"],
+)
