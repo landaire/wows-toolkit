@@ -16,6 +16,7 @@ members = [
     "crates/wows-replay-insights",
     "crates/wgcheck",
     "crates/wows-battle-world",
+    "build-support/buck/reindeer-features",
 ]
 
 [workspace.package]

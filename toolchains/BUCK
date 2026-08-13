@@ -1,4 +1,5 @@
 load(":hermetic_rust.bzl", "hermetic_cxx_toolchain", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "validate_nix_toolchain")
+load(":native_build_mode.bzl", "native_build_mode_transition")
 
 validate_nix_toolchain()
 
@@ -16,5 +17,34 @@ hermetic_rust_toolchain(
     name = "rust",
     default_edition = "2024",
     rustc_target_triple = "aarch64-apple-darwin",
+    visibility = ["PUBLIC"],
+)
+
+constraint_setting(
+    name = "native_build_mode",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "debug",
+    constraint_setting = ":native_build_mode",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "release",
+    constraint_setting = ":native_build_mode",
+    visibility = ["PUBLIC"],
+)
+
+native_build_mode_transition(
+    name = "debug_transition",
+    constraint_value = ":debug",
+    visibility = ["PUBLIC"],
+)
+
+native_build_mode_transition(
+    name = "release_transition",
+    constraint_value = ":release",
     visibility = ["PUBLIC"],
 )

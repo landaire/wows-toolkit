@@ -28,6 +28,35 @@ def _toolchain_root():
 def _tool(name):
     return RunInfo(args = [_toolchain_root() + "/bin/" + name])
 
+def _native_build_mode():
+    mode = read_root_config("native_build", "mode", "debug")
+    if mode not in ["debug", "release"]:
+        fail("native_build.mode must be debug or release, got {}".format(mode))
+    return mode
+
+def _rustc_flags():
+    if _native_build_mode() == "release":
+        return ["-Copt-level=3", "-Cdebuginfo=0"]
+    return ["-Copt-level=0", "-Cdebuginfo=2"]
+
+def _cxx_compiler_flags():
+    if _native_build_mode() == "release":
+        return ["-O3"]
+    return ["-O0", "-g"]
+
+def native_buildscript_env():
+    if _native_build_mode() == "release":
+        return {
+            "DEBUG": "false",
+            "OPT_LEVEL": "3",
+            "PROFILE": "release",
+        }
+    return {
+        "DEBUG": "true",
+        "OPT_LEVEL": "0",
+        "PROFILE": "debug",
+    }
+
 def validate_nix_toolchain():
     _toolchain_root()
 
@@ -46,7 +75,7 @@ def _hermetic_rust_toolchain_impl(ctx):
             panic_runtime = PanicRuntime("unwind"),
             report_unused_deps = False,
             rustc_binary_flags = [],
-            rustc_flags = [],
+            rustc_flags = _rustc_flags(),
             rustc_target_triple = ctx.attrs.rustc_target_triple,
             rustc_test_flags = [],
             rustdoc = _tool("rustdoc"),
@@ -87,7 +116,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             c_compiler_info = CCompilerInfo(
                 compiler = _tool("clang"),
                 compiler_type = "clang",
-                compiler_flags = [],
+                compiler_flags = _cxx_compiler_flags(),
                 preprocessor_flags = [],
                 supports_content_based_paths = False,
                 supports_two_phase_compilation = False,
@@ -96,7 +125,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             cxx_compiler_info = CxxCompilerInfo(
                 compiler = _tool("clang++"),
                 compiler_type = "clang",
-                compiler_flags = [],
+                compiler_flags = _cxx_compiler_flags(),
                 preprocessor_flags = [],
                 supports_content_based_paths = False,
                 supports_two_phase_compilation = False,
@@ -106,7 +135,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             linker_info = LinkerInfo(
                 archiver = _tool("ar"),
                 archiver_supports_argfiles = False,
-                archiver_type = None,
+                archiver_type = "gnu",
                 archive_objects_locally = True,
                 binary_extension = "",
                 force_full_hybrid_if_capable = False,
@@ -118,7 +147,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
                 link_style = LinkStyle("shared"),
                 link_weight = 1,
                 linker = _tool("clang++"),
-                linker_flags = [],
+                linker_flags = ["-L" + _toolchain_root() + "/lib"],
                 lto_mode = LtoMode("none"),
                 object_file_extension = "o",
                 post_linker_flags = [],

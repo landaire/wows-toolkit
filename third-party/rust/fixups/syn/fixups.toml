@@ -7,3 +7,7 @@
 # above-listed licenses.
 
 buildscript.run = false
+rustc_flags = [
+    "--cfg=feature=\"extra-traits\"",
+    "--cfg=feature=\"visit\"",
+]

@@ -1,0 +1,17 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wt_collab_egui",
+    crate = "wt_collab_egui",
+    package = "wt-collab-egui",
+    version = "1.0.1",
+    deps = [
+        "//crates/minimap-renderer:wows_minimap_renderer",
+        "//crates/wows-replays:wows_replays",
+        "//crates/wt-collab-protocol:wt_collab_protocol",
+        "//crates/wt-translations:wt_translations",
+        "//third-party/rust:egui",
+        "//third-party/rust:egui-phosphor",
+        "//third-party/rust:web-time",
+    ],
+)

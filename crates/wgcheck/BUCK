@@ -1,12 +1,10 @@
-load("@prelude//rust:cargo_package.bzl", "cargo")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library")
 
-cargo.rust_library(
+workspace_library(
     name = "wgcheck",
-    srcs = glob(["src/**/*.rs"]),
     crate = "wgcheck",
-    crate_root = "src/lib.rs",
-    edition = "2021",
-    visibility = ["PUBLIC"],
+    package = "wgcheck",
+    version = "1.0.1",
     deps = [
         "//third-party/rust:cbc",
         "//third-party/rust:des",
@@ -15,13 +13,12 @@ cargo.rust_library(
     ],
 )
 
-cargo.rust_binary(
+workspace_binary(
     name = "wgcheck_bin",
-    srcs = glob(["src/**/*.rs"]),
     crate = "wgcheck",
+    package = "wgcheck",
+    version = "1.0.1",
     crate_root = "src/main.rs",
-    edition = "2021",
-    visibility = ["PUBLIC"],
     deps = [
         ":wgcheck",
         "//third-party/rust:clap",

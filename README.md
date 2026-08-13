@@ -59,6 +59,8 @@ This is not considered a World of Warships mod and does not modify your World of
 
 If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
 
+Native Buck builds default to debug mode. Build a root alias with `buck2 build //:wows_toolkit`. Use `buck2 build -c native_build.mode=release //:wows_toolkit` for an optimized native release build.
+
 To build yourself, make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
 
 To build the CLI tools:

@@ -1144,6 +1144,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "buck-reindeer-features"
+version = "0.1.0"
+dependencies = [
+ "dhat",
+ "mimalloc",
+ "tar",
+]
+
+[[package]]
 name = "built"
 version = "0.8.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

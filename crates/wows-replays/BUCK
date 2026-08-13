@@ -1,0 +1,33 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library")
+
+buildscript = workspace_buildscript(
+    name = "wows-replays-buildscript",
+    crate = "wows_replays",
+    package = "wows_replays",
+    version = "0.46.0",
+    deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
+)
+
+workspace_library(
+    name = "wows_replays",
+    crate = "wows_replays",
+    package = "wows_replays",
+    version = "0.46.0",
+    features = ["arc", "parsing", "vfs"],
+    buildscript = buildscript,
+    deps = [
+        "//crates/wowsunpack:wowsunpack",
+        "//third-party/rust:bon",
+        "//third-party/rust:flate2",
+        "//third-party/rust:kinded",
+        "//third-party/rust:modular-bitfield",
+        "//third-party/rust:pickled",
+        "//third-party/rust:rootcause",
+        "//third-party/rust:roxmltree",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tracing",
+        "//third-party/rust:winnow",
+    ],
+)

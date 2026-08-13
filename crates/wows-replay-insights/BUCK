@@ -1,0 +1,22 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wows_replay_insights",
+    crate = "wows_replay_insights",
+    package = "wows-replay-insights",
+    version = "0.13.0",
+    features = ["arc", "battle-report", "build", "serde", "wowssb"],
+    deps = [
+        "//crates/wows-battle-world:wows_battle_world",
+        "//crates/wows-core:wows_core",
+        "//crates/wows-replays:wows_replays",
+        "//crates/wowsunpack:wowsunpack",
+        "//third-party/rust:data-encoding",
+        "//third-party/rust:flate2",
+        "//third-party/rust:jiff",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tracing",
+    ],
+)

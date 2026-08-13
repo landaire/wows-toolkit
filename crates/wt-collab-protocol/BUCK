@@ -1,0 +1,19 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wt_collab_protocol",
+    crate = "wt_collab_protocol",
+    package = "wt-collab-protocol",
+    version = "1.0.1",
+    features = ["egui"],
+    deps = [
+        "//crates/minimap-renderer:wows_minimap_renderer",
+        "//crates/wowsunpack:wowsunpack",
+        "//third-party/rust:data-encoding",
+        "//third-party/rust:eframe",
+        "//third-party/rust:egui",
+        "//third-party/rust:flate2",
+        "//third-party/rust:iroh",
+        "//third-party/rust:rkyv",
+    ],
+)

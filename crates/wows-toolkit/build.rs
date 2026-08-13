@@ -1,6 +1,7 @@
+#![allow(unexpected_cfgs)]
+
 use std::collections::BTreeMap;
-use std::path::Path;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -15,6 +16,13 @@ struct GameDataSource {
     registry_path: PathBuf,
     data_dir: PathBuf,
     scan_data_directories: bool,
+}
+
+fn copy_embedded_file(env_name: &str, fallback: &str, destination: &str) {
+    println!("cargo:rerun-if-env-changed={env_name}");
+    let source = std::env::var_os(env_name).map(PathBuf::from).unwrap_or_else(|| PathBuf::from(fallback));
+    std::fs::copy(source, PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR")).join(destination))
+        .expect("copy embedded file");
 }
 
 fn find_workspace_root() -> Option<PathBuf> {
@@ -115,20 +123,15 @@ const KNOWN_TEST_BUILDS: &[u32] = &[
 ];
 
 fn main() {
+    copy_embedded_file("EMBEDDED_CONSTANTS", "../../embedded_resources/constants.json", "constants.json");
+    copy_embedded_file("WOWS_TOOLKIT_ICON", "../../assets/wows_toolkit.png", "wows_toolkit.png");
+
+    #[cfg(not(wows_buck_build))]
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("../../assets/wows_toolkit.ico");
         res.compile().unwrap();
 
-        // The vendor hybrid-graphics shims look these up in the export table by
-        // name. Defining the statics is not enough; an executable exports
-        // nothing unless the linker is told to.
-        //
-        // Scoped to the GUI binary, which is where the statics are defined and
-        // the only target that opens a surface. `-bins` would put the directive
-        // on every binary in the crate, and the headless helpers in src/bin
-        // define no such symbol, so the linker would fail them on an export it
-        // cannot resolve.
         if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
             println!("cargo:rustc-link-arg-bin=wows_toolkit=/EXPORT:NvOptimusEnablement,DATA");
             println!("cargo:rustc-link-arg-bin=wows_toolkit=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");

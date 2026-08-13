@@ -1636,7 +1636,7 @@ impl TabState {
         let cache_dir = settings.settings.game.game_data_cache_dir.clone();
         drop(settings);
         let fallback_constants: serde_json::Value =
-            serde_json::from_str(include_str!("../../../embedded_resources/constants.json"))
+            serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/constants.json")))
                 .expect("failed to parse embedded constants JSON");
         let _join_handle = crate::util::thread::spawn_logged("load-game-data", move || {
             let _ = tx.send(crate::task::load_wows_files(

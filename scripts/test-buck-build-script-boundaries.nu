@@ -6,7 +6,6 @@ def main [] {
         "crates/wows-replays/build.rs"
         "crates/minimap-renderer/build.rs"
         "crates/wows-battle-world/build.rs"
-        "crates/wows-toolkit/build.rs"
     ]
 
     for script in $data_scripts {
@@ -43,6 +42,11 @@ def main [] {
         if not ($contents | str contains 'WOWS_HERMETIC_BUILD = "1"') {
             error make $"($fixup) does not suppress undeclared game-data scans."
         }
+    }
+
+    let toolkit_build = (open --raw "crates/wows-toolkit/build.rs")
+    if not ($toolkit_build | str contains 'EMBEDDED_CONSTANTS') or not ($toolkit_build | str contains 'WOWS_TOOLKIT_ICON') or not ($toolkit_build | str contains 'OUT_DIR') {
+        error make "The toolkit build script does not stage its declared embedded resources."
     }
 
     let toolkit_fixup = (open --raw "third-party/rust/fixups/wows_toolkit/fixups.toml")

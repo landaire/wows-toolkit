@@ -1,0 +1,13 @@
+[buildscript.run]
+env = {
+    CARGO_PKG_HOMEPAGE = "",
+    CARGO_PKG_LICENSE = "BSD-2-Clause",
+    DEBUG = "true",
+    NUM_JOBS = "1",
+    OPT_LEVEL = "0",
+    PROFILE = "debug",
+    RUSTDOC = "rustdoc",
+}
+
+['cfg(target_arch = "aarch64")']
+omit_features = ["asm"]

@@ -37,7 +37,9 @@ struct ConsumableLayoutEntry {
 /// which `src/consumable_versions.rs` includes.
 fn generate_consumable_versions() {
     let manifest_dir = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
-    let toml_path = manifest_dir.join("consumable_layouts.toml");
+    let toml_path = std::env::var_os("WOWS_CONSUMABLE_LAYOUTS")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| manifest_dir.join("consumable_layouts.toml"));
     println!("cargo:rerun-if-changed={}", toml_path.display());
 
     let data = std::fs::read_to_string(&toml_path).expect("read consumable_layouts.toml");

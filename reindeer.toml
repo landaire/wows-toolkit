@@ -4,7 +4,10 @@ vendor = "local-registry"
 cargo_env = [
     "CARGO_CRATE_NAME",
     "CARGO_MANIFEST_DIR",
+    "CARGO_PKG_AUTHORS",
+    "CARGO_PKG_DESCRIPTION",
     "CARGO_PKG_NAME",
+    "CARGO_PKG_REPOSITORY",
     "CARGO_PKG_VERSION",
     "CARGO_PKG_VERSION_MAJOR",
     "CARGO_PKG_VERSION_MINOR",
@@ -26,11 +29,11 @@ generated_file_header = """
 # Run scripts/update-buck-deps.sh after changing Cargo.toml or Cargo.lock.
 """
 
-[platform.darwin-aarch64]
+[platform.macos-arm64]
 target = "aarch64-apple-darwin"
 
 [platform.linux-x86_64]
 target = "x86_64-unknown-linux-gnu"
 
-[platform.windows-x86_64]
+[platform.windows-msvc]
 target = "x86_64-pc-windows-msvc"

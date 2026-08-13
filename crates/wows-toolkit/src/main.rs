@@ -142,7 +142,7 @@ fn main() -> eframe::Result<()> {
     // which needs well under 64 KB, so the main thread is fine.
     wows_toolkit::init_i18n();
 
-    let icon_data: &[u8] = &include_bytes!("../../../assets/wows_toolkit.png")[..];
+    let icon_data: &[u8] = &include_bytes!(concat!(env!("OUT_DIR"), "/wows_toolkit.png"))[..];
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_min_inner_size([400.0, 300.0])

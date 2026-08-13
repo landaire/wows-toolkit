@@ -161,7 +161,7 @@ def _make_cc_shim(ctx: AnalysisContext, name: str, cmd: cmd_args) -> cmd_args:
 
     language = ctx.attrs._exec_os_type[OsLookup].script
     if language == ScriptLanguage("sh"):
-        script = ctx.actions.declare_output("{}.sh".format(name), has_content_based_path = True)
+        script = ctx.actions.declare_output("{}.sh".format(name))
         wrapper, _ = ctx.actions.write(
             script,
             [
@@ -191,7 +191,7 @@ def _make_cc_shim(ctx: AnalysisContext, name: str, cmd: cmd_args) -> cmd_args:
             allow_args = True,
         )
     elif language == ScriptLanguage("bat"):
-        script = ctx.actions.declare_output("{}.bat".format(name), has_content_based_path = True)
+        script = ctx.actions.declare_output("{}.bat".format(name))
         wrapper, _ = ctx.actions.write(
             script,
             [
@@ -229,9 +229,9 @@ def _cargo_buildscript_impl(ctx: AnalysisContext) -> list[Provider]:
     cxx_toolchain_info = ctx.attrs._cxx_toolchain[CxxToolchainInfo]
     rust_toolchain_info = ctx.attrs._rust_toolchain[RustToolchainInfo]
 
-    cwd = ctx.actions.declare_output("cwd", dir = True, has_content_based_path = True)
-    out_dir = ctx.actions.declare_output("OUT_DIR", dir = True, has_content_based_path = True)
-    rustc_flags = ctx.actions.declare_output("rustc_flags", has_content_based_path = True)
+    cwd = ctx.actions.declare_output("cwd", dir = True)
+    out_dir = ctx.actions.declare_output("OUT_DIR", dir = True)
+    rustc_flags = ctx.actions.declare_output("rustc_flags")
 
     if ctx.attrs.manifest_dir != None:
         manifest_dir = ctx.attrs.manifest_dir[DefaultInfo].default_outputs[0]
@@ -460,12 +460,22 @@ def buildscript_run(
         lambda plat: buildscript_rule if plat == None else ":{}".format(platform_buildscript_build_name(plat)),
     )
 
+    mode = read_root_config("native_build", "mode", "debug")
+    if mode not in ["debug", "release"]:
+        fail("native_build.mode must be debug or release, got {}".format(mode))
+
     _cargo_buildscript_rule(
-        name = name,
+        name = name + "-inner",
         buildscript = buildscript_rule,
         package_name = package_name,
         version = version,
         filegroup_for_manifest_dir = filegroup_for_manifest_dir,
         manifest_dir = manifest_dir,
         **kwargs
+    )
+
+    transition_alias(
+        name = name,
+        actual = ":" + name + "-inner",
+        incoming_transition = "toolchains//:{}_transition".format(mode),
     )

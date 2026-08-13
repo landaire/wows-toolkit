@@ -1,0 +1,28 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_buildscript", "workspace_library")
+
+buildscript = workspace_buildscript(
+    name = "wows-battle-world-buildscript",
+    crate = "wows_battle_world",
+    package = "wows-battle-world",
+    version = "0.13.0",
+    deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
+)
+
+workspace_library(
+    name = "wows_battle_world",
+    crate = "wows_battle_world",
+    package = "wows-battle-world",
+    version = "0.13.0",
+    buildscript = buildscript,
+    deps = [
+        "//crates/wows-core:wows_core",
+        "//crates/wows-replays:wows_replays",
+        "//crates/wowsunpack:wowsunpack",
+        "//third-party/rust:bevy_ecs",
+        "//third-party/rust:pickled",
+        "//third-party/rust:rootcause",
+        "//third-party/rust:serde_json",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tracing",
+    ],
+)

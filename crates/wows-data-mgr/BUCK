@@ -1,0 +1,40 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library")
+
+WDM_DEPS = [
+    "//crates/wowsunpack:wowsunpack",
+    "//third-party/rust:clap",
+    "//third-party/rust:http-body-util",
+    "//third-party/rust:indicatif",
+    "//third-party/rust:jiff",
+    "//third-party/rust:octocrab",
+    "//third-party/rust:reqwest",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:ruzstd",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:sha2",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:tokio",
+    "//third-party/rust:toml",
+    "//third-party/rust:tracing",
+    "//third-party/rust:tracing-subscriber",
+]
+
+workspace_library(
+    name = "wows_data_mgr",
+    crate = "wows_data_mgr",
+    package = "wows-data-mgr",
+    version = "0.21.0",
+    features = ["constants", "download"],
+    deps = WDM_DEPS,
+)
+
+workspace_binary(
+    name = "wows_data_mgr_bin",
+    crate = "wows_data_mgr",
+    package = "wows-data-mgr",
+    version = "0.21.0",
+    crate_root = "src/main.rs",
+    features = ["constants", "download"],
+    deps = [":wows_data_mgr"] + WDM_DEPS,
+)

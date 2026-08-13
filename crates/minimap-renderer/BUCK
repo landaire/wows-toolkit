@@ -1,0 +1,66 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library")
+
+buildscript = workspace_buildscript(
+    name = "minimap-renderer-buildscript",
+    crate = "wows_minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.39.0",
+    deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
+)
+
+MINIMAP_DEPS = [
+    "//crates/wows-battle-world:wows_battle_world",
+    "//crates/wows-data-mgr:wows_data_mgr",
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:ab_glyph",
+    "//third-party/rust:clap",
+    "//third-party/rust:convert_case",
+    "//third-party/rust:gettext",
+    "//third-party/rust:image",
+    "//third-party/rust:indicatif",
+    "//third-party/rust:muxide",
+    "//third-party/rust:openh264",
+    "//third-party/rust:objc2",
+    "//third-party/rust:objc2-core-foundation",
+    "//third-party/rust:objc2-core-media",
+    "//third-party/rust:objc2-core-video",
+    "//third-party/rust:objc2-foundation",
+    "//third-party/rust:objc2-video-toolbox",
+    "//third-party/rust:rav1e",
+    "//third-party/rust:resvg",
+    "//third-party/rust:rkyv",
+    "//third-party/rust:rootcause",
+    "//third-party/rust:roxmltree",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:tiny-skia",
+    "//third-party/rust:toml",
+    "//third-party/rust:tracing",
+    "//third-party/rust:tracing-subscriber",
+    "//third-party/rust:yuvutils-rs",
+]
+
+MINIMAP_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv", "videotoolbox"]
+
+workspace_library(
+    name = "wows_minimap_renderer",
+    crate = "wows_minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.39.0",
+    features = MINIMAP_FEATURES,
+    deps = MINIMAP_DEPS,
+    buildscript = buildscript,
+)
+
+workspace_binary(
+    name = "minimap_renderer_bin",
+    crate = "minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.39.0",
+    crate_root = "src/main.rs",
+    features = MINIMAP_FEATURES,
+    deps = [":wows_minimap_renderer"] + MINIMAP_DEPS,
+)

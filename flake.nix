@@ -125,6 +125,7 @@
               nasm
               bash
               coreutils
+              libiconv
               python3
             ];
           };

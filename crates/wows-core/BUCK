@@ -1,18 +1,17 @@
-load("@prelude//rust:cargo_package.bzl", "cargo")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
 
-cargo.rust_library(
+workspace_library(
     name = "wows_core",
-    srcs = glob(["**"], exclude = ["BUCK"]),
     crate = "wows_core",
-    crate_root = "src/lib.rs",
-    edition = "2024",
+    package = "wows-core",
+    version = "0.13.0",
     features = [
+        "arc",
         "default",
+        "parsing",
         "rkyv",
-        "roxmltree",
         "serde",
     ],
-    visibility = ["PUBLIC"],
     deps = [
         "//third-party/rust:rkyv",
         "//third-party/rust:roxmltree",

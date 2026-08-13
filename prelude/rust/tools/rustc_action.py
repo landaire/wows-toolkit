@@ -362,7 +362,7 @@ async def main() -> int:  # noqa: C901
         # build scripts relies on `--env-set` as the implementation of "cargo:rustc-env".
         # Tracking issue: https://github.com/rust-lang/rust/issues/118372
         if arg.startswith("--env-set="):
-            flag, key, value = arg.split("=", 3)
+            flag, key, value = arg.split("=", 2)
             env[key] = value
             continue
 
