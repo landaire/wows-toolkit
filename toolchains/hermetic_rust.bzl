@@ -32,7 +32,6 @@ def validate_nix_toolchain():
     _toolchain_root()
 
 def _hermetic_rust_toolchain_impl(ctx):
-    root = _toolchain_root()
     return [
         DefaultInfo(),
         RustToolchainInfo(
@@ -47,9 +46,6 @@ def _hermetic_rust_toolchain_impl(ctx):
             panic_runtime = PanicRuntime("unwind"),
             report_unused_deps = False,
             rustc_binary_flags = [],
-            rustc_env = {
-                "PATH": root + "/bin",
-            },
             rustc_flags = [],
             rustc_target_triple = ctx.attrs.rustc_target_triple,
             rustc_test_flags = [],
