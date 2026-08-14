@@ -1291,8 +1291,8 @@ mod tests {
                 ui,
                 "Your Team (3)".to_string(),
                 "Enemy Team (3)".to_string(),
-                Color32::GREEN,
-                Color32::RED,
+                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
                 &friendly,
                 &enemy,
                 &ctx,
@@ -1410,8 +1410,8 @@ mod tests {
                 ui,
                 "Your Team (1)".to_string(),
                 "Enemy Team (1)".to_string(),
-                Color32::GREEN,
-                Color32::RED,
+                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
                 &friendly,
                 &enemy,
                 &ctx,
@@ -1505,8 +1505,8 @@ mod tests {
                 ui,
                 "Your Team (1)".to_string(),
                 "Enemy Team (1)".to_string(),
-                Color32::GREEN,
-                Color32::RED,
+                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
                 &friendly,
                 &enemy,
                 &ctx,
@@ -1569,8 +1569,8 @@ mod tests {
                 ui,
                 "Your Team (12)".to_string(),
                 "Enemy Team (12)".to_string(),
-                Color32::GREEN,
-                Color32::RED,
+                Color32::GREEN, // theme-exempt: snapshot fixture, so the image does not move with the theme
+                Color32::RED,   // theme-exempt: snapshot fixture, so the image does not move with the theme
                 &friendly,
                 &enemy,
                 &ctx,
