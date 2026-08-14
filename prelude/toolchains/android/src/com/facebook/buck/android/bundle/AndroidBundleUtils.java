@@ -19,6 +19,7 @@ import com.facebook.buck.android.apk.sdk.ApkJarBuilder;
 import com.facebook.buck.android.apk.sdk.DuplicateFileException;
 import com.facebook.buck.android.apk.sdk.IArchiveBuilder;
 import com.facebook.buck.android.apk.sdk.SealedApkException;
+import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import java.io.File;
@@ -29,11 +30,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Enumeration;
+import java.util.Objects;
 import java.util.Set;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class AndroidBundleUtils {
 
   public interface DuplicateFileListener {
@@ -64,8 +67,10 @@ public class AndroidBundleUtils {
         new ApkBuilder(
             moduleZipOutputFile,
             fakeResourceApkFile,
+            // NULLSAFE_FIXME[Parameter Not Nullable]
             null,
             packageMetaInfVersionFiles,
+            // NULLSAFE_FIXME[Parameter Not Nullable]
             verboseStream,
             excludedResources);
     addModuleFiles(
@@ -104,6 +109,7 @@ public class AndroidBundleUtils {
       addFile(
           moduleBuilder,
           dexFile,
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           Paths.get(BundleModule.DEX_DIRECTORY.toString())
               .resolve(dexFile.getFileName())
               .toString(),
@@ -231,7 +237,9 @@ public class AndroidBundleUtils {
       throws DuplicateFileException, ApkCreationException, SealedApkException {
     path = Paths.get(path).resolve(file.getName()).toString();
     if (file.isDirectory() && ApkBuilder.checkFolderForPackaging(file.getName())) {
+      // NULLSAFE_FIXME[Not Vetted Third-Party]
       if (file.getName().equals(BundleModule.RESOURCES_DIRECTORY.toString())) {
+        // NULLSAFE_FIXME[Not Vetted Third-Party]
         path = BundleModule.RESOURCES_DIRECTORY.toString();
       }
       File[] files = file.listFiles();
@@ -247,6 +255,7 @@ public class AndroidBundleUtils {
         addFile(
             builder,
             file.toPath(),
+            // NULLSAFE_FIXME[Not Vetted Third-Party]
             Paths.get(BundleModule.DEX_DIRECTORY.toString()).resolve(file.getName()).toString(),
             addedFiles,
             addedSourceFiles,
@@ -255,6 +264,7 @@ public class AndroidBundleUtils {
         addFile(
             builder,
             file.toPath(),
+            // NULLSAFE_FIXME[Not Vetted Third-Party]
             Paths.get(BundleModule.MANIFEST_DIRECTORY.toString())
                 .resolve(file.getName())
                 .toString(),
@@ -262,6 +272,7 @@ public class AndroidBundleUtils {
             addedSourceFiles,
             duplicateFileListener);
       } else if (file.getName()
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .equals(BundleModule.SpecialModuleEntry.RESOURCE_TABLE.getPath().toString())) {
         addFile(
             builder,
@@ -307,6 +318,7 @@ public class AndroidBundleUtils {
           continue;
         }
         Path libPath =
+            // NULLSAFE_FIXME[Not Vetted Third-Party]
             Paths.get(BundleModule.LIB_DIRECTORY.toString())
                 .resolve(abi.getName())
                 .resolve(lib.getName());
@@ -365,13 +377,14 @@ public class AndroidBundleUtils {
    */
   private static boolean checkFolderForPackaging(String folderName) {
     return !folderName.equalsIgnoreCase("nonJvmMain")
-        && // nonJvmMain is only useful when build multiplatform and we are building an APK here
-        !folderName.equalsIgnoreCase("commonMain")
-        && // commonMain folder is part of multiple AndroidX libraries, exclude it to avoid
+        // nonJvmMain is only useful when build multiplatform and we are building an APK here
+        // commonMain folder is part of multiple AndroidX libraries, exclude it to avoid
         // duplicate file error
-        !folderName.equalsIgnoreCase("nativeMain")
-        && // nativeMain holds platform-specific code for native environments like iOS and macOS,
-        !folderName.startsWith("_");
+        && !folderName.equalsIgnoreCase("commonMain")
+        // nativeMain holds platform-specific code for native environments like iOS and macOS,
+        // exclude it to avoid duplicate file error
+        // see https://kotlinlang.org/docs/multiplatform-discover-project.html
+        && !folderName.equalsIgnoreCase("nativeMain");
   }
 
   /**
@@ -420,17 +433,23 @@ public class AndroidBundleUtils {
     String empty = "";
 
     if (entry.getName().equals(BundleModule.MANIFEST_FILENAME)) {
+      // NULLSAFE_FIXME[Not Vetted Third-Party]
       location = BundleModule.MANIFEST_DIRECTORY.toString();
 
+      // NULLSAFE_FIXME[Not Vetted Third-Party]
     } else if (entry.getName().startsWith(BundleModule.LIB_DIRECTORY.toString() + fileSeparator)
+        // NULLSAFE_FIXME[Not Vetted Third-Party]
         || entry.getName().startsWith(BundleModule.RESOURCES_DIRECTORY.toString() + fileSeparator)
+        // NULLSAFE_FIXME[Not Vetted Third-Party]
         || entry.getName().startsWith(BundleModule.ASSETS_DIRECTORY.toString() + fileSeparator)
+        // NULLSAFE_FIXME[Not Vetted Third-Party]
         || entry.getName().startsWith(BundleModule.DEX_DIRECTORY.toString() + fileSeparator)
         || entry.getName().endsWith(".pb")) {
       // They are already in the right folder
       location = empty;
 
     } else {
+      // NULLSAFE_FIXME[Not Vetted Third-Party]
       location = BundleModule.ROOT_DIRECTORY.toString();
     }
 
@@ -442,7 +461,7 @@ public class AndroidBundleUtils {
     File tempFile = tempFilePath.toFile();
     tempFile.deleteOnExit();
     try (InputStream in = zipFile.getInputStream(ze)) {
-      Files.copy(in, tempFilePath, REPLACE_EXISTING);
+      Files.copy(Objects.requireNonNull(in), tempFilePath, REPLACE_EXISTING);
     }
     return tempFile;
   }

@@ -8,8 +8,19 @@
 
 load("@prelude//:validation_deps.bzl", "get_validation_deps_outputs")
 load("@prelude//android:android_binary.bzl", "get_binary_info")
-load("@prelude//android:android_providers.bzl", "AndroidApkInfo", "AndroidApkUnderTestInfo", "AndroidBinaryNativeLibsInfo", "AndroidBinaryPrimaryPlatformInfo", "AndroidBinaryResourcesInfo", "DexFilesInfo", "ExopackageInfo")
+load(
+    "@prelude//android:android_providers.bzl",
+    "AndroidApkExopackageInfo",
+    "AndroidApkInfo",
+    "AndroidApkUnderTestInfo",
+    "AndroidBinaryNativeLibsInfo",
+    "AndroidBinaryPrimaryPlatformInfo",
+    "AndroidBinaryResourcesInfo",
+    "DexFilesInfo",
+    "ExopackageInfo",
+)
 load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
+load("@prelude//android:util.bzl", "package_validators_decorator")
 load("@prelude//java:class_to_srcs.bzl", "merge_class_to_source_map_from_jar")
 load("@prelude//java:java_providers.bzl", "KeystoreInfo")
 load("@prelude//java:java_toolchain.bzl", "JavaToolchainInfo")
@@ -27,9 +38,15 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
     resources_info = android_binary_info.resources_info
     validation_outputs = android_binary_info.validation_outputs
 
+    wrapped_build_apk = package_validators_decorator(
+        ctx,
+        build_apk,
+        extension = ".apk",
+    )
+
     keystore = ctx.attrs.keystore[KeystoreInfo]
-    output_apk = build_apk(
-        label = ctx.label,
+    output_apk = wrapped_build_apk(
+        output_filename = ctx.label.name,
         actions = ctx.actions,
         android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo],
         keystore = keystore,
@@ -39,6 +56,8 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
         compress_resources_dot_arsc = ctx.attrs.resource_compression == "enabled" or ctx.attrs.resource_compression == "enabled_with_strings_as_assets",
         validation_deps_outputs = get_validation_deps_outputs(ctx) + validation_outputs,
         packaging_options = ctx.attrs.packaging_options,
+        # Exclude BUCK_BUILD_ID from assets/BuildInfo.json for release builds.
+        include_build_info_file = ctx.attrs.include_build_info_file and ctx.attrs.package_type != "release",
     )
 
     if dex_files_info.secondary_dex_exopackage_info or native_library_info.exopackage_info or resources_info.exopackage_info:
@@ -50,6 +69,7 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
         default_output = ctx.actions.write(
             "{}_exopackage_apk_warning".format(ctx.label.name),
             "exopackage apks should not be used externally, try buck install or building with exopackage disabled\n",
+            has_content_based_path = False,
         )
         sub_targets["exo_apk"] = [DefaultInfo(default_output = output_apk)]  # Used by tests
     else:
@@ -73,13 +93,21 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
     # We can only be sure that an APK has native libs if it has any shared libraries. Prebuilt native libraries dirs can exist but be empty.
     definitely_has_native_libs = bool(native_library_info.shared_libraries)
 
-    install_info = get_install_info(ctx, output_apk = output_apk, manifest = resources_info.manifest, exopackage_info = exopackage_info, definitely_has_native_libs = definitely_has_native_libs)
+    install_info = get_install_info(
+        ctx, output_apk = output_apk, manifest = resources_info.manifest, exopackage_info = exopackage_info, definitely_has_native_libs = definitely_has_native_libs
+    )
 
     classpath = [dep.jar for dep in java_packaging_deps if dep.jar]
-    sub_targets["classpath"] = [DefaultInfo(default_output = ctx.actions.write("classpath.txt", classpath), other_outputs = classpath)]
-    sub_targets["classpath_targets"] = [DefaultInfo(default_output = ctx.actions.write("classpath_targets.txt", list(set([jar.owner.raw_target() for jar in classpath]))))]
+    sub_targets["classpath"] = [
+        DefaultInfo(default_output = ctx.actions.write("classpath.txt", classpath, has_content_based_path = False), other_outputs = classpath)
+    ]
+    sub_targets["classpath_targets"] = [
+        DefaultInfo(
+            default_output = ctx.actions.write("classpath_targets.txt", list(set([jar.owner.raw_target() for jar in classpath])), has_content_based_path = False)
+        )
+    ]
 
-    return [
+    providers = [
         AndroidApkInfo(
             apk = output_apk,
             manifest = resources_info.manifest,
@@ -99,9 +127,10 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
             platforms = android_binary_info.deps_by_platform.keys(),
             primary_platform = android_binary_info.primary_platform,
             resource_infos = set([info.raw_target for info in resources_info.unfiltered_resource_infos]),
-            r_dot_java_packages = set([info.specified_r_dot_java_package for info in resources_info.unfiltered_resource_infos if info.specified_r_dot_java_package]),
+            r_dot_java_packages = set(
+                [info.specified_r_dot_java_package for info in resources_info.unfiltered_resource_infos if info.specified_r_dot_java_package]
+            ),
             shared_libraries = set(native_library_info.shared_libraries),
-
             # Merge map delegate
             native_library_merge_sequence = ctx.attrs.native_library_merge_sequence,
             native_library_merge_code_generator = ctx.attrs.native_library_merge_code_generator,
@@ -112,29 +141,45 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
             native_library_merge_non_asset_libs = ctx.attrs.native_library_merge_non_asset_libs,
             native_library_merge_sequence_blocklist = ctx.attrs.native_library_merge_sequence_blocklist,
         ),
-        DefaultInfo(default_output = default_output, other_outputs = install_info.files.values() + android_binary_info.materialized_artifacts, sub_targets = sub_targets | class_to_srcs_subtargets),
+        DefaultInfo(
+            default_output = default_output,
+            other_outputs = install_info.files.values() + android_binary_info.materialized_artifacts,
+            sub_targets = sub_targets | class_to_srcs_subtargets,
+        ),
         install_info,
         TemplatePlaceholderInfo(
             keyed_variables = {
                 "classpath": cmd_args(classpath, delimiter = get_path_separator_for_exec_os(ctx)),
-                "classpath_including_targets_with_no_output": cmd_args([dep.output_for_classpath_macro for dep in java_packaging_deps], delimiter = get_path_separator_for_exec_os(ctx)),
+                "classpath_including_targets_with_no_output": cmd_args(
+                    [dep.output_for_classpath_macro for dep in java_packaging_deps], delimiter = get_path_separator_for_exec_os(ctx)
+                ),
             },
         ),
         class_to_srcs,
     ]
 
+    # Expose the exopackage secondary-dex dir so android_instrumentation_test can push it to the device.
+    if exopackage_info != None and exopackage_info.secondary_dex_info != None:
+        providers.append(
+            AndroidApkExopackageInfo(secondary_dex_directory = exopackage_info.secondary_dex_info.directory),
+        )
+
+    return providers
+
 def build_apk(
-        label: Label,
-        actions: AnalysisActions,
-        keystore: KeystoreInfo,
-        android_toolchain: AndroidToolchainInfo,
-        dex_files_info: DexFilesInfo,
-        native_library_info: AndroidBinaryNativeLibsInfo,
-        resources_info: AndroidBinaryResourcesInfo,
-        compress_resources_dot_arsc: bool = False,
-        validation_deps_outputs: [list[Artifact], None] = None,
-        packaging_options: dict | None = None) -> Artifact:
-    output_apk = actions.declare_output("{}.apk".format(label.name))
+    output_filename: str,
+    actions: AnalysisActions,
+    keystore: KeystoreInfo,
+    android_toolchain: AndroidToolchainInfo,
+    dex_files_info: DexFilesInfo,
+    native_library_info: AndroidBinaryNativeLibsInfo,
+    resources_info: AndroidBinaryResourcesInfo,
+    compress_resources_dot_arsc: bool = False,
+    validation_deps_outputs: [list[Artifact], None] = None,
+    packaging_options: dict | None = None,
+    include_build_info_file: bool = False,
+) -> Artifact:
+    output_apk = actions.declare_output("{}.apk".format(output_filename), has_content_based_path = False)
 
     apk_builder_args = cmd_args(
         android_toolchain.apk_builder[RunInfo],
@@ -158,18 +203,20 @@ def build_apk(
     )
 
     asset_directories = (
-        native_library_info.root_module_native_lib_assets +
-        native_library_info.non_root_module_native_lib_assets +
-        dex_files_info.root_module_bootstrap_dex_dirs +
-        dex_files_info.root_module_secondary_dex_dirs +
-        dex_files_info.non_root_module_secondary_dex_dirs +
-        resources_info.module_manifests
+        native_library_info.root_module_native_lib_assets
+        + native_library_info.non_root_module_native_lib_assets
+        + dex_files_info.root_module_bootstrap_dex_dirs
+        + dex_files_info.root_module_secondary_dex_dirs
+        + dex_files_info.non_root_module_secondary_dex_dirs
+        + resources_info.module_manifests
     )
     asset_directories_file = argfile(actions = actions, name = "asset_directories.txt", args = asset_directories)
     native_library_directories = argfile(actions = actions, name = "native_library_directories", args = native_library_info.native_libs_for_primary_apk)
     all_zip_files = [resources_info.packaged_string_assets] if resources_info.packaged_string_assets else []
     zip_files = argfile(actions = actions, name = "zip_files", args = all_zip_files)
-    jar_files_that_may_contain_resources = argfile(actions = actions, name = "jar_files_that_may_contain_resources", args = resources_info.jar_files_that_may_contain_resources)
+    jar_files_that_may_contain_resources = argfile(
+        actions = actions, name = "jar_files_that_may_contain_resources", args = resources_info.jar_files_that_may_contain_resources
+    )
 
     apk_builder_args.add([
         "--asset-directories-list",
@@ -182,24 +229,42 @@ def build_apk(
         jar_files_that_may_contain_resources,
     ])
 
+    # Invoke the toolchain's build-info generator from this apk packaging action (which already has
+    # every APK input) so the baked BUCK_BUILD_ID refreshes when the APK content changes and
+    # cache-hits otherwise -- no separate action. Its run command is multi-token (java -jar ...), so
+    # pass it via an argfile the apk-builder reads and execs.
+    if include_build_info_file:
+        apk_builder_args.add(
+            "--build-info-generator-args",
+            argfile(
+                actions = actions,
+                name = "build_info_generator_args",
+                args = cmd_args(android_toolchain.build_info_generator[RunInfo]),
+                allow_args = True,
+            ),
+        )
+
     if packaging_options:
         for key, value in packaging_options.items():
-            if key != "excluded_resources":
-                fail("Only 'excluded_resources' is supported in packaging_options right now!")
+            if key == "excluded_resources":
+                apk_builder_args.add("--excluded-resources", actions.write("excluded_resources.txt", value, has_content_based_path = False))
+            elif key == "uncompressed_files":
+                apk_builder_args.add("--uncompressed-files", actions.write("uncompressed_files.txt", value, has_content_based_path = False))
             else:
-                apk_builder_args.add("--excluded-resources", actions.write("excluded_resources.txt", value))
+                fail("Only 'excluded_resources' and 'uncompressed_files' are supported in packaging_options right now!")
 
-    actions.run(apk_builder_args, category = "apk_build")
+    actions.run(apk_builder_args, category = "apk_build", allow_cache_upload = True)
 
     return output_apk
 
 def get_install_info(
-        ctx: AnalysisContext,
-        output_apk: Artifact,
-        manifest: Artifact,
-        exopackage_info: [ExopackageInfo, None],
-        definitely_has_native_libs: bool = True,
-        apex_mode: bool = False) -> InstallInfo:
+    ctx: AnalysisContext,
+    output_apk: Artifact,
+    manifest: Artifact,
+    exopackage_info: [ExopackageInfo, None],
+    definitely_has_native_libs: bool = True,
+    apex_mode: bool = False,
+) -> InstallInfo:
     files = {
         ctx.attrs.name: output_apk,
         "manifest": manifest,
@@ -232,7 +297,7 @@ def get_install_info(
         files["resources_exopackage_res_hash"] = resources_info.res_hash
 
     if definitely_has_native_libs and hasattr(ctx.attrs, "cpu_filters"):
-        files["cpu_filters"] = ctx.actions.write("cpu_filters.txt", ctx.attrs.cpu_filters)
+        files["cpu_filters"] = ctx.actions.write("cpu_filters.txt", ctx.attrs.cpu_filters, has_content_based_path = False)
 
     return InstallInfo(
         installer = ctx.attrs._android_toolchain[AndroidToolchainInfo].installer,
@@ -241,7 +306,7 @@ def get_install_info(
 
 def generate_install_config(ctx: AnalysisContext, apex_mode: bool) -> Artifact:
     data = get_install_config(apex_mode)
-    return ctx.actions.write_json("install_android_options.json", data)
+    return ctx.actions.write_json("install_android_options.json", data, has_content_based_path = False)
 
 def get_install_config(apex_mode: bool) -> dict[str, typing.Any]:
     # TODO: read from toolchains

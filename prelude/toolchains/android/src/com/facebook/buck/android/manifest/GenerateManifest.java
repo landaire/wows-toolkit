@@ -20,6 +20,7 @@ import com.android.utils.ILogger;
 import com.facebook.buck.android.DefaultAndroidManifestReader;
 import com.facebook.buck.android.apkmodule.APKModule;
 import com.facebook.buck.util.environment.Platform;
+import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
 import com.google.common.base.Strings;
@@ -30,22 +31,25 @@ import com.google.common.io.Files;
 import java.io.File;
 import java.io.IOException;
 import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import javax.annotation.Nullable;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
+import org.jetbrains.annotations.Nullable;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.InputSource;
 
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class GenerateManifest {
 
   public static final String ANDROID_NAMESPACE = "http://schemas.android.com/apk/res/android";
@@ -56,15 +60,17 @@ public class GenerateManifest {
     @Nullable private final String minSdkVersion;
     @Nullable private final String targetSdkVersion;
 
-    SdkVersions(String minSdkVersion, String targetSdkVersion) {
+    SdkVersions(@Nullable String minSdkVersion, @Nullable String targetSdkVersion) {
       this.minSdkVersion = minSdkVersion;
       this.targetSdkVersion = targetSdkVersion;
     }
 
+    @Nullable
     String getMinSdkVersion() {
       return minSdkVersion;
     }
 
+    @Nullable
     String getTargetSdkVersion() {
       return targetSdkVersion;
     }
@@ -77,7 +83,7 @@ public class GenerateManifest {
       ImmutableMap<String, String> placeholders,
       Path outManifestPath,
       Path mergeReportPath,
-      Path preprocessLogPath,
+      @Nullable Path preprocessLogPath,
       ILogger logger)
       throws IOException {
     if (skeletonManifestPath.getNameCount() == 0) {
@@ -101,7 +107,14 @@ public class GenerateManifest {
     SdkVersions sdkVersions = extractSdkVersions(skeletonManifestPath.toFile(), logger);
 
     // Preprocess library manifests to inject targetSdkVersion and minSdkVersion if missing
-    Path tempDir = java.nio.file.Files.createTempDirectory("preprocessed_manifests");
+    String tmpDirEnv = System.getenv("BUCK_SCRATCH_PATH");
+    if (tmpDirEnv == null || tmpDirEnv.isEmpty()) {
+      throw new RuntimeException(
+          "BUCK_SCRATCH_PATH environment variable must be set and non-empty");
+    }
+    Path tmpDirPath = java.nio.file.Paths.get(tmpDirEnv);
+    Path tempDir = tmpDirPath.resolve("preprocessed_manifests");
+    java.nio.file.Files.createDirectories(tempDir);
 
     List<File> libraryManifestFiles = new ArrayList<>();
     for (Path libraryManifestPath : libraryManifestPaths) {
@@ -119,7 +132,11 @@ public class GenerateManifest {
             mergeReportPath,
             logger);
 
+    // Post-process merge report to make all paths relative to current directory
+    makePathsRelativeInMergeReport(mergeReportPath, logger);
+
     String xmlText = mergingReport.getMergedDocument(MergingReport.MergedManifestKind.MERGED);
+    // NULLSAFE_FIXME[Parameter Not Nullable]
     xmlText = replacePlaceholders(xmlText, placeholders);
     xmlText = moveActivityAliasesToEnd(xmlText);
 
@@ -176,12 +193,14 @@ public class GenerateManifest {
           manifestInvoker
               .withFeatures(
                   ManifestMerger2.Invoker.Feature.REMOVE_TOOLS_DECLARATIONS,
-                  ManifestMerger2.Invoker.Feature.DISABLE_PACKAGE_NAME_UNIQUENESS_CHECK)
+                  ManifestMerger2.Invoker.Feature.DISABLE_PACKAGE_NAME_UNIQUENESS_CHECK,
+                  ManifestMerger2.Invoker.Feature.USES_SDK_IN_MANIFEST_LENIENT_HANDLING)
               .addLibraryManifests(Iterables.toArray(libraryManifestFiles, File.class))
               .setMergeReportFile(mergeReportPath.toFile())
               .merge();
       if (mergingReport.getResult().isError()) {
         for (MergingReport.Record record : mergingReport.getLoggingRecords()) {
+          // NULLSAFE_FIXME[Parameter Not Nullable]
           logger.error(null, record.toString());
         }
         throw new RuntimeException("Error generating manifest file");
@@ -190,7 +209,8 @@ public class GenerateManifest {
       return mergingReport;
     } catch (ManifestMerger2.MergeFailureException e) {
       throw new RuntimeException(
-          String.format("Error generating manifest file: %s", e.getMessage()), e.getCause());
+          String.format("Error generating manifest file: %s", String.valueOf(e.getMessage())),
+          e.getCause());
     }
   }
 
@@ -206,7 +226,7 @@ public class GenerateManifest {
 
     StringBuffer sb = new StringBuffer();
     while (matcher.find()) {
-      final String value = placeholders.get(matcher.group(1));
+      final String value = Objects.requireNonNull(placeholders.get(matcher.group(1)));
       // There are instances where the value of a placeholder points to another placeholder, having
       // the form of `${key}`.
       // This clashes with the implementation details of `Matcher.appendReplacement`, which uses the
@@ -255,7 +275,8 @@ public class GenerateManifest {
       DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
       factory.setNamespaceAware(true);
       DocumentBuilder builder = factory.newDocumentBuilder();
-      Document doc = builder.parse(new InputSource(new StringReader(xmlContent)));
+      Document doc =
+          Objects.requireNonNull(builder.parse(new InputSource(new StringReader(xmlContent))));
 
       // Find the application element
       NodeList applicationNodes = doc.getElementsByTagName("application");
@@ -263,7 +284,7 @@ public class GenerateManifest {
         return xmlContent; // No application element, nothing to do
       }
 
-      Element application = (Element) applicationNodes.item(0);
+      Element application = (Element) Objects.requireNonNull(applicationNodes.item(0));
       List<Element> earlyAliases = getEarlyAliases(application);
 
       if (earlyAliases.isEmpty()) {
@@ -278,13 +299,16 @@ public class GenerateManifest {
       }
 
       // Use XmlPrettyPrinter to format the output, matching the manifest merger's formatting
+      // NULLSAFE_FIXME[Not Vetted Third-Party]
       XmlFormatPreferences prefs = XmlFormatPreferences.defaults();
       prefs.removeEmptyLines = true;
 
+      // NULLSAFE_FIXME[Not Vetted Third-Party]
       return XmlPrettyPrinter.prettyPrint(
           doc,
           prefs,
           XmlFormatStyle.get(doc),
+          // NULLSAFE_FIXME[Parameter Not Nullable]
           null, /* lineSeparator */
           false /* endWithNewline */);
 
@@ -302,7 +326,7 @@ public class GenerateManifest {
     // Iterate through children to find activities and early aliases
     NodeList children = application.getChildNodes();
     for (int i = 0; i < children.getLength(); i++) {
-      Node node = children.item(i);
+      Node node = Objects.requireNonNull(children.item(i));
       if (node.getNodeType() != Node.ELEMENT_NODE) {
         continue;
       }
@@ -342,11 +366,11 @@ public class GenerateManifest {
       DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
       factory.setNamespaceAware(true);
       DocumentBuilder builder = factory.newDocumentBuilder();
-      Document doc = builder.parse(skeletonManifest);
+      Document doc = Objects.requireNonNull(builder.parse(skeletonManifest));
 
       NodeList usesSdkNodes = doc.getElementsByTagName("uses-sdk");
       if (usesSdkNodes.getLength() > 0) {
-        Element usesSdk = (Element) usesSdkNodes.item(0);
+        Element usesSdk = (Element) Objects.requireNonNull(usesSdkNodes.item(0));
 
         String docMinSdkVersion = usesSdk.getAttributeNS(ANDROID_NAMESPACE, "minSdkVersion");
         String docTargetSdkVersion = usesSdk.getAttributeNS(ANDROID_NAMESPACE, "targetSdkVersion");
@@ -378,7 +402,7 @@ public class GenerateManifest {
     } catch (Exception e) {
       logger.warning(
           "Failed to extract SDK versions from skeleton manifest %s: %s",
-          skeletonManifest.getPath(), e.getMessage());
+          skeletonManifest.getPath(), String.valueOf(e.getMessage()));
     }
 
     return new SdkVersions(minSdkVersion, targetSdkVersion);
@@ -425,7 +449,7 @@ public class GenerateManifest {
       DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
       factory.setNamespaceAware(true);
       DocumentBuilder builder = factory.newDocumentBuilder();
-      Document doc = builder.parse(originalFile);
+      Document doc = Objects.requireNonNull(builder.parse(originalFile));
 
       Element usesSdk = getOrCreateUsesSdk(doc);
 
@@ -460,8 +484,9 @@ public class GenerateManifest {
       // Catch XML parsing exceptions, log them, and use original manifest
       logger.warning(
           "Failed to preprocess library manifest %s: %s. Using original.",
-          originalFile.getPath(), e.getMessage());
-      preprocessLogger.log("  -> ERROR: Failed to preprocess: %s\n", e.getMessage());
+          originalFile.getPath(), String.valueOf(e.getMessage()));
+      preprocessLogger.log(
+          "  -> ERROR: Failed to preprocess: %s\n", String.valueOf(e.getMessage()));
       preprocessLogger.log("  -> Using original manifest\n");
     }
     return originalFile;
@@ -474,7 +499,7 @@ public class GenerateManifest {
    */
   @VisibleForTesting
   static void ensureAndroidNamespace(Document doc) {
-    Element manifestElement = doc.getDocumentElement();
+    Element manifestElement = Objects.requireNonNull(doc.getDocumentElement());
     String androidNsAttr = manifestElement.getAttribute("xmlns:android");
     if (Strings.isNullOrEmpty(androidNsAttr)) {
       manifestElement.setAttribute("xmlns:android", ANDROID_NAMESPACE);
@@ -491,11 +516,12 @@ public class GenerateManifest {
   static Element getOrCreateUsesSdk(Document doc) {
     NodeList usesSdkNodes = doc.getElementsByTagName("uses-sdk");
     if (usesSdkNodes.getLength() > 0) {
-      return (Element) usesSdkNodes.item(0);
+      return (Element) Objects.requireNonNull(usesSdkNodes.item(0));
     }
 
+    // NULLSAFE_FIXME[Not Vetted Third-Party]
     Element usesSdk = doc.createElement("uses-sdk");
-    Element manifestElement = doc.getDocumentElement();
+    Element manifestElement = Objects.requireNonNull(doc.getDocumentElement());
 
     Node firstChild = manifestElement.getFirstChild();
     if (firstChild != null) {
@@ -511,19 +537,75 @@ public class GenerateManifest {
       throws IOException {
     // Write the modified manifest to a temporary file
     File processedFile = outputDir.resolve(originalFile.getPath()).toFile();
-    processedFile.getParentFile().mkdirs();
+    Objects.requireNonNull(processedFile.getParentFile()).mkdirs();
 
+    // NULLSAFE_FIXME[Not Vetted Third-Party]
     XmlFormatPreferences prefs = XmlFormatPreferences.defaults();
     prefs.removeEmptyLines = true;
     String formattedXml =
+        // NULLSAFE_FIXME[Not Vetted Third-Party]
         XmlPrettyPrinter.prettyPrint(
             doc,
             prefs,
             XmlFormatStyle.get(doc),
+            // NULLSAFE_FIXME[Parameter Not Nullable]
             null, /* lineSeparator */
             false /* endWithNewline */);
 
     java.nio.file.Files.write(processedFile.toPath(), formattedXml.getBytes());
     return processedFile;
+  }
+
+  /**
+   * Post-processes the merge report file to convert all absolute paths to relative paths.
+   *
+   * @param mergeReportPath Path to the merge report file
+   * @param logger Logger for debugging information
+   */
+  private static void makePathsRelativeInMergeReport(Path mergeReportPath, ILogger logger) {
+    try {
+      if (!java.nio.file.Files.exists(mergeReportPath)) {
+        logger.warning("Merge report file does not exist: " + mergeReportPath);
+        return;
+      }
+
+      String content =
+          new String(java.nio.file.Files.readAllBytes(mergeReportPath), StandardCharsets.UTF_8);
+      Path currentDir = java.nio.file.Paths.get("").toAbsolutePath();
+      String modifiedContent = makePathsRelative(content, currentDir);
+      java.nio.file.Files.write(mergeReportPath, modifiedContent.getBytes(StandardCharsets.UTF_8));
+      logger.info("Made paths relative in merge report: " + mergeReportPath);
+    } catch (IOException e) {
+      logger.warning(
+          "Failed to make paths relative in merge report: "
+              + String.valueOf(e.getMessage())
+              + ". Report will contain absolute paths.");
+    }
+  }
+
+  /**
+   * Replaces absolute paths in the content with relative paths from the current directory.
+   *
+   * <p>Only replaces paths that start with the current directory to avoid false matches with
+   * substring occurrences.
+   *
+   * @param content The content to process
+   * @param currentDir The current working directory
+   * @return Content with paths made relative
+   */
+  private static String makePathsRelative(String content, Path currentDir) {
+    String currentDirStr = currentDir.toString();
+    String result = content;
+
+    // Build patterns with path separators to match only actual path prefixes
+    // Handle both forward slashes and backslashes for cross-platform compatibility
+    String withForwardSlash = currentDirStr + "/";
+    String withBackslash = currentDirStr + "\\";
+
+    // Replace paths that start with currentDir followed by a separator
+    result = result.replace(withForwardSlash, "");
+    result = result.replace(withBackslash, "");
+
+    return result;
   }
 }

@@ -10,6 +10,7 @@ load(
     "LinkerInfo",
     "LinkerType",
     "PicBehavior",
+    "RuntimeDependencyHandling",
     "ShlibInterfacesMode",
 )
 load("@prelude//cxx:headers.bzl", "HeaderMode")
@@ -191,6 +192,7 @@ def _hermetic_cxx_toolchain_impl(ctx):
             ),
             llvm_link = _tool("llvm-link"),
             pic_behavior = PicBehavior(ctx.attrs.pic_behavior),
+            runtime_dependency_handling = RuntimeDependencyHandling("no_symlink"),
             use_dep_files = True,
         ),
         CxxPlatformInfo(name = ctx.attrs.platform_name),
@@ -242,17 +244,29 @@ def nix_cxx_toolchain(name, os, visibility):
     else:
         fail("nix_cxx_toolchain does not support os {}".format(os))
 
-def _hermetic_python_bootstrap_toolchain_impl(_ctx):
+def _hermetic_python_bootstrap_toolchain_impl(ctx):
     return [
         DefaultInfo(),
-        PythonBootstrapToolchainInfo(interpreter = _toolchain_root() + "/bin/python3"),
+        PythonBootstrapToolchainInfo(interpreter = ctx.attrs.interpreter),
     ]
 
-hermetic_python_bootstrap_toolchain = rule(
+_hermetic_python_bootstrap_toolchain_rule = rule(
     impl = _hermetic_python_bootstrap_toolchain_impl,
-    attrs = {},
+    attrs = {"interpreter": attrs.string()},
     is_toolchain_rule = True,
 )
+
+def hermetic_python_bootstrap_toolchain(name, visibility):
+    """The prelude's C++ internal tools are Python scripts, so every platform
+    needs an interpreter, not just the Nix-rooted ones."""
+
+    # Resolved while the package loads; read_root_config is unavailable during
+    # analysis on some rule kinds.
+    _hermetic_python_bootstrap_toolchain_rule(
+        name = name,
+        interpreter = _hermetic_tool("python"),
+        visibility = visibility,
+    )
 
 def _selected_toolchain_impl(ctx):
     return ctx.attrs.actual.providers

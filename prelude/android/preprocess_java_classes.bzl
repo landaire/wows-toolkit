@@ -20,7 +20,7 @@ def get_preprocessed_java_classes(enhance_ctx: EnhancementContext, input_jars: d
 
     input_srcs = {}
     output_jars_to_owners = {}
-    output_dir = ctx.actions.declare_output("preprocessed_java_classes/output_dir")
+    output_dir = ctx.actions.declare_output("preprocessed_java_classes/output_dir", has_content_based_path = False)
     input_jars_to_owners = {}
 
     for i, (input_jar, target_label) in enumerate(input_jars.items()):
@@ -31,9 +31,9 @@ def get_preprocessed_java_classes(enhance_ctx: EnhancementContext, input_jars: d
         output_jar = output_dir.project(jar_name)
         output_jars_to_owners[output_jar] = target_label
 
-    input_dir = ctx.actions.symlinked_dir("preprocessed_java_classes/input_dir", input_srcs)
-    input_jars_map = ctx.actions.write_json("preprocessed_java_classes/input_jars_map.json", input_jars_to_owners)
-    materialized_artifacts_dir = ctx.actions.declare_output("preprocessed_java_classes/materialized_artifacts")
+    input_dir = ctx.actions.symlinked_dir("preprocessed_java_classes/input_dir", input_srcs, has_content_based_path = False)
+    input_jars_map = ctx.actions.write_json("preprocessed_java_classes/input_jars_map.json", input_jars_to_owners, has_content_based_path = False)
+    materialized_artifacts_dir = ctx.actions.declare_output("preprocessed_java_classes/materialized_artifacts", has_content_based_path = False)
 
     android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo]
     env = {
@@ -50,7 +50,7 @@ def get_preprocessed_java_classes(enhance_ctx: EnhancementContext, input_jars: d
     }
 
     output_jars = output_jars_to_owners.keys()
-    output_jars_file = ctx.actions.write("preprocessed_java_classes/output_jars.txt", output_jars)
+    output_jars_file = ctx.actions.write("preprocessed_java_classes/output_jars.txt", output_jars, has_content_based_path = False)
 
     preprocess_cmd = [
         "/usr/bin/env",
@@ -64,11 +64,8 @@ def get_preprocessed_java_classes(enhance_ctx: EnhancementContext, input_jars: d
 
     preprocess_cmd = cmd_args(
         preprocess_cmd,
-        hidden = [output_jar.as_output() for output_jar in output_jars] +
-                 [
-                     dep[DefaultInfo].default_outputs + dep[DefaultInfo].other_outputs
-                     for dep in ctx.attrs.preprocess_java_classes_deps
-                 ],
+        hidden = [output_jar.as_output() for output_jar in output_jars]
+        + [dep[DefaultInfo].default_outputs + dep[DefaultInfo].other_outputs for dep in ctx.attrs.preprocess_java_classes_deps],
     )
 
     ctx.actions.run(preprocess_cmd, env = env, category = "preprocess_java_classes")

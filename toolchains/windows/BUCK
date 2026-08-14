@@ -5,7 +5,6 @@ load("@prelude//toolchains:cxx.bzl", "cxx_tools_info_toolchain")
 
 hermetic_msvc_tools(
     name = "msvc_tools",
-    toolchain_root = "offline/installed",
     visibility = ["PUBLIC"],
 )
 

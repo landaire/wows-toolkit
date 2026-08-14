@@ -15,7 +15,6 @@ load("@prelude//:paths.bzl", "paths")
 load(
     "@prelude//linking:link_info.bzl",
     "DepMetadata",
-    "LinkStrategy",
     "LinkStyle",
     "LinkerFlags",
     "MergedLinkInfo",
@@ -23,7 +22,7 @@ load(
 load("@prelude//linking:types.bzl", "Linkage")
 load(
     "@prelude//utils:utils.bzl",
-    "flatten",
+    "filter_and_map_idx",
     "from_named_set",
 )
 load(":cxx_context.bzl", "get_cxx_platform_info", "get_cxx_toolchain_info")
@@ -32,58 +31,54 @@ load(
     "LinkerType",
     "ShlibInterfacesMode",
 )
-load(
-    ":headers.bzl",
-    "cxx_attr_header_namespace",
-)
-load(":platform.bzl", "cxx_by_platform")
 
 OBJECTS_SUBTARGET = "objects"
 
-# The dependencies
+# The dependencies, and the default deps (if selected)
 def cxx_attr_deps(ctx: AnalysisContext) -> list[Dependency]:
-    cxx_platform_info = get_cxx_platform_info(ctx)
-    return (
-        ctx.attrs.deps +
-        flatten(cxx_by_platform(cxx_platform_info, getattr(ctx.attrs, "platform_deps", []))) +
-        (getattr(ctx.attrs, "deps_query", []) or [])
-    )
+    deps = ctx.attrs.deps
 
+    if getattr(ctx.attrs, "default_deps", "") == "deps":
+        toolchain_info = get_cxx_toolchain_info(ctx)
+        if toolchain_info.default_deps:
+            deps.extend(toolchain_info.default_deps)
+
+    deps_query_attr = getattr(ctx.attrs, "deps_query", None)
+    if deps_query_attr:
+        return deps + deps_query_attr
+
+    # Avoid making a copy of deps if deps_query is not set.
+    return deps
+
+# The exported dependencies, and the default deps (if selected)
 def cxx_attr_exported_deps(ctx: AnalysisContext) -> list[Dependency]:
-    cxx_platform_info = get_cxx_platform_info(ctx)
-    return getattr(ctx.attrs, "exported_deps", []) + flatten(cxx_by_platform(cxx_platform_info, ctx.attrs.exported_platform_deps))
+    exported_deps = []
+
+    exported_deps_attr = getattr(ctx.attrs, "exported_deps", None)
+    if exported_deps_attr:
+        exported_deps.extend(exported_deps_attr)
+
+    if getattr(ctx.attrs, "default_deps", "") == "exported_deps":
+        toolchain_info = get_cxx_toolchain_info(ctx)
+        if toolchain_info.default_deps:
+            exported_deps.extend(toolchain_info.default_deps)
+
+    return exported_deps
 
 def cxx_attr_linker_flags_all(ctx: AnalysisContext) -> LinkerFlags:
-    cxx_platform_info = get_cxx_platform_info(ctx)
-    flags = (
-        cxx_attr_linker_flags(ctx) +
-        (ctx.attrs.local_linker_script_flags if hasattr(ctx.attrs, "local_linker_script_flags") else [])
-    )
-    post_flags = (
-        (ctx.attrs.post_linker_flags if hasattr(ctx.attrs, "post_linker_flags") else []) +
-        (flatten(cxx_by_platform(cxx_platform_info, ctx.attrs.post_platform_linker_flags)) if hasattr(ctx.attrs, "post_platform_linker_flags") else [])
-    )
-    exported_flags = cxx_attr_exported_linker_flags(ctx)
-    exported_post_flags = cxx_attr_exported_post_linker_flags(ctx)
+    flags = cxx_attr_linker_flags(ctx)
+
+    local_linker_script_flags_attr = getattr(ctx.attrs, "local_linker_script_flags", None)
+    if local_linker_script_flags_attr:
+        flags.extend(local_linker_script_flags_attr)
+
+    post_flags = getattr(ctx.attrs, "post_linker_flags", [])
+
     return LinkerFlags(
         flags = flags,
         post_flags = post_flags,
-        exported_flags = exported_flags,
-        exported_post_flags = exported_post_flags,
-    )
-
-def cxx_attr_exported_linker_flags(ctx: AnalysisContext) -> list[typing.Any]:
-    cxx_platform_info = get_cxx_platform_info(ctx)
-    return (
-        ctx.attrs.exported_linker_flags +
-        (flatten(cxx_by_platform(cxx_platform_info, ctx.attrs.exported_platform_linker_flags)) if hasattr(ctx.attrs, "exported_platform_linker_flags") else [])
-    )
-
-def cxx_attr_exported_post_linker_flags(ctx: AnalysisContext) -> list[typing.Any]:
-    cxx_platform_info = get_cxx_platform_info(ctx)
-    return (
-        ctx.attrs.exported_post_linker_flags +
-        (flatten(cxx_by_platform(cxx_platform_info, ctx.attrs.exported_post_platform_linker_flags)) if hasattr(ctx.attrs, "exported_post_platform_linker_flags") else [])
+        exported_flags = ctx.attrs.exported_linker_flags,
+        exported_post_flags = ctx.attrs.exported_post_linker_flags,
     )
 
 def cxx_inherited_link_info(first_order_deps: list[Dependency]) -> list[MergedLinkInfo]:
@@ -94,32 +89,12 @@ def cxx_inherited_link_info(first_order_deps: list[Dependency]) -> list[MergedLi
     # We filter out nones because some non-cxx rule without such providers could be a dependency, for example
     # cxx_binary "fbcode//one_world/cli/util/process_wrapper:process_wrapper" depends on
     # python_library "fbcode//third-party-buck/$platform/build/glibc:__project__"
-    return filter(None, [x.get(MergedLinkInfo) for x in first_order_deps])
+    return filter_and_map_idx(MergedLinkInfo, first_order_deps)
 
 # Linker flags
 def cxx_attr_linker_flags(ctx: AnalysisContext) -> list[typing.Any]:
-    cxx_platform_info = get_cxx_platform_info(ctx)
-    return (
-        ctx.attrs.linker_flags +
-        (flatten(cxx_by_platform(cxx_platform_info, ctx.attrs.platform_linker_flags)) if hasattr(ctx.attrs, "platform_linker_flags") else [])
-    )
-
-# Even though we're returning the shared library links, we must still
-# respect the `link_style` attribute of the target which controls how
-# all deps get linked. For example, you could be building the shared
-# output of a library which has `link_style = "static"`.
-#
-# The fallback equivalent code in Buck v1 is in CxxLibraryFactor::createBuildRule()
-# where link style is determined using the `linkableDepType` variable.
-
-# Note if `static` link style is requested, we assume `static_pic`
-# instead, so that code in the shared library can be correctly
-# loaded in the address space of any process at any address.
-def cxx_attr_link_strategy(attrs: typing.Any) -> LinkStrategy:
-    value = attrs.link_style if attrs.link_style != None else "shared"
-    if value == "static":
-        value = "static_pic"
-    return LinkStrategy(value)
+    linker_flags = list(ctx.attrs.linker_flags)
+    return linker_flags
 
 def cxx_attr_link_style(ctx: AnalysisContext) -> LinkStyle:
     if ctx.attrs.link_style != None:
@@ -149,11 +124,33 @@ def cxx_attr_resources(ctx: AnalysisContext) -> dict[str, ArtifactOutputs]:
     """
 
     resources = {}
-    namespace = cxx_attr_header_namespace(ctx)
 
-    # Use getattr, as apple rules don't have a `resources` parameter.
-    for name, resource in from_named_set(getattr(ctx.attrs, "resources", {})).items():
-        resources[paths.join(namespace, name)] = single_artifact(resource)
+    resources_attr = getattr(ctx.attrs, "resources", None)
+    if resources_attr:
+        # Resource keys prefix with `header_namespace`. Unset (None) falls
+        # back to package; explicit "" means "no prefix" UNLESS `raw_headers`
+        # is also set, which signals the xplat macros (`_unified_cxx_library`
+        # / `_fbcode_cpp_common_wrapper`) clobbered `header_namespace=""` to
+        # suppress #include namespace mangling — fall back to package in that
+        # case so consumers (e.g. `kBuckPrefix + "manifest.json"`) keep
+        # working. Idempotent: keys already prefixed (by ACME, snapshots) are
+        # left alone.
+        namespace = ctx.attrs.header_namespace
+        if namespace == None:
+            namespace = ctx.label.package
+        elif namespace == "" and getattr(ctx.attrs, "raw_headers", None):
+            namespace = ctx.label.package
+        prefix = namespace + "/" if namespace else None
+
+        # Use getattr, as apple rules don't have a `resources` parameter.
+        for name, resource in from_named_set(resources_attr).items():
+            if not namespace:
+                key = name
+            elif name == namespace or name.startswith(prefix):
+                key = name
+            else:
+                key = paths.join(namespace, name)
+            resources[key] = single_artifact(resource)
 
     return resources
 
@@ -171,9 +168,6 @@ def cxx_use_shlib_intfs(ctx: AnalysisContext) -> bool:
 
     linker_info = get_cxx_toolchain_info(ctx).linker_info
     return linker_info.shlib_interfaces != ShlibInterfacesMode("disabled")
-
-def cxx_can_generate_shlib_interface_from_linkables(ctx: AnalysisContext) -> bool:
-    return get_cxx_toolchain_info(ctx).binary_utilities_info.custom_tools.get("llvm-tbd-gen", None) != None
 
 def cxx_use_shlib_intfs_mode(ctx: AnalysisContext, mode: ShlibInterfacesMode) -> bool:
     """

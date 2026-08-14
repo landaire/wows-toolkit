@@ -26,11 +26,7 @@ def python_needed_coverage_test_impl(ctx: AnalysisContext) -> list[Provider]:
     needed_coverages = parse_python_needed_coverage_specs(ctx.attrs.needed_coverage)
     test_cmd.append("--collect-coverage")
     test_cmd.append("--coverage-include")
-    test_cmd.append(",".join([
-        "*/{}".format(module)
-        for needed_coverage in needed_coverages
-        for module in needed_coverage.modules
-    ]))
+    test_cmd.append(",".join(["*/{}".format(module) for needed_coverage in needed_coverages for module in needed_coverage.modules]))
     for needed_coverage in needed_coverages:
         for module in needed_coverage.modules:
             test_cmd.append("--coverage-verdict={}={}".format(module, needed_coverage.ratio))
@@ -44,7 +40,7 @@ def python_needed_coverage_test_impl(ctx: AnalysisContext) -> list[Provider]:
     test_env["TEST_PILOT"] = "1"
 
     # Setup RE executors based on the `remote_execution` param.
-    re_executor, executor_overrides = get_re_executors_from_props(ctx)
+    re_executors = get_re_executors_from_props(ctx)
 
     return inject_test_run_info(
         ctx,
@@ -54,12 +50,13 @@ def python_needed_coverage_test_impl(ctx: AnalysisContext) -> list[Provider]:
             env = test_env,
             labels = ctx.attrs.labels,
             contacts = ctx.attrs.contacts,
-            default_executor = re_executor,
-            executor_overrides = executor_overrides,
+            default_executor = re_executors.default_executor,
+            executor_overrides = re_executors.executor_overrides,
             # We implicitly make this test via the project root, instead of
             # the cell root (e.g. fbcode root).
-            run_from_project_root = re_executor != None,
-            use_project_relative_paths = re_executor != None,
+            run_from_project_root = re_executors.run_from_project_root,
+            use_project_relative_paths = re_executors.use_project_relative_paths,
+            supports_test_execution_caching = ctx.attrs.supports_test_execution_caching,
         ),
     ) + [
         DefaultInfo(),

@@ -51,6 +51,7 @@ StartSpec = record(
 BuiltApplication = record(
     build_environment = field(BuildEnvironment),
     app_file = field(Artifact),
+    appup_file = field(Artifact | None),
     src_dir = field(Artifact),
     priv_dir = field(Artifact),
 )
@@ -60,11 +61,14 @@ def erlang_application_impl(ctx: AnalysisContext) -> Promise:
     toolchain = get_toolchain(ctx)
 
     # collect all dependencies
-    dep_info = ctx.actions.anon_target(erlang_deps_rule, {
-        "applications": ctx.attrs.applications,
-        "extra_includes": ctx.attrs.extra_includes,
-        "included_applications": ctx.attrs.included_applications,
-    })
+    dep_info = ctx.actions.anon_target(
+        erlang_deps_rule,
+        {
+            "applications": ctx.attrs.applications,
+            "extra_includes": ctx.attrs.extra_includes,
+            "included_applications": ctx.attrs.included_applications,
+        },
+    )
 
     name = app_name(ctx)
 
@@ -109,7 +113,11 @@ def _build_erlang_application(ctx: AnalysisContext, name: str, toolchain: Toolch
     if ctx.attrs._includes_target:
         include_info = ctx.attrs._includes_target[ErlangAppIncludeInfo]
         if include_info._original_includes != ctx.attrs.includes:
-            fail("includes of the includes_target and direct includes must be the same, got {} and {}".format(include_info._original_includes, ctx.attrs.includes))
+            fail(
+                "includes of the includes_target and direct includes must be the same, got {} and {}".format(
+                    include_info._original_includes, ctx.attrs.includes
+                )
+            )
         if include_info.name != name:
             fail("includes_target must have the same name as the application, got {} and {}".format(include_info.name, name))
     build_environment = erlang_build.prepare_build_environment(dep_info, include_info)
@@ -122,11 +130,7 @@ def _build_erlang_application(ctx: AnalysisContext, name: str, toolchain: Toolch
     src_dir = _link_src_dir(ctx, extra_srcs = generated_source_artifacts)
 
     # collect all inputs
-    src_artifacts = [
-        src
-        for src in ctx.attrs.srcs
-        if erlang_build.utils.is_erl(src)
-    ] + generated_source_artifacts
+    src_artifacts = [src for src in ctx.attrs.srcs if erlang_build.utils.is_erl(src)] + generated_source_artifacts
 
     private_header_artifacts = [header for header in ctx.attrs.srcs if erlang_build.utils.is_hrl(header)]
 
@@ -159,6 +163,9 @@ def _build_erlang_application(ctx: AnalysisContext, name: str, toolchain: Toolch
         build_environment,
     )
 
+    # doc files
+    _build_doc_artifacts(ctx, build_environment)
+
     # beams
     erlang_build.build_steps.generate_beam_artifacts(
         ctx,
@@ -177,12 +184,16 @@ def _build_erlang_application(ctx: AnalysisContext, name: str, toolchain: Toolch
         src_artifacts,
     )
 
+    # create <appname>.appup file
+    appup_file = _generate_appup_file(ctx, toolchain, name)
+
     # priv
     priv_dir = _generate_priv_dir(ctx)
 
     return BuiltApplication(
         build_environment = build_environment,
         app_file = app_file,
+        appup_file = appup_file,
         src_dir = src_dir,
         priv_dir = priv_dir,
     )
@@ -207,14 +218,11 @@ def _generate_priv_dir(ctx: AnalysisContext) -> Artifact:
             "priv",
         ),
         priv_symlinks,
+        has_content_based_path = False,
     )
 
-def _generate_app_file(
-        ctx: AnalysisContext,
-        toolchain: Toolchain,
-        name: str,
-        srcs: list[Artifact]) -> Artifact:
-    """ rule for generating the .app files
+def _generate_app_file(ctx: AnalysisContext, toolchain: Toolchain, name: str, srcs: list[Artifact]) -> Artifact:
+    """rule for generating the .app files
 
     NOTE: We are using the .erl files as input to avoid dependencies on
           beams.
@@ -222,7 +230,7 @@ def _generate_app_file(
     _check_application_dependencies(ctx)
 
     app_file_name = name + ".app"
-    output = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, app_file_name)
+    output = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, app_file_name, has_content_based_path = False)
     app_info_file = _app_info_content(ctx, name, srcs)
 
     erlang_build.utils.run_with_env(
@@ -236,8 +244,7 @@ def _generate_app_file(
     return output
 
 def _check_application_dependencies(ctx: AnalysisContext):
-    """ there must not be duplicated applications within applications and included_applications
-    """
+    """there must not be duplicated applications within applications and included_applications"""
     discovered = _check_applications_field(ctx.attrs.applications, "applications", {})
     _check_applications_field(ctx.attrs.included_applications, "included_applications", discovered)
 
@@ -245,27 +252,23 @@ def _check_applications_field(field: list[Dependency], tag: str, discovered: dic
     for application in field:
         name = application[ErlangAppInfo].name
         if name in discovered:
-            fail("discovered {} in `{}`, but the application was already specified in `{}`. The `applications` and `included_applications` field must be unique.".format(name, tag, discovered[name]))
+            fail(
+                "discovered {} in `{}`, but the application was already specified in `{}`. The `applications` and `included_applications` field must be unique.".format(
+                    name, tag, discovered[name]
+                )
+            )
         else:
             discovered[name] = tag
     return discovered
 
-def _app_info_content(
-        ctx: AnalysisContext,
-        name: str,
-        srcs: list[Artifact]) -> Artifact:
+def _app_info_content(ctx: AnalysisContext, name: str, srcs: list[Artifact]) -> Artifact:
     """build an app_info.json file that contains the meta information for building the .app file"""
-    app_info = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, "app_info.json")
+    app_info = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, "app_info.json", has_content_based_path = False)
 
     data = {
-        "applications": [
-            app[ErlangAppInfo].name
-            for app in ctx.attrs.applications
-        ],
-        "included_applications": [
-            app[ErlangAppInfo].name
-            for app in ctx.attrs.included_applications
-        ],
+        "app_src_vsn": ctx.attrs.app_src_vsn,
+        "applications": [app[ErlangAppInfo].name for app in ctx.attrs.applications],
+        "included_applications": [app[ErlangAppInfo].name for app in ctx.attrs.included_applications],
         "name": name,
         "sources": srcs,
     }
@@ -284,19 +287,47 @@ def _app_info_content(
     ctx.actions.write_json(app_info.as_output(), data)
     return app_info
 
-def link_output(
-        ctx: AnalysisContext,
-        link_path: str,
-        built: BuiltApplication) -> Artifact:
+def _generate_appup_file(ctx: AnalysisContext, toolchain: Toolchain, name: str) -> Artifact | None:
+    if not ctx.attrs.appup_src:
+        return None
+    if not ctx.attrs.version:
+        fail("appup_src requires `version` to be set on the target: %s" % (ctx.label,))
+
+    appup_file_name = name + ".appup"
+    output = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, appup_file_name, has_content_based_path = False)
+    appup_info_file = _appup_info_content(ctx, name)
+
+    erlang_build.utils.run_with_env(
+        ctx,
+        toolchain,
+        cmd_args(toolchain.appup_src_script, appup_info_file, output.as_output()),
+        category = "appup_resource",
+        identifier = name,
+    )
+
+    return output
+
+def _appup_info_content(ctx: AnalysisContext, name: str) -> Artifact:
+    appup_info = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, "appup_info.json", has_content_based_path = False)
+    data = {
+        "app_src_vsn": ctx.attrs.app_src_vsn,
+        "name": name,
+        "template": ctx.attrs.appup_src,
+        "version": ctx.attrs.version,
+    }
+    appup_info = appup_info.with_associated_artifacts([ctx.attrs.appup_src])
+    ctx.actions.write_json(appup_info.as_output(), data)
+    return appup_info
+
+def link_output(ctx: AnalysisContext, link_path: str, built: BuiltApplication) -> Artifact:
     """Link application output folder in working dir root folder."""
     name = app_name(ctx)
 
     build_environment = built.build_environment
     ebin = build_environment.beams.get(name, {}).values() + [built.app_file]
-    ebin = {
-        paths.join("ebin", ebin_file.basename): ebin_file
-        for ebin_file in ebin
-    }
+    if built.appup_file:
+        ebin = ebin + [built.appup_file]
+    ebin = {paths.join("ebin", ebin_file.basename): ebin_file for ebin_file in ebin}
 
     link_spec = {}
     link_spec.update(ebin)
@@ -306,21 +337,38 @@ def link_output(
     if name in build_environment.include_dirs:
         link_spec["include"] = build_environment.include_dirs[name]
 
-    return ctx.actions.symlinked_dir(link_path, link_spec)
+    return ctx.actions.symlinked_dir(link_path, link_spec, has_content_based_path = False)
+
+# mutates build_environment in place
+def _build_doc_artifacts(ctx: AnalysisContext, build_environment: BuildEnvironment):
+    """Build doc file artifacts at __build/<rel_path> so erlc can resolve file-based -moduledoc/-doc annotations."""
+    doc_files = ctx.attrs.docs
+    if not doc_files:
+        return
+
+    pkg_prefix = ctx.label.package
+    if pkg_prefix:
+        pkg_prefix = pkg_prefix + "/"
+    for doc in doc_files:
+        rel_path = doc.short_path
+        if pkg_prefix and rel_path.startswith(pkg_prefix):
+            rel_path = rel_path[len(pkg_prefix) :]
+        out = ctx.actions.declare_output(paths.join(erlang_build.utils.BUILD_DIR, rel_path), has_content_based_path = False)
+        ctx.actions.symlink_file(out.as_output(), doc)
+        build_environment.docs[rel_path] = out
 
 def _link_src_dir(ctx: AnalysisContext, *, extra_srcs: list[Artifact]) -> Artifact:
     """Link all sources in a src folder"""
-    srcs = {
-        src_file.basename: src_file
-        for src_file in ctx.attrs.srcs
-    }
+    srcs = {src_file.basename: src_file for src_file in ctx.attrs.srcs}
     if ctx.attrs.app_src:
         srcs[ctx.attrs.app_src.basename] = ctx.attrs.app_src
+    if ctx.attrs.appup_src:
+        srcs[ctx.attrs.appup_src.basename] = ctx.attrs.appup_src
 
     for extra_srcs in extra_srcs:
         srcs[extra_srcs.basename] = extra_srcs
 
-    return ctx.actions.symlinked_dir(paths.join(erlang_build.utils.BUILD_DIR, "src"), srcs)
+    return ctx.actions.symlinked_dir(paths.join(erlang_build.utils.BUILD_DIR, "src"), srcs, has_content_based_path = False)
 
 def _build_start_dependencies(ctx: AnalysisContext) -> list[StartDependencySet]:
     return build_apps_start_dependencies(
@@ -360,19 +408,19 @@ def _build_start_spec(app_info: Provider, start_type: StartType) -> StartSpec:
     )
 
 def _build_default_info(dep_info: ErlangDependencyInfo, app_dir: Artifact) -> Provider:
-    """ generate default_outputs and DefaultInfo provider
-    """
+    """generate default_outputs and DefaultInfo provider"""
 
     # We depend on the code path of all dependencies to force them to be compiled
     # and emit errors when users compile just this one application
     return DefaultInfo(default_output = app_dir, other_outputs = [dep_info.code_path])
 
 def build_app_info(
-        ctx: AnalysisContext,
-        dependencies: ErlAppDependencies,
-        build_environment: BuildEnvironment,
-        app_folder: Artifact,
-        start_dependencies: list[StartDependencySet]) -> Provider:
+    ctx: AnalysisContext,
+    dependencies: ErlAppDependencies,
+    build_environment: BuildEnvironment,
+    app_folder: Artifact,
+    start_dependencies: list[StartDependencySet],
+) -> Provider:
     name = app_name(ctx)
 
     # build application info

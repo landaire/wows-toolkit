@@ -6,9 +6,11 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-AndroidPlatformInfo = provider(fields = {
-    "name": provider_field(typing.Any, default = None),
-})
+AndroidPlatformInfo = provider(
+    fields = {
+        "name": provider_field(typing.Any, default = None),
+    }
+)
 
 AndroidToolchainInfo = provider(
     fields = {
@@ -25,9 +27,12 @@ AndroidToolchainInfo = provider(
         "apk_builder": provider_field(typing.Any, default = None),
         "apk_module_graph": provider_field(typing.Any, default = None),
         "app_without_resources_stub": provider_field(typing.Any, default = None),
+        "build_info_generator": provider_field(typing.Any, default = None),
         "bundle_apks_builder": provider_field(typing.Any, default = None),
         "bundle_builder": provider_field(typing.Any, default = None),
+        "collect_perfetto": provider_field(typing.Any, default = None),
         "combine_native_library_dirs": provider_field(typing.Any, default = None),
+        "consolidate_class_names": provider_field(typing.Any, default = None),
         "copy_string_resources": provider_field(typing.Any, default = None),
         "cross_module_native_deps_check": provider_field(typing.Any, default = None),
         "d8_command": provider_field(typing.Any, default = None),
@@ -37,6 +42,7 @@ AndroidToolchainInfo = provider(
         "filter_prebuilt_native_library_dir": provider_field(typing.Any, default = None),
         "filter_resources": provider_field(typing.Any, default = None),
         "framework_aidl_file": provider_field(typing.Any, default = None),
+        # @oss-disable[end= ]: "gatorade_mergemap_tool": provider_field(typing.Any, default = None),
         "generate_build_config": provider_field(typing.Any, default = None),
         "generate_manifest": provider_field(typing.Any, default = None),
         "installer": provider_field(typing.Any, default = None),
@@ -65,6 +71,8 @@ AndroidToolchainInfo = provider(
         "secondary_dex_weight_limit": provider_field(typing.Any, default = None),
         "set_application_id_to_specified_package": provider_field(typing.Any, default = None),
         "should_run_sanity_check_for_placeholders": provider_field(typing.Any, default = None),
+        "sort_pre_dexed_files": provider_field(typing.Any, default = None),
+        "target_stats_tools": provider_field(typing.Any, default = None),
         "unpack_aar": provider_field(typing.Any, default = None),
         "zipalign": provider_field(typing.Any, default = None),
     },

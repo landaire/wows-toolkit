@@ -31,17 +31,9 @@ CrateType = enum(
     "staticlib",
 )
 
-# Crate type is intended for native linkage (eg C++)
-def crate_type_native_linkage(crate_type: CrateType) -> bool:
-    return crate_type.value in ("cdylib", "staticlib")
-
-# Crate type which invokes the linker
+# Crate type requires linking
 def crate_type_linked(crate_type: CrateType) -> bool:
     return crate_type.value in ("bin", "dylib", "proc-macro", "cdylib")
-
-# Crate type which should always need codegen
-def crate_type_codegen(crate_type: CrateType) -> bool:
-    return crate_type_linked(crate_type) or crate_type_native_linkage(crate_type)
 
 # -Crelocation-model= from --print relocation-models
 RelocModel = enum(
@@ -81,6 +73,7 @@ Emit = enum(
 ProfileMode = enum(
     "llvm-time-trace",
     "self-profile",
+    "remarks",
 )
 
 # The different quantities of Rust metadata that can be requested from
@@ -95,17 +88,17 @@ MetadataKind = enum(
 # Emitting this artifact generates code
 def dep_metadata_of_emit(emit: Emit) -> MetadataKind:
     return {
-        Emit("asm"): MetadataKind("link"),
-        Emit("llvm-bc"): MetadataKind("link"),
-        Emit("llvm-ir"): MetadataKind("link"),
-        Emit("llvm-ir-noopt"): MetadataKind("link"),
-        Emit("obj"): MetadataKind("link"),
+        Emit("asm"): MetadataKind("full"),
+        Emit("llvm-bc"): MetadataKind("full"),
+        Emit("llvm-ir"): MetadataKind("full"),
+        Emit("llvm-ir-noopt"): MetadataKind("full"),
+        Emit("obj"): MetadataKind("full"),
         Emit("link"): MetadataKind("link"),
-        Emit("mir"): MetadataKind("link"),
+        Emit("mir"): MetadataKind("full"),
         Emit("metadata-fast"): MetadataKind("fast"),
         Emit("clippy"): MetadataKind("fast"),
-        Emit("dep-info"): MetadataKind("full"),
-        Emit("expand"): MetadataKind("full"),
+        Emit("dep-info"): MetadataKind("fast"),
+        Emit("expand"): MetadataKind("fast"),
         Emit("metadata-full"): MetadataKind("full"),
     }[emit]
 
@@ -135,32 +128,26 @@ RuleType = enum("binary", "library")
 # or buck is driving the final linking and whether we are linking the artifact
 # into other rust targets.
 #
-# Rust: In this mode, we build rust libraries as rlibs. This is the primary
-# approach for building rust targets when the final link step is driven by
-# rustc (e.g. rust_binary, rust_unittest, etc).
-#
-# Native: In this mode, we build rust libraries as staticlibs, where rustc
-# will bundle all of this target's rust dependencies into a single library
-# artifact. This approach is the most standardized way to build rust libraries
-# for linkage in non-rust code.
-#
-# NOTE: This approach does not scale well. It's possible to end up with
-# non-rust target A depending on two rust targets B and C, which can cause
-# duplicate symbols if B and C share common rust dependencies.
-#
-# Native Unbundled: In this mode, we revert back to building as rlibs. This
-# approach mitigates the duplicate symbol downside of the "Native" approach.
-# However, this option is not formally supported by rustc, and depends on an
-# implementation detail of rlibs (they're effectively .a archives and can be
-# linked with other native code using the CXX linker).
+# Rust: In this mode, we build standard rlibs/dylibs. This is the approach that
+# we use either when the artifacts will subsequently be consumed by rust, or
+# when `advanced_unstable_linking` is enabled (or both). In the
+# `advanced_unstable_linking` case, this approach mitigates the duplicate symbol
+# downside of the "Native" approach. However, this option is not formally
+# supported by rustc, and depends on an implementation detail of rlibs (they're
+# effectively .a archives and can be linked with other native code using the CXX
+# linker).
 #
 # See https://github.com/rust-lang/rust/issues/73632 for more details on
 # stabilizing this approach.
+#
+# native-bundled: In this mode, we build rust libraries as staticlibs, where
+# rustc will bundle all of this target's rust dependencies into a single library
+# artifact. This approach is the most standardized OSS way to build rust
+# libraries for linkage in non-rust code.
 
 LinkageLang = enum(
     "rust",
-    "native",
-    "native-unbundled",
+    "native-bundled",
 )
 
 _BINARY = 0
@@ -254,9 +241,7 @@ _INPUTS = {
     ("binary", False, None, "rust"): _BINARY,
     ("binary", True, None, "rust"): _RUST_PROC_MACRO_RUSTDOC_TEST,
     # Native linkable shared object
-    ("library", False, "shared_lib", "native"): _NATIVE_LINKABLE_SHARED_OBJECT,
-    # Native unbundled linkable shared object
-    ("library", False, "shared_lib", "native-unbundled"): _RUST_DYLIB_SHARED,
+    ("library", False, "shared_lib", "native-bundled"): _NATIVE_LINKABLE_SHARED_OBJECT,
     # Rust dylib shared object
     ("library", False, "shared_lib", "rust"): _RUST_DYLIB_SHARED,
     # Rust proc-macro
@@ -268,13 +253,9 @@ _INPUTS = {
     # Rust static (non-pic) library
     ("library", False, "archive", "rust"): _RUST_STATIC_NON_PIC_LIBRARY,
     # Native linkable static_pic
-    ("library", False, "pic_archive", "native"): _NATIVE_LINKABLE_STATIC_PIC,
+    ("library", False, "pic_archive", "native-bundled"): _NATIVE_LINKABLE_STATIC_PIC,
     # Native linkable static non-pic
-    ("library", False, "archive", "native"): _NATIVE_LINKABLE_STATIC_NON_PIC,
-    # Native Unbundled static_pic library
-    ("library", False, "pic_archive", "native-unbundled"): _RUST_STATIC_PIC_LIBRARY,
-    # Native Unbundled static (non-pic) library
-    ("library", False, "archive", "native-unbundled"): _RUST_STATIC_NON_PIC_LIBRARY,
+    ("library", False, "archive", "native-bundled"): _NATIVE_LINKABLE_STATIC_NON_PIC,
 }
 
 # Check types of _INPUTS, writing these out as types is too verbose, but let's make sure we don't have any typos.
@@ -322,13 +303,14 @@ def _get_reloc_model(rule: RuleType, link_strategy: LinkStrategy, target_os_type
 #     fundamental in cases without native unbundled deps - with native unbundled deps it may be
 #     fixable, but that's not super clear.
 def build_params(
-        rule: RuleType,
-        proc_macro: bool,
-        link_strategy: LinkStrategy | None,
-        lib_output_style: LibOutputStyle | None,
-        lang: LinkageLang,
-        linker_type: LinkerType,
-        target_os_type: OsLookup) -> BuildParams:
+    rule: RuleType,
+    proc_macro: bool,
+    link_strategy: LinkStrategy | None,
+    lib_output_style: LibOutputStyle | None,
+    lang: LinkageLang,
+    linker_type: LinkerType,
+    target_os_type: OsLookup,
+) -> BuildParams:
     if rule == RuleType("binary"):
         expect(link_strategy != None)
         expect(lib_output_style == None)

@@ -3,7 +3,6 @@ load("@prelude//toolchains:cxx.bzl", "CxxToolsInfo")
 load("@prelude//cxx:cxx_toolchain_types.bzl", "LinkerType")
 
 WindowsToolPathsInfo = provider(fields = {
-    "root": provider_field(typing.Any),
     "cl": provider_field(typing.Any),
     "lib": provider_field(typing.Any),
     "link": provider_field(typing.Any),
@@ -14,10 +13,18 @@ WindowsToolPathsInfo = provider(fields = {
     "rustdoc": provider_field(typing.Any),
     "nasm": provider_field(typing.Any),
     "wix": provider_field(typing.Any),
+    "wix_extensions": provider_field(typing.Any),
 })
 
-def _tool(root, relative_path):
-    return cmd_args(root, "/" + relative_path, delimiter = "")
+# Every tool is an absolute path published by toolchains/windows/verify-toolchain.ps1,
+# the same mechanism scripts/refresh-buck-toolchain.nu uses on macOS and Linux.
+# Taking the toolchain as a source directory instead would make Buck digest the
+# whole multi-gigabyte Visual Studio and SDK tree on every build.
+def _tool(name):
+    path = read_root_config("hermetic_tools", name)
+    if path == None:
+        fail("Missing [hermetic_tools] {}. Run toolchains/windows/verify-toolchain.ps1 before invoking Buck2.".format(name))
+    return path
 
 def _native_build_mode():
     mode = read_root_config("native_build", "mode", "debug")
@@ -26,32 +33,20 @@ def _native_build_mode():
     return mode
 
 def _rustc_flags():
+    # No -Clinker here: the prelude already points rustc at the linker from
+    # CxxToolsInfo, which is the pinned link.exe wrapper.
     if _native_build_mode() == "release":
         return ["-Copt-level=3", "-Cdebuginfo=0"]
     return ["-Copt-level=0", "-Cdebuginfo=2"]
 
-def _rustc_env(root):
-    # No PATH: rustc is pointed at link.exe explicitly through -Clinker, so the
-    # only ambient lookup it would otherwise perform is removed. INCLUDE and LIB
-    # have no such flag and must be passed as environment.
-    return {
-        "INCLUDE": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/include"),
-        "LIB": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/lib/x64"),
-        "LIBPATH": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/lib/x64"),
-    }
-
 def _wrapper(ctx, name, executable):
-    root = ctx.attrs.toolchain_root
+    # cl.exe and link.exe read their search paths from the environment. The
+    # wrapper sets exactly those and clears PATH, so nothing is inherited.
     content = cmd_args(
         "@echo off\r\nsetlocal DisableDelayedExpansion\r\nset \"PATH=\"\r\nset \"INCLUDE=",
-        _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/include"), ";",
-        _tool(root, "WindowsKits/10/Include/10.0.26100.0/ucrt"), ";",
-        _tool(root, "WindowsKits/10/Include/10.0.26100.0/um"), ";",
-        _tool(root, "WindowsKits/10/Include/10.0.26100.0/shared"),
+        ctx.attrs.include,
         "\"\r\nset \"LIB=",
-        _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/lib/x64"), ";",
-        _tool(root, "WindowsKits/10/Lib/10.0.26100.0/ucrt/x64"), ";",
-        _tool(root, "WindowsKits/10/Lib/10.0.26100.0/um/x64"),
+        ctx.attrs.lib_paths,
         "\"\r\nset \"LIBPATH=%LIB%\"\r\n\"", executable, "\" %*\r\n",
         delimiter = "",
     )
@@ -59,46 +54,112 @@ def _wrapper(ctx, name, executable):
     return wrapper
 
 def _msvc_tools_impl(ctx):
-    root = ctx.attrs.toolchain_root
-    cl = _wrapper(ctx, "cl", _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/cl.exe"))
-    lib = _wrapper(ctx, "lib", _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/lib.exe"))
-    link = _wrapper(ctx, "link", _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/link.exe"))
-    rc = _wrapper(ctx, "rc", _tool(root, "WindowsKits/10/bin/10.0.26100.0/x64/rc.exe"))
-    ml64 = _wrapper(ctx, "ml64", _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/ml64.exe"))
-    rustc = _tool(root, "Rust/1.92.0/bin/rustc.exe")
-    rustdoc = _tool(root, "Rust/1.92.0/bin/rustdoc.exe")
-    nasm = _tool(root, "NASM/3.01/nasm.exe")
-    wix = _tool(root, "WiX/6.0.2/wix.exe")
+    cl = _wrapper(ctx, "cl", ctx.attrs.cc)
+    lib = _wrapper(ctx, "lib", ctx.attrs.ar)
+    link = _wrapper(ctx, "link", ctx.attrs.link)
+    rc = _wrapper(ctx, "rc", ctx.attrs.rc)
+    ml64 = _wrapper(ctx, "ml64", ctx.attrs.ml64)
+    cvtres = _wrapper(ctx, "cvtres", ctx.attrs.cvtres)
+    wix = ctx.attrs.wix
     return [
         DefaultInfo(),
         RunInfo(args = [wix]),
         CxxToolsInfo(
-            compiler = cl, compiler_type = "windows", cxx_compiler = cl,
-            asm_compiler = ml64, asm_compiler_type = "windows_ml64", rc_compiler = rc,
-            cvtres_compiler = _wrapper(ctx, "cvtres", _tool(root, "WindowsKits/10/bin/10.0.26100.0/x64/cvtres.exe")),
-            archiver = lib, archiver_type = "windows", linker = link, linker_type = LinkerType("windows"),
+            compiler = cl,
+            compiler_type = "windows",
+            cxx_compiler = cl,
+            asm_compiler = ml64,
+            asm_compiler_type = "windows_ml64",
+            rc_compiler = rc,
+            cvtres_compiler = cvtres,
+            archiver = lib,
+            archiver_type = "windows",
+            linker = link,
+            linker_type = LinkerType("windows"),
         ),
-        WindowsToolPathsInfo(root = root, cl = cl, lib = lib, link = link, rc = rc, midl = _tool(root, "WindowsKits/10/bin/10.0.26100.0/x64/midl.exe"), ml64 = ml64, rustc = rustc, rustdoc = rustdoc, nasm = nasm, wix = wix),
+        WindowsToolPathsInfo(
+            cl = cl,
+            lib = lib,
+            link = link,
+            rc = rc,
+            midl = ctx.attrs.midl,
+            ml64 = ml64,
+            rustc = ctx.attrs.rustc,
+            rustdoc = ctx.attrs.rustdoc,
+            nasm = ctx.attrs.nasm,
+            wix = wix,
+            wix_extensions = ctx.attrs.wix_extensions,
+        ),
     ]
 
-hermetic_msvc_tools = rule(impl = _msvc_tools_impl, attrs = {"toolchain_root": attrs.source(allow_directory = True)})
+_TOOL_ATTRS = ["ar", "cc", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc", "wix", "wix_extensions"]
+
+_hermetic_msvc_tools_rule = rule(
+    impl = _msvc_tools_impl,
+    attrs = {name: attrs.string() for name in _TOOL_ATTRS},
+)
+
+def hermetic_msvc_tools(name, visibility):
+    # read_root_config is unavailable during analysis, so the paths are resolved
+    # here, while the package is loading, and passed in as attributes.
+    _hermetic_msvc_tools_rule(
+        name = name,
+        visibility = visibility,
+        **{attr: _tool(attr) for attr in _TOOL_ATTRS}
+    )
 
 def _hermetic_msvc_rust_toolchain_impl(ctx):
     tools = ctx.attrs.tools[WindowsToolPathsInfo]
     return [DefaultInfo(), RustToolchainInfo(
-        allow_lints = [], clippy_driver = RunInfo(args = [tools.rustc]), clippy_toml = None,
-        compiler = RunInfo(args = [tools.rustc]), default_edition = ctx.attrs.default_edition,
-        deny_lints = [], doctests = False, nightly_features = False, panic_runtime = PanicRuntime("unwind"),
-        report_unused_deps = False, rustc_binary_flags = [], rustc_env = _rustc_env(tools.root), rustc_flags = _rustc_flags(),
-        rustc_target_triple = "x86_64-pc-windows-msvc", rustc_test_flags = [],
-        rustdoc = RunInfo(args = [tools.rustdoc]), rustdoc_flags = [], warn_lints = [],
+        allow_lints = [],
+        clippy_driver = RunInfo(args = [tools.rustc]),
+        clippy_toml = None,
+        compiler = RunInfo(args = [tools.rustc]),
+        default_edition = ctx.attrs.default_edition,
+        deny_lints = [],
+        doctests = False,
+        nightly_features = False,
+        panic_runtime = PanicRuntime("unwind"),
+        report_unused_deps = False,
+        rustc_binary_flags = [],
+        # INCLUDE and LIB have no rustc flag and must be passed as environment.
+        rustc_env = {
+            "INCLUDE": ctx.attrs.include,
+            "LIB": ctx.attrs.lib_paths,
+            "LIBPATH": ctx.attrs.lib_paths,
+        },
+        rustc_flags = ctx.attrs.rustc_flags,
+        rustc_target_triple = "x86_64-pc-windows-msvc",
+        rustc_test_flags = [],
+        rustdoc = RunInfo(args = [tools.rustdoc]),
+        rustdoc_flags = [],
+        warn_lints = [],
     )]
 
-hermetic_msvc_rust_toolchain = rule(
+_hermetic_msvc_rust_toolchain_rule = rule(
     impl = _hermetic_msvc_rust_toolchain_impl,
-    attrs = {"default_edition": attrs.string(), "tools": attrs.dep(providers = [WindowsToolPathsInfo])},
+    attrs = {
+        "default_edition": attrs.string(),
+        "include": attrs.string(),
+        "lib_paths": attrs.string(),
+        "rustc_flags": attrs.list(attrs.string()),
+        "tools": attrs.dep(providers = [WindowsToolPathsInfo]),
+    },
     is_toolchain_rule = True,
 )
+
+def hermetic_msvc_rust_toolchain(name, default_edition, tools, visibility):
+    # Resolved while the package loads; read_root_config is unavailable during
+    # analysis.
+    _hermetic_msvc_rust_toolchain_rule(
+        name = name,
+        default_edition = default_edition,
+        include = _tool("include"),
+        lib_paths = _tool("lib_paths"),
+        rustc_flags = _rustc_flags(),
+        tools = tools,
+        visibility = visibility,
+    )
 
 def _windows_resource_impl(ctx):
     tools = ctx.attrs.tools[WindowsToolPathsInfo]

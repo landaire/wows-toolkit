@@ -10,11 +10,9 @@
 
 package com.facebook.buck.jvm.kotlin;
 
-import static com.facebook.buck.jvm.java.CompilerOutputPaths.getKspDepFilePath;
 import static com.facebook.buck.jvm.java.JavaPaths.SRC_ZIP;
 import static com.facebook.buck.jvm.kotlin.AnnotationProcessorUtils.getAnnotationProcessors;
 import static com.facebook.buck.jvm.kotlin.CompilerPluginUtils.getKotlinCompilerPluginsArgs;
-import static com.google.common.collect.Iterables.transform;
 
 import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.core.filesystems.RelPath;
@@ -36,13 +34,10 @@ import com.facebook.buck.step.isolatedsteps.common.MakeCleanDirectoryIsolatedSte
 import com.facebook.buck.step.isolatedsteps.common.MkdirIsolatedStep;
 import com.facebook.buck.step.isolatedsteps.common.ZipIsolatedStep;
 import com.facebook.buck.util.zip.ZipCompressionLevel;
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.ImmutableSortedSet;
-import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -78,7 +73,7 @@ public class KspStepsBuilder {
       RelPath configuredBuckOut,
       ImmutableMap<String, AbsPath> resolvedKosabiPluginOptionPath,
       ImmutableSortedSet.Builder<RelPath> sourceBuilderWithKspOutputs,
-      ImmutableList<AbsPath> sourceOnlyAbiClasspath,
+      ImmutableList<AbsPath> compilationClasspath,
       String moduleName,
       KotlinCDAnalytics kotlinCDAnalytics) {
 
@@ -138,82 +133,46 @@ public class KspStepsBuilder {
             .map(AnnotationProcessorUtils::urlToFile)
             .collect(ImmutableList.toImmutableList());
 
-    if (isKsp2(annotationProcessorParams)) {
-      kspInvocationStatus = KSPInvocationStatus.KSP2_INVOKED;
+    kspInvocationStatus = KSPInvocationStatus.KSP2_INVOKED;
 
-      ImmutableList.Builder<AbsPath> allClassPathsBuilder = ImmutableList.builder();
+    ImmutableList.Builder<AbsPath> allClassPathsBuilder = ImmutableList.builder();
 
-      allClassPathsBuilder.addAll(allClasspaths);
+    allClassPathsBuilder.addAll(allClasspaths);
 
-      if (invokingRule.isSourceOnlyAbi()) {
-        allClassPathsBuilder.addAll(
-            sourceOnlyAbiClasspath.stream().filter(p -> !allClasspaths.contains(p)).toList());
-      }
-
-      Ksp2Step ksp2Step =
-          new Ksp2Step(
-              invokingRule,
-              compilerOutputPaths,
-              rootPath,
-              shouldTrackClassUsage,
-              allClassPathsBuilder.build(),
-              kotlinPluginGeneratedOutFullPath,
-              annotationProcessorParams.getParameters(),
-              sourceFilePaths,
-              CompilerOutputPaths.getKspDepFilePath(reportsOutput),
-              moduleName,
-              kspProcessorsClasspathList,
-              kspClassesOutput,
-              kspKotlinOutput,
-              kspJavaOutput,
-              kspOutputBaseDir,
-              extraParams.getJvmTarget(),
-              extraParams.getLanguageVersion(),
-              getJvmDefaultMode(extraParams.getExtraKotlincArguments()),
-              kotlinCDAnalytics,
-              Ksp2ModeFactory.create(
-                  rootPath,
-                  invokingRule.isSourceOnlyAbi(),
-                  kspCachesOutput,
-                  extraParams,
-                  actionMetadata.orElse(null)));
-      steps.add(ksp2Step);
-    } else {
-      kspInvocationStatus = KSPInvocationStatus.KSP1_INVOKED;
-      String kspProcessorsClasspath =
-          Joiner.on(File.pathSeparatorChar).join(kspProcessorsClasspathList);
-      steps.add(
-          getKsp1Step(
-              invokingRule,
-              rootPath,
-              outputDirectory,
-              reportsOutput,
-              shouldTrackClassUsage,
-              allClasspaths,
-              extraParams.getKotlinCompilerPlugins(),
-              kotlinPluginGeneratedOutFullPath,
-              projectBaseDir,
-              annotationProcessorParams,
-              sourceFilePaths,
-              pathToSrcsList,
-              kotlinHomeLibraries,
-              kotlinc,
-              compilerOutputPaths,
-              configuredBuckOut,
-              resolvedKosabiPluginOptionPath,
-              extraParams.getKosabiJvmAbiGenEarlyTerminationMessagePrefix().orElse(null),
-              sourceOnlyAbiClasspath,
-              moduleName,
-              extraParams.getExtraKotlincArguments(),
-              kspProcessorsClasspath,
-              kspClassesOutput,
-              kspKotlinOutput,
-              kspJavaOutput,
-              kspCachesOutput,
-              kspMetaOutput,
-              kotlinCDAnalytics));
+    if (invokingRule.isSourceOnlyAbi()) {
+      allClassPathsBuilder.addAll(
+          compilationClasspath.stream().filter(p -> !allClasspaths.contains(p)).toList());
     }
 
+    Ksp2Step ksp2Step =
+        new Ksp2Step(
+            invokingRule,
+            compilerOutputPaths,
+            rootPath,
+            shouldTrackClassUsage,
+            allClassPathsBuilder.build(),
+            kotlinPluginGeneratedOutFullPath,
+            annotationProcessorParams.getParameters(),
+            sourceFilePaths,
+            CompilerOutputPaths.getKspDepFilePath(reportsOutput),
+            moduleName,
+            kspProcessorsClasspathList,
+            kspClassesOutput,
+            kspKotlinOutput,
+            kspJavaOutput,
+            kspOutputBaseDir,
+            extraParams.getJvmTarget(),
+            extraParams.getLanguageVersion(),
+            getJvmDefaultMode(extraParams.getExtraKotlincArguments()),
+            extraParams.getJavaBinary(),
+            kotlinCDAnalytics,
+            Ksp2ModeFactory.create(
+                rootPath,
+                invokingRule.isSourceOnlyAbi(),
+                kspCachesOutput,
+                extraParams,
+                actionMetadata.orElse(null)));
+    steps.add(ksp2Step);
     steps.add(
         CopyIsolatedStep.forDirectory(
             kspKotlinOutput, kspAnnotationGenFolder, CopySourceMode.DIRECTORY_CONTENTS_ONLY));
@@ -253,132 +212,6 @@ public class KspStepsBuilder {
     return kspInvocationStatus;
   }
 
-  private static Ksp1Step getKsp1Step(
-      BuildTargetValue invokingRule,
-      AbsPath rootPath,
-      RelPath outputDirectory,
-      RelPath reportsOutput,
-      boolean shouldTrackClassUsage,
-      ImmutableList<AbsPath> allClasspaths,
-      ImmutableMap<AbsPath, ImmutableMap<String, String>> resolvedKotlinCompilerPlugins,
-      String kotlinPluginGeneratedOutFullPath,
-      RelPath projectBaseDir,
-      JavacPluginParams annotationProcessorParams,
-      ImmutableSortedSet<RelPath> sourceFilePaths,
-      Path pathToSrcsList,
-      ImmutableList<AbsPath> kotlinHomeLibraries,
-      Kotlinc kotlinc,
-      CompilerOutputPaths compilerOutputPaths,
-      RelPath configuredBuckOut,
-      ImmutableMap<String, AbsPath> resolvedKosabiPluginOptionPath,
-      String kosabiJvmAbiGenEarlyTerminationMessagePrefix,
-      ImmutableList<AbsPath> sourceOnlyAbiClasspath,
-      String moduleName,
-      ImmutableList<String> extraKotlincArguments,
-      String kspProcessorsClasspath,
-      RelPath kspClassesOutput,
-      RelPath kspKotlinOutput,
-      RelPath kspJavaOutput,
-      RelPath kspCachesOutput,
-      RelPath kspOutput,
-      KotlinCDAnalytics kotlinCDAnalytics) {
-    ImmutableList.Builder<String> kspPluginOptionsBuilder = ImmutableList.builder();
-    kspPluginOptionsBuilder
-        .add(KSP_PLUGIN_ID + "apclasspath=" + kspProcessorsClasspath)
-        .add(KSP_PLUGIN_ID + "projectBaseDir=" + rootPath.resolve(projectBaseDir))
-        .add(KSP_PLUGIN_ID + "classOutputDir=" + rootPath.resolve(kspClassesOutput))
-        .add(KSP_PLUGIN_ID + "kotlinOutputDir=" + rootPath.resolve(kspKotlinOutput))
-        .add(KSP_PLUGIN_ID + "javaOutputDir=" + rootPath.resolve(kspJavaOutput))
-        .add(KSP_PLUGIN_ID + "resourceOutputDir=" + rootPath.resolve(kspClassesOutput))
-        .add(KSP_PLUGIN_ID + "cachesDir=" + rootPath.resolve(kspCachesOutput))
-        .add(KSP_PLUGIN_ID + "kspOutputDir=" + rootPath.resolve(kspOutput));
-
-    // KSP needs the full classpath in order to resolve resources
-    String allClasspath =
-        Joiner.on(File.pathSeparator)
-            .join(transform(allClasspaths, path -> path.getPath().toString()));
-    allClasspath = allClasspath.replace(',', '-');
-    kspPluginOptionsBuilder.add(KSP_PLUGIN_ID + "apoption=" + "cp=" + allClasspath);
-
-    if (shouldTrackClassUsage) {
-      kspPluginOptionsBuilder.add(
-          KSP_PLUGIN_ID
-              + "apoption="
-              + "fileAccessHistoryReportFile="
-              + rootPath.resolve(getKspDepFilePath(reportsOutput)));
-    }
-
-    if (invokingRule.isSourceOnlyAbi()) {
-      kspPluginOptionsBuilder
-          .add(KSP_PLUGIN_ID + "apoption=" + "com.facebook.buck.kotlin.generating_abi=" + "true")
-          .add(KSP_PLUGIN_ID + "withCompilation=true");
-    }
-
-    ImmutableSortedSet<String> apParams = annotationProcessorParams.getParameters();
-    for (String param : apParams) {
-      Preconditions.checkState(param.split("=").length == 2);
-      kspPluginOptionsBuilder.add(KSP_PLUGIN_ID + "apoption=" + param);
-    }
-
-    kspPluginOptionsBuilder.add(
-        KSP_PLUGIN_ID
-            + "apoption=com.facebook.buck.kotlin.ksp_generated_out_path="
-            + kotlinPluginGeneratedOutFullPath);
-
-    boolean forceK1ForKspPlugins = true;
-
-    ImmutableList.Builder<String> kspTriggerBuilder = ImmutableList.builder();
-    kspTriggerBuilder
-        .addAll(getKspPluginsArgs(resolvedKotlinCompilerPlugins, kotlinPluginGeneratedOutFullPath))
-        .add(PLUGIN, Joiner.on(",").join(kspPluginOptionsBuilder.build()));
-
-    kspTriggerBuilder.add(MODULE_NAME).add(moduleName);
-
-    // To support source-only compilation, which only runs once without executing the main
-    // compilation, we need to provide additional arguments to the Kotlin compiler (kotlinc) to
-    // align the JVM settings and compiler plugin arguments for customizations in the non-ksp plugin
-    // settings.
-    if (invokingRule.isSourceOnlyAbi()) {
-      kspTriggerBuilder
-          .addAll(
-              getKotlinCompilerPluginsArgs(
-                  resolvedKotlinCompilerPlugins,
-                  kotlinPluginGeneratedOutFullPath,
-                  KspStepsBuilder::isPluginNotRequiredForStandaloneKsp))
-          .addAll(extraKotlincArguments);
-    }
-
-    return new Ksp1Step(
-        invokingRule,
-        outputDirectory.getPath(),
-        sourceFilePaths,
-        pathToSrcsList,
-        allClasspaths,
-        kotlinHomeLibraries,
-        reportsOutput,
-        kotlinc,
-        kspTriggerBuilder.build(),
-        compilerOutputPaths,
-        configuredBuckOut,
-        resolvedKosabiPluginOptionPath,
-        kosabiJvmAbiGenEarlyTerminationMessagePrefix,
-        sourceOnlyAbiClasspath,
-        shouldTrackClassUsage,
-        kotlinCDAnalytics);
-  }
-
-  private static boolean isKsp2(JavacPluginParams annotationProcessorParams) {
-    ImmutableSortedSet<String> apParams = annotationProcessorParams.getParameters();
-    for (String param : apParams) {
-      String[] splitParam = param.split("=");
-      Preconditions.checkState(splitParam.length == 2);
-      if (splitParam[0].equals("com.facebook.ksp.isKSP2")) {
-        return Boolean.parseBoolean(splitParam[1]);
-      }
-    }
-    return false;
-  }
-
   private static ImmutableList<String> getKspPluginsArgs(
       ImmutableMap<AbsPath, ImmutableMap<String, String>> resolvedKotlinCompilerPlugins,
       String outputDir) {
@@ -391,8 +224,24 @@ public class KspStepsBuilder {
   private static String getJvmDefaultMode(ImmutableList<String> args) {
     for (String arg : args) {
       String[] splitArg = arg.split("=");
-      if (splitArg.length == 2 && splitArg[0].equals("-Xjvm-default")) {
-        return splitArg[1];
+      if (splitArg.length == 2) {
+        if (splitArg[0].equals("-Xjvm-default")) {
+          return splitArg[1];
+        }
+        // Kotlin 2.3 renamed -Xjvm-default to -jvm-default with new mode names. Map them back to
+        // the legacy mode names KSP expects to preserve behavior.
+        if (splitArg[0].equals("-jvm-default")) {
+          switch (splitArg[1]) {
+            case "no-compatibility":
+              return "all";
+            case "enable":
+              return "all-compatibility";
+            case "disable":
+              return "disable";
+            default:
+              return splitArg[1];
+          }
+        }
       }
     }
     return "disabled";
@@ -424,7 +273,6 @@ public class KspStepsBuilder {
   }
 
   public enum KSPInvocationStatus {
-    KSP1_INVOKED,
     KSP2_INVOKED,
     NOT_INVOKED
   }

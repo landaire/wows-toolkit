@@ -16,18 +16,12 @@ PycInvalidationMode = enum(
     # "timestamp",
 )
 
-def compile_manifests(
-        ctx: AnalysisContext,
-        manifests: list[ManifestInfo]) -> dict[PycInvalidationMode, ManifestInfo]:
-    return {
-        mode: compile_manifests_for_mode(ctx, manifests, mode)
-        for mode in [PycInvalidationMode("unchecked_hash"), PycInvalidationMode("checked_hash")]
-    }
+def compile_manifests(ctx: AnalysisContext, manifests: list[ManifestInfo]) -> dict[PycInvalidationMode, ManifestInfo]:
+    return {mode: compile_manifests_for_mode(ctx, manifests, mode) for mode in [PycInvalidationMode("unchecked_hash"), PycInvalidationMode("checked_hash")]}
 
 def compile_manifests_for_mode(
-        ctx: AnalysisContext,
-        manifests: list[ManifestInfo],
-        invalidation_mode: PycInvalidationMode = PycInvalidationMode("unchecked_hash")) -> ManifestInfo:
+    ctx: AnalysisContext, manifests: list[ManifestInfo], invalidation_mode: PycInvalidationMode = PycInvalidationMode("unchecked_hash")
+) -> ManifestInfo:
     mode = invalidation_mode.value.upper()
     has_content_based_path = ctx.attrs._python_toolchain[PythonToolchainInfo].supports_content_based_paths == True
     output = ctx.actions.declare_output("bytecode_{}".format(mode), dir = True, has_content_based_path = has_content_based_path)
@@ -61,7 +55,7 @@ def compile_manifests_for_mode(
         env["CINDER_DUMMY_PYC_CACHE_BUSTER"] = "3451"
     elif version and "3.12" in version:
         # for CPython, the magic number *shouldn't* change during the lifetime of a feature release
-        # but internally we do make more signifcant changes (rarely),
+        # but internally we do make more significant changes (rarely),
         # so for those cases we support forced invalidation using this env var
         env["PYTHON312_DUMMY_PYC_CACHE_BUSTER"] = "3532"
 

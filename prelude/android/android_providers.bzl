@@ -120,6 +120,14 @@ AndroidApkInfo = provider(
     },
 )
 
+# Exopackage secondary-dex dir (metadata.txt + secondary-N.dex.jar) so android_instrumentation_test
+# can push it to the device. Only set when the apk is built with exopackage secondary_dex mode.
+AndroidApkExopackageInfo = provider(
+    fields = {
+        "secondary_dex_directory": provider_field(Artifact),
+    },
+)
+
 AndroidAabInfo = provider(
     fields = {
         "aab": provider_field(Artifact),
@@ -155,7 +163,6 @@ AndroidApkUnderTestInfo = provider(
         "resource_infos": provider_field(typing.Any, default = None),  # set(TargetLabel)
         "r_dot_java_packages": provider_field(typing.Any, default = None),  # set(str)
         "shared_libraries": provider_field(typing.Any, default = None),  # set(TargetLabel)
-
         # Merge map delegate
         "native_library_merge_code_generator": provider_field(typing.Any, default = None),
         "native_library_merge_glue": provider_field(typing.Any, default = None),
@@ -171,6 +178,7 @@ AndroidApkUnderTestInfo = provider(
 AndroidInstrumentationApkInfo = provider(
     fields = {
         "apk_under_test": provider_field(typing.Any, default = None),  # "artifact"
+        "is_self_instrumenting": provider_field(bool, default = False),
     },
 )
 
@@ -222,7 +230,7 @@ AndroidResourceInfo = provider(
         #  if False, then the "res" are not affected by the strings-as-assets resource filter
         "allow_strings_as_assets_resource_filtering": provider_field(typing.Any, default = None),  # bool
         # assets defined by this rule. May be empty
-        "assets": provider_field(Artifact | None, default = None),
+        "assets": provider_field(list[Artifact], default = []),
         # manifest file used by the resources, if resources are present
         "manifest_file": provider_field(Artifact | None, default = None),
         # the package specified by the android_resource rule itself
@@ -270,23 +278,24 @@ AndroidLibraryIntellijInfo = provider(
     },
 )
 
-AndroidPrebuiltAarIntellijInfo = provider(
+AndroidResourceRDotInfo = provider(
     # @unsorted-dict-items
-    doc = "Information about android prebuilt aar that is required for Intellij project generation",
+    doc = "Exposes the compiled R.jar for android_prebuilt_aar and android_resource targets",
     fields = {
         "dummy_r_dot_java": provider_field(Artifact | None, default = None),
     },
 )
 
 def merge_android_packageable_info(
-        label: Label,
-        actions: AnalysisActions,
-        deps: list[Dependency],
-        build_config_info: [AndroidBuildConfigInfo, None] = None,
-        manifest: Artifact | None = None,
-        prebuilt_native_library_dir: [PrebuiltNativeLibraryDir, None] = None,
-        resource_info: [AndroidResourceInfo, None] = None,
-        for_primary_apk: bool = False) -> AndroidPackageableInfo:
+    label: Label,
+    actions: AnalysisActions,
+    deps: list[Dependency],
+    build_config_info: [AndroidBuildConfigInfo, None] = None,
+    manifest: Artifact | None = None,
+    prebuilt_native_library_dir: [PrebuiltNativeLibraryDir, None] = None,
+    resource_info: [AndroidResourceInfo, None] = None,
+    for_primary_apk: bool = False,
+) -> AndroidPackageableInfo:
     android_packageable_deps = filter(None, [x.get(AndroidPackageableInfo) for x in deps])
 
     build_config_infos = _get_transitive_set(
@@ -313,7 +322,9 @@ def merge_android_packageable_info(
         ManifestInfo(
             target_label = label.raw_target(),
             manifest = manifest,
-        ) if manifest else None,
+        )
+        if manifest
+        else None,
         ManifestTSet,
     )
 
@@ -341,10 +352,8 @@ def merge_android_packageable_info(
     )
 
 def _get_transitive_set(
-        actions: AnalysisActions,
-        children: list[TransitiveSet],
-        node: typing.Any,
-        transitive_set_definition: TransitiveSetDefinition) -> [TransitiveSet, None]:
+    actions: AnalysisActions, children: list[TransitiveSet], node: typing.Any, transitive_set_definition: TransitiveSetDefinition
+) -> [TransitiveSet, None]:
     kwargs = {}
     if children:
         kwargs["children"] = children
@@ -353,8 +362,7 @@ def _get_transitive_set(
 
     return actions.tset(transitive_set_definition, **kwargs) if kwargs else None
 
-def merge_exported_android_resource_info(
-        exported_deps: list[Dependency]) -> ExportedAndroidResourceInfo:
+def merge_exported_android_resource_info(exported_deps: list[Dependency]) -> ExportedAndroidResourceInfo:
     exported_android_resource_infos = []
     for exported_dep in exported_deps:
         exported_resource_info = exported_dep.get(ExportedAndroidResourceInfo)
@@ -366,3 +374,8 @@ def merge_exported_android_resource_info(
             exported_android_resource_infos.append(android_resource)
 
     return ExportedAndroidResourceInfo(resource_infos = dedupe(exported_android_resource_infos))
+
+def get_all_android_packageable_targets(deps: list[Dependency]) -> list[TargetLabel]:
+    android_packageable_infos = filter(None, [dep.get(AndroidPackageableInfo) for dep in deps])
+    android_deps_tsets = filter(None, [dep.deps for dep in android_packageable_infos])
+    return [deps_info.name for android_deps_tset in android_deps_tsets for deps_info in android_deps_tset.traverse()]

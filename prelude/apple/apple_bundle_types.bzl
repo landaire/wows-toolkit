@@ -78,33 +78,44 @@ AppleBundleInfo = provider(
         "extra_codesign_paths": provider_field([list[str], None], default = None),
         "codesign_manifest_tree": provider_field(AppleBundleCodesignManifestTree | None, default = None),
         "signing_context_tree": provider_field(AppleBundleSigningContextTree | None, default = None),
+        "signing_info": provider_field(Artifact | None, default = None),
     },
 )
 
 # Provider which helps to propagate minimum deployment version up the target graph.
-AppleMinDeploymentVersionInfo = provider(fields = {
-    "version": provider_field([str, None]),
-})
+AppleMinDeploymentVersionInfo = provider(
+    fields = {
+        "version": provider_field([str, None]),
+    }
+)
 
-AppleBundleResourceInfo = provider(fields = {
-    "resource_output": provider_field(typing.Any, default = None),  # AppleBundleResourcePartListOutput
-})
+AppleBundleResourceInfo = provider(
+    fields = {
+        "resource_output": provider_field(typing.Any, default = None),  # AppleBundleResourcePartListOutput
+    }
+)
 
-AppleBundleLinkerMapInfo = provider(fields = {
-    "linker_maps": provider_field(list[Artifact]),
-})
+AppleBundleLinkerMapInfo = provider(
+    fields = {
+        "linker_maps": provider_field(list[Artifact]),
+    }
+)
 
 # Providers used to merge extra linker outputs as a top level output
 # of an application bundle.
-AppleBinaryExtraOutputsInfo = provider(fields = {
-    "default_output": provider_field(Artifact),
-    "extra_outputs": provider_field(dict[str, list[Artifact]]),
-    "name": provider_field(str),
-})
+AppleBinaryExtraOutputsInfo = provider(
+    fields = {
+        "default_output": provider_field(Artifact),
+        "extra_outputs": provider_field(dict[str, list[Artifact]]),
+        "name": provider_field(str),
+    }
+)
 
-AppleBundleExtraOutputsInfo = provider(fields = {
-    "extra_outputs": provider_field(list[AppleBinaryExtraOutputsInfo]),
-})
+AppleBundleExtraOutputsInfo = provider(
+    fields = {
+        "extra_outputs": provider_field(list[AppleBinaryExtraOutputsInfo]),
+    }
+)
 
 AppleBundleBinaryOutput = record(
     binary = field(Artifact),
@@ -124,4 +135,10 @@ AppleBundleTypeAttributeType = enum(
     "appclip",
     "extensionkit_extension",
     "watchapp",
+)
+
+AppleInfoPlistInfo = provider(
+    fields = {
+        "info_plist": provider_field(Artifact),
+    }
 )

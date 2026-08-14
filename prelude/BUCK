@@ -4,10 +4,12 @@ load(":native.bzl", prelude = "native")
 
 oncall("build_infra")
 
-source_listing(exclude = [
-    # Exclude PACKAGE file using modifiers since those are not enabled everywhere yet.
-    "PACKAGE",
-])
+source_listing(
+    exclude = [
+        # Exclude PACKAGE file using modifiers since those are not enabled everywhere yet.
+        "PACKAGE",
+    ]
+)
 
 # Done to avoid triggering a lint rule that replaces glob with an fbcode macro
 globby = glob
@@ -46,6 +48,9 @@ prelude.filegroup(
     srcs = {
         "": ":files",
         "android/constraints/BUCK": ":copy_android_constraint",
+        # explicitly include files that fall off the glob due to package boundary violations
+        "cfg/exec_platform/marker/BUCK": "//cfg/exec_platform/marker:buck_file",
+        # @oss-disable[end= ]: "python/meta_only/config.bzl": "//python/meta_only:config.bzl",
         "rust/tools/attrs.bzl": "//rust/tools:attrs.bzl",
     },
     visibility = ["PUBLIC"],

@@ -38,6 +38,6 @@ def get_argsfiles_output(ctx: AnalysisContext, argsfile_by_ext: dict[str, Compil
         # because it tracks the dependents through the `cmd_args` API.
         dependent_outputs.append(argsfile.cmd_form)
 
-    argsfiles_summary = ctx.actions.write(summary_name, argsfiles)
+    argsfiles_summary = ctx.actions.write(summary_name, argsfiles, has_content_based_path = False)
 
     return DefaultInfo(default_outputs = [argsfiles_summary], other_outputs = argsfiles + dependent_outputs)

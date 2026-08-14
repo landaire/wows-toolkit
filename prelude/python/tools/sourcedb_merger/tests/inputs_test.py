@@ -14,8 +14,8 @@ import json
 import os
 import tempfile
 import unittest
+from collections.abc import Generator, Mapping
 from pathlib import Path
-from typing import Generator, Mapping
 
 # pyre-fixme[21]: Could not find module `sourcedb_merger.inputs`.
 from sourcedb_merger.inputs import (
@@ -73,8 +73,9 @@ class InputsTest(unittest.TestCase):
         )
 
     def test_load_targets_and_build_map(self) -> None:
-        with tempfile.TemporaryDirectory() as root, switch_working_directory(
-            Path(root)
+        with (
+            tempfile.TemporaryDirectory() as root,
+            switch_working_directory(Path(root)),
         ):
             write_files(
                 {

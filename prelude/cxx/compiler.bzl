@@ -7,6 +7,10 @@
 # above-listed licenses.
 
 load("@prelude//:paths.bzl", "paths")
+load(
+    "@prelude//utils:utils.bzl",
+    "as_output",
+)
 load(":cxx_toolchain_types.bzl", "DepTrackingMode")
 
 # TODO(T110378132): Added here for compat with v1, but this might make more
@@ -51,23 +55,17 @@ def get_flags_for_colorful_output(compiler_type: str) -> list[str]:
 def cc_dep_files(actions: AnalysisActions, filename_base: str, _input_file: Artifact) -> (cmd_args, cmd_args):
     intermediary_dep_file = actions.declare_output(
         paths.join("__dep_files_intermediaries__", filename_base),
-        uses_experimental_content_based_path_hashing = True,
+        has_content_based_path = True,
     ).as_output()
 
     return (cmd_args(intermediary_dep_file), cmd_args(["-MD", "-MF", intermediary_dep_file]))
 
-def tree_style_cc_dep_files(
-        _actions: AnalysisActions,
-        _filename_base: str,
-        input_file: Artifact) -> (cmd_args, cmd_args):
+def tree_style_cc_dep_files(_actions: AnalysisActions, _filename_base: str, input_file: Artifact) -> (cmd_args, cmd_args):
     # If we use color diagnostics, then error messages come through in color, which messes up parsing of the
     # -H output in `show_headers_to_dep_file.py`.  So make sure to pass -fno-color-diagnostics.
     return (cmd_args(input_file), cmd_args(["-H", "-fno-color-diagnostics"]))
 
-def windows_cc_dep_files(
-        _actions: AnalysisActions,
-        _filename_base: str,
-        input_file: Artifact) -> (cmd_args, cmd_args):
+def windows_cc_dep_files(_actions: AnalysisActions, _filename_base: str, input_file: Artifact) -> (cmd_args, cmd_args):
     return (cmd_args(input_file), cmd_args(["/showIncludes"]))
 
 def get_headers_dep_files_flags_factory(dep_tracking_mode: DepTrackingMode) -> [typing.Callable, None]:
@@ -82,8 +80,8 @@ def get_headers_dep_files_flags_factory(dep_tracking_mode: DepTrackingMode) -> [
 
     return None
 
-def get_output_flags(compiler_type: str, output: Artifact) -> list[typing.Any]:
+def get_output_flags(compiler_type: str, output: Artifact | OutputArtifact) -> list[typing.Any]:
     if compiler_type in ["windows", "clang_cl", "windows_ml64"]:
-        return [cmd_args(output.as_output(), format = "/Fo{}")]
+        return [cmd_args(as_output(output), format = "/Fo{}")]
     else:
-        return ["-o", output.as_output()]
+        return ["-o", as_output(output)]

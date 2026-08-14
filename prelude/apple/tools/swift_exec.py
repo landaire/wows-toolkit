@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import sys
 
-from writable import make_path_user_writable
+from writable import make_dir_recursively_writable, make_path_user_writable
 
 _RE_TMPDIR_ENV_VAR = "TMPDIR"
 _FILE_WRITE_FAILURE_MARKER = "could not write"
@@ -93,17 +93,26 @@ def _make_path_user_writable(path: str) -> None:
     # Incremental Remote Actions, where this path may or may not be
     # pre-populated from a previous action. We need to check because we won't
     # know if we have these paths populated until runtime.
+    if "INSIDE_RE_WORKER" not in os.environ:
+        return
+
     if not os.path.exists(path):
         return
 
     backup_path = f"{path}.bak"
     shutil.move(path, backup_path)
-    shutil.copy2(backup_path, path)
-
-    backup_file = pathlib.Path(backup_path)
-    backup_file.unlink()
-
-    make_path_user_writable(path)
+    if os.path.isdir(backup_path):
+        shutil.copytree(backup_path, path)
+        make_dir_recursively_writable(path)
+        # Remove the original dir. Unlinking its files needs write
+        # permission on parent dir
+        for dirpath, _dirnames, _filenames in os.walk(backup_path):
+            make_path_user_writable(dirpath)
+        shutil.rmtree(backup_path)
+    else:
+        shutil.copy2(backup_path, path)
+        pathlib.Path(backup_path).unlink()
+        make_path_user_writable(path)
 
 
 def _rewrite_dependency_file(command, out_path):
@@ -232,6 +241,11 @@ def _parse_wrapper_args(
         nargs="*",
         help="Paths that should be made writable for incremental compilation",
     )
+    parser.add_argument(
+        "--no-file-prefix-map",
+        action="store_true",
+        help="Don't use -file-prefix-map or -coverage-prefix-map options",
+    )
     parsed_args = parser.parse_args(wrapper_args)
 
     if (
@@ -272,29 +286,30 @@ def main():
     #
     # We need to use the path where the action is run (both locally and on RE),
     # which is not known when we define the action.
-    command += [
-        # Macro expansions get materialized in the temporary directory, which
-        # varies between local and remote actions. For local actions this will
-        # be a subdir of the CWD, so this needs to be the first map entry.
-        # We also need this prefix for the clang module cache path if we are
-        # not using explicit modules with remote actions.
-        "-file-prefix-map",
-        f"{env.get(_RE_TMPDIR_ENV_VAR, "/tmp").rstrip("/")}=/tmp",
-        "-file-prefix-map",
-        f"{os.getcwd()}/=",
-        "-file-prefix-map",
-        f"{os.getcwd()}=.",
-    ]
+    if not wrapper_args.no_file_prefix_map:
+        command += [
+            # Macro expansions get materialized in the temporary directory, which
+            # varies between local and remote actions. For local actions this will
+            # be a subdir of the CWD, so this needs to be the first map entry.
+            # We also need this prefix for the clang module cache path if we are
+            # not using explicit modules with remote actions.
+            "-file-prefix-map",
+            f"{env.get(_RE_TMPDIR_ENV_VAR, '/tmp').rstrip('/')}=/tmp",
+            "-file-prefix-map",
+            f"{os.getcwd()}/=",
+            "-file-prefix-map",
+            f"{os.getcwd()}=.",
+        ]
 
-    # Apply a coverage prefix map for the current directory
-    # to make file path metadata relocatable stripping
-    # the current directory from it.
-    #
-    # This overrides -file-prefix-map.
-    command += [
-        "-coverage-prefix-map",
-        f"{os.getcwd()}=.",
-    ]
+        # Apply a coverage prefix map for the current directory
+        # to make file path metadata relocatable stripping
+        # the current directory from it.
+        #
+        # This overrides -file-prefix-map.
+        command += [
+            "-coverage-prefix-map",
+            f"{os.getcwd()}=.",
+        ]
 
     if wrapper_args.skip_incremental_outputs:
         command = _process_skip_incremental_outputs(command)
@@ -318,12 +333,23 @@ def main():
                     "swift-dependencies",
                     "dependencies",
                     "emit-module-dependencies",
+                    "emit-module-diagnostics",
                     "diagnostics",
                     "object",
                 ]:
                     maybe_path = value.get(subkey, None)
                     if maybe_path:
                         _make_path_user_writable(maybe_path)
+
+    # Ensure the directories referenced by the output file map exist.
+    # This can happen for Swift Incremental mode where there's no
+    # previous incremental action available
+    if "-output-file-map" in command:
+        with open(command[command.index("-output-file-map") + 1]) as f:
+            for entry in json.load(f).values():
+                for maybe_path in entry.values():
+                    if isinstance(maybe_path, str) and os.path.dirname(maybe_path):
+                        os.makedirs(os.path.dirname(maybe_path), exist_ok=True)
 
     result = subprocess.run(
         command,

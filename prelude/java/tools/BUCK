@@ -65,3 +65,46 @@ prelude.python_bootstrap_library(
         "prelude//kotlin/tools/...",
     ],
 )
+
+# Type checking target for Python tool scripts
+prelude.python_library(
+    name = "scripts-typing",
+    srcs = [
+        "compile_and_package.py",
+        "fat_jar.py",
+        "gen_class_to_source_map.py",
+        "list_class_names.py",
+        "merge_class_to_source_maps.py",
+        "run_postprocessor.py",
+        "utils.py",
+    ],
+    typing = True,
+)
+
+prelude.python_test(
+    name = "test_fat_jar",
+    srcs = [
+        "fat_jar.py",
+        "tests/test_fat_jar.py",
+        "utils.py",
+    ],
+    base_module = "",
+)
+
+prelude.python_test(
+    name = "test_gen_class_to_source_map",
+    srcs = [
+        "gen_class_to_source_map.py",
+        "tests/test_gen_class_to_source_map.py",
+    ],
+    base_module = "",
+)
+
+prelude.python_test(
+    name = "test_list_class_names",
+    srcs = [
+        "list_class_names.py",
+        "tests/test_list_class_names.py",
+    ],
+    base_module = "",
+)

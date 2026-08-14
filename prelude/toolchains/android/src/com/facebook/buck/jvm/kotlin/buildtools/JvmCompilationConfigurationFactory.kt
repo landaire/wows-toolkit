@@ -76,7 +76,10 @@ internal class JvmCompilationConfigurationFactory(
                         is ClasspathChanges.NoChanges -> {
                           assureNoClasspathSnapshotsChanges(true)
                         }
-                        else -> {}
+                        is ClasspathChanges.ToBeComputedByIncrementalCompiler -> {
+                          // The Kotlin incremental compiler handles classpath changes
+                          // (additions, modifications, and removals).
+                        }
                       }
                     },
             )

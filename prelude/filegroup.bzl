@@ -16,7 +16,7 @@ def filegroup_impl(ctx):
     Each symlink is based on the `short_path` for the provided `src`.
     """
     output_name = ctx.attrs.out if ctx.attrs.out else ctx.label.name
-    has_content_based_path = ctx.attrs.uses_experimental_content_based_path_hashing or ctx.attrs.has_content_based_path
+    has_content_based_path = ctx.attrs.has_content_based_path
 
     if type(ctx.attrs.srcs) == type({}):
         srcs = ctx.attrs.srcs
@@ -25,12 +25,7 @@ def filegroup_impl(ctx):
         for src in ctx.attrs.srcs:
             existing = srcs.get(src.short_path)
             if existing != None and existing != src:
-                soft_error(
-                    "starlark_filegroup_duplicate_srcs",
-                    "filegroup {} has srcs with duplicate names: {} and {}".format(ctx.label, src, srcs[src.short_path]),
-                    quiet = True,
-                    stack = False,
-                )
+                fail("filegroup {} has srcs with duplicate names: {} and {}".format(ctx.label, src, srcs[src.short_path]))
             srcs[src.short_path] = src
 
     # It seems that buck1 always copies, and that's important for Python rules

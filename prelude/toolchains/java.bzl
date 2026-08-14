@@ -7,7 +7,16 @@
 # above-listed licenses.
 
 load("@prelude//:paths.bzl", "paths")
-load("@prelude//java:java_toolchain.bzl", "AbiGenerationMode", "JavaPlatformInfo", "JavaTestToolchainInfo", "JavaToolchainInfo", "JavacProtocol", "PrebuiltJarToolchainInfo")
+load(
+    "@prelude//java:java_toolchain.bzl",
+    "AbiGenerationMode",
+    "JavaPlatformInfo",
+    "JavaTestToolchainInfo",
+    "JavaToolchainInfo",
+    "JavacProtocol",
+    "PrebuiltJarToolchainInfo",
+)
+load("@prelude//tests:test_listing.bzl", "TestListingInfo")
 
 def _system_java_tool_impl(ctx):
     return [
@@ -23,7 +32,7 @@ system_java_tool = rule(
 )
 
 def _system_java_lib_impl(ctx):
-    output = ctx.actions.declare_output(paths.basename(ctx.attrs.jar))
+    output = ctx.actions.declare_output(paths.basename(ctx.attrs.jar), has_content_based_path = False)
     ctx.actions.run(cmd_args(["ln", "-s", ctx.attrs.jar, output.as_output()]), category = "{}_symlink".format(ctx.attrs.name))
     return [DefaultInfo(default_output = output)]
 
@@ -34,10 +43,7 @@ system_java_lib = rule(
     },
 )
 
-def system_prebuilt_jar_bootstrap_toolchain(
-        name,
-        java,
-        visibility = None):
+def system_prebuilt_jar_bootstrap_toolchain(name, java, visibility = None):
     kwargs = {}
 
     _prebuilt_jar_toolchain_rule(name = name, java = java, visibility = visibility, **kwargs)
@@ -62,16 +68,7 @@ _prebuilt_jar_toolchain_rule = rule(
     is_toolchain_rule = True,
 )
 
-def javacd_toolchain(
-        name,
-        java,
-        javac,
-        jar,
-        jlink,
-        jmod,
-        jrt_fs_jar,
-        java_for_tests = None,
-        visibility = None):
+def javacd_toolchain(name, java, javac, jar, jlink, jmod, jrt_fs_jar, java_for_tests = None, visibility = None):
     _java_toolchain(
         name = name,
         visibility = visibility,
@@ -91,14 +88,7 @@ def javacd_toolchain(
         jrt_fs_jar = jrt_fs_jar,
     )
 
-def system_java_bootstrap_toolchain(
-        name,
-        java,
-        javac,
-        jlink,
-        jmod,
-        jrt_fs_jar,
-        visibility = None):
+def system_java_bootstrap_toolchain(name, java, javac, jlink, jmod, jrt_fs_jar, visibility = None):
     _java_toolchain(
         name = name,
         visibility = visibility,
@@ -173,9 +163,12 @@ _java_toolchain = rule(
             default = "prelude//java/tools:gen_class_to_source_map",
             providers = [RunInfo],
         ),
-        "gen_class_to_source_map_include_sourceless_compiled_packages": attrs.list(attrs.string(), default = [
-            "androidx.databinding",
-        ]),
+        "gen_class_to_source_map_include_sourceless_compiled_packages": attrs.list(
+            attrs.string(),
+            default = [
+                "androidx.databinding",
+            ],
+        ),
         "is_bootstrap_toolchain": attrs.bool(default = False),
         "jar": attrs.option(attrs.dep(providers = [RunInfo]), default = None),
         "jar_builder": attrs.source(default = "prelude//toolchains/android/src/com/facebook/buck/util/zip:jar_builder"),
@@ -215,9 +208,11 @@ def _java_test_toolchain_rule_impl(ctx):
             junit_test_runner_main_class_args = ctx.attrs.junit_test_runner_main_class_args,
             jvm_args = ctx.attrs.jvm_args,
             list_class_names = ctx.attrs.list_class_names,
-            list_tests = None,
             test_runner_library_jar = ctx.attrs.test_runner_library_jar,
             testng_test_runner_main_class_args = ctx.attrs.testng_test_runner_main_class_args,
+        ),
+        TestListingInfo(
+            list_tests = ctx.attrs.list_tests,
         ),
     ]
 
@@ -231,6 +226,7 @@ _java_test_toolchain_rule = rule(
             default = [],
         ),
         "list_class_names": attrs.dep(providers = [RunInfo]),
+        "list_tests": attrs.option(attrs.dep(providers = [RunInfo]), default = None),
         "test_runner_library_jar": attrs.source(),
         "testng_test_runner_main_class_args": attrs.list(attrs.string()),
     },

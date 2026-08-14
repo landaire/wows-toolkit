@@ -11,6 +11,7 @@
 package com.facebook.buck.android.apk.sdk;
 
 import com.facebook.buck.android.apk.sdk.ApkJarBuilder.IZipEntryFilter;
+import com.facebook.infer.annotation.Nullsafe;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -23,12 +24,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * Class making the final apk packaging. The inputs are: - packaged resources (output of aapt) -
  * code file (output of dx) - Java resources coming from the project, its libraries, and its jar
  * files - Native libraries from the project or its library.
  */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public final class ApkBuilder implements IArchiveBuilder {
   /** Native lib folder inside the APK: "lib" */
   public static final String FD_APK_NATIVE_LIBS = "lib"; // $NON-NLS-1$
@@ -163,7 +166,7 @@ public final class ApkBuilder implements IArchiveBuilder {
 
   private File mApkFile;
   private File mResFile;
-  private File mDexFile;
+  @Nullable private File mDexFile;
   private PrintStream mVerboseStream;
   private ApkJarBuilder mBuilder;
   private boolean mDebugMode = false;
@@ -584,7 +587,8 @@ public final class ApkBuilder implements IArchiveBuilder {
    * @throws SealedApkException if the APK is already sealed.
    * @throws ApkCreationException if an error occurred
    */
-  private static void processFileForResource(IArchiveBuilder builder, File file, String path)
+  private static void processFileForResource(
+      IArchiveBuilder builder, File file, @Nullable String path)
       throws IOException, DuplicateFileException, ApkCreationException, SealedApkException {
     if (file.isDirectory()) {
       // a directory? we check it
@@ -628,6 +632,7 @@ public final class ApkBuilder implements IArchiveBuilder {
    * @return A File object of either a file at the same location or an archive that contains a file
    *     that was put at the same location.
    */
+  @Nullable
   private File checkFileForDuplicate(String archivePath) {
     return mAddedFiles.get(archivePath);
   }
@@ -655,7 +660,7 @@ public final class ApkBuilder implements IArchiveBuilder {
           throw new ApkCreationException("Failed to create %s", file);
         }
       } catch (IOException e) {
-        throw new ApkCreationException("Failed to create '%1$ss': %2$s", file, e.getMessage());
+        throw new ApkCreationException("Failed to create '%1$ss': %2$s", file, e.toString());
       }
     }
   }
@@ -695,15 +700,14 @@ public final class ApkBuilder implements IArchiveBuilder {
         && !folderName.equalsIgnoreCase("SCCS")
         && !folderName.equalsIgnoreCase("META-INF")
         && !folderName.equalsIgnoreCase("nonJvmMain")
-        && // nonJvmMain is only useful when build multiplatform and we are building an APK here
-        !folderName.equalsIgnoreCase("commonMain")
-        && // commonMain folder is part of multiple AndroidX libraries, exclude it to avoid
+        // nonJvmMain is only useful when build multiplatform and we are building an APK here
+        // commonMain folder is part of multiple AndroidX libraries, exclude it to avoid
         // duplicate file error
-        !folderName.equalsIgnoreCase("nativeMain")
-        && // nativeMain holds platform-specific code for native environments like iOS and macOS,
+        && !folderName.equalsIgnoreCase("commonMain")
+        // nativeMain holds platform-specific code for native environments like iOS and macOS,
         // exclude it to avoid duplicate file error
         // see https://kotlinlang.org/docs/multiplatform-discover-project.html
-        !folderName.startsWith("_");
+        && !folderName.equalsIgnoreCase("nativeMain");
   }
 
   /**
@@ -763,6 +767,12 @@ public final class ApkBuilder implements IArchiveBuilder {
         && // image index file
         !"package.html".equalsIgnoreCase(fileName)
         && // Javadoc
-        !"overview.html".equalsIgnoreCase(fileName); // Javadoc
+        !"overview.html".equalsIgnoreCase(fileName)
+        && // License files
+        !"LICENSE".equalsIgnoreCase(fileName)
+        && !"LICENSE.txt".equalsIgnoreCase(fileName)
+        && // Notice files
+        !"NOTICE".equalsIgnoreCase(fileName)
+        && !"NOTICE.txt".equalsIgnoreCase(fileName);
   }
 }

@@ -11,7 +11,6 @@
 package com.facebook.buck.jvm.kotlin;
 
 import static com.facebook.buck.jvm.kotlin.ClasspathUtils.getClasspathSnapshots;
-import static com.facebook.buck.jvm.kotlin.KaptStepsBuilder.isKaptSupportedForCurrentKotlinLanguageVersion;
 import static com.facebook.buck.jvm.kotlin.KosabiStubgenStepsBuilder.prepareKosabiStubgenIfNeeded;
 import static com.facebook.buck.jvm.kotlin.KspStepsBuilder.prepareKspProcessorsIfNeeded;
 
@@ -194,14 +193,8 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
           sourceWithStubsAndKaptAndKspOutputBuilder,
           sourceWithStubsAndKaptOutputBuilder,
           extraParams.getLanguageVersion());
-
-      ImmutableList.Builder<AbsPath> sourceOnlyAbiClasspathBuilder =
-          ImmutableList.<AbsPath>builder()
-              .addAll(
-                  parameters.getClasspathEntries().stream()
-                      .map(RelPath::toAbsolutePath)
-                      .filter(ClasspathUtils::assertValidClasspathsPattern)
-                      .collect(Collectors.toList()));
+      ImmutableList.Builder<AbsPath> compilationClasspathBuilder =
+          buildCompilationClasspath(parameters, extraParams);
 
       prepareKosabiStubgenIfNeeded(
           buckOut,
@@ -220,78 +213,44 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
           reportsOutput,
           kotlinc,
           kosabiPluginOptions.getAllKosabiPlugins(),
-          sourceOnlyAbiClasspathBuilder,
+          compilationClasspathBuilder,
           postKotlinCompilationFailureSteps,
           kotlinCDAnalytics,
           extraParams.getLanguageVersion());
 
-      KspStepsBuilder.KSPInvocationStatus kspInvocationStatus =
-          prepareKspProcessorsIfNeeded(
-              Optional.ofNullable(actionMetadata),
-              extraParams,
-              invokingRule,
-              buildCellRootPath,
-              steps,
-              postKotlinCompilationSteps,
-              buildTargetValueExtraParams,
-              outputDirectory,
-              annotationGenFolder,
-              javacSourceBuilder,
-              reportsOutput,
-              parameters.getShouldTrackClassUsage(),
-              allClasspaths,
-              kotlinPluginGeneratedFullPath,
-              buildTargetValueExtraParams.getCellRelativeBasePath(),
-              annotationProcessorParams,
-              sourceWithStubsAndKaptOutputBuilder.build(),
-              pathToSrcsList,
-              kotlinHomeLibraries,
-              kotlinc,
-              compilerOutputPaths,
-              buckOut,
-              kosabiPluginOptions.getKosabiPlugins(),
-              sourceWithStubsAndKaptAndKspOutputBuilder,
-              sourceOnlyAbiClasspathBuilder.build(),
-              moduleName,
-              kotlinCDAnalytics);
+      prepareKspProcessorsIfNeeded(
+          Optional.ofNullable(actionMetadata),
+          extraParams,
+          invokingRule,
+          buildCellRootPath,
+          steps,
+          postKotlinCompilationSteps,
+          buildTargetValueExtraParams,
+          outputDirectory,
+          annotationGenFolder,
+          javacSourceBuilder,
+          reportsOutput,
+          parameters.getShouldTrackClassUsage(),
+          allClasspaths,
+          kotlinPluginGeneratedFullPath,
+          buildTargetValueExtraParams.getCellRelativeBasePath(),
+          annotationProcessorParams,
+          sourceWithStubsAndKaptOutputBuilder.build(),
+          pathToSrcsList,
+          kotlinHomeLibraries,
+          kotlinc,
+          compilerOutputPaths,
+          buckOut,
+          kosabiPluginOptions.getKosabiPlugins(),
+          sourceWithStubsAndKaptAndKspOutputBuilder,
+          compilationClasspathBuilder.build(),
+          moduleName,
+          kotlinCDAnalytics);
 
-      // Avoid running Kotlin source-only builds twice when KSP split invocation happens.
-      // If KSP1 processors has invoked previously, we should have sufficient source-only ABI
-      // generated. Source-only frameworks reads KSP generated sources during compiler analysis
-      // stage and generates ABI output.
-      // If standalone KSP2 processors has invoked previously, we should still run the main K1
-      // KotlinC step for generating the abi
-      if (invokingRule.isSourceOnlyAbi()
-          && kspInvocationStatus == KspStepsBuilder.KSPInvocationStatus.KSP1_INVOKED) {
-        steps.addAll(postKotlinCompilationSteps.build());
-
-        ResolvedJavacOptions resolvedJavacOptions = extraParams.getResolvedJavacOptions();
-        if (isKaptSupportedForCurrentKotlinLanguageVersion(extraParams.getLanguageVersion())
-            && extraParams.getAnnotationProcessingTool() == AnnotationProcessingTool.KAPT) {
-          // Most of the time, KotlinC have ran annotation processing,
-          // so only run "java on mix" processors (very uncommon) on Javac
-          resolvedJavacOptions =
-              resolvedJavacOptions.withJavaAnnotationProcessorParams(
-                  getRunsOnJavaOnlyProcessors(resolvedJavacOptions));
-        }
-
-        JavacStepsBuilder.prepareJavaCompilationIfNeeded(
-            invokingRule,
-            buildCellRootPath,
-            steps,
-            buckOut,
-            compilerOutputPathsValue,
-            parameters,
-            resolvedJavac,
-            resolvedJavacOptions,
-            parameters.getClasspathEntries(),
-            extraParams.getExtraClassPaths(),
-            ImmutableList.of(kotlinOutputDirectory, outputDirectory),
-            javacSourceBuilder,
-            abiJarParameters);
-
-        return;
-      }
+      // Reduced SO-ABI classpath for the applicability plugin (rfsoa +
+      // source_only_abi_deps only). Distinct from compilationClasspath which
+      // contains the full dep set during library builds.
+      ImmutableList<AbsPath> applicabilityClasspath = extraParams.getApplicabilityClasspath();
 
       KotlinCStepsBuilder.prepareKotlinCompilation(
           buckOut,
@@ -311,8 +270,8 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
           reportsOutput,
           kotlinc,
           kosabiPluginOptions,
-          kspInvocationStatus,
-          sourceOnlyAbiClasspathBuilder.build(),
+          compilationClasspathBuilder.build(),
+          applicabilityClasspath,
           postKotlinCompilationFailureSteps,
           classpathSnapshots,
           kotlinCDAnalytics);
@@ -321,7 +280,6 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
 
     ResolvedJavacOptions resolvedJavacOptions = extraParams.getResolvedJavacOptions();
     if (hasKotlinSources
-        && isKaptSupportedForCurrentKotlinLanguageVersion(extraParams.getLanguageVersion())
         && extraParams.getAnnotationProcessingTool() == AnnotationProcessingTool.KAPT) {
       // Most of the time, KotlinC have ran annotation processing,
       // so only run "java on mix" processors (very uncommon) on Javac
@@ -398,5 +356,34 @@ public class DaemonKotlincToJarStepFactory extends BaseCompileToJarStepFactory<K
     }
     return new JavacPluginParams(
         filteredPluginProperties, javaAnnotationProcessorParams.getParameters());
+  }
+
+  /**
+   * Builds the compilation classpath by combining regular classpath entries with the bootclasspath
+   * (which includes android.jar for Android targets). For library builds this is the full dep set;
+   * for SO-ABI builds it is the reduced set (rfsoa deps only).
+   *
+   * @param parameters Compiler parameters containing classpath entries
+   * @param extraParams Kotlin-specific parameters containing resolved javac options with
+   *     bootclasspath
+   * @return A builder containing all classpath entries (regular + bootclasspath) as absolute paths
+   */
+  static ImmutableList.Builder<AbsPath> buildCompilationClasspath(
+      CompilerParameters parameters, KotlinExtraParams extraParams) {
+    ImmutableList.Builder<AbsPath> compilationClasspathBuilder =
+        ImmutableList.<AbsPath>builder()
+            .addAll(
+                parameters.getClasspathEntries().stream()
+                    .map(RelPath::toAbsolutePath)
+                    .filter(ClasspathUtils::assertValidClasspathsPattern)
+                    .collect(Collectors.toList()));
+
+    compilationClasspathBuilder.addAll(
+        extraParams.getResolvedJavacOptions().getBootclasspathList().stream()
+            .map(RelPath::toAbsolutePath)
+            .filter(ClasspathUtils::assertValidClasspathsPattern)
+            .collect(Collectors.toList()));
+
+    return compilationClasspathBuilder;
   }
 }

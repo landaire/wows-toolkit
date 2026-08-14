@@ -10,16 +10,20 @@
 
 package com.facebook.buck.jvm.cd;
 
+import com.facebook.infer.annotation.Nullsafe;
 import java.io.File;
 import java.io.PrintStream;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import org.jetbrains.annotations.Nullable;
 
 /**
  * A PrintStream implementation that intercepts stderr output and applies syntax highlighting to
  * compiler messages based on the file type
  */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class ErrorInterceptor extends PrintStream {
 
   private static final String RED = "\033[91m";
@@ -179,14 +183,15 @@ public class ErrorInterceptor extends PrintStream {
   private static final Pattern WARNING_PATTERN =
       Pattern.compile("\\bwarning\\b(:.*?)\\n", Pattern.CASE_INSENSITIVE);
   private static final Pattern JAVA_FILE_PATTERN =
-      Pattern.compile("\\b(/?(?:[\\w-]+/)*[\\w-]+\\.java)\\b:(\\d+):");
+      Pattern.compile("(?:\\x1b\\[[0-9;]*m)*(/?(?:[\\w-]+/)*[\\w-]+\\.java)\\b:(\\d+):");
   private static final Pattern KOTLIN_FILE_PATTERN =
-      Pattern.compile("\\b(/?(?:[\\w-]+/)*[\\w-]+\\.kt)\\b:(\\d+):(\\d+):");
+      Pattern.compile("(?:\\x1b\\[[0-9;]*m)*(/?(?:[\\w-]+/)*[\\w-]+\\.kt)\\b:(\\d+):(\\d+):");
 
   /** Enum representing supported file types with their associated patterns and keywords. */
   public enum FileType {
     JAVA(JAVA_FILE_PATTERN, JAVA_KEYWORDS),
     KOTLIN(KOTLIN_FILE_PATTERN, KOTLIN_KEYWORDS),
+    // NULLSAFE_FIXME[Parameter Not Nullable]
     UNKNOWN(null, new String[0]);
 
     private final Pattern filePattern;
@@ -211,11 +216,12 @@ public class ErrorInterceptor extends PrintStream {
   }
 
   @Override
-  public void print(String message) {
+  public void print(@Nullable String message) {
     super.print(prettyPrint(message));
   }
 
-  public static String prettyPrint(String exception) {
+  @Nullable
+  public static String prettyPrint(@Nullable String exception) {
     if (exception == null || exception.isEmpty()) {
       return exception;
     }
@@ -338,7 +344,7 @@ public class ErrorInterceptor extends PrintStream {
         + BOLD
         + match.group(1)
         + RESET
-        + highlightCode(match.group(2), keywords)
+        + highlightCode(Objects.requireNonNull(match.group(2)), keywords)
         + RED
         + match.group(3)
         + RESET
@@ -350,19 +356,26 @@ public class ErrorInterceptor extends PrintStream {
   }
 
   private static String highlightJavaFile(Matcher match) {
-    String file = match.group(1);
-    int line = Integer.parseInt(match.group(2));
-    String displayText = GREEN + file + RESET;
+    String file = Objects.requireNonNull(match.group(1));
+    int line = Integer.parseInt(Objects.requireNonNull(match.group(2)));
 
-    return createHyperlink(file, line, displayText) + ":" + MAGENTA + match.group(2) + RESET + ":";
+    return GREEN
+        + createHyperlink(file, line, file)
+        + RESET
+        + ":"
+        + MAGENTA
+        + match.group(2)
+        + RESET
+        + ":";
   }
 
   private static String highlightKotlinFile(Matcher match) {
-    String file = match.group(1);
-    int line = Integer.parseInt(match.group(2));
-    String displayText = GREEN + file + RESET;
+    String file = Objects.requireNonNull(match.group(1));
+    int line = Integer.parseInt(Objects.requireNonNull(match.group(2)));
 
-    return createHyperlink(file, line, displayText)
+    return GREEN
+        + createHyperlink(file, line, file)
+        + RESET
         + ":"
         + MAGENTA
         + match.group(2)

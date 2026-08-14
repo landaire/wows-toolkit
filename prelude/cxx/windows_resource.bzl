@@ -44,6 +44,7 @@ def windows_resource_impl(ctx: AnalysisContext) -> list[Provider]:
         rc_output = ctx.actions.declare_output(
             "__objects__",
             "{}.res".format(src.short_path),
+            has_content_based_path = False,
         )
         rc_cmd = cmd_args(
             toolchain.rc_compiler_info.compiler,
@@ -62,6 +63,7 @@ def windows_resource_impl(ctx: AnalysisContext) -> list[Provider]:
         cvtres_output = ctx.actions.declare_output(
             "__objects__",
             "{}.obj".format(src.short_path),
+            has_content_based_path = False,
         )
         cvtres_cmd = cmd_args(
             toolchain.cvtres_compiler_info.compiler,
@@ -79,11 +81,13 @@ def windows_resource_impl(ctx: AnalysisContext) -> list[Provider]:
 
     link = LinkInfo(
         name = ctx.attrs.name,
-        linkables = [ObjectsLinkable(
-            objects = objects,
-            linker_type = toolchain.linker_info.type,
-            link_whole = True,
-        )],
+        linkables = [
+            ObjectsLinkable(
+                objects = objects,
+                linker_type = toolchain.linker_info.type,
+                link_whole = True,
+            )
+        ],
     )
 
     providers = [

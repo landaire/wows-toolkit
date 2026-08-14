@@ -26,6 +26,7 @@ buck_kotlin_library(
     name = "process_executor",
     srcs = PROCESS_EXECUTOR_SRCS,
     tests = [
+        "prelude//toolchains/android/test/com/facebook/buck/util:util",
     ],
     visibility = ["PUBLIC"],
     deps = [

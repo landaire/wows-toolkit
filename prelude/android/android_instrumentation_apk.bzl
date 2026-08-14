@@ -120,6 +120,7 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
                 jars_to_owners,
                 ctx.attrs.primary_dex_patterns,
                 enable_bootstrap_dexes = ctx.attrs.enable_bootstrap_dexes,
+                multidex_min_api = ctx.attrs.multidex_min_api,
             )
         else:
             dex_files_info = get_single_primary_dex(
@@ -144,7 +145,7 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
     )
 
     output_apk = build_apk(
-        label = ctx.label,
+        output_filename = ctx.label.name,
         actions = ctx.actions,
         android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo],
         keystore = apk_under_test_info.keystore,
@@ -169,7 +170,7 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
 
     return [
         AndroidApkInfo(apk = output_apk, materialized_artifacts = materialized_artifacts, manifest = resources_info.manifest),
-        AndroidInstrumentationApkInfo(apk_under_test = ctx.attrs.apk[AndroidApkInfo].apk),
+        AndroidInstrumentationApkInfo(apk_under_test = ctx.attrs.apk[AndroidApkInfo].apk, is_self_instrumenting = is_self_instrumenting),
         DefaultInfo(default_output = output_apk, other_outputs = materialized_artifacts, sub_targets = sub_targets | class_to_srcs_subtargets),
         class_to_srcs,
     ]

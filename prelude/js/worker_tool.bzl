@@ -39,6 +39,7 @@ def worker_tool(ctx: AnalysisContext) -> list[Provider]:
             "worker_tool_args",
             worker_args,
             allow_args = True,
+            has_content_based_path = False,
         )
 
         worker_tool_cmd.append("--worker-args-file")
@@ -55,6 +56,7 @@ def worker_tool(ctx: AnalysisContext) -> list[Provider]:
             "worker_tool_envs",
             env_args,
             allow_args = True,
+            has_content_based_path = False,
         )
 
         worker_tool_cmd.append("--worker-env-file")

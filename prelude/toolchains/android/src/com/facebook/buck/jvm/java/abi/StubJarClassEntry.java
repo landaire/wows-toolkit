@@ -60,8 +60,19 @@ class StubJarClassEntry extends StubJarEntry {
       AnnotationNode kotlinMetadataAnnotation = findKotlinMetadataAnnotation(classMetadata);
       if (kotlinMetadataAnnotation != null) {
         isKotlinClass = true;
+
+        KotlinMetadataReader.ParsedMetadata parsedMetadata =
+            KotlinMetadataReader.readMetadata(kotlinMetadataAnnotation);
+
+        // Exclude Kotlin file-private classes from class-abi. These are compiled to
+        // package-private in bytecode (so ACC_PRIVATE doesn't catch them), but they
+        // are not part of the module's public API. Source-only-abi already excludes them.
+        if (KotlinMetadataReader.isFilePrivateClass(parsedMetadata)) {
+          return null;
+        }
+
         isWithinInlineFunctionScope = inlineFunctionScope.captures(path, classMetadata);
-        inlineFunctions = KotlinMetadataReader.getInlineFunctions(kotlinMetadataAnnotation);
+        inlineFunctions = KotlinMetadataReader.getInlineFunctions(parsedMetadata);
       }
     }
 

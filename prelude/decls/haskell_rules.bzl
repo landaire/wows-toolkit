@@ -36,20 +36,22 @@ haskell_binary = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
-            "main": attrs.option(attrs.string(), default = None, doc = """
+            "main": attrs.option(
+                attrs.string(),
+                default = None,
+                doc = """
                 The main module serving as the entry point into the binary. If not specified,
                  the compiler default is used.
-            """),
-        } |
-        native_common.link_group_deps() |
-        native_common.link_group_public_deps_label() |
-        native_common.link_style() |
-        haskell_common.srcs_arg() |
-        haskell_common.compiler_flags_arg() |
-        haskell_common.deps_arg() |
-        buck.platform_deps_arg() |
-        {
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            """,
+            ),
+        }
+        | native_common.link_group_deps()
+        | native_common.link_group_public_deps_label()
+        | native_common.link_style()
+        | haskell_common.srcs_arg()
+        | haskell_common.compiler_flags_arg()
+        | haskell_common.deps_arg()
+        | {
             "deps_query": attrs.option(attrs.query(), default = None),
             "enable_profiling": attrs.bool(default = False),
             "ghci_platform_preload_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
@@ -57,24 +59,29 @@ haskell_binary = prelude_rule(
             "link_deps_query_whole": attrs.bool(default = False),
             "linker_flags": attrs.list(attrs.arg(), default = []),
             "platform": attrs.option(attrs.string(), default = None),
-            "platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = []),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
 haskell_ghci = prelude_rule(
     name = "haskell_ghci",
-    docs = "",
+    docs = """
+        A `haskell_ghci()` rule produces a deployable script that
+        launches a GHCi session with the given sources and dependencies
+        preloaded. Building the rule compiles all dependent libraries
+        (including any C++ shared libraries that GHCi needs to load);
+        running the produced script enters the session ready for
+        `:reload`-driven development.
+    """,
     examples = None,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
             "compiler_flags": attrs.list(attrs.string(), default = []),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "deps_query": attrs.option(attrs.query(), default = None),
             "enable_profiling": attrs.bool(default = False),
@@ -83,60 +90,65 @@ haskell_ghci = prelude_rule(
             "ghci_init": attrs.option(attrs.source(), default = None),
             "linker_flags": attrs.list(attrs.arg(), default = []),
             "platform": attrs.option(attrs.string(), default = None),
-            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
-            "platform_preload_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
             "preload_deps": attrs.set(attrs.dep(), sorted = True, default = []),
             "srcs": attrs.named_set(attrs.source(), sorted = True, default = []),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
 haskell_haddock = prelude_rule(
     name = "haskell_haddock",
-    docs = "",
+    docs = """
+        A `haskell_haddock()` rule generates Haddock documentation for
+        the given Haskell dependencies. Extra flags can be passed to the
+        `haddock` tool via `haddock_flags`.
+    """,
     examples = None,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "deps_query": attrs.option(attrs.query(), default = None),
             "haddock_flags": attrs.list(attrs.arg(), default = []),
             "platform": attrs.option(attrs.string(), default = None),
-            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
 haskell_ide = prelude_rule(
     name = "haskell_ide",
-    docs = "",
+    docs = """
+        A `haskell_ide()` rule defines a project set for use with an
+        LSP-based Haskell IDE (such as `ghcide`/HLS). When built, it
+        compiles the dependencies of the listed sources and produces the
+        GHC flags needed to load them as a single multi-component IDE
+        session, which is faster than loading each project individually
+        and avoids `ghcide`'s multi-component limitations.
+    """,
     examples = None,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
             "compiler_flags": attrs.list(attrs.string(), default = []),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "deps_query": attrs.option(attrs.query(), default = None),
             "extra_script_templates": attrs.list(attrs.source(), default = []),
             "link_style": attrs.enum(LinkableDepType),
             "linker_flags": attrs.list(attrs.arg(), default = []),
             "platform": attrs.option(attrs.string(), default = None),
-            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
             "srcs": attrs.named_set(attrs.source(), sorted = True, default = []),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
@@ -159,25 +171,22 @@ haskell_library = prelude_rule(
     further = None,
     attrs = (
         # @unsorted-dict-items
-        haskell_common.srcs_arg() |
-        haskell_common.compiler_flags_arg() |
-        haskell_common.deps_arg() |
-        buck.platform_deps_arg() |
-        native_common.link_whole(link_whole_type = attrs.bool(default = False)) |
-        native_common.preferred_linkage(preferred_linkage_type = attrs.enum(Linkage.values())) |
-        {
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+        haskell_common.srcs_arg()
+        | haskell_common.compiler_flags_arg()
+        | haskell_common.deps_arg()
+        | native_common.link_whole(link_whole_type = attrs.bool(default = False))
+        | native_common.preferred_linkage(preferred_linkage_type = attrs.enum(Linkage.values()))
+        | {
             "enable_profiling": attrs.bool(default = False),
             "ghci_platform_preload_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
             "ghci_preload_deps": attrs.set(attrs.dep(), sorted = True, default = []),
             "haddock_flags": attrs.list(attrs.arg(), default = []),
             "linker_flags": attrs.list(attrs.arg(), default = []),
             "platform": attrs.option(attrs.string(), default = None),
-            "platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = []),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
@@ -210,38 +219,55 @@ haskell_prebuilt_library = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
-            "deps": attrs.list(attrs.dep(), default = [], doc = """
+            "deps": attrs.list(
+                attrs.dep(),
+                default = [],
+                doc = """
                 Other `prebuilt_haskell_library()` rules from which this library
                  imports modules.
-            """),
-            "static_libs": attrs.list(attrs.source(), default = [], doc = """
+            """,
+            ),
+            "static_libs": attrs.list(
+                attrs.source(),
+                default = [],
+                doc = """
                 The libraries to use when building a statically linked top-level target.
-            """),
-            "shared_libs": attrs.dict(key = attrs.string(), value = attrs.source(), sorted = False, default = {}, doc = """
+            """,
+            ),
+            "shared_libs": attrs.dict(
+                key = attrs.string(),
+                value = attrs.source(),
+                sorted = False,
+                default = {},
+                doc = """
                 A map of shared library names to shared library paths to use when building a
                  dynamically linked top-level target.
-            """),
-            "exported_compiler_flags": attrs.list(attrs.string(), default = [], doc = """
+            """,
+            ),
+            "exported_compiler_flags": attrs.list(
+                attrs.string(),
+                default = [],
+                doc = """
                 Compiler flags used by dependent rules when compiling with this library.
-            """),
-        } |
-        haskell_common.exported_linker_flags_arg() |
-        {
-            "exported_post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            """,
+            ),
+        }
+        | haskell_common.exported_linker_flags_arg()
+        | {
             "cxx_header_dirs": attrs.list(attrs.source(), default = []),
             "db": attrs.source(),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "enable_profiling": attrs.bool(default = False),
+            "exported_post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
             "id": attrs.string(default = ""),
             "import_dirs": attrs.list(attrs.source(), default = []),
             "pic_profiled_static_libs": attrs.list(attrs.source(), default = []),
             "pic_static_libs": attrs.list(attrs.source(), default = []),
             "profiled_static_libs": attrs.list(attrs.source(), default = []),
             "version": attrs.string(default = ""),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 

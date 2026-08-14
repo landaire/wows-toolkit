@@ -10,6 +10,9 @@
 
 package com.facebook.buck.android;
 
+import com.facebook.infer.annotation.Nullsafe;
+
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class AdbOptions {
 
   public static final String MULTI_INSTALL_MODE_SHORT_ARG = "-x";
@@ -19,9 +22,10 @@ public class AdbOptions {
   private int adbServerPort;
   private boolean multiInstallMode;
   private boolean stagedInstallMode;
-  private int adbTimeout;
   private boolean ignoreMissingDevice;
   private boolean apexMode;
+  private String restartMode;
+  private boolean waitForDeviceReady;
 
   public AdbOptions(
       String adbExecutablePath,
@@ -29,17 +33,19 @@ public class AdbOptions {
       int adbServerPort,
       boolean multiInstallMode,
       boolean stagedInstallMode,
-      int adbTimeout,
       boolean ignoreMissingDevice,
-      boolean apexMode) {
+      boolean apexMode,
+      String restartMode,
+      boolean waitForDeviceReady) {
     this.adbExecutablePath = adbExecutablePath;
     this.adbThreadCount = adbThreadCount;
     this.adbServerPort = adbServerPort;
     this.multiInstallMode = multiInstallMode;
     this.stagedInstallMode = stagedInstallMode;
-    this.adbTimeout = adbTimeout;
     this.ignoreMissingDevice = ignoreMissingDevice;
     this.apexMode = apexMode;
+    this.restartMode = restartMode;
+    this.waitForDeviceReady = waitForDeviceReady;
   }
 
   public String getAdbExecutablePath() {
@@ -66,12 +72,16 @@ public class AdbOptions {
     return apexMode;
   }
 
-  public int getAdbTimeout() {
-    return adbTimeout;
-  }
-
   public boolean getIgnoreMissingDevice() {
     return ignoreMissingDevice;
+  }
+
+  public String getRestartMode() {
+    return restartMode;
+  }
+
+  public boolean getWaitForDeviceReady() {
+    return waitForDeviceReady;
   }
 
   @Override
@@ -87,12 +97,14 @@ public class AdbOptions {
         + multiInstallMode
         + ", stagedInstallMode="
         + stagedInstallMode
-        + ", adbTimeout="
-        + adbTimeout
         + ", ignoreMissingDevice="
         + ignoreMissingDevice
         + ", apexMode="
         + apexMode
+        + ", restartMode="
+        + restartMode
+        + ", waitForDeviceReady="
+        + waitForDeviceReady
         + '}';
   }
 }

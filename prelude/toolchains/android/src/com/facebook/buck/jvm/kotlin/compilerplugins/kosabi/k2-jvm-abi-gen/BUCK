@@ -5,13 +5,15 @@ oncall("android_devxx")
 
 source_listing()
 
+KOTLIN_VERSION = read_config("kotlin", "kotlin_version_for_upgrade_only_do_not_use", "2.2.0")
+
 buck_kotlin_library(
     name = "k2-jvm-abi-gen-lib",
     srcs = glob(
-        [
-            "**/*.kt",
-        ],
-    ),
+        ["**/*.kt"],
+        exclude = ["src/main/kotlin/compilercompat/2.*/*.kt"],
+    )
+    + glob(["src/main/kotlin/compilercompat/" + KOTLIN_VERSION + "/*.kt"]),
     labels = ["codegen_rule"],
     provided_deps = [
         "prelude//toolchains/android/third-party:kotlin-compiler-embeddable",
@@ -22,6 +24,7 @@ buck_kotlin_library(
         "PUBLIC",
     ],
     deps = [
+        "fbsource//fbandroid/java/com/facebook/kotlin/compilercompat:compilercompat",
         "prelude//toolchains/android/src/com/facebook/buck/jvm/kotlin/compilerplugins/common:common",
         "prelude//toolchains/android/src/com/facebook/buck/jvm/kotlin/compilerplugins/kosabi/common/stub:stub",
         "prelude//toolchains/android/third-party:kotlin-metadata-jvm",

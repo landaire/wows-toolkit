@@ -28,7 +28,7 @@ RestrictedMergeOperations = enum("copy")
 
 def process_info_plist(ctx: AnalysisContext, override_input: Artifact | None) -> AppleBundlePart:
     input = _preprocess_info_plist(ctx)
-    output = ctx.actions.declare_output("Info.plist")
+    output = ctx.actions.declare_output("Info.plist", has_content_based_path = False)
     additional_keys = _additional_keys_as_json_file(ctx)
     override_keys = _override_keys_as_json_file(ctx)
     process_plist(
@@ -51,7 +51,7 @@ def _get_plist_run_options() -> dict[str, bool]:
 
 def _preprocess_info_plist(ctx: AnalysisContext) -> Artifact:
     input = ctx.attrs.info_plist
-    output = ctx.actions.declare_output("PreprocessedInfo.plist")
+    output = ctx.actions.declare_output("PreprocessedInfo.plist", has_content_based_path = False)
     substitutions_json = _plist_substitutions_as_json_file(ctx)
     apple_tools = ctx.attrs._apple_tools[AppleToolsInfo]
     processor = apple_tools.info_plist_processor
@@ -80,28 +80,41 @@ def _plist_substitutions_as_json_file(ctx: AnalysisContext) -> Artifact | None:
     if not info_plist_substitutions:
         return None
 
-    substitutions_json = ctx.actions.write_json("plist_substitutions.json", info_plist_substitutions)
+    substitutions_json = ctx.actions.write_json("plist_substitutions.json", info_plist_substitutions, has_content_based_path = False)
     return substitutions_json
 
-def process_plist(ctx: AnalysisContext, input: Artifact, output: OutputArtifact, override_input: Artifact | None = None, additional_keys: Artifact | None = None, override_keys: Artifact | None = None, action_id: [str, None] = None):
+def process_plist(
+    ctx: AnalysisContext,
+    input: Artifact,
+    output: OutputArtifact,
+    override_input: Artifact | None = None,
+    additional_keys: Artifact | None = None,
+    override_keys: Artifact | None = None,
+    action_id: [str, None] = None,
+):
     apple_tools = ctx.attrs._apple_tools[AppleToolsInfo]
     processor = apple_tools.info_plist_processor
     override_input_arguments = ["--override-input", override_input] if override_input != None else []
     additional_keys_arguments = ["--additional-keys", additional_keys] if additional_keys != None else []
     override_keys_arguments = ["--override-keys", override_keys] if override_keys != None else []
-    command = cmd_args([
-        processor,
-        "process",
-        "--input",
-        input,
-        "--output",
-        output,
-    ] + override_input_arguments + additional_keys_arguments + override_keys_arguments)
+    command = cmd_args(
+        [
+            processor,
+            "process",
+            "--input",
+            input,
+            "--output",
+            output,
+        ]
+        + override_input_arguments
+        + additional_keys_arguments
+        + override_keys_arguments
+    )
     ctx.actions.run(command, category = "apple_process_info_plist", identifier = action_id or input.basename, **_get_plist_run_options())
 
 def _additional_keys_as_json_file(ctx: AnalysisContext) -> Artifact:
     additional_keys = _info_plist_additional_keys(ctx)
-    return ctx.actions.write_json("plist_additional.json", additional_keys)
+    return ctx.actions.write_json("plist_additional.json", additional_keys, has_content_based_path = False)
 
 def _info_plist_additional_keys(ctx: AnalysisContext) -> dict[str, typing.Any]:
     sdk_name = get_apple_sdk_name(ctx)
@@ -153,7 +166,7 @@ def _extra_mac_info_plist_keys(sdk_metadata: AppleSdkMetadata, extension: str) -
 
 def _override_keys_as_json_file(ctx: AnalysisContext) -> Artifact:
     override_keys = _info_plist_override_keys(ctx)
-    return ctx.actions.write_json("plist_override.json", override_keys)
+    return ctx.actions.write_json("plist_override.json", override_keys, has_content_based_path = False)
 
 def _info_plist_override_keys(ctx: AnalysisContext) -> dict[str, typing.Any]:
     sdk_name = get_apple_sdk_name(ctx)
@@ -178,7 +191,7 @@ def apple_info_plist_impl(ctx: AnalysisContext) -> list[Provider]:
     processor = apple_tools.info_plist_processor
 
     input_plist = ctx.attrs.src
-    output_plist = ctx.actions.declare_output("Info.plist")
+    output_plist = ctx.actions.declare_output("Info.plist", has_content_based_path = False)
 
     # Basic plist processing command
     command = cmd_args([
@@ -195,7 +208,7 @@ def apple_info_plist_impl(ctx: AnalysisContext) -> list[Provider]:
 
     # Add mutations if provided
     if ctx.attrs.mutations:
-        mutations_file = ctx.actions.write_json("mutations.json", ctx.attrs.mutations)
+        mutations_file = ctx.actions.write_json("mutations.json", ctx.attrs.mutations, has_content_based_path = False)
         command.add("--mutations")
         command.add(mutations_file)
         for mutation in ctx.attrs.mutations:
@@ -203,12 +216,7 @@ def apple_info_plist_impl(ctx: AnalysisContext) -> list[Provider]:
             if operation in MergeOperations.values() or operation in RestrictedMergeOperations.values():
                 command.add(cmd_args(hidden = mutation[1]))
 
-    ctx.actions.run(
-        command,
-        category = "apple_info_plist",
-        identifier = input_plist.basename,
-        **_get_plist_run_options()
-    )
+    ctx.actions.run(command, category = "apple_info_plist", identifier = input_plist.basename, **_get_plist_run_options())
 
     return [
         DefaultInfo(default_output = output_plist),

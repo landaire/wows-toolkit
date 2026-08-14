@@ -94,6 +94,15 @@ Expand-Archive -LiteralPath (Join-Path $OfflineRoot $wixExtensions.path) -Destin
 $zstdArchive = $manifest.archives | Where-Object { $_.name -eq "zstd" } | Select-Object -First 1
 Expand-Archive -LiteralPath (Join-Path $OfflineRoot $zstdArchive.path) -DestinationPath (Join-Path $InstallRoot $zstdArchive.install_path) -Force
 
+$python = $manifest.archives | Where-Object { $_.name -eq "python" } | Select-Object -First 1
+$pythonDir = Join-Path $InstallRoot $python.install_path
+Expand-Archive -LiteralPath (Join-Path $OfflineRoot $python.path) -DestinationPath $pythonDir -Force
+
+# The embeddable distribution ships a ._pth file that makes sys.path exactly its
+# own contents, so a script cannot import a module sitting next to it. The
+# prelude's C++ and Rust tools are multi-module, so they need the default rules.
+Get-ChildItem -LiteralPath $pythonDir -Filter "*._pth" | Remove-Item -Force
+
 # Buck2 itself is part of the pinned boundary: the vendored prelude only loads
 # under the release it was expanded from.
 $buck2 = $manifest.archives | Where-Object { $_.name -eq "buck2" } | Select-Object -First 1

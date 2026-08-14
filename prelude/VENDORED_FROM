@@ -1,4 +1,4 @@
-Expanded from the bundled prelude of: buck2 2025-12-01-75e4243c93877a3db4acf55f20d2e80a32523233
+Expanded from the bundled prelude of: buck2 2026-07-31-1d7bb93c093b0c31530ef8d92dd2da73de1784de
 
 Regenerate with `nu scripts/vendor-prelude.nu`, which reapplies the patches in
 that script. Do not hand-edit files under prelude/.

@@ -10,12 +10,9 @@
 
 package com.facebook.buck.jvm.java.abi;
 
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.fail;
-import static org.junit.Assume.assumeThat;
 
 import com.facebook.buck.cd.model.java.AbiGenerationMode;
 import com.facebook.buck.core.filesystems.AbsPath;
@@ -23,7 +20,6 @@ import com.facebook.buck.jvm.java.JarDumper;
 import com.facebook.buck.jvm.java.testutil.compiler.TestCompiler;
 import com.facebook.buck.jvm.kotlin.testutil.compiler.KotlinTestCompiler;
 import com.facebook.buck.util.environment.EnvVariablesProvider;
-import com.facebook.buck.util.environment.Platform;
 import com.facebook.buck.util.unarchive.Unzip;
 import com.facebook.buck.util.zip.DeterministicManifest;
 import com.facebook.buck.util.zip.JarBuilder;
@@ -63,7 +59,6 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic.Kind;
 import org.junit.Before;
-import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -101,8 +96,8 @@ public class StubJarTest {
         .toArray(new Object[][] {});
   }
 
-  public boolean isKotlin21() {
-    return EnvVariablesProvider.getSystemEnv().get("KOTLIN_VERSION").equals("2.1.0");
+  public boolean isKotlin22() {
+    return EnvVariablesProvider.getSystemEnv().get("KOTLIN_VERSION").equals("2.2.0");
   }
 
   public boolean isKotlin20() {
@@ -152,8 +147,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0002\\u0008\\u0016\\u0018\\u00002\\u00020\\u0001B\\u0007\\u00a2\\u0006\\u0004\\u0008\\u0002\\u0010\\u0003\"},"
@@ -174,7 +169,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -269,8 +264,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0016\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0016\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -305,7 +300,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -354,8 +349,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0012\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0012\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -389,7 +384,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -440,8 +435,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0012\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0012\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -474,7 +469,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -520,8 +515,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0012\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0012\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -553,7 +548,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -644,7 +639,7 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 = "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=3, xi=176)";
+    String metadata22 = "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=3, xi=176)";
     String metadata20 = "  @Lkotlin/Metadata;(mv={2, 0, 0}, k=3, xi=176)";
     tester
         .setSourceFile(
@@ -663,9 +658,20 @@ public class StubJarTest {
                 + " implements kotlin/jvm/functions/Function0 {",
             "",
             "  // compiled from: A.kt",
+            "  // debug info: SMAP",
+            "A.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 A.kt",
+            "com/example/buck/AKt$test$1",
+            "*L",
+            "1#1,3:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/AKt test (I)Lkotlin/jvm/functions/Function0;",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/AKt$test$1 null null",
             "",
@@ -734,8 +740,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=3, xi=176, d1={\"\\u0000\\u000c\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=3, xi=176, d1={\"\\u0000\\u000c\\n"
             + "\\u0000\\n"
             + "\\u0002\\u0010\\u0002\\n"
             + "\\u0000\\n"
@@ -769,12 +775,23 @@ public class StubJarTest {
                 + " kotlin/jvm/functions/Function2 {",
             "",
             "  // compiled from: A.kt",
+            "  // debug info: SMAP",
+            "A.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 A.kt",
+            "com/example/buck/AKt$test$1",
+            "*L",
+            "1#1,3:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/AKt test ()Lkotlin/jvm/functions/Function2;",
             "",
             "  @Lkotlin/coroutines/jvm/internal/DebugMetadata;(f=\"A.kt\", l={}, i={}, s={}, n={},"
                 + " m=\"invokeSuspend\", c=\"com.example.buck.AKt$test$1\")",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/AKt$test$1 null null",
             "",
@@ -805,6 +822,9 @@ public class StubJarTest {
             "  // access flags 0x11",
             "  public final invokeSuspend(Ljava/lang/Object;)Ljava/lang/Object;",
             "   L0",
+            "    ALOAD 0",
+            "    GETFIELD com/example/buck/AKt$test$1.I$0 : I",
+            "    ISTORE 2",
             "    INVOKESTATIC kotlin/coroutines/intrinsics/IntrinsicsKt.getCOROUTINE_SUSPENDED"
                 + " ()Ljava/lang/Object;",
             "   L1",
@@ -819,16 +839,12 @@ public class StubJarTest {
             "    ALOAD 1",
             "    INVOKESTATIC kotlin/ResultKt.throwOnFailure (Ljava/lang/Object;)V",
             "   L4",
-            "    ALOAD 0",
-            "    GETFIELD com/example/buck/AKt$test$1.I$0 : I",
-            "    ISTORE 2",
-            "   L5",
-            "    LINENUMBER 2 L5",
+            "    LINENUMBER 2 L4",
             "    GETSTATIC java/lang/System.out : Ljava/io/PrintStream;",
             "    ILOAD 2",
             "    INVOKEVIRTUAL java/io/PrintStream.println (I)V",
-            "   L6",
-            "    LINENUMBER 2 L6",
+            "   L5",
+            "    LINENUMBER 2 L5",
             "    GETSTATIC kotlin/Unit.INSTANCE : Lkotlin/Unit;",
             "    ARETURN",
             "   L3",
@@ -838,10 +854,10 @@ public class StubJarTest {
             "    LDC \"call to 'resume' before 'invoke' with coroutine\"",
             "    INVOKESPECIAL java/lang/IllegalStateException.<init> (Ljava/lang/String;)V",
             "    ATHROW",
-            "   L7",
-            "    LOCALVARIABLE it I L5 L3 2",
-            "    LOCALVARIABLE this Lcom/example/buck/AKt$test$1; L0 L7 0",
-            "    LOCALVARIABLE $result Ljava/lang/Object; L4 L3 1",
+            "   L6",
+            "    LOCALVARIABLE this Lcom/example/buck/AKt$test$1; L0 L6 0",
+            "    LOCALVARIABLE $result Ljava/lang/Object; L0 L6 1",
+            "    LOCALVARIABLE it I L1 L6 2",
             "    MAXSTACK = 3",
             "    MAXLOCALS = 3",
             "",
@@ -933,7 +949,7 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 = "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=3, xi=176)";
+    String metadata22 = "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=3, xi=176)";
     String metadata20 = "  @Lkotlin/Metadata;(mv={2, 0, 0}, k=3, xi=176)";
     tester
         .setSourceFile(
@@ -955,9 +971,20 @@ public class StubJarTest {
                 + " implements kotlin/jvm/functions/Function1 {",
             "",
             "  // compiled from: A.kt",
+            "  // debug info: SMAP",
+            "A.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 A.kt",
+            "com/example/buck/AKt$test$1",
+            "*L",
+            "1#1,3:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/AKt test (I)Lkotlin/jvm/functions/Function1;",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/AKt$test$1 null null",
             "  // access flags 0x19",
@@ -1035,7 +1062,7 @@ public class StubJarTest {
             "  // compiled from: A.kt",
             "  OUTERCLASS com/example/buck/AKt$test$1 invoke (I)Lkotlin/jvm/functions/Function1;",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/AKt$test$1 null null",
             "  // access flags 0x19",
@@ -1117,8 +1144,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0016\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0016\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -1153,7 +1180,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -1181,8 +1208,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0014\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0014\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -1223,7 +1250,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -1317,8 +1344,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=2, xi=48, d1={\"\\u0000\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=2, xi=48, d1={\"\\u0000\\n"
             + "\\n"
             + "\\u0000\\n"
             + "\\u0002\\u0010\\u000e\\n"
@@ -1358,7 +1385,7 @@ public class StubJarTest {
             "",
             "  // compiled from: B.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x19",
             "  public final static getString(Lcom/example/buck/A;)Ljava/lang/String;",
@@ -1402,10 +1429,21 @@ public class StubJarTest {
                 + " implements kotlin/jvm/functions/Function1 {",
             "",
             "  // compiled from: B.kt",
+            "  // debug info: SMAP",
+            "B.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 B.kt",
+            "com/example/buck/BKt$getString$1",
+            "*L",
+            "1#1,5:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/BKt getString (Lcom/example/buck/A;)Ljava/lang/String;",
             "",
-            isKotlin21()
-                ? "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=3, xi=176)"
+            isKotlin22()
+                ? "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=3, xi=176)"
                 : "  @Lkotlin/Metadata;(mv={2, 0, 0}, k=3, xi=176)",
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/BKt$getString$1 null null",
@@ -1492,8 +1530,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u001e\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u001e\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -1535,7 +1573,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -1630,11 +1668,22 @@ public class StubJarTest {
                 + " implements kotlin/jvm/functions/Function1 {",
             "",
             "  // compiled from: A.kt",
+            "  // debug info: SMAP",
+            "A.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 A.kt",
+            "com/example/buck/A$someMethod$1",
+            "*L",
+            "1#1,7:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/A someMethod$default"
                 + " (Lcom/example/buck/A;Lkotlin/jvm/functions/Function1;ILjava/lang/Object;)V",
             "",
-            isKotlin21()
-                ? "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=3, xi=176)"
+            isKotlin22()
+                ? "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=3, xi=176)"
                 : "  @Lkotlin/Metadata;(mv={2, 0, 0}, k=3, xi=176)",
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/A$someMethod$1 null null",
@@ -1720,8 +1769,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=2, xi=48, d1={\"\\u0000\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=2, xi=48, d1={\"\\u0000\\n"
             + "\\n"
             + "\\u0000\\n"
             + "\\u0002\\u0010\\u0002\\n"
@@ -1737,7 +1786,7 @@ public class StubJarTest {
             + "\\u0010\\u0000\\u001a\\u00020\\u0001*\\u00020\\u0002H\\u0086\\u0008\"},"
             + " d2={\"useSomeInterface\", \"\", \"Lcom/example/buck/A;\"})";
     String innerMetadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=176, d1={\"\\u0000\\u000f\\n"
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=176, d1={\"\\u0000\\u000f\\n"
             + "\\u0000\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0000\\n"
@@ -1783,7 +1832,7 @@ public class StubJarTest {
             "",
             "  // compiled from: B.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x19",
             "  public final static useSomeInterface(Lcom/example/buck/A;)V",
@@ -1822,9 +1871,23 @@ public class StubJarTest {
                 + " com/example/buck/A$SomeInterface {",
             "",
             "  // compiled from: B.kt",
+            "  // debug info: SMAP",
+            "B.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 B.kt",
+            "com/example/buck/BKt$useSomeInterface$1",
+            "*L",
+            "1#1,9:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/BKt useSomeInterface (Lcom/example/buck/A;)V",
             "",
-            isKotlin21() ? innerMetadata21 : innerMetadata20,
+            isKotlin22() ? innerMetadata21 : innerMetadata20,
+            "  // access flags 0x609",
+            "  public static abstract INNERCLASS com/example/buck/A$SomeInterface"
+                + " com/example/buck/A SomeInterface",
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/BKt$useSomeInterface$1 null null",
             "",
@@ -1875,8 +1938,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\u0008\\u0016\\u0018\\u00002\\u00020\\u0001:\\u0001\\u0004B\\u0007\\u00a2\\u0006\\u0004\\u0008\\u0002\\u0010\\u0003\"},"
@@ -1888,7 +1951,7 @@ public class StubJarTest {
             + "\\u0002\\u0008\\u0003\\u0008\\u0016\\u0018\\u00002\\u00020\\u0001:\\u0001\\u0004B\\u0007\\u00a2\\u0006\\u0004\\u0008\\u0002\\u0010\\u0003\"},"
             + " d2={\"Lcom/example/buck/B;\", \"\", \"<init>\", \"()V\", \"C\"})";
     String innerMetadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0010\\n"
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0010\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -1904,7 +1967,7 @@ public class StubJarTest {
             + " d2={\"Lcom/example/buck/B$C;\", \"\", \"<init>\", \"()V\", \"useSomeInterface\","
             + " \"\"})";
     String innerInnerMetadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=176, d1={\"\\u0000\\u000f\\n"
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=176, d1={\"\\u0000\\u000f\\n"
             + "\\u0000\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0000\\n"
@@ -1953,7 +2016,7 @@ public class StubJarTest {
             "",
             "  // compiled from: B.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "  // access flags 0x9",
             "  public static INNERCLASS com/example/buck/B$C com/example/buck/B C",
             "",
@@ -1968,7 +2031,7 @@ public class StubJarTest {
             "",
             "  // compiled from: B.kt",
             "",
-            isKotlin21() ? innerMetadata21 : innerMetadata20,
+            isKotlin22() ? innerMetadata21 : innerMetadata20,
             "  // access flags 0x9",
             "  public static INNERCLASS com/example/buck/B$C com/example/buck/B C",
             "",
@@ -2012,9 +2075,23 @@ public class StubJarTest {
                 + " com/example/buck/A$SomeInterface {",
             "",
             "  // compiled from: B.kt",
+            "  // debug info: SMAP",
+            "B.kt",
+            "Kotlin",
+            "*S Kotlin",
+            "*F",
+            "+ 1 B.kt",
+            "com/example/buck/B$C$useSomeInterface$1",
+            "*L",
+            "1#1,12:1",
+            "*E",
+            "",
             "  OUTERCLASS com/example/buck/B$C useSomeInterface ()V",
             "",
-            isKotlin21() ? innerInnerMetadata21 : innerInnerMetadata20,
+            isKotlin22() ? innerInnerMetadata21 : innerInnerMetadata20,
+            "  // access flags 0x609",
+            "  public static abstract INNERCLASS com/example/buck/A$SomeInterface"
+                + " com/example/buck/A SomeInterface",
             "  // access flags 0x9",
             "  public static INNERCLASS com/example/buck/B$C com/example/buck/B C",
             "  // access flags 0x19",
@@ -2076,8 +2153,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=2, xi=48, d1={\"\\u0000\\u0018\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=2, xi=48, d1={\"\\u0000\\u0018\\n"
             + "\\u0000\\n"
             + "\\u0002\\u0010\\u0002\\n"
             + "\\u0002\\u0018\\u0002\\n"
@@ -2132,7 +2209,7 @@ public class StubJarTest {
             "",
             "  // compiled from: B.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x19",
             "  // signature"
@@ -2200,8 +2277,8 @@ public class StubJarTest {
             "  // compiled from: B.kt",
             "  OUTERCLASS com/example/buck/BKt null",
             "",
-            isKotlin21()
-                ? "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=3, xi=176)"
+            isKotlin22()
+                ? "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=3, xi=176)"
                 : "  @Lkotlin/Metadata;(mv={2, 0, 0}, k=3, xi=176)",
             "  // access flags 0x19",
             "  public final static INNERCLASS com/example/buck/BKt$sam$i$java_lang_Runnable$0 null"
@@ -2695,51 +2772,6 @@ public class StubJarTest {
         .createStubJar();
   }
 
-  @Test
-  @Ignore
-  public void failsWhenAnnotationWillNotLoad() throws IOException {
-    if (!testingMode.equals(MODE_SOURCE_BASED_MISSING_DEPS)) {
-      return;
-    }
-
-    tester
-        .setSourceFile(
-            "DepAnno.java", "package com.example.buck.dependency;", "public @interface DepAnno { }")
-        .createStubJar()
-        .addStubJarToClasspath()
-        .setSourceFile(
-            "A.java",
-            "package com.example.buck;",
-            "import com.example.buck.dependency.DepAnno;",
-            "@DepAnno",
-            "public class A {",
-            "  public void foo(@DepAnno int d) { }",
-            "}")
-        .addExpectedCompileError(
-            "A.java:3: error: Could not find the annotation com.example.buck.dependency.DepAnno.\n"
-                + "@DepAnno\n"
-                + "^\n"
-                + "  This can happen for one of two reasons:\n"
-                + "  1. A dependency is missing in the BUCK file for the current target. Try"
-                + " building the current rule without the #source-only-abi flavor, fix any errors"
-                + " that are reported, and then build this flavor again.\n"
-                + "  2. The rule that owns com.example.buck.dependency.DepAnno is not marked with"
-                + " required_for_source_only_abi = True. Add that parameter to the rule and try"
-                + " again.")
-        .addExpectedCompileError(
-            "A.java:5: error: Could not find the annotation com.example.buck.dependency.DepAnno.\n"
-                + "  public void foo(@DepAnno int d) { }\n"
-                + "                  ^\n"
-                + "  This can happen for one of two reasons:\n"
-                + "  1. A dependency is missing in the BUCK file for the current target. Try"
-                + " building the current rule without the #source-only-abi flavor, fix any errors"
-                + " that are reported, and then build this flavor again.\n"
-                + "  2. The rule that owns com.example.buck.dependency.DepAnno is not marked with"
-                + " required_for_source_only_abi = True. Add that parameter to the rule and try"
-                + " again.")
-        .createStubJar();
-  }
-
   /**
    * Regression test for a bug where our error suppressing listener wasn't tracking Context changes
    * across rounds.
@@ -3118,38 +3150,8 @@ public class StubJarTest {
   }
 
   @Test
-  @Ignore
-  public void providesNiceErrorWhenAnnotationMissing() throws IOException {
-    if (!testingMode.equals(MODE_SOURCE_BASED_MISSING_DEPS)) {
-      return;
-    }
-
-    createAnnotationFullJar()
-        .addFullJarToClasspath()
-        .setSourceFile(
-            "A.java",
-            "package com.example.buck;",
-            "public class A {",
-            "  @Foo",
-            "  public void cheese(String key) {}",
-            "}")
-        .addExpectedCompileError(
-            "A.java:3: error: Could not find the annotation com.example.buck.Foo.\n"
-                + "  @Foo\n"
-                + "  ^\n"
-                + "  This can happen for one of two reasons:\n"
-                + "  1. A dependency is missing in the BUCK file for the current target. Try"
-                + " building the current rule without the #source-only-abi flavor, fix any errors"
-                + " that are reported, and then build this flavor again.\n"
-                + "  2. The rule that owns com.example.buck.Foo is not marked with"
-                + " required_for_source_only_abi = True. Add that parameter to the rule and try"
-                + " again.")
-        .createStubJar();
-  }
-
-  @Test
   public void preservesAnnotationsOnMethods() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3180,7 +3182,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsOnFields() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3211,7 +3213,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsOnParameters() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3474,7 +3476,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithPrimitiveValues() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3499,7 +3501,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithStringArrayValues() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3630,7 +3632,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithConstantValues() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspathAlways()
@@ -3685,7 +3687,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithAnnotationValues() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3711,7 +3713,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithAnnotationArrayValues() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3828,7 +3830,7 @@ public class StubJarTest {
 
   @Test
   public void stubsEnumsOverridingGenericInterface() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "A.java",
@@ -4253,7 +4255,7 @@ public class StubJarTest {
 
     tester = new Tester(Language.KOTLIN);
     String innerMetadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0018\\n"
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0018\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -4274,8 +4276,8 @@ public class StubJarTest {
             + "\\u0000\\u001a\\u0004\\u0008\\u0006\\u0010\\u0007\"},"
             + " d2={\"Lcom/example/buck/A$B;\", \"\", \"<init>\", \"()V\", \"count\", \"\","
             + " \"getCount\", \"()I\", \"foo\", \"\"})";
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\u0008\\u0016\\u0018\\u00002\\u00020\\u0001:\\u0001\\u0004B\\u0007\\u00a2\\u0006\\u0004\\u0008\\u0002\\u0010\\u0003\"},"
@@ -4306,7 +4308,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? innerMetadata21 : innerMetadata20,
+            isKotlin22() ? innerMetadata21 : innerMetadata20,
             "  // access flags 0x1A",
             "  private final static INNERCLASS com/example/buck/A$B com/example/buck/A B",
             "",
@@ -4327,7 +4329,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "  // access flags 0x1A",
             "  private final static INNERCLASS com/example/buck/A$B com/example/buck/A B",
             "",
@@ -5167,7 +5169,7 @@ public class StubJarTest {
 
   @Test
   public void stubsImportedReferencesToInnerClassesOfOtherTypes() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "Imported.java",
@@ -5211,7 +5213,7 @@ public class StubJarTest {
 
   @Test
   public void stubsStaticImportedReferencesToInnerClassesOfOtherTypes() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     tester
         .setSourceFile(
@@ -5469,7 +5471,7 @@ public class StubJarTest {
 
   @Test
   public void stubsReferencesFromBridgeMethodsToInnerClassesOtherTypes() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "A.java",
@@ -5660,8 +5662,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0014\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0014\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -5697,7 +5699,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -5778,8 +5780,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0010\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0010\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -5809,7 +5811,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -6076,7 +6078,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeInnerClassTypeParameterReferenceInMethodParameter() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "Outer.java",
@@ -6525,7 +6527,7 @@ public class StubJarTest {
 
   @Test
   public void bridgeMethodInStubsCanBeCompiledAgainst() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
 
     tester
         .setSourceFile(
@@ -7005,7 +7007,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeInnerClassReferencesInPackageInfoClass() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "A.java",
@@ -7103,7 +7105,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeGenericBridgeMethods() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "A.java",
@@ -7158,7 +7160,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeGenericOverrideBridgeMethods() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "A.java",
@@ -7233,7 +7235,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeCovariantReturnBridgeMethods() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "Super.java",
@@ -7297,7 +7299,7 @@ public class StubJarTest {
   public void
       shouldCopyAccessibilityAnnotationsAndParamNamesFromOverriderAndThrowsFromOverriddenToBridgeMethods()
           throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile("Anno.java", "package com.example.buck;", "public @interface Anno { }")
         .compileFullJar()
@@ -7390,7 +7392,7 @@ public class StubJarTest {
    */
   @Test
   public void shouldIncludeNonPublicBaseClassBridgeMethods() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "B.java",
@@ -7460,7 +7462,7 @@ public class StubJarTest {
 
   @Test
   public void shouldNotIncludeNonPublicBaseClassBridgeMethodsWhenManuallyDone() throws IOException {
-    notYetImplementedForMissingClasspath();
+    if (notYetImplementedForMissingClasspath()) return;
     tester
         .setSourceFile(
             "B.java",
@@ -7529,8 +7531,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u000c\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0006\\u0008\\u00c6\\u0002\\u0018\\u00002\\u00020\\u0001B\\u0009\\u0008\\u0002\\u00a2\\u0006\\u0004\\u0008\\u0002\\u0010\\u0003R\\u001c\\u0010\\u0004\\u001a\\u00020\\u00018\\u0006X\\u0087\\u0004\\u00a2\\u0006\\u000e\\n"
@@ -7560,7 +7562,7 @@ public class StubJarTest {
             "",
             "  // compiled from: Obj.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x19",
             "  public final static Lcom/example/buck/Obj; INSTANCE",
@@ -7595,8 +7597,8 @@ public class StubJarTest {
     }
 
     tester = new Tester(Language.KOTLIN);
-    String metadata21 =
-        "  @Lkotlin/Metadata;(mv={2, 1, 0}, k=1, xi=48, d1={\"\\u0000\\u0018\\n"
+    String metadata22 =
+        "  @Lkotlin/Metadata;(mv={2, 2, 0}, k=1, xi=48, d1={\"\\u0000\\u0018\\n"
             + "\\u0002\\u0018\\u0002\\n"
             + "\\u0002\\u0010\\u0000\\n"
             + "\\u0002\\u0008\\u0003\\n"
@@ -7633,7 +7635,7 @@ public class StubJarTest {
             "",
             "  // compiled from: A.kt",
             "",
-            isKotlin21() ? metadata21 : metadata20,
+            isKotlin22() ? metadata22 : metadata20,
             "",
             "  // access flags 0x1",
             "  public <init>()V",
@@ -7655,6 +7657,56 @@ public class StubJarTest {
             "    // annotable parameter count: 2 (invisible)",
             "    @Lorg/jetbrains/annotations/NotNull;() // invisible, parameter 0",
             "}")
+        .createAndCheckStubJar();
+  }
+
+  @Test
+  public void kotlinExcludesFilePrivateClasses() throws IOException {
+    if (!isValidForKotlin()) {
+      return;
+    }
+
+    if (testingMode.equals(MODE_SOURCE_BASED)) {
+      // Source-only-abi already excludes file-private classes via its own mechanism.
+      return;
+    }
+
+    // A file-private class in Kotlin (declared with `private` at the file level) is compiled
+    // to package-private in bytecode. The class-abi filter should detect this via Kotlin metadata
+    // and exclude it, matching source-only-abi behavior.
+    tester = new Tester(Language.KOTLIN);
+    tester
+        .setSourceFile(
+            "A.kt",
+            "package com.example.buck",
+            "open class A {",
+            "  fun publicMethod(): String = \"hello\"",
+            "}",
+            "private class FilePrivateHelper {",
+            "  fun helperMethod(): Int = 42",
+            "}")
+        .addExpectedStub("com/example/buck/A")
+        .createAndCheckStubJar();
+  }
+
+  @Test
+  public void kotlinExcludesFilePrivateClassButKeepsPublicFromSameFile() throws IOException {
+    if (!isValidForKotlin()) {
+      return;
+    }
+
+    if (testingMode.equals(MODE_SOURCE_BASED)) {
+      return;
+    }
+
+    // Verify that when a file contains both public and private classes, only the public
+    // classes are included in the stub jar and the file-private classes are excluded.
+    tester = new Tester(Language.KOTLIN);
+    tester
+        .setSourceFile(
+            "A.kt", "package com.example.buck", "open class A", "open class B", "private class C")
+        .addExpectedStub("com/example/buck/A")
+        .addExpectedStub("com/example/buck/B")
         .createAndCheckStubJar();
   }
 
@@ -7759,18 +7811,11 @@ public class StubJarTest {
         .compileFullJar();
   }
 
-  private void notYetImplementedForMissingClasspath() {
-    assumeThat(testingMode, not(equalTo(MODE_SOURCE_BASED_MISSING_DEPS)));
-  }
-
-  private void notYetImplementedForSource() {
-    assumeThat(testingMode, equalTo(MODE_JAR_BASED));
+  private boolean notYetImplementedForMissingClasspath() {
+    return testingMode == MODE_SOURCE_BASED_MISSING_DEPS;
   }
 
   private boolean isValidForKotlin() {
-    // System.getProperty("java.class.path") returning classpath with ":" as separator which means
-    // that KotlinTestCompiler crashes (separator should be ";" on Windows)
-    assumeThat(Platform.detect(), not(Platform.WINDOWS));
     return !testingMode.equals(MODE_SOURCE_BASED_MISSING_DEPS);
   }
 

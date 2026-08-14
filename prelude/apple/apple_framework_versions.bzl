@@ -53,8 +53,14 @@ FRAMEWORK_INTRODUCED_VERSIONS = {
         "macosx": (11, 0, 0),
         "watchos": (7, 0, 0),
     },
+    "AccessoryNotifications": {
+        "iphoneos": (26, 4, 0),
+    },
     "AccessorySetupKit": {
         "iphoneos": (18, 0, 0),
+    },
+    "AccessoryTransportExtension": {
+        "iphoneos": (26, 2, 0),
     },
     "Accounts": {
         "iphoneos": (5, 0, 0),
@@ -79,6 +85,7 @@ FRAMEWORK_INTRODUCED_VERSIONS = {
         "macosx": (10, 2, 0),
     },
     "AddressBookUI": {"iphoneos": (2, 0, 0), "maccatalyst": (14, 0, 0)},
+    "AlarmKit": {"iphoneos": (26, 0, 0)},
     "AppClip": {"iphoneos": (14, 0, 0), "maccatalyst": (14, 0, 0)},
     "AppIntents": {
         "appletvos": (16, 0, 0),
@@ -88,6 +95,7 @@ FRAMEWORK_INTRODUCED_VERSIONS = {
         "watchos": (9, 0, 0),
     },
     "AppKit": {"maccatalyst": (13, 0, 0), "macosx": (10, 0, 0)},
+    "AppMigrationKit": {"iphoneos": (26, 1, 0)},
     "AppTrackingTransparency": {
         "appletvos": (14, 0, 0),
         "iphoneos": (14, 0, 0),
@@ -560,6 +568,11 @@ FRAMEWORK_INTRODUCED_VERSIONS = {
         "maccatalyst": (13, 0, 0),
         "macosx": (10, 8, 0),
         "watchos": (2, 0, 0),
+    },
+    "ImagePlayground": {
+        "iphoneos": (18, 1, 0),
+        "maccatalyst": (18, 1, 0),
+        "macosx": (15, 1, 0),
     },
     "InputMethodKit": {"macosx": (10, 5, 0)},
     "InstallerPlugins": {"macosx": (10, 4, 0)},
@@ -1118,11 +1131,11 @@ def _parse_version(version: str) -> (int, int, int):
 def validate_sdk_frameworks(frameworks: list[str]) -> None:
     for framework in frameworks:
         if framework.startswith("$SDKROOT/System/Library/Frameworks"):
-            framework_name = framework[len("$SDKROOT/System/Library/Frameworks/"):-len(".framework")]
+            framework_name = framework[len("$SDKROOT/System/Library/Frameworks/") : -len(".framework")]
             if framework_name not in FRAMEWORK_INTRODUCED_VERSIONS:
                 fail("Framework {} is missing version information".format(framework_name))
 
-def get_framework_linker_args(ctx: AnalysisContext, framework_names: list[str]) -> list[str]:
+def get_framework_linker_args(ctx: AnalysisContext, framework_names: list[str]) -> cmd_args:
     if not has_apple_toolchain(ctx):
         return _get_unchecked_framework_linker_args(framework_names)
 
@@ -1136,10 +1149,14 @@ def get_framework_linker_args(ctx: AnalysisContext, framework_names: list[str]) 
     # Simulator and device platforms have the same framework versions
     sdk_name = get_apple_sdk_name(ctx)
     if sdk_name.endswith("simulator"):
-        sdk_name = sdk_name[:-len("simulator")] + "os"
+        sdk_name = sdk_name[: -len("simulator")] + "os"
 
-    args = []
+    weak_frameworks = []
+    strong_frameworks = []
+
+    args = cmd_args()
     for name in framework_names:
+        is_weak = False
         versions = FRAMEWORK_INTRODUCED_VERSIONS.get(name, None)
         if versions:
             introduced = versions.get(sdk_name, None)
@@ -1149,24 +1166,22 @@ def get_framework_linker_args(ctx: AnalysisContext, framework_names: list[str]) 
                 fail(message)
 
             if _version_is_greater_than(introduced, deployment_target):
-                args.append("-weak_framework")
-            else:
-                args.append("-framework")
+                is_weak = True
+
+        if is_weak:
+            weak_frameworks.append(name)
         else:
-            # Assume this is a non-SDK framework
-            args.append("-framework")
+            strong_frameworks.append(name)
 
-        args.append(name)
-
-    return args
-
-def _get_unchecked_framework_linker_args(framework_names: list[str]) -> list[str]:
-    args = []
-    for f in framework_names:
-        args.append("-framework")
-        args.append(f)
+    if strong_frameworks:
+        args.add(cmd_args(strong_frameworks, prepend = "-framework"))
+    if weak_frameworks:
+        args.add(cmd_args(weak_frameworks, prepend = "-weak_framework"))
 
     return args
+
+def _get_unchecked_framework_linker_args(framework_names: list[str]) -> cmd_args:
+    return cmd_args(framework_names, prepend = "-framework")
 
 def _version_is_greater_than(x: (int, int, int), y: (int, int, int)) -> bool:
     return x[0] > y[0] or (x[0] == y[0] and x[1] > y[1]) or (x[0] == y[0] and x[1] == y[1] and x[2] > y[2])

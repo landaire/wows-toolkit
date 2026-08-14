@@ -38,7 +38,10 @@ service Installer {
 
 message InstallInfoRequest {
   string install_id = 1;
-  map<string, string> files = 2;
+  reserved 2;
+  // Set of file names to expect. The actual paths are delivered later via
+  // FileReady requests.
+  repeated string file_names = 3;
 }
 
 message InstallResponse {
@@ -82,7 +85,7 @@ message ErrorDetail {
   repeated string tags = 3;
 }
 
-// Should be kept in sync with buck2_error::ErrorTier.
+// Error category for installer errors.
 enum ErrorCategory {
   ERROR_CATEGORY_UNSPECIFIED = 0;
   // Unexpected errors in installer. AKA Infra error.

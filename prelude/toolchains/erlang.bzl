@@ -22,11 +22,10 @@ def _system_erlang_binary_impl(_ctx):
 system_erlang_binary = rule(
     impl = _system_erlang_binary_impl,
     attrs = {},
+    is_toolchain_rule = True,
 )
 
-def system_erlang_toolchain(
-        name,
-        visibility):
+def system_erlang_toolchain(name, visibility):
     system_erlang_binary(
         name = "{}-binaries".format(name),
         visibility = visibility,

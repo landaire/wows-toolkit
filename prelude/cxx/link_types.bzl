@@ -26,6 +26,9 @@ ExtraLinkerOutputCategory = enum(
 )
 
 LinkOptions = record(
+    # link args for binary link step
+    binary_links = field(list[LinkArgs]),
+    # common link args
     links = list[LinkArgs],
     link_execution_preference = LinkExecutionPreference,
     link_weight = int,
@@ -51,31 +54,38 @@ LinkOptions = record(
     extra_linker_outputs_flags_factory = field(typing.Callable | None, None),
     extra_distributed_thin_lto_opt_outputs_merger = field(typing.Callable | None, None),
     produce_shared_library_interface = field(bool, False),
+    incremental_link = field(bool, False),
+    has_hip_device_debug = field(bool, False),
 )
 
 def link_options(
-        links: list[LinkArgs],
-        link_execution_preference: LinkExecutionPreference,
-        link_weight: int = 1,
-        link_ordering: [LinkOrdering, None] = None,
-        enable_distributed_thinlto: bool = False,
-        category_suffix: [str, None] = None,
-        identifier: [str, None] = None,
-        strip: bool = False,
-        strip_args_factory = None,
-        import_library: Artifact | None = None,
-        allow_cache_upload: bool = False,
-        cxx_toolchain: [CxxToolchainInfo, None] = None,
-        error_handler: [typing.Callable, None] = None,
-        extra_linker_outputs_factory: typing.Callable | None = None,
-        extra_linker_outputs_flags_factory: typing.Callable | None = None,
-        extra_distributed_thin_lto_opt_outputs_merger: typing.Callable | None = None,
-        produce_shared_library_interface: bool = False) -> LinkOptions:
+    links: list[LinkArgs],
+    link_execution_preference: LinkExecutionPreference,
+    link_weight: int = 1,
+    binary_links: list[LinkArgs] = [],
+    link_ordering: [LinkOrdering, None] = None,
+    enable_distributed_thinlto: bool = False,
+    category_suffix: [str, None] = None,
+    identifier: [str, None] = None,
+    strip: bool = False,
+    strip_args_factory = None,
+    import_library: Artifact | None = None,
+    allow_cache_upload: bool = False,
+    cxx_toolchain: [CxxToolchainInfo, None] = None,
+    error_handler: [typing.Callable, None] = None,
+    extra_linker_outputs_factory: typing.Callable | None = None,
+    extra_linker_outputs_flags_factory: typing.Callable | None = None,
+    extra_distributed_thin_lto_opt_outputs_merger: typing.Callable | None = None,
+    produce_shared_library_interface: bool = False,
+    incremental_link: bool = False,
+    has_hip_device_debug: bool = False,
+) -> LinkOptions:
     """
     A type-checked constructor for LinkOptions because by default record
     constructors aren't typed.
     """
     return LinkOptions(
+        binary_links = binary_links,
         links = links,
         link_execution_preference = link_execution_preference,
         link_weight = link_weight,
@@ -94,6 +104,8 @@ def link_options(
         extra_linker_outputs_flags_factory = extra_linker_outputs_flags_factory,
         extra_distributed_thin_lto_opt_outputs_merger = extra_distributed_thin_lto_opt_outputs_merger,
         produce_shared_library_interface = produce_shared_library_interface,
+        incremental_link = incremental_link,
+        has_hip_device_debug = has_hip_device_debug,
     )
 
 # A marker instance to differentiate explicitly-passed None and a field that
@@ -102,25 +114,29 @@ _NotProvided = record()
 _NOT_PROVIDED = _NotProvided()
 
 def merge_link_options(
-        base: LinkOptions,
-        links: [list[LinkArgs], _NotProvided] = _NOT_PROVIDED,
-        link_execution_preference: [LinkExecutionPreference, _NotProvided] = _NOT_PROVIDED,
-        link_weight: [int, _NotProvided] = _NOT_PROVIDED,
-        link_ordering: [LinkOrdering, None, _NotProvided] = _NOT_PROVIDED,
-        enable_distributed_thinlto: [bool, _NotProvided] = _NOT_PROVIDED,
-        category_suffix: [str, None, _NotProvided] = _NOT_PROVIDED,
-        identifier: [str, None, _NotProvided] = _NOT_PROVIDED,
-        strip: [bool, _NotProvided] = _NOT_PROVIDED,
-        strip_args_factory = _NOT_PROVIDED,
-        import_library: [Artifact, None, _NotProvided] = _NOT_PROVIDED,
-        allow_cache_upload: [bool, _NotProvided] = _NOT_PROVIDED,
-        cxx_toolchain: [CxxToolchainInfo, _NotProvided] = _NOT_PROVIDED) -> LinkOptions:
+    base: LinkOptions,
+    binary_links: [list[LinkArgs], _NotProvided] = _NOT_PROVIDED,
+    links: [list[LinkArgs], _NotProvided] = _NOT_PROVIDED,
+    link_execution_preference: [LinkExecutionPreference, _NotProvided] = _NOT_PROVIDED,
+    link_weight: [int, _NotProvided] = _NOT_PROVIDED,
+    link_ordering: [LinkOrdering, None, _NotProvided] = _NOT_PROVIDED,
+    enable_distributed_thinlto: [bool, _NotProvided] = _NOT_PROVIDED,
+    category_suffix: [str, None, _NotProvided] = _NOT_PROVIDED,
+    identifier: [str, None, _NotProvided] = _NOT_PROVIDED,
+    strip: [bool, _NotProvided] = _NOT_PROVIDED,
+    strip_args_factory = _NOT_PROVIDED,
+    import_library: [Artifact, None, _NotProvided] = _NOT_PROVIDED,
+    allow_cache_upload: [bool, _NotProvided] = _NOT_PROVIDED,
+    cxx_toolchain: [CxxToolchainInfo, _NotProvided] = _NOT_PROVIDED,
+    incremental_link: [bool, _NotProvided] = _NOT_PROVIDED,
+) -> LinkOptions:
     """
     Also something we would ideally auto-generate as LinkOptions.merge in
     Starlark.
     """
 
     return LinkOptions(
+        binary_links = base.binary_links if binary_links == _NOT_PROVIDED else binary_links,
         links = base.links if links == _NOT_PROVIDED else links,
         link_execution_preference = base.link_execution_preference if link_execution_preference == _NOT_PROVIDED else link_execution_preference,
         link_weight = base.link_weight if link_weight == _NOT_PROVIDED else link_weight,
@@ -139,4 +155,6 @@ def merge_link_options(
         extra_linker_outputs_flags_factory = base.extra_linker_outputs_flags_factory,
         extra_distributed_thin_lto_opt_outputs_merger = base.extra_distributed_thin_lto_opt_outputs_merger,
         produce_shared_library_interface = base.produce_shared_library_interface,
+        incremental_link = base.incremental_link if incremental_link == _NOT_PROVIDED else incremental_link,
+        has_hip_device_debug = base.has_hip_device_debug,
     )

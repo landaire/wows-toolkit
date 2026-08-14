@@ -115,7 +115,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
     targets_json_file = None
     cmd = cmd_args(scrubber)
     if json_type == _SelectiveDebuggingJsonType("targets"):
-        targets_json_file = ctx.attrs.targets_json_file or ctx.actions.write_json("targets.json", {"targets": []})
+        targets_json_file = ctx.attrs.targets_json_file or ctx.actions.write_json("targets.json", {"targets": []}, has_content_based_path = False)
 
         # If a targets json file is not provided, write an empty json file:
         cmd.add("--targets-file")
@@ -127,7 +127,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
             "include_build_target_patterns": ctx.attrs.include_build_target_patterns,
             "include_regular_expressions": ctx.attrs.include_regular_expressions,
         }
-        spec_file = ctx.actions.write_json("selective_debugging_spec.json", json_data)
+        spec_file = ctx.actions.write_json("selective_debugging_spec.json", json_data, has_content_based_path = False)
         cmd.add("--spec-file")
         cmd.add(spec_file)
     else:
@@ -146,7 +146,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
         #
         # See `_maybe_scrub_binary()` in apple_bundle.bzl
         if json_type != _SelectiveDebuggingJsonType("targets"):
-            return inner_ctx.actions.write(output_name, sorted(set(package_names)))
+            return inner_ctx.actions.write(output_name, sorted(set(package_names)), has_content_based_path = False)
 
         def scrub_selected_debug_paths_action(dynamic_ctx: AnalysisContext, artifacts, outputs):
             packages = [
@@ -159,7 +159,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                 sorted(set(filter(lambda p: p in packages, package_names))),
             )
 
-        output = inner_ctx.actions.declare_output(output_name)
+        output = inner_ctx.actions.declare_output(output_name, has_content_based_path = False)
         inner_ctx.actions.dynamic_output(
             dynamic = [targets_json_file],
             inputs = [],
@@ -170,15 +170,16 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
         return output
 
     def scrub_binary(
-            inner_ctx,
-            executable: Artifact,
-            executable_link_execution_preference: LinkExecutionPreference,
-            adhoc_codesign_tool: [RunInfo, None],
-            focused_targets_labels: list[Label],
-            identifier: None | str = None) -> Artifact:
+        inner_ctx,
+        executable: Artifact,
+        executable_link_execution_preference: LinkExecutionPreference,
+        adhoc_codesign_tool: [RunInfo, None],
+        focused_targets_labels: list[Label],
+        identifier: None | str = None,
+    ) -> Artifact:
         inner_cmd = cmd_args(cmd)
         subdir = "{}/".format(identifier) if identifier else ""
-        output = inner_ctx.actions.declare_output("debug_scrubbed/{}{}".format(subdir, executable.short_path))
+        output = inner_ctx.actions.declare_output("debug_scrubbed/{}{}".format(subdir, executable.short_path), has_content_based_path = False)
 
         action_execution_properties = get_action_execution_attributes(executable_link_execution_preference)
 
@@ -192,6 +193,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
             additional_labels_json = inner_ctx.actions.write_json(
                 inner_ctx.attrs.name + ".additional_labels.json",
                 {"targets": [label.raw_target() for label in focused_targets_labels]},
+                has_content_based_path = False,
             )
             inner_cmd.add(["--persisted-targets-file", additional_labels_json])
         inner_ctx.actions.run(
@@ -210,14 +212,11 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
         selected_target_infos = []
         linked_targets = set()
         is_any_selected_target_linked = False
-        is_using_spec = (json_type == _SelectiveDebuggingJsonType("spec"))
+        is_using_spec = json_type == _SelectiveDebuggingJsonType("spec")
         selected_targets_contain_swift = False
         for infos in debug_info:
             for info in infos:
-                is_swiftmodule = ArtifactInfoTag("swiftmodule") in info.tags
-                is_swift_pcm = ArtifactInfoTag("swift_pcm") in info.tags
-                is_swift_related = is_swiftmodule or is_swift_pcm
-
+                is_swift_debug_info = ArtifactInfoTag("swift_debug_info") in info.tags
                 is_label_included = _is_label_included(info.label, selection_criteria)
 
                 is_any_selected_target_linked_when_using_spec = is_using_spec and is_any_selected_target_linked
@@ -232,7 +231,9 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                     # terminate the search early (as we cannot determine whether a selected target is linked
                     # as the list of selected targets is stored in the targets JSON file, which is not available
                     # at analysis time, only avail behind a dynamic output).
-                    debug_artifact_contains_object_code = lazy.is_any(lambda debug_artifact: debug_artifact.extension in _OBJECT_FILE_EXTENSIONS, info.artifacts)
+                    debug_artifact_contains_object_code = lazy.is_any(
+                        lambda debug_artifact: debug_artifact.extension in _OBJECT_FILE_EXTENSIONS, info.artifacts
+                    )
                     if debug_artifact_contains_object_code:
                         if is_using_spec and is_label_included:
                             is_any_selected_target_linked = True
@@ -244,19 +245,21 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                     # `selected_target_infos` should only include targets explicitly selected by the user,
                     # not anything included in addition to support the debugger (e.g., `.swiftmodule` files)
                     selected_target_infos.append(info)
-                if is_label_included or (selected_targets_contain_swift and is_swift_related):
+                if is_label_included or (selected_targets_contain_swift and is_swift_debug_info):
                     # There might be a few ArtifactInfo corresponding to the same Label,
                     # so to avoid overwriting, we need to preserve all artifacts.
                     artifact_infos.append(info)
-                    selected_targets_contain_swift = selected_targets_contain_swift or ArtifactInfoTag("swiftmodule") in info.tags
+                    selected_targets_contain_swift = selected_targets_contain_swift or ArtifactInfoTag("swift_debug_info") in info.tags
 
         if json_type == _SelectiveDebuggingJsonType("spec"):
             metadata_output = inner_ctx.actions.write_json(
                 "selective_metadata_with_spec.json",
                 _generate_metadata_json_object(is_any_selected_target_linked),
                 pretty = True,
+                has_content_based_path = False,
             )
         elif json_type == _SelectiveDebuggingJsonType("targets"):
+
             def generate_metadata_output(dynamic_ctx: AnalysisContext, artifacts, outputs):
                 targets = artifacts[targets_json_file].read_json()["targets"]
                 is_any_selected_target_linked_inner = False
@@ -264,7 +267,10 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                     cell, package_with_target_name = target.split("//")
                     package, target_name = package_with_target_name.split(":")
 
-                    is_any_selected_target_linked_inner = lazy.is_any(lambda linked_target: linked_target.cell == cell and linked_target.package == package and linked_target.name == target_name, linked_targets)
+                    is_any_selected_target_linked_inner = lazy.is_any(
+                        lambda linked_target: linked_target.cell == cell and linked_target.package == package and linked_target.name == target_name,
+                        linked_targets,
+                    )
                     if is_any_selected_target_linked_inner:
                         break
 
@@ -274,7 +280,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                     pretty = True,
                 )
 
-            metadata_output = inner_ctx.actions.declare_output("selective_metadata_with_targets_file.json")
+            metadata_output = inner_ctx.actions.declare_output("selective_metadata_with_targets_file.json", has_content_based_path = False)
             inner_ctx.actions.dynamic_output(
                 dynamic = [targets_json_file],
                 inputs = [],
@@ -324,11 +330,15 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
 def _is_label_included(label: Label, selection_criteria: _SelectionCriteria) -> bool:
     # If no include criteria are provided, we then include everything, as long as it is not excluded.
     if selection_criteria.include_build_target_patterns or selection_criteria.include_regular_expressions:
-        if not _check_if_label_matches_patterns_or_expressions(label, selection_criteria.include_build_target_patterns, selection_criteria.include_regular_expressions):
+        if not _check_if_label_matches_patterns_or_expressions(
+            label, selection_criteria.include_build_target_patterns, selection_criteria.include_regular_expressions
+        ):
             return False
 
     # If included (above snippet), ensure that this target is not excluded.
-    return not _check_if_label_matches_patterns_or_expressions(label, selection_criteria.exclude_build_target_patterns, selection_criteria.exclude_regular_expressions)
+    return not _check_if_label_matches_patterns_or_expressions(
+        label, selection_criteria.exclude_build_target_patterns, selection_criteria.exclude_regular_expressions
+    )
 
 def _check_if_label_matches_patterns_or_expressions(label: Label, patterns: list[BuildTargetPattern], expressions: list[regex]) -> bool:
     for pattern in patterns:

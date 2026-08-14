@@ -45,8 +45,9 @@ internal class ClassUsageMergerTest {
     val prevClassUsageMap: ClassUsageMap = classUsageMapBase
 
     val innerMap: MutableSet<Path> = mutableSetOf(Paths.get("C.class"))
-    val currentClassUsageMap =
-        classUsageMapBase.apply { toMutableMap()[Paths.get("new-class-abi.jar")] = innerMap }
+    val currentClassUsageMap = classUsageMapBase.apply {
+      toMutableMap()[Paths.get("new-class-abi.jar")] = innerMap
+    }
 
     val mergedMap: ClassUsageMap = mergeClassUsageMaps(prevClassUsageMap, currentClassUsageMap)
 
@@ -56,10 +57,9 @@ internal class ClassUsageMergerTest {
   @Test
   fun `when inner addition is made then new class is included in merged inner map`() {
     val prevClassUsageMap: ClassUsageMap = classUsageMapBase
-    val currentClassUsageMap: ClassUsageMap =
-        classUsageMapBase.apply {
-          toMutableMap()[Paths.get("class-abi.jar")] = setOf(Paths.get("C.class"))
-        }
+    val currentClassUsageMap: ClassUsageMap = classUsageMapBase.apply {
+      toMutableMap()[Paths.get("class-abi.jar")] = setOf(Paths.get("C.class"))
+    }
 
     val mergedMap: ClassUsageMap = mergeClassUsageMaps(prevClassUsageMap, currentClassUsageMap)
 
@@ -69,8 +69,9 @@ internal class ClassUsageMergerTest {
   @Test
   fun `when outer deletion is made then deleted class usage is still included in merged map`() {
     val prevClassUsageMap: ClassUsageMap = classUsageMapBase
-    val currentClassUsageMap: ClassUsageMap =
-        classUsageMapBase.apply { toMutableMap().remove(Paths.get("class-abi.jar")) }
+    val currentClassUsageMap: ClassUsageMap = classUsageMapBase.apply {
+      toMutableMap().remove(Paths.get("class-abi.jar"))
+    }
 
     val mergedMap: ClassUsageMap = mergeClassUsageMaps(prevClassUsageMap, currentClassUsageMap)
 
@@ -106,23 +107,21 @@ internal class ClassUsageMergerTest {
   private val classUsageMapBase: ClassUsageMap
     get() {
       val outerMap: MutableMap<Path, MutableSet<Path>> = HashMap()
-      val innerSet: MutableSet<Path> =
-          mutableSetOf(
-              Paths.get("kotlin/Unit.class"),
-              Paths.get("kotlin/io/ConsoleKt.class"),
-              Paths.get("kotlin/internal/InlineOnly.class"),
-              Paths.get("kotlin/annotation/Target.class"),
-              Paths.get("kotlin/annotation/MustBeDocumented.class"),
-              Paths.get("kotlin/annotation/Retention.class"),
-          )
+      val innerSet: MutableSet<Path> = mutableSetOf(
+          Paths.get("kotlin/Unit.class"),
+          Paths.get("kotlin/io/ConsoleKt.class"),
+          Paths.get("kotlin/internal/InlineOnly.class"),
+          Paths.get("kotlin/annotation/Target.class"),
+          Paths.get("kotlin/annotation/MustBeDocumented.class"),
+          Paths.get("kotlin/annotation/Retention.class"),
+      )
 
       outerMap[Paths.get("symlink_kotlin-stdlib-2.0.0.jar-class-abi.jar")] = innerSet
 
-      val innerSet2: MutableSet<Path> =
-          mutableSetOf(
-              Paths.get("java/lang/Object.class"),
-              Paths.get("java/lang/annotation/Annotation.class"),
-          )
+      val innerSet2: MutableSet<Path> = mutableSetOf(
+          Paths.get("java/lang/Object.class"),
+          Paths.get("java/lang/annotation/Annotation.class"),
+      )
       outerMap[Paths.get("android.jar")] = innerSet2
 
       val innerSet3: MutableSet<Path> = mutableSetOf(Paths.get("D.class"))

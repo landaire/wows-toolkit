@@ -14,9 +14,9 @@ def h(tag, children, attrs = {}, indent_level = 0) -> cmd_args:
         attrs_list = [
             cmd_args(
                 key,
-                "=\"",
+                '="',
                 value,
-                "\"",
+                '"',
                 delimiter = "",
             )
             for key, value in attrs.items()
@@ -160,7 +160,7 @@ def get_mode_config_path(mode_name):
     if mode_name.startswith("//"):
         mode_name = mode_name[2:]
     elif mode_name.startswith("fbsource//"):
-        mode_name = mode_name[len("fbsource//"):]
+        mode_name = mode_name[len("fbsource//") :]
     return mode_name.replace("/", "_") + ".props"
 
 def get_root_path_relative_to(target_label):
@@ -178,6 +178,43 @@ def get_output_path(target_node: bxl.ConfiguredTargetNode, bxl_ctx) -> str:
         return ""
 
     return get_path_without_materialization(default_outputs[0], bxl_ctx, abs = True)
+
+# Check if the input is possibly a hash string in content-based path (hacky!).
+def _is_possibly_hash(input):
+    return len(input) == 16 and all(map(lambda c: c.islower() or c.isdigit(), input.elems()))
+
+# Translate content based path to configuration based path as VS relies on stable paths to launch and debug binaries.
+def translate_content_based_path(content_based_path: str, target_label, cli_args) -> str:
+    default_mode_file = cli_args.mode_files[0]
+    default_mode_hash = cli_args.mode_hashes.get(default_mode_file) or {}
+    if target_label in default_mode_hash:
+        default_mode_hash = default_mode_hash[target_label]
+    else:
+        default_mode_hash = default_mode_hash["default"]
+
+    found_cell = False
+    found_target = False
+    skip_next = False
+    config_based_path = []
+    for component in content_based_path.split("\\"):
+        if skip_next:
+            if not _is_possibly_hash(component):
+                # Not a content-based path.
+                return content_based_path
+            skip_next = False
+
+            # Skip SHA component in content-based path.
+            continue
+
+        config_based_path += [component]
+        if (not found_cell) and component == target_label.cell:
+            found_cell = True
+            config_based_path += [default_mode_hash]
+        if (not found_target) and component.startswith("__") and component.endswith("__"):
+            found_target = True
+            skip_next = True
+
+    return "\\".join(config_based_path)
 
 def infer_settings_by_modes(target_label, settings, mode_files, mode_hashes) -> dict[str, typing.Any]:
     if len(mode_files) == 1:
@@ -234,14 +271,7 @@ def sanitize(input):
 # https://en.wikipedia.org/wiki/XML#Escaping
 # TODO: apply escape in more places.
 def escape_xml(input):
-    return (
-        input
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-            .replace("'", "&apos;")
-            .replace('"', "&quot;")
-    )
+    return input.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("'", "&apos;").replace('"', "&quot;")
 
 def flatten_lists(list_list):
     final_list = []
@@ -267,7 +297,7 @@ def merge(input1, input2):
         return {item: True for item in input1 + input2}.keys()
 
     result = {}
-    for (key, value) in input1.items() + input2.items():
+    for key, value in input1.items() + input2.items():
         result[key] = merge(result.get(key), value)
     return result
 

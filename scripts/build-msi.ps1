@@ -7,8 +7,10 @@ $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
 # The provisioned Buck2, not whatever is on PATH: the vendored prelude only
-# loads under the release it was expanded from.
-$buck2 = "toolchains/windows/offline/installed/Buck2/2025-12-01/buck2.exe"
+# loads under the release it was expanded from. Its path comes from the manifest
+# so the pinned version lives in exactly one place.
+$manifest = Get-Content -Raw "toolchains/windows/toolchain-manifest.json" | ConvertFrom-Json
+$buck2 = Join-Path "toolchains/windows/offline/installed" $manifest.tools.buck2.path
 if (-not (Test-Path -LiteralPath $buck2 -PathType Leaf)) {
     throw "Missing $buck2. Run toolchains/windows/provision-toolchain.ps1 first."
 }

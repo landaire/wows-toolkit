@@ -8,26 +8,28 @@
 
 # pyre-ignore-all-errors
 
-import json
 import os
 import tempfile
 
 
 class ParBuilder:
     """
-    Asbtract class that represents the process of build a .par file
+    Abstract class that represents the process of building a .par file
     """
 
-    def __init__(self, options, manifest, mode=None, warnings=None):
-        self.options = options  # lets not pass this around anymore
+    def __init__(self, options, manifest, mode=None):
+        self.options = options
         self.manifest = manifest
         self.output = options.output
         self.strict_tabs = options.strict_tabs
         self.warnings = options.warnings
         self.mode = mode
-        self.runtime_env = options.runtime_env
+        self.runtime_env = list(options.runtime_env)
+        self.runtime_env.append(
+            "FB_PAR_FIX_OS_ARGV={}".format("1" if options.fix_os_argv else "")
+        )
+        self.interpreter_flags = options.interpreter_flags
         self.ld_preload = options.ld_preload
-        self.exe = None
 
         self.python = options.python
         self.python_home = options.python_home or None
@@ -51,7 +53,7 @@ class ParBuilder:
             if self.mode:
                 os.chmod(self.output, self.mode)
 
-    def _gen_contents(self):
+    def _gen_contents(self, output_file):
         raise NotImplementedError
 
     def _postbuild(self):
@@ -87,4 +89,7 @@ class ParBuilder:
         if flags:
             cmd.append("-" + "".join(flags))
 
-        return " ".join(arg for arg in cmd)
+        if self.interpreter_flags:
+            cmd.extend(self.interpreter_flags)
+
+        return " ".join(cmd)

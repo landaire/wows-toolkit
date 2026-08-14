@@ -54,7 +54,7 @@ summary(omitted) -> ?OMITTED.
         details := binary(),
         durationSecs := float(),
         std_out := binary(),
-        endedTime => float()
+        endedTime => integer()
     }.
 
 -type collected_result() :: cth_tpx_test_tree:collected_result().
@@ -85,9 +85,9 @@ format_case(
     } = _CaseResult
 ) ->
     #{
-        inits => lists:map(fun(MethodResult) -> format_method_result(MethodResult) end, Inits),
+        inits => [format_method_result(Elem) || Elem <:- Inits],
         main => format_method_result(Main),
-        ends => lists:map(fun(MethodResult) -> format_method_result(MethodResult) end, Ends)
+        ends => [format_method_result(Elem) || Elem <:- Ends]
     }.
 
 -spec format_method_result(cth_tpx_test_tree:collected_method_result()) -> formatted_result().

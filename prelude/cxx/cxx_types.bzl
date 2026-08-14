@@ -12,12 +12,12 @@ load(
     "CudaCompileStyle",
 )
 load(
-    "@prelude//cxx:link_groups_types.bzl",
-    "LinkGroupInfo",  # @unused Used as a type
+    "@prelude//cxx:cxx_toolchain_types.bzl",
+    "RuntimeDependencyHandling",  # @unused Used as a type
 )
 load(
-    "@prelude//cxx:runtime_dependency_handling.bzl",
-    "RuntimeDependencyHandling",  # @unused Used as a type
+    "@prelude//cxx:link_groups_types.bzl",
+    "LinkGroupInfo",  # @unused Used as a type
 )
 load(
     "@prelude//linking:link_info.bzl",
@@ -33,12 +33,15 @@ load(
     "SharedLibrary",  # @unused Used as a type
 )
 load(":argsfiles.bzl", "CompileArgsfiles")
-load(":compile_types.bzl", "CxxSrcCompileCommand")
+load(
+    ":compile_types.bzl",
+    "IndexStoreFactory",
+    "UseHeaderUnitsMode",
+)
 load(
     ":cxx_sources.bzl",
     "CxxSrcWithFlags",  # @unused Used as a type
 )
-load(":cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load(
     ":headers.bzl",
     "CxxHeadersLayout",
@@ -60,6 +63,8 @@ load(
     ":xcode.bzl",
     "cxx_populate_xcode_attributes",
 )
+
+LinkPreference = enum("default", "full", "incremental")
 
 CxxLibraryInfo = provider(
     fields = dict(
@@ -132,15 +137,12 @@ CxxRuleAdditionalParams = record(
 # different and need to be specified. The following record holds the data which
 # is needed to specialize user-facing rule from generic implementation.
 CxxRuleConstructorParams = record(
-    #Required
-
+    # Required
     # Name of the top level rule utilizing the cxx rule.
     rule_type = str,
     # Header layout to use importing headers.
     headers_layout = CxxHeadersLayout,
-
-    #Optional
-
+    # Optional
     # Whether to build an empty shared library. This is utilized for rust_python_extensions
     # so that they can link against the rust shared object.
     build_empty_so = field(bool, False),
@@ -246,23 +248,17 @@ CxxRuleConstructorParams = record(
     # Compiler flags
     compiler_flags = field(list[typing.Any], []),
     lang_compiler_flags = field(dict[typing.Any, typing.Any], {}),
-    # Platform compiler flags
-    platform_compiler_flags = field(list[(str, typing.Any)], []),
-    lang_platform_compiler_flags = field(dict[typing.Any, typing.Any], {}),
     # Preprocessor flags
     preprocessor_flags = field(list[typing.Any], []),
     lang_preprocessor_flags = field(dict[typing.Any, typing.Any], {}),
-    # Platform preprocessor flags
-    platform_preprocessor_flags = field(list[(str, typing.Any)], []),
-    lang_platform_preprocessor_flags = field(dict[typing.Any, typing.Any], {}),
     # modulename-Swift.h header for building objc targets that rely on this swift dep
     swift_objc_header = field([Artifact, None], None),
     error_handler = field([typing.Callable, None], None),
-    index_store_factory = field(typing.Callable[[AnalysisActions, Label, CxxSrcCompileCommand, CxxToolchainInfo, cmd_args], Artifact | None] | None, None),
+    index_store_factory = field(IndexStoreFactory | None, None),
     # Swift index stores to propagate
     index_stores = field(list[Artifact] | None, None),
     # Whether to add header units from dependencies to the command line.
-    use_header_units = field(bool, False),
+    use_header_units = field(UseHeaderUnitsMode, UseHeaderUnitsMode("none")),
     # Whether to export a header unit to all dependents.
     export_header_unit = field([str, None], None),
     # Filter what headers to include in header units.
@@ -291,11 +287,14 @@ CxxRuleConstructorParams = record(
     use_content_based_paths = field(bool, False),
     # Coverage instrumentation compiler flags
     coverage_instrumentation_compiler_flags = field(list[str], []),
+    # Optional profile list artifact for selective coverage via -fprofile-list
+    coverage_profile_list = field(Artifact | None, None),
     # Separate debug info
     separate_debug_info = field(bool, False),
     # Cuda compile stype
     cuda_compile_style = field(CudaCompileStyle | None, None),
-    # If set, do not export this targets headers, used for Apple rules that
-    # are using symlink trees.
-    skip_exported_headers = field(bool, False),
+    link_preference = field(LinkPreference, LinkPreference("default")),
+    supports_stripping = field(bool, True),
+    # Whether to set expect_eligible_for_dedupe on compile actions.
+    expect_eligible_for_dedupe = field(bool, False),
 )

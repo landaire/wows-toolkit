@@ -13,6 +13,7 @@ package com.facebook.buck.android.resources;
 import com.facebook.buck.android.aapt.RDotTxtEntry;
 import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.util.zip.JarBuilder;
+import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -24,11 +25,13 @@ import java.nio.file.Paths;
 import java.util.EnumSet;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.jetbrains.annotations.Nullable;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 
 /** Main entry point for executing {@link MergeAndroidResources} calls. */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class MergeAndroidResourcesExecutableMain {
   @Option(name = "--symbol-file-info", required = true)
   private String symbolFileInfo;
@@ -40,47 +43,51 @@ public class MergeAndroidResourcesExecutableMain {
   private String outputDirZippedString;
 
   @Option(name = "--strings-output-dir")
-  private String stringsOutputDirString;
+  private @Nullable String stringsOutputDirString = null;
 
   @Option(name = "--strings-output-dir-zipped")
-  private String stringsOutputDirZippedString;
+  private @Nullable String stringsOutputDirZippedString = null;
 
   @Option(name = "--ids-output-dir")
-  private String idsOutputDirString;
+  private @Nullable String idsOutputDirString = null;
 
   @Option(name = "--ids-output-dir-zipped")
-  private String idsOutputDirZippedString;
+  private @Nullable String idsOutputDirZippedString = null;
 
   @Option(name = "--force-final-resource-ids")
   private boolean forceFinalResourceIds = false;
 
   @Option(name = "--uber-r-dot-txt")
-  private String uberRDotTxtFilesList;
+  private @Nullable String uberRDotTxtFilesList = null;
 
   @Option(name = "--banned-duplicate-resource-types")
-  private String bannedDuplicateResourceTypesList;
+  private @Nullable String bannedDuplicateResourceTypesList = null;
 
   @Option(name = "--override-symbols")
-  private String overrideSymbolsList;
+  private @Nullable String overrideSymbolsList = null;
 
   @Option(name = "--duplicate-resource-allowlist-path")
-  private String duplicateResourceAllowlist;
+  private @Nullable String duplicateResourceAllowlist = null;
 
   @Option(name = "--union-package")
-  private String unionPackageString;
+  private @Nullable String unionPackageString = null;
 
   @Option(name = "--referenced-resources-lists")
-  private String referencedResourcesLists;
+  private @Nullable String referencedResourcesLists = null;
+
+  @Option(name = "--optimized-processing", usage = "enable optimized resource processing")
+  private boolean optimizedProcessing = false;
 
   public static void main(String[] args) throws IOException {
     MergeAndroidResourcesExecutableMain main = new MergeAndroidResourcesExecutableMain();
     CmdLineParser parser = new CmdLineParser(main);
     try {
       parser.parseArgument(args);
+      ResourceProcessingConfig.setOptimizationsEnabled(main.optimizedProcessing);
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
-      System.err.println(e.getMessage());
+      System.err.println(e.toString());
       parser.printUsage(System.err);
       System.exit(1);
     }

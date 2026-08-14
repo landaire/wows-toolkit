@@ -20,11 +20,11 @@ import com.facebook.buck.testutil.TemporaryPaths
 import com.google.common.collect.ImmutableList
 import java.io.File
 import java.nio.file.Files
+import java.nio.file.attribute.FileTime
 import java.util.UUID
 import kotlin.io.path.absolute
 import kotlin.io.path.extension
 import kotlin.io.path.listDirectoryEntries
-import kotlin.io.path.toPath
 import org.jetbrains.kotlin.buildtools.api.CompilationResult
 import org.jetbrains.kotlin.buildtools.api.CompilationService
 import org.jetbrains.kotlin.buildtools.api.ExperimentalBuildToolsApi
@@ -78,8 +78,10 @@ internal class KotlinCompilationServiceTest {
             """
             |class Foo {
             |
+            | var counter: Int = 0
+            |
             | fun foo() {
-            |   println("foo")
+            |   counter = 1
             | }
             |
             | fun bar() {}
@@ -158,9 +160,9 @@ internal class KotlinCompilationServiceTest {
             ),
         mode = createIncrementalMode(),
     )
+    resetClassModificationTimesToSentinel()
     val initialClassTimestamps = getClassModificationTimes()
-
-    fooSourceFile.changeContent("println(\"foo\")", "println(\"foo!\")")
+    fooSourceFile.changeContent("counter = 1", "counter = 2")
     val result =
         kotlinCompilationService.compile(
             projectId = ProjectId.ProjectUUID(UUID.randomUUID()),
@@ -189,6 +191,7 @@ internal class KotlinCompilationServiceTest {
             ),
         mode = createIncrementalMode(),
     )
+    resetClassModificationTimesToSentinel()
     val initialClassTimestamps = getClassModificationTimes()
     fooSourceFile.changeContent("foo()", "foo(i: Int = 1)")
 
@@ -267,7 +270,7 @@ internal class KotlinCompilationServiceTest {
     )
     val initialClassTimestamps = getClassModificationTimes()
 
-    fooSourceFile.changeContent("println(\"foo\")", "println(\"foo!\")")
+    fooSourceFile.changeContent("counter = 1", "counter = 2")
     kotlinCompilationService.compile(
         projectId = ProjectId.ProjectUUID(UUID.randomUUID()),
         arguments =
@@ -321,8 +324,8 @@ internal class KotlinCompilationServiceTest {
                 ClasspathChanges.ToBeComputedByIncrementalCompiler(ImmutableList.of(snapshot))
             ),
     )
+    resetClassModificationTimesToSentinel()
     val initialClassTimestamps = getClassModificationTimes()
-
     fooSourceFile.changeContent("foo()", "foo(i: Int = 1)")
     kotlinCompilationService.compile(
         projectId = ProjectId.ProjectUUID(UUID.randomUUID()),
@@ -433,8 +436,8 @@ internal class KotlinCompilationServiceTest {
                 ClasspathChanges.ToBeComputedByIncrementalCompiler(ImmutableList.of(snapshot))
             ),
     )
+    resetClassModificationTimesToSentinel()
     val initialClassTimestamps = getClassModificationTimes()
-
     fooSourceFile.changeContent("fun bar() {}", "")
     kotlinCompilationService.compile(
         projectId = ProjectId.ProjectUUID(UUID.randomUUID()),
@@ -469,14 +472,18 @@ internal class KotlinCompilationServiceTest {
       outputDir: AbsPath,
       classpath: List<AbsPath> = emptyList(),
   ): List<String> {
+    // The compiler is invoked with `-no-stdlib`, so the stdlib must be supplied explicitly on the
+    // classpath. It has to be a standalone kotlin-stdlib jar: resolving it reflectively from
+    // `KotlinVersion` yields the merged test binary, whose `META-INF/*.kotlin_module` metadata is
+    // stripped, leaving top-level declarations such as `println` unresolvable. The path is injected
+    // by the `KOTLIN_STDLIB_JAR` env var set on the test target.
     val stdlibLocation =
         AbsPath.of(
-            KotlinVersion::class
-                .java
-                .protectionDomain
-                .codeSource
-                .location
-                .toURI()
+            File(
+                    checkNotNull(System.getenv(KOTLIN_STDLIB_JAR_ENV)) {
+                      "$KOTLIN_STDLIB_JAR_ENV env var is not set"
+                    }
+                )
                 .toPath()
                 .absolute()
         )
@@ -512,15 +519,35 @@ internal class KotlinCompilationServiceTest {
         path.fileName.toString() to Files.getLastModifiedTime(path).toMillis()
       }
 
+  /**
+   * Stamp existing `.class` outputs with a fixed past mtime so a later recompile (which writes a
+   * current mtime) is detected as `mtime != sentinel`, independent of filesystem timestamp
+   * granularity. Call after the first compile, before capturing the baseline timestamps.
+   */
+  private fun resetClassModificationTimesToSentinel() {
+    val sentinel = FileTime.fromMillis(SENTINEL_TIMESTAMP_MS)
+    classesDir.path.listDirectoryEntries().forEach { path ->
+      Files.setLastModifiedTime(path, sentinel)
+    }
+  }
+
   private fun generateClasspathSnapshot(
       dependencyOutput: AbsPath,
       granularity: SnapshotGranularity,
   ): File {
-    // see details in docs for `CachedClasspathSnapshotSerializer` for details why we can't use a
-    // fixed name
-    val snapshotFile = librarySnapshotsDir.resolve("dep-${System.currentTimeMillis()}.snapshot")
+    // `CachedClasspathSnapshotSerializer` caches snapshots by file name (see its docs), so every
+    // snapshot needs a distinct name or a stale cached snapshot is returned. A timestamp-based name
+    // collides when two snapshots are generated within the same millisecond, so use a UUID instead.
+    val snapshotFile = librarySnapshotsDir.resolve("dep-${UUID.randomUUID()}.snapshot")
     ClasspathSnapshotGenerator(dependencyOutput.path, snapshotFile.path, granularity).run()
 
     return snapshotFile.toFile()
+  }
+
+  companion object {
+    private const val KOTLIN_STDLIB_JAR_ENV = "KOTLIN_STDLIB_JAR"
+
+    // 2000-01-01T00:00:00Z.
+    private const val SENTINEL_TIMESTAMP_MS = 946_684_800_000L
   }
 }

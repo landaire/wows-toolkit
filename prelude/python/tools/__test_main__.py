@@ -7,6 +7,8 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
+# pyre-strict
+
 """
 This file contains the main module code for buck python test programs.
 
@@ -15,10 +17,6 @@ rules can also specify their own custom main_module.  If you write your own
 main module, you can import this module as tools.test.stubs.fbpyunit, to access
 any of its code to help implement your main module.
 """
-
-# pyre-unsafe
-
-from __future__ import print_function
 
 import contextlib
 import ctypes
@@ -34,20 +32,13 @@ import time
 import traceback
 import unittest
 from importlib.machinery import PathFinder
+from io import StringIO
 
-
-try:
-    from StringIO import StringIO  # type: ignore
-except ImportError:
-    from io import StringIO
 try:
     import coverage  # type: ignore
 except ImportError:
     coverage = None
-try:
-    from importlib.machinery import SourceFileLoader
-except ImportError:
-    SourceFileLoader = None
+from importlib.machinery import SourceFileLoader
 
 
 EXIT_CODE_SUCCESS = 0
@@ -134,10 +125,10 @@ class DebugWipeFinder(PathFinder):
 def optimize_for_coverage(cov, include_patterns, omit_patterns):
     """
     We get better performance if we zero out debug information for files which
-    we're not interested in. Only available in CPython 3.3+
+    we're not interested in. Only available in CPython.
     """
     matcher = PathMatcher(include_patterns, omit_patterns)
-    if SourceFileLoader and platform.python_implementation() == "CPython":
+    if platform.python_implementation() == "CPython":
         sys.meta_path.insert(0, DebugWipeFinder(matcher))
 
 
@@ -637,8 +628,7 @@ class MainProgram:
             parts = value.rsplit("=", 1)
             if len(parts) != 2:
                 self.option_parser.error(
-                    "--logger argument must be of the "
-                    "form <name>=<level>: %s" % value
+                    "--logger argument must be of the form <name>=<level>: %s" % value
                 )
             name = parts[0]
             level_name = parts[1].lower()
@@ -719,9 +709,7 @@ class MainProgram:
 
     def run_tests(self, test_suite):
         # Install a signal handler to catch Ctrl-C and display the results
-        # (but only if running >2.6).
-        if sys.version_info[0] > 2 or sys.version_info[1] > 6:
-            unittest.installHandler()
+        unittest.installHandler()
 
         # Run the tests
         runner = BuckTestRunner(

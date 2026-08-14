@@ -14,7 +14,7 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from apple.tools.plistlib_utils import detect_format_and_loads
 
@@ -32,6 +32,10 @@ class ProvisioningProfileMetadata:
     # Let's agree they are uppercased
     developer_certificate_fingerprints: frozenset[str]
     entitlements: dict[str, Any]
+    # Naïve object with ignored timezone (same as expiration_date)
+    creation_date: Optional[datetime] = None
+    provisions_all_devices: Optional[bool] = None
+    provisioned_devices: Optional[list[str]] = None
 
     _mergeable_entitlements_keys: frozenset[str] = frozenset(
         [
@@ -71,9 +75,9 @@ class ProvisioningProfileMetadata:
         developer_certificate_fingerprints = {
             hashlib.sha1(c).hexdigest().upper() for c in root["DeveloperCertificates"]
         }
-        assert (
-            len(developer_certificate_fingerprints) > 0
-        ), "Expected at least one suitable certificate."
+        assert len(developer_certificate_fingerprints) > 0, (
+            "Expected at least one suitable certificate."
+        )
         return ProvisioningProfileMetadata(
             file_path=file_path,
             uuid=root["UUID"],
@@ -83,6 +87,9 @@ class ProvisioningProfileMetadata:
                 developer_certificate_fingerprints
             ),
             entitlements=root["Entitlements"],
+            creation_date=root.get("CreationDate"),
+            provisions_all_devices=root.get("ProvisionsAllDevices"),
+            provisioned_devices=root.get("ProvisionedDevices"),
         )
 
     def __hash__(self) -> int:

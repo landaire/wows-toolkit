@@ -15,7 +15,9 @@ DSYM_INFO_SUBTARGET = "dsym-info"
 EXTENDED_DSYM_INFO_SUBTARGET = "extended-dsym-info"
 DWARF_AND_DSYM_SUBTARGET = "dwarf-and-dsym"
 
-def get_apple_dsym(ctx: AnalysisContext, executable: Artifact, debug_info: list[ArgLike], action_identifier: str, output_path_override: [str, None] = None) -> Artifact:
+def get_apple_dsym(
+    ctx: AnalysisContext, executable: Artifact, debug_info: list[ArgLike], action_identifier: str, output_path_override: [str, None] = None
+) -> Artifact:
     output_path = output_path_override or "{}.dSYM".format(executable.short_path)
     return get_apple_dsym_ext(ctx, executable, debug_info, action_identifier, output_path)
 
@@ -23,7 +25,7 @@ def get_apple_dsym(ctx: AnalysisContext, executable: Artifact, debug_info: list[
 # - oso_prefix
 def get_apple_dsym_ext(ctx: AnalysisContext, executable: [ArgLike, Artifact], debug_info: list[ArgLike], action_identifier: str, output_path: str) -> Artifact:
     dsymutil = ctx.attrs._apple_toolchain[AppleToolchainInfo].dsymutil
-    output = ctx.actions.declare_output(output_path, dir = True)
+    output = ctx.actions.declare_output(output_path, dir = True, has_content_based_path = False)
     cmd = cmd_args(
         [
             dsymutil,
@@ -51,9 +53,8 @@ AppleDsymJsonInfo = record(
 )
 
 def get_apple_dsym_info_json(
-        binary_dsyms: list[Artifact],
-        dep_dsyms: list[Artifact],
-        metadata: list[AppleSelectiveDebuggableMetadata] | None = None) -> AppleDsymJsonInfo:
+    binary_dsyms: list[Artifact], dep_dsyms: list[Artifact], metadata: list[AppleSelectiveDebuggableMetadata] | None = None
+) -> AppleDsymJsonInfo:
     dsym_info = {}
 
     if len(binary_dsyms) == 1:

@@ -6,8 +6,8 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//cxx:cxx_library_utility.bzl", "cxx_attr_deps", "cxx_attr_exported_deps")
 load("@prelude//cxx:link_groups_types.bzl", "LinkGroupInfo")
+load("@prelude//utils:arglike.bzl", "ArgLike")
 load(
     ":types.bzl",
     "XPluginsPluginUsageInfo",
@@ -16,30 +16,18 @@ load(
     "XPluginsUsageInfoSet",
 )
 
-def get_xplugins_usage_info(ctx: AnalysisContext) -> XPluginsUsageInfo | None:
-    plugin_manifests = []
-    socket_manifests = []
-    usage_infos = []
-    for d in cxx_attr_deps(ctx):
-        if XPluginsPluginUsageInfo in d:
-            plugin_manifests.append(d[XPluginsPluginUsageInfo])
-        if XPluginsSocketUsageInfo in d:
-            socket_manifests.append(d[XPluginsSocketUsageInfo])
-        if XPluginsUsageInfo in d:
-            usage_infos.append(d[XPluginsUsageInfo])
-
-    # Collect the XPluginsUsageInfo from exported_deps too
-    for d in cxx_attr_exported_deps(ctx):
-        if XPluginsUsageInfo in d:
-            usage_infos.append(d[XPluginsUsageInfo])
+def get_xplugins_usage_info(actions: AnalysisActions, all_deps: list[Dependency]) -> XPluginsUsageInfo | None:
+    plugin_manifests = [d[XPluginsPluginUsageInfo] for d in all_deps if XPluginsPluginUsageInfo in d]
+    socket_manifests = [d[XPluginsSocketUsageInfo] for d in all_deps if XPluginsSocketUsageInfo in d]
+    usage_infos = [d[XPluginsUsageInfo] for d in all_deps if XPluginsUsageInfo in d]
 
     if plugin_manifests or socket_manifests or usage_infos:
-        plugin_info_tset = ctx.actions.tset(
+        plugin_info_tset = actions.tset(
             XPluginsUsageInfoSet,
             value = plugin_manifests,
             children = [u.plugin_info_tset for u in usage_infos],
         )
-        socket_info_tset = ctx.actions.tset(
+        socket_info_tset = actions.tset(
             XPluginsUsageInfoSet,
             value = socket_manifests,
             children = [u.socket_info_tset for u in usage_infos],
@@ -52,11 +40,8 @@ def get_xplugins_usage_info(ctx: AnalysisContext) -> XPluginsUsageInfo | None:
         return None
 
 def _filter_plugins_artifacts(
-        actions: AnalysisActions,
-        link_group: str,
-        link_group_info: LinkGroupInfo,
-        out: OutputArtifact,
-        usage_info_tset: XPluginsUsageInfoSet) -> list[Provider]:
+    actions: AnalysisActions, link_group: str, link_group_info: LinkGroupInfo, out: OutputArtifact, usage_info_tset: XPluginsUsageInfoSet
+) -> list[Provider]:
     mappings = link_group_info.mappings
     usage_infos = []
     for usage_info_list in usage_info_tset.traverse():
@@ -85,78 +70,71 @@ _xplugins_manifest_rule = dynamic_actions(
     },
 )
 
-def get_xplugins_usage_subtargets(
-        ctx: AnalysisContext,
-        usage_info: XPluginsUsageInfo | None,
-        link_group_info: LinkGroupInfo | None) -> dict[str, list[Provider]]:
-    if not usage_info:
-        return {}
+_ManifestInfo = record(
+    argsfile = field(Artifact),
+    unfiltered_argsfile = field(Artifact),
+    manifests = field(ArgLike),
+)
 
-    plugin_usage_argsfile = ctx.actions.declare_output("xplugins/{}_plugin_usage_info.argsfile".format(ctx.attrs.name))
-    socket_usage_argsfile = ctx.actions.declare_output("xplugins/{}_socket_usage_info.argsfile".format(ctx.attrs.name))
-    plugin_usage_manifests = usage_info.plugin_info_tset.project_as_args("artifacts")
-    socket_usage_manifests = usage_info.socket_info_tset.project_as_args("artifacts")
+def _process_manifest(ctx, kind, info_tset, link_group_info):
+    """Process a single manifest kind (plugin or socket), returning a _ManifestInfo record."""
+    argsfile = ctx.actions.declare_output("xplugins/{}_{}_usage_info.argsfile".format(ctx.label.name, kind), has_content_based_path = False)
+    manifests = info_tset.project_as_args("artifacts")
 
     if link_group_info:
         ctx.actions.dynamic_output_new(
             _xplugins_manifest_rule(
                 link_group = ctx.attrs.link_group or "",
                 link_group_info = link_group_info,
-                out = plugin_usage_argsfile.as_output(),
-                usage_info_tset = usage_info.plugin_info_tset,
+                out = argsfile.as_output(),
+                usage_info_tset = info_tset,
             ),
         )
-        ctx.actions.dynamic_output_new(
-            _xplugins_manifest_rule(
-                link_group = ctx.attrs.link_group or "",
-                link_group_info = link_group_info,
-                out = socket_usage_argsfile.as_output(),
-                usage_info_tset = usage_info.socket_info_tset,
-            ),
+        unfiltered_argsfile = ctx.actions.write(
+            "unfiltered_{}_usage_info.argsfile".format(kind),
+            manifests,
+            has_content_based_path = False,
         )
-
-        unfiltered_socket_usage_argsfile = ctx.actions.write(
-            "unfiltered_socket_usage_info.argsfile",
-            socket_usage_manifests,
-        )
-        unfiltered_plugin_usage_argsfile = ctx.actions.write(
-            "unfiltered_plugin_usage_info.argsfile",
-            plugin_usage_manifests,
-        )
-
     else:
-        unfiltered_socket_usage_argsfile = socket_usage_argsfile
-        unfiltered_plugin_usage_argsfile = plugin_usage_argsfile
+        unfiltered_argsfile = argsfile
+        ctx.actions.write(
+            argsfile.as_output(),
+            manifests,
+        )
 
-        # Without link groups we can just project the artifacts to a file
-        ctx.actions.write(
-            plugin_usage_argsfile.as_output(),
-            plugin_usage_manifests,
-        )
-        ctx.actions.write(
-            socket_usage_argsfile.as_output(),
-            socket_usage_manifests,
-        )
+    return _ManifestInfo(
+        argsfile = argsfile,
+        unfiltered_argsfile = unfiltered_argsfile,
+        manifests = manifests,
+    )
+
+def _make_manifest_providers(info):
+    """Build the provider list for a manifest subtarget."""
+    return [
+        DefaultInfo(
+            default_output = info.argsfile,
+            other_outputs = [info.manifests],
+            sub_targets = {
+                "unfiltered": [
+                    DefaultInfo(
+                        default_output = info.unfiltered_argsfile,
+                        other_outputs = [info.manifests],
+                    )
+                ],
+            },
+        ),
+    ]
+
+def get_xplugins_usage_subtargets(
+    ctx: AnalysisContext, usage_info: XPluginsUsageInfo | None, link_group_info: LinkGroupInfo | None
+) -> dict[str, list[Provider]]:
+    if not usage_info:
+        return {}
+
+    plugin = _process_manifest(ctx, "plugin", usage_info.plugin_info_tset, link_group_info)
+    socket = _process_manifest(ctx, "socket", usage_info.socket_info_tset, link_group_info)
 
     return {
-        "xplugins-plugin-manifests": [
-            DefaultInfo(default_output = plugin_usage_argsfile, other_outputs = [plugin_usage_manifests], sub_targets = {
-                "unfiltered": [DefaultInfo(
-                    default_output = unfiltered_plugin_usage_argsfile,
-                    other_outputs = [plugin_usage_manifests],
-                )],
-            }),
-        ],
-        "xplugins-socket-manifests": [
-            DefaultInfo(
-                default_output = socket_usage_argsfile,
-                other_outputs = [socket_usage_manifests],
-                sub_targets = {
-                    "unfiltered": [DefaultInfo(
-                        default_output = unfiltered_socket_usage_argsfile,
-                        other_outputs = [socket_usage_manifests],
-                    )],
-                },
-            ),
-        ],
+        "xplugins-plugin-manifests": _make_manifest_providers(plugin),
+        "xplugins-socket-manifests": _make_manifest_providers(socket),
     }

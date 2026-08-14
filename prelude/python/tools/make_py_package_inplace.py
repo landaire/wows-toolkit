@@ -21,12 +21,12 @@ This script:
 A full usage might be something like this:
 
 $ cat template.in
-(see prelude/python/run_inplace_lite.py.in)
+(see prelude/python/run_inplace.py.in)
 $ ./make_py_package_inplace.py  \\
     --template prelude/python/run_inplace.py.in \\
     # These two args create the hashbang for the bootstrapper script \\
     --python="/usr/bin/python3" \\
-    --python-interpreter-flags="-Es" \\
+    --python-interpreter-flags="-Xgil=0" \\
     # This is based on the path in dests. This is the module that gets executed \\
     # to start program execution \\
     --entry-point=lib.foo  \\
@@ -59,13 +59,6 @@ def parse_args() -> argparse.Namespace:
         help="The template file for the .pex bootstrapper script",
     )
     parser.add_argument(
-        "--template-lite",
-        required=True,
-        type=Path,
-        help="The template file for the .pex bootstrapper script, if it's simple",
-    )
-
-    parser.add_argument(
         "--preload",
         type=Path,
         dest="preload_libraries",
@@ -82,11 +75,6 @@ def parse_args() -> argparse.Namespace:
         "--host-python",
         required=True,
         help="The host python binary to use to e.g. compiling bytecode",
-    )
-    parser.add_argument(
-        "--python-interpreter-flags",
-        default="-Es",
-        help="The interpreter flags for the hashbang",
     )
     entry_point = parser.add_mutually_exclusive_group(required=True)
     entry_point.add_argument(
@@ -115,11 +103,6 @@ def parse_args() -> argparse.Namespace:
         help="The link tree directory to use at runtime",
     )
     parser.add_argument(
-        "--use-lite",
-        help="Whether to use the lite template",
-        action="store_true",
-    )
-    parser.add_argument(
         "output",
         type=Path,
         help="Where to write the bootstrapper script to",
@@ -145,6 +128,12 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="environment variables to set before launching the runtime. (e.g. -e FOO=BAR BAZ=QUX)",
     )
+    parser.add_argument(
+        "--python-interpreter-flags",
+        action="append",
+        default=[],
+        help="additional flags to pass to the Python interpreter (e.g. -Xgil=0)",
+    )
     # Compatibility with existing make_par scripts
     parser.add_argument("--passthrough", action="append", default=[])
     # No-op, added for compatibility with existing make_par scripts
@@ -158,12 +147,7 @@ def parse_args() -> argparse.Namespace:
 def write_bootstrapper(args: argparse.Namespace) -> None:
     """Write the .pex bootstrapper script using a template"""
 
-    template = (
-        args.template_lite
-        if (args.use_lite and not args.runtime_env)
-        else args.template
-    )
-    with open(template, "r", encoding="utf8") as fin:
+    with open(args.template, "r", encoding="utf8") as fin:
         data = fin.read()
 
     # Because this can be invoked from other directories, find the relative path
@@ -177,9 +161,6 @@ def write_bootstrapper(args: argparse.Namespace) -> None:
     #                 the current shell. So, we hack in /usr/bin/env in the front
     #                 for now, and let it do the lifting. OSX: Bringing you the best
     #                 of 1980s BSD in 2021...
-    #                 Also, make sure we add PYTHON_INTERPRETER_FLAGS back. We had to
-    #                 exclude it for now, because linux doesn't like multiple args
-    #                 after /usr/bin/env
 
     ld_preload = None
     if args.preload_libraries:
@@ -190,7 +171,11 @@ def write_bootstrapper(args: argparse.Namespace) -> None:
         python = os.path.abspath(python)
 
     new_data = data.replace("<PYTHON>", f"/usr/bin/env {python}")
-    new_data = new_data.replace("<PYTHON_INTERPRETER_FLAGS>", "")
+    # Instead, pass interpreter flags via the Python variable that the re-exec
+    # path uses (e.g. -Xgil=0 for free-threaded builds).
+    new_data = new_data.replace(
+        "<PYTHON_INTERPRETER_FLAGS>", " ".join(args.python_interpreter_flags or [])
+    )
 
     new_data = new_data.replace("<MODULES_DIR>", str(relative_modules_dir))
     main_module = args.entry_point

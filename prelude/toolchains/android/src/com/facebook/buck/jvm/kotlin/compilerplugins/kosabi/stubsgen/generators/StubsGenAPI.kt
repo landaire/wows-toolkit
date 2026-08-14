@@ -55,29 +55,28 @@ open class StubsGenAPI(
     val additionalSrcStubsContext = GenerationContext(knownSources, classPaths, lightweight = true)
     val additionalSrcStubs =
         generateStubs(configureAdditionalSourcesGenerators(), additionalSrcStubsContext)
-    val additionalRenderedSrcStubs: List<RenderedKStub> =
-        additionalSrcStubs.map { RenderedKStub(it, it.render()) }
+    val additionalRenderedSrcStubs: List<RenderedKStub> = additionalSrcStubs.map {
+      RenderedKStub(it, it.render())
+    }
     val additionalSrcs = additionalRenderedSrcStubs.map { generateFakeKtFile(project, it) }
 
-    val stubsGenerators: List<StubsGenerator> =
-        listOf(
-            PrimitiveStubsGenerator(getPostfixToSkipForPrimitiveTypesGeneration()),
-            InnerClassStubsGenerator(),
-            FullQualifiedClassStubsGenerator(),
-            SamePackageClassStubsGenerator(),
-            CtorStubsGenerator(),
-            InterfaceStubsGenerator(),
-            GenericStubsGenerator(),
-            AnnotationStubsGenerator(),
-            ClassLevelFunctionStubsGenerator(),
-        )
-    val context =
-        GenerationContext(
-            additionalSrcs + knownSources,
-            classPaths,
-            getKnownKspGeneratedTypes(),
-            lightweight = false,
-        )
+    val stubsGenerators: List<StubsGenerator> = listOf(
+        PrimitiveStubsGenerator(getPostfixToSkipForPrimitiveTypesGeneration()),
+        InnerClassStubsGenerator(),
+        FullQualifiedClassStubsGenerator(),
+        SamePackageClassStubsGenerator(),
+        CtorStubsGenerator(),
+        InterfaceStubsGenerator(),
+        GenericStubsGenerator(),
+        AnnotationStubsGenerator(),
+        ClassLevelFunctionStubsGenerator(),
+    )
+    val context = GenerationContext(
+        additionalSrcs + knownSources,
+        classPaths,
+        getKnownKspGeneratedTypes(),
+        lightweight = false,
+    )
     val stubs = generateStubs(stubsGenerators + configureExtraGenerators(), context)
     val enableBytecodeStub = stubsClassOutputDir != null
     val renderedStubs: List<RenderedKStub> =

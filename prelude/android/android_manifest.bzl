@@ -32,12 +32,13 @@ def android_manifest_impl(ctx: AnalysisContext) -> list[Provider]:
     ]
 
 def generate_android_manifest(
-        ctx: AnalysisContext,
-        generate_manifest: RunInfo,
-        manifest_skeleton: Artifact,
-        module_name: str,
-        manifests: [ManifestTSet, list[Artifact], None],
-        placeholder_entries: dict) -> (Artifact, Artifact):
+    ctx: AnalysisContext,
+    generate_manifest: RunInfo,
+    manifest_skeleton: Artifact,
+    module_name: str,
+    manifests: [ManifestTSet, list[Artifact], None],
+    placeholder_entries: dict,
+) -> (Artifact, Artifact):
     generate_manifest_cmd = cmd_args(generate_manifest)
     generate_manifest_cmd.add([
         "--skeleton-manifest",
@@ -49,7 +50,7 @@ def generate_android_manifest(
     if not manifests:
         manifests = []
     elif isinstance(manifests, TransitiveSet):
-        manifests = manifests.project_as_args("artifacts", ordering = "bfs")
+        manifests = manifests.project_as_args("artifacts", ordering = "topological")
 
     library_manifest_paths_file = argfile(actions = ctx.actions, name = "{}/library_manifest_paths_file".format(module_name), args = manifests)
 
@@ -58,13 +59,13 @@ def generate_android_manifest(
     placeholder_entries_args = cmd_args()
     for key, val in placeholder_entries.items():
         placeholder_entries_args.add(cmd_args(str(key), str(val), delimiter = " "))
-    placeholder_entries_file = ctx.actions.write("{}/placeholder_entries_file".format(module_name), placeholder_entries_args)
+    placeholder_entries_file = ctx.actions.write("{}/placeholder_entries_file".format(module_name), placeholder_entries_args, has_content_based_path = False)
 
     generate_manifest_cmd.add(["--placeholder-entries-list", placeholder_entries_file])
 
-    output = ctx.actions.declare_output("{}/AndroidManifest.xml".format(module_name))
-    merge_report = ctx.actions.declare_output("{}/merge-report.txt".format(module_name))
-    preprocess_log = ctx.actions.declare_output("{}/preprocess-log.txt".format(module_name))
+    output = ctx.actions.declare_output("{}/AndroidManifest.xml".format(module_name), has_content_based_path = False)
+    merge_report = ctx.actions.declare_output("{}/merge-report.txt".format(module_name), has_content_based_path = False)
+    preprocess_log = ctx.actions.declare_output("{}/preprocess-log.txt".format(module_name), has_content_based_path = False)
     generate_manifest_cmd.add([
         "--output",
         output.as_output(),

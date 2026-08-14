@@ -17,4 +17,4 @@ def test_suite_impl(ctx: AnalysisContext) -> list[Provider]:
         default_info = test_dep[DefaultInfo]
         other_outputs.extend(default_info.default_outputs)
         other_outputs.extend(default_info.other_outputs)
-    return [DefaultInfo(default_outputs = [ctx.actions.write("test_targets.txt", test_targets)], other_outputs = other_outputs)]
+    return [DefaultInfo(default_outputs = [ctx.actions.write("test_targets.txt", test_targets, has_content_based_path = False)], other_outputs = other_outputs)]

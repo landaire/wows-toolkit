@@ -8,6 +8,20 @@
 
 **Tech Stack:** Buck2 prelude Rust/C++ rules, Reindeer local registry vendoring, Nix flakes, Visual Studio Build Tools offline layout, Windows SDK, Rust MSVC, NASM, WiX 6, GitHub Actions.
 
+## Buck2 pin
+
+Buck2 is pinned to release `2026-08-01` (the binary reports `2026-07-31`) in
+`flake.nix`, `toolchains/windows/toolchain-manifest.json`, and
+`prelude/VENDORED_FROM`. All three must agree: the vendored prelude only loads
+under the release it was expanded from. It does not come from nixpkgs, which
+tracks a different release.
+
+Moving the pin means running `nu scripts/vendor-prelude.nu` against the new
+binary and fixing whatever the prelude renamed. Going from 2025-12-01 to this
+release needed three: `buildscript_platform.bzl` moved under `rust/buildscript/`,
+`CxxToolchainInfo` requires `runtime_dependency_handling` again, and the
+`--env-set` splitting bug the vendor script patched is now fixed upstream.
+
 ## Status
 
 Tasks 1-3 are done and verified on `x86_64-unknown-linux-gnu`: all nine aliases
@@ -15,15 +29,22 @@ build in debug and release, every `scripts/test-*.nu` passes, and
 `check-buck-hermetic.nu` accepts each alias while rejecting all ten negative
 fixtures.
 
-Task 4 is written but unverified. No offline Visual Studio layout exists to
-provision against, so the archive hashes in `toolchain-manifest.json` have never
-been checked against a real download and `//toolchains/windows:*` has only ever
-been parsed, never analyzed or built.
+Task 4 builds. All nine aliases build for `x86_64-pc-windows-msvc` in debug and
+release, and `wows_toolkit.exe` carries its icon, its version resource, and the
+hybrid-graphics exports. Two parts are still unproven: the build was driven from
+an MSVC, SDK and Rust install already on the machine rather than from a
+provisioned offline layout, so `provision-toolchain.ps1` has never run
+end-to-end; and the MSI target has never been built, because WiX was not part of
+that install. The NASM and WiX archive hashes in `toolchain-manifest.json` were
+checked against the real downloads and match, as were the Buck2, zstd and Python
+entries added while getting the build working. The Visual Studio, Windows SDK
+and Rust MSVC hashes remain unverified.
 
-Task 5 is written but unverified: `toolchains/platforms` and
-`.github/workflows/buck.yml` exist, and explicit `--target-platforms` selection
-is confirmed on Linux only. macOS has never been built; the Xcode pin in
-`build-support/check-xcode.nu` is unverified against any real Xcode install.
+Task 5 is partly verified: `toolchains/platforms` exists and explicit
+`--target-platforms` selection is confirmed on Linux and Windows.
+`.github/workflows/buck.yml` has never run. macOS has never been built, and the
+Xcode pin in `build-support/check-xcode.nu` is unverified against any real Xcode
+install.
 
 ## Global Constraints
 

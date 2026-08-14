@@ -1,8 +1,5 @@
 load(":hermetic_msvc.bzl", "WindowsToolPathsInfo")
 
-def _tool(root, relative_path):
-    return cmd_args(root, "/" + relative_path, delimiter = "")
-
 def _wix_msi_impl(ctx):
     tools = ctx.attrs.tools[WindowsToolPathsInfo]
     payload = []
@@ -20,9 +17,9 @@ def _wix_msi_impl(ctx):
         cmd_args(payload[0].dirname, format = "{}"),
         "-dBinDir=" + payload[0].dirname,
         "-ext",
-        _tool(tools.root, "WiX/6.0.2/extensions/WixToolset.UI.wixext.6.0.2.nupkg"),
+        tools.wix_extensions + "/WixToolset.UI.wixext.6.0.2.nupkg",
         "-ext",
-        _tool(tools.root, "WiX/6.0.2/extensions/WixToolset.Util.wixext.6.0.2.nupkg"),
+        tools.wix_extensions + "/WixToolset.Util.wixext.6.0.2.nupkg",
         "-o",
         output.as_output(),
         hidden = payload + ctx.attrs.assets + [ctx.attrs.version_input],

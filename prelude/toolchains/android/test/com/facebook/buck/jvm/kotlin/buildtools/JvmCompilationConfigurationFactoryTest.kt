@@ -205,14 +205,28 @@ internal class JvmCompilationConfigurationFactoryTest {
         .forceNonIncrementalMode(true)
   }
 
+  @Test
+  fun `when classpath has additions or modifications only, non-incremental mode is not forced`() {
+    jvmCompilationConfigurationFactory.create(
+        createFakeIncrementalKotlincMode(
+            classpathChanges =
+                ClasspathChanges.ToBeComputedByIncrementalCompiler(ImmutableList.of())
+        )
+    )
+
+    verify(classpathSnapshotBasedIncrementalJvmCompilationConfiguration, never())
+        .forceNonIncrementalMode(true)
+    verify(classpathSnapshotBasedIncrementalJvmCompilationConfiguration, never())
+        .assureNoClasspathSnapshotsChanges(true)
+  }
+
   private fun createClasspathSnapshotBasedIncrementalCompilationApproachParameters(
       mode: KotlincMode.Incremental
-  ) =
-      ClasspathSnapshotBasedIncrementalCompilationApproachParameters(
-          newClasspathSnapshotFiles = mode.classpathChanges.classpathSnapshotFiles,
-          shrunkClasspathSnapshot =
-              mode.kotlicWorkingDir.resolve("shrunk-classpath-snapshot.bin").toFile(),
-      )
+  ) = ClasspathSnapshotBasedIncrementalCompilationApproachParameters(
+      newClasspathSnapshotFiles = mode.classpathChanges.classpathSnapshotFiles,
+      shrunkClasspathSnapshot =
+          mode.kotlicWorkingDir.resolve("shrunk-classpath-snapshot.bin").toFile(),
+  )
 
   private fun createFakeIncrementalKotlincMode(
       classpathChanges: ClasspathChanges = createFakeClasspathChanges(),

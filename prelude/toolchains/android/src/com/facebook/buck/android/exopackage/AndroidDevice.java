@@ -10,6 +10,7 @@
 
 package com.facebook.buck.android.exopackage;
 
+import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableSortedSet;
 import java.io.File;
 import java.nio.file.Path;
@@ -17,27 +18,65 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import org.jetbrains.annotations.Nullable;
 
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public interface AndroidDevice {
   default boolean installApkOnDevice(
       File apk, boolean installViaSd, boolean quiet, boolean stagedInstallMode) {
     return installApkOnDevice(apk, installViaSd, quiet, true, stagedInstallMode);
   }
 
+  default boolean installApkOnDevice(
+      File apk,
+      boolean installViaSd,
+      boolean quiet,
+      boolean verifyTempWritable,
+      boolean stagedInstallMode) {
+    return installApkOnDevice(
+        apk, installViaSd, quiet, verifyTempWritable, stagedInstallMode, null);
+  }
+
+  /**
+   * Install an APK on the device with optional user targeting.
+   *
+   * @param apk The APK file to install
+   * @param installViaSd Whether to install via SD card
+   * @param quiet If true, suppress output
+   * @param verifyTempWritable If true, verify temp folder is writable before install
+   * @param stagedInstallMode If true, use staged installation
+   * @param userId User to install for: "all" for all users, a specific user ID (e.g., "10"), or
+   *     null for default behavior (current user only)
+   * @return true if installation succeeded
+   */
   boolean installApkOnDevice(
       File apk,
       boolean installViaSd,
       boolean quiet,
       boolean verifyTempWritable,
-      boolean stagedInstallMode);
+      boolean stagedInstallMode,
+      @Nullable String userId);
 
   default boolean installApexOnDevice(File apex, boolean quiet) {
+    return installApexOnDevice(apex, quiet, true);
+  }
+
+  default boolean installApexOnDevice(File apex, boolean quiet, boolean restart) {
+    return installApexOnDevice(apex, quiet, restart, false);
+  }
+
+  default boolean installApexOnDevice(
+      File apex, boolean quiet, boolean restart, boolean waitForDeviceReady) {
     boolean softRebootAvailable = prepareForApexInstallation();
-    return installApexOnDevice(apex, quiet, true, softRebootAvailable);
+    return installApexOnDevice(apex, quiet, restart, softRebootAvailable, waitForDeviceReady);
   }
 
   boolean installApexOnDevice(
-      File apex, boolean quiet, boolean restart, boolean softRebootAvailable);
+      File apex,
+      boolean quiet,
+      boolean restart,
+      boolean softRebootAvailable,
+      boolean waitForDeviceReady);
 
   boolean prepareForApexInstallation();
 
@@ -47,7 +86,7 @@ public interface AndroidDevice {
 
   void uninstallPackage(String packageName) throws Exception;
 
-  String getSignature(String packagePath) throws Exception;
+  String getApkManifestDigest(String packagePath) throws Exception;
 
   ImmutableSortedSet<Path> listDirRecursive(Path dirPath) throws Exception;
 
@@ -76,7 +115,7 @@ public interface AndroidDevice {
   boolean installBuildUuidFile(Path dataRoot, String packageName, String buildUuid)
       throws Exception;
 
-  String deviceStartIntent(AndroidIntent intent) throws Exception;
+  String deviceStartIntent(@Nullable AndroidIntent intent) throws Exception;
 
   boolean uninstallApkFromDevice(String packageName, boolean keepData) throws Exception;
 
@@ -88,7 +127,7 @@ public interface AndroidDevice {
 
   default void fixRootDir(String rootDir) {}
 
-  boolean setDebugAppPackageName(String packageName) throws Exception;
+  boolean setDebugAppPackageName(@Nullable String packageName) throws Exception;
 
-  void enableAppLinks(String packageName) throws Exception;
+  void enableAppLinks(@Nullable String packageName) throws Exception;
 }

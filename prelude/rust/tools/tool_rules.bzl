@@ -12,18 +12,26 @@ load("@prelude//rust:rust_toolchain.bzl", "RustToolchainInfo")
 def _get_rustc_cfg_impl(ctx: AnalysisContext) -> list[Provider]:
     toolchain_info = ctx.attrs._rust_toolchain[RustToolchainInfo]
 
-    out = ctx.actions.declare_output("rustc.cfg")
+    out = ctx.actions.declare_output("rustc.cfg", has_content_based_path = True)
 
     cmd = [
         toolchain_info.compiler,
         cmd_args("--print=cfg=", out.as_output(), delimiter = ""),
         cmd_args("--sysroot="),  # We do not need a sysroot here, and not all platforms we support have one available (e.g. mips64-unknown-linux-gnuabi64)
+        toolchain_info.rustc_flags,
     ]
+
+    uses_custom_target = toolchain_info.rust_target_path != None
 
     if toolchain_info.rustc_target_triple:
         cmd.append(cmd_args("--target=", toolchain_info.rustc_target_triple, delimiter = ""))
+        if uses_custom_target:
+            cmd.append("-Zunstable-options")
 
     env = {}
+    if ctx.attrs.enable_nightly_cfgs or uses_custom_target:
+        env["RUSTC_BOOTSTRAP"] = "1"
+
     if toolchain_info.rust_target_path != None:
         env["RUST_TARGET_PATH"] = toolchain_info.rust_target_path[DefaultInfo].default_outputs[0]
 
@@ -34,6 +42,7 @@ def _get_rustc_cfg_impl(ctx: AnalysisContext) -> list[Provider]:
 get_rustc_cfg = rule(
     impl = _get_rustc_cfg_impl,
     attrs = {
+        "enable_nightly_cfgs": attrs.bool(default = False),
         "_rust_toolchain": toolchains_common.rust(),
     },
 )
@@ -41,7 +50,7 @@ get_rustc_cfg = rule(
 def _get_rustc_host_tuple_impl(ctx: AnalysisContext) -> list[Provider]:
     toolchain_info = ctx.attrs._rust_toolchain[RustToolchainInfo]
 
-    out = ctx.actions.declare_output("rustc.host_tuple")
+    out = ctx.actions.declare_output("rustc.host_tuple", has_content_based_path = True)
 
     cmd = [
         toolchain_info.compiler,
@@ -66,7 +75,7 @@ def _linkable_symbol_supports_no_std_impl(ctx: AnalysisContext) -> list[Provider
     # as otherwise the panic handler is missing.
     cfg = "--cfg=set_nostd\n" if toolchain_info.advanced_unstable_linking else ""
 
-    flagfile = ctx.actions.write("cfg", cfg)
+    flagfile = ctx.actions.write("cfg", cfg, has_content_based_path = True)
     return [DefaultInfo(default_output = flagfile)]
 
 linkable_symbol_supports_no_std = rule(

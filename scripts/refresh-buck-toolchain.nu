@@ -40,5 +40,6 @@ for tool in $required {
     $"cc = ($toolchain_root)/bin/clang"
     $"cxx = ($toolchain_root)/bin/clang++"
     $"nasm = ($toolchain_root)/bin/nasm"
+    $"python = ($toolchain_root)/bin/python3"
     ""
 ] | str join "\n" | save -f .buckconfig.local

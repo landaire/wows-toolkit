@@ -98,7 +98,15 @@ TOOLKIT_DEPS = [
     "//third-party/rust:web-time",
     "//third-party/rust:wgpu",
     "//third-party/rust:zip",
-]
+] + os_select(
+    macos = [],
+    linux = [],
+    # The cfg(windows) dependency section of Cargo.toml.
+    windows = [
+        "//third-party/rust:windows-registry",
+        "//third-party/rust:windows-sys",
+    ],
+)
 
 TOOLKIT_FEATURES = ["logging"]
 
@@ -149,7 +157,7 @@ GUI_LINK_FLAGS = os_select(
     windows = [
         "-Clink-arg=/EXPORT:NvOptimusEnablement,DATA",
         "-Clink-arg=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA",
-        "-Clink-arg=$(location //toolchains/windows:app_resource)",
+        "-Clink-arg=$(location toolchains//windows:app_resource)",
     ],
 )
 

@@ -7,17 +7,18 @@
 # above-listed licenses.
 
 load("@prelude//cxx:cxx_apple_linker_flags.bzl", "apple_extra_darwin_linker_flags", "apple_format_target_triple", "is_valid_apple_platform_name")
-load("@prelude//cxx:cxx_error_handler.bzl", "cxx_generic_error_handler")
 load("@prelude//cxx:debug.bzl", "SplitDebugMode")
+load("@prelude//target_stats:target_stats_tools.bzl", "TargetStatsToolsInfo")
 
 LinkerType = enum("gnu", "darwin", "windows", "wasm")
+
+IncrementalLinkingMode = enum("disabled", "supported", "enabled")
 
 ShlibInterfacesMode = enum(
     "disabled",
     "defined_only",  # Generate a "stub" shared library by only linking object files passed to the link, ignoring static libraries or dynamic libraries linked against.
     # This known to be incorrect in the presence of static libraries, as they won't be represented in the interface.
     "stub_from_library",  # Generate an interface from the completed shared library via some external tool.
-    "stub_from_object_files",  # Generate an interface from the input files (ie. object files, archives, etc.) without actually linking them together, again via external tool.
     "stub_from_linker_invocation",  # For linkers that support it, generate an interface from the linker invocation that would ordinarily produce the shared library, adding some extra flags
 )
 
@@ -40,6 +41,7 @@ LinkerInfo = provider(
         "dist_thin_lto_codegen_flags": provider_field([cmd_args, None], default = None),
         "extra_outputs": provider_field(list[str], default = []),
         "generate_linker_maps": provider_field(typing.Any, default = None),  # bool
+        "generate_gc_sections": provider_field(typing.Any, default = None),  # bool
         # Whether to run native links locally.  We support this for fbcode platforms
         # to avoid issues with C++ static links (see comment in
         # `platform/cxx_toolchains.bzl` for details).
@@ -86,20 +88,25 @@ LinkerInfo = provider(
         "is_pdb_generated": provider_field(typing.Any, default = None),  # bool
         # Flags to use to "sandbox" exported library linker flags.
         "push_pop_state_flags": provider_field(typing.Any, default = None),
+        "supports_content_based_paths_for_archiving": provider_field(bool, default = False),
+        "incremental_linking": provider_field(str, default = "disabled"),
+        "supports_shared_libraries": provider_field(bool, default = True),
     },
 )
 
-BinaryUtilitiesInfo = provider(fields = {
-    "bolt": provider_field(typing.Any, default = None),
-    "bolt_msdk": provider_field(typing.Any, default = None),
-    "custom_tools": provider_field(dict[str, RunInfo], default = {}),
-    "dwp": provider_field(typing.Any, default = None),
-    "nm": provider_field(typing.Any, default = None),
-    "objcopy": provider_field(typing.Any, default = None),
-    "objdump": provider_field(typing.Any, default = None),
-    "ranlib": provider_field(typing.Any, default = None),
-    "strip": provider_field(typing.Any, default = None),
-})
+BinaryUtilitiesInfo = provider(
+    fields = {
+        "bolt": provider_field(typing.Any, default = None),
+        "bolt_msdk": provider_field(typing.Any, default = None),
+        "custom_tools": provider_field(dict[str, RunInfo], default = {}),
+        "dwp": provider_field(typing.Any, default = None),
+        "nm": provider_field(typing.Any, default = None),
+        "objcopy": provider_field(typing.Any, default = None),
+        "objdump": provider_field(typing.Any, default = None),
+        "ranlib": provider_field(typing.Any, default = None),
+        "strip": provider_field(typing.Any, default = None),
+    }
+)
 
 StripFlagsInfo = provider(
     # @unsorted-dict-items
@@ -164,27 +171,33 @@ ObjcCompilerInfo = provider(fields = _compiler_fields)
 ObjcxxCompilerInfo = provider(fields = _compiler_fields)
 RcCompilerInfo = provider(fields = _compiler_fields)
 
-DistLtoToolsInfo = provider(fields = dict(
-    planner = dict[LinkerType, RunInfo],
-    opt = dict[LinkerType, RunInfo],
-    prepare = dict[LinkerType, RunInfo],
-    copy = RunInfo,
-    archive_mapper = RunInfo,
-    compiler_stats_merger = RunInfo,
-))
+DistLtoToolsInfo = provider(
+    fields = dict(
+        planner = dict[LinkerType, RunInfo],
+        opt = dict[LinkerType, RunInfo],
+        prepare = dict[LinkerType, RunInfo],
+        copy = RunInfo,
+        archive_mapper = RunInfo,
+        compiler_stats_merger = RunInfo,
+    )
+)
 
-CxxInternalTools = provider(fields = dict(
-    check_nonempty_output = RunInfo,
-    concatenate_diagnostics = RunInfo,
-    dep_file_processor = RunInfo,
-    dist_lto = DistLtoToolsInfo,
-    filter_argsfile = RunInfo,
-    hmap_wrapper = RunInfo,
-    make_comp_db = RunInfo,
-    remap_cwd = RunInfo,
-    serialized_diagnostics_to_json_wrapper = RunInfo,
-    stderr_to_file = RunInfo,
-))
+CxxInternalTools = provider(
+    fields = dict(
+        check_nonempty_output = RunInfo,
+        clang_tidy_wrapper = RunInfo,
+        concatenate_diagnostics = RunInfo,
+        dep_file_processor = RunInfo,
+        dist_lto = DistLtoToolsInfo,
+        filter_argsfile = RunInfo,
+        hmap_wrapper = RunInfo,
+        make_comp_db = RunInfo,
+        remap_cwd = RunInfo,
+        serialized_diagnostics_to_json_wrapper = RunInfo,
+        stderr_to_file = RunInfo,
+        stub_header_unit = RunInfo,
+    )
+)
 
 CxxObjectFormat = enum(
     "native",
@@ -204,12 +217,24 @@ CxxObjectFormat = enum(
 PicBehavior = enum(
     # Regardless of whether -fPIC is specified explicitly
     # every compiled artifact will have a position-independent representation.
-    # This should be the the default when targeting x86_64 + arm64.
+    # This should be the default when targeting x86_64 + arm64.
     "always_enabled",
     # The -fPIC flag is known and changes the compiled artifact.
     "supported",
     # The -fPIC flag is unknown to this platform.
     "not_supported",
+)
+
+# Additional behavior for how to handle runtime dependencies
+RuntimeDependencyHandling = enum(
+    # Do no additional handling
+    "no_symlink",
+    # Always include runtime dependencies in a symlink tree, regardless
+    # of whether shared linkage is used or not. Only include first level deps.
+    "symlink_single_level_only",
+    # Always include runtime dependencies in a symlink tree, regardless
+    # of whether shared linkage is used or not. Include transitive deps.
+    "symlink",
 )
 
 # TODO(T110378094): We should consider if we can change this from a hardcoded
@@ -225,9 +250,15 @@ CxxToolchainInfo = provider(
         "binary_utilities_info": provider_field(typing.Any, default = None),
         "bolt_enabled": provider_field(typing.Any, default = None),
         "c_compiler_info": provider_field(typing.Any, default = None),
+        # Maps cell names to their repo-relative path prefix. Used by coverage
+        # prefix maps to translate cell-relative paths to repo-relative paths.
+        # e.g. {"fbcode": "fbcode"} means cell "fbcode" maps to the "fbcode/"
+        # subdirectory. Cells not in the map are assumed to be the repo root.
+        "cell_to_path_prefix_map": provider_field(dict[str, str], default = {}),
         "clang_llvm_statistics": provider_field(typing.Any, default = None),
         "clang_remarks": provider_field(typing.Any, default = None),
-        "clang_trace": provider_field(typing.Any, default = None),
+        # Produce a time profiler JSON report by calling clang with `-ftime-trace`.
+        "clang_trace": provider_field(bool, default = False),
         "compiler_flavor_flags": provider_field(typing.Any, default = {}),
         "cpp_dep_tracking_mode": provider_field(typing.Any, default = None),
         "cuda_compiler_info": provider_field(typing.Any, default = None),
@@ -235,28 +266,42 @@ CxxToolchainInfo = provider(
         "cvtres_compiler_info": provider_field(typing.Any, default = None),
         "cxx_compiler_info": provider_field(typing.Any, default = None),
         "cxx_error_handler": provider_field(typing.Any, default = None),
+        "default_deps": provider_field(list[Dependency], default = []),
         "dumpbin_toolchain_path": provider_field(typing.Any, default = None),
         "gcno_files": provider_field(typing.Any, default = None),
         "header_mode": provider_field(typing.Any, default = None),
         "headers_as_raw_headers_mode": provider_field(typing.Any, default = None),
         "hip_compiler_info": provider_field(typing.Any, default = None),
+        # See prelude/cxx/hip_debug_extract.bzl. `hip_debug_extract` is the
+        # wrapper RunInfo (None on unsupported ROCm).
+        "hip_debug_extract": provider_field([RunInfo, None], default = None),
+        "hip_device_debug_extract": provider_field(bool, default = False),
+        "hip_gpu_archs": provider_field(list[str], default = []),
         "internal_tools": provider_field(CxxInternalTools),
         "libclang": provider_field(typing.Any, default = None),
         "linker_info": provider_field(typing.Any, default = None),
         "lipo": provider_field([RunInfo, None], default = None),
         "llvm_cgdata": provider_field([RunInfo, None], default = None),
         "llvm_link": provider_field(typing.Any, default = None),
+        # Whether a top-level binary's unpacked external debug info (e.g.
+        # split-dwarf .dwo files) is materialized as part of building it, via
+        # DefaultInfo.other_outputs. When False, it can still be materialized
+        # explicitly via the `[debuginfo]` sub-target.
+        "materialize_external_debug_info": provider_field(bool, default = True),
         "minimum_os_version": provider_field([str, None], default = None),
         "objc_compiler_info": provider_field([ObjcCompilerInfo, None], default = None),
         "objcxx_compiler_info": provider_field([ObjcxxCompilerInfo, None], default = None),
         "object_format": provider_field(typing.Any, default = None),
+        "pass_plugin": provider_field([Artifact, None], default = None),
         "pic_behavior": provider_field(typing.Any, default = None),
         "raw_headers_as_headers_mode": provider_field(typing.Any, default = None),
         "rc_compiler_info": provider_field(typing.Any, default = None),
         "remap_cwd": provider_field(bool, default = False),
+        "runtime_dependency_handling": provider_field(RuntimeDependencyHandling),
         "split_debug_mode": provider_field(typing.Any, default = None),
         "strip_flags_info": provider_field(typing.Any, default = None),
         "supported_compile_flavors": provider_field(typing.Any, default = []),
+        "target_stats_tools": provider_field([TargetStatsToolsInfo, None], default = None),
         "use_dep_files": provider_field(typing.Any, default = None),
         "use_distributed_thinlto": provider_field(typing.Any, default = None),
     },
@@ -280,47 +325,57 @@ def is_bitcode_format(format: CxxObjectFormat) -> bool:
     return format in [CxxObjectFormat("bitcode"), CxxObjectFormat("embedded-bitcode")]
 
 def cxx_toolchain_infos(
-        platform_name,
-        c_compiler_info,
-        cxx_compiler_info,
-        linker_info,
-        binary_utilities_info,
-        header_mode,
-        internal_tools: CxxInternalTools,
-        headers_as_raw_headers_mode = None,
-        raw_headers_as_headers_mode = None,
-        asm_compiler_info = None,
-        as_compiler_info = None,
-        hip_compiler_info = None,
-        cuda_compiler_info = None,
-        cvtres_compiler_info = None,
-        rc_compiler_info = None,
-        object_format = CxxObjectFormat("native"),
-        use_distributed_thinlto = False,
-        use_dep_files = False,
-        clang_remarks = None,
-        clang_llvm_statistics = False,
-        gcno_files = None,
-        clang_trace = False,
-        cpp_dep_tracking_mode = DepTrackingMode("none"),
-        cuda_dep_tracking_mode = DepTrackingMode("none"),
-        strip_flags_info = None,
-        split_debug_mode = SplitDebugMode("none"),
-        bolt_enabled = False,
-        llvm_cgdata = None,
-        llvm_link = None,
-        platform_deps_aliases = [],
-        pic_behavior = PicBehavior("supported"),
-        dumpbin_toolchain_path = None,
-        minimum_os_version = None,
-        libclang = None,
-        lipo = None,
-        remap_cwd = False,
-        compiler_flavor_flags = {},
-        supported_compile_flavors = ["pic"],
-        objc_compiler_info = None,
-        objcxx_compiler_info = None,
-        cxx_error_handler = None):
+    platform_name,
+    c_compiler_info,
+    cxx_compiler_info,
+    linker_info,
+    binary_utilities_info,
+    header_mode,
+    internal_tools: CxxInternalTools,
+    headers_as_raw_headers_mode = None,
+    raw_headers_as_headers_mode = None,
+    asm_compiler_info = None,
+    as_compiler_info = None,
+    hip_compiler_info = None,
+    hip_debug_extract = None,
+    hip_device_debug_extract = False,
+    hip_gpu_archs = [],
+    cuda_compiler_info = None,
+    cvtres_compiler_info = None,
+    rc_compiler_info = None,
+    object_format = CxxObjectFormat("native"),
+    use_distributed_thinlto = False,
+    use_dep_files = False,
+    clang_remarks = None,
+    clang_llvm_statistics = False,
+    gcno_files = None,
+    clang_trace = False,
+    cpp_dep_tracking_mode = DepTrackingMode("none"),
+    cuda_dep_tracking_mode = DepTrackingMode("none"),
+    strip_flags_info = None,
+    split_debug_mode = SplitDebugMode("none"),
+    materialize_external_debug_info = True,
+    bolt_enabled = False,
+    cell_to_path_prefix_map = {},
+    llvm_cgdata = None,
+    llvm_link = None,
+    platform_deps_aliases = [],
+    pic_behavior = PicBehavior("supported"),
+    dumpbin_toolchain_path = None,
+    minimum_os_version = None,
+    libclang = None,
+    lipo = None,
+    remap_cwd = False,
+    compiler_flavor_flags = {},
+    supported_compile_flavors = ["pic"],
+    objc_compiler_info = None,
+    objcxx_compiler_info = None,
+    cxx_error_handler = None,
+    pass_plugin = None,
+    default_deps = [],
+    runtime_dependency_handling = RuntimeDependencyHandling("no_symlink"),
+    target_stats_tools = None,
+):
     """
     Creates the collection of cxx-toolchain Infos for a cxx toolchain.
 
@@ -334,41 +389,16 @@ def cxx_toolchain_infos(
 
     # Maintain backwards compatibility with ObjC compilation using the C compiler.
     if objc_compiler_info == None:
-        objc_compiler_info = ObjcCompilerInfo(
-            **{k: getattr(c_compiler_info, k, None) for k in _compiler_fields}
-        )
+        objc_compiler_info = ObjcCompilerInfo(**{k: getattr(c_compiler_info, k, None) for k in _compiler_fields})
     if objcxx_compiler_info == None:
-        objcxx_compiler_info = ObjcxxCompilerInfo(
-            **{k: getattr(cxx_compiler_info, k, None) for k in _compiler_fields}
-        )
-
-    # TODO(minglunli): Should probably dedup from Buck2 side instead
-    def cxx_combined_error_handler(ctx: ActionErrorCtx) -> list[ActionSubError]:
-        errors = []
-        error_set = set()
-
-        # cxx specific error handler is called if it's defined
-        if cxx_error_handler != None:
-            specific_errors = cxx_error_handler(ctx)
-            for err in specific_errors:
-                # TDOO(nero): Impllment hash for ActionSubError, so no need to convert to string
-                err_str = str(err)
-                if err_str not in error_set:
-                    errors.append(err)
-                    error_set.add(err_str)
-
-        for generic in cxx_generic_error_handler(ctx):
-            err_str = str(generic)
-            if err_str not in error_set:
-                errors.append(generic)
-                error_set.add(err_str)
-        return errors
+        objcxx_compiler_info = ObjcxxCompilerInfo(**{k: getattr(cxx_compiler_info, k, None) for k in _compiler_fields})
 
     toolchain_info = CxxToolchainInfo(
         as_compiler_info = as_compiler_info,
         asm_compiler_info = asm_compiler_info,
         binary_utilities_info = binary_utilities_info,
         bolt_enabled = bolt_enabled,
+        cell_to_path_prefix_map = cell_to_path_prefix_map,
         c_compiler_info = c_compiler_info,
         clang_remarks = clang_remarks,
         clang_llvm_statistics = clang_llvm_statistics,
@@ -383,27 +413,35 @@ def cxx_toolchain_infos(
         header_mode = header_mode,
         headers_as_raw_headers_mode = headers_as_raw_headers_mode,
         hip_compiler_info = hip_compiler_info,
+        hip_debug_extract = hip_debug_extract,
+        hip_device_debug_extract = hip_device_debug_extract,
+        hip_gpu_archs = hip_gpu_archs,
         internal_tools = internal_tools,
         libclang = libclang,
         linker_info = linker_info,
         lipo = lipo,
         llvm_cgdata = llvm_cgdata,
         llvm_link = llvm_link,
+        materialize_external_debug_info = materialize_external_debug_info,
         objc_compiler_info = objc_compiler_info,
         objcxx_compiler_info = objcxx_compiler_info,
         object_format = object_format,
+        pass_plugin = pass_plugin,
         compiler_flavor_flags = compiler_flavor_flags,
         pic_behavior = pic_behavior,
         raw_headers_as_headers_mode = raw_headers_as_headers_mode,
         rc_compiler_info = rc_compiler_info,
         remap_cwd = remap_cwd,
+        runtime_dependency_handling = runtime_dependency_handling,
         split_debug_mode = split_debug_mode,
         strip_flags_info = strip_flags_info,
         minimum_os_version = minimum_os_version,
         use_dep_files = use_dep_files,
         use_distributed_thinlto = use_distributed_thinlto,
-        cxx_error_handler = cxx_combined_error_handler,
+        cxx_error_handler = cxx_error_handler,
         supported_compile_flavors = supported_compile_flavors,
+        default_deps = default_deps,
+        target_stats_tools = target_stats_tools,
     )
 
     ldflags_shared_extra = None
@@ -437,8 +475,6 @@ def cxx_toolchain_infos(
         "ldflags-static": _shell_quote(linker_info.linker_flags or []),
         "ldflags-static-pic": _shell_quote(linker_info.linker_flags or []),
         "objcopy": binary_utilities_info.objcopy,
-        # TODO(T110378148): $(platform-name) is almost unusued. Should we remove it?
-        "platform-name": platform_name,
     }
 
     if as_compiler_info != None:

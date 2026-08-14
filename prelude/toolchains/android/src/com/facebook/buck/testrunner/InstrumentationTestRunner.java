@@ -10,6 +10,7 @@
 
 package com.facebook.buck.testrunner;
 
+import com.android.ddmlib.AndroidDebugBridge;
 import com.android.ddmlib.IDevice;
 import com.android.ddmlib.MultiLineReceiver;
 import com.android.ddmlib.testrunner.ITestRunListener;
@@ -18,8 +19,10 @@ import com.android.ddmlib.testrunner.TestIdentifier;
 import com.facebook.buck.android.exopackage.AdbUtils;
 import com.facebook.buck.android.exopackage.AndroidDevice;
 import com.facebook.buck.android.exopackage.AndroidDeviceImpl;
+import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.RunFailureStatus;
 import com.facebook.buck.testresultsoutput.TestResultsOutputSender;
 import com.facebook.buck.testrunner.reportlayer.LogExtractorReportLayer;
+import com.facebook.buck.testrunner.reportlayer.PerfettoReportLayer;
 import com.facebook.buck.testrunner.reportlayer.ReportLayer;
 import com.facebook.buck.testrunner.reportlayer.TombstonesReportLayer;
 import com.facebook.buck.testrunner.reportlayer.VideoRecordingReportLayer;
@@ -29,7 +32,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -44,6 +47,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.stream.Stream;
@@ -81,6 +85,37 @@ public class InstrumentationTestRunner extends DeviceRunner {
       "TEST_RESULT_APP_SCOPED_ARTIFACT_ANNOTATIONS_DIR";
   private static final String FORWARDABLE_ENV_PREFIX = "AIT_";
 
+  private static final long ADB_CONNECT_TIMEOUT_MS = 30000;
+  private static final long ADB_CONNECT_TIME_STEP_MS = ADB_CONNECT_TIMEOUT_MS / 10;
+
+  /** Env var gate for per-test JaCoCo coverage. */
+  static final String PER_TEST_COVERAGE_ENABLED_ENV = "PER_TEST_COVERAGE_ENABLED";
+
+  /** Host env var set by the coverage wrapper to the pull destination for per-test artifacts. */
+  static final String PER_TEST_COVERAGE_DIR_ENV = "PER_TEST_COVERAGE_DIR";
+
+  /** Instrumentation arg read by the on-device per-test coverage listener. */
+  static final String PER_TEST_COVERAGE_DIR_ARG = "PER_TEST_COVERAGE_DIR";
+
+  private static final String PER_TEST_COVERAGE_SUBDIR = "per_test_coverage";
+
+  /** Env var to enable per-test timeout enforcement. */
+  static final String PER_TEST_TIMEOUT_ENABLED_ENV = "ANDROID_PER_TEST_TIMEOUT_ENABLED";
+
+  /** Env var to enable proactive target-level timeout stack traces. */
+  static final String PROACTIVE_TIMEOUT_ENABLED_ENV = "ANDROID_PROACTIVE_TIMEOUT_ENABLED";
+
+  /** Env var to set the timeout multiplier for long-running tests. */
+  static final String PER_TEST_TIMEOUT_MULTIPLIER_ENV = "ANDROID_PER_TEST_TIMEOUT_MULTIPLIER";
+
+  /**
+   * Env var controlling how a per-test artifact staging failure is handled. When set to "true", a
+   * staging failure aborts the run. Otherwise staging is best-effort: the failure is logged and the
+   * run continues without per-test artifact collection for that directory (needed for displayless
+   * emulator images that boot without external storage).
+   */
+  static final String FAIL_ON_ARTIFACT_STAGING_ERROR_ENV = "ANDROID_FAIL_ON_ARTIFACT_STAGING_ERROR";
+
   private static final String INSTRUMENTATION_TEST_DEFAULT_ARTIFACTS_DIR_TEMPLATE =
       "/sdcard/test_result/%s/%s/";
   private static final String INSTRUMENTATION_TEST_DEFAULT_ARTIFACTS_FILE_TEMPLATE =
@@ -91,12 +126,16 @@ public class InstrumentationTestRunner extends DeviceRunner {
       "/storage/emulated/0/Android/media/%s/test_result/%s/";
   private static final String PRE_TEST_SETUP_SCRIPT = "PRE_TEST_SETUP_SCRIPT";
   private static final String APEXES_TO_INSTALL = "APEXES_TO_INSTALL";
+  // On-device root where exopackage artifacts live, keyed by package name; matches the on-device
+  // ExopackageDexLoader convention.
+  private static final String EXOPACKAGE_INSTALL_ROOT = "/data/local/tmp/exopackage";
 
   private final String packageName;
   private final String targetPackageName;
   private final String testRunner;
   private final File outputDirectory;
   private final String exopackageLocalPath;
+  @Nullable private final String exopackageSecondaryDexLocalPath;
   private final boolean attemptUninstallApkUnderTest;
   private final boolean attemptUninstallInstrumentationApk;
   private final Map<String, String> extraInstrumentationArguments;
@@ -116,14 +155,62 @@ public class InstrumentationTestRunner extends DeviceRunner {
   private final String preTestSetupScript;
   private final List<String> apexesToInstall;
 
-  private final CrashAnalyzer crashAnalyzer = new CrashAnalyzer();
+  @Nullable private final Integer userId;
 
+  /** Prefix for secondary user storage paths */
+  private static final String SECONDARY_USER_STORAGE_PREFIX = "/data/media/";
+
+  private static final String SDCARD_PATH = "/sdcard";
+  private static final String STORAGE_EMULATED_PATH = "/storage/emulated/0";
+  private static final String STORAGE_EMULATED_PREFIX = "/storage/emulated/";
+
+  private final CrashAnalyzer crashAnalyzer = new CrashAnalyzer();
   private List<ReportLayer> reportLayers = new ArrayList<>();
 
-  private IDevice device = null;
-  private AndroidDevice androidDevice = null;
-  private AdbUtils adbUtils = null;
+  protected final AndroidDevice androidDevice;
   private volatile boolean testRunFailed = false;
+
+  /**
+   * Resolves a device path for the current user. For secondary users, paths like /sdcard and
+   * /storage/emulated/0 are translated to /data/media/{userId}.
+   *
+   * <p>Also handles paths that already contain a user-specific storage path prefix (e.g.,
+   * /storage/emulated/10) by translating them to the current user's storage path.
+   *
+   * @param path The original device path
+   * @return The resolved path appropriate for the current user
+   */
+  private String resolvePathForUser(String path) {
+    if (userId == null || userId == 0) {
+      return path;
+    }
+
+    String userStoragePath = SECONDARY_USER_STORAGE_PREFIX + userId;
+
+    if (path.startsWith(SDCARD_PATH)) {
+      return userStoragePath + path.substring(SDCARD_PATH.length());
+    }
+
+    // Handle /storage/emulated/0 specifically (primary user path)
+    if (path.startsWith(STORAGE_EMULATED_PATH)) {
+      return userStoragePath + path.substring(STORAGE_EMULATED_PATH.length());
+    }
+
+    // Handle /storage/emulated/{other_user_id} paths (e.g., /storage/emulated/10)
+    if (path.startsWith(STORAGE_EMULATED_PREFIX)) {
+      // Find the end of the user ID portion
+      int userIdEndIndex = path.indexOf('/', STORAGE_EMULATED_PREFIX.length());
+      if (userIdEndIndex == -1) {
+        // Path is just /storage/emulated/{userId} with no trailing content
+        return userStoragePath;
+      }
+      // Extract the rest of the path after /storage/emulated/{userId}
+      String remainingPath = path.substring(userIdEndIndex);
+      return userStoragePath + remainingPath;
+    }
+
+    return path;
+  }
 
   public InstrumentationTestRunner(
       DeviceArgs deviceArgs,
@@ -135,6 +222,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
       String apkUnderTestPath,
       String exopackageLocalPath,
       String apkUnderTestExopackageLocalPath,
+      String exopackageSecondaryDexLocalPath,
       boolean attemptUninstallApkUnderTest,
       boolean attemptUninstallInstrumentationApk,
       boolean debug,
@@ -148,7 +236,8 @@ public class InstrumentationTestRunner extends DeviceRunner {
       boolean clearPackageData,
       boolean disableAnimations,
       String preTestSetupScript,
-      List<String> apexesToInstall) {
+      List<String> apexesToInstall,
+      @Nullable Integer userId) {
     super(deviceArgs);
     this.packageName = packageName;
     this.targetPackageName = targetPackageName;
@@ -158,6 +247,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
     this.apkUnderTestPath = apkUnderTestPath;
     this.exopackageLocalPath = exopackageLocalPath;
     this.apkUnderTestExopackageLocalPath = apkUnderTestExopackageLocalPath;
+    this.exopackageSecondaryDexLocalPath = exopackageSecondaryDexLocalPath;
     this.attemptUninstallApkUnderTest = attemptUninstallApkUnderTest;
     this.attemptUninstallInstrumentationApk = attemptUninstallInstrumentationApk;
     this.codeCoverageOutputFile = codeCoverageOutputFile;
@@ -174,10 +264,12 @@ public class InstrumentationTestRunner extends DeviceRunner {
     this.disableAnimations = disableAnimations;
     this.preTestSetupScript = preTestSetupScript;
     this.apexesToInstall = apexesToInstall;
-    this.adbUtils = new AdbUtils(getAdbPath(), 0);
+    this.userId = userId;
+    this.androidDevice = initializeAndroidDevice();
   }
 
   protected static class ArgsParser {
+    private final Map<String, String> environment;
     File outputDirectory = null;
     DeviceArgs deviceArgs = null;
     String apkUnderTestPath = null;
@@ -188,6 +280,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
     String codeCoverageOutputFile = null;
     String exopackageLocalPath = null;
     String apkUnderTestExopackageLocalPath = null;
+    String exopackageSecondaryDexLocalPath = null;
     String extraInstrumentationTestListener = null;
     boolean attemptUninstallApkUnderTest = false;
     boolean attemptUninstallInstrumentationApk = false;
@@ -198,12 +291,22 @@ public class InstrumentationTestRunner extends DeviceRunner {
     boolean disableAnimations = false;
     boolean collectTombstones = false;
     boolean recordVideo = false;
+    boolean collectPerfetto = false;
     Map<String, String> extraInstrumentationArguments = new HashMap<String, String>();
     Map<String, String> extraFilesToPull = new HashMap<String, String>();
     Map<String, String> extraDirsToPull = new HashMap<String, String>();
     Map<String, String> logExtractors = new HashMap<String, String>();
     String preTestSetupScript = null;
     List<String> extraApksToInstall = new ArrayList<>();
+    @Nullable Integer userId = null;
+
+    ArgsParser() {
+      this(System.getenv());
+    }
+
+    ArgsParser(Map<String, String> environment) {
+      this.environment = environment;
+    }
 
     @SuppressWarnings("PMD.BlacklistedSystemGetenv")
     void fromArgs(String... args) throws IOException {
@@ -242,6 +345,9 @@ public class InstrumentationTestRunner extends DeviceRunner {
             break;
           case "--apk-under-test-exopackage-local-dir":
             apkUnderTestExopackageLocalPath = args[++i];
+            break;
+          case "--exopackage-secondary-dex-local-dir":
+            exopackageSecondaryDexLocalPath = args[++i];
             break;
           case "--attempt-uninstall":
             attemptUninstallApkUnderTest = true;
@@ -317,6 +423,9 @@ public class InstrumentationTestRunner extends DeviceRunner {
           case VideoRecordingReportLayer.ARG:
             recordVideo = true;
             break;
+          case PerfettoReportLayer.ARG:
+            collectPerfetto = true;
+            break;
           case LogExtractorReportLayer.ARG:
             String logExtractorArg = args[++i];
             String[] logExtractorArgSplit = logExtractorArg.split("=", 2);
@@ -325,6 +434,23 @@ public class InstrumentationTestRunner extends DeviceRunner {
               System.exit(1);
             }
             logExtractors.put(logExtractorArgSplit[0], logExtractorArgSplit[1]);
+            break;
+          case "--user":
+            if (i + 1 >= args.length) {
+              System.err.println("--user requires a user ID argument");
+              System.exit(1);
+            }
+            String userIdArg = args[++i];
+            try {
+              userId = Integer.parseInt(userIdArg);
+              if (userId < 0) {
+                System.err.printf("Invalid user ID: %s\n", userIdArg);
+                System.exit(1);
+              }
+            } catch (NumberFormatException e) {
+              System.err.printf("Invalid user ID: %s\n", userIdArg);
+              System.exit(1);
+            }
             break;
         }
       }
@@ -352,7 +478,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
       // Process env-based setup - using package name to uniquify the folders
       // and avoid concurrency problems
 
-      String testArtifactsPath = System.getenv(TEST_RESULT_ARTIFACTS_ENV);
+      String testArtifactsPath = environment.get(TEST_RESULT_ARTIFACTS_ENV);
       if (testArtifactsPath != null) {
         String devicePath =
             String.format(
@@ -361,7 +487,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
         extraInstrumentationArguments.put(TEST_RESULT_ARTIFACTS_ENV, devicePath);
       }
 
-      String testArtifactAnnotationsPath = System.getenv(TEST_RESULT_ARTIFACTS_ANNOTATIONS_ENV);
+      String testArtifactAnnotationsPath = environment.get(TEST_RESULT_ARTIFACTS_ANNOTATIONS_ENV);
       if (testArtifactAnnotationsPath != null) {
         String devicePath =
             String.format(
@@ -372,12 +498,12 @@ public class InstrumentationTestRunner extends DeviceRunner {
         extraInstrumentationArguments.put(TEST_RESULT_ARTIFACTS_ANNOTATIONS_ENV, devicePath);
       }
 
-      String preTestSetupEnv = System.getenv(PRE_TEST_SETUP_SCRIPT);
+      String preTestSetupEnv = environment.get(PRE_TEST_SETUP_SCRIPT);
       if (preTestSetupEnv != null) {
         this.preTestSetupScript = preTestSetupEnv;
       }
 
-      String extraApksToInstall = System.getenv(APEXES_TO_INSTALL);
+      String extraApksToInstall = environment.get(APEXES_TO_INSTALL);
       if (extraApksToInstall != null) {
         this.extraApksToInstall = Arrays.asList(extraApksToInstall.split(","));
       }
@@ -388,10 +514,6 @@ public class InstrumentationTestRunner extends DeviceRunner {
 
   public String getPackageName() {
     return packageName;
-  }
-
-  public IDevice getDevice() {
-    return this.device;
   }
 
   public boolean hasTestRunFailed() {
@@ -417,6 +539,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
             argsParser.apkUnderTestPath,
             argsParser.exopackageLocalPath,
             argsParser.apkUnderTestExopackageLocalPath,
+            argsParser.exopackageSecondaryDexLocalPath,
             argsParser.attemptUninstallApkUnderTest,
             argsParser.attemptUninstallInstrumentationApk,
             argsParser.debug,
@@ -430,11 +553,15 @@ public class InstrumentationTestRunner extends DeviceRunner {
             argsParser.clearPackageData,
             argsParser.disableAnimations,
             argsParser.preTestSetupScript,
-            argsParser.extraApksToInstall);
+            argsParser.extraApksToInstall,
+            argsParser.userId);
     if (argsParser.recordVideo) {
       runner.addReportLayer(new VideoRecordingReportLayer(runner));
     }
     runner.addReportLayer(new TombstonesReportLayer(runner, argsParser.collectTombstones));
+    if (argsParser.collectPerfetto) {
+      runner.addReportLayer(new PerfettoReportLayer(runner));
+    }
     if (!argsParser.logExtractors.isEmpty()) {
       runner.addReportLayer(new LogExtractorReportLayer(runner, argsParser.logExtractors));
     }
@@ -455,44 +582,174 @@ public class InstrumentationTestRunner extends DeviceRunner {
   }
 
   protected void installPackage(String path) throws Throwable {
-    androidDevice.installApkOnDevice(new File(path), false, false, false);
+    // When running as secondary user, install for all users so the APK is available
+    // to the secondary user context
+    String userTarget = (this.userId != null && this.userId > 0) ? "all" : null;
+    androidDevice.installApkOnDevice(new File(path), false, false, true, false, userTarget);
   }
 
-  protected void initializeAndroidDevice() throws Exception {
-    if (this.androidDevice == null) {
-      String deviceSerial = deviceArgs.deviceSerial;
+  /**
+   * Execute adb shell command using AndroidDevice and AdbUtils.
+   *
+   * @param command the shell command to execute
+   * @return the output of the shell command
+   * @throws Exception if command execution fails
+   */
+  protected String executeAdbShellCommand(String command) throws Exception {
+    return adbUtils.executeAdbShellCommand(command, androidDevice.getSerialNumber(), false);
+  }
 
-      // Validate device selection arguments
-      if (deviceSerial == null && !deviceArgs.autoRunOnConnectedDevice) {
-        throw new IllegalArgumentException(
-            "Either deviceSerial must be provided or autoRunOnConnectedDevice must be enabled");
+  protected AndroidDevice initializeAndroidDevice() {
+    String deviceSerial = deviceArgs.deviceSerial;
+
+    // Validate device selection arguments
+    if (deviceSerial == null && !deviceArgs.autoRunOnConnectedDevice) {
+      throw new IllegalArgumentException(
+          "Either deviceSerial must be provided or autoRunOnConnectedDevice must be enabled");
+    }
+
+    AndroidDevice device = null;
+
+    // If both deviceSerial and autoRunOnConnectedDevice are specified, deviceSerial takes
+    // precedence
+    if (deviceSerial == null && deviceArgs.autoRunOnConnectedDevice) {
+      List<AndroidDevice> devices = this.adbUtils.getDevices();
+      if (!devices.isEmpty()) {
+        // TODO: If more than one device is attached, we currently select the first one.
+        // Consider warning the user or providing a way to specify which device to use.
+        device = devices.get(0);
       }
-
-      // If both deviceSerial and autoRunOnConnectedDevice are specified, deviceSerial takes
-      // precedence
-      if (deviceSerial == null && deviceArgs.autoRunOnConnectedDevice) {
-        List<AndroidDevice> devices = this.adbUtils.getDevices();
-        if (!devices.isEmpty()) {
-          // TODO: If more than one device is attached, we currently select the first one.
-          // Consider warning the user or providing a way to specify which device to use.
-          this.androidDevice = devices.get(0);
+    } else if (deviceSerial != null) {
+      // For TCP-connected devices (e.g., emulators at host:port), ensure the ADB server
+      // knows about the device before we proceed. ADB servers don't auto-discover TCP
+      // devices — "adb connect" must be called first.
+      if (isTcpDevice(deviceSerial)) {
+        boolean found = false;
+        for (AndroidDevice d : this.adbUtils.getDevices()) {
+          if (d.getSerialNumber().equals(deviceSerial)) {
+            found = true;
+            break;
+          }
         }
-      } else if (deviceSerial != null) {
-        this.androidDevice = new AndroidDeviceImpl(deviceSerial, this.adbUtils);
+        if (!found) {
+          System.err.println("Device " + deviceSerial + " not found, attempting adb connect...");
+          connectTcpDevice(deviceSerial);
+          long start = System.currentTimeMillis();
+          while (!found) {
+            long timeLeft = start + ADB_CONNECT_TIMEOUT_MS - System.currentTimeMillis();
+            if (timeLeft <= 0) {
+              break;
+            }
+            try {
+              Thread.sleep(ADB_CONNECT_TIME_STEP_MS);
+            } catch (InterruptedException e) {
+              Thread.currentThread().interrupt();
+              break;
+            }
+            for (AndroidDevice d : this.adbUtils.getDevices()) {
+              if (d.getSerialNumber().equals(deviceSerial)) {
+                found = true;
+                break;
+              }
+            }
+          }
+          if (!found) {
+            System.err.println(
+                "Warning: Device "
+                    + deviceSerial
+                    + " not found after adb connect, proceeding anyway");
+          }
+        }
       }
+      device = new AndroidDeviceImpl(deviceSerial, this.adbUtils);
+    }
 
-      if (this.androidDevice == null) {
-        throw new RuntimeException("Failed to initialize AndroidDevice");
+    if (device == null) {
+      throw new RuntimeException("Failed to initialize AndroidDevice");
+    }
+
+    return device;
+  }
+
+  /**
+   * Resolves a ddmlib {@link IDevice} for the given serial number. This is needed solely because
+   * {@link RemoteAndroidTestRunner} requires an {@link IDevice} to execute {@code am instrument}.
+   * All other device interactions use {@link AndroidDevice} via {@link AdbUtils}.
+   */
+  protected IDevice resolveIDevice(String serial) throws InterruptedException {
+    AndroidDebugBridge.initIfNeeded(/* clientSupport */ false);
+    AndroidDebugBridge adb = AndroidDebugBridge.createBridge(getAdbPath(), false);
+    if (adb == null) {
+      System.err.println("Failed to connect to adb. Make sure adb server is running.");
+      System.exit(1);
+      return null;
+    }
+
+    long start = System.currentTimeMillis();
+    while (!adb.isConnected() || !adb.hasInitialDeviceList()) {
+      long timeLeft = start + ADB_CONNECT_TIMEOUT_MS - System.currentTimeMillis();
+      if (timeLeft <= 0) {
+        break;
       }
+      Thread.sleep(ADB_CONNECT_TIME_STEP_MS);
+    }
+
+    if (!adb.isConnected() || !adb.hasInitialDeviceList()) {
+      System.err.println("Unable to set up adb.");
+      System.exit(1);
+      return null;
+    }
+
+    for (IDevice device : adb.getDevices()) {
+      if (device.getSerialNumber().equals(serial)) {
+        return device;
+      }
+    }
+
+    System.err.printf("Unable to find device with serial %s via ddmlib%n", serial);
+    System.exit(1);
+    return null;
+  }
+
+  /**
+   * Returns true if the serial looks like a TCP-connected device (host:port format), which is
+   * typical for emulators connected via {@code adb connect}.
+   */
+  private static boolean isTcpDevice(String serial) {
+    return serial != null && serial.contains(":");
+  }
+
+  /**
+   * Runs {@code adb connect <serial>} to ensure the ADB server knows about a TCP-connected device
+   * (e.g., an emulator).
+   */
+  private void connectTcpDevice(String serial) {
+    try {
+      String result = adbUtils.executeAdbCommand("connect " + serial, null, true);
+      System.err.println("adb connect " + serial + ": " + result.trim());
+    } catch (Exception e) {
+      System.err.println("Failed to run adb connect " + serial + ": " + e.getMessage());
     }
   }
 
   @SuppressWarnings({"PMD.BlacklistedSystemGetenv", "PMD.BlacklistedDefaultProcessMethod"})
   public void run() throws Throwable {
-    IDevice device = getAndroidDevice(deviceArgs.autoRunOnConnectedDevice, deviceArgs.deviceSerial);
-    this.device = device;
+    // Proactive timeout: start the timer as early as possible since TPX_TIMEOUT_SEC counts from
+    // process start. ADB setup (APK install, directory creation) can consume significant time,
+    // so placing this after setup would cause the timer to fire too late.
+    Optional<TestResultsOutputSender> testResultsOutputSender =
+        TestResultsOutputSender.fromDefaultEnvName();
+    TpxTimeoutBufferManager tpxTimeoutBufferManager = null;
+    if (testResultsOutputSender.isPresent()
+        && "true".equals(System.getenv(PROACTIVE_TIMEOUT_ENABLED_ENV))) {
+      ScheduledExecutorService watchdogExecutor = Executors.newScheduledThreadPool(1);
+      tpxTimeoutBufferManager =
+          TpxTimeoutBufferManager.create(testResultsOutputSender.get(), watchdogExecutor);
+    }
 
-    initializeAndroidDevice();
+    // Resolve a ddmlib IDevice solely for RemoteAndroidTestRunner compatibility.
+    // All other device interactions use this.androidDevice (AdbUtils-based).
+    IDevice iDevice = resolveIDevice(androidDevice.getSerialNumber());
 
     if (this.instrumentationApkPath != null) {
       if (this.apkUnderTestPath != null) {
@@ -548,6 +805,10 @@ public class InstrumentationTestRunner extends DeviceRunner {
       syncExopackageDir(localBase);
     }
 
+    if (this.exopackageSecondaryDexLocalPath != null) {
+      pushExopackageSecondaryDex(Paths.get(this.exopackageSecondaryDexLocalPath), this.packageName);
+    }
+
     String appScopedStorageDeviceArtifactsPath =
         getAppScopedStoragePath(packageName, targetPackageName, isSelfInstrumenting, "artifacts");
     if (appScopedStorageDeviceArtifactsPath != null) {
@@ -597,7 +858,8 @@ public class InstrumentationTestRunner extends DeviceRunner {
         System.err.println(
             String.format(
                 "Installing APEX %d/%d: %s...", i + 1, this.apexesToInstall.size(), apexPath));
-        androidDevice.installApexOnDevice(new File(apexPath), false, isLast, softRebootAvailable);
+        androidDevice.installApexOnDevice(
+            new File(apexPath), false, isLast, softRebootAvailable, true);
       }
 
       System.err.println(
@@ -640,36 +902,64 @@ public class InstrumentationTestRunner extends DeviceRunner {
       }
     }
 
+    String hostPerTestCoverageDir = setUpPerTestCoveragePull();
+
     if (this.clearPackageData) {
-      executeAdbShellCommand("pm clear " + this.packageName, device);
-      executeAdbShellCommand("pm clear " + this.targetPackageName, device);
+      executeAdbShellCommand("pm clear " + this.packageName);
+      executeAdbShellCommand("pm clear " + this.targetPackageName);
     }
 
     AnimationScales originalWindowAnimationScales = null;
 
     if (this.disableAnimations) {
-      originalWindowAnimationScales = getAnimationScales(device);
-      setAnimationScales(device, new AnimationScales(0f, 0f, 0f));
+      originalWindowAnimationScales = getAnimationScales();
+      setAnimationScales(new AnimationScales(0f, 0f, 0f));
     }
 
     // Increase logcat buffer size to 16MB.
-    executeAdbShellCommand("logcat -G 16M", device);
+    executeAdbShellCommand("logcat -G 16M");
 
     // Clear logcat logs prior to test run
-    executeAdbShellCommand("logcat -c", device);
+    executeAdbShellCommand("logcat -c");
 
-    // Clean up output directories before the run
+    // Clean up + stage output directories before the run.
+    //
+    // Cleanup is mandatory: a stale directory left over from a prior run could pollute results, so
+    // a failed cleanup always aborts the run.
+    //
+    // Staging (creating the dir) is best-effort by default: some displayless/emulator images boot
+    // without external storage (no MediaProvider -> /sdcard unmounted), and that must not abort the
+    // entire test run. On such a device the failure is logged and the run continues; per-test
+    // artifacts for that dir just won't be collected. Set ANDROID_FAIL_ON_ARTIFACT_STAGING_ERROR to
+    // "true" to make a staging failure abort the run instead.
+    boolean failOnArtifactStagingError = "true".equals(getenv(FAIL_ON_ARTIFACT_STAGING_ERROR_ENV));
     for (final String devicePath : this.extraDirsToPull.keySet()) {
-      String output = executeAdbShellCommand("rm -fr " + devicePath, device);
+      String resolvedPath = resolvePathForUser(devicePath);
+      String output = executeAdbShellCommand("rm -fr " + resolvedPath);
 
-      if (directoryExists(devicePath)) {
-        System.err.printf("Failed to clean up directory %s due to error: %s\n", devicePath, output);
+      if (directoryExists(resolvedPath)) {
+        System.err.printf(
+            "Failed to clean up directory %s due to error: %s\n", resolvedPath, output);
         System.exit(1);
       }
 
-      output = executeAdbShellCommand("mkdir -p " + devicePath, device);
-      if (!directoryExists(devicePath)) {
-        System.err.printf("Failed to create directory %s due to error: %s\n", devicePath, output);
+      try {
+        output = executeAdbShellCommand("mkdir -p " + resolvedPath);
+        if (!directoryExists(resolvedPath)) {
+          throw new RuntimeException(String.format("mkdir did not create directory: %s", output));
+        }
+      } catch (Exception e) {
+        if (failOnArtifactStagingError) {
+          System.err.printf(
+              "Failed to create directory %s due to error: %s\n", resolvedPath, e.getMessage());
+          System.exit(1);
+        }
+        System.err.printf(
+            "Warning: could not stage artifact directory %s; external storage may be"
+                + " unavailable on this device (e.g. a displayless emulator without"
+                + " MediaProvider). Continuing without per-test artifact collection for this"
+                + " dir. Error: %s\n",
+            resolvedPath, e.getMessage());
       }
     }
 
@@ -679,10 +969,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
 
     try {
       RemoteAndroidTestRunner runner =
-          new RemoteAndroidTestRunner(
-              this.packageName,
-              this.testRunner,
-              getAndroidDevice(deviceArgs.autoRunOnConnectedDevice, deviceArgs.deviceSerial));
+          new RemoteAndroidTestRunner(this.packageName, this.testRunner, iDevice);
 
       for (Map.Entry<String, String> entry : this.extraInstrumentationArguments.entrySet()) {
         runner.addInstrumentationArg(
@@ -719,7 +1006,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
         }
       }
 
-      BuckXmlTestRunListener buckXmlListener = new BuckXmlTestRunListener(device);
+      BuckXmlTestRunListener buckXmlListener = new BuckXmlTestRunListener(androidDevice, adbUtils);
       ITestRunListener trimLineListener =
           new ITestRunListener() {
             /**
@@ -769,18 +1056,33 @@ public class InstrumentationTestRunner extends DeviceRunner {
       listeners.add(trimLineListener);
       listeners.add(buckXmlListener);
 
-      Optional<TestResultsOutputSender> testResultsOutputSender =
-          TestResultsOutputSender.fromDefaultEnvName();
+      // Determine the result listener for timeout enforcement.
+      ITestRunListener resultListener = buckXmlListener;
+
       if (testResultsOutputSender.isPresent()) {
         InstrumentationTpxStandardOutputTestListener tpxListener =
-            new InstrumentationTpxStandardOutputTestListener(testResultsOutputSender.get(), device);
+            new InstrumentationTpxStandardOutputTestListener(
+                testResultsOutputSender.get(), androidDevice, adbUtils);
         listeners.add(tpxListener);
+        resultListener = tpxListener;
       }
 
+      if ("true".equals(System.getenv(PER_TEST_TIMEOUT_ENABLED_ENV))) {
+        listeners.add(new InstrumentationTimeoutEnforcingRunListener(resultListener));
+      }
+
+      if (this.userId != null) {
+        runner.addInstrumentationArg("user", this.userId.toString());
+      }
       runner.run(listeners);
 
+      // All tests completed normally — mark as completed so proactive timer is a no-op
+      if (tpxTimeoutBufferManager != null) {
+        tpxTimeoutBufferManager.markCompleted();
+      }
+
       if (this.disableAnimations) {
-        setAnimationScales(device, originalWindowAnimationScales);
+        setAnimationScales(originalWindowAnimationScales);
       }
 
       if (this.codeCoverageOutputFile != null || (useJaCoCoCoverage && coverageTempDir != null)) {
@@ -792,9 +1094,9 @@ public class InstrumentationTestRunner extends DeviceRunner {
         }
 
         String covFileInEmu = "/data/data/" + this.targetPackageName + "/files/coverage.ec";
-        String covFileInSdcard = "/sdcard/coverage.ec";
+        String covFileInSdcard = resolvePathForUser("/sdcard/coverage.ec");
         String cpOutput =
-            executeAdbShellCommand("su root cp " + covFileInEmu + " " + covFileInSdcard, device);
+            executeAdbShellCommand("su root cp " + covFileInEmu + " " + covFileInSdcard);
 
         System.out.println(cpOutput);
         pullFile(covFileInSdcard, destCovFileInHost);
@@ -816,17 +1118,21 @@ public class InstrumentationTestRunner extends DeviceRunner {
         }
       }
       for (Map.Entry<String, String> entry : this.extraFilesToPull.entrySet()) {
-        pullFile(entry.getKey(), entry.getValue());
+        String resolvedPath = resolvePathForUser(entry.getKey());
+        pullFile(resolvedPath, entry.getValue());
       }
       for (Map.Entry<String, String> entry : this.extraDirsToPull.entrySet()) {
-        pullDir(entry.getKey(), entry.getValue());
+        String resolvedPath = resolvePathForUser(entry.getKey());
+        pullDir(resolvedPath, entry.getValue());
       }
 
+      maybeEmitPerTestCoverageInfraFailure(hostPerTestCoverageDir, testResultsOutputSender);
+
     } finally {
-      this.collectAdbLogs(device);
+      this.collectAdbLogs();
 
       // Restore logcat buffer size to default.
-      executeAdbShellCommand("logcat -G 256K", device);
+      executeAdbShellCommand("logcat -G 256K");
 
       for (ReportLayer layer : this.reportLayers) {
         layer.report();
@@ -850,6 +1156,74 @@ public class InstrumentationTestRunner extends DeviceRunner {
 
   public Process exec(String command) throws IOException {
     return Runtime.getRuntime().exec(command);
+  }
+
+  @Nullable
+  private String setUpPerTestCoveragePull() {
+    if (!"true".equals(getenv(PER_TEST_COVERAGE_ENABLED_ENV))) {
+      return null;
+    }
+
+    String devicePerTestCoveragePath =
+        getAppScopedStoragePath(
+            packageName, targetPackageName, isSelfInstrumenting, PER_TEST_COVERAGE_SUBDIR);
+    if (devicePerTestCoveragePath == null) {
+      devicePerTestCoveragePath =
+          String.format(
+              INSTRUMENTATION_TEST_DEFAULT_ARTIFACTS_DIR_TEMPLATE,
+              PER_TEST_COVERAGE_SUBDIR,
+              packageName);
+    }
+    String hostPerTestCoverageDir = getHostPerTestCoverageDir();
+    if (hostPerTestCoverageDir != null) {
+      extraDirsToPull.put(devicePerTestCoveragePath, hostPerTestCoverageDir);
+      extraInstrumentationArguments.put(PER_TEST_COVERAGE_DIR_ARG, devicePerTestCoveragePath);
+    }
+    return hostPerTestCoverageDir;
+  }
+
+  @Nullable
+  private String getHostPerTestCoverageDir() {
+    String hostPerTestCoverageDir = getenv(PER_TEST_COVERAGE_DIR_ENV);
+    if (hostPerTestCoverageDir != null && !hostPerTestCoverageDir.isEmpty()) {
+      return hostPerTestCoverageDir;
+    }
+
+    String testArtifactsPath = getenv(TEST_RESULT_ARTIFACTS_ENV);
+    if (testArtifactsPath == null || testArtifactsPath.isEmpty()) {
+      return null;
+    }
+    return Paths.get(testArtifactsPath, PER_TEST_COVERAGE_SUBDIR).toString();
+  }
+
+  // Pairs with PerTestAndroidCoverageRunListener#onFirstCoverageError, which writes
+  // "coverage_error.txt" inside the per-test coverage output dir on the first agent-side failure.
+  // Without this signal a silently-broken agent looks identical to a successful run with zero
+  // probes (empty manifest.jsonl) — surfacing it as INFRA_FAILURE makes the next regression
+  // visible in test results instead of waiting for someone to notice missing per-test artifacts.
+  private static void maybeEmitPerTestCoverageInfraFailure(
+      String hostPerTestCoverageDir, Optional<TestResultsOutputSender> sender) {
+    if (hostPerTestCoverageDir == null || !sender.isPresent()) {
+      return;
+    }
+    Path sentinel = Paths.get(hostPerTestCoverageDir, "coverage_error.txt");
+    if (!Files.exists(sentinel)) {
+      return;
+    }
+    try {
+      String contents = new String(Files.readAllBytes(sentinel), StandardCharsets.UTF_8);
+      int newline = contents.indexOf('\n');
+      String firstLine = (newline >= 0) ? contents.substring(0, newline) : contents;
+      sender
+          .get()
+          .sendRunFailure(
+              RunFailureStatus.INFRA_FAILURE,
+              System.currentTimeMillis(),
+              "Per-test coverage collection failed: " + firstLine,
+              contents);
+    } catch (IOException e) {
+      System.err.printf("Failed to read per-test coverage error sentinel: %s\n", e);
+    }
   }
 
   @Nullable
@@ -878,7 +1252,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
   }
 
   @SuppressWarnings("PMD.BlacklistedSystemGetenv")
-  private void collectAdbLogs(IDevice device) {
+  private void collectAdbLogs() {
     try {
       StringBuilder allLogOutput = new StringBuilder();
 
@@ -955,7 +1329,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
     }
     Path annotationsPath =
         Paths.get(testArtifactsAnnotationsPath, String.format("%s.annotation", name));
-    Files.write(annotationsPath, annotationTemplate.getBytes(Charset.forName("UTF-8")));
+    Files.write(annotationsPath, annotationTemplate.getBytes(StandardCharsets.UTF_8));
 
     // create the artifact file
     return Paths.get(testArtifactsPath, name);
@@ -1014,6 +1388,14 @@ public class InstrumentationTestRunner extends DeviceRunner {
     return output.contains("exists");
   }
 
+  /**
+   * Execute adb shell command. Public wrapper around executeAdbShellCommand for use by report
+   * layers in other packages.
+   */
+  public String runShellCommand(String command) throws Exception {
+    return executeAdbShellCommand(command);
+  }
+
   protected void transferFile(String operation, String source, String destination)
       throws Exception {
     adbUtils.executeAdbCommand(
@@ -1044,6 +1426,12 @@ public class InstrumentationTestRunner extends DeviceRunner {
     Path remoteBase = Paths.get(metadataContents.trim());
     // TODO: speed this up by checking for already installed items
     // TODO: speed this up by only installing ABI-compatible shared-objects
+    pushTree(localBase, remoteBase, pusher);
+  }
+
+  /** Pushes every file under {@code localBase} to {@code remoteBase}, preserving relative paths. */
+  protected static void pushTree(Path localBase, Path remoteBase, FilePusher pusher)
+      throws Exception {
     try (Stream<Path> paths = Files.walk(localBase, FileVisitOption.FOLLOW_LINKS)) {
       Iterable<Path> localFiles = () -> paths.filter(p -> !Files.isDirectory(p)).iterator();
       for (Path p : localFiles) {
@@ -1053,6 +1441,18 @@ public class InstrumentationTestRunner extends DeviceRunner {
         pusher.pushFile(p.toString(), fullRemotePath.toString().replace('\\', '/'));
       }
     }
+  }
+
+  /**
+   * Push exopackage secondary-dex artifacts to
+   * /data/local/tmp/exopackage/&lt;packageName&gt;/secondary-dex so the on-device
+   * ExopackageDexLoader installs them before the test runner's Application init. Unlike {@link
+   * #syncExopackageDir}, the remote base is derived from the package name, so the buck rule can
+   * pass the build's secondary-dex dir directly without a remote-base metadata file.
+   */
+  protected void pushExopackageSecondaryDex(Path localDir, String packageName) throws Exception {
+    Path remoteBase = Paths.get(EXOPACKAGE_INSTALL_ROOT + "/" + packageName + "/secondary-dex");
+    pushTree(localDir, remoteBase, this::pushFile);
   }
 
   private String getAppScopedStoragePath(
@@ -1106,7 +1506,7 @@ public class InstrumentationTestRunner extends DeviceRunner {
     return -1;
   }
 
-  private AnimationScales getAnimationScales(IDevice device) throws Exception {
+  private AnimationScales getAnimationScales() throws Exception {
     Function<String, Float> converter =
         s -> {
           if (s == null || "null".equals(s.trim())) {
@@ -1115,31 +1515,24 @@ public class InstrumentationTestRunner extends DeviceRunner {
           return Float.parseFloat(s);
         };
     float windowAnimationScale =
-        converter.apply(
-            executeAdbShellCommand("settings get global window_animation_scale", device));
+        converter.apply(executeAdbShellCommand("settings get global window_animation_scale"));
     float transitionAnimationScale =
-        converter.apply(
-            executeAdbShellCommand("settings get global transition_animation_scale", device));
+        converter.apply(executeAdbShellCommand("settings get global transition_animation_scale"));
     float animatorDurationScale =
-        converter.apply(
-            executeAdbShellCommand("settings get global animator_duration_scale", device));
+        converter.apply(executeAdbShellCommand("settings get global animator_duration_scale"));
 
     return new AnimationScales(
         windowAnimationScale, transitionAnimationScale, animatorDurationScale);
   }
 
-  private void setAnimationScales(IDevice device, AnimationScales animationScales)
-      throws Exception {
+  private void setAnimationScales(AnimationScales animationScales) throws Exception {
     executeAdbShellCommand(
-        "settings put global window_animation_scale " + animationScales.windowAnimationScale,
-        device);
+        "settings put global window_animation_scale " + animationScales.windowAnimationScale);
     executeAdbShellCommand(
         "settings put global transition_animation_scale "
-            + animationScales.transitionAnimationScale,
-        device);
+            + animationScales.transitionAnimationScale);
     executeAdbShellCommand(
-        "settings put global animator_duration_scale " + animationScales.animatorDurationScale,
-        device);
+        "settings put global animator_duration_scale " + animationScales.animatorDurationScale);
   }
 
   // VisibleForTesting

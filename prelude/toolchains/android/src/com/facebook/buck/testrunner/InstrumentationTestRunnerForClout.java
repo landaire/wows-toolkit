@@ -10,6 +10,7 @@
 
 package com.facebook.buck.testrunner;
 
+import com.facebook.buck.testrunner.reportlayer.PerfettoReportLayer;
 import com.facebook.buck.testrunner.reportlayer.TombstonesReportLayer;
 import com.facebook.buck.testrunner.reportlayer.VideoRecordingReportLayer;
 import java.io.File;
@@ -32,6 +33,7 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
       String apkUnderTestPath,
       String exopackageLocalPath,
       String apkUnderTestExopackageLocalPath,
+      String exopackageSecondaryDexLocalPath,
       boolean attemptUninstallApkUnderTest,
       boolean attemptUninstallInstrumentationApk,
       boolean debug,
@@ -45,7 +47,8 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
       boolean clearPackageData,
       boolean disableAnimations,
       String preTestSetupScript,
-      List<String> extraApksToInstall) {
+      List<String> extraApksToInstall,
+      @Nullable Integer userId) {
     super(
         deviceArgs,
         packageName,
@@ -56,6 +59,7 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
         apkUnderTestPath,
         exopackageLocalPath,
         apkUnderTestExopackageLocalPath,
+        exopackageSecondaryDexLocalPath,
         attemptUninstallApkUnderTest,
         attemptUninstallInstrumentationApk,
         debug,
@@ -69,7 +73,8 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
         clearPackageData,
         disableAnimations,
         preTestSetupScript,
-        extraApksToInstall);
+        extraApksToInstall,
+        userId);
   }
 
   @SuppressWarnings("PMD.BlacklistedSystemGetenv")
@@ -88,6 +93,7 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
             argsParser.apkUnderTestPath,
             argsParser.exopackageLocalPath,
             argsParser.apkUnderTestExopackageLocalPath,
+            argsParser.exopackageSecondaryDexLocalPath,
             argsParser.attemptUninstallApkUnderTest,
             argsParser.attemptUninstallInstrumentationApk,
             argsParser.debug,
@@ -101,11 +107,15 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
             argsParser.clearPackageData,
             argsParser.disableAnimations,
             argsParser.preTestSetupScript,
-            argsParser.extraApksToInstall);
+            argsParser.extraApksToInstall,
+            argsParser.userId);
     if (argsParser.recordVideo) {
       runner.addReportLayer(new VideoRecordingReportLayer(runner));
     }
     runner.addReportLayer(new TombstonesReportLayer(runner, argsParser.collectTombstones));
+    if (argsParser.collectPerfetto) {
+      runner.addReportLayer(new PerfettoReportLayer(runner));
+    }
     return runner;
   }
 

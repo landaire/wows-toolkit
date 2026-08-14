@@ -6,6 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
+load("@prelude//:resources.bzl", "gather_resources")
 load("@prelude//cxx:cxx.bzl", "create_shared_lib_link_group_specs")
 load("@prelude//cxx:cxx_context.bzl", "get_cxx_toolchain_info")
 load("@prelude//cxx:cxx_executable.bzl", "CxxExecutableOutput", "cxx_executable")
@@ -24,6 +25,7 @@ load(
     "Traversal",
 )
 load("@prelude//cxx:headers.bzl", "cxx_get_regular_cxx_headers_layout")
+load("@prelude//cxx:link.bzl", "CxxGcSectionsData", "CxxLinkerMapData")  # @unused Used as a type
 load(
     "@prelude//cxx:link_groups.bzl",
     "LinkGroupLibSpec",
@@ -65,13 +67,14 @@ load(
 )
 load("@prelude//linking:types.bzl", "Linkage")
 load("@prelude//python:internal_tools.bzl", "PythonInternalToolsInfo")
+load("@prelude//python:python.bzl", "python_attr_preload_deps")
 load("@prelude//python:toolchain.bzl", "PackageStyle")
 load("@prelude//utils:argfile.bzl", "at_argfile")
-load(":native_python_util.bzl", "CxxExtensionLinkInfo", "CxxExtensionLinkInfoReduced", "merge_cxx_extension_info", "reduce_cxx_extension_info")  # @unused Used as a type
+load(
+    ":native_python_util.bzl", "CxxExtensionLinkInfo", "CxxExtensionLinkInfoReduced", "merge_cxx_extension_info", "reduce_cxx_extension_info"
+)  # @unused Used as a type
 
-def _get_root_link_group_specs(
-        libs: list[LinkableProviders],
-        extensions: dict[str, LinkableProviders]) -> list[LinkGroupLibSpec]:
+def _get_root_link_group_specs(libs: list[LinkableProviders], extensions: dict[str, LinkableProviders]) -> list[LinkGroupLibSpec]:
     """
     Walk the linkable graph finding dlopen-able C++ libs.
     """
@@ -172,11 +175,12 @@ def _get_shared_only_groups(shared_only_libs: list[LinkableProviders]) -> list[G
     return groups
 
 def _get_link_group_info(
-        ctx: AnalysisContext,
-        link_deps: list[LinkableProviders],
-        libs: list[LinkableProviders],
-        extensions: dict[str, LinkableProviders],
-        shared_only_libs: list[LinkableProviders]) -> ([LinkGroupInfo, None], list[LinkGroupLibSpec]):
+    ctx: AnalysisContext,
+    link_deps: list[LinkableProviders],
+    libs: list[LinkableProviders],
+    extensions: dict[str, LinkableProviders],
+    shared_only_libs: list[LinkableProviders],
+) -> ([LinkGroupInfo, None], list[LinkGroupLibSpec]):
     """
     Return the `LinkGroupInfo` and link group lib specs to use for this binary.
     This will handle parsing the various user-specific parameters and automatic
@@ -214,14 +218,14 @@ def _get_link_group_info(
     link_groups = [s.group for s in root_specs] + _get_shared_only_groups(shared_only_libs) + definitions
 
     linkable_graph = LinkableGraph(
-        #label = ctx.label,
+        # label = ctx.label,
         nodes = ctx.actions.tset(
             LinkableGraphTSet,
             children = (
-                [d.linkable_graph.nodes for d in link_deps] +
-                [d.linkable_graph.nodes for d in libs] +
-                [d.linkable_graph.nodes for d in extensions.values()] +
-                [d.linkable_graph.nodes for d in shared_only_libs]
+                [d.linkable_graph.nodes for d in link_deps]
+                + [d.linkable_graph.nodes for d in libs]
+                + [d.linkable_graph.nodes for d in extensions.values()]
+                + [d.linkable_graph.nodes for d in shared_only_libs]
             ),
         ),
     )
@@ -240,7 +244,7 @@ def _compute_cxx_extension_info(ctx, deps) -> (CxxExtensionLinkInfo, CxxExtensio
         ctx.actions,
         deps + executable_deps,
         # Add in dlopen-enabled libs from first-order deps.
-        shared_deps = ctx.attrs.deps + ctx.attrs.preload_deps,
+        shared_deps = ctx.attrs.deps + python_attr_preload_deps(ctx),
     )
     extension_info_reduced = reduce_cxx_extension_info(extension_info)
     return extension_info, extension_info_reduced
@@ -249,24 +253,16 @@ def _cxx_exe_allow_cache_upload(ctx) -> bool:
     return hasattr(ctx.attrs, "exe_allow_cache_upload") and bool(ctx.attrs.exe_allow_cache_upload)
 
 def _compute_cxx_executable_info(
-        ctx,
-        extension_info_reduced,
-        static_extension_info_out,
-        inherited_preprocessor_info,
-        python_toolchain,
-        package_style,
-        allow_cache_upload) -> CxxExecutableOutput:
+    ctx, extension_info_reduced, static_extension_info_out, inherited_preprocessor_info, python_toolchain, package_style, allow_cache_upload
+) -> CxxExecutableOutput:
     cxx_executable_srcs = [
         CxxSrcWithFlags(file = ctx.attrs.cxx_main, flags = []),
         CxxSrcWithFlags(file = ctx.attrs.static_extension_utils, flags = ["-DOSS_PYTHON=1"] if ctx.attrs.use_oss_python else []),
         CxxSrcWithFlags(file = static_extension_info_out, flags = []),
     ]
 
-    # All deps inolved in the link.
-    link_deps = (
-        linkables(ctx.attrs.executable_deps + ctx.attrs.preload_deps) +
-        extension_info_reduced.linkable_providers
-    )
+    # All deps involved in the link.
+    link_deps = linkables(ctx.attrs.executable_deps + python_attr_preload_deps(ctx)) + extension_info_reduced.linkable_providers
 
     link_group_info, auto_link_group_specs = _get_link_group_info(
         ctx,
@@ -280,6 +276,21 @@ def _compute_cxx_executable_info(
 
     extra_binary_link_flags.extend(python_toolchain.binary_linker_flags)
 
+    # Force the linker to retain all PyInit symbols for embeddable C extensions.
+    # The generated static_extension_info.cpp references these symbols via asm
+    # directives, but the linker may still drop archive members that define them
+    # if nothing else references them (e.g. when link groups or --gc-sections
+    # are in play). Adding -u flags ensures the linker treats them as undefined
+    # entry points and pulls in the necessary object files from archives.
+    pyinit_symbols = extension_info_reduced.python_module_names.values()
+    if pyinit_symbols:
+        pyinit_argsfile = ctx.actions.write(
+            "__pyinit_undefined_symbols__.argsfile",
+            cmd_args(["-u" + sym for sym in pyinit_symbols]),
+            has_content_based_path = False,
+        )
+        extra_binary_link_flags.append(cmd_args(pyinit_argsfile, format = "@{}"))
+
     linker_info = get_cxx_toolchain_info(ctx).linker_info
 
     # Set rpaths to find 1) the shared libs dir and the 2) runtime libs dir.
@@ -291,7 +302,12 @@ def _compute_cxx_executable_info(
     else:
         use_anon_target = getattr(ctx.attrs, "use_anon_target_for_analysis", False)
         if use_anon_target:
-            link_tree_name = getattr(ctx.attrs, "name", ctx.attrs.rpath)
+            # Under the anon target, ctx.attrs.name is "python_linking:<name>", but the
+            # link-tree dir (built by the outer python_binary rule) uses the bare name. The
+            # bare name is threaded through as the `rpath` attr; use it so the baked RPATH
+            # matches the real "<name>#link-tree" dir. (getattr(..., "name", ...) never falls
+            # back since `name` always exists, so it would emit a nonexistent RPATH.)
+            link_tree_name = ctx.attrs.rpath
         else:
             link_tree_name = ctx.attrs.name
 
@@ -318,26 +334,21 @@ def _compute_cxx_executable_info(
         extra_shared_libs = traverse_shared_library_info(
             merge_shared_libraries(
                 actions = ctx.actions,
-                deps =
-                    [d.shared_library_info for d in extension_info_reduced.shared_only_libs],
+                deps = [d.shared_library_info for d in extension_info_reduced.shared_only_libs],
             ),
             transformation_provider = None,
         ),
         extra_link_roots = (
-            extension_info_reduced.unembeddable_extensions.values() +
-            extension_info_reduced.dlopen_deps +
-            extension_info_reduced.shared_only_libs +
-            linkables(ctx.attrs.link_group_deps)
+            extension_info_reduced.unembeddable_extensions.values()
+            + extension_info_reduced.dlopen_deps
+            + extension_info_reduced.shared_only_libs
+            + linkables(ctx.attrs.link_group_deps)
         ),
         exe_allow_cache_upload = bool(allow_cache_upload) or _cxx_exe_allow_cache_upload(ctx),
         compiler_flags = ctx.attrs.compiler_flags,
         lang_compiler_flags = ctx.attrs.lang_compiler_flags,
-        platform_compiler_flags = ctx.attrs.platform_compiler_flags,
-        lang_platform_compiler_flags = ctx.attrs.lang_platform_compiler_flags,
         preprocessor_flags = ctx.attrs.preprocessor_flags,
         lang_preprocessor_flags = ctx.attrs.lang_preprocessor_flags,
-        platform_preprocessor_flags = ctx.attrs.platform_preprocessor_flags,
-        lang_platform_preprocessor_flags = ctx.attrs.lang_platform_preprocessor_flags,
         error_handler = python_toolchain.python_error_handler,
         allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs, get_cxx_toolchain_info(ctx).cxx_compiler_info.allow_cache_upload),
         precompiled_header = ctx.attrs.precompiled_header,
@@ -347,19 +358,17 @@ def _compute_cxx_executable_info(
     return cxx_executable(ctx, impl_params)
 
 def process_native_linking(
-        ctx,
-        deps,
-        python_toolchain,
-        python_internal_tools: PythonInternalToolsInfo,
-        package_style,
-        allow_cache_upload) -> (
+    ctx, deps, python_toolchain, python_internal_tools: PythonInternalToolsInfo, package_style, allow_cache_upload
+) -> (
     list[(SharedLibrary, str)],
     dict[str, (LinkedObject, Label)],
     list[LinkArgs],
     dict[str, typing.Any],
     dict[str, typing.Any],
+    [CxxLinkerMapData, None],
+    [CxxGcSectionsData, None],
+    list[typing.Any],
 ):
-    #TODO @dcssiva: fix types
     extra = {}
     extra_artifacts = {}
 
@@ -370,7 +379,7 @@ def process_native_linking(
     inherited_preprocessor_info = cxx_inherited_preprocessor_infos(executable_deps)
 
     # Generate an additional C file as input
-    static_extension_info_out = ctx.actions.declare_output("static_extension_info.cpp")
+    static_extension_info_out = ctx.actions.declare_output("static_extension_info.cpp", has_content_based_path = False)
     argfile = at_argfile(
         actions = ctx.actions,
         name = "generate_static_extension_info.argsfile",
@@ -383,7 +392,6 @@ def process_native_linking(
     cmd.add(cmd_args(argfile))
     cmd.add(cmd_args(static_extension_info_out.as_output(), format = "--output={}"))
 
-    # TODO we don't need to do this ...
     ctx.actions.run(cmd, category = "generate_static_extension_info")
 
     extra["static_extension_info"] = [DefaultInfo(default_output = static_extension_info_out)]
@@ -423,21 +431,54 @@ def process_native_linking(
     # potentially all of them before startup.
     shared_libs = [(s, "runtime/lib") for s in executable_info.shared_libs]
 
-    # TODO expect(len(executable_info.runtime_files) == 0, "OH NO THERE ARE RUNTIME FILES")
     extra_artifacts.update(extension_info_reduced.artifacts)
-    shared_libs.append((
-        create_shlib(
-            soname = ctx.attrs.executable_name,
-            label = ctx.label,
-            lib = LinkedObject(
-                output = executable_info.binary,
-                unstripped_output = executable_info.binary,
-                dwp = executable_info.dwp,
+    shared_libs.append(
+        (
+            create_shlib(
+                soname = ctx.attrs.executable_name,
+                label = ctx.label,
+                lib = LinkedObject(
+                    output = executable_info.binary,
+                    unstripped_output = executable_info.binary,
+                    dwp = executable_info.dwp,
+                ),
             ),
-        ),
-        "runtime/bin",
-    ))
+            "runtime/bin",
+        )
+    )
 
     link_args = executable_info.link_args
     extra_artifacts["static_extension_finder.py"] = ctx.attrs.static_extension_finder
-    return shared_libs, extensions, link_args, extra, extra_artifacts
+
+    # The native executable runs from `runtime/bin/<binary>` inside the packaged
+    # PAR (e.g. the xar mount). build::ExternalResourceManager reads
+    # `<exe>.resources.json` next to it, but transitive C++ resources are bundled
+    # at the PAR root under `__cxx_resources__/`. Emit a manifest next to the
+    # inner binary mapping each resource to its `__cxx_resources__/` location so
+    # getResourcePath resolves at runtime in a packaged (xar/standalone) context.
+    # (The inplace case is covered separately by forwarding runtime_files.)
+    cxx_resource_names = []
+    for label_resources in gather_resources(ctx.label, deps = deps).values():
+        cxx_resource_names.extend(label_resources.keys())
+    if cxx_resource_names:
+        runtime_bin_resources_json = ctx.actions.write_json(
+            "runtime_bin_resources.json",
+            {name: "../../__cxx_resources__/" + name for name in cxx_resource_names},
+            has_content_based_path = False,
+        )
+        # Name the manifest after the in-PAR binary, which is placed at
+        # `runtime/bin/<executable_name>` (the shlib soname) — executable_name
+        # carries the runtime flavor suffix (e.g. `#native-main#...`), so this
+        # matches what getCurrentExecutablePath() resolves to at runtime.
+        extra_artifacts["runtime/bin/" + ctx.attrs.executable_name + ".resources.json"] = runtime_bin_resources_json
+
+    return (
+        shared_libs,
+        extensions,
+        link_args,
+        extra,
+        extra_artifacts,
+        executable_info.linker_map_data,
+        executable_info.gc_sections_data,
+        executable_info.runtime_files,
+    )

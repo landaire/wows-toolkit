@@ -16,8 +16,8 @@
 # @unsorted-dict-items
 NAMED_CONSTRAINT_SETTINGS = {
     # TODO(scottcao): Add OSS constraints as well
-    "ovr_config//build_mode/constraints:core_build_mode": None,
-    "ovr_config//os/constraints:os": None,
+    "ovr_config//build_mode/constraints:core_build_mode": (lambda label: str(label.sub_target[0])),
+    "ovr_config//os/constraints:os": (lambda label: str(label.sub_target[0])),
     "ovr_config//cpu/constraints:cpu": None,
     "ovr_config//runtime/constraints:runtime": None,
     "ovr_config//runtime/constraints:runtime_version": None,
@@ -28,6 +28,7 @@ NAMED_CONSTRAINT_SETTINGS = {
     "ovr_config//build_mode:sanitizer_type": (lambda label: str(label.sub_target[0])),
     "fbcode//fdo/constraints:fdo": (lambda label: str(label.name)),
     "ovr_config//build_mode/default_opt_cxx:default_opt_cxx_setting": (lambda label: "opt-by-default" if str(label.name) == "enabled" else None),
+    "ovr_config//build_mode:arvr_mode": (lambda label: "arvr" if str(label.sub_target[0]) == "enabled" else None),
 }
 
 # Mark all modifier generated configurations with a `cfg:` prefix.
@@ -42,14 +43,16 @@ def cfg_name(cfg: ConfigurationInfo) -> str:
     name_list = []
     constraints = {str(key): value for key, value in cfg.constraints.items()}
     for constraint_setting, transform in NAMED_CONSTRAINT_SETTINGS.items():
+        constraint_name = None
         if constraint_setting in constraints:
             constraint_value_label = constraints[constraint_setting].label
             if transform:
                 constraint_name = transform(constraint_value_label)
             else:
                 constraint_name = str(constraint_value_label.name)
-            if constraint_name:
-                name_list.append(constraint_name)
+        if constraint_name:
+            name_list.append(constraint_name)
+
     if len(name_list) == 0:
         name = _EMPTY_CFG_NAME
     else:

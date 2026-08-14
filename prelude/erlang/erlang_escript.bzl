@@ -50,7 +50,7 @@ def erlang_escript_impl(ctx: AnalysisContext) -> list[Provider]:
             artifacts[artifact.short_path] = artifact
 
     escript_name = _escript_name(ctx)
-    output = ctx.actions.declare_output(escript_name)
+    output = ctx.actions.declare_output(escript_name, has_content_based_path = False)
 
     args = ctx.attrs.emu_args
 
@@ -73,6 +73,7 @@ def erlang_escript_impl(ctx: AnalysisContext) -> list[Provider]:
         "escript_build_spec.json",
         escript_build_spec,
         with_inputs = True,
+        has_content_based_path = False,
     )
 
     create_escript(ctx, spec_file, toolchain, escript_name)
@@ -89,13 +90,8 @@ def erlang_escript_impl(ctx: AnalysisContext) -> list[Provider]:
         RunInfo(escript_cmd),
     ]
 
-def create_escript(
-        ctx: AnalysisContext,
-        spec_file: WriteJsonCliArgs,
-        toolchain: Toolchain,
-        escript_name: str) -> None:
-    """ build the escript with the escript builder tool
-    """
+def create_escript(ctx: AnalysisContext, spec_file: WriteJsonCliArgs, toolchain: Toolchain, escript_name: str) -> None:
+    """build the escript with the escript builder tool"""
 
     erlang_build.utils.run_with_env(
         ctx,
@@ -139,6 +135,7 @@ def build_escript_unbundled_trampoline(ctx: AnalysisContext, config_files: list[
         paths.join(erlang_build.utils.BUILD_DIR, "run.escript"),
         data,
         is_executable = True,
+        has_content_based_path = False,
     )
 
 def build_escript_bundled_trampoline(ctx: AnalysisContext, toolchain, config_files: list[Artifact]) -> Artifact:
@@ -156,8 +153,9 @@ EscriptDir = escript:script_name(),""",
     escript_trampoline_erl = ctx.actions.write(
         paths.join(erlang_build.utils.BUILD_DIR, "erlang_escript_trampoline.erl"),
         data,
+        has_content_based_path = False,
     )
-    my_output = ctx.actions.declare_output("erlang_escript_trampoline.beam")
+    my_output = ctx.actions.declare_output("erlang_escript_trampoline.beam", has_content_based_path = False)
 
     erlang_build.utils.run_with_env(
         ctx,

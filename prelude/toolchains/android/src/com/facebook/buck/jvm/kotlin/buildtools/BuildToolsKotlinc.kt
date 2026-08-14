@@ -16,6 +16,7 @@ import com.facebook.buck.core.filesystems.RelPath
 import com.facebook.buck.core.util.log.Logger
 import com.facebook.buck.jvm.core.BuildTargetValue
 import com.facebook.buck.jvm.kotlin.cd.analytics.KotlinCDLoggingContext
+import com.facebook.buck.jvm.kotlin.cd.analytics.SourceTokenCounter
 import com.facebook.buck.jvm.kotlin.kotlinc.Kotlinc
 import com.facebook.buck.jvm.kotlin.kotlinc.incremental.KotlincMode
 import com.facebook.buck.util.ClassLoaderCache
@@ -50,15 +51,16 @@ class BuildToolsKotlinc : Kotlinc {
       mode: KotlincMode,
       kotlinCDLoggingContext: KotlinCDLoggingContext,
   ): Int {
-    val compilerArgs =
-        buildCompilerArgs(
-            ruleCellRoot,
-            kotlinSourceFilePaths,
-            workingDirectory,
-            invokingRule,
-            options,
-            kotlinCDLoggingContext,
-        )
+    val argsStart = System.nanoTime()
+    val compilerArgs = buildCompilerArgs(
+        ruleCellRoot,
+        kotlinSourceFilePaths,
+        workingDirectory,
+        invokingRule,
+        options,
+        kotlinCDLoggingContext,
+    )
+    val argsMs = (System.nanoTime() - argsStart) / 1_000_000
 
     LOG.info(
         "[KotlinC Toolchain Build Step from for target:${invokingRule.fullyQualifiedName} type:${invokingRule.type}] " +
@@ -74,14 +76,19 @@ class BuildToolsKotlinc : Kotlinc {
     )
     compilerArgs.forEach { arg -> LOG.info("KOTLINCD_ARG|$arg") }
 
-    val kotlinCompilationService =
-        KotlinCompilationService(
-            CompilationService.loadImplementation(
-                context.classLoaderCache.getClassLoader(kotlinHomeLibraries)
-            ),
-            kotlinCDLoggingContext,
-        )
+    val classLoaderStart = System.nanoTime()
+    val classLoader = context.classLoaderCache.getClassLoader(kotlinHomeLibraries)
+    val classLoaderMs = (System.nanoTime() - classLoaderStart) / 1_000_000
 
+    val serviceLoadStart = System.nanoTime()
+    val kotlinCompilationService = KotlinCompilationService(
+        CompilationService.loadImplementation(classLoader),
+        kotlinCDLoggingContext,
+    )
+    val serviceLoadMs = (System.nanoTime() - serviceLoadStart) / 1_000_000
+
+    val gcBefore = getGcStats()
+    val compileStart = System.nanoTime()
     val result =
         kotlinCompilationService.compile(
             ProjectId.ProjectUUID(UUID.randomUUID()),
@@ -89,8 +96,28 @@ class BuildToolsKotlinc : Kotlinc {
             mode,
             BuckKotlinLogger(UncloseablePrintStream(context.stdErr), kotlinCDLoggingContext),
         )
+    val compileMs = (System.nanoTime() - compileStart) / 1_000_000
+    val gcAfter = getGcStats()
+    val gcDeltaMs = gcAfter.first - gcBefore.first
+    val gcDeltaCount = gcAfter.second - gcBefore.second
+
+    LOG.info(
+        "KOTLINCD_TIMING|${invokingRule.fullyQualifiedName}|args_ms=$argsMs|classloader_ms=$classLoaderMs|service_load_ms=$serviceLoadMs|compile_ms=$compileMs|gc_time_ms=$gcDeltaMs|gc_count=$gcDeltaCount"
+    )
 
     return result.toExitCode.code
+  }
+
+  private fun getGcStats(): Pair<Long, Long> {
+    var totalMs = 0L
+    var totalCount = 0L
+    for (bean in java.lang.management.ManagementFactory.getGarbageCollectorMXBeans()) {
+      val time = bean.collectionTime
+      val count = bean.collectionCount
+      if (time >= 0) totalMs += time
+      if (count >= 0) totalCount += count
+    }
+    return Pair(totalMs, totalCount)
   }
 
   private fun getIncrementalInfoMessage(mode: KotlincMode) =
@@ -116,13 +143,19 @@ class BuildToolsKotlinc : Kotlinc {
       options: List<String>,
       kotlinCDLoggingContext: KotlinCDLoggingContext,
   ): List<String> {
-    val expandedSources: ImmutableList<Path> =
-        getExpandedSourcePathsOrThrow(
-            ruleCellRoot,
-            kotlinSourceFilePaths,
-            workingDirectory,
-            invokingRule,
-        )
+    val expandStart = System.nanoTime()
+    val expandedSources: ImmutableList<Path> = getExpandedSourcePathsOrThrow(
+        ruleCellRoot,
+        kotlinSourceFilePaths,
+        workingDirectory,
+        invokingRule,
+    )
+    val expandMs = (System.nanoTime() - expandStart) / 1_000_000
+    if (expandMs > 100) {
+      LOG.info(
+          "KOTLINCD_SOURCE_EXPAND|${invokingRule.fullyQualifiedName}|expand_ms=$expandMs|source_count=${expandedSources.size}"
+      )
+    }
 
     expandedSources
         .groupingBy { path -> path.extension }
@@ -134,8 +167,21 @@ class BuildToolsKotlinc : Kotlinc {
           )
         }
 
-    val resolvedExpandedSources =
-        expandedSources.map { path -> ruleCellRoot.resolve(path).toString() }
+    try {
+      val tokenCounts = SourceTokenCounter.countTokens(expandedSources, ruleCellRoot.path)
+      kotlinCDLoggingContext.numKotlinTokens = tokenCounts.kotlinTokens
+      kotlinCDLoggingContext.numJavaTokens = tokenCounts.javaTokens
+    } catch (e: Exception) {
+      // Token counting is best-effort telemetry; don't fail the build
+      kotlinCDLoggingContext.addExtras(
+          BuildToolsKotlinc::class.java.simpleName,
+          "Token counting failed: ${e.message}",
+      )
+    }
+
+    val resolvedExpandedSources = expandedSources.map { path ->
+      ruleCellRoot.resolve(path).toString()
+    }
 
     val isMultiPlatform = options.contains("-Xmulti-platform")
 
@@ -184,8 +230,9 @@ class BuildToolsKotlinc : Kotlinc {
                 val resolvedSourceOption =
                     unresolvedSources.split(",").map { fragmentSourcePath ->
                       val (fragmentName, fragmentPath) = fragmentSourcePath.split(":")
-                      val fragmentSourceAbsPath =
-                          allSources.firstOrNull { it.endsWith(fragmentPath) }
+                      val fragmentSourceAbsPath = allSources.firstOrNull {
+                        it.endsWith(fragmentPath)
+                      }
 
                       if (fragmentSourceAbsPath == null) {
                         throw RuntimeException("Invalid fragment source path: $fragmentSourcePath")

@@ -10,7 +10,10 @@
 
 package com.facebook.buck.android.dex;
 
+import com.facebook.infer.annotation.Nullsafe;
+
 /** Options to pass to {@code d8}. */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public enum D8Options {
   /** Specify the {@code --debug} flag. Otherwise --release is specified */
   NO_OPTIMIZE,
@@ -29,5 +32,8 @@ public enum D8Options {
 
   /** Fill up the primary dex as much as possible */
   MAXIMIZE_PRIMARY_DEX,
+
+  /** Fail if D8 produces multiple DEX files when a single output is expected */
+  FAIL_ON_MULTIPLE_DEX,
   ;
 }

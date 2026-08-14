@@ -17,6 +17,7 @@ import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.core.util.log.Logger;
 import com.facebook.buck.io.filesystem.impl.ProjectFilesystemUtils;
 import com.facebook.buck.util.NamedTemporaryFile;
+import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Splitter;
@@ -36,12 +37,14 @@ import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 
 /** ExopackageInstaller manages the installation of apps with the "exopackage" flag set to true. */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class ExopackageInstaller {
 
   private static final Logger LOG = Logger.get(ExopackageInstaller.class);
@@ -235,26 +238,27 @@ public class ExopackageInstaller {
     }
 
     LOG.debug("App path: %s", appPackageInfo.get().apkPath);
-    String installedAppSignature = getInstalledAppSignature(appPackageInfo.get().apkPath);
-    String localAppSignature = ExopackageUtil.getJarSignature(apkInfo.getApkPath().toString());
-    LOG.info("Local app signature: %s", localAppSignature);
-    LOG.info("Remote app signature: %s", installedAppSignature);
+    String installedAppManifestDigest = getInstalledAppManifestDigest(appPackageInfo.get().apkPath);
+    String localAppManifestDigest =
+        ExopackageUtil.getJarManifestDigest(apkInfo.getApkPath().toString());
+    LOG.info("Local APK manifest digest: %s", localAppManifestDigest);
+    LOG.info("Installed APK manifest digest: %s", installedAppManifestDigest);
 
-    if (!installedAppSignature.equals(localAppSignature)) {
-      LOG.info("App signatures do not match.  Must re-install.");
+    if (!installedAppManifestDigest.equals(localAppManifestDigest)) {
+      LOG.info("APK manifest digests do not match.  Must re-install.");
       return true;
     }
 
-    LOG.info("App signatures match.  No need to install.");
+    LOG.info("APK manifest digests match.  No need to install.");
     return false;
   }
 
-  private String getInstalledAppSignature(String packagePath) throws Exception {
-    String output = device.getSignature(packagePath);
+  private String getInstalledAppManifestDigest(String packagePath) throws Exception {
+    String output = device.getApkManifestDigest(packagePath);
 
     String result = output.trim();
     if (result.contains("\n") || result.contains("\r")) {
-      throw new IllegalStateException("Unexpected return from get-signature:\n" + output);
+      throw new IllegalStateException("Unexpected APK manifest digest:\n" + output);
     }
 
     return result;
@@ -335,7 +339,8 @@ public class ExopackageInstaller {
     try (Closer closer = Closer.create()) {
       Map<Path, Path> filesToInstall = new HashMap<>();
       for (Map.Entry<Path, String> entry : metadataToInstall.entrySet()) {
-        NamedTemporaryFile temp = closer.register(new NamedTemporaryFile("metadata", "tmp"));
+        NamedTemporaryFile temp =
+            Objects.requireNonNull(closer.register(new NamedTemporaryFile("metadata", "tmp")));
         com.google.common.io.Files.write(
             entry.getValue().getBytes(StandardCharsets.UTF_8), temp.get().toFile());
         filesToInstall.put(entry.getKey(), temp.get());

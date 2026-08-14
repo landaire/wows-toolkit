@@ -119,7 +119,8 @@ jobs:
       - name: Build every alias
         shell: pwsh
         run: |
-          $buck2 = "toolchains/windows/offline/installed/Buck2/2025-12-01/buck2.exe"
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "toolchains/windows/offline/installed" $manifest.tools.buck2.path
           & $buck2 build --target-platforms toolchains//windows:windows_x86_64_msvc `
             -c native_build.mode=release $env:ALIASES.Split(" ", [StringSplitOptions]::RemoveEmptyEntries)
 

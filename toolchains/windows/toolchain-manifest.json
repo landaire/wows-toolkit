@@ -49,6 +49,15 @@
       "install_path": "WiX/6.0.2"
     },
     {
+      "name": "python",
+      "comment": "The prelude's C++ internal tools are Python scripts; the embeddable build is a plain unzip with no installer.",
+      "url": "https://www.python.org/ftp/python/3.13.7/python-3.13.7-embed-amd64.zip",
+      "sha256": "f6cca216a359be84797cabb54149ce5e062afb16cc7567eb7fc51cacb2d86b65",
+      "path": "archives/python-3.13.7-embed-amd64.zip",
+      "version": "3.13.7",
+      "install_path": "Python/3.13.7"
+    },
+    {
       "name": "zstd",
       "comment": "Windows ships no zstd; the pinned Buck2 release asset is zstd-compressed.",
       "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-v1.5.7-win64.zip",
@@ -60,11 +69,11 @@
     {
       "name": "buck2",
       "comment": "Must stay on the release the vendored prelude came from; see prelude/VENDORED_FROM.",
-      "url": "https://github.com/facebook/buck2/releases/download/2025-12-01/buck2-x86_64-pc-windows-msvc.exe.zst",
-      "sha256": "3c9319aa3be0696d89b6fd11177339af0d33516ce9804fe0f43edbdfa53f37e3",
-      "path": "archives/buck2-2025-12-01-x86_64-pc-windows-msvc.exe.zst",
-      "version": "2025-12-01",
-      "install_path": "Buck2/2025-12-01"
+      "url": "https://github.com/facebook/buck2/releases/download/2026-08-01/buck2-x86_64-pc-windows-msvc.exe.zst",
+      "sha256": "5c727b170b9ed1dc089ad732668c8fcc454f3268f16cf8a2717c7202d634edf6",
+      "path": "archives/buck2-2026-08-01-x86_64-pc-windows-msvc.exe.zst",
+      "version": "2026-07-31",
+      "install_path": "Buck2/2026-07-31"
     },
     {
       "name": "wix_extensions",
@@ -85,8 +94,9 @@
     "rustc": { "path": "Rust/1.92.0/bin/rustc.exe", "version_output": "rustc 1.92.0" },
     "rustdoc": { "path": "Rust/1.92.0/bin/rustdoc.exe", "version_output": "rustdoc 1.92.0" },
     "nasm": { "path": "NASM/3.01/nasm.exe", "version_output": "NASM version 3.01" },
-    "buck2": { "path": "Buck2/2025-12-01/buck2.exe", "version_output": "2025-12-01" },
+    "buck2": { "path": "Buck2/2026-07-31/buck2.exe", "version_output": "2026-07-31" },
     "zstd": { "path": "Zstd/1.5.7/zstd-v1.5.7-win64/zstd.exe", "version_output": "v1.5.7" },
+    "python": { "path": "Python/3.13.7/python.exe", "version_output": "Python 3.13.7" },
     "wix": { "path": "WiX/6.0.2/wix.exe", "version_output": "6.0.2" },
     "wix_ui_extension": { "path": "WiX/6.0.2/extensions/WixToolset.UI.wixext.6.0.2.nupkg" },
     "wix_util_extension": { "path": "WiX/6.0.2/extensions/WixToolset.Util.wixext.6.0.2.nupkg" }

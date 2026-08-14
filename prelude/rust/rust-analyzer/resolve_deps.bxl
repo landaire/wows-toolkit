@@ -25,9 +25,7 @@ ExpandedAndResolved = record(
     resolved_deps = dict[TargetLabel, TargetInfo],
 )
 
-def materialize(
-        ctx: bxl.Context,
-        target: bxl.ConfiguredTargetNode) -> Artifact:
+def materialize(ctx: bxl.Context, target: bxl.ConfiguredTargetNode) -> Artifact:
     analysis = ctx.analysis(target)
     sources = analysis.providers()[DefaultInfo].sub_targets["sources"][DefaultInfo].default_outputs[0]
     return sources
@@ -36,11 +34,7 @@ def _get_nullable_attr(attrs, key: str) -> typing.Any:
     nullable = getattr(attrs, key, None)
     return nullable.value() if nullable != None else None
 
-def _process_target_config(
-        ctx: bxl.Context,
-        target: bxl.ConfiguredTargetNode,
-        analysis: bxl.AnalysisResult,
-        in_workspace: bool) -> TargetInfo:
+def _process_target_config(ctx: bxl.Context, target: bxl.ConfiguredTargetNode, analysis: bxl.AnalysisResult, in_workspace: bool) -> TargetInfo:
     target = target.unwrap_forward()
 
     providers = analysis.providers()
@@ -94,8 +88,9 @@ def _process_target_config(
         "env": env,
         "features": ra_info.features,
         "in_workspace": in_workspace,
-        "kind": target.rule_type,
+        "kind": ra_info.target_kind.value,
         "label": target.label.raw_target(),
+        "labels": resolved_attrs.labels if hasattr(resolved_attrs, "labels") else [],
         "mapped_srcs": mapped_srcs,
         "name": resolved_attrs.name,
         "named_deps": named_deps,
@@ -108,8 +103,7 @@ def _process_target_config(
     }
 
 def _select_assume_default(value):
-    """Unwrap select() values, assuming the DEFAULT value is always used.
-    """
+    """Unwrap select() values, assuming the DEFAULT value is always used."""
     if isinstance(value, bxl.SelectConcat):
         items = []
         for raw_item in value.select_iter():
@@ -154,10 +148,10 @@ def gather_unconfigured_deps(ctx: bxl.Context, targets: list[TargetLabel]) -> di
         srcs = [src.short_path for src in _get_attr_no_select(target, "srcs") or []]
 
         mapped_srcs = {}
-
         raw_mapped_srcs = _get_attr_no_select(target, "mapped_srcs") or {}
         for t, t_srcs in raw_mapped_srcs.items():
-            mapped_srcs[t.raw_target()] = t_srcs
+            if hasattr(t, "raw_target"):
+                mapped_srcs[t.raw_target()] = t_srcs
 
         abs_buildfile_path = ctx.root() + "/" + target.buildfile_path.cell + "/" + target.buildfile_path.path
         source_folder = abs_buildfile_path.removesuffix("/TARGETS").removesuffix("/BUCK")
@@ -185,8 +179,9 @@ def gather_unconfigured_deps(ctx: bxl.Context, targets: list[TargetLabel]) -> di
             "env": env,
             "features": _get_attr_no_select(target, "features"),
             "in_workspace": False,
-            "kind": target.rule_type,
+            "kind": _get_attr_no_select(target, "_rust_analyzer_target_kind"),
             "label": target.label,
+            "labels": _get_attr_no_select(target, "labels") or [],
             "mapped_srcs": mapped_srcs,
             "name": target.get_attr("name"),
             "named_deps": {},
@@ -202,10 +197,7 @@ def gather_unconfigured_deps(ctx: bxl.Context, targets: list[TargetLabel]) -> di
 
     return out
 
-def gather_deps(
-        ctx: bxl.Context,
-        target_analysis: dict[Label, bxl.AnalysisResult],
-        workspaces: list[TargetLabel]) -> dict[TargetLabel, TargetInfo]:
+def gather_deps(ctx: bxl.Context, target_analysis: dict[Label, bxl.AnalysisResult], workspaces: list[TargetLabel]) -> dict[TargetLabel, TargetInfo]:
     targets = set()
     for _target, analysis in target_analysis.items():
         info = analysis.providers().get(RustAnalyzerInfo)
@@ -213,7 +205,7 @@ def gather_deps(
             for target_set in info.transitive_target_set:
                 targets.add(target_set)
 
-    #TODO(romanp) support set as target_universe arg
+    # TODO(romanp) support set as target_universe arg
     outputs = ctx.target_universe(list(targets)).target_set()
     out = {}
 
@@ -243,9 +235,7 @@ def gather_deps(
 
     return out
 
-def expand_proc_macros(
-        ctx: bxl.Context,
-        target_analysis: dict[Label, bxl.AnalysisResult]) -> dict[TargetLabel, MacroOutput]:
+def expand_proc_macros(ctx: bxl.Context, target_analysis: dict[Label, bxl.AnalysisResult]) -> dict[TargetLabel, MacroOutput]:
     macros = set()
     for _target, analysis in target_analysis.items():
         info = analysis.providers().get(RustAnalyzerInfo)
@@ -264,17 +254,19 @@ def expand_proc_macros(
     return out
 
 # Returns a list of all the expanded targets including any workspaces, followed by just the workspaces
-def expand_targets(
-        ctx: bxl.Context,
-        targets: list[TargetLabel],
-        exclude_workspaces: bool) -> (dict[Label, bxl.AnalysisResult], list[TargetLabel]):
+def expand_targets(ctx: bxl.Context, targets: list[TargetLabel], exclude_workspaces: bool) -> (dict[Label, bxl.AnalysisResult], list[TargetLabel]):
     target_universe = ctx.target_universe(targets).target_set()
-    kind_target_list = ctx.cquery().kind("^(rust_binary|rust_library|rust_test|alias)$", target_universe)
+    # Pick up any rule that sets RustAnalyzerTargetKind and so exposes RustAnalyzerInfo, regardless of its rule name.
+    # Custom rules that wrap/override our rust_* builtins but don't use the same names will be picked up here.
+    attr_target_list = ctx.cquery().attrregexfilter("_rust_analyzer_target_kind", "^(bin|lib|test)$", target_universe)
+
+    # Aliases don't set RustAnalyzerTargetKind, so we must fallback to grabbing all of them
+    alias_target_list = ctx.cquery().kind("^(alias|_?transitioned)$", target_universe)
 
     # Allow targets to opt-in to being treated as rust-analyzer-compatible.
     # This is used for cross-compilation targets that apply Buck transitions to Rust rules.
     labeled_target_list = ctx.cquery().attrfilter("labels", "rust_analyzer_target", target_universe)
-    expanded_targets = {t.label.raw_target(): t for t in kind_target_list + labeled_target_list}
+    expanded_targets = {t.label.raw_target(): t for t in attr_target_list + alias_target_list + labeled_target_list}
 
     # Map of potential workspaces to a list of the targets that name these as potential workspaces
     possible_workspaces = {}
@@ -335,7 +327,7 @@ def resolve_targets_impl(ctx: bxl.Context) -> None:
         expanded_targets = targets
         resolved_deps = gather_unconfigured_deps(ctx, targets)
 
-    artifact = actions.declare_output("resolve_targets.json")
+    artifact = actions.declare_output("resolve_targets.json", has_content_based_path = False)
     artifacts = actions.write_json(
         artifact,
         ExpandedAndResolved(
@@ -350,16 +342,90 @@ def resolve_targets_impl(ctx: bxl.Context) -> None:
     ctx.output.ensure_multiple(artifacts)
     ctx.output.print(ctx.output.ensure(artifact).abs_path())
 
+def _short_version(version: str) -> str:
+    """Return the short version string used in target names.
+
+    Uses the leftmost non-zero semver component as the compatibility boundary:
+    - >=1.0.0: major only (e.g. "3")
+    - 0.y.z where y >= 1: major.minor (e.g. "0.2")
+    - 0.0.z: full version (e.g. "0.0.3")
+    """
+    parts = version.split(".")
+    if len(parts) < 3:
+        return version
+    major, minor, _patch = parts[0], parts[1], parts[2]
+    if major != "0":
+        return major
+    if minor != "0":
+        return "{}.{}".format(major, minor)
+    return version
+
+def _resolve_vendor_rust_libraries(ctx: bxl.Context, targets: bxl.UnconfiguredTargetSet) -> bxl.UnconfiguredTargetSet:
+    """Rust files in third-party/rust/vendor/ are owned by rust_filegroup targets,
+    but a rust_filegroup is just a set of files, without any information about
+    the crate.
+
+    For example:
+
+    file: third-party/rust/vendor/nix-0.30.1/src/fcntl.rs
+    owner: fbsource//third-party/rust/vendor/nix-0.30.1:srcs
+    library: fbsource//third-party/rust/vendor/nix:0.30
+
+    Look up the relevant rust_library by taking advantage of the fact that
+    target names follow a predictable pattern. Target names use the short
+    version: major-only for >=1.0.0, major.minor for 0.y.z, full semver
+    for 0.0.z.
+
+    """
+    filegroups = ctx.uquery().kind("^rust_filegroup$", targets)
+
+    rust_libraries = utarget_set()
+    for fg in filegroups:
+        # E.g. third-party/rust/vendor/nix-0.30.1
+        package_path = fg.label.package
+
+        if not package_path.startswith("third-party/rust/vendor/"):
+            continue
+        crate_version = package_path.removeprefix("third-party/rust/vendor/")
+
+        # "nix-0.30.1" -> ("nix", "0.30.1")
+        parts = crate_version.rsplit("-", 1)
+        if len(parts) != 2:
+            continue
+        crate_name, version = parts
+
+        # E.g. fbsource//third-party/rust/vendor/nix:0.30
+        short_ver = _short_version(version)
+        lib_target_str = "{}//third-party/rust/vendor/{}:{}".format(fg.label.cell, crate_name, short_ver)
+
+        # Since we're using string conventions to find the library, defensively
+        # check that the target actually exists.
+        if ctx.target_exists(lib_target_str):
+            rust_libraries += ctx.unconfigured_targets([lib_target_str])
+
+    return (targets - filegroups) + rust_libraries
+
 def resolve_owning_buildfile_impl(ctx: bxl.Context) -> None:
     # depending on the input, determine the initial set of targets
+
     if ctx.cli_args.files:
+        # Find targets that own these files and are relevant to rust.
         targets = ctx.uquery().owner(ctx.cli_args.files)
+        attr_targets = ctx.uquery().attrregexfilter("_rust_analyzer_target_kind", "^(bin|lib|test)$", targets)
+        filegroup_targets = ctx.uquery().kind("^rust_filegroup$", targets)
+        targets = attr_targets + filegroup_targets
+
+        # Convert rust_filegroup targets to rust_library targets.
+        targets = _resolve_vendor_rust_libraries(ctx, targets)
     elif ctx.cli_args.buildfiles:
         targets = [ctx.uquery().targets_in_buildfile(buildfile) for buildfile in ctx.cli_args.buildfiles]
 
         # equivalent of `flat_map`ing
         targets = [target for sublist in targets for target in sublist]
-        targets = ctx.uquery().kind("^(rust_binary|rust_library|rust_test)$", targets)
+        attr_targets = ctx.uquery().attrregexfilter("_rust_analyzer_target_kind", "^(bin|lib|test)$", targets)
+        transitioned_targets = ctx.uquery().kind("^_?transitioned$", targets)
+        labeled_targets = ctx.uquery().attrfilter("labels", "rust_analyzer_target", targets)
+        targets = attr_targets + transitioned_targets + labeled_targets
     elif ctx.cli_args.targets:
         # equivalent of `flat_map`ing
         targets = [target for sublist in ctx.cli_args.targets for target in sublist]
@@ -379,8 +445,13 @@ def resolve_owning_buildfile_impl(ctx: bxl.Context) -> None:
     # collect extra targets from each buildfile
     extra_targets_by_buildfile = {}
     for buildfile_path in targets_by_buildfile:
-        extra_targets = ctx.uquery().targets_in_buildfile("{}".format(buildfile_path))
-        extra_targets = ctx.uquery().kind("^(rust_binary|rust_library|rust_test)$", extra_targets)
+        if "third-party/rust/vendor/" in buildfile_path:
+            continue
+
+        all_buildfile_targets = ctx.uquery().targets_in_buildfile(buildfile_path)
+        extra_targets = ctx.uquery().attrregexfilter("_rust_analyzer_target_kind", "^(bin|lib|test)$", all_buildfile_targets)
+        extra_targets += ctx.uquery().kind("^_?transitioned$", all_buildfile_targets)
+        extra_targets += ctx.uquery().attrfilter("labels", "rust_analyzer_target", all_buildfile_targets)
 
         # Exclude targets with the rustc_do_no_check label from the extra targets. This
         # label is used for foo@symbol targets (generated by rust_linkable_symbols), which

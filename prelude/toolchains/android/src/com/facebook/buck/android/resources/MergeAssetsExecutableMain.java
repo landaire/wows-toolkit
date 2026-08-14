@@ -13,6 +13,7 @@ package com.facebook.buck.android.resources;
 import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.core.filesystems.RelPath;
 import com.facebook.buck.util.json.ObjectMappers;
+import com.facebook.infer.annotation.Nullsafe;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -24,23 +25,26 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import org.jetbrains.annotations.Nullable;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 import org.kohsuke.args4j.spi.StringArrayOptionHandler;
 
 /** Main entry point for merging assets. */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class MergeAssetsExecutableMain {
 
   @Option(name = "--output-apk", required = true, usage = "path to output APK")
   private String outputApk;
 
   @Option(name = "--module-assets-apks-dir", usage = "path to module assets APKs")
-  private String moduleAssetsApksDir;
+  private @Nullable String moduleAssetsApksDir = null;
 
   @Option(name = "--base-apk", usage = "path to existing APK containing resources")
-  private String baseApk = null;
+  private @Nullable String baseApk = null;
 
   @Option(name = "--assets-dirs", required = true, usage = "directory containing assets")
   private String assetsDirs;
@@ -48,7 +52,7 @@ public class MergeAssetsExecutableMain {
   @Option(
       name = "--output-apk-hash",
       usage = "output path of a file containing the hash of output APK")
-  private String outputApkHash;
+  private @Nullable String outputApkHash = null;
 
   @Option(
       name = "--extra-no-compress-asset-extensions",
@@ -59,20 +63,24 @@ public class MergeAssetsExecutableMain {
   @Option(
       name = "--extra_no_compress_asset_regex",
       usage = "regex pattern to match asset paths that should not be compressed")
-  private String extraNoCompressRegex = null;
+  private @Nullable String extraNoCompressRegex = null;
 
   @Option(name = "--binary-type", usage = "either 'apk' or 'aab'")
-  private String binaryType;
+  private @Nullable String binaryType = null;
+
+  @Option(name = "--optimized-processing", usage = "enable optimized resource processing")
+  private boolean optimizedProcessing = false;
 
   public static void main(String[] args) throws IOException {
     MergeAssetsExecutableMain main = new MergeAssetsExecutableMain();
     CmdLineParser parser = new CmdLineParser(main);
     try {
       parser.parseArgument(args);
+      ResourceProcessingConfig.setOptimizationsEnabled(main.optimizedProcessing);
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
-      System.err.println(e.getMessage());
+      System.err.println(e.toString());
       parser.printUsage(System.err);
       System.exit(1);
     }
@@ -85,6 +93,7 @@ public class MergeAssetsExecutableMain {
             new TypeReference<ImmutableMap<String, ImmutableSet<Path>>>() {});
 
     ImmutableMap<String, ImmutableSet<RelPath>> dirs =
+        // NULLSAFE_FIXME[Nullable Dereference]
         rawDirs.entrySet().stream()
             .collect(
                 ImmutableMap.toImmutableMap(
@@ -103,7 +112,7 @@ public class MergeAssetsExecutableMain {
         dirs,
         ImmutableSet.copyOf(extraNoCompressAssetExtensions),
         Optional.ofNullable(extraNoCompressRegex),
-        MergeAssetsUtils.BinaryType.valueOf(binaryType.toUpperCase()));
+        MergeAssetsUtils.BinaryType.valueOf(Objects.requireNonNull(binaryType).toUpperCase()));
 
     if (outputApkHash != null) {
       Files.writeString(

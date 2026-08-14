@@ -100,22 +100,39 @@ if ($BuckConfigPath) {
         (Join-Path $sdkInclude "um")
         (Join-Path $sdkInclude "shared")
     ) -join ";"
-    $lib = @(
+    $libPaths = @(
         (Join-Path $msvcRoot "lib\x64")
         (Join-Path $installed $manifest.sdk.ucrt_lib)
         (Join-Path $installed $manifest.sdk.um_lib)
     ) -join ";"
+
+    # cvtres ships with MSVC, beside cl, not with the SDK tools beside rc.
+    $cvtres = Join-Path (Split-Path (& $tool "cl") -Parent) "cvtres.exe"
 
     @(
         "[hermetic_tools]"
         "ar = $(& $tool "lib")"
         "cc = $(& $tool "cl")"
         "cxx = $(& $tool "cl")"
+        "link = $(& $tool "link")"
+        "ml64 = $(& $tool "ml64")"
+        "rc = $(& $tool "rc")"
+        "cvtres = $cvtres"
+        "midl = $(& $tool "midl")"
+        "rustc = $(& $tool "rustc")"
+        "rustdoc = $(& $tool "rustdoc")"
         "nasm = $(& $tool "nasm")"
+        "python = $(& $tool "python")"
+        "wix = $(& $tool "wix")"
+        "wix_extensions = $(Join-Path $installed "WiX/6.0.2/extensions")"
         "include = $include"
-        "lib = $lib"
+        "lib_paths = $libPaths"
         ""
-    ) -join "`n" | Set-Content -LiteralPath $BuckConfigPath -Encoding utf8
+    ) -join "`n" | ForEach-Object {
+        # Not Set-Content -Encoding utf8: Windows PowerShell 5.1 writes a BOM,
+        # and Buck2 rejects the file with a parse error on the first section.
+        [System.IO.File]::WriteAllText($BuckConfigPath, $_, (New-Object System.Text.UTF8Encoding($false)))
+    }
     Write-Host "Wrote $BuckConfigPath."
 }
 

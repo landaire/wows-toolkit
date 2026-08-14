@@ -23,7 +23,7 @@ def _zip_file_impl(ctx: AnalysisContext) -> list[Provider]:
     create_zip_tool = zip_file_toolchain.create_zip
 
     zip_output_name = ctx.attrs.out if ctx.attrs.out else "{}.zip".format(ctx.label.name)
-    output = ctx.actions.declare_output(zip_output_name)
+    output = ctx.actions.declare_output(zip_output_name, has_content_based_path = True)
 
     on_duplicate_entry = ctx.attrs.on_duplicate_entry
     entries_to_exclude = ctx.attrs.entries_to_exclude
@@ -42,12 +42,9 @@ def _zip_file_impl(ctx: AnalysisContext) -> list[Provider]:
     if srcs:
         # add artifact and is_source flag pair
         srcs_file_cmd = cmd_args(
-            [
-                [src, src.short_path, str(src.is_source)]
-                for src in srcs
-            ],
+            [[src, src.short_path, str(src.is_source)] for src in srcs],
         )
-        entries_file = ctx.actions.write("entries", srcs_file_cmd)
+        entries_file = ctx.actions.write("entries", srcs_file_cmd, has_content_based_path = True)
 
         create_zip_cmd.append("--entries_file")
         create_zip_cmd.append(entries_file)

@@ -11,16 +11,19 @@
 package com.facebook.buck.android.build_config;
 
 import com.facebook.buck.util.ThrowingPrintWriter;
+import com.facebook.infer.annotation.Nullsafe;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import org.jetbrains.annotations.Nullable;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 
 /** Main entry point for generating BuildConfig.java. */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class GenerateBuildConfigExecutableMain {
   @Option(name = "--source", required = true)
   private String source;
@@ -35,6 +38,7 @@ public class GenerateBuildConfigExecutableMain {
   private String defaultValuesFile;
 
   @Option(name = "--values-file")
+  @Nullable
   private String valuesFile;
 
   @Option(name = "--output", required = true)
@@ -48,7 +52,7 @@ public class GenerateBuildConfigExecutableMain {
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
-      System.err.println(e.getMessage());
+      System.err.println(e.toString());
       parser.printUsage(System.err);
       System.exit(1);
     }

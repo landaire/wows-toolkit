@@ -10,10 +10,18 @@ load("@prelude//rust:build.bzl", "crate_root", "process_env")
 load(
     "@prelude//rust:context.bzl",
     "CompileContext",  # @unused Used as a type
+)
+load(
+    "@prelude//rust:crate_name.bzl",
     "CrateName",  # @unused Used as a type
+)
+load(
+    "@prelude//rust:dep_context.bzl",
     "DepCollectionContext",  # @unused Used as a type
 )
 load("@prelude//rust:link_info.bzl", "attr_crate", "get_available_proc_macros", "resolve_rust_deps")
+
+RustAnalyzerTargetKind = enum("bin", "lib", "test")
 
 RustAnalyzerInfo = provider(
     fields = {
@@ -31,6 +39,7 @@ RustAnalyzerInfo = provider(
         # exec deps used as inputs to genrules and other non-rust dependencies.
         "rust_deps": list[Dependency],
         "rustc_flags": cmd_args,
+        "target_kind": RustAnalyzerTargetKind,
         # The list of recursive rust dependencies for this target, including proc macros. Useful for
         # identifying the targets needing to be collected into Rust Analyzer's crate graph. Notably,
         # excludes rust dependencies that are used in build tools (e.g. build scripts).
@@ -38,11 +47,9 @@ RustAnalyzerInfo = provider(
     },
 )
 
-def _compute_rust_deps(
-        ctx: AnalysisContext,
-        dep_ctx: DepCollectionContext) -> list[Dependency]:
+def _compute_rust_deps(ctx: AnalysisContext, dep_ctx: DepCollectionContext) -> list[Dependency]:
     dep_ctx = DepCollectionContext(
-        advanced_unstable_linking = dep_ctx.advanced_unstable_linking,
+        advanced_unstable_linking = False,
         # Include doc deps here for any doctests that may be present in the target.
         include_doc_deps = True,
         is_proc_macro = dep_ctx.is_proc_macro,
@@ -57,9 +64,7 @@ def _compute_rust_deps(
 
     return [dep.dep for dep in first_order_deps] + available_proc_macros.values()
 
-def _compute_transitive_target_set(
-        ctx: AnalysisContext,
-        first_order_deps: list[Dependency]) -> set[ConfiguredTargetLabel]:
+def _compute_transitive_target_set(ctx: AnalysisContext, first_order_deps: list[Dependency]) -> set[ConfiguredTargetLabel]:
     transitive_targets = set([ctx.label.configured_target()])
     for dep in first_order_deps:
         target_sets = dep[RustAnalyzerInfo].transitive_target_set
@@ -67,16 +72,12 @@ def _compute_transitive_target_set(
             transitive_targets.add(target_set)
     return transitive_targets
 
-def _compute_env(
-        ctx: AnalysisContext,
-        compile_ctx: CompileContext) -> dict[str, cmd_args]:
+def _compute_env(ctx: AnalysisContext, compile_ctx: CompileContext) -> dict[str, cmd_args]:
     # Disable rustc_action processing, as rust-project will handle windows + any escaping necessary.
     plain_env, path_env = process_env(compile_ctx, ctx.attrs.env, False)
     return plain_env | path_env
 
-def _compute_rustc_flags(
-        ctx: AnalysisContext,
-        compile_ctx: CompileContext) -> cmd_args:
+def _compute_rustc_flags(ctx: AnalysisContext, compile_ctx: CompileContext) -> cmd_args:
     toolchain_info = compile_ctx.toolchain_info
     return cmd_args(
         toolchain_info.rustc_flags,
@@ -84,10 +85,7 @@ def _compute_rustc_flags(
         toolchain_info.extra_rustc_flags,
     )
 
-def rust_analyzer_provider(
-        ctx: AnalysisContext,
-        compile_ctx: CompileContext,
-        default_roots: list[str]) -> RustAnalyzerInfo:
+def rust_analyzer_provider(ctx: AnalysisContext, compile_ctx: CompileContext, default_roots: list[str]) -> RustAnalyzerInfo:
     toolchain_info = compile_ctx.toolchain_info
     rust_deps = _compute_rust_deps(ctx, compile_ctx.dep_ctx)
     return RustAnalyzerInfo(
@@ -99,5 +97,6 @@ def rust_analyzer_provider(
         features = ctx.attrs.features,
         rust_deps = rust_deps,
         rustc_flags = _compute_rustc_flags(ctx, compile_ctx),
+        target_kind = RustAnalyzerTargetKind(ctx.attrs._rust_analyzer_target_kind),
         transitive_target_set = _compute_transitive_target_set(ctx, rust_deps),
     )

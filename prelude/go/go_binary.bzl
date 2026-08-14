@@ -7,7 +7,6 @@
 # above-listed licenses.
 
 load("@prelude//:artifacts.bzl", "single_artifact")
-load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load("@prelude//dist:dist_info.bzl", "DistInfo")
 load(
     "@prelude//linking:link_info.bzl",
@@ -15,31 +14,42 @@ load(
 )
 load(
     "@prelude//utils:utils.bzl",
+    "from_named_set",
     "map_val",
     "value_or",
 )
+load(":cgo_builder.bzl", "get_cgo_build_context")
 load(":compile.bzl", "GoTestInfo")
+load(":coverage.bzl", "GoCoverageMode")
 load(":link.bzl", "GoBuildMode", "link")
-load(":package_builder.bzl", "build_package")
+load(":package_builder.bzl", "GoBuildConfig", "GoSourceInputs", "declare_package_build")
 load(":packages.bzl", "go_attr_pkg_name")
 load(":toolchain.bzl", "evaluate_cgo_enabled")
 
 def go_binary_impl(ctx: AnalysisContext) -> list[Provider]:
-    cxx_toolchain_available = CxxToolchainInfo in ctx.attrs._cxx_toolchain
-    pkg_name = go_attr_pkg_name(ctx)
-    cgo_enabled = evaluate_cgo_enabled(cxx_toolchain_available, ctx.attrs.cgo_enabled)
+    pkg_import_path = go_attr_pkg_name(ctx)
+    cgo_enabled = evaluate_cgo_enabled(ctx.attrs._cgo_enabled)
+    coverage_mode = GoCoverageMode(ctx.attrs._coverage_mode) if ctx.attrs._coverage_mode else None
+    cgo_build_context = get_cgo_build_context(ctx)
 
-    lib, pkg_info = build_package(
+    lib, pkg_info, _ = declare_package_build(
         ctx = ctx,
-        pkg_name = pkg_name,
+        pkg_import_path = pkg_import_path,
         main = True,
-        srcs = ctx.attrs.srcs,
-        package_root = ctx.attrs.package_root,
+        sources = GoSourceInputs(
+            srcs = ctx.attrs.srcs + ctx.attrs.headers,
+            embed_srcs = from_named_set(ctx.attrs.embed_srcs),
+            package_root = ctx.attrs.package_root,
+        ),
+        cgo_build_context = cgo_build_context,
+        config = GoBuildConfig(
+            compiler_flags = ctx.attrs.compiler_flags,
+            build_tags = ctx.attrs._build_tags,
+            cgo_enabled = cgo_enabled,
+            coverage_enabled = ctx.attrs.coverage_enabled,
+            coverage_mode = coverage_mode,
+        ),
         deps = ctx.attrs.deps,
-        compiler_flags = ctx.attrs.compiler_flags,
-        build_tags = ctx.attrs._build_tags,
-        embedcfg = ctx.attrs.embedcfg,
-        cgo_enabled = cgo_enabled,
     )
     (bin, runtime_files, external_debug_info) = link(
         ctx,
@@ -82,7 +92,8 @@ def go_binary_impl(ctx: AnalysisContext) -> list[Provider]:
         GoTestInfo(
             deps = ctx.attrs.deps,
             srcs = ctx.attrs.srcs,
-            pkg_name = pkg_name,
+            pkg_import_path = pkg_import_path,
+            coverage_enabled = ctx.attrs.coverage_enabled,
         ),
         pkg_info,
     ]

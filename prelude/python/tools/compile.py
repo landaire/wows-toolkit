@@ -23,6 +23,8 @@ compile.py --output=out-dir --bytecode-manifest=output.manifest --ignore-errors 
 
 import argparse
 import errno
+import importlib
+import importlib.util
 import json
 import os
 import re
@@ -31,16 +33,8 @@ import traceback
 from functools import partial
 from py_compile import compile, PycInvalidationMode, PyCompileError
 from types import TracebackType
-from typing import List, Type
 
-
-if sys.version_info[0] == 3:
-    import importlib
-    import importlib.util
-
-    DEFAULT_FORMAT: str = importlib.util.cache_from_source("{pkg}/{name}.py")
-else:
-    DEFAULT_FORMAT: str = "{pkg}/{name}.pyc"
+DEFAULT_FORMAT: str = importlib.util.cache_from_source("{pkg}/{name}.py")
 
 
 def get_py_path(module: str) -> str:
@@ -84,7 +78,7 @@ def _hyperlink(file: str, line: int, text: str) -> str:
 
 
 def pretty_exception(
-    typ: Type[BaseException], exc: BaseException, tb: TracebackType, src: str
+    typ: type[BaseException], exc: BaseException, tb: TracebackType, src: str
 ) -> None:
     try:
         from colorama import Fore, just_fix_windows_console, Style
@@ -139,7 +133,7 @@ def pretty_exception(
         traceback.print_exception(typ, exc, tb)
 
 
-def main(argv: List[str]) -> None:
+def main(argv: list[str]) -> None:
     parser = argparse.ArgumentParser(fromfile_prefix_chars="@")
     parser.add_argument("-o", "--output", required=True)
     parser.add_argument(

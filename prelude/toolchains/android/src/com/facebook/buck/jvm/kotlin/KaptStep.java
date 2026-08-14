@@ -58,7 +58,7 @@ public class KaptStep extends KotlincStep {
         configuredBuckOut,
         ImmutableMap.of(),
         null,
-        true,
+        ImmutableList.of(),
         ImmutableList.of(),
         false,
         ImmutableList.of(),

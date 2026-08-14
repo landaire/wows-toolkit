@@ -17,7 +17,9 @@ def _select_platform():
     return select({
         "DEFAULT": select({
             "DEFAULT": "android",
+            "config//os/constraints:appletvos": "ios",
             "config//os/constraints:iphoneos": "ios",
+            "config//os/constraints:macos": "macos",
             "config//os/constraints:windows": "windows",
         }),
         "config//react-native:macos": "macos",
@@ -33,9 +35,9 @@ def _is_release():
         "DEFAULT": select({
             "DEFAULT": select({
                 "DEFAULT": False,
-                "fbsource//tools/build_defs/android/config:build_mode_opt": True,
+                "config//build_mode:optimization[opt]": True,
             }),
-            "config//build_mode/constraints:release": True,
+            "config//build_mode/constraints:build_mode[release]": True,
         }),
         "config//runtime:fbcode": select({
             "DEFAULT": False,
@@ -46,8 +48,8 @@ def _is_release():
 def _select_asset_dest_path_resolver():
     return select({
         "DEFAULT": None,
-        "fbsource//tools/build_defs/js/config:asset_dest_path_resolver_android": "android",
-        "fbsource//tools/build_defs/js/config:asset_dest_path_resolver_generic": "generic",
+        "fbsource//tools/build_defs/js/constraints/asset_dest_path_resolver:android": "android",
+        "fbsource//tools/build_defs/js/constraints/asset_dest_path_resolver:generic": "generic",
     })
 
 implemented_rules = {
@@ -67,7 +69,14 @@ extra_attributes = {
             default = _select_platform(),
         ),
     },
-    "js_bundle_genrule": genrule_attributes() | {
+    "js_bundle_genrule": genrule_attributes()
+    | {
+        "has_content_based_path": attrs.bool(
+            default = select({
+                "DEFAULT": False,
+                "config//features/apple:content_based_path_hashing_enabled": True,
+            })
+        ),
         "type": attrs.string(
             default = "js_bundle_genrule",
         ),
@@ -80,6 +89,10 @@ extra_attributes = {
         ),
     },
     "js_library": {
+        "extra_babel_plugins": attrs.list(
+            attrs.one_of(attrs.dep(), attrs.tuple(attrs.dep(), attrs.arg(default = "{}"))),
+            default = [],
+        ),
         "worker": attrs.exec_dep(),
         "_asset_dest_path_resolver": attrs.option(
             attrs.string(),

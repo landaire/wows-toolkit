@@ -1,6 +1,6 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
-load("@prelude//rust/tools:buildscript_platform.bzl", "transition_alias")
+load("@prelude//rust/buildscript:buildscript_platform.bzl", "transition_alias")
 
 def _cargo_env(crate, package, version):
     version_parts = version.split(".")

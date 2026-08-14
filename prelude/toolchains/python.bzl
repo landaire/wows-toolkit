@@ -8,6 +8,10 @@
 
 load("@prelude//:prelude.bzl", "native")
 load(
+    "@prelude//python:python_wheel_toolchain.bzl",
+    "PythonWheelToolchainInfo",
+)
+load(
     "@prelude//python:toolchain.bzl",
     "PythonPlatformInfo",
     "PythonToolchainInfo",
@@ -15,6 +19,26 @@ load(
 load(
     "@prelude//python_bootstrap:python_bootstrap.bzl",
     "PythonBootstrapToolchainInfo",
+)
+
+def _system_python_wheel_toolchain_impl(ctx):
+    return [
+        DefaultInfo(),
+        PythonWheelToolchainInfo(
+            abi = ctx.attrs.abi,
+            platform = ctx.attrs.platform,
+            python = ctx.attrs.python,
+        ),
+    ]
+
+system_python_wheel_toolchain = rule(
+    impl = _system_python_wheel_toolchain_impl,
+    attrs = {
+        "abi": attrs.string(default = "none"),
+        "platform": attrs.string(default = "linux_x86_64"),
+        "python": attrs.string(default = "py3"),
+    },
+    is_toolchain_rule = True,
 )
 
 _INTERPRETER = select({
@@ -123,25 +147,40 @@ python_toolchain = rule(
 # update this by running `prelude//python/tools:discover_python_archives.sh`
 CPYTHON_ARCHIVE = {
     "linux": {
-        "arm64": {"sha256": "829d615905b5ae8c50353f2ceb3d6665793442d4cbc64503bc9b27b5b9f6fb8a", "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz"},
-        "x86_64": {"sha256": "e3e280d4b1ead63de6ebc9816de71792fc8c71b7a6a999ea82f937047beba037", "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"},
+        "arm64": {
+            "sha256": "829d615905b5ae8c50353f2ceb3d6665793442d4cbc64503bc9b27b5b9f6fb8a",
+            "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-aarch64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        },
+        "x86_64": {
+            "sha256": "e3e280d4b1ead63de6ebc9816de71792fc8c71b7a6a999ea82f937047beba037",
+            "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz",
+        },
     },
     "macos": {
-        "arm64": {"sha256": "c57e48145722a87e34a50a2c31d6b11f0830e62e26d759c11b6606a6a80e6243", "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-aarch64-apple-darwin-install_only_stripped.tar.gz"},
-        "x86_64": {"sha256": "7caed8ea779dcc5d091955628455823cb0e91587703d8b6f7dd285fb2b44d1e0", "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-x86_64-apple-darwin-install_only_stripped.tar.gz"},
+        "arm64": {
+            "sha256": "c57e48145722a87e34a50a2c31d6b11f0830e62e26d759c11b6606a6a80e6243",
+            "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-aarch64-apple-darwin-install_only_stripped.tar.gz",
+        },
+        "x86_64": {
+            "sha256": "7caed8ea779dcc5d091955628455823cb0e91587703d8b6f7dd285fb2b44d1e0",
+            "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-x86_64-apple-darwin-install_only_stripped.tar.gz",
+        },
     },
     "windows": {
-        "arm64": {"sha256": "a24c09048d1c20ed01e58e7e59a5e43b79cb7a9f36c067fc24e17649e4301d54", "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-aarch64-pc-windows-msvc-install_only_stripped.tar.gz"},
-        "x86_64": {"sha256": "0de6eb2cb66211967874b0fb47cfc0299102e8a805f5319e108121e314083066", "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz"},
+        "arm64": {
+            "sha256": "a24c09048d1c20ed01e58e7e59a5e43b79cb7a9f36c067fc24e17649e4301d54",
+            "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-aarch64-pc-windows-msvc-install_only_stripped.tar.gz",
+        },
+        "x86_64": {
+            "sha256": "0de6eb2cb66211967874b0fb47cfc0299102e8a805f5319e108121e314083066",
+            "url": "https://github.com/astral-sh/python-build-standalone/releases/download/20250807/cpython-3.13.6+20250807-x86_64-pc-windows-msvc-install_only_stripped.tar.gz",
+        },
     },
 }
 
 def remote_python_toolchain(
-        name: str,
-        visibility: list[str],
-        cpython_urls: dict[str, dict[str, dict[str, str]]] = CPYTHON_ARCHIVE,
-        bootstrap: bool = True,
-        **kwargs) -> None:
+    name: str, visibility: list[str], cpython_urls: dict[str, dict[str, dict[str, str]]] = CPYTHON_ARCHIVE, bootstrap: bool = True, **kwargs
+) -> None:
     """
     Sets up a Python toolchain by using a pre-built CPython installation, downloaded from the [python-build-standalone project](https://github.com/astral-sh/python-build-standalone).
 
@@ -150,18 +189,14 @@ def remote_python_toolchain(
 
     native.http_archive(
         name = "cpython_archive",
-        urls = [select({
-            "prelude//os:{}".format(os): select({
-                "prelude//cpu:{}".format(cpu): archive["url"]
-                for cpu, archive in value.items()
+        urls = [
+            select({
+                "prelude//os:{}".format(os): select({"prelude//cpu:{}".format(cpu): archive["url"] for cpu, archive in value.items()})
+                for os, value in cpython_urls.items()
             })
-            for os, value in cpython_urls.items()
-        })],
+        ],
         sha256 = select({
-            "prelude//os:{}".format(os): select({
-                "prelude//cpu:{}".format(cpu): archive["sha256"]
-                for cpu, archive in value.items()
-            })
+            "prelude//os:{}".format(os): select({"prelude//cpu:{}".format(cpu): archive["sha256"] for cpu, archive in value.items()})
             for os, value in cpython_urls.items()
         }),
         strip_prefix = "python",
@@ -204,5 +239,5 @@ def remote_python_toolchain(
             "DEFAULT": ["-L$(location :cpython_archive[lib])", "@$(location :libpython_symbols)"],
             "prelude//os:windows": ["/LIBPATH:$(location :cpython_archive[lib])"],
         }),
-        **kwargs
+        **kwargs,
     )

@@ -6,7 +6,14 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//android:android_providers.bzl", "AndroidPrebuiltAarIntellijInfo", "AndroidResourceInfo", "PrebuiltNativeLibraryDir", "RESOURCE_PRIORITY_LOW", "merge_android_packageable_info")
+load(
+    "@prelude//android:android_providers.bzl",
+    "AndroidResourceInfo",
+    "AndroidResourceRDotInfo",
+    "PrebuiltNativeLibraryDir",
+    "RESOURCE_PRIORITY_LOW",
+    "merge_android_packageable_info",
+)
 load("@prelude//android:android_resource.bzl", "aapt2_compile", "extract_package_from_manifest")
 load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
 load("@prelude//android:r_dot_java.bzl", "get_dummy_r_dot_java")
@@ -68,7 +75,7 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
         raw_target = ctx.label.raw_target(),
         aapt2_compile_output = aapt2_compile(ctx, res, android_toolchain),
         allow_strings_as_assets_resource_filtering = True,
-        assets = assets,
+        assets = [assets],
         manifest_file = manifest,
         r_dot_java_package = extract_package_from_manifest(ctx, manifest),
         res = res,
@@ -83,12 +90,14 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
         None,
     )
 
-    android_prebuilt_aar_intellij_info = AndroidPrebuiltAarIntellijInfo(
+    android_resource_r_dot_info = AndroidResourceRDotInfo(
         dummy_r_dot_java = dummy_r_dot_java_info.library_output.abi,
     )
 
     abi = None if java_toolchain.is_bootstrap_toolchain else create_abi(ctx.actions, java_toolchain.class_abi_generator, all_classes_jar)
-    abi_jar_snapshot = generate_java_classpath_snapshot(ctx.actions, java_toolchain.cp_snapshot_generator, ClasspathSnapshotGranularity("CLASS_LEVEL"), abi or all_classes_jar, "", ctx.attrs.uses_content_based_path_for_jar_snapshot)
+    abi_jar_snapshot = generate_java_classpath_snapshot(
+        ctx.actions, java_toolchain.cp_snapshot_generator, ClasspathSnapshotGranularity("CLASS_LEVEL"), abi or all_classes_jar, ""
+    )
 
     library_output_classpath_entry = JavaClasspathEntry(
         full_library = all_classes_jar,
@@ -98,7 +107,16 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
         abi_jar_snapshot = abi_jar_snapshot,
     )
 
-    java_library_info, java_packaging_info, global_code_info, shared_library_info, linkable_graph, cxx_resource_info, template_placeholder_info, java_library_intellij_info = create_java_library_providers(
+    (
+        java_library_info,
+        java_packaging_info,
+        global_code_info,
+        shared_library_info,
+        linkable_graph,
+        cxx_resource_info,
+        template_placeholder_info,
+        java_library_intellij_info,
+    ) = create_java_library_providers(
         ctx = ctx,
         library_output = library_output_classpath_entry,
         global_code_config = java_toolchain.global_code_config,
@@ -129,7 +147,7 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
         linkable_graph,
         template_placeholder_info,
         java_library_intellij_info,
-        android_prebuilt_aar_intellij_info,
+        android_resource_r_dot_info,
         merge_android_packageable_info(
             ctx.label,
             ctx.actions,
@@ -140,13 +158,16 @@ def android_prebuilt_aar_impl(ctx: AnalysisContext) -> list[Provider]:
             for_primary_apk = ctx.attrs.for_primary_apk,
         ),
         resource_info,
-        DefaultInfo(default_output = all_classes_jar, other_outputs = [
-            manifest,
-            r_dot_txt,
-            res,
-            assets,
-            jni,
-            annotation_jars_dir,
-            proguard_config,
-        ]),
+        DefaultInfo(
+            default_output = all_classes_jar,
+            other_outputs = [
+                manifest,
+                r_dot_txt,
+                res,
+                assets,
+                jni,
+                annotation_jars_dir,
+                proguard_config,
+            ],
+        ),
     ]

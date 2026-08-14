@@ -13,6 +13,12 @@ package com.facebook.buck.installer.android
 import com.facebook.buck.core.util.log.Logger
 import com.facebook.buck.installer.InstallError
 
+private const val INSUFFICIENT_STORAGE_ERROR = "INSTALL_FAILED_INSUFFICIENT_STORAGE"
+private const val NO_SPACE_LEFT_ON_DEVICE_ERROR = "No space left on device"
+
+internal fun isInsufficientStorageFailure(message: String): Boolean =
+    message.contains(INSUFFICIENT_STORAGE_ERROR) || message.contains(NO_SPACE_LEFT_ON_DEVICE_ERROR)
+
 class AndroidInstallException(val installError: InstallError) :
     RuntimeException(installError.message) {
   init {
@@ -25,21 +31,19 @@ class AndroidInstallException(val installError: InstallError) :
     fun rebootRequired(msg: String) =
         AndroidInstallException(InstallError(msg, AndroidInstallErrorTag.MANUAL_REBOOT_REQUIRED))
 
-    fun tempFolderNotWritable(): AndroidInstallException =
-        AndroidInstallException(
-            InstallError(
-                "Temp folder is not writable.",
-                AndroidInstallErrorTag.TEMP_FOLDER_NOT_WRITABLE,
-            )
+    fun tempFolderNotWritable(): AndroidInstallException = AndroidInstallException(
+        InstallError(
+            "Temp folder is not writable.",
+            AndroidInstallErrorTag.TEMP_FOLDER_NOT_WRITABLE,
         )
+    )
 
-    fun operationNotSupported(operation: String): AndroidInstallException =
-        AndroidInstallException(
-            InstallError(
-                "Operation $operation is not supported.",
-                AndroidInstallErrorTag.OTHER_INFRA,
-            )
+    fun operationNotSupported(operation: String): AndroidInstallException = AndroidInstallException(
+        InstallError(
+            "Operation $operation is not supported.",
+            AndroidInstallErrorTag.OTHER_INFRA,
         )
+    )
 
     fun deviceAbiUnknown() =
         AndroidInstallException(
@@ -56,9 +60,14 @@ class AndroidInstallException(val installError: InstallError) :
         exceptionMessage: String?,
     ): AndroidInstallException {
       val errorMessage = exceptionMessage?.let { "\n" + it } ?: ""
-      return AndroidInstallException(
-          InstallError("$message.$errorMessage", AndroidInstallErrorTag.ADB_COMMAND_FAILED)
-      )
+      val fullMessage = "$message.$errorMessage"
+      val tag =
+          if (isInsufficientStorageFailure(fullMessage)) {
+            AndroidInstallErrorTag.NO_SPACE_LEFT_ON_DEVICE
+          } else {
+            AndroidInstallErrorTag.ADB_COMMAND_FAILED
+          }
+      return AndroidInstallException(InstallError(fullMessage, tag))
     }
   }
 }

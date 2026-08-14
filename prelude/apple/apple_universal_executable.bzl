@@ -41,26 +41,29 @@ def apple_universal_executable_impl(ctx: AnalysisContext) -> list[Provider]:
 
     debug_info = project_artifacts(
         actions = ctx.actions,
-        tsets = [binary_outputs.debuggable_info.debug_info_tset],
+        tsets = binary_outputs.debuggable_info.debug_info_tset,
     )
 
     sub_targets = {}
     if ctx.attrs.split_arch_dsym:
         dsyms = binary_outputs.debuggable_info.dsyms
     else:
-        dsyms = [get_apple_dsym_ext(
-            ctx = ctx,
-            executable = binary_outputs.binary,
-            debug_info = debug_info,
-            action_identifier = ctx.attrs.name + "_dsym",
-            output_path = dsym_name,
-        )]
+        dsyms = [
+            get_apple_dsym_ext(
+                ctx = ctx,
+                executable = binary_outputs.binary,
+                debug_info = debug_info,
+                action_identifier = ctx.attrs.name + "_dsym",
+                output_path = dsym_name,
+            )
+        ]
     sub_targets[DSYM_SUBTARGET] = [DefaultInfo(default_outputs = dsyms)]
 
     debug_info_artifacts_manifest = ctx.actions.write(
         "debuginfo.artifacts",
         debug_info,
         with_inputs = True,
+        has_content_based_path = False,
     )
     sub_targets[DEBUGINFO_SUBTARGET] = [DefaultInfo(default_output = debug_info_artifacts_manifest)]
 
@@ -80,6 +83,7 @@ def apple_universal_executable_impl(ctx: AnalysisContext) -> list[Provider]:
             merged_providers += [
                 AppleDebuggableInfo(
                     dsyms = dsyms,
+                    binaries = binary_outputs.debuggable_info.binaries,
                     debug_info_tset = binary_outputs.debuggable_info.debug_info_tset,
                 ),
             ]
@@ -90,7 +94,11 @@ def apple_universal_executable_impl(ctx: AnalysisContext) -> list[Provider]:
         else:
             fail("Unhandled provider type: {}".format(merged_provider_type))
 
-    return [
-        DefaultInfo(default_output = binary_outputs.binary, sub_targets = sub_targets),
-        RunInfo(args = cmd_args(binary_outputs.binary)),
-    ] + forwarded_providers + merged_providers
+    return (
+        [
+            DefaultInfo(default_output = binary_outputs.binary, sub_targets = sub_targets),
+            RunInfo(args = cmd_args(binary_outputs.binary)),
+        ]
+        + forwarded_providers
+        + merged_providers
+    )

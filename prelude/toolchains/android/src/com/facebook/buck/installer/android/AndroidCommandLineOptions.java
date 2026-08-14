@@ -86,8 +86,6 @@ class AndroidCommandLineOptions {
       usage = "Install .apk on all connected devices and/or emulators (multi-install mode)")
   public boolean multiInstallMode;
 
-  public final int adbTimeout = 60_000;
-
   @Option(
       name = "--tcp-port",
       usage = "TCP port used for connection in case TCP protocol is chosen")
@@ -95,6 +93,14 @@ class AndroidCommandLineOptions {
 
   @Option(name = "--log-path", usage = "Use this option to set the log path for the install")
   private String logPath;
+
+  @Option(
+      name = "--install-timeout",
+      metaVar = "<seconds>",
+      usage =
+          "Maximum time in seconds to wait for install to complete. Defaults to 600 seconds (10"
+              + " minutes).")
+  private long installTimeoutSeconds = 600;
 
   @Option(
       name = "--run",
@@ -169,6 +175,20 @@ class AndroidCommandLineOptions {
   @Nullable
   public Boolean enableAppLinks = null;
 
+  public enum RestartMode {
+    auto,
+    yes,
+    no,
+  }
+
+  @Option(name = "--restart", usage = "Restart the device after installing APEX files.")
+  public RestartMode restartMode = RestartMode.auto;
+
+  @Option(
+      name = "--wait-for-device-ready",
+      usage = "Wait for the device to be ready after installation.")
+  public boolean waitForDeviceReady = false;
+
   public AndroidCommandLineOptions() {}
 
   public int getTcpPort() {
@@ -177,5 +197,9 @@ class AndroidCommandLineOptions {
 
   public String getLogPath() {
     return logPath;
+  }
+
+  public long getInstallTimeoutSeconds() {
+    return installTimeoutSeconds;
   }
 }

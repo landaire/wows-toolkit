@@ -4,14 +4,18 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
+# `out` keeps the original filenames: an export_file otherwise names its output
+# after the target, and the resource script refers to the icon by name.
 export_file(
     name = "wows_toolkit_ico",
     src = "wows_toolkit.ico",
+    out = "wows_toolkit.ico",
     visibility = ["PUBLIC"],
 )
 
 export_file(
     name = "wows_toolkit_rc",
     src = "wows_toolkit.rc",
+    out = "wows_toolkit.rc",
     visibility = ["PUBLIC"],
 )

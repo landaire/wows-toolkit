@@ -13,10 +13,18 @@
 def patch [file: path, from: string, to: string] {
     let text = (open --raw $file)
     let occurrences = ($text | split row $from | length) - 1
-    if $occurrences != 1 {
-        error make {msg: $"Expected exactly one occurrence of the patch site in ($file), found ($occurrences)."}
+    if $occurrences == 1 {
+        $text | str replace $from $to | save -f $file
+        return
     }
-    $text | str replace $from $to | save -f $file
+    # A patch that upstream has since made unnecessary is not an error, but only
+    # if the result it was written to produce is already there. Anything else
+    # means the prelude moved and the patch needs rewriting by hand.
+    if $occurrences == 0 and ($text | str contains $to) {
+        print $"Skipping ($file): already upstream."
+        return
+    }
+    error make {msg: $"Expected exactly one occurrence of the patch site in ($file), found ($occurrences)."}
 }
 
 rm -r -f prelude
@@ -40,9 +48,25 @@ for file in ["prelude/utils/cmd_script.bzl", "prelude/rust/context.bzl"] {
     patch $file '"#!/usr/bin/env bash",' '"#!{}/bin/bash".format(read_root_config("nix_toolchain", "root")),'
 }
 
-# Upstream bug: `--env-set=KEY=VALUE` loses its split when VALUE contains `=`,
-# which several crates' `cargo:rustc-env` output does.
+# `--env-set=KEY=VALUE` used to lose its split when VALUE contains `=`, which
+# several crates' `cargo:rustc-env` output does. Fixed upstream since 2026-07-31.
 patch "prelude/rust/tools/rustc_action.py" 'flag, key, value = arg.split("=", 3)' 'flag, key, value = arg.split("=", 2)'
+
+# MSVC link.exe does not expand a response file referenced from inside another
+# response file, and rustc spills long linker command lines into one of its own.
+patch "prelude/rust/build.bzl" ("        else:
+            rustc_cmd.add(cmd_args(linker_argsfile, format = \"-Clink-arg=@{}\"))
+            linker = compile_ctx.linker_with_pre_args") ("        elif compile_ctx.exec_is_windows:
+            # MSVC link.exe does not expand a response file referenced from
+            # inside another response file, and rustc spills long linker command
+            # lines into one of its own. Passing the arguments inline leaves
+            # rustc's spill as the only response file, so nothing nests.
+            rustc_cmd.add(cmd_args(link_args_output.link_args, separate_debug_info_args, format = \"-Clink-arg={}\"))
+            rustc_cmd.add(cmd_args(hidden = [link_args_output.hidden, separate_debug_info_args]))
+            linker = compile_ctx.linker_with_pre_args
+        else:
+            rustc_cmd.add(cmd_args(linker_argsfile, format = \"-Clink-arg=@{}\"))
+            linker = compile_ctx.linker_with_pre_args")
 
 # Archive extraction shells out to bare mkdir/tar/unzip, which resolve through
 # PATH. Route the POSIX branch through the pinned toolchain instead.

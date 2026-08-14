@@ -13,12 +13,8 @@ package com.facebook.buck.jvm.kotlin;
 /** Configuration for Kosabi plugin. */
 public abstract class KosabiConfig {
   public static final String PROPERTY_KOSABI_APPLICABILITY_PLUGIN = "kosabi_applicability_plugin";
-  public static final String PROPERTY_KOSABI_STUBS_GEN_PLUGIN = "kosabi_stubs_gen_plugin";
 
   public static final String PROPERTY_KOSABI_STUBS_GEN_K2_PLUGIN = "kosabi_stubs_gen_k2_plugin";
 
-  public static final String PROPERTY_KOSABI_SOURCE_MODIFIER_PLUGIN =
-      "kosabi_source_modifier_plugin";
-  public static final String PROPERTY_KOSABI_JVM_ABI_GEN_PLUGIN = "kosabi_jvm_abi_gen_plugin";
   public static final String PROPERTY_KOSABI_JVM_ABI_GEN_K2_PLUGIN = "kosabi_jvm_abi_gen_k2_plugin";
 }

@@ -30,13 +30,13 @@ AppleSelectiveDebuggableMetadata = record(
 
 # Represents Apple debug info from both executables and bundles.
 AppleDebuggableInfo = provider(
-    # @unsorted-dict-items
     fields = {
-        "dsyms": provider_field(list[Artifact]),
+        "binaries": provider_field(list[Artifact], default = []),
         # Tset containing ArtifactInfos with either
         # a. the owning library target to artifacts, or
         # b. the owning bundle target to filtered artifacts
         "debug_info_tset": provider_field(ArtifactTSet),
+        "dsyms": provider_field(list[Artifact]),
         # In the case of b above, contains the map of library target to artifacts, else None
         "filtered_map": provider_field([dict[Label, list[Artifact]], None], default = None),
         "selective_metadata": provider_field(list[AppleSelectiveDebuggableMetadata], default = []),
@@ -78,14 +78,17 @@ def get_aggregated_debug_info(ctx: AnalysisContext, debug_infos: list[AppleDebug
     )
     sub_targets = {}
     sub_targets[DEBUGINFO_SUBTARGET] = [
-        DefaultInfo(default_output = ctx.actions.write(
-            "debuginfo.artifacts",
-            project_artifacts(
-                actions = ctx.actions,
-                tsets = [debug_info_tset],
-            ),
-            with_inputs = True,
-        )),
+        DefaultInfo(
+            default_output = ctx.actions.write(
+                "debuginfo.artifacts",
+                project_artifacts(
+                    actions = ctx.actions,
+                    tsets = debug_info_tset,
+                ),
+                with_inputs = True,
+                has_content_based_path = False,
+            )
+        ),
     ]
 
     full_debug_info_tset = make_artifact_tset(
@@ -98,7 +101,7 @@ def get_aggregated_debug_info(ctx: AnalysisContext, debug_infos: list[AppleDebug
 
     sub_targets[DEBUGINFO_DB_SUBTARGET] = [
         DefaultInfo(
-            default_output = ctx.actions.write_json(DEBUGINFO_DB_SUBTARGET, debug_info_map),
+            default_output = ctx.actions.write_json(DEBUGINFO_DB_SUBTARGET, debug_info_map, has_content_based_path = False),
         ),
     ]
     return AggregatedAppleDebugInfo(

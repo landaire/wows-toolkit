@@ -15,7 +15,11 @@ load(":common.bzl", "buck", "prelude_rule")
 
 js_bundle = prelude_rule(
     name = "js_bundle",
-    docs = "",
+    docs = """
+        A `js_bundle()` rule builds a JavaScript bundle from one or more entry points,
+        pulling in `js_library()` dependencies and invoking a worker tool to perform
+        the bundling.
+    """,
     examples = None,
     further = None,
     attrs = (
@@ -24,22 +28,24 @@ js_bundle = prelude_rule(
             "android_package": attrs.option(attrs.string(), default = None),
             "bundle_name": attrs.option(attrs.string(), default = None),
             "bundle_name_for_flavor": attrs.list(attrs.tuple(attrs.string(), attrs.string()), default = []),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "entry": attrs.one_of(attrs.set(attrs.string(), sorted = False), attrs.string()),
             "extra_json": attrs.option(attrs.arg(), default = None),
             "fallback_transform_profile": attrs.option(attrs.string(), default = None),
             "worker": attrs.dep(),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
 js_bundle_genrule = prelude_rule(
     name = "js_bundle_genrule",
-    docs = "",
+    docs = """
+        `js_bundle_genrule` is a genrule that acts on a `js_bundle` and provides a bunch of
+        additional environment variables for the genrule to use.
+    """,
     examples = None,
     further = None,
     attrs = (
@@ -51,11 +57,9 @@ js_bundle_genrule = prelude_rule(
             "cacheable": attrs.option(attrs.bool(), default = None),
             "cmd": attrs.option(attrs.arg(), default = None),
             "cmd_exe": attrs.option(attrs.arg(), default = None),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "enable_sandbox": attrs.option(attrs.bool(), default = None),
             "environment_expansion_separator": attrs.option(attrs.string(), default = None),
             "js_bundle": attrs.dep(),
-            "need_android_tools": attrs.bool(default = False),
             "remote": attrs.option(attrs.bool(), default = None),
             "rewrite_deps_file": attrs.bool(default = False),
             "rewrite_misc": attrs.bool(default = False),
@@ -63,16 +67,19 @@ js_bundle_genrule = prelude_rule(
             "skip_resources": attrs.bool(default = False),
             "srcs": attrs.named_set(attrs.source(), sorted = False, default = []),
             "weight": attrs.option(attrs.int(), default = None),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 
 js_library = prelude_rule(
     name = "js_library",
-    docs = "",
+    docs = """
+        A `js_library()` rule groups together JavaScript source files and assets so they
+        can be consumed by a `js_bundle()`.
+    """,
     examples = None,
     further = None,
     attrs = (
@@ -81,16 +88,15 @@ js_library = prelude_rule(
             "asset_extensions": attrs.option(attrs.set(attrs.string(), sorted = False), default = None),
             "asset_platforms": attrs.option(attrs.set(attrs.string(), sorted = False), default = None),
             "base_path": attrs.option(attrs.string(), default = None),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "deps_query": attrs.option(attrs.query(), default = None),
             "extra_json": attrs.option(attrs.arg(), default = None),
             "srcs": attrs.list(attrs.one_of(attrs.source(), attrs.tuple(attrs.source(), attrs.string())), default = []),
             "worker": attrs.dep(),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 

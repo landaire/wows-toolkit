@@ -11,15 +11,9 @@
 
 -include_lib("common/include/tpx_records.hrl").
 
--export([
-    list_tests/2,
-    list_test_spec/1, list_test_spec/2
-]).
+-export([list_tests/2]).
 
 -import(common_util, [unicode_characters_to_binary/1]).
-
-%% Fallback oncall
--define(FALLBACK_ONCALL, <<"fallback_oncall">>).
 
 -type ct_groupname() :: ct_suite:ct_groupname().
 -type ct_testname() :: ct_suite:ct_testname().
@@ -70,33 +64,36 @@
 %% ------ Public Function --------
 
 -doc """
-Outputs a string representation
-of the tests in the suite, as a XML
-as defined by tpx-buck2 specifications
-(see https://www.internalfb.com/code/fbsource/fbcode/buck2/docs/test_execution.md#test-spec-integration-with-tpx)
+Generates a list of tests, suitable for test runners like TPX
 """.
--spec list_tests(suite(), [module()]) -> #test_spec_test_case{}.
+-spec list_tests(Suite, Hooks) -> #test_spec_test_case{} when
+    Suite :: suite(),
+    Hooks :: [module()].
 list_tests(Suite, Hooks) ->
-    TestNames = list_test_spec(Suite, Hooks),
-    throw_if_duplicate(TestNames),
-    listing_interfacer:test_case_constructor(Suite, TestNames).
+    TestCases = list_test_spec(Suite, Hooks),
+    throw_if_duplicate(TestCases),
+    #test_spec_test_case{
+        suite = atom_to_binary(Suite),
+        testcases = TestCases
+    }.
 
 %% -------------- Internal functions ----------------
 %%
 %%
--spec throw_if_duplicate(list(binary())) -> ok.
-throw_if_duplicate(TestNames) ->
-    throw_if_duplicate(sets:new([{version, 2}]), TestNames).
+-spec throw_if_duplicate([#test_spec_test_info{}]) -> ok.
+throw_if_duplicate(TestCaseInfos) ->
+    throw_if_duplicate(sets:new([{version, 2}]), TestCaseInfos).
 
--spec throw_if_duplicate(sets:set(binary()), list(binary())) -> ok.
+-spec throw_if_duplicate(sets:set(binary()), [#test_spec_test_info{}]) -> ok.
 throw_if_duplicate(_, []) ->
     ok;
-throw_if_duplicate(TestNameSet, [TestName | Tail]) ->
-    case sets:is_element(TestName, TestNameSet) of
+throw_if_duplicate(TestNameSet, [TestCaseInfo | Tail]) ->
+    TestCaseName = TestCaseInfo#test_spec_test_info.name,
+    case sets:is_element(TestCaseName, TestNameSet) of
         true ->
-            throw({found_duplicate_test, TestName});
+            throw({found_duplicate_test, TestCaseInfo});
         false ->
-            throw_if_duplicate(sets:add_element(TestName, TestNameSet), Tail)
+            throw_if_duplicate(sets:add_element(TestCaseName, TestNameSet), Tail)
     end.
 
 -doc """
@@ -164,16 +161,17 @@ suite_all(Suite, Hooks, GroupsDef) ->
         Hooks
     ).
 
--spec list_test([ct_test_def() | ct_group_content()], [ct_groupname()], groups_output(), suite()) -> [binary()].
+-spec list_test([ct_test_def() | ct_group_content()], [ct_groupname()], groups_output(), suite()) ->
+    [#test_spec_test_info{}].
 list_test(Node, Groups, SuiteGroups, Suite) ->
     lists:foldl(
         fun
             (Test, ListTestsAcc) when is_atom(Test) ->
-                [test_format(Suite, Groups, Test) | ListTestsAcc];
+                [test_case_info(Suite, Groups, Test) | ListTestsAcc];
             ({testcase, Test}, ListTestsAcc) when is_atom(Test) ->
-                [test_format(Suite, Groups, Test) | ListTestsAcc];
+                [test_case_info(Suite, Groups, Test) | ListTestsAcc];
             ({testcase, TestName, _Properties}, ListTestsAcc) when is_atom(TestName) ->
-                [test_format(Suite, Groups, TestName) | ListTestsAcc];
+                [test_case_info(Suite, Groups, TestName) | ListTestsAcc];
             (Group, ListTestsAcc) ->
                 lists:append(list_group(Group, Groups, SuiteGroups, Suite), ListTestsAcc)
         end,
@@ -183,7 +181,8 @@ list_test(Node, Groups, SuiteGroups, Suite) ->
 
 %% case where the format of the group is {group, GroupName}, then we need to
 %% look for the specifications of the group from the groups() method.
--spec list_group(ct_group_ref() | ct_group_def(), [ct_groupname()], groups_output(), suite()) -> [binary()].
+-spec list_group(ct_group_ref() | ct_group_def(), [ct_groupname()], groups_output(), suite()) ->
+    [#test_spec_test_info{}].
 list_group({group, Group}, Groups, SuiteGroups, Suite) when is_atom(Group) ->
     list_sub_group(Group, Groups, SuiteGroups, Suite);
 %% case {group, GroupName, Properties}, similar as above
@@ -196,7 +195,7 @@ list_group({group, Group, _, _}, Groups, SuiteGroups, Suite) ->
 list_group(GroupDef, Groups, SuiteGroups, Suite) ->
     list_group_def(GroupDef, Groups, SuiteGroups, Suite).
 
--spec list_group_def(ct_group_def(), [ct_groupname()], groups_output(), suite()) -> [binary()].
+-spec list_group_def(ct_group_def(), [ct_groupname()], groups_output(), suite()) -> [#test_spec_test_info{}].
 %% case {GroupName, SubGroupTests}, then we need to look for the specification of the group
 %% from the groups() method as above
 list_group_def({Group, SubGroupTests}, Groups, SuiteGroups, Suite) ->
@@ -212,7 +211,7 @@ list_group_def({Group, _, SubGroupTests}, Groups, SuiteGroups, Suite) ->
 Makes use of the output from the groups/0 method to get the tests and subgroups
 of the group name given as input
 """.
--spec list_sub_group(ct_groupname(), [ct_groupname()], groups_output(), suite()) -> [binary()].
+-spec list_sub_group(ct_groupname(), [ct_groupname()], groups_output(), suite()) -> [#test_spec_test_info{}].
 list_sub_group(Group, Groups, SuiteGroups, Suite) when is_list(SuiteGroups) ->
     TestsAndGroups =
         case lists:keyfind(Group, 1, SuiteGroups) of
@@ -224,84 +223,23 @@ list_sub_group(Group, Groups, SuiteGroups, Suite) when is_list(SuiteGroups) ->
     Groups1 = lists:append(Groups, [Group]),
     list_test(TestsAndGroups, Groups1, SuiteGroups, Suite).
 
--doc """
-Given a test that belongs to a common test suite,
-prints it as follows:
-name_of_suite.group1:group2:...:groupn.test_name
-""".
--spec test_format(suite(), [ct_groupname()], ct_testname()) -> binary().
-test_format(Suite, Groups, Test) ->
+-spec test_case_info(suite(), [ct_groupname()], ct_testname()) -> #test_spec_test_info{}.
+test_case_info(Suite, Groups, Test) ->
     ok = test_exported_test(Suite, Test),
-    ListPeriodGroups = lists:join(":", lists:map(fun(Group) -> atom_to_list(Group) end, Groups)),
-    GroupString = lists:foldl(
-        fun(Element, Acc) -> string:concat(Acc, Element) end,
-        "",
-        ListPeriodGroups
-    ),
-    unicode_characters_to_binary(io_lib:format("~ts.~ts", [GroupString, Test])).
+    ListPeriodGroups = lists:join(":", [atom_to_list(Group) || Group <:- Groups]),
+    Name = unicode_characters_to_binary(io_lib:format("~ts.~ts", [ListPeriodGroups, Test])),
+    #test_spec_test_info{
+        name = Name,
+        filter = Name,
+        breakpoint = {Suite, Test, 1}
+    }.
 
--spec list_test_spec(suite()) -> [binary()].
-list_test_spec(Suite) ->
-    list_test_spec(Suite, []).
-
--doc """
-Creates a Xml representation of all the group / tests
-of the suite by exploring the suite
-""".
--spec list_test_spec(suite(), [module()]) -> [binary()].
+-spec list_test_spec(Suite, Hooks) -> [#test_spec_test_info{}] when
+    Suite :: suite(),
+    Hooks :: [module()].
 list_test_spec(Suite, Hooks) ->
     ok = load_hooks(Hooks),
-    _Contacts = get_contacts(Suite),
+    {module, Suite} = code:ensure_loaded(Suite),
     GroupsDef = suite_groups(Suite, Hooks),
     AllResult = suite_all(Suite, Hooks, GroupsDef),
     lists:reverse(list_test(AllResult, [], GroupsDef, Suite)).
-
--spec get_contacts(suite()) -> [binary()].
-get_contacts(Suite) ->
-    try
-        SuiteSource = proplists:get_value(source, Suite:module_info(compile)),
-        {ok, Forms} = epp_dodger:parse_file(SuiteSource),
-        Oncalls = extract_attribute(oncall, Forms),
-        Authors = extract_attribute(author, Forms),
-        case lists:append(Oncalls, Authors) of
-            [] -> [?FALLBACK_ONCALL];
-            Contacts -> Contacts
-        end
-    catch
-        % the suite module is for some reason not accessible
-        _:_:_ -> [?FALLBACK_ONCALL]
-    end.
-
--spec extract_attribute(atom(), erl_syntax:forms()) -> [binary()].
-extract_attribute(_, []) ->
-    [];
-extract_attribute(Attribute, [Form | Forms]) ->
-    case erl_syntax:type(Form) of
-        attribute ->
-            AttrName = erl_syntax:attribute_name(Form),
-            FoundHere =
-                case erl_syntax:is_atom(AttrName, Attribute) of
-                    false ->
-                        [];
-                    true ->
-                        case erl_syntax:attribute_arguments(Form) of
-                            [AttrArg] ->
-                                case erl_syntax:type(AttrArg) of
-                                    string ->
-                                        [unicode_characters_to_binary(erl_syntax:string_value(AttrArg))];
-                                    list ->
-                                        [
-                                            unicode_characters_to_binary(erl_syntax:string_value(S))
-                                         || S <- erl_syntax:list_elements(AttrArg), erl_syntax:type(S) =:= string
-                                        ];
-                                    _ ->
-                                        []
-                                end;
-                            _ ->
-                                []
-                        end
-                end,
-            FoundHere ++ extract_attribute(Attribute, Forms);
-        _ ->
-            extract_attribute(Attribute, Forms)
-    end.

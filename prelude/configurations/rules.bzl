@@ -6,36 +6,43 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
+load("@prelude//cfg/modifier:constraint_modifier_info.bzl", "make_constraint_modifier_info")
 load("@prelude//cfg/modifier:types.bzl", "ConditionalModifierInfo")
 load(":util.bzl", "util")
 
-# config_setting() accepts a list of constraint_values and a list of values
-# (buckconfig keys + expected values) and matches if all of those match.
-#
-# This is implemented as forming a single ConfigurationInfo from the union of the
-# referenced values and the config keys.
-#
-# Attributes:
-#   "constraint_values": attrs.list(attrs.configuration_label(), default = []),
-#   "values": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
+_ExecutionModifierInfo = provider(
+    fields = {
+        "execution_modifier": bool,
+    }
+)
+
 def config_setting_impl(ctx):
     subinfos = [util.constraint_values_to_configuration(ctx.attrs.constraint_values)]
     subinfos.append(ConfigurationInfo(constraints = {}, values = ctx.attrs.values))
-    return [DefaultInfo(), util.configuration_info_union(subinfos)]
+    cfg_info = util.configuration_info_union(subinfos)
+    providers = [DefaultInfo(), cfg_info]
+    if len(ctx.attrs.constraint_values) == 1:
+        # When only have one constraint, we return an additional ConditionalModifierInfo provider for
+        # conditional modifier
+        conditional_modifier_info = ctx.attrs.constraint_values[0][ConditionalModifierInfo]
+        providers.append(conditional_modifier_info)
+    return providers
 
-# constraint_setting() targets just declare the existence of a constraint.
 def constraint_setting_impl(ctx):
-    return [DefaultInfo(), ConstraintSettingInfo(label = ctx.label.raw_target())]
+    return [
+        DefaultInfo(),
+        ConstraintSettingInfo(label = ctx.label.raw_target()),
+        # In order for the constraint_value to access the execution modifier info, we need to provide an additional provider here.
+        _ExecutionModifierInfo(execution_modifier = ctx.attrs.execution_modifier),
+    ]
 
-# constraint_value() declares a specific value of a constraint_setting.
-#
-# Attributes:
-#  constraint_setting: the target constraint that this is a value of
 def constraint_value_impl(ctx):
     constraint_value = ConstraintValueInfo(
         setting = ctx.attrs.constraint_setting[ConstraintSettingInfo],
         label = ctx.label.raw_target(),
     )
+    execution_modifier_info = ctx.attrs.constraint_setting[_ExecutionModifierInfo]
+
     return [
         DefaultInfo(),
         constraint_value,
@@ -46,32 +53,54 @@ def constraint_value_impl(ctx):
             },
             values = {},
         ),
-        ConditionalModifierInfo(
-            inner = constraint_value,
+        make_constraint_modifier_info(
+            constraint_value = constraint_value,
             key = constraint_value.setting.label,
+            execution_modifier = execution_modifier_info.execution_modifier,
+            exec_platform_marker_configuration_info = ctx.attrs._exec_platform_marker[ConfigurationInfo],
         ),
     ]
 
-# constraint() is a unified constraint rule that declares both a constraint setting
-# and its possible values. Values are exposed as subtargets.
-#
-# Attributes:
-#  values: list of value names (strings)
-#  default: default value (must be one of the values)
 def constraint_impl(ctx):
     # Validate values are unique and non-empty
     values = ctx.attrs.values
-    if len(values) <= 1:
-        fail("constraint() rule must have at least two values: one for the default and at least one alternative to provide constraint choices. Example: values = ['disable', 'enable']")
 
+    min_values = 1 if ctx.attrs.allow_trivial_constraint else 2
+    if len(values) < min_values:
+        if ctx.attrs.allow_trivial_constraint:
+            fail("constraint() rule must have at least one value.")
+        else:
+            fail(
+                "constraint() rule must have at least two values. "
+                + "A single-value constraint has no selectivity: it can't express a choice between alternatives "
+                + "(e.g., 'linux' vs 'macos', 'enabled' vs 'disabled'), which is the whole point of a constraint. "
+                + "If you don't need to select between alternatives, you likely don't need a constraint at all.\n\n"
+                + "Set allow_trivial_constraint = True only if your constraint legitimately has just one value "
+                + "most of the time and may temporarily gain alternatives (e.g., versioned packages "
+                + "that pick up an extra value during an upgrade and drop it once the upgrade lands).",
+            )
+
+    default = ctx.attrs.default
+
+    # Value-name reservations:
+    # - 'DEFAULT' is always reserved, to avoid visual confusion with the special `[default]` subtarget.
+    # - 'default' is allowed only when it is itself the default value, in which case it coincides with the
+    #   `[default]` subtarget added below. Otherwise `[default]` would be ambiguous, so it is rejected.
     seen = set()
     for v in values:
+        if v == "DEFAULT":
+            fail("'DEFAULT' is a reserved keyword and cannot be used as a constraint value. Use a different name to avoid confusion.")
+        if v == "default" and default != "default":
+            fail(
+                "'default' can be used as a constraint value only when it is also the default value "
+                + "(i.e. default = \"default\"); otherwise ':{}[default]' is ambiguous between the value ".format(ctx.label.name)
+                + "named 'default' and the default value '{}'.".format(default),
+            )
         if v in seen:
             fail("Duplicate value '{}' in constraint()".format(v))
         seen.add(v)
 
-    # Validate default if provided
-    default = ctx.attrs.default
+    # Validate default is one of the declared values.
     if default not in seen:
         fail("default value '{}' must be one of the declared values: {}".format(default, values))
 
@@ -81,6 +110,16 @@ def constraint_impl(ctx):
         label = main_label,
         default = main_label.with_sub_target(default),
     )
+
+    # exec_platform_marker_constraint() and constraint() rule both use this impl,
+    # but only constraint() has this attribute.
+    exec_platform_marker_configuration_info = None
+    if hasattr(ctx.attrs, "_exec_platform_marker"):
+        exec_platform_marker_configuration_info = ctx.attrs._exec_platform_marker[ConfigurationInfo]
+
+    execution_modifier = False
+    if hasattr(ctx.attrs, "execution_modifier"):
+        execution_modifier = ctx.attrs.execution_modifier
 
     # Create subtargets for each value
     sub_targets = {}
@@ -100,27 +139,37 @@ def constraint_impl(ctx):
                 },
                 values = {},
             ),
-            ConditionalModifierInfo(
-                inner = constraint_value,
+            make_constraint_modifier_info(
+                constraint_value = constraint_value,
                 key = main_label,
+                execution_modifier = execution_modifier,
+                exec_platform_marker_configuration_info = exec_platform_marker_configuration_info,
             ),
         ]
+
+    # Add 'default' subtarget that aliases to the actual default value
+    sub_targets["default"] = sub_targets[default]
+
+    # Validate and register user-defined aliases.
+    # Each alias becomes an additional subtarget pointing to an existing value's providers.
+    reserved_keywords = ["default", "DEFAULT"]
+    aliases = ctx.attrs.aliases
+    for alias_name, alias_value in aliases.items():
+        if alias_name in reserved_keywords:
+            fail("alias '{}' is a reserved keyword and cannot be used as a constraint alias.".format(alias_name))
+        if alias_name in seen:
+            fail("alias '{}' conflicts with a declared constraint value.".format(alias_name))
+        if alias_value not in seen:
+            fail("alias '{}' targets value '{}' which is not declared in values: {}".format(alias_name, alias_value, values))
+        sub_targets[alias_name] = sub_targets[alias_value]
 
     return [
         DefaultInfo(sub_targets = sub_targets),
         constraint_setting,
     ]
 
-# platform() declares a platform, it is a list of constraint values.
-#
-# Attributes:
-#  constraint_values: list of constraint values that are set for this platform
-#  deps: a list of platform target dependencies, the constraints from these platforms will be part of this platform (unless overridden)
 def platform_impl(ctx):
-    subinfos = (
-        [dep[PlatformInfo].configuration for dep in ctx.attrs.deps] +
-        [util.constraint_values_to_configuration(ctx.attrs.constraint_values)]
-    )
+    subinfos = [dep[PlatformInfo].configuration for dep in ctx.attrs.deps] + [util.constraint_values_to_configuration(ctx.attrs.constraint_values)]
     return [
         DefaultInfo(),
         PlatformInfo(
@@ -151,5 +200,6 @@ implemented_rules = {
     "constraint": constraint_impl,
     "constraint_setting": constraint_setting_impl,
     "constraint_value": constraint_value_impl,
+    "exec_platform_marker_constraint": constraint_impl,
     "platform": platform_impl,
 }

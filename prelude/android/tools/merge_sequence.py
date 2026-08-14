@@ -112,7 +112,6 @@ import pathlib
 import re
 import sys
 import typing
-
 from collections import defaultdict
 from typing import Optional
 
@@ -128,6 +127,7 @@ class LinkableGraphNode(typing.NamedTuple):
     soname: str
     deps: list[Label]
     can_be_asset: bool
+    force_static: bool
     labels: list[str]
 
     @staticmethod
@@ -365,12 +365,12 @@ class MergeSequenceGroupSpec:
 
         for group_spec in self.group_specs:
             library_name = group_spec[0]
-            assert library_name.startswith(
-                "lib"
-            ), f"native merge library name {library_name} does not begin with 'lib'"
-            assert library_name.endswith(
-                ".so"
-            ), f"native merge library name {library_name} does not end with '.so'"
+            assert library_name.startswith("lib"), (
+                f"native merge library name {library_name} does not begin with 'lib'"
+            )
+            assert library_name.endswith(".so"), (
+                f"native merge library name {library_name} does not end with '.so'"
+            )
 
         self.group_roots_patterns = [
             [re.compile(x) for x in spec[1]] for spec in self.group_specs
@@ -765,9 +765,9 @@ def main() -> int:  # noqa: C901
     if args.output:
         pathlib.Path(args.output).mkdir(parents=True, exist_ok=True)
         with open(os.path.join(args.output, "merge.map"), "w") as outfile:
-            json.dump(final_result, outfile, indent=2)
+            json.dump(final_result, outfile, indent=2, sort_keys=True)
         with open(os.path.join(args.output, "split_groups.map"), "w") as outfile:
-            json.dump(split_groups, outfile, indent=2)
+            json.dump(split_groups, outfile, indent=2, sort_keys=True)
 
         # When writing an output dir we also produce some debugging information.
         for platform, result in final_result.items():

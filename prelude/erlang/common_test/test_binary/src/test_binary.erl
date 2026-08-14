@@ -53,7 +53,10 @@ cli() ->
             "list" => #{
                 handler => fun handle_list/1,
                 arguments => [
-                    #{name => output_dir, long => "-output-dir", type => string, required => true}
+                    #{name => output_dir, long => "-output-dir", type => string, required => true},
+
+                    % --json flag is now a no-op, to be removed once all callers are fixed
+                    #{name => json, long => "-json", type => boolean, required => false}
                 ]
             },
             "run" => #{
@@ -88,11 +91,18 @@ cli() ->
 -spec handle_list(Args) -> ok when
     Args :: list_args().
 handle_list(Args) ->
-    #{output_dir := OutputDir} = Args,
-    test_logger:set_up_logger(OutputDir, test_listing, capture_stdout),
-    ok = listing(Args),
-    ?LOG_DEBUG("Listing done"),
-    ok.
+    try
+        #{output_dir := OutputDir} = Args,
+        test_logger:set_up_logger(OutputDir, test_listing, no_capture_stdout),
+        ok = listing(Args),
+        ?LOG_DEBUG("Listing done"),
+        ok
+    catch
+        Class:Reason:StackTrace ->
+            ErrorMsg = erl_error:format_exception(Class, Reason, StackTrace),
+            io:format(standard_error, "Listing failed:~n~ts", [ErrorMsg]),
+            erlang:halt(1)
+    end.
 
 -spec handle_run(Args) -> ok when
     Args :: run_args().
@@ -168,7 +178,7 @@ listing(Args) ->
     #{test_info_file := TestInfoFile, output_dir := OutputDir} = Args,
     TestInfo = test_info:load_from_file(TestInfoFile),
     Listing = get_listing(TestInfo, OutputDir),
-    listing_interfacer:produce_xml_file(OutputDir, Listing).
+    listing_interfacer:produce_json_file(OutputDir, Listing).
 
 -spec running(Args) -> ok when
     Args :: run_args().

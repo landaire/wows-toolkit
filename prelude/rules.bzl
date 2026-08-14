@@ -7,7 +7,6 @@
 # above-listed licenses.
 
 load("@prelude//:is_full_meta_repo.bzl", "is_full_meta_repo")
-
 # Combine the attributes we generate, we the custom implementations we have.
 load("@prelude//:rules_impl.bzl", "categorized_extra_attributes", "categorized_rule_decl_records", "extra_implemented_rules", "toolchain_rule_names")
 load("@prelude//apple:apple_platforms.bzl", "APPLE_PLATFORMS_KEY")
@@ -100,11 +99,7 @@ def _mk_rule(rule_spec: typing.Any, extra_attrs: dict[str, typing.Any] = dict(),
 
     extra_args.setdefault("is_configuration_rule", name in _config_implemented_rules)
     extra_args.setdefault("is_toolchain_rule", is_toolchain_rule)
-    return rule(
-        impl = impl,
-        attrs = attributes,
-        **extra_args
-    )
+    return rule(impl = impl, attrs = attributes, **extra_args)
 
 def _categorized_decls():
     grouped_decls = {}
@@ -159,11 +154,7 @@ def _update_categorized_rules(categorized_rules: dict[str, dict[str, prelude_rul
 _categorized_declared_rules = _categorized_decls()
 _update_categorized_rules(_categorized_declared_rules, categorized_extra_attributes)
 
-_declared_rules = {
-    rule_name: rule
-    for category in _categorized_declared_rules.values()
-    for rule_name, rule in category.items()
-}
+_declared_rules = {rule_name: rule for category in _categorized_declared_rules.values() for rule_name, rule in category.items()}
 
 categorized_rules = {
     group_name: {rule_name: _mk_rule(rule_decl) for rule_name, rule_decl in group_rules.items()}

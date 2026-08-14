@@ -26,9 +26,21 @@ git_fetch = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
-            "allow_cache_upload": attrs.bool(doc = """
+            "allow_cache_upload": attrs.bool(
+                doc = """
                 Whether the results of the fetch can be written to the action cache and CAS.
-            """, default = True),
+            """,
+                default = True,
+            ),
+            "git": attrs.option(
+                attrs.string(),
+                default = None,
+                doc = """
+                Path to the git binary to use. If not specified, the system
+                git from PATH is used, with fallback to common system
+                locations (/usr/bin/git, /usr/local/bin/git).
+            """,
+            ),
             "object_format": attrs.option(
                 attrs.enum(["sha1", "sha256"]),
                 default = None,
@@ -37,12 +49,23 @@ git_fetch = prelude_rule(
                 Must be one of `sha1` or `sha256`.
                 """,
             ),
-            "repo": attrs.string(doc = """
+            "repo": attrs.string(
+                doc = """
                 Url suitable as a git remote.
-            """),
-            "rev": attrs.string(doc = """
+            """
+            ),
+            "rev": attrs.string(
+                doc = """
                 Commit hash. 40 hex digits for sha1, 64 hex digits for sha256.
-            """),
+            """
+            ),
+            "update_submodules": attrs.bool(
+                default = False,
+                doc = """
+                Whether to initialize and update Git submodules after the worktree checkout.
+                If true, submodules are fetched recursively with depth 1.
+            """,
+            ),
             "sub_targets": attrs.list(
                 attrs.string(),
                 default = [],
@@ -53,12 +76,11 @@ git_fetch = prelude_rule(
                 to the serde_derive subdirectory of the repo as `":serde.git[serde_derive]"`.
             """,
             ),
-            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "_git_fetch_tool": attrs.default_only(attrs.exec_dep(providers = [RunInfo], default = "prelude//git/tools:git_fetch")),
-        } |
-        buck.licenses_arg() |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
+        | buck.licenses_arg()
+        | buck.labels_arg()
+        | buck.contacts_arg()
     ),
 )
 

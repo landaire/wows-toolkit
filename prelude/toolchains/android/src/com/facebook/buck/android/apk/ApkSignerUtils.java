@@ -12,6 +12,7 @@ package com.facebook.buck.android.apk;
 
 import com.android.apksig.ApkSigner;
 import com.facebook.buck.android.apk.sdk.ApkCreationException;
+import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableList;
 import java.io.File;
 import java.io.InputStream;
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Objects;
 
 /** Use Google apksigner to v1 + v2 sign the final APK */
+@Nullsafe(Nullsafe.Mode.LOCAL)
 public class ApkSignerUtils {
 
   /** Sign the APK using Google's {@link ApkSigner} */
@@ -34,11 +36,17 @@ public class ApkSignerUtils {
     ApkSigner.Builder apkSignerBuilder = new ApkSigner.Builder(signerConfigs);
     try {
       apkSignerBuilder
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .setV1SigningEnabled(true)
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .setV2SigningEnabled(true)
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .setV3SigningEnabled(false)
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .setInputApk(inputApk)
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .setOutputApk(outputApk)
+          // NULLSAFE_FIXME[Not Vetted Third-Party]
           .build()
           .sign();
     } catch (Exception e) {
@@ -56,6 +64,7 @@ public class ApkSignerUtils {
     PrivateKey key = loadPrivateKey(keystore, keyAlias, keyPassword);
     List<X509Certificate> certs = loadCertificates(keystore, keyAlias);
     ApkSigner.SignerConfig signerConfig =
+        // NULLSAFE_FIXME[Not Vetted Third-Party]
         new ApkSigner.SignerConfig.Builder("CERT", key, certs).build();
     return ImmutableList.of(signerConfig);
   }

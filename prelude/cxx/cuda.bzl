@@ -6,10 +6,14 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//cxx:compile_types.bzl", "CxxSrcCompileCommand")
+load("@prelude//cxx:compile_types.bzl", "CudaDistributedCompileOutput", "CxxSrcCompileCommand")
 load("@prelude//cxx:compiler.bzl", "get_output_flags")
 load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
 load("@prelude//cxx:headers.bzl", "add_headers_dep_files")
+load(
+    "@prelude//utils:utils.bzl",
+    "as_output",
+)
 
 CudaCompileInfo = record(
     # Output base filename without extension
@@ -18,7 +22,7 @@ CudaCompileInfo = record(
     identifier = field(str),
     # Output sub-directory where all CUDA compilation artifacts will go to
     output_prefix = field(str),
-    uses_experimental_content_based_path_hashing = field(bool),
+    uses_content_based_paths = field(bool),
 )
 
 CudaCompileStyle = enum(
@@ -30,58 +34,173 @@ CudaCompileStyle = enum(
     "dist",
 )
 
-def cuda_compile(
-        actions: AnalysisActions,
-        toolchain: CxxToolchainInfo,
-        cmd: cmd_args,
-        object: Artifact,
-        src_compile_cmd: CxxSrcCompileCommand,
-        cuda_compile_info: CudaCompileInfo,
-        action_dep_files: dict[str, ArtifactTag],
-        allow_dep_file_cache_upload: bool,
-        error_handler: [typing.Callable, None],
-        cuda_compile_style: CudaCompileStyle | None) -> list[Artifact] | None:
-    if cuda_compile_style == CudaCompileStyle("mono"):
-        # Bind the object output for monolithic NVCC compilation.
-        cmd.add(get_output_flags(src_compile_cmd.cxx_compile_cmd.compiler_type, object))
-        headers_dep_files = src_compile_cmd.cxx_compile_cmd.headers_dep_files
-        if headers_dep_files:
-            cmd = add_headers_dep_files(
-                actions,
-                cmd,
-                headers_dep_files,
-                src_compile_cmd.src,
-                cuda_compile_info.filename,
-                action_dep_files,
-            )
-        actions.run(
-            cmd,
-            category = src_compile_cmd.cxx_compile_cmd.category,
-            identifier = cuda_compile_info.identifier,
-            dep_files = action_dep_files,
-            allow_cache_upload = src_compile_cmd.cxx_compile_cmd.allow_cache_upload,
-            allow_dep_file_cache_upload = allow_dep_file_cache_upload,
-            error_handler = error_handler,
-        )
-        return None
-    elif cuda_compile_style == CudaCompileStyle("dist"):
-        return dist_nvcc(
+def declare_cuda_dist_compile_output(actions: AnalysisActions, cuda_compile_info: CudaCompileInfo) -> CudaDistributedCompileOutput:
+    """
+    Declare output artifacts for CUDA distributed compilation upfront.
+    This should be called during analysis before the dynamic action.
+    """
+    content_based = cuda_compile_info.uses_content_based_paths
+
+    # Create the following files for each CUDA file:
+    # - Envvars to run the NVCC sub-commands with.
+    # - A dependency graph of the NVCC sub-commands.
+    # - Argsfile for the host compiler.
+    env = actions.declare_output(
+        cuda_compile_info.output_prefix,
+        "{}.env".format(cuda_compile_info.filename),
+        has_content_based_path = content_based,
+    )
+    subcmds = actions.declare_output(
+        cuda_compile_info.output_prefix,
+        "{}.json".format(cuda_compile_info.filename),
+        has_content_based_path = content_based,
+    )
+    hostcc_argsfile = actions.declare_output(
+        cuda_compile_info.output_prefix,
+        "{}.hostcc_argsfile".format(cuda_compile_info.filename),
+        has_content_based_path = content_based,
+    )
+    return CudaDistributedCompileOutput(
+        nvcc_dag = subcmds,
+        nvcc_env = env,
+        hostcc_argsfile = hostcc_argsfile,
+    )
+
+def cuda_mono_compile(
+    actions: AnalysisActions,
+    cmd: cmd_args,
+    object: OutputArtifact,
+    src_compile_cmd: CxxSrcCompileCommand,
+    cuda_compile_info: CudaCompileInfo,
+    action_dep_files: dict[str, ArtifactTag],
+    allow_dep_file_cache_upload: bool,
+    error_handler: [typing.Callable, None],
+) -> None:
+    """
+    Compile a CUDA file monolithically using NVCC as the compiler driver.
+    All compilation happens in a single Buck action.
+    """
+
+    # Bind the object output for monolithic NVCC compilation.
+    cmd.add(get_output_flags(src_compile_cmd.cxx_compile_cmd.compiler_type, object))
+    headers_dep_files = src_compile_cmd.cxx_compile_cmd.headers_dep_files
+    if headers_dep_files:
+        cmd = add_headers_dep_files(
             actions,
-            toolchain,
+            cmd,
+            headers_dep_files,
+            src_compile_cmd.src,
+            cuda_compile_info.filename,
+            action_dep_files,
+        )
+    actions.run(
+        cmd,
+        category = src_compile_cmd.cxx_compile_cmd.category,
+        identifier = cuda_compile_info.identifier,
+        dep_files = action_dep_files,
+        allow_cache_upload = src_compile_cmd.cxx_compile_cmd.allow_cache_upload,
+        allow_dep_file_cache_upload = allow_dep_file_cache_upload,
+        error_handler = error_handler,
+    )
+
+def cuda_distributed_compile(
+    actions: AnalysisActions,
+    toolchain: CxxToolchainInfo,
+    cmd: cmd_args,
+    object: OutputArtifact,
+    cuda_dist_output: CudaDistributedCompileOutput,
+    src_compile_cmd: CxxSrcCompileCommand,
+    cuda_compile_info: CudaCompileInfo,
+) -> None:
+    """
+    Compile a CUDA file using distributed compilation.
+    NVCC provides the compilation plan, but compilation is split into
+    one Buck action per sub-command.
+    """
+    hostcc_argsfile = cuda_dist_output.hostcc_argsfile
+
+    # We'll first run nvcc with -dryrun. So do not bind the object file yet.
+    cmd.add(["-o", object.short_path])
+    original_cmd = cmd.copy()
+    cmd.add([
+        "-_NVCC_DRYRUN_",
+        "-_NVCC_HOSTCC_ARGSFILE_",
+        as_output(hostcc_argsfile),
+        "-_NVCC_DRYRUN_ENV_OUT_",
+        as_output(cuda_dist_output.nvcc_env),
+        "-_NVCC_DRYRUN_DAG_OUT_",
+        as_output(cuda_dist_output.nvcc_dag),
+    ])
+
+    # Run nvcc with -dryrun to create the inputs needed for dist nvcc.
+    actions.run(cmd, category = "cuda_compile_prepare", identifier = cuda_compile_info.identifier)
+
+    actions.dynamic_output_new(
+        _nvcc_dynamic_compile_rule(
+            toolchain = toolchain,
+            cuda_compile_info = cuda_compile_info,
+            src_compile_cmd = src_compile_cmd,
+            original_cmd = original_cmd,
+            hostcc_argsfile = hostcc_argsfile,
+            plan_artifact = cuda_dist_output.nvcc_dag,
+            env_artifact = cuda_dist_output.nvcc_env,
+            output_declared_artifact = object,
+        )
+    )
+
+# Keep the old cuda_compile function for backward compatibility
+def cuda_compile(
+    actions: AnalysisActions,
+    toolchain: CxxToolchainInfo,
+    cmd: cmd_args,
+    object: OutputArtifact,
+    src_compile_cmd: CxxSrcCompileCommand,
+    cuda_compile_info: CudaCompileInfo,
+    action_dep_files: dict[str, ArtifactTag],
+    allow_dep_file_cache_upload: bool,
+    error_handler: [typing.Callable, None],
+    cuda_compile_style: CudaCompileStyle | None,
+    cuda_dist_output: CudaDistributedCompileOutput | None = None,
+) -> None:
+    """
+    Compile a CUDA file using either monolithic or distributed compilation.
+    This is a convenience function that dispatches to the appropriate implementation.
+    """
+    if cuda_compile_style == CudaCompileStyle("mono"):
+        cuda_mono_compile(
+            actions,
             cmd,
             object,
             src_compile_cmd,
             cuda_compile_info,
+            action_dep_files,
+            allow_dep_file_cache_upload,
+            error_handler,
         )
+        return None
+    elif cuda_compile_style == CudaCompileStyle("dist"):
+        if cuda_dist_output == None:
+            fail("cuda_dist_output is required for distributed CUDA compilation")
+        cuda_distributed_compile(
+            actions,
+            toolchain,
+            cmd,
+            object,
+            cuda_dist_output,
+            src_compile_cmd,
+            cuda_compile_info,
+        )
+        return None
     else:
         fail("Unsupported CUDA compile style: {}".format(cuda_compile_style))
 
 def _create_file_to_artifact_map(
-        actions: AnalysisActions,
-        plan_json: list[dict[str, typing.Any]],
-        src_compile_cmd: CxxSrcCompileCommand,
-        output_declared_artifact: OutputArtifact,
-        uses_experimental_content_based_path_hashing: bool) -> dict[str, Artifact | OutputArtifact]:
+    actions: AnalysisActions,
+    plan_json: list[dict[str, typing.Any]],
+    src_compile_cmd: CxxSrcCompileCommand,
+    output_declared_artifact: OutputArtifact,
+    uses_content_based_paths: bool,
+) -> dict[str, Artifact | OutputArtifact]:
     # Create artifacts for all intermediate input and output files.
     file2artifact = {}
     for cmd_node in plan_json:
@@ -94,7 +213,7 @@ def _create_file_to_artifact_map(
                 else:
                     input_artifact = actions.declare_output(
                         input,
-                        uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing,
+                        has_content_based_path = uses_content_based_paths,
                     )
                     file2artifact[input] = input_artifact
         for output in node_outputs:
@@ -104,7 +223,7 @@ def _create_file_to_artifact_map(
                 else:
                     output_artifact = actions.declare_output(
                         output,
-                        uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing,
+                        has_content_based_path = uses_content_based_paths,
                     )
                     file2artifact[output] = output_artifact
     return file2artifact
@@ -117,10 +236,7 @@ def _create_nvcc_subcmd_env(env_artifact: ArtifactValue) -> dict[str, str]:
         subcmd_env[key] = value
     return subcmd_env
 
-def _include_symlinked_stubs_dir(
-        actions: AnalysisActions,
-        file2artifact: dict[str, typing.Any],
-        subcmd: cmd_args) -> None:
+def _include_symlinked_stubs_dir(actions: AnalysisActions, file2artifact: dict[str, typing.Any], subcmd: cmd_args) -> None:
     """
     .cudafe1.stub.c and .fatbin.c files are hardcoded into the cudafe1.cpp file
     and its includes like below:
@@ -137,7 +253,7 @@ def _include_symlinked_stubs_dir(
     stubs_dir = actions.declare_output(
         "__stubs__",
         dir = True,
-        uses_experimental_content_based_path_hashing = True,
+        has_content_based_path = True,
     )
     stubs = {}
     for file, artifact in file2artifact.items():
@@ -149,22 +265,23 @@ def _include_symlinked_stubs_dir(
     symlinked_dir = actions.symlinked_dir(
         stubs_dir,
         stubs,
-        uses_experimental_content_based_path_hashing = True,
+        has_content_based_path = True,
     )
     subcmd.add(cmd_args(symlinked_dir, format = "-I{}"))
 
 def _nvcc_dynamic_compile(
-        actions: AnalysisActions,
-        toolchain: CxxToolchainInfo,
-        cuda_compile_info: CudaCompileInfo,
-        src_compile_cmd: CxxSrcCompileCommand,
-        original_cmd: cmd_args,
-        hostcc_argsfile: Artifact,
-        plan_artifact: ArtifactValue,
-        env_artifact: ArtifactValue,
-        output_declared_artifact: OutputArtifact) -> list[Provider]:
+    actions: AnalysisActions,
+    toolchain: CxxToolchainInfo,
+    cuda_compile_info: CudaCompileInfo,
+    src_compile_cmd: CxxSrcCompileCommand,
+    original_cmd: cmd_args,
+    hostcc_argsfile: Artifact,
+    plan_artifact: ArtifactValue,
+    env_artifact: ArtifactValue,
+    output_declared_artifact: OutputArtifact,
+) -> list[Provider]:
     plan = plan_artifact.read_json()
-    content_based = cuda_compile_info.uses_experimental_content_based_path_hashing
+    content_based = cuda_compile_info.uses_content_based_paths
     file2artifact = _create_file_to_artifact_map(
         actions,
         plan,
@@ -246,60 +363,3 @@ _nvcc_dynamic_compile_rule = dynamic_actions(
         "toolchain": dynattrs.value(CxxToolchainInfo),
     },
 )
-
-def dist_nvcc(
-        actions: AnalysisActions,
-        toolchain: CxxToolchainInfo,
-        cmd: cmd_args,
-        object: Artifact,
-        src_compile_cmd: CxxSrcCompileCommand,
-        cuda_compile_info: CudaCompileInfo) -> list[Artifact] | None:
-    content_based = cuda_compile_info.uses_experimental_content_based_path_hashing
-    hostcc_argsfile = actions.declare_output(
-        cuda_compile_info.output_prefix,
-        "{}.hostcc_argsfile".format(cuda_compile_info.filename),
-        uses_experimental_content_based_path_hashing = content_based,
-    )
-
-    # Create the following files for each CUDA file:
-    # - Envvars to run the NVCC sub-commands with.
-    # - A dependency graph of the NVCC sub-commands.
-    env = actions.declare_output(
-        cuda_compile_info.output_prefix,
-        "{}.env".format(cuda_compile_info.filename),
-        uses_experimental_content_based_path_hashing = content_based,
-    )
-    subcmds = actions.declare_output(
-        cuda_compile_info.output_prefix,
-        "{}.json".format(cuda_compile_info.filename),
-        uses_experimental_content_based_path_hashing = content_based,
-    )
-
-    # We'll first run nvcc with -dryrun. So do not bind the object file yet.
-    cmd.add(["-o", object.short_path])
-    original_cmd = cmd.copy()
-    cmd.add([
-        "-_NVCC_DRYRUN_",
-        "-_NVCC_HOSTCC_ARGSFILE_",
-        hostcc_argsfile.as_output(),
-        "-_NVCC_DRYRUN_ENV_OUT_",
-        env.as_output(),
-        "-_NVCC_DRYRUN_DAG_OUT_",
-        subcmds.as_output(),
-    ])
-
-    # Run nvcc with -dryrun to create the inputs needed for dist nvcc.
-    actions.run(cmd, category = "cuda_compile_prepare", identifier = cuda_compile_info.identifier)
-
-    actions.dynamic_output_new(_nvcc_dynamic_compile_rule(
-        toolchain = toolchain,
-        cuda_compile_info = cuda_compile_info,
-        src_compile_cmd = src_compile_cmd,
-        original_cmd = original_cmd,
-        hostcc_argsfile = hostcc_argsfile,
-        plan_artifact = subcmds,
-        env_artifact = env,
-        output_declared_artifact = object.as_output(),
-    ))
-
-    return [subcmds, env]

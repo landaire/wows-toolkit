@@ -6,9 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxPlatformInfo")
 load("@prelude//utils:arglike.bzl", "ArgLike")
-load("@prelude//utils:platform_flavors_util.bzl", "by_platform")
 load(":manifest.bzl", "ManifestInfo")
 
 # The ways that Python executables handle native linkable dependencies.
@@ -33,7 +31,6 @@ NativeLinkStrategy = enum(
 PackageStyle = enum(
     "inplace",
     "standalone",
-    "inplace_lite",
     # Similar to inplace, but generate copies instead of symlinks
     "outplace",
 )
@@ -52,6 +49,9 @@ PythonToolchainInfo = provider(
     fields = {
         "build_standalone_binaries_locally": provider_field(bool | None, default = None),
         "compile": provider_field(ArgLike | None, default = None),
+        # Whether to precompile .pyc bytecode for this version. Disabled for
+        # versions whose pyc magic number isn't yet frozen + fully deployed.
+        "pyc_compilation_enabled": provider_field(bool, default = True),
         # The interpreter to use to compile bytecode.
         "host_interpreter": provider_field(ArgLike | None, default = None),
         "interpreter": provider_field(ArgLike | None, default = None),
@@ -63,7 +63,7 @@ PythonToolchainInfo = provider(
         "extension_linker_flags": provider_field(ArgLike, default = []),
         "wheel_extension_linker_flags": provider_field(ArgLike, default = []),
         "wheel_linker_flags": provider_field(ArgLike, default = []),
-        # site-packages-relative rpaths to emebed into libs/bins in the wheel
+        # site-packages-relative rpaths to embed into libs/bins in the wheel
         "wheel_rpaths": provider_field(ArgLike, default = []),
         "gen_lpar_bootstrap": provider_field(Dependency | None, default = None),
         "package_style": provider_field(str | None, default = None),  # Should be `PackageStyle`.
@@ -82,36 +82,23 @@ PythonToolchainInfo = provider(
         # Prefix to use when running a Python test/executable.
         "run_prefix": provider_field(ArgLike, default = []),
         "python_error_handler": provider_field(typing.Callable | None, default = None),
+        "lazy_imports_analyzer": provider_field(RunInfo | None, default = None),
         "manifest_module_entries": provider_field(dict[str, list[str] | dict[str, typing.Any]] | None, default = None),
+        "preload_deps": provider_field(list[Dependency], default = []),
     },
 )
 
 # Stores "platform"/flavor name used to resolve *platform_* arguments
-PythonPlatformInfo = provider(fields = {
-    "name": provider_field(typing.Any, default = None),
-})
+PythonPlatformInfo = provider(
+    fields = {
+        "name": provider_field(typing.Any, default = None),
+    }
+)
 
 def get_package_style(ctx: AnalysisContext) -> PackageStyle:
     if ctx.attrs.package_style != None:
         return PackageStyle(ctx.attrs.package_style.lower())
     return PackageStyle(ctx.attrs._python_toolchain[PythonToolchainInfo].package_style)
-
-def get_platform_attr(
-        python_platform_info: PythonPlatformInfo,
-        cxx_toolchain: Dependency,
-        xs: list[(str, typing.Any)]) -> list[typing.Any]:
-    """
-    Take a platform_* value, and the non-platform version, and concat into a list
-    of values based on the cxx/python platform
-    """
-    if len(xs) == 0:
-        return []
-    cxx_info = cxx_toolchain.get(CxxPlatformInfo)
-    if cxx_info == None:
-        fail("Cannot use platform attrs in a fat platform configuration")
-    python_platform = python_platform_info.name
-    cxx_platform = cxx_info.name
-    return by_platform([python_platform, cxx_platform], xs)
 
 python = struct(
     PythonToolchainInfo = PythonToolchainInfo,

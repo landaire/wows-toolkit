@@ -35,17 +35,21 @@ def apple_core_data_impl(ctx: AnalysisContext) -> list[Provider]:
 
     xcode_data_default_info, xcode_data_info = generate_xcode_data(ctx, "core_data_model", None, _xcode_populate_attributes)
 
-    return [DefaultInfo(
-        sub_targets = {
-            XCODE_DATA_SUB_TARGET: xcode_data_default_info,
-        },
-    ), graph, xcode_data_info]
+    return [
+        DefaultInfo(
+            sub_targets = {
+                XCODE_DATA_SUB_TARGET: xcode_data_default_info,
+            },
+        ),
+        graph,
+        xcode_data_info,
+    ]
 
 def compile_apple_core_data(ctx: AnalysisContext, specs: list[AppleCoreDataSpec], product_name: str) -> Artifact | None:
     if len(specs) == 0:
         return None
 
-    output = ctx.actions.declare_output("AppleCoreDataCompiled")
+    output = ctx.actions.declare_output("AppleCoreDataCompiled", has_content_based_path = False)
 
     # Aggregate all the coredata momc and mapc commands together
     tool_commands = []
@@ -68,6 +72,7 @@ def compile_apple_core_data(ctx: AnalysisContext, specs: list[AppleCoreDataSpec]
             cmd_args(output, format = 'mkdir -p {} && cp -r "$TMPDIR"/ {}'),
         ],
         allow_args = True,
+        has_content_based_path = False,
     )
     combined_command = cmd_args(["/bin/sh", wrapper_script], hidden = tool_commands + [output.as_output()])
     processing_options = get_bundle_resource_processing_options(ctx)
@@ -96,17 +101,21 @@ def _get_tool_command(ctx: AnalysisContext, core_data_spec: AppleCoreDataSpec, p
         sdk_version = get_bundle_min_target_version(ctx, ctx.attrs.binary),
     )
 
-    return cmd_args([
-        tool,
-        "--sdkroot",
-        ctx.attrs._apple_toolchain[AppleToolchainInfo].sdk_path,
-        "--" + get_platform_name_for_sdk(sdk_name) + "-deployment-target",
-        deployment_target,
-        "--module",
-        core_data_spec.module if core_data_spec.module else product_name,
-        cmd_args(core_data_spec.path, format = "./{}"),
-        output,
-    ], delimiter = " ", hidden = core_data_spec.path)
+    return cmd_args(
+        [
+            tool,
+            "--sdkroot",
+            ctx.attrs._apple_toolchain[AppleToolchainInfo].sdk_path,
+            "--" + get_platform_name_for_sdk(sdk_name) + "-deployment-target",
+            deployment_target,
+            "--module",
+            core_data_spec.module if core_data_spec.module else product_name,
+            cmd_args(core_data_spec.path, format = "./{}"),
+            output,
+        ],
+        delimiter = " ",
+        hidden = core_data_spec.path,
+    )
 
 def _xcode_populate_attributes(ctx) -> dict[str, typing.Any]:
     data = {XcodeDataInfoKeys.EXTRA_XCODE_FILES: [ctx.attrs.path]}

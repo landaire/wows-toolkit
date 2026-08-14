@@ -71,8 +71,20 @@ prelude.python_bootstrap_binary(
 )
 
 prelude.python_bootstrap_binary(
+    name = "stub_header_unit",
+    main = "stub_header_unit.py",
+    visibility = ["PUBLIC"],
+)
+
+prelude.python_bootstrap_binary(
     name = "simple_ar",
     main = "simple_ar.py",
+    visibility = ["PUBLIC"],
+)
+
+prelude.python_bootstrap_binary(
+    name = "clang_tidy_wrapper",
+    main = "clang_tidy_wrapper.py",
     visibility = ["PUBLIC"],
 )
 
@@ -104,4 +116,28 @@ prelude.python_bootstrap_binary(
 cxx_hacks(
     name = "cxx_hacks",
     visibility = ["PUBLIC"],
+)
+
+# Type checking target for Python tool scripts
+prelude.python_library(
+    name = "scripts-typing",
+    srcs = [
+        "check_nonempty_output.py",
+        "clang_tidy_wrapper.py",
+        "concatenate_diagnostics.py",
+        "dep_file_processor.py",
+        "dep_file_utils.py",
+        "filter_argsfile.py",
+        "hmap_wrapper.py",
+        "linker_wrapper.py",
+        "make_comp_db.py",
+        "makefile_to_dep_file.py",
+        "remap_cwd.py",
+        "show_headers_to_dep_file.py",
+        "show_includes_to_dep_file.py",
+        "simple_ar.py",
+        "stderr_to_file.py",
+        "stub_header_unit.py",
+    ],
+    typing = True,
 )

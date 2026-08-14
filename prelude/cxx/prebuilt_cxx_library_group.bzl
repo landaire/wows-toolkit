@@ -56,14 +56,18 @@ load(
 )
 load("@prelude//unix:providers.bzl", "UnixEnv", "create_unix_env_info")
 load("@prelude//utils:expect.bzl", "expect")
-load("@prelude//utils:utils.bzl", "flatten_dict")
+load("@prelude//utils:utils.bzl", "filter_and_map_idx", "flatten_dict")
 load(":cxx_context.bzl", "get_cxx_toolchain_info")
 load(
     ":cxx_library_utility.bzl",
     "cxx_attr_dep_metadata",
     "cxx_attr_use_content_based_paths",
     "cxx_inherited_link_info",
-    "cxx_use_shlib_intfs",
+    "cxx_use_shlib_intfs_mode",
+)
+load(
+    ":cxx_toolchain_types.bzl",
+    "ShlibInterfacesMode",
 )
 load(
     ":shared_library_interface.bzl",
@@ -76,8 +80,7 @@ def _linkage(ctx: AnalysisContext) -> Linkage:
     """
 
     # If we have both shared and static libs, we support any linkage.
-    if (ctx.attrs.shared_link and
-        (ctx.attrs.static_link or ctx.attrs.static_pic_link)):
+    if ctx.attrs.shared_link and (ctx.attrs.static_link or ctx.attrs.static_pic_link):
         return Linkage("any")
 
     # Otherwise, if we have a shared library, we only support shared linkage.
@@ -114,19 +117,15 @@ def _parse_macro(arg: str) -> [(str, str), None]:
     expect(start == "")
     pos = rest.find(" ")
     macro = rest[:pos]
-    rest = rest[pos + 1:]
+    rest = rest[pos + 1 :]
     pos = rest.find(")")
     param = rest[:pos]
-    end = rest[pos + 1:]
+    end = rest[pos + 1 :]
     expect(end == "")
 
     return macro, param
 
-def _get_static_link_infos(
-        ctx: AnalysisContext,
-        linker_type: LinkerType,
-        libs: list[Artifact],
-        args: list[str]) -> LinkInfos:
+def _get_static_link_infos(ctx: AnalysisContext, linker_type: LinkerType, libs: list[Artifact], args: list[str]) -> LinkInfos:
     """
     Format a pair of static link string args and static libs into args to be
     passed to the link, by resolving macro references to libraries.
@@ -163,7 +162,18 @@ def _get_static_link_infos(
             expect(macro == "lib")
             lib = libs[int(param)]
             linkables.append(archive_linkable(lib))
-            linkables_stripped.append(archive_linkable(strip_debug_info(ctx.actions, lib.short_path, lib, anonymous = True, cxx_toolchain = ctx.attrs._cxx_toolchain, has_content_based_path = cxx_attr_use_content_based_paths(ctx))))
+            linkables_stripped.append(
+                archive_linkable(
+                    strip_debug_info(
+                        ctx.actions,
+                        lib.short_path,
+                        lib,
+                        anonymous = True,
+                        cxx_toolchain = ctx.attrs._cxx_toolchain,
+                        has_content_based_path = cxx_attr_use_content_based_paths(ctx),
+                    )
+                )
+            )
         elif linkables:
             # If we've already seen linkables, put remaining flags/args into
             # post-linker flags.
@@ -186,11 +196,7 @@ def _get_static_link_infos(
         ),
     )
 
-def _get_shared_link_infos(
-        ctx: AnalysisContext,
-        shared_libs: dict[str, Artifact],
-        args: list[str],
-        shlib_intfs: bool = True) -> LinkInfos:
+def _get_shared_link_infos(ctx: AnalysisContext, shared_libs: dict[str, Artifact], args: list[str], shlib_intfs: bool = True) -> LinkInfos:
     """
     Format a pair of shared link string args and shared libs into args to be
     passed to the link, by resolving macro references to libraries.
@@ -323,7 +329,12 @@ def prebuilt_cxx_library_group_impl(ctx: AnalysisContext) -> list[Provider]:
                 ctx = ctx,
                 shared_libs = flatten_dict([ctx.attrs.shared_libs, ctx.attrs.provided_shared_libs]),
                 args = ctx.attrs.shared_link,
-                shlib_intfs = ctx.attrs.supports_shared_library_interface and cxx_use_shlib_intfs(ctx),
+                # TODO: We should not permit both modes, but to keep builds green we have to for now.
+                shlib_intfs = ctx.attrs.supports_shared_library_interface
+                and (
+                    cxx_use_shlib_intfs_mode(ctx, ShlibInterfacesMode("defined_only"))
+                    or cxx_use_shlib_intfs_mode(ctx, ShlibInterfacesMode("stub_from_library"))
+                ),
             )
             solibs.update({n: LinkedObject(output = lib, unstripped_output = lib) for n, lib in ctx.attrs.shared_libs.items()})
         outputs[output_style] = outs
@@ -334,25 +345,29 @@ def prebuilt_cxx_library_group_impl(ctx: AnalysisContext) -> list[Provider]:
     pic_behavior = PicBehavior("supported")
 
     # Provider for native link.
-    providers.append(create_merged_link_info(
-        ctx,
-        pic_behavior,
-        libraries,
-        preferred_linkage = preferred_linkage,
-        # Export link info from our (non-exported) deps (e.g. when we're linking
-        # statically).
-        deps = inherited_non_exported_link,
-        # Export link info from our (exported) deps.
-        exported_deps = inherited_exported_link,
-    ))
+    providers.append(
+        create_merged_link_info(
+            ctx,
+            pic_behavior,
+            libraries,
+            preferred_linkage = preferred_linkage,
+            # Export link info from our (non-exported) deps (e.g. when we're linking
+            # statically).
+            deps = inherited_non_exported_link,
+            # Export link info from our (exported) deps.
+            exported_deps = inherited_exported_link,
+        )
+    )
 
     # Propagate shared libraries up the tree.
     shared_libs = create_shared_libraries(ctx, solibs)
-    providers.append(merge_shared_libraries(
-        ctx.actions,
-        shared_libs,
-        filter(None, [x.get(SharedLibraryInfo) for x in deps + exported_deps]),
-    ))
+    providers.append(
+        merge_shared_libraries(
+            ctx.actions,
+            shared_libs,
+            filter_and_map_idx(SharedLibraryInfo, deps + exported_deps),
+        )
+    )
 
     # Create, augment and provide the linkable graph.
     linkable_graph = create_linkable_graph(
@@ -391,7 +406,7 @@ def prebuilt_cxx_library_group_impl(ctx: AnalysisContext) -> list[Provider]:
     # Third-party provider.
     third_party_build_info = create_third_party_build_info(
         ctx = ctx,
-        #cxx_headers = [propagated_preprocessor],
+        # cxx_headers = [propagated_preprocessor],
         shared_libs = shared_libs.libraries,
         cxx_header_dirs = [inc_dir.short_path for inc_dir in ctx.attrs.include_dirs],
         deps = deps + exported_deps,

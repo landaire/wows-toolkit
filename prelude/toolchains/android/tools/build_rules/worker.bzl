@@ -26,6 +26,16 @@ def _get_jvm_args_for_worker(ctx):
     if not _jvm_arg_name_is_specified("-XX:CompressedClassSpaceSize", jvm_args):
         jvm_args.insert(0, "-XX:CompressedClassSpaceSize=2g")
 
+    # Pre-size JIT code cache and metaspace to reduce warmup overhead on cold workers.
+    # kotlincd loads the Kotlin compiler, KSP framework, and annotation processors,
+    # which generates significant JIT-compiled code. Default code cache (240MB) can
+    # fill with 16 concurrent compilations, causing eviction and re-compilation.
+    # Default metaspace (~20MB) triggers repeated full GC as classes are loaded.
+    if not _jvm_arg_name_is_specified("-XX:ReservedCodeCacheSize", jvm_args):
+        jvm_args.insert(0, "-XX:ReservedCodeCacheSize=512m")
+    if not _jvm_arg_name_is_specified("-XX:MetaspaceSize", jvm_args):
+        jvm_args.insert(0, "-XX:MetaspaceSize=256m")
+
     # Allow JVM compiler daemon to access internal jdk.compiler APIs
     jvm_args.extend(OPEN_JDK_COMPILER_ARGS)
     jvm_args.append("--add-opens=java.base/java.util=ALL-UNNAMED")

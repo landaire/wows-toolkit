@@ -10,6 +10,16 @@
 
 load("@prelude//utils:expect.bzl", "expect")
 
+def as_output(artifact: Artifact | OutputArtifact) -> OutputArtifact:
+    """
+    Convert an Artifact or OutputArtifact to an OutputArtifact.
+    Useful when a function needs to accept either type.
+    """
+    if isinstance(artifact, OutputArtifact):
+        return artifact
+    else:
+        return artifact.as_output()
+
 def value_or(x: [None, typing.Any], default: typing.Any) -> typing.Any:
     return default if x == None else x
 
@@ -44,8 +54,7 @@ def from_named_set(srcs: [dict[str, Artifact | Dependency], list[Artifact | Depe
                 # default output.
                 expect(
                     len(src[DefaultInfo].default_outputs) == 1,
-                    "expected exactly one default output from {} ({})"
-                        .format(src, src[DefaultInfo].default_outputs),
+                    "expected exactly one default output from {} ({})".format(src, src[DefaultInfo].default_outputs),
                 )
                 [artifact] = src[DefaultInfo].default_outputs
                 name = artifact.short_path

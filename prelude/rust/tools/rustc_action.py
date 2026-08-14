@@ -29,6 +29,11 @@ import tempfile
 from pathlib import Path
 from typing import Any, IO, NamedTuple, Optional
 
+
+# Sentinel used to mark OUT_DIR-relative paths emitted by buildscripts.
+# We later replace this sentinel with the actual content-addressed path, once that is known.
+OUT_DIR_SENTINEL: str = "${__BUILDSCRIPT_OUT_DIR__}"
+
 DEBUG = False
 
 INHERITED_ENV = [
@@ -56,8 +61,6 @@ INHERITED_ENV = [
     "DOTSLASH_CACHE",
     # Required to run Python on Windows (for linker wrapper).
     "SYSTEMROOT",
-    # Our rustc wrapper. https://fburl.com/code/qcos5aho
-    "SYSROOT_MULTIPLEXER_DEBUG",
     # Required on Windows for getpass.getuser() to work.
     "USERNAME",
     # Option to disable hg pre-fork client.
@@ -77,6 +80,7 @@ INHERITED_ENV = [
     "NIX_CFLAGS_COMPILE",
     "NIX_CFLAGS_COMPILE_FOR_TARGET",
     "NIX_COREFOUNDATION_RPATH",
+    "NIX_DEBUG",
     "NIX_DONT_SET_RPATH",
     "NIX_DONT_SET_RPATH_FOR_BUILD",
     "NIX_ENFORCE_NO_NATIVE",
@@ -340,8 +344,13 @@ async def main() -> int:  # noqa: C901
     separator = args.rustc.index("--rustc-action-separator")
     rustc_cmd, rustc_args_orig = args.rustc[:separator], args.rustc[separator + 1 :]
 
+    out_dir = env.get("OUT_DIR")
+
     rustc_args = []
     for arg in rustc_args_orig:
+        # Resolve OUT_DIR_SENTINEL to the consumer's canonical OUT_DIR.
+        if out_dir is not None and OUT_DIR_SENTINEL in arg:
+            arg = arg.replace(OUT_DIR_SENTINEL, out_dir)
         # Build.bzl uses the following expression to generate remap flags:
         #   cmd_args("--remap-path-prefix=", ... "=", ctx.label.path, path_sep, delimiter = "")
         # The ctx.label.path (which is of type StarlarkCellPath) has the

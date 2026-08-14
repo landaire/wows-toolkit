@@ -55,8 +55,7 @@ public class KosabiStubgenStep extends KotlincStep {
       RelPath configuredBuckOut,
       ImmutableMap<String, AbsPath> resolvedKosabiPluginOptionPath,
       @Nullable String kosabiJvmAbiGenEarlyTerminationMessagePrefix,
-      boolean kosabiShouldEnableMixedCompilation,
-      ImmutableList<AbsPath> sourceOnlyAbiClasspath,
+      ImmutableList<AbsPath> compilationClasspath,
       boolean verifySourceOnlyAbiConstraints,
       ImmutableList<IsolatedStep> postKotlinCompilationFailureSteps,
       Optional<AbsPath> depTrackerPath,
@@ -81,8 +80,8 @@ public class KosabiStubgenStep extends KotlincStep {
         configuredBuckOut,
         resolvedKosabiPluginOptionPath,
         kosabiJvmAbiGenEarlyTerminationMessagePrefix,
-        kosabiShouldEnableMixedCompilation,
-        sourceOnlyAbiClasspath,
+        compilationClasspath,
+        ImmutableList.of(),
         verifySourceOnlyAbiConstraints,
         postKotlinCompilationFailureSteps,
         depTrackerPath,
@@ -94,11 +93,7 @@ public class KosabiStubgenStep extends KotlincStep {
         false);
     this.stubgenDir = stubgenDir;
     this.stubClassOutputDir = stubClassOutputDir;
-    this.pluginPath =
-        "plugin:"
-            + (languageVersion.getSupportsK2()
-                ? "com.facebook.kotlin.compilerplugins.kosabi.stubsgen_k2"
-                : "com.facebook.kotlin.compilerplugins.kosabi.stubsgen");
+    this.pluginPath = "plugin:com.facebook.kotlin.compilerplugins.kosabi.stubsgen_k2";
   }
 
   @Override
@@ -108,8 +103,10 @@ public class KosabiStubgenStep extends KotlincStep {
 
   @Override
   protected void configureSourceOnlyOptions(
-      ImmutableList.Builder<String> builder, LanguageVersion languageVersion) {
-    super.configureSourceOnlyOptions(builder, languageVersion);
+      ImmutableList.Builder<String> builder,
+      LanguageVersion languageVersion,
+      AbsPath ruleCellRoot) {
+    super.configureSourceOnlyOptions(builder, languageVersion, ruleCellRoot);
     builder.add("-P");
     builder.add(pluginPath + ":stubsgen-dir=" + stubgenDir.toString());
 

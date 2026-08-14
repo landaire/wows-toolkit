@@ -11,6 +11,8 @@
 package com.facebook.buck.testresultsoutput;
 
 import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.FinishEvent;
+import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.RunFailureEvent;
+import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.RunFailureStatus;
 import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.StartEvent;
 import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.TestStatus;
 import java.io.FileNotFoundException;
@@ -91,9 +93,10 @@ public class TestResultsOutputSender implements AutoCloseable {
    * Sends a test start event to the output file.
    *
    * @param name The name of the test.
+   * @param startedTime The time the test started, in milliseconds since Unix epoch.
    */
-  public void sendTestStart(String name) {
-    StartEvent startEvent = new StartEvent(name);
+  public void sendTestStart(String name, long startedTime) {
+    StartEvent startEvent = new StartEvent(name, startedTime);
 
     byte[] serialized;
     try {
@@ -132,6 +135,27 @@ public class TestResultsOutputSender implements AutoCloseable {
     }
 
     try {
+      this.fileOutputStream.write(serialized);
+      this.fileOutputStream.write("\n".getBytes());
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  /**
+   * Sends a run failure event to the output file.
+   *
+   * @param status The status of the run failure (TIMEOUT or FATAL).
+   * @param time The time the failure occurred, in milliseconds since Unix epoch.
+   * @param details Human-readable description of the failure.
+   * @param stacktrace Optional stack trace (can be null).
+   */
+  public void sendRunFailure(
+      RunFailureStatus status, long time, String details, String stacktrace) {
+    RunFailureEvent event = new RunFailureEvent(status, time, details, stacktrace);
+
+    try {
+      byte[] serialized = event.toJsonBytes();
       this.fileOutputStream.write(serialized);
       this.fileOutputStream.write("\n".getBytes());
     } catch (IOException e) {

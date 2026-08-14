@@ -23,3 +23,13 @@ erlang_application(
     use_global_parse_transforms = False,
     visibility = ["PUBLIC"],
 )
+
+erlang_tests(
+    contacts = ["build_infra"],
+    labels = ["unit"],
+    suites = ["test/ct_stdout_SUITE.erl"],
+    deps = [
+        "stdlib",
+        ":common",
+    ],
+)

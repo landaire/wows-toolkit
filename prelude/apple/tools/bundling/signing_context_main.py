@@ -40,6 +40,10 @@ def _main() -> None:
         signing_context_and_selected_identity_from_args(args)
     )
 
+    selection_profile_context = selection_profile_context_from_signing_context(
+        signing_context
+    )
+
     with open(args.output, "w") as output_file:
         signing_context_json_obj = {
             "version": 1,
@@ -53,9 +57,6 @@ def _main() -> None:
             # signing cert fingerprint (i.e., SHA1 hash of cert in DER format)
             signing_context_json_obj["codesign_identity"] = selected_identity
 
-        selection_profile_context = selection_profile_context_from_signing_context(
-            signing_context
-        )
         if selection_profile_context:
             selected_profile_info = selection_profile_context.selected_profile_info
             profile_metadata = selected_profile_info.profile

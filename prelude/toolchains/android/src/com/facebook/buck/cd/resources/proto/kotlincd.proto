@@ -56,8 +56,16 @@ message KotlinExtraParams {
   string languageVersion = 23;
   repeated string extraClassPathSnapshots = 24;
   bool shouldKsp2RunIncrementally = 26;
-  bool shouldKosabiJvmAbiGenUseK2 = 27;
+  reserved 27; // was shouldKosabiJvmAbiGenUseK2, unused (kotlincd derives K2
+               // from LanguageVersion.getSupportsK2())
   string kotlinClassesDir = 28;
+  reserved 29; // was skipClasspathRemovalRebuild, removed after KT-85740 fix
+  string javaBinary = 30;
+  // Reduced SO-ABI classpath for the applicability plugin (only deps with
+  // required_for_source_only_abi=True or in source_only_abi_deps). Distinct
+  // from compileTimeClasspathPaths which contains the full dep set during
+  // library builds.
+  repeated string applicabilityClasspath = 31;
 }
 
 message PluginParams {
