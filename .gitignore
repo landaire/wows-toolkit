@@ -1,4 +1,6 @@
 target/
+toolchains/windows/offline/installed/*
+!toolchains/windows/offline/installed/.gitkeep
 buck-out/
 # Machine-local Nix toolchain root written by scripts/refresh-buck-toolchain.nu.
 .buckconfig.local

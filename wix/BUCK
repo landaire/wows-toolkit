@@ -1,0 +1,23 @@
+export_file(
+    name = "main_wxs",
+    src = "main.wxs",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "banner_bmp",
+    src = "banner.bmp",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "license_rtf",
+    src = "license.rtf",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "version_wxi",
+    src = "version.wxi",
+    visibility = ["PUBLIC"],
+)

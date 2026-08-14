@@ -1,10 +1,8 @@
-load(":hermetic_rust.bzl", "hermetic_cxx_toolchain", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "validate_nix_toolchain")
+load(":hermetic_rust.bzl", "hermetic_cxx_toolchain", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "selected_toolchain", "validate_nix_toolchain")
 load(":native_build_mode.bzl", "native_build_mode_transition")
 
-validate_nix_toolchain()
-
 hermetic_cxx_toolchain(
-    name = "cxx",
+    name = "nix_cxx",
     visibility = ["PUBLIC"],
 )
 
@@ -14,9 +12,27 @@ hermetic_python_bootstrap_toolchain(
 )
 
 hermetic_rust_toolchain(
-    name = "rust",
+    name = "nix_rust",
     default_edition = "2024",
     rustc_target_triple = "aarch64-apple-darwin",
+    visibility = ["PUBLIC"],
+)
+
+selected_toolchain(
+    name = "cxx",
+    actual = select({
+        "config//os/constraints:windows": "//windows:cxx",
+        "DEFAULT": ":nix_cxx",
+    }),
+    visibility = ["PUBLIC"],
+)
+
+selected_toolchain(
+    name = "rust",
+    actual = select({
+        "config//os/constraints:windows": "//windows:rust",
+        "DEFAULT": ":nix_rust",
+    }),
     visibility = ["PUBLIC"],
 )
 

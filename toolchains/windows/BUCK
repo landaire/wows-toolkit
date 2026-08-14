@@ -1,0 +1,47 @@
+load(":hermetic_msvc.bzl", "hermetic_msvc_rust_toolchain", "hermetic_msvc_tools")
+load(":windows-x86_64-msvc.bzl", "windows_x86_64_msvc_platform")
+load(":wix.bzl", "wix_msi")
+load("@prelude//toolchains:cxx.bzl", "cxx_tools_info_toolchain")
+
+hermetic_msvc_tools(
+    name = "msvc_tools",
+    toolchain_root = "offline/installed",
+    visibility = ["PUBLIC"],
+)
+
+cxx_tools_info_toolchain(
+    name = "cxx",
+    cxx_tools_info = ":msvc_tools",
+    c_flags = ["/nologo", "/Brepro"],
+    cxx_flags = ["/nologo", "/Brepro"],
+    link_flags = ["/Brepro", "/INCREMENTAL:NO"],
+    visibility = ["PUBLIC"],
+)
+
+hermetic_msvc_rust_toolchain(
+    name = "rust",
+    default_edition = "2024",
+    tools = ":msvc_tools",
+    visibility = ["PUBLIC"],
+)
+
+windows_x86_64_msvc_platform(
+    name = "windows_x86_64_msvc",
+    visibility = ["PUBLIC"],
+)
+
+wix_msi(
+    name = "wows_toolkit_msi",
+    tools = ":msvc_tools",
+    wxs = ["root//wix:main_wxs"],
+    assets = [
+        "root//assets:wows_toolkit_ico",
+        "root//wix:banner_bmp",
+        "root//wix:license_rtf",
+    ],
+    binaries = {"wows_toolkit.exe": "root//crates/wows-toolkit:wows_toolkit_bin"},
+    pdbs = {},
+    version_input = "root//wix:version_wxi",
+    out = "wows-toolkit-windows-x86_64-unsigned.msi",
+    visibility = ["PUBLIC"],
+)

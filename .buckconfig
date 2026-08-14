@@ -21,3 +21,6 @@
 
 [native_build]
   mode = debug
+
+[windows_toolchain]
+  manifest = toolchains/windows/toolchain-manifest.json

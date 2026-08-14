@@ -192,3 +192,12 @@ hermetic_python_bootstrap_toolchain = rule(
     attrs = {},
     is_toolchain_rule = True,
 )
+
+def _selected_toolchain_impl(ctx):
+    return ctx.attrs.actual.providers
+
+selected_toolchain = rule(
+    impl = _selected_toolchain_impl,
+    attrs = {"actual": attrs.toolchain_dep()},
+    is_toolchain_rule = True,
+)
