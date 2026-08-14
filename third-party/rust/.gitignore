@@ -1,1 +1,15 @@
 .cargo
+
+# Crate sources are fetched by the bootstrap and verified against the SHA-256
+# that Cargo.lock already pins for each one, so committing them would only
+# duplicate the lock at ~150 MB per dependency update.
+vendor/*.crate
+vendor/*.part
+
+# Only reindeer needs the local registry index, when regenerating.
+vendor/index/
+
+# Cargo.lock records no checksum for a git dependency, so there is nothing to
+# verify a fetch against and this archive is committed instead. scripts/
+# fetch-buck-deps.py fails with the name of any other crate that needs adding.
+!vendor/egui-notify-*.crate

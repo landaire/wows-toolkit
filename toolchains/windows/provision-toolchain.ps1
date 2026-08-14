@@ -119,4 +119,11 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
+# Crate sources are not committed; fetch them against Cargo.lock's checksums.
+$repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+& (Join-Path $InstallRoot $manifest.tools.python.path) (Join-Path $repo "scripts/fetch-buck-deps.py")
+if ($LASTEXITCODE -ne 0) {
+    throw "Fetching crate sources failed with exit code $LASTEXITCODE."
+}
+
 Write-Host "Provisioned offline Windows toolchain tree at $InstallRoot."

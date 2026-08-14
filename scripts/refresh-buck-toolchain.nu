@@ -43,3 +43,6 @@ for tool in $required {
     $"python = ($toolchain_root)/bin/python3"
     ""
 ] | str join "\n" | save -f .buckconfig.local
+
+# Crate sources are not committed; fetch them against Cargo.lock's checksums.
+^$"($toolchain_root)/bin/python3" scripts/fetch-buck-deps.py

@@ -59,27 +59,11 @@ This is not considered a World of Warships mod and does not modify your World of
 
 If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
 
-### Building with Buck
+You can build with either Cargo or Buck2. Cargo is fine for day-to-day work; CI builds everything with Buck2 and all releases ship from CI, so a change has to build under Buck2 to land.
 
-Buck2 builds every binary from checked-in sources and a pinned toolchain, without Cargo and without downloading anything. Run the one-time bootstrap first, which writes the machine-local `.buckconfig.local`:
+### Building with Cargo
 
-```
-nu scripts/refresh-buck-toolchain.nu   # macOS and Linux
-./toolchains/windows/verify-toolchain.ps1 -OfflineRoot <layout>   # Windows
-```
-
-Then build any root alias. Builds default to debug mode:
-
-```
-buck2 build //:wows_toolkit
-buck2 build -c native_build.mode=release //:wows_toolkit
-```
-
-The aliases are `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, and `dhat_parse`.
-
-`nu scripts/check-buck-hermetic.nu //:<alias>` fails if anything in that target's action graph reaches outside the declared inputs.
-
-To build yourself, make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
+Make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
 
 To build the CLI tools:
 
@@ -130,6 +114,22 @@ Installing NASM:
 - **macOS:** `brew install nasm`
 - **Nix:** already provisioned in the flake's devShell
 
+### Building with Buck
+
+One-time setup, then build any root alias:
+
+```
+./setup.sh     # macOS and Linux, needs nix
+.\setup.ps1    # Windows, from an elevated shell
+
+buck2 build //:wows_toolkit
+buck2 build -c native_build.mode=release //:wows_toolkit
+```
+
+Setup provisions the pinned toolchain and fetches the pinned crate sources; everything after it is offline. The aliases are `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, and `dhat_parse`.
+
+See [DEVELOPING.md](DEVELOPING.md#buck) for the hermeticity check, dependency updates, fixups, and troubleshooting.
+
 ### Nix
 
 A Nix flake is provided with a devShell and packages for the CLI tools:
@@ -140,11 +140,3 @@ nix build .#wowsunpack
 nix build .#minimap-renderer
 nix build .#replayshark
 ```
-
-## Buck Dependency Maintenance
-
-After changing `Cargo.toml` or `Cargo.lock`, run `nu scripts/update-buck-deps.nu` to re-vendor the dependency sources and regenerate `third-party/rust/BUCK`. Commit the vendored crates, the generated rules, and the fixups together.
-
-`nu scripts/vendor-prelude.nu` re-vendors `prelude/` from the pinned Buck2 binary and reapplies the patches this repo depends on. The prelude must come from the same Buck2 that consumes it, so run it after changing `flake.lock`. Never hand-edit files under `prelude/`.
-
-Both commands need a Nix-capable macOS or Linux environment; on Windows use WSL2 or another maintenance host. That applies only to regeneration. Building needs neither Nix nor Cargo in any Buck action.

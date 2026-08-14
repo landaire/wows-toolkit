@@ -29,8 +29,9 @@ jobs:
           authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
           signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
 
-      # Realize every store path Buck will need while the network is still up.
-      - name: Provision the pinned toolchain
+      # Realize every store path and crate source Buck will need, while the
+      # network is still up.
+      - name: Provision the toolchain and crate sources
         run: nix develop --command nu scripts/refresh-buck-toolchain.nu
 
       - name: Disable network access
@@ -79,7 +80,7 @@ jobs:
       - name: Select the pinned Xcode
         run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
 
-      - name: Provision the pinned toolchain
+      - name: Provision the toolchain and crate sources
         run: nix develop --command nu scripts/refresh-buck-toolchain.nu
 
       # Deliberately not tolerant of failure: a block that silently does nothing
@@ -104,9 +105,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # Downloads every pinned archive, verifies its hash, installs from the
-      # offline layout, and writes the machine-local .buckconfig.local. Buck2
-      # itself is one of the pinned archives.
-      - name: Provision the offline toolchain
+      # offline layout, writes the machine-local .buckconfig.local, and fetches
+      # the crate sources. Buck2 itself is one of the pinned archives.
+      - name: Provision the toolchain and crate sources
         shell: pwsh
         run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "${{ runner.temp }}/offline"
 
