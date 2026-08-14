@@ -17,6 +17,19 @@ def _cargo_env(crate, package, version):
         "CARGO_PKG_VERSION_PRE": "",
     }
 
+def os_select(macos, linux, windows):
+    """Select a value by target operating system.
+
+    Mirrors the `[target.'cfg(target_os = ...)']` sections of a Cargo manifest so
+    first-party targets can express the same platform-conditional dependencies
+    and features that Cargo resolves from cfg predicates.
+    """
+    return select({
+        "config//os/constraints:linux": linux,
+        "config//os/constraints:macos": macos,
+        "config//os/constraints:windows": windows,
+    })
+
 def native_binary_alias(name, actual):
     mode = read_config("native_build", "mode", "debug")
     if mode not in ["debug", "release"]:
@@ -79,12 +92,11 @@ def workspace_library(name, crate, package, version, features = [], deps = [], b
         deps = deps,
     )
 
-def workspace_binary(name, crate, package, version, crate_root, features = [], deps = [], buildscript = None, resources = []):
+def workspace_binary(name, crate, package, version, crate_root, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
     env = _cargo_env(crate, package, version)
-    rustc_flags = []
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
-        rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)]
+        rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
 
     cargo.rust_binary(
         name = name,

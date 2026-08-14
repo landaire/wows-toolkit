@@ -29,15 +29,6 @@ git_fetch = prelude_rule(
             "allow_cache_upload": attrs.bool(doc = """
                 Whether the results of the fetch can be written to the action cache and CAS.
             """, default = True),
-            "git": attrs.option(
-                attrs.string(),
-                default = None,
-                doc = """
-                Path to the git binary to use. If not specified, the system
-                git from PATH is used, with fallback to common system
-                locations (/usr/bin/git, /usr/local/bin/git).
-            """,
-            ),
             "object_format": attrs.option(
                 attrs.enum(["sha1", "sha256"]),
                 default = None,
@@ -62,6 +53,7 @@ git_fetch = prelude_rule(
                 to the serde_derive subdirectory of the repo as `":serde.git[serde_derive]"`.
             """,
             ),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "_git_fetch_tool": attrs.default_only(attrs.exec_dep(providers = [RunInfo], default = "prelude//git/tools:git_fetch")),
         } |
         buck.licenses_arg() |

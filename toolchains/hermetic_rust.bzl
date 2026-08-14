@@ -10,7 +10,6 @@ load(
     "LinkerInfo",
     "LinkerType",
     "PicBehavior",
-    "RuntimeDependencyHandling",
     "ShlibInterfacesMode",
 )
 load("@prelude//cxx:headers.bzl", "HeaderMode")
@@ -44,21 +43,43 @@ def _cxx_compiler_flags():
         return ["-O3"]
     return ["-O0", "-g"]
 
+def _hermetic_tool(name):
+    path = read_root_config("hermetic_tools", name)
+    if path == None:
+        fail("Missing [hermetic_tools] {}. Run the platform toolchain bootstrap (`nu scripts/refresh-buck-toolchain.nu`, or `toolchains/windows/verify-toolchain.ps1` on Windows) before invoking Buck2.".format(name))
+    return path
+
 def native_buildscript_env():
+    """Environment forced onto every vendored crate's build script.
+
+    Cargo build scripts otherwise resolve `cc`, `nasm`, and the build profile
+    from ambient state. Every one of them is pinned here instead, so a build
+    script cannot pick up a compiler that is merely on PATH.
+    """
     if _native_build_mode() == "release":
-        return {
+        env = {
             "DEBUG": "false",
             "OPT_LEVEL": "3",
             "PROFILE": "release",
         }
-    return {
-        "DEBUG": "true",
-        "OPT_LEVEL": "0",
-        "PROFILE": "debug",
-    }
+    else:
+        env = {
+            "DEBUG": "true",
+            "OPT_LEVEL": "0",
+            "PROFILE": "debug",
+        }
 
-def validate_nix_toolchain():
-    _toolchain_root()
+    for var, key in [("AR", "ar"), ("CC", "cc"), ("CXX", "cxx"), ("NASM", "nasm")]:
+        env[var] = _hermetic_tool(key)
+
+    # MSVC needs its header and library search paths passed explicitly; the Nix
+    # toolchains encode theirs in the compiler wrapper.
+    for var, key in [("INCLUDE", "include"), ("LIB", "lib")]:
+        value = read_root_config("hermetic_tools", key)
+        if value != None:
+            env[var] = value
+
+    return env
 
 def _hermetic_rust_toolchain_impl(ctx):
     return [
@@ -94,6 +115,11 @@ hermetic_rust_toolchain = rule(
 )
 
 def _hermetic_cxx_toolchain_impl(ctx):
+    linker_type = LinkerType(ctx.attrs.linker_type)
+
+    # Clang resolves `ld` through PATH, which the actions clear. Point it at the
+    # pinned lld in the same Nix toolchain root instead.
+    extra_linker_flags = ["-fuse-ld=" + _toolchain_root() + "/bin/ld.lld"] if ctx.attrs.use_lld else []
     return [
         DefaultInfo(),
         CxxToolchainInfo(
@@ -134,7 +160,8 @@ def _hermetic_cxx_toolchain_impl(ctx):
             internal_tools = ctx.attrs.internal_tools[CxxInternalTools],
             linker_info = LinkerInfo(
                 archiver = _tool("ar"),
-                archiver_supports_argfiles = False,
+                # Apple's ar predates @argfile support; GNU ar accepts it.
+                archiver_supports_argfiles = ctx.attrs.archiver_supports_argfiles,
                 archiver_type = "gnu",
                 archive_objects_locally = True,
                 binary_extension = "",
@@ -147,32 +174,38 @@ def _hermetic_cxx_toolchain_impl(ctx):
                 link_style = LinkStyle("shared"),
                 link_weight = 1,
                 linker = _tool("clang++"),
-                linker_flags = ["-L" + _toolchain_root() + "/lib"],
+                linker_flags = ["-L" + _toolchain_root() + "/lib"] + extra_linker_flags,
                 lto_mode = LtoMode("none"),
                 object_file_extension = "o",
                 post_linker_flags = [],
                 shared_dep_runtime_ld_flags = [],
                 shared_library_name_default_prefix = "lib",
-                shared_library_name_format = "{}.dylib",
-                shared_library_versioned_name_format = "{}.dylib.{}",
+                shared_library_name_format = ctx.attrs.shared_library_name_format,
+                shared_library_versioned_name_format = ctx.attrs.shared_library_versioned_name_format,
                 shlib_interfaces = ShlibInterfacesMode("disabled"),
                 static_dep_runtime_ld_flags = [],
                 static_library_extension = "a",
                 static_pic_dep_runtime_ld_flags = [],
-                type = LinkerType("darwin"),
+                type = linker_type,
                 use_archiver_flags = True,
             ),
             llvm_link = _tool("llvm-link"),
-            pic_behavior = PicBehavior("always_enabled"),
-            runtime_dependency_handling = RuntimeDependencyHandling("no_symlink"),
+            pic_behavior = PicBehavior(ctx.attrs.pic_behavior),
             use_dep_files = True,
         ),
-        CxxPlatformInfo(name = "macos-arm64"),
+        CxxPlatformInfo(name = ctx.attrs.platform_name),
     ]
 
 hermetic_cxx_toolchain = rule(
     impl = _hermetic_cxx_toolchain_impl,
     attrs = {
+        "archiver_supports_argfiles": attrs.bool(),
+        "linker_type": attrs.string(),
+        "pic_behavior": attrs.string(),
+        "platform_name": attrs.string(),
+        "shared_library_name_format": attrs.string(),
+        "shared_library_versioned_name_format": attrs.string(),
+        "use_lld": attrs.bool(default = False),
         "internal_tools": attrs.default_only(attrs.exec_dep(
             providers = [CxxInternalTools],
             default = "prelude//cxx/tools:internal_tools",
@@ -180,6 +213,34 @@ hermetic_cxx_toolchain = rule(
     },
     is_toolchain_rule = True,
 )
+
+def nix_cxx_toolchain(name, os, visibility):
+    """Declare the Nix-rooted C++ toolchain for one host operating system."""
+    if os == "macos":
+        hermetic_cxx_toolchain(
+            name = name,
+            archiver_supports_argfiles = False,
+            linker_type = "darwin",
+            pic_behavior = "always_enabled",
+            platform_name = "macos-arm64",
+            shared_library_name_format = "{}.dylib",
+            shared_library_versioned_name_format = "{}.dylib.{}",
+            visibility = visibility,
+        )
+    elif os == "linux":
+        hermetic_cxx_toolchain(
+            name = name,
+            archiver_supports_argfiles = True,
+            linker_type = "gnu",
+            pic_behavior = "supported",
+            platform_name = "linux-x86_64",
+            shared_library_name_format = "{}.so",
+            shared_library_versioned_name_format = "{}.so.{}",
+            use_lld = True,
+            visibility = visibility,
+        )
+    else:
+        fail("nix_cxx_toolchain does not support os {}".format(os))
 
 def _hermetic_python_bootstrap_toolchain_impl(_ctx):
     return [

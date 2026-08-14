@@ -7,7 +7,6 @@
 # above-listed licenses.
 
 load("@prelude//:paths.bzl", "paths")
-load("@prelude//apple:apple_provisioning_profile_sources.bzl", "AppleProvisioningProfileSourcesInfo")
 load("@prelude//apple/swift:swift_toolchain_types.bzl", "SwiftToolchainInfo")
 load("@prelude//utils:expect.bzl", "expect")
 load("@prelude//utils:utils.bzl", "value_or")
@@ -69,7 +68,7 @@ AppleBundleConstructionResult = record(
 
 def bundle_output(ctx: AnalysisContext) -> Artifact:
     bundle_dir_name = get_bundle_dir_name(ctx)
-    output = ctx.actions.declare_output(bundle_dir_name, has_content_based_path = False)
+    output = ctx.actions.declare_output(bundle_dir_name)
     return output
 
 def assemble_bundle(
@@ -160,26 +159,13 @@ def assemble_bundle(
 
         profile_selection_required = _should_embed_provisioning_profile(ctx, codesign_type)
         if profile_selection_required:
-            if ctx.attrs._provisioning_profile_sources_enabled:
-                sources_info = ctx.attrs._provisioning_profile_sources[AppleProvisioningProfileSourcesInfo]
-                for i, source in enumerate(sources_info.sources):
-                    if source.profiles:
-                        profiles_dir = ctx.actions.symlinked_dir(
-                            "provisioning_profile_source_{}".format(i),
-                            {profile.short_path: profile for profile in source.profiles},
-                            has_content_based_path = False,
-                        )
-                        codesign_args.extend(["--profiles-dir", profiles_dir])
-                    elif source.directory:
-                        codesign_args.extend(["--profiles-dir", source.directory])
-            else:
-                provisioning_profiles = ctx.attrs._provisioning_profiles[DefaultInfo]
-                expect(
-                    len(provisioning_profiles.default_outputs) == 1,
-                    "expected exactly one default output from provisioning profile",
-                )
-                provisioning_profiles_args = ["--profiles-dir"] + provisioning_profiles.default_outputs
-                codesign_args.extend(provisioning_profiles_args)
+            provisioning_profiles = ctx.attrs._provisioning_profiles[DefaultInfo]
+            expect(
+                len(provisioning_profiles.default_outputs) == 1,
+                "expected exactly one default output from provisioning profile",
+            )
+            provisioning_profiles_args = ["--profiles-dir"] + provisioning_profiles.default_outputs
+            codesign_args.extend(provisioning_profiles_args)
 
             identities_command = ctx.attrs._apple_toolchain[AppleToolchainInfo].codesign_identities_command
             if ctx.attrs._codesign_identities_command_override:
@@ -195,12 +181,6 @@ def assemble_bundle(
                 codesign_args.append("--embed-provisioning-profile-when-signing-ad-hoc")
 
         codesign_args += get_entitlements_codesign_args(ctx, codesign_type)
-        if getattr(ctx.attrs, "entitlements_suffixed_key_map", None):
-            codesign_args += ["--entitlements-suffixed-key-map", json.encode(ctx.attrs.entitlements_suffixed_key_map)]
-        if getattr(ctx.attrs, "entitlements_removed_keys", None):
-            codesign_args += ["--entitlements-removed-keys", json.encode(ctx.attrs.entitlements_removed_keys)]
-        if getattr(ctx.attrs, "entitlements_removed_values_map", None):
-            codesign_args += ["--entitlements-removed-values-map", json.encode(ctx.attrs.entitlements_removed_values_map)]
         codesign_bundle_extra_args += _get_extra_codesign_args(ctx)
 
         info_plist_args = [
@@ -233,13 +213,11 @@ def assemble_bundle(
     #  - Manifest file name reflects whether signing is required or not.
     #    Useful for debugging purposes.
     codesign_manifest_file_name = "codesign_manifest.json" if codesign_required else "placeholder_codesign_manifest.json"
-    codesign_manifest = ctx.actions.declare_output(codesign_manifest_file_name, has_content_based_path = False)
+    codesign_manifest = ctx.actions.declare_output(codesign_manifest_file_name)
     codesign_bundle_extra_args += [
         "--codesign-manifest",
         codesign_manifest.as_output(),
     ]
-
-    verify_entitlements_args = ["--verify-entitlements"] if ctx.attrs.entitlements_verification_check_enabled else []
 
     command = cmd_args(
         [
@@ -248,7 +226,7 @@ def assemble_bundle(
             bundle.as_output(),
             "--spec",
             spec_file,
-        ] + codesign_args + codesign_bundle_extra_args + verify_entitlements_args + platform_args + swift_args,
+        ] + codesign_args + codesign_bundle_extra_args + platform_args + swift_args,
         hidden =
             [part.source for part in all_parts] +
             [part.codesign_entitlements for part in all_parts if part.codesign_entitlements] +
@@ -256,7 +234,7 @@ def assemble_bundle(
             extra_hidden,
     )
     run_incremental_args = {}
-    incremental_state = ctx.actions.declare_output("incremental_state.json", has_content_based_path = False).as_output()
+    incremental_state = ctx.actions.declare_output("incremental_state.json").as_output()
 
     # Fallback to value from buckconfig
     incremental_bundling_enabled = ctx.attrs.incremental_bundling_enabled or ctx.attrs._incremental_bundling_enabled
@@ -279,13 +257,13 @@ def assemble_bundle(
         category = "apple_assemble_bundle"
 
     if ctx.attrs._profile_bundling_enabled:
-        profile_output = ctx.actions.declare_output("bundling_profile.txt", has_content_based_path = False).as_output()
+        profile_output = ctx.actions.declare_output("bundling_profile.txt").as_output()
         command.add("--profile-output", profile_output)
 
     subtargets = {}
     bundling_log_output = None
     if ctx.attrs._bundling_log_file_enabled:
-        bundling_log_output = ctx.actions.declare_output("bundling_log.txt", has_content_based_path = False)
+        bundling_log_output = ctx.actions.declare_output("bundling_log.txt")
         command.add("--log-file", bundling_log_output.as_output())
         if ctx.attrs._bundling_log_file_level:
             command.add("--log-level-file", ctx.attrs._bundling_log_file_level)
@@ -296,11 +274,7 @@ def assemble_bundle(
         command.add("--versioned-if-macos")
     command.add(codesign_configuration_args)
 
-    bundle_telemetry_logger = tools.bundle_telemetry_logger
-    if bundle_telemetry_logger:
-        command.add("--bundle-telemetry-logger", bundle_telemetry_logger)
-
-    command_json = ctx.actions.declare_output("bundling_command.json", has_content_based_path = False)
+    command_json = ctx.actions.declare_output("bundling_command.json")
     command_json_cmd_args = ctx.actions.write_json(command_json, command, with_inputs = True, pretty = True)
     subtargets["command"] = [DefaultInfo(default_output = command_json, other_outputs = [command_json_cmd_args])]
 
@@ -321,7 +295,7 @@ def assemble_bundle(
     bundle_manifest = AppleBundleManifest(log_file_map = bundle_manifest_log_file_map)
     bundle_manifest_json_object = _convert_bundle_manifest_to_json_object(bundle_manifest)
 
-    bundle_manifest_json_file = ctx.actions.declare_output("bundle_manifest.json", has_content_based_path = False)
+    bundle_manifest_json_file = ctx.actions.declare_output("bundle_manifest.json")
     bundle_manifest_cmd_args = ctx.actions.write_json(bundle_manifest_json_file, bundle_manifest_json_object, with_inputs = True, pretty = True)
     subtargets["manifest"] = [DefaultInfo(default_output = bundle_manifest_json_file, other_outputs = [bundle_manifest_cmd_args])]
 
@@ -345,7 +319,7 @@ def assemble_bundle(
 
     codesign_manifest_tree = _make_codesign_manifest_tree(ctx, codesign_manifest, codesign_manifest_parts)
     codesign_manifest_tree_json = _get_codesign_manifest_tree_as_json(codesign_manifest_tree)
-    codesign_manifest_tree_json_file = ctx.actions.declare_output("codesign_manifest_tree.json", has_content_based_path = False)
+    codesign_manifest_tree_json_file = ctx.actions.declare_output("codesign_manifest_tree.json")
     codesign_manifest_tree_json_cmd_args = ctx.actions.write_json(
         codesign_manifest_tree_json_file,
         codesign_manifest_tree_json,
@@ -356,7 +330,7 @@ def assemble_bundle(
     tools = ctx.attrs._apple_tools[AppleToolsInfo]
     manifest_tree_postprocessor = tools.codesign_manifest_tree_postprocessor
 
-    postprocessed_codesign_manifest_tree = ctx.actions.declare_output("postprocessed_codesign_manifest_tree.json", has_content_based_path = False)
+    postprocessed_codesign_manifest_tree = ctx.actions.declare_output("postprocessed_codesign_manifest_tree.json")
     ctx.actions.run(
         cmd_args(
             [
@@ -376,16 +350,13 @@ def assemble_bundle(
         ),
     ]
 
-    signing_context_output = ctx.actions.declare_output("provisioning-manifest.json", has_content_based_path = False)
-    signing_info_output = ctx.actions.declare_output("signing-info.json", has_content_based_path = False)
+    signing_context_output = ctx.actions.declare_output("provisioning-manifest.json")
     ctx.actions.run(
         cmd_args(
             [
                 tools.signing_context,
                 "--output",
                 signing_context_output.as_output(),
-                "--signing-info-output",
-                signing_info_output.as_output(),
             ] + platform_args + codesign_args,
         ),
         category = "apple_provisioning_manifest",
@@ -393,7 +364,7 @@ def assemble_bundle(
 
     signing_context_tree = _make_signing_context_tree(ctx, signing_context_output, signing_context_parts)
     signing_context_tree_json = _get_signing_context_tree_as_json(signing_context_tree)
-    signing_context_tree_json_file = ctx.actions.declare_output("provisioning-manifest-tree.json", has_content_based_path = False)
+    signing_context_tree_json_file = ctx.actions.declare_output("provisioning-manifest-tree.json")
     signing_context_tree_json_cmd_args = ctx.actions.write_json(
         signing_context_tree_json_file,
         signing_context_tree_json,
@@ -401,7 +372,7 @@ def assemble_bundle(
         pretty = True,
     )
 
-    postprocessed_signing_context_tree = ctx.actions.declare_output("postprocessed-provisioning-manifest-tree.json", has_content_based_path = False)
+    postprocessed_signing_context_tree = ctx.actions.declare_output("postprocessed-provisioning-manifest-tree.json")
     ctx.actions.run(
         cmd_args(
             [
@@ -416,7 +387,6 @@ def assemble_bundle(
     )
 
     subtargets["provisioning-manifest"] = [DefaultInfo(default_output = postprocessed_signing_context_tree)]
-    subtargets["signing-info"] = [DefaultInfo(default_output = signing_info_output)]
 
     return AppleBundleConstructionResult(
         sub_targets = subtargets,

@@ -10,7 +10,6 @@
 
 package com.facebook.buck.android.resources;
 
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -25,7 +24,6 @@ import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.stream.IntStream;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class UsedResourcesFinder {
   interface ApkContentProvider {
     ResourceTable getResourceTable();
@@ -111,15 +109,9 @@ public class UsedResourcesFinder {
         int k = id & 0xFFFF;
         Set<Integer> processedIdsForType =
             Objects.requireNonNull(processedIds.computeIfAbsent(type, v -> new TreeSet<>()));
-        if (ResourceProcessingConfig.areOptimizationsEnabled()) {
-          if (processedIdsForType.add(k)) {
-            Objects.requireNonNull(idsToProcess.computeIfAbsent(type, v -> new TreeSet<>())).add(k);
-          }
-        } else {
-          if (!processedIdsForType.contains(k)) {
-            processedIdsForType.add(k);
-            Objects.requireNonNull(idsToProcess.computeIfAbsent(type, v -> new TreeSet<>())).add(k);
-          }
+        if (!processedIdsForType.contains(k)) {
+          processedIdsForType.add(k);
+          Objects.requireNonNull(idsToProcess.computeIfAbsent(type, v -> new TreeSet<>())).add(k);
         }
       }
     }

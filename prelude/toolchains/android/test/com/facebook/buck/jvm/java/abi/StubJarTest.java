@@ -10,9 +10,12 @@
 
 package com.facebook.buck.jvm.java.abi;
 
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeThat;
 
 import com.facebook.buck.cd.model.java.AbiGenerationMode;
 import com.facebook.buck.core.filesystems.AbsPath;
@@ -20,6 +23,7 @@ import com.facebook.buck.jvm.java.JarDumper;
 import com.facebook.buck.jvm.java.testutil.compiler.TestCompiler;
 import com.facebook.buck.jvm.kotlin.testutil.compiler.KotlinTestCompiler;
 import com.facebook.buck.util.environment.EnvVariablesProvider;
+import com.facebook.buck.util.environment.Platform;
 import com.facebook.buck.util.unarchive.Unzip;
 import com.facebook.buck.util.zip.DeterministicManifest;
 import com.facebook.buck.util.zip.JarBuilder;
@@ -59,6 +63,7 @@ import javax.lang.model.SourceVersion;
 import javax.lang.model.element.TypeElement;
 import javax.tools.Diagnostic.Kind;
 import org.junit.Before;
+import org.junit.Ignore;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -2690,6 +2695,51 @@ public class StubJarTest {
         .createStubJar();
   }
 
+  @Test
+  @Ignore
+  public void failsWhenAnnotationWillNotLoad() throws IOException {
+    if (!testingMode.equals(MODE_SOURCE_BASED_MISSING_DEPS)) {
+      return;
+    }
+
+    tester
+        .setSourceFile(
+            "DepAnno.java", "package com.example.buck.dependency;", "public @interface DepAnno { }")
+        .createStubJar()
+        .addStubJarToClasspath()
+        .setSourceFile(
+            "A.java",
+            "package com.example.buck;",
+            "import com.example.buck.dependency.DepAnno;",
+            "@DepAnno",
+            "public class A {",
+            "  public void foo(@DepAnno int d) { }",
+            "}")
+        .addExpectedCompileError(
+            "A.java:3: error: Could not find the annotation com.example.buck.dependency.DepAnno.\n"
+                + "@DepAnno\n"
+                + "^\n"
+                + "  This can happen for one of two reasons:\n"
+                + "  1. A dependency is missing in the BUCK file for the current target. Try"
+                + " building the current rule without the #source-only-abi flavor, fix any errors"
+                + " that are reported, and then build this flavor again.\n"
+                + "  2. The rule that owns com.example.buck.dependency.DepAnno is not marked with"
+                + " required_for_source_only_abi = True. Add that parameter to the rule and try"
+                + " again.")
+        .addExpectedCompileError(
+            "A.java:5: error: Could not find the annotation com.example.buck.dependency.DepAnno.\n"
+                + "  public void foo(@DepAnno int d) { }\n"
+                + "                  ^\n"
+                + "  This can happen for one of two reasons:\n"
+                + "  1. A dependency is missing in the BUCK file for the current target. Try"
+                + " building the current rule without the #source-only-abi flavor, fix any errors"
+                + " that are reported, and then build this flavor again.\n"
+                + "  2. The rule that owns com.example.buck.dependency.DepAnno is not marked with"
+                + " required_for_source_only_abi = True. Add that parameter to the rule and try"
+                + " again.")
+        .createStubJar();
+  }
+
   /**
    * Regression test for a bug where our error suppressing listener wasn't tracking Context changes
    * across rounds.
@@ -3068,8 +3118,38 @@ public class StubJarTest {
   }
 
   @Test
+  @Ignore
+  public void providesNiceErrorWhenAnnotationMissing() throws IOException {
+    if (!testingMode.equals(MODE_SOURCE_BASED_MISSING_DEPS)) {
+      return;
+    }
+
+    createAnnotationFullJar()
+        .addFullJarToClasspath()
+        .setSourceFile(
+            "A.java",
+            "package com.example.buck;",
+            "public class A {",
+            "  @Foo",
+            "  public void cheese(String key) {}",
+            "}")
+        .addExpectedCompileError(
+            "A.java:3: error: Could not find the annotation com.example.buck.Foo.\n"
+                + "  @Foo\n"
+                + "  ^\n"
+                + "  This can happen for one of two reasons:\n"
+                + "  1. A dependency is missing in the BUCK file for the current target. Try"
+                + " building the current rule without the #source-only-abi flavor, fix any errors"
+                + " that are reported, and then build this flavor again.\n"
+                + "  2. The rule that owns com.example.buck.Foo is not marked with"
+                + " required_for_source_only_abi = True. Add that parameter to the rule and try"
+                + " again.")
+        .createStubJar();
+  }
+
+  @Test
   public void preservesAnnotationsOnMethods() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3100,7 +3180,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsOnFields() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3131,7 +3211,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsOnParameters() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3394,7 +3474,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithPrimitiveValues() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3419,7 +3499,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithStringArrayValues() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3550,7 +3630,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithConstantValues() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspathAlways()
@@ -3605,7 +3685,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithAnnotationValues() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3631,7 +3711,7 @@ public class StubJarTest {
 
   @Test
   public void preservesAnnotationsWithAnnotationArrayValues() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     createAnnotationFullJar()
         .addFullJarToClasspath()
@@ -3748,7 +3828,7 @@ public class StubJarTest {
 
   @Test
   public void stubsEnumsOverridingGenericInterface() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "A.java",
@@ -5087,7 +5167,7 @@ public class StubJarTest {
 
   @Test
   public void stubsImportedReferencesToInnerClassesOfOtherTypes() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "Imported.java",
@@ -5131,7 +5211,7 @@ public class StubJarTest {
 
   @Test
   public void stubsStaticImportedReferencesToInnerClassesOfOtherTypes() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     tester
         .setSourceFile(
@@ -5389,7 +5469,7 @@ public class StubJarTest {
 
   @Test
   public void stubsReferencesFromBridgeMethodsToInnerClassesOtherTypes() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "A.java",
@@ -5996,7 +6076,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeInnerClassTypeParameterReferenceInMethodParameter() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "Outer.java",
@@ -6445,7 +6525,7 @@ public class StubJarTest {
 
   @Test
   public void bridgeMethodInStubsCanBeCompiledAgainst() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
 
     tester
         .setSourceFile(
@@ -6925,7 +7005,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeInnerClassReferencesInPackageInfoClass() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "A.java",
@@ -7023,7 +7103,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeGenericBridgeMethods() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "A.java",
@@ -7078,7 +7158,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeGenericOverrideBridgeMethods() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "A.java",
@@ -7153,7 +7233,7 @@ public class StubJarTest {
 
   @Test
   public void shouldIncludeCovariantReturnBridgeMethods() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "Super.java",
@@ -7217,7 +7297,7 @@ public class StubJarTest {
   public void
       shouldCopyAccessibilityAnnotationsAndParamNamesFromOverriderAndThrowsFromOverriddenToBridgeMethods()
           throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile("Anno.java", "package com.example.buck;", "public @interface Anno { }")
         .compileFullJar()
@@ -7310,7 +7390,7 @@ public class StubJarTest {
    */
   @Test
   public void shouldIncludeNonPublicBaseClassBridgeMethods() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "B.java",
@@ -7380,7 +7460,7 @@ public class StubJarTest {
 
   @Test
   public void shouldNotIncludeNonPublicBaseClassBridgeMethodsWhenManuallyDone() throws IOException {
-    if (notYetImplementedForMissingClasspath()) return;
+    notYetImplementedForMissingClasspath();
     tester
         .setSourceFile(
             "B.java",
@@ -7679,11 +7759,18 @@ public class StubJarTest {
         .compileFullJar();
   }
 
-  private boolean notYetImplementedForMissingClasspath() {
-    return testingMode == MODE_SOURCE_BASED_MISSING_DEPS;
+  private void notYetImplementedForMissingClasspath() {
+    assumeThat(testingMode, not(equalTo(MODE_SOURCE_BASED_MISSING_DEPS)));
+  }
+
+  private void notYetImplementedForSource() {
+    assumeThat(testingMode, equalTo(MODE_JAR_BASED));
   }
 
   private boolean isValidForKotlin() {
+    // System.getProperty("java.class.path") returning classpath with ":" as separator which means
+    // that KotlinTestCompiler crashes (separator should be ";" on Windows)
+    assumeThat(Platform.detect(), not(Platform.WINDOWS));
     return !testingMode.equals(MODE_SOURCE_BASED_MISSING_DEPS);
   }
 

@@ -1,1 +1,48 @@
+# The build script only feeds wrapper.cpp to `cc`, so the VulkanMemoryAllocator
+# implementation is declared directly instead. VMA_*_VULKAN_FUNCTIONS=0 keeps it
+# on ash's loader rather than linking vulkan-1 itself, matching build.rs.
 buildscript.run = false
+
+[['cfg(not(target_env = "msvc"))'.cxx_library]]
+name = "vma"
+srcs = ["wrapper.cpp"]
+headers = [
+    "vendor/VulkanMemoryAllocator/include/**/*.h",
+    "vendor/Vulkan-Headers/include/**/*.h",
+]
+include_paths = [
+    "vendor/VulkanMemoryAllocator/include",
+    "vendor/Vulkan-Headers/include",
+]
+preprocessor_flags = [
+    "-DVMA_STATIC_VULKAN_FUNCTIONS=0",
+    "-DVMA_DYNAMIC_VULKAN_FUNCTIONS=0",
+]
+compiler_flags = [
+    "-std=c++17",
+    "-Wno-missing-field-initializers",
+    "-Wno-nullability-completeness",
+    "-Wno-reorder",
+    "-Wno-unused-parameter",
+    "-Wno-unused-private-field",
+    "-Wno-unused-variable",
+]
+preferred_linkage = "static"
+
+[['cfg(target_env = "msvc")'.cxx_library]]
+name = "vma-msvc"
+srcs = ["wrapper.cpp"]
+headers = [
+    "vendor/VulkanMemoryAllocator/include/**/*.h",
+    "vendor/Vulkan-Headers/include/**/*.h",
+]
+include_paths = [
+    "vendor/VulkanMemoryAllocator/include",
+    "vendor/Vulkan-Headers/include",
+]
+preprocessor_flags = [
+    "/DVMA_STATIC_VULKAN_FUNCTIONS=0",
+    "/DVMA_DYNAMIC_VULKAN_FUNCTIONS=0",
+]
+compiler_flags = ["/std:c++17", "/EHsc"]
+preferred_linkage = "static"

@@ -10,7 +10,6 @@ load("@prelude//:paths.bzl", "paths")
 load(
     "@prelude//cxx:compile_types.bzl",
     "AsmExtensions",
-    "CudaDistributedCompileOutput",
     "CxxCompileCommand",
     "CxxCompileCommandOutput",
     "CxxCompileFlavor",
@@ -21,27 +20,22 @@ load(
     "DepFileType",
     "HeaderExtension",
     "HeadersDepFiles",
-    "UseHeaderUnitsMode",
 )
 load(
     "@prelude//cxx:cuda.bzl",
     "CudaCompileInfo",
     "CudaCompileStyle",  # @unused Used as a type
     "cuda_compile",
-    "declare_cuda_dist_compile_output",
 )
-load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo")
+load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxPlatformInfo", "CxxToolchainInfo")
 load(
     "@prelude//ide_integrations/xcode:argsfiles.bzl",
     "XCODE_ARG_SUBSTITUTIONS",
 )
 load("@prelude//linking:lto.bzl", "LtoMode")
-load("@prelude//utils:expect.bzl", "expect")
 load(
     "@prelude//utils:utils.bzl",
-    "as_output",
     "flatten",
-    "map_val",
 )
 load(":argsfiles.bzl", "CompileArgsfile", "CompileArgsfiles")
 load(":attr_selection.bzl", "cxx_by_language_ext")
@@ -64,6 +58,7 @@ load(
     "CxxPrecompiledHeader",  # @unused Used in type annotation
     "add_headers_dep_files",
 )
+load(":platform.bzl", "cxx_by_platform")
 load(
     ":preprocessor.bzl",
     "CPreprocessor",  # @unused Used as a type
@@ -71,23 +66,6 @@ load(
     "HeaderUnit",  # @unused Used as a type
     "cxx_merge_cpreprocessors",
     "get_flags_for_compiler_type",
-)
-
-# Record containing compile info that will be passed to the dynamic action
-CxxCompileInfo = record(
-    compile_cmd = field(CxxSrcCompileCommand),
-    short_path = field(str),
-    filename_base = field(str),
-    index_store_base = field(str | None),  # filename_base for index store compilation
-    identifier = field(str),
-    folder_name = field(str),
-    flavor_flags = field(dict[str, list[str]]),
-)
-
-# Input for a single CXX compilation - declared artifacts and compile info
-CxxCompileInput = record(
-    declared_artifacts = field(CxxCompileOutput),
-    info = field(CxxCompileInfo),
 )
 
 def _project_clang_traces_as_args(traces: list[Artifact]):
@@ -209,6 +187,7 @@ def create_compile_cmds(
         actions: AnalysisActions,
         target_label: Label,
         toolchain: CxxToolchainInfo,
+        cxx_platform_info: CxxPlatformInfo,
         impl_params: CxxRuleConstructorParams,
         own_preprocessors: list[CPreprocessor],
         inherited_preprocessor_infos: list[CPreprocessorInfo],
@@ -275,7 +254,7 @@ def create_compile_cmds(
     # of the same extension they will have some of the same flags. Save on
     # allocations by caching and reusing these objects.
     for ext in src_extensions:
-        cmd = _generate_base_compile_command(actions, target_label, toolchain, impl_params, pre, headers_tag, ext)
+        cmd = _generate_base_compile_command(actions, target_label, toolchain, cxx_platform_info, impl_params, pre, headers_tag, ext)
         cxx_compile_cmd_by_ext[ext] = cmd
         argsfile_by_ext[ext.value] = cmd.argsfile
         xcode_argsfile_by_ext[ext.value] = cmd.xcode_argsfile
@@ -312,10 +291,9 @@ def create_compile_cmds(
             args = src_args,
             index = src.index,
             is_header = src.is_header,
-            uses_content_based_paths = cxx_compile_cmd.allow_content_based_paths,
+            uses_experimental_content_based_path_hashing = cxx_compile_cmd.allow_content_based_paths,
             index_store_factory = impl_params.index_store_factory,
             error_handler = impl_params.error_handler,
-            expect_eligible_for_dedupe = impl_params.expect_eligible_for_dedupe,
         )
 
         if src.is_header:
@@ -336,22 +314,33 @@ def create_compile_cmds(
         comp_db_compile_cmds = src_compile_cmds + hdr_compile_cmds,
     )
 
+def _compile_index_store(actions: AnalysisActions, target_label: Label, src_compile_cmd: CxxSrcCompileCommand, toolchain: CxxToolchainInfo, compile_cmd: cmd_args) -> Artifact | None:
+    if src_compile_cmd.index_store_factory:
+        return src_compile_cmd.index_store_factory(actions, target_label, src_compile_cmd, toolchain, compile_cmd)
+    return None
+
 COMMON_PREPROCESSOR_OUTPUT_ARGS = cmd_args("-E", "-dD")
 
-def _prepare_cxx_compilation(
+def _compile_single_cxx(
         actions: AnalysisActions,
+        target_label: Label,
         toolchain: CxxToolchainInfo,
         default_object_format: CxxObjectFormat,
+        bitcode_args: list,
         src_compile_cmd: CxxSrcCompileCommand,
         flavors: set[CxxCompileFlavor],
+        flavor_flags: dict[str, list[str]],
         provide_syntax_only: bool,
-        use_header_units: UseHeaderUnitsMode,
+        use_header_units: bool,
         separate_debug_info: bool,
         cuda_compile_style: CudaCompileStyle | None,
-        compile_pch: CxxPrecompiledHeader | None) -> CxxCompileInput:
+        precompiled_header: Dependency | None = None,
+        compile_pch: CxxPrecompiledHeader | None = None) -> CxxCompileOutput:
     """
-    DECLARATION PHASE: Declares all output artifacts for a single source file compilation.
+    Construct a final compile command for a single CXX source based on
+    `src_compile_command` and other compilation options.
     """
+
     short_path = src_compile_cmd.src.short_path
     if src_compile_cmd.index != None:
         # Add a unique postfix if we have duplicate source files with different flags
@@ -360,233 +349,38 @@ def _prepare_cxx_compilation(
     filename_base = short_path
     identifier = short_path
 
-    if src_compile_cmd.cxx_compile_cmd.category == "cxx_compile" and use_header_units == UseHeaderUnitsMode("pcm") and src_compile_cmd.cxx_compile_cmd.header_units_argsfile:
+    if src_compile_cmd.cxx_compile_cmd.category == "cxx_compile" and use_header_units and src_compile_cmd.cxx_compile_cmd.header_units_argsfile:
         identifier += " (modular)"
 
     for flavor in flavors:
         filename_base = "{}.{}".format(filename_base, flavor.value)
         identifier = "{} ({})".format(identifier, flavor.value)
 
-    content_based = src_compile_cmd.uses_content_based_paths
-    folder_name = "__objects__"
-    compiler_type = src_compile_cmd.cxx_compile_cmd.compiler_type
+    content_based = src_compile_cmd.uses_experimental_content_based_path_hashing
 
-    # Declare main object output
+    folder_name = "__objects__"
     object = actions.declare_output(
         folder_name,
         "{}.{}".format(filename_base, toolchain.linker_info.object_file_extension),
-        has_content_based_path = content_based,
+        uses_experimental_content_based_path_hashing = content_based,
     )
 
-    # Diagnostics
-    diagnostics = None
-    if compiler_type == "clang" and provide_syntax_only:
-        diagnostics = actions.declare_output(
-            "__diagnostics__",
-            "{}.diag.txt".format(short_path),
-            has_content_based_path = False,
-        )
-
-    # Declare index store upfront using factory.declare() if available
-    index_store = None
-    index_store_base = None
-    if CxxCompileFlavor("pic") in flavors and src_compile_cmd.index_store_factory:
-        factory = src_compile_cmd.index_store_factory
-        declared_index_store = factory.declare(actions, src_compile_cmd)
-        if declared_index_store:
-            index_store = declared_index_store.output
-            index_store_base = declared_index_store.filename_base
-
-    # Clang LLVM statistics
-    clang_llvm_statistics = None
-    if toolchain.clang_llvm_statistics and compiler_type == "clang":
-        clang_llvm_statistics = actions.declare_output(
-            paths.join("__objects__", "{}.stats".format(filename_base)),
-            has_content_based_path = content_based,
-        )
-
-    # GCNO file
-    gcno_file = None
-    if toolchain.gcno_files and src_compile_cmd.src.extension not in (".S", ".sx"):
-        gcno_file = actions.declare_output(
-            paths.join("__objects__", "{}.gcno".format(filename_base)),
-            has_content_based_path = content_based,
-        )
-
-    # Clang remarks
-    clang_remarks = None
-    if toolchain.clang_remarks and compiler_type == "clang":
-        clang_remarks = actions.declare_output(
-            paths.join("__objects__", "{}.opt.yaml".format(filename_base)),
-            has_content_based_path = content_based,
-        )
-
-    # Generate pre-processed sources
-    preproc = actions.declare_output(
-        "__preprocessed__",
-        "{}.{}".format(filename_base, "i"),
-        has_content_based_path = content_based,
-    )
-
-    # External debug info
-    external_debug_info = None
-    extension_supports_external_debug_info = src_compile_cmd.src.extension not in (".hip")
-    use_external_debug_info = separate_debug_info and toolchain.split_debug_mode == SplitDebugMode("split") and compiler_type == "clang" and extension_supports_external_debug_info
-    if use_external_debug_info:
-        external_debug_info = actions.declare_output(
-            folder_name,
-            "{}.{}".format(filename_base, "dwo"),
-            has_content_based_path = content_based,
-        )
-
-    # .S extension is native assembly code (machine level, processor specific)
-    # and clang will happily compile them to .o files, but the object are always
-    # native even if we ask for bitcode.  If we don't mark the output format,
-    # other tools would try and parse the .o file as LLVM-IR and fail.
-    if src_compile_cmd.src.extension in [".S", ".s"]:
-        object_format = CxxObjectFormat("native")
-    else:
-        object_format = default_object_format
-
-    assembly = _declare_assembly(
-        actions = actions,
-        compiler_type = compiler_type,
-        object_format = object_format,
-        filename_base = filename_base,
-        content_based = content_based,
-    )
-
-    # If we're building with split debugging, where the debug info is in the
-    # original object, then add the object as external debug info
-    # FIXME: ThinLTO generates debug info in a separate dwo dir, but we still
-    # need to track object files if the object file is not compiled to bitcode.
-    # We should track whether ThinLTO is used on a per-object basis rather than
-    # globally on a toolchain level.
-    object_has_external_debug_info = (
-        toolchain.split_debug_mode == SplitDebugMode("single")
-    )
-
-    flavor_flags = build_flavor_flags(toolchain.compiler_flavor_flags, src_compile_cmd.cxx_compile_cmd.compiler_type)
-    clang_trace = _declare_clang_trace_output(toolchain, compiler_type, actions, filename_base, content_based)
-
-    # Only declare CUDA distributed compile outputs for CUDA source files
-    cuda_dist_output = None
-    if src_compile_cmd.src.extension == ".cu" and cuda_compile_style == CudaCompileStyle("dist"):
-        cuda_dist_output = declare_cuda_dist_compile_output(actions, CudaCompileInfo(
-            filename = filename_base,
-            identifier = identifier,
-            output_prefix = folder_name,
-            uses_content_based_paths = content_based,
-        ))
-
-    # Declare PCH object output for Windows compiler
-    pch_object = None
-    if compiler_type == "windows" and compile_pch:
-        pch_object = actions.declare_output(
-            folder_name,
-            "{}.pch.o".format(filename_base),
-            has_content_based_path = content_based,
-        )
-
-    # JSON error output
-    json_error = None
-    serialized_diags_to_json = toolchain.binary_utilities_info.custom_tools.get("serialized-diags-to-json", None)
-    if serialized_diags_to_json and src_compile_cmd.error_handler and compiler_type == "clang" and src_compile_cmd.src.extension != ".cu":
-        json_error = actions.declare_output(
-            "__diagnostics__/{}.json".format(filename_base),
-            has_content_based_path = content_based,
-        )
-
-    declared_artifacts = CxxCompileOutput(
-        object = object,
-        object_format = object_format,
-        object_has_external_debug_info = object_has_external_debug_info,
-        external_debug_info = external_debug_info,
-        clang_remarks = clang_remarks,
-        clang_llvm_statistics = clang_llvm_statistics,
-        clang_trace = clang_trace,
-        gcno_file = gcno_file,
-        index_store = index_store,
-        assembly = assembly,
-        diagnostics = diagnostics,
-        preproc = preproc,
-        dist_cuda = cuda_dist_output,
-        pch_object = pch_object,
-        json_error = json_error,
-    )
-
-    info = CxxCompileInfo(
-        compile_cmd = src_compile_cmd,
-        short_path = short_path,
-        filename_base = filename_base,
-        index_store_base = index_store_base,
-        identifier = identifier,
-        folder_name = folder_name,
-        flavor_flags = flavor_flags,
-    )
-
-    return CxxCompileInput(
-        declared_artifacts = declared_artifacts,
-        info = info,
-    )
-
-def _compile_single_cxx(
-        actions: AnalysisActions,
-        label: Label,
-        toolchain: CxxToolchainInfo,
-        bitcode_args: list,
-        flavors: set[CxxCompileFlavor],
-        compile_pch: CxxPrecompiledHeader | None,
-        precompiled_header: Dependency | None,
-        cuda_compile_style: CudaCompileStyle | None,
-        use_header_units: UseHeaderUnitsMode,
-        # CxxCompileInfo fields
-        info: CxxCompileInfo,
-        # Output artifacts
-        object: OutputArtifact,
-        external_debug_info: OutputArtifact | None,
-        clang_remarks: OutputArtifact | None,
-        clang_llvm_statistics: OutputArtifact | None,
-        clang_trace: OutputArtifact | None,
-        gcno_file: OutputArtifact | None,
-        assembly: OutputArtifact | None,
-        diagnostics: OutputArtifact | None,
-        preproc: OutputArtifact,
-        index_store: OutputArtifact | None,
-        dist_cuda: (OutputArtifact, OutputArtifact, OutputArtifact) | None,
-        pch_object: OutputArtifact | None,
-        json_error: OutputArtifact | None) -> None:
-    """
-    EXECUTION PHASE: Creates compilation actions for a single source file.
-
-    This function runs INSIDE the dynamic action callback (`_cxx_dynamic_compile`),
-    meaning it only executes when Buck2 determines the compilation is actually needed.
-
-    ## Relationship to Declaration Phase
-    The output artifacts passed here were declared earlier by `_prepare_cxx_compilation`
-    during the analysis phase.
-    """
-
-    # Extract info fields
-    src_compile_cmd = info.compile_cmd
-    filename_base = info.filename_base
-    index_store_base = info.index_store_base
-    identifier = info.identifier
-    folder_name = info.folder_name
-    short_path = info.short_path
-    flavor_flags = info.flavor_flags
-
-    # Get compiler type
     compiler_type = src_compile_cmd.cxx_compile_cmd.compiler_type
-    content_based = src_compile_cmd.uses_content_based_paths
 
+    # For distributed NVCC compilation we will bind the object in the
+    # cuda_compile function.
+    pch_object_output = None
     if src_compile_cmd.src.extension == ".cu":
         output_args = None
     elif compile_pch:
         if src_compile_cmd.cxx_compile_cmd.compiler_type == "windows":
+            pch_object_output = actions.declare_output(
+                folder_name,
+                "{}.pch.o".format(filename_base),
+            )
             output_args = [
-                cmd_args(object, format = "/Fp{}"),
-                cmd_args(pch_object, format = "/Fo{}"),
+                cmd_args(object.as_output(), format = "/Fp{}"),
+                cmd_args(pch_object_output.as_output(), format = "/Fo{}"),
                 cmd_args(compile_pch.path, format = "/Yc{}"),
             ]
         else:
@@ -609,22 +403,6 @@ def _compile_single_cxx(
         use_header_units = use_header_units,
         output_args = output_args,
     )
-
-    if index_store:
-        compile_index_store_cmd = _get_base_compile_cmd(
-            bitcode_args = bitcode_args,
-            src_compile_cmd = src_compile_cmd,
-            flavors = flavors,
-            flavor_flags = toolchain.compiler_flavor_flags,
-        )
-        src_compile_cmd.index_store_factory.compile(
-            actions,
-            label,
-            index_store,
-            index_store_base,
-            toolchain,
-            compile_index_store_cmd,
-        )
 
     if precompiled_header and precompiled_header[CPrecompiledHeaderInfo] and precompiled_header[CPrecompiledHeaderInfo].compiled:
         pch_info = precompiled_header[DefaultInfo].sub_targets["pch"]
@@ -657,72 +435,95 @@ def _compile_single_cxx(
             action_dep_files,
         )
 
-    if clang_remarks:
+    clang_remarks = None
+    if toolchain.clang_remarks and compiler_type == "clang":
         cmd.add(["-fsave-optimization-record", "-fdiagnostics-show-hotness", "-foptimization-record-passes=" + toolchain.clang_remarks])
-        cmd.add(cmd_args(hidden = clang_remarks))
+        clang_remarks = actions.declare_output(
+            paths.join("__objects__", "{}.opt.yaml".format(filename_base)),
+            uses_experimental_content_based_path_hashing = content_based,
+        )
+        cmd.add(cmd_args(hidden = clang_remarks.as_output()))
 
-    if clang_llvm_statistics:
+    clang_llvm_statistics = None
+    if toolchain.clang_llvm_statistics and compiler_type == "clang":
+        clang_llvm_statistics = actions.declare_output(
+            paths.join("__objects__", "{}.stats".format(filename_base)),
+            uses_experimental_content_based_path_hashing = content_based,
+        )
+
         # Use stderr_to_file to capture clang statistics output
         cmd = cmd_args(
             toolchain.internal_tools.stderr_to_file,
-            cmd_args(clang_llvm_statistics, format = "--out={}"),
+            cmd_args(clang_llvm_statistics.as_output(), format = "--out={}"),
             cmd,
             ["-mllvm", "-stats"],
         )
 
-    if clang_trace:
+    clang_trace = None
+    if toolchain.clang_trace and compiler_type == "clang":
         cmd.add(["-ftime-trace"])
-        cmd.add(cmd_args(hidden = clang_trace))
+        clang_trace = actions.declare_output(
+            paths.join("__objects__", "{}.json".format(filename_base)),
+            uses_experimental_content_based_path_hashing = content_based,
+        )
+        cmd.add(cmd_args(hidden = clang_trace.as_output()))
 
-    if gcno_file:
+    gcno_file = None
+    if toolchain.gcno_files and src_compile_cmd.src.extension not in (".S", ".sx"):
         cmd.add(["--coverage"])
-        cmd.add(cmd_args(hidden = gcno_file))
+        gcno_file = actions.declare_output(
+            paths.join("__objects__", "{}.gcno".format(filename_base)),
+            uses_experimental_content_based_path_hashing = content_based,
+        )
+        cmd.add(cmd_args(hidden = gcno_file.as_output()))
 
-    if external_debug_info:
-        cmd.add(cmd_args(external_debug_info, format = "--fbcc-create-external-debug-info={}"))
+    external_debug_info = None
+    extension_supports_external_debug_info = src_compile_cmd.src.extension not in (".hip")
+    use_external_debug_info = separate_debug_info and toolchain.split_debug_mode == SplitDebugMode("split") and compiler_type == "clang" and extension_supports_external_debug_info
+    if use_external_debug_info:
+        external_debug_info = actions.declare_output(
+            folder_name,
+            "{}.{}".format(filename_base, "dwo"),
+            uses_experimental_content_based_path_hashing = content_based,
+        )
+        cmd.add(cmd_args(external_debug_info.as_output(), format = "--fbcc-create-external-debug-info={}"))
 
     outputs_for_error_handler = []
-    if json_error:
+    serialized_diags_to_json = toolchain.binary_utilities_info.custom_tools.get("serialized-diags-to-json", None)
+    if serialized_diags_to_json and src_compile_cmd.error_handler and compiler_type == "clang" and src_compile_cmd.src.extension != ".cu":
         # We need to wrap the entire compile to provide serialized diagnostics
         # output and on error convert it to JSON.
-        serialized_diags_to_json = toolchain.binary_utilities_info.custom_tools.get("serialized-diags-to-json", None)
-        outputs_for_error_handler.append(json_error)
+        json_error_output = actions.declare_output("__diagnostics__/{}.json".format(filename_base), uses_experimental_content_based_path_hashing = content_based).as_output()
+        outputs_for_error_handler.append(json_error_output)
         cmd = cmd_args(
             toolchain.internal_tools.serialized_diagnostics_to_json_wrapper,
             serialized_diags_to_json,
-            json_error,
+            json_error_output,
             cmd,
         )
 
+    dist_nvcc_dag = None
+    dist_nvcc_env = None
     if src_compile_cmd.src.extension == ".cu":
-        expect(cuda_compile_style != None, "CUDA compile style should be configured for targets with .cu sources")
-        cuda_compile_info = CudaCompileInfo(
-            filename = filename_base,
-            identifier = identifier,
-            output_prefix = folder_name,
-            uses_content_based_paths = content_based,
-        )
-
-        cuda_dist_output = None
-        if dist_cuda:
-            cuda_dist_output = CudaDistributedCompileOutput(
-                nvcc_dag = dist_cuda[0].as_input(),
-                nvcc_env = dist_cuda[1].as_input(),
-                hostcc_argsfile = dist_cuda[2].as_input(),
-            )
-        cuda_compile(
+        cuda_compile_output = cuda_compile(
             actions,
             toolchain,
             cmd,
             object,
             src_compile_cmd,
-            cuda_compile_info,
+            CudaCompileInfo(
+                filename = filename_base,
+                identifier = identifier,
+                output_prefix = folder_name,
+                uses_experimental_content_based_path_hashing = content_based,
+            ),
             action_dep_files,
             allow_dep_file_cache_upload = False,
             error_handler = src_compile_cmd.error_handler,
             cuda_compile_style = cuda_compile_style,
-            cuda_dist_output = cuda_dist_output,
         )
+        if cuda_compile_output:
+            dist_nvcc_dag, dist_nvcc_env = cuda_compile_output
     else:
         is_producing_compiled_pch = bool(compile_pch)
         is_consuming_compiled_pch = bool(precompiled_header and precompiled_header[CPrecompiledHeaderInfo].compiled)
@@ -736,11 +537,49 @@ def _compile_single_cxx(
             error_handler = src_compile_cmd.error_handler,
             outputs_for_error_handler = outputs_for_error_handler,
             local_only = is_producing_compiled_pch or is_consuming_compiled_pch,
-            expect_eligible_for_dedupe = src_compile_cmd.expect_eligible_for_dedupe,
         )
 
+    # If we're building with split debugging, where the debug info is in the
+    # original object, then add the object as external debug info
+    # FIXME: ThinLTO generates debug info in a separate dwo dir, but we still
+    # need to track object files if the object file is not compiled to bitcode.
+    # We should track whether ThinLTO is used on a per-object basis rather than
+    # globally on a toolchain level.
+    object_has_external_debug_info = (
+        toolchain.split_debug_mode == SplitDebugMode("single")
+    )
+
+    # .S extension is native assembly code (machine level, processor specific)
+    # and clang will happily compile them to .o files, but the object are always
+    # native even if we ask for bitcode.  If we don't mark the output format,
+    # other tools would try and parse the .o file as LLVM-IR and fail.
+    if src_compile_cmd.src.extension in [".S", ".s"]:
+        object_format = CxxObjectFormat("native")
+    else:
+        object_format = default_object_format
+
+    compile_index_store_cmd = _get_base_compile_cmd(
+        bitcode_args = bitcode_args,
+        src_compile_cmd = src_compile_cmd,
+        flavors = flavors,
+        flavor_flags = toolchain.compiler_flavor_flags,
+    )
+
+    index_store = None
+
+    if CxxCompileFlavor("pic") in flavors:
+        index_store = _compile_index_store(actions, target_label, src_compile_cmd, toolchain, compile_index_store_cmd)
+
     # Generate asm for compiler which accept `-S` (TODO: support others)
-    if assembly:
+    if compiler_type in ["clang", "gcc"]:
+        # Generate assembler or llvm bitcode output file
+        assembly_extension = "s"
+        if compiler_type == "clang" and object_format == CxxObjectFormat("bitcode"):
+            assembly_extension = "ll"
+        assembly = actions.declare_output(
+            "__assembly__",
+            "{}.{}".format(filename_base, assembly_extension),
+        )
         assembly_cmd = _get_base_compile_cmd(
             bitcode_args = bitcode_args,
             src_compile_cmd = src_compile_cmd,
@@ -756,8 +595,14 @@ def _compile_single_cxx(
             allow_dep_file_cache_upload = False,
             error_handler = src_compile_cmd.error_handler,
         )
+    else:
+        assembly = None
 
-    if diagnostics:
+    if compiler_type == "clang" and provide_syntax_only:
+        diagnostics = actions.declare_output(
+            "__diagnostics__",
+            "{}.diag.txt".format(short_path),
+        )
         syntax_only_cmd = _get_base_compile_cmd(
             bitcode_args = bitcode_args,
             src_compile_cmd = src_compile_cmd,
@@ -778,7 +623,7 @@ def _compile_single_cxx(
         actions.run(
             [
                 toolchain.internal_tools.stderr_to_file,
-                cmd_args(diagnostics, format = "--out={}"),
+                cmd_args(diagnostics.as_output(), format = "--out={}"),
                 syntax_only_cmd,
             ],
             category = "check",
@@ -788,8 +633,14 @@ def _compile_single_cxx(
             allow_dep_file_cache_upload = False,
             error_handler = src_compile_cmd.error_handler,
         )
+    else:
+        diagnostics = None
 
     # Generate pre-processed sources
+    preproc = actions.declare_output(
+        "__preprocessed__",
+        "{}.{}".format(filename_base, "i"),
+    )
     preproc_cmd = _get_base_compile_cmd(
         bitcode_args = bitcode_args,
         src_compile_cmd = src_compile_cmd,
@@ -806,13 +657,31 @@ def _compile_single_cxx(
         error_handler = src_compile_cmd.error_handler,
     )
 
+    return CxxCompileOutput(
+        object = object,
+        object_format = object_format,
+        object_has_external_debug_info = object_has_external_debug_info,
+        external_debug_info = external_debug_info,
+        clang_remarks = clang_remarks,
+        clang_llvm_statistics = clang_llvm_statistics,
+        clang_trace = clang_trace,
+        gcno_file = gcno_file,
+        index_store = index_store,
+        assembly = assembly,
+        diagnostics = diagnostics,
+        preproc = preproc,
+        nvcc_dag = dist_nvcc_dag,
+        nvcc_env = dist_nvcc_env,
+        pch_object_output = pch_object_output,
+    )
+
 def _get_base_compile_cmd(
         bitcode_args: cmd_args | list,
         src_compile_cmd: CxxSrcCompileCommand,
         flavors: set[CxxCompileFlavor],
         flavor_flags: dict[str, list[str]],
         output_args: list | None = None,
-        use_header_units: UseHeaderUnitsMode = UseHeaderUnitsMode("none")) -> cmd_args:
+        use_header_units: bool = False) -> cmd_args:
     """
     Construct a shared compile command for a single CXX source based on
     `src_compile_command` and other compilation options.
@@ -821,10 +690,8 @@ def _get_base_compile_cmd(
     if output_args:
         cmd.add(output_args)
 
-    if use_header_units == UseHeaderUnitsMode("pcm") and src_compile_cmd.cxx_compile_cmd.header_units_argsfile:
+    if use_header_units and src_compile_cmd.cxx_compile_cmd.header_units_argsfile:
         cmd.add(src_compile_cmd.cxx_compile_cmd.header_units_argsfile.cmd_form)
-    elif use_header_units == UseHeaderUnitsMode("stub") and src_compile_cmd.cxx_compile_cmd.header_unit_stubs_argsfile:
-        cmd.add(cmd_args(hidden = src_compile_cmd.cxx_compile_cmd.header_unit_stubs_argsfile.file))
 
     cmd.add(src_compile_cmd.cxx_compile_cmd.argsfile.cmd_form)
 
@@ -851,119 +718,6 @@ def build_flavor_flags(flavor_flags: dict[str, list[str]], compiler_type: str) -
 
     return flavor_flags
 
-def _cxx_dynamic_compile(
-        actions: AnalysisActions,
-        label: Label,
-        toolchain: CxxToolchainInfo,
-        bitcode_args: list[str],
-        flavors: list[CxxCompileFlavor],
-        use_header_units: UseHeaderUnitsMode,
-        precompiled_header: Dependency | None,
-        compile_pch: CxxPrecompiledHeader | None,
-        cuda_compile_style: CudaCompileStyle | None,
-        infos: list[CxxCompileInfo],
-        object: list[OutputArtifact],
-        external_debug_info: list[OutputArtifact | None],
-        clang_remarks: list[OutputArtifact | None],
-        clang_llvm_statistics: list[OutputArtifact | None],
-        clang_trace: list[OutputArtifact | None],
-        gcno_file: list[OutputArtifact | None],
-        assembly: list[OutputArtifact | None],
-        diagnostics: list[OutputArtifact | None],
-        preproc: list[OutputArtifact],
-        index_store: list[OutputArtifact | None],
-        dist_cuda: list[None | (OutputArtifact, OutputArtifact, OutputArtifact)],
-        pch_object: list[OutputArtifact | None],
-        json_error: list[OutputArtifact | None]) -> list[Provider]:
-    """
-    DYNAMIC ACTION CALLBACK: The bridge between declaration and execution phases.
-
-    This function is the implementation for Buck2's `dynamic_output_new` API. It runs
-    LAZILY—only when Buck2 determines that one or more of the declared outputs are
-    actually needed by the build. This is the key to memory optimization: action
-    graphs are not materialized until necessary.
-
-    ## How This Fits
-    ```
-    compile_cxx()                          # ANALYSIS PHASE
-        │
-        ├─► for each source file:
-        │       _prepare_cxx_compilation() # Declares outputs (Artifact)
-        │       collect declared artifacts
-        │
-        └─► actions.dynamic_output_new()   # Registers this callback
-                    │
-                    ▼
-            _cxx_dynamic_compile()         # EXECUTION PHASE (called lazily)
-                    │
-                    └─► for each source:
-                            _compile_single_cxx()  # Creates actual actions
-    ```
-
-    ## Why Batched Dynamic Actions?
-    All source files are compiled in a single `dynamic_output_new` call rather than
-    one per source file.
-    """
-    flavors_set = set(flavors)
-    for i in range(len(infos)):
-        _compile_single_cxx(
-            actions = actions,
-            label = label,
-            toolchain = toolchain,
-            bitcode_args = bitcode_args,
-            flavors = flavors_set,
-            compile_pch = compile_pch,
-            precompiled_header = precompiled_header,
-            cuda_compile_style = cuda_compile_style,
-            use_header_units = use_header_units,
-            info = infos[i],
-            object = object[i],
-            external_debug_info = external_debug_info[i],
-            clang_remarks = clang_remarks[i],
-            clang_llvm_statistics = clang_llvm_statistics[i],
-            clang_trace = clang_trace[i],
-            gcno_file = gcno_file[i],
-            assembly = assembly[i],
-            diagnostics = diagnostics[i],
-            preproc = preproc[i],
-            index_store = index_store[i],
-            dist_cuda = dist_cuda[i],
-            pch_object = pch_object[i],
-            json_error = json_error[i],
-        )
-
-    return [DefaultInfo()]
-
-# https://buck2.build/docs/api/build/AnalysisActions/#analysisactionsdynamic_output_new
-# Dynamic actions factory for batch CXX compilation
-_dynamic_compile_rule = dynamic_actions(
-    impl = _cxx_dynamic_compile,
-    attrs = {
-        "assembly": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "bitcode_args": dynattrs.list(dynattrs.value(str)),
-        "clang_llvm_statistics": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "clang_remarks": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "clang_trace": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "compile_pch": dynattrs.option(dynattrs.value(CxxPrecompiledHeader)),
-        "cuda_compile_style": dynattrs.option(dynattrs.value(CudaCompileStyle)),
-        "diagnostics": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "dist_cuda": dynattrs.list(dynattrs.option(dynattrs.tuple(dynattrs.output(), dynattrs.output(), dynattrs.output()))),
-        "external_debug_info": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "flavors": dynattrs.list(dynattrs.value(CxxCompileFlavor)),
-        "gcno_file": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "index_store": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "infos": dynattrs.list(dynattrs.value(CxxCompileInfo)),
-        "json_error": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "label": dynattrs.value(Label),
-        "object": dynattrs.list(dynattrs.output()),
-        "pch_object": dynattrs.list(dynattrs.option(dynattrs.output())),
-        "precompiled_header": dynattrs.option(dynattrs.value(Dependency)),
-        "preproc": dynattrs.list(dynattrs.output()),
-        "toolchain": dynattrs.value(CxxToolchainInfo),
-        "use_header_units": dynattrs.value(UseHeaderUnitsMode),
-    },
-)
-
 def compile_cxx(
         actions: AnalysisActions,
         target_label: Label,
@@ -972,15 +726,12 @@ def compile_cxx(
         flavors: set[CxxCompileFlavor],
         provide_syntax_only: bool,
         separate_debug_info: bool,
-        use_header_units: UseHeaderUnitsMode = UseHeaderUnitsMode("none"),
+        use_header_units: bool = False,
         precompiled_header: Dependency | None = None,
         cuda_compile_style: CudaCompileStyle | None = None,
         compile_pch: CxxPrecompiledHeader | None = None) -> list[CxxCompileOutput]:
     """
-    MAIN ENTRY POINT: Compiles a list of C/C++ source files.
-
-    This function implements a two-phases that separates output
-    declaration (analysis phase) from action creation (execution phase).
+    For a given list of src_compile_cmds, generate output artifacts.
     """
     linker_info = toolchain.linker_info
 
@@ -1003,81 +754,24 @@ def compile_cxx(
 
     objects = []
 
-    # Lists for dynamic action inputs
-    infos = []
-    object_outputs = []
-    external_debug_info_outputs = []
-    clang_remarks_outputs = []
-    clang_llvm_statistics_outputs = []
-    clang_trace_outputs = []
-    gcno_file_outputs = []
-    assembly_outputs = []
-    diagnostics_outputs = []
-    preproc_outputs = []
-    index_store_outputs = []
-    dist_cuda_outputs = []
-    pch_object_outputs = []
-    json_error_outputs = []
-
     for src_compile_cmd in src_compile_cmds:
-        cxx_compile_input = _prepare_cxx_compilation(
+        cxx_compile_output = _compile_single_cxx(
             actions = actions,
+            target_label = target_label,
             toolchain = toolchain,
             default_object_format = default_object_format,
+            bitcode_args = bitcode_args,
             src_compile_cmd = src_compile_cmd,
             flavors = flavors,
+            flavor_flags = build_flavor_flags(toolchain.compiler_flavor_flags, src_compile_cmd.cxx_compile_cmd.compiler_type),
             provide_syntax_only = provide_syntax_only,
             use_header_units = use_header_units,
             separate_debug_info = separate_debug_info,
             cuda_compile_style = cuda_compile_style,
+            precompiled_header = precompiled_header,
             compile_pch = compile_pch,
         )
-
-        # Collect info (metadata without artifacts)
-        infos.append(cxx_compile_input.info)
-
-        # Collect outputs - call .as_output() on each artifact
-        declared = cxx_compile_input.declared_artifacts
-        object_outputs.append(declared.object.as_output())
-        external_debug_info_outputs.append(map_val(as_output, declared.external_debug_info))
-        clang_remarks_outputs.append(map_val(as_output, declared.clang_remarks))
-        clang_llvm_statistics_outputs.append(map_val(as_output, declared.clang_llvm_statistics))
-        clang_trace_outputs.append(map_val(as_output, declared.clang_trace))
-        gcno_file_outputs.append(map_val(as_output, declared.gcno_file))
-        assembly_outputs.append(map_val(as_output, declared.assembly))
-        diagnostics_outputs.append(map_val(as_output, declared.diagnostics))
-        preproc_outputs.append(declared.preproc.as_output())
-        index_store_outputs.append(map_val(as_output, declared.index_store))
-        dist_cuda_outputs.append(map_val(lambda d: (d.nvcc_dag.as_output(), d.nvcc_env.as_output(), d.hostcc_argsfile.as_output()), declared.dist_cuda))
-        pch_object_outputs.append(map_val(as_output, declared.pch_object))
-        json_error_outputs.append(map_val(as_output, declared.json_error))
-
-        objects.append(declared)
-
-    actions.dynamic_output_new(_dynamic_compile_rule(
-        assembly = assembly_outputs,
-        bitcode_args = bitcode_args,
-        clang_llvm_statistics = clang_llvm_statistics_outputs,
-        clang_remarks = clang_remarks_outputs,
-        clang_trace = clang_trace_outputs,
-        compile_pch = compile_pch,
-        cuda_compile_style = cuda_compile_style,
-        diagnostics = diagnostics_outputs,
-        dist_cuda = dist_cuda_outputs,
-        external_debug_info = external_debug_info_outputs,
-        flavors = list(flavors),
-        gcno_file = gcno_file_outputs,
-        index_store = index_store_outputs,
-        infos = infos,
-        json_error = json_error_outputs,
-        label = target_label,
-        object = object_outputs,
-        pch_object = pch_object_outputs,
-        precompiled_header = precompiled_header,
-        preproc = preproc_outputs,
-        toolchain = toolchain,
-        use_header_units = use_header_units,
-    ))
+        objects.append(cxx_compile_output)
 
     return objects
 
@@ -1161,7 +855,7 @@ def _create_precompile_cmd(
     input_header = actions.write(
         module_name,
         cmd_args(input_header_contents, cmd_args(["\n"])),
-        has_content_based_path = True,
+        uses_experimental_content_based_path_hashing = True,
     )
 
     import_stub = actions.write(
@@ -1172,7 +866,7 @@ export
 #endif
 import \"{}\";
 """.format(module_name),
-        has_content_based_path = True,
+        uses_experimental_content_based_path_hashing = True,
     )
 
     symlinked_files = {}
@@ -1188,7 +882,7 @@ module "{}" {{
     modulemap_file = actions.write(
         "module.modulemap" + group_name,
         modulemap_content,
-        has_content_based_path = True,
+        uses_experimental_content_based_path_hashing = True,
     )
 
     src_dir = actions.symlinked_dir(
@@ -1198,11 +892,12 @@ module "{}" {{
             import_name: import_stub,
             "module.modulemap": modulemap_file,
         },
-        has_content_based_path = True,
+        uses_experimental_content_based_path_hashing = True,
     )
 
     args = []
     args.extend([
+        "-DFACEBOOK_CPP_HEADER_UNIT=1",
         # TODO(nml): Fix warning bugs.
         "-Wno-uninitialized",
         "-Wno-conversion",
@@ -1217,29 +912,20 @@ module "{}" {{
             compiler_info = compiler_info,
             preprocessor = cxx_merge_cpreprocessors(actions, extra_preprocessors, []),
             ext = CxxExtension(".cpp"),
-            has_content_based_path = True,
+            uses_experimental_content_based_path_hashing = True,
             filename_prefix = "export{}_".format(group_name),
         )
 
     args.extend(["-xc++-user-header", "-fmodule-header"])
     args.extend(["-fmodule-name={}".format(module_name)])
     args.extend(["-Xclang", "-fmodule-file-home-is-cwd"])
-
-    # check_args: same setup but -fsyntax-only instead of --precompile, and
-    # without -DFACEBOOK_CPP_HEADER_UNIT=1 (the `export` keyword in import
-    # stubs is only valid inside module purview set up by --precompile).
-    check_args = list(args)
-
     args.extend(["-Xclang", cmd_args(input_header, format = "-fmodules-embed-file={}")])
-    args.extend(["-DFACEBOOK_CPP_HEADER_UNIT=1", "--precompile", input_header])
-
-    check_args.extend(["-fsyntax-only", input_header])
+    args.extend(["--precompile", input_header])
 
     return CxxSrcPrecompileCommand(
         src = src_dir,
         cxx_compile_cmd = cmd,
         args = args,
-        check_args = check_args,
         extra_argsfile = extra_argsfile,
     )
 
@@ -1251,114 +937,54 @@ def _precompile_single_cxx(
         group_name: str,
         src_compile_cmd: CxxSrcPrecompileCommand) -> HeaderUnit:
     identifier = src_compile_cmd.src.short_path
-    cxx_cmd = src_compile_cmd.cxx_compile_cmd
 
     filename = "{}.pcm".format(identifier)
     module = actions.declare_output(
         "__pcm_files__",
         filename,
-        has_content_based_path = True,
+        uses_experimental_content_based_path_hashing = True,
     )
 
-    # Declare stub artifact
-    stub_filename = "{}.pcm.stub".format(identifier)
-    stub = actions.declare_output(
-        "__pcm_files__",
-        stub_filename,
-        has_content_based_path = True,
-    )
-
-    # Build actual header units
-    # TODO(nml): We don't meaningfully support dep files. See T225373444.
-    cmd = cmd_args(cxx_cmd.base_compile_cmd)
-    if cxx_cmd.header_units_argsfile:
-        cmd.add(cxx_cmd.header_units_argsfile.cmd_form)
+    cmd = cmd_args(src_compile_cmd.cxx_compile_cmd.base_compile_cmd)
+    if src_compile_cmd.cxx_compile_cmd.header_units_argsfile:
+        cmd.add(src_compile_cmd.cxx_compile_cmd.header_units_argsfile.cmd_form)
     if src_compile_cmd.extra_argsfile:
         cmd.add(src_compile_cmd.extra_argsfile.cmd_form)
-    cmd.add(cxx_cmd.argsfile.cmd_form)
+    cmd.add(src_compile_cmd.cxx_compile_cmd.argsfile.cmd_form)
     cmd.add(src_compile_cmd.args)
-    cmd.add("-o", module.as_output())
+    cmd.add(["-o", module.as_output()])
 
     clang_trace = None
     if toolchain.clang_trace and toolchain.cxx_compiler_info.compiler_type == "clang":
+        cmd.add(["-ftime-trace"])
         clang_trace = actions.declare_output(
             paths.join("__pcm_files__", "{}.json".format(identifier)),
-            has_content_based_path = True,
+            uses_experimental_content_based_path_hashing = True,
         )
-        cmd.add(cmd_args("-ftime-trace", hidden = clang_trace.as_output()))
+        cmd.add(cmd_args(hidden = clang_trace.as_output()))
 
+    # TODO(nml): We don't meaningfully support dep files. See T225373444.
     actions.run(
         cmd,
         category = "cxx_modules_precompile",
         identifier = identifier,
-        allow_cache_upload = cxx_cmd.allow_cache_upload,
-        low_pass_filter = False,
-    )
-
-    # Diagnostics: run -fsyntax-only variant for [check] subtarget.
-    # This is cheaper than --precompile because it skips module serialization.
-    # We must remove -DFACEBOOK_CPP_HEADER_UNIT=1 because that macro gates
-    # `export` keywords in import stubs, which are only valid inside module
-    # purview (set up by --precompile but not -fsyntax-only).
-    diagnostics = None
-    if cxx_cmd.compiler_type == "clang":
-        diagnostics = actions.declare_output(
-            "__diagnostics__",
-            "{}.header-unit.diag.txt".format(identifier),
-            has_content_based_path = False,
-        )
-        check_cmd = cmd_args(cxx_cmd.base_compile_cmd)
-        if cxx_cmd.header_units_argsfile:
-            check_cmd.add(cxx_cmd.header_units_argsfile.cmd_form)
-        if src_compile_cmd.extra_argsfile:
-            check_cmd.add(src_compile_cmd.extra_argsfile.cmd_form)
-        check_cmd.add(cxx_cmd.argsfile.cmd_form)
-
-        # Add all precompile args except --precompile and -DFACEBOOK_CPP_HEADER_UNIT=1
-        check_cmd.add(src_compile_cmd.check_args)
-        actions.run(
-            [
-                toolchain.internal_tools.stderr_to_file,
-                cmd_args(diagnostics.as_output(), format = "--out={}"),
-                check_cmd,
-            ],
-            category = "check",
-            identifier = identifier + " (header-unit)",
-            allow_cache_upload = cxx_cmd.allow_cache_upload,
-            low_pass_filter = False,
-        )
-
-    # Build the stub artifact using the stub_header_unit tool
-    stub_cmd = cmd_args(toolchain.internal_tools.stub_header_unit)
-    stub_cmd.add(cxx_cmd.base_compile_cmd)
-    if cxx_cmd.header_unit_stubs_argsfile:
-        stub_cmd.add(cmd_args(hidden = cxx_cmd.header_unit_stubs_argsfile.file))
-    stub_cmd.add(cxx_cmd.argsfile.cmd_form)
-    stub_cmd.add(src_compile_cmd.args)
-    stub_cmd.add("-o", stub.as_output())
-
-    actions.run(
-        stub_cmd,
-        category = "cxx_modules_precompile_stub",
-        identifier = identifier,
-        allow_cache_upload = cxx_cmd.allow_cache_upload,
+        allow_cache_upload = src_compile_cmd.cxx_compile_cmd.allow_cache_upload,
         low_pass_filter = False,
     )
 
     return HeaderUnit(
         name = _get_module_name(target_label, group_name),
         module = module,
-        stub = stub,
         include_dir = src_compile_cmd.src,
         import_include = _get_import_filename(target_label, group_name) if impl_params.export_header_unit == "preload" else None,
         clang_trace = clang_trace,
-        diagnostics = diagnostics,
     )
 
 def precompile_cxx(
         actions: AnalysisActions,
         target_label: Label,
         toolchain: CxxToolchainInfo,
+        cxx_platform_info: CxxPlatformInfo,
         impl_params: CxxRuleConstructorParams,
         preprocessors: list[CPreprocessor],
         header_preprocessor_info: CPreprocessorInfo) -> list[CPreprocessor]:
@@ -1377,6 +1003,7 @@ def precompile_cxx(
         argsfile = _mk_argsfiles(
             actions,
             target_label,
+            cxx_platform_info,
             impl_params,
             compiler_info,
             header_preprocessor_info,
@@ -1384,7 +1011,7 @@ def precompile_cxx(
             headers_tag,
             is_xcode_argsfile = False,
             is_precompile = True,
-            uses_content_based_paths = True,
+            uses_experimental_content_based_path_hashing = True,
             filename_prefix = "pre_",
         )
         header_units_argsfile = _mk_header_units_argsfile(
@@ -1392,25 +1019,14 @@ def precompile_cxx(
             compiler_info,
             header_preprocessor_info,
             ext,
-            has_content_based_path = True,
+            uses_experimental_content_based_path_hashing = True,
             filename_prefix = "pre_",
-            stub = False,
-        )
-        header_unit_stubs_argsfile = _mk_header_units_argsfile(
-            actions,
-            compiler_info,
-            header_preprocessor_info,
-            ext,
-            has_content_based_path = True,
-            filename_prefix = "pre_",
-            stub = True,
         )
         return CxxCompileCommand(
             base_compile_cmd = base_compile_cmd,
             argsfile = argsfile,
             xcode_argsfile = argsfile,  # Unused
             header_units_argsfile = header_units_argsfile,
-            header_unit_stubs_argsfile = header_unit_stubs_argsfile,
             headers_dep_files = None,
             compiler_type = compiler_info.compiler_type,
             category = "cxx_modules_precompile",
@@ -1472,9 +1088,10 @@ def cxx_objects_sub_targets(outs: list[CxxCompileOutput]) -> dict[str, list[Prov
             sub_targets["assembly"] = [DefaultInfo(obj.assembly)]
         if obj.preproc:
             sub_targets["preprocessed"] = [DefaultInfo(obj.preproc)]
-        if obj.dist_cuda:
-            sub_targets["nvcc-dag"] = [DefaultInfo(obj.dist_cuda.nvcc_dag)]
-            sub_targets["nvcc-env"] = [DefaultInfo(obj.dist_cuda.nvcc_env)]
+        if obj.nvcc_dag:
+            sub_targets["nvcc-dag"] = [DefaultInfo(obj.nvcc_dag)]
+        if obj.nvcc_env:
+            sub_targets["nvcc-env"] = [DefaultInfo(obj.nvcc_env)]
         objects_sub_targets[obj.object.short_path] = [DefaultInfo(
             obj.object,
             sub_targets = sub_targets,
@@ -1547,7 +1164,7 @@ def _get_compile_base(toolchain: CxxToolchainInfo, compiler_info: typing.Any, us
     """
     compiler = compiler_info.compiler_with_wrapper if compiler_info.compiler_with_wrapper and use_wrapper else compiler_info.compiler
 
-    if toolchain.remap_cwd and compiler_info.compiler_type in ["clang", "clang_windows", "clang_cl", "gcc"]:
+    if toolchain.remap_cwd and compiler_info.compiler_type in ["clang", "clang_windows", "clang_cl"]:
         return cmd_args(toolchain.internal_tools.remap_cwd, compiler)
     else:
         return cmd_args(compiler)
@@ -1659,7 +1276,7 @@ def _filter_precompile_args(args: list[typing.Any]) -> list[typing.Any]:
     )
 
 def _filter_precompile_argsfile_anon_impl(ctx: AnalysisContext):
-    argsfile = ctx.actions.declare_output("filtered_args", has_content_based_path = True)
+    argsfile = ctx.actions.declare_output("filtered_args")
     ctx.actions.run(
         [
             ctx.attrs._cxx_toolchain[CxxToolchainInfo].internal_tools.filter_argsfile,
@@ -1687,6 +1304,7 @@ _filter_precompile_argsfile_anon_rule = anon_rule(
 def _mk_argsfiles(
         actions: AnalysisActions,
         target_label: Label,
+        cxx_platform_info: CxxPlatformInfo,
         impl_params: CxxRuleConstructorParams,
         compiler_info: typing.Any,
         preprocessor: CPreprocessorInfo,
@@ -1695,7 +1313,7 @@ def _mk_argsfiles(
         is_xcode_argsfile: bool,
         is_precompile: bool = False,
         filename_prefix: str = "",
-        uses_content_based_paths: bool = False) -> CompileArgsfile:
+        uses_experimental_content_based_path_hashing: bool = False) -> CompileArgsfile:
     """
     Generate and return an {ext}.argsfile artifact and command args that utilize the argsfile.
     """
@@ -1717,7 +1335,7 @@ def _mk_argsfiles(
             filename,
             content,
             allow_args = True,
-            has_content_based_path = uses_content_based_paths,
+            uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing,
             use_dep_files_placeholder_for_content_based_paths = use_dep_files_placeholder_for_content_based_paths,
         )
         return argsfile
@@ -1746,7 +1364,6 @@ def _mk_argsfiles(
                 "src": compiler_info_argsfile,
                 "_cxx_toolchain": impl_params._cxx_toolchain,
             }).artifact("argsfile")
-            filtered_info_argsfile = actions.assert_has_content_based_path(filtered_info_argsfile)
 
             # TODO(nml): Currently we need to copy the output file so its content-based
             # path is the same across different configurations. We should move the whole
@@ -1756,7 +1373,7 @@ def _mk_argsfiles(
             compiler_info_argsfile = actions.copy_file(
                 filename_prefix + "filtered_toolchain_cxx_args",
                 filtered_info_argsfile,
-                has_content_based_path = True,
+                uses_experimental_content_based_path_hashing = True,
             )
 
         argsfiles.append(compiler_info_argsfile)
@@ -1828,10 +1445,14 @@ def _mk_argsfiles(
             # preprocessor
             impl_params.preprocessor_flags,
             cxx_by_language_ext(impl_params.lang_preprocessor_flags, ext.value),
+            cxx_by_platform(cxx_platform_info, impl_params.platform_preprocessor_flags),
+            cxx_by_platform(cxx_platform_info, cxx_by_language_ext(impl_params.lang_platform_preprocessor_flags, ext.value)),
             get_flags_for_compiler_type(compiler_info.compiler_type),
 
             # compiler
             cxx_by_language_ext(impl_params.lang_compiler_flags, ext.value),
+            cxx_by_platform(cxx_platform_info, impl_params.platform_compiler_flags),
+            cxx_by_platform(cxx_platform_info, cxx_by_language_ext(impl_params.lang_platform_compiler_flags, ext.value)),
 
             # ctx.attrs.compiler_flags need to come last to preserve buck1 ordering, this prevents compiler
             # flags ordering-dependent build errors
@@ -1868,15 +1489,6 @@ def _mk_argsfiles(
         # to avoid "argument too long" errors
         file_prefix_args = headers_tag.tag_artifacts(preprocessor.set.project_as_args("file_prefix_args"))
 
-        # -fcoverage-prefix-map is only supported by clang. Include coverage
-        # prefix args only for clang to avoid breaking non-clang compilers
-        # (e.g. GCC for CUDA) that receive flags from dependencies via the
-        # preprocessor set. Also exclude .cu files because nvcc does not
-        # understand -fcoverage-prefix-map even when its host compiler is clang.
-        if compiler_info.compiler_type == "clang" and ext.value != ".cu":
-            coverage_prefix_args = headers_tag.tag_artifacts(preprocessor.set.project_as_args("coverage_prefix_args"))
-            file_prefix_args = cmd_args(file_prefix_args, coverage_prefix_args)
-
         # filename example: .cpp.file_prefix_cxx_args
         file_prefix_args_filename = filename_prefix + "file_prefix_cxx_args"
         argsfiles.append(mk_argsfile(file_prefix_args_filename, file_prefix_args))
@@ -1900,7 +1512,7 @@ def _mk_argsfiles(
         file_args,
         allow_args = True,
         absolute = is_xcode_argsfile,
-        has_content_based_path = uses_content_based_paths,
+        uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing,
     )
 
     args = create_cmd_args(is_nasm, is_xcode_argsfile, args_list)
@@ -1925,8 +1537,7 @@ def _mk_header_units_argsfile(
         preprocessor: CPreprocessorInfo,
         ext: CxxExtension,
         filename_prefix: str = "",
-        has_content_based_path: bool = False,
-        stub: bool = False) -> CompileArgsfile | None:
+        uses_experimental_content_based_path_hashing: bool = False) -> CompileArgsfile | None:
     """
     Generate and return an argsfile artifact containing all header unit options, and
     command args that utilize the argsfile.
@@ -1940,7 +1551,7 @@ def _mk_header_units_argsfile(
     if not preprocessor.set.reduce("has_header_units_args"):
         return None
 
-    file_name = "{}.{}header_unit{}_args".format(ext.value, filename_prefix, "_stubs" if stub else "s")
+    file_name = "{}.{}header_units_args".format(ext.value, filename_prefix)
     args = cmd_args()
     args.add([
         # TODO(nml): We only support Clang 17+, which don't need/want the extra -f
@@ -1956,14 +1567,13 @@ def _mk_header_units_argsfile(
 
     # TODO(nml): Tag args with headers_tag.tag_artifacts() once -MD -MF reports correct
     # usage of PCMs. See T225373444 and _mk_header_units_argsfile() below.
-    projection_name = "header_unit_stubs_args" if stub else "header_units_args"
-    args.add(preprocessor.set.project_as_args(projection_name))
+    args.add(preprocessor.set.project_as_args("header_units_args"))
     file_args = cmd_args(args, quote = "shell")
     argsfile, _ = actions.write(
         file_name,
         file_args,
         allow_args = True,
-        has_content_based_path = has_content_based_path,
+        uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing,
     )
     cmd_form = cmd_args(argsfile, format = "@{}", hidden = file_args)
 
@@ -1991,6 +1601,7 @@ def _generate_base_compile_command(
         actions: AnalysisActions,
         target_label: Label,
         toolchain: CxxToolchainInfo,
+        cxx_platform_info: CxxPlatformInfo,
         impl_params: CxxRuleConstructorParams,
         pre: CPreprocessorInfo,
         headers_tag: ArtifactTag,
@@ -2022,6 +1633,7 @@ def _generate_base_compile_command(
         return _mk_argsfiles(
             actions,
             target_label,
+            cxx_platform_info,
             impl_params,
             compiler_info,
             pre,
@@ -2029,7 +1641,7 @@ def _generate_base_compile_command(
             headers_tag,
             is_precompile = False,
             filename_prefix = filename_prefix,
-            uses_content_based_paths = not is_xcode_argsfile,
+            uses_experimental_content_based_path_hashing = not is_xcode_argsfile,
             is_xcode_argsfile = is_xcode_argsfile,
         )
 
@@ -2042,18 +1654,7 @@ def _generate_base_compile_command(
         pre,
         ext,
         filename_prefix,
-        has_content_based_path = True,
-        stub = False,
-    )
-
-    header_unit_stubs_argsfile = _mk_header_units_argsfile(
-        actions,
-        compiler_info,
-        pre,
-        ext,
-        filename_prefix,
-        has_content_based_path = True,
-        stub = True,
+        uses_experimental_content_based_path_hashing = True,
     )
 
     allow_content_based_paths = bool(compiler_info.supports_content_based_paths and impl_params.use_content_based_paths)
@@ -2062,7 +1663,6 @@ def _generate_base_compile_command(
         argsfile = argsfile,
         xcode_argsfile = xcode_argsfile,
         header_units_argsfile = header_units_argsfile,
-        header_unit_stubs_argsfile = header_unit_stubs_argsfile,
         headers_dep_files = headers_dep_files,
         compiler_type = compiler_info.compiler_type,
         category = category,
@@ -2090,43 +1690,3 @@ def _get_use_pch_args(
         ))
 
     return pch_args
-
-def _declare_clang_trace_output(
-        toolchain: CxxToolchainInfo,
-        compiler_type: str,
-        actions: AnalysisActions,
-        filename_base: str,
-        content_based: bool) -> Artifact | None:
-    """
-    Declares an output artifact for clang trace JSON file.
-    """
-    if toolchain.clang_trace and compiler_type == "clang":
-        return actions.declare_output(
-            paths.join("__objects__", "{}.json".format(filename_base)),
-            has_content_based_path = content_based,
-        )
-    return None
-
-def _declare_assembly(
-        actions: AnalysisActions,
-        compiler_type: str,
-        object_format: CxxObjectFormat,
-        filename_base: str,
-        content_based: bool) -> Artifact | None:
-    """
-    Declares an output artifact for assembly or LLVM IR output file.
-    Returns None for compilers that don't support the -S flag.
-    """
-    if compiler_type not in ["clang", "gcc"]:
-        return None
-
-    # Generate assembler or llvm bitcode output file
-    assembly_extension = "s"
-    if compiler_type == "clang" and object_format == CxxObjectFormat("bitcode"):
-        assembly_extension = "ll"
-
-    return actions.declare_output(
-        "__assembly__",
-        "{}.{}".format(filename_base, assembly_extension),
-        has_content_based_path = content_based,
-    )

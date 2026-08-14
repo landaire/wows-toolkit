@@ -27,8 +27,6 @@ import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.logging.Level;
 import javax.annotation.Nullable;
 import junit.framework.TestCase;
@@ -94,17 +92,6 @@ public final class JUnitRunner extends BaseRunner {
     Optional<TestResultsOutputSender> testResultsOutputSender =
         TestResultsOutputSender.fromDefaultEnvName();
 
-    // Shared watchdog executor for timeout enforcement (per-test and target-level)
-    ScheduledExecutorService watchdogExecutor = Executors.newScheduledThreadPool(1);
-
-    // Proactive timeout: capture thread dump before RE's SIGKILL
-    TpxTimeoutBufferManager tpxTimeoutBufferManager = null;
-    if (testResultsOutputSender.isPresent()
-        && "true".equals(System.getProperty("android.proactive.timeout.enabled"))) {
-      tpxTimeoutBufferManager =
-          TpxTimeoutBufferManager.create(testResultsOutputSender.get(), watchdogExecutor);
-    }
-
     for (String className : testClassNames) {
       Class<?> testClass = Class.forName(className);
       Class<?>[] testClasses;
@@ -122,35 +109,14 @@ public final class JUnitRunner extends BaseRunner {
         Request request = Request.runner(suite);
         request = request.filterWith(filter);
 
-        JUnitTpxStandardOutputListener tpxListener = null;
         if (testResultsOutputSender.isPresent()) {
-          tpxListener = new JUnitTpxStandardOutputListener(testResultsOutputSender.get());
+          JUnitTpxStandardOutputListener tpxListener =
+              new JUnitTpxStandardOutputListener(testResultsOutputSender.get());
           jUnitCore.addListener(tpxListener);
-
-          // Add Robolectric timeout enforcement listener if this is a Robolectric test
-          if (isRobolectricTest(suite)
-              && "true".equals(System.getProperty("android.per.test.timeout.enabled"))) {
-            RobolectricTimeoutEnforcingRunListener timeoutListener =
-                new RobolectricTimeoutEnforcingRunListener(
-                    testResultsOutputSender.get(), watchdogExecutor);
-            jUnitCore.addListener(timeoutListener);
-          }
         } else {
           jUnitCore.addListener(new TestListener(results, stdOutLogLevel, stdErrLogLevel));
         }
         jUnitCore.run(request);
-
-        // Report filtered-out tests (e.g., @Ignore) to TPX output so they're not retried
-        if (tpxListener != null) {
-          for (TestResult filteredTest : filter.filteredOut) {
-            if (filteredTest.type == ResultType.DISABLED) {
-              String testName =
-                  JUnitTpxStandardOutputListener.getFullTestName(
-                      filteredTest.testMethodName, filteredTest.testClassName);
-              tpxListener.reportOmittedTest(testName, "Test disabled (@Ignore annotation)");
-            }
-          }
-        }
       }
       // Combine the results with the tests we filtered out
       List<TestResult> actualResults = combineResults(results, filter.filteredOut);
@@ -167,11 +133,6 @@ public final class JUnitRunner extends BaseRunner {
                     className, stackTraceToString(result.failure));
                 System.exit(1);
               });
-    }
-
-    // All test classes completed normally — mark as completed so shutdown hook is a no-op
-    if (tpxTimeoutBufferManager != null) {
-      tpxTimeoutBufferManager.markCompleted();
     }
   }
 
@@ -220,6 +181,8 @@ public final class JUnitRunner extends BaseRunner {
 
   private static Class<?>[] collectTestClasses(Class<?> testClass) {
     ArrayList<Class<?>> classes = new ArrayList<>();
+    // Get all nested classes
+    Class<?>[] declaredClasses = testClass.getDeclaredClasses();
     for (Class<?> cls : testClass.getDeclaredClasses()) {
       int modifiers = cls.getModifiers();
       if (!Modifier.isStatic(modifiers)) {
@@ -352,70 +315,6 @@ public final class JUnitRunner extends BaseRunner {
         return jUnit4RunnerBuilder;
       }
     };
-  }
-
-  /**
-   * Checks if a test class is a Robolectric test by examining its runner.
-   *
-   * <p>This method handles two cases:
-   *
-   * <ol>
-   *   <li>Direct Robolectric runners: The runner class directly extends RobolectricTestRunner
-   *   <li>Suite-based Robolectric runners: The runner extends Suite (e.g.,
-   *       WhatsAppParameterizedRobolectricTestRunner) but its children extend RobolectricTestRunner
-   * </ol>
-   *
-   * @param runner The instantiated runner for this test class
-   */
-  private boolean isRobolectricTest(Runner runner) {
-    Class<?> runnerClass = runner.getClass();
-    try {
-      Class<?> robolectricTestRunner = Class.forName("org.robolectric.RobolectricTestRunner");
-
-      // Case 1: Runner directly extends RobolectricTestRunner
-      if (robolectricTestRunner.isAssignableFrom(runnerClass)) {
-        return true;
-      }
-
-      // Case 2: Runner extends Suite - check if children extend RobolectricTestRunner
-      Class<?> suiteClass = Class.forName("org.junit.runners.Suite");
-      if (suiteClass.isAssignableFrom(runnerClass)) {
-        return isRobolectricSuiteRunner(runner, robolectricTestRunner);
-      }
-    } catch (ClassNotFoundException e) {
-      // Not a Robolectric test
-    }
-    return false;
-  }
-
-  /**
-   * Checks if a Suite-based runner has children that extend RobolectricTestRunner.
-   *
-   * <p>This handles parameterized Robolectric test runners like
-   * WhatsAppParameterizedRobolectricTestRunner which extend Suite but have child runners that
-   * extend RobolectricTestRunner.
-   *
-   * @param runner The instantiated runner
-   * @param robolectricTestRunner The RobolectricTestRunner class to check against
-   */
-  private boolean isRobolectricSuiteRunner(Runner runner, Class<?> robolectricTestRunner) {
-    try {
-      // getChildren() is a protected method defined in ParentRunner
-      Class<?> parentRunner = Class.forName("org.junit.runners.ParentRunner");
-      Method getChildrenMethod = parentRunner.getDeclaredMethod("getChildren");
-      getChildrenMethod.setAccessible(true);
-      @SuppressWarnings("unchecked")
-      List<Runner> children = (List<Runner>) getChildrenMethod.invoke(runner);
-
-      // Check if first child extends RobolectricTestRunner (we only ever deal with one child)
-      if (!children.isEmpty()) {
-        Runner firstChild = children.get(0);
-        return robolectricTestRunner.isAssignableFrom(firstChild.getClass());
-      }
-    } catch (ReflectiveOperationException e) {
-      // Not a Robolectric suite runner
-    }
-    return false;
   }
 
   /**

@@ -22,7 +22,7 @@ def _analyze_llvm_lines(
         llvm_ir_noopt: Artifact) -> list[Provider] | None:
     if compile_ctx.toolchain_info.llvm_lines_tool == None:
         return None
-    llvm_lines = ctx.actions.declare_output("llvm_lines.txt", has_content_based_path = False)
+    llvm_lines = ctx.actions.declare_output("llvm_lines.txt")
     ctx.actions.run(
         cmd_args(
             compile_ctx.internal_tools_info.redirect_stdout,
@@ -39,7 +39,7 @@ def _analyze_llvm_lines(
 def _llvm_time_trace(
         compile_ctx: CompileContext,
         llvm_time_trace: RustcOutput) -> list[Provider]:
-    return _make_trace_providers(compile_ctx, llvm_time_trace.compile_output.profile_output)
+    return _make_trace_providers(compile_ctx, llvm_time_trace.profile_output)
 
 def _self_profile(
         ctx: AnalysisContext,
@@ -47,11 +47,11 @@ def _self_profile(
         self_profile: RustcOutput) -> list[Provider]:
     sub_targets = {}
 
-    profdata = ctx.actions.declare_output("self_profile.mm_profdata", has_content_based_path = False)
+    profdata = ctx.actions.declare_output("self_profile.mm_profdata")
     ctx.actions.run(
         cmd_args(
             compile_ctx.internal_tools_info.symlink_only_dir_entry,
-            self_profile.compile_output.profile_output,
+            self_profile.profile_output,
             profdata.as_output(),
         ),
         category = "find_profdata",
@@ -60,7 +60,7 @@ def _self_profile(
 
     crox = compile_ctx.toolchain_info.measureme_crox
     if crox != None:
-        proftrace = ctx.actions.declare_output("self_profile_trace/chrome_profiler.json", has_content_based_path = False)
+        proftrace = ctx.actions.declare_output("self_profile_trace/chrome_profiler.json")
         ctx.actions.run(
             # `crox` outputs to the cwd, so we have to do this dance
             cmd_args(

@@ -10,12 +10,10 @@
 
 package com.facebook.buck.jvm.cd.serialization;
 
-import com.facebook.infer.annotation.Nullsafe;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
 /** {@link Path} to protobuf serializer */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class PathSerializer {
 
   private PathSerializer() {}

@@ -13,7 +13,6 @@ package com.facebook.buck.android.resources.filter;
 import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.io.filesystem.impl.ProjectFilesystemUtils;
 import com.facebook.buck.io.pathformat.PathFormatter;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableSet;
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
@@ -24,7 +23,6 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collection;
 import java.util.regex.Pattern;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class DrawableFinder {
 
   private static final Pattern DRAWABLE_PATH_PATTERN =

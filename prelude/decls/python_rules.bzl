@@ -39,10 +39,11 @@ def _python_executable_attrs():
     python_executable_attrs.update({
         "anonymous_link_groups": attrs.bool(default = False),
         "binary_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
-        "bolt_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+        "bolt_flags": attrs.list(attrs.arg(), default = []),
         "bolt_profile": attrs.option(attrs.source(), default = None),
         "compiler_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
         "cxx_main": attrs.source(default = "prelude//python/tools:embedded_main.cpp"),
+        "distributed_thinlto_partial_split_dwarf": attrs.bool(default = False),
         "enable_distributed_thinlto": attrs.bool(default = False),
         "exe_allow_cache_upload": attrs.bool(
             default = False,
@@ -52,7 +53,6 @@ def _python_executable_attrs():
         ),
         "executable_name": attrs.option(attrs.string(), default = None),
         "inplace_build_args": attrs.list(attrs.arg(), default = []),
-        "interpreter_args": attrs.list(attrs.string(), default = []),
         "lazy_imports_analyzer": attrs.option(attrs.exec_dep(providers = [RunInfo]), default = None),
         "link_group": attrs.option(attrs.string(), default = None),
         "link_group_map": LINK_GROUP_MAP_ATTR,
@@ -97,22 +97,11 @@ def _python_executable_attrs():
         "runtime_bundle": attrs.option(attrs.dep(providers = [PythonRuntimeBundleInfo]), default = None),
         "runtime_bundle_full": attrs.bool(default = False),
         "runtime_env": attrs.option(attrs.dict(key = attrs.string(), value = attrs.string()), default = None),
-        "runtime_libs": attrs.dict(
-            key = attrs.string(),
-            value = attrs.dep(),
-            default = {},
-            doc = """
-                A dictionary mapping destination filenames to dependencies whose
-                default outputs will be installed into the runtime/lib directory
-                of the PAR file. Only relevant for native python.
-            """,
-        ),
         "standalone_build_args": attrs.list(attrs.arg(), default = []),
         "static_extension_finder": attrs.source(default = "prelude//python/tools:static_extension_finder.py"),
         "static_extension_utils": attrs.source(default = "prelude//python/tools:static_extension_utils.cpp"),
         "strip_libpar": attrs.enum(StripLibparStrategy, default = "none"),
         "strip_stapsdt": attrs.bool(default = False),
-        "supports_pyc_content_based_paths": attrs.bool(default = False),  # TODO(kasrag) Delete this when content-based paths are fulled rolled out
         "use_anon_target_for_analysis": attrs.bool(default = False),  # TODO(dcssiva) Delete this when we change the default analysis method to use anon targets
         "use_oss_python": attrs.bool(default = False),
         "use_rust_make_par": attrs.bool(default = False),  # TODO(rishiarora) Delete this when we change the default build style
@@ -218,10 +207,14 @@ cxx_python_extension = prelude_rule(
         python_common.base_module_arg() |
         cxx_common.srcs_arg() |
         cxx_common.deps_arg() |
+        cxx_common.platform_srcs_arg() |
         cxx_common.headers_arg() |
+        cxx_common.platform_headers_arg() |
         cxx_common.header_namespace_arg() |
         cxx_common.preprocessor_flags_arg() |
+        cxx_common.platform_preprocessor_flags_arg() |
         cxx_common.compiler_flags_arg() |
+        cxx_common.platform_compiler_flags_arg() |
         {
             "link_style": attrs.option(attrs.enum(LinkableDepType), default = None, doc = """
                 Determines whether to build and link this rule's dependencies statically or dynamically.
@@ -233,12 +226,13 @@ cxx_python_extension = prelude_rule(
         cxx_common.linker_extra_outputs_arg() |
         cxx_common.linker_flags_arg() |
         cxx_common.local_linker_flags_arg() |
+        cxx_common.platform_linker_flags_arg() |
         cxx_common.supports_stripping() |
-        cxx_common.default_deps_arg() |
         native_common.transformation_spec_arg() |
         third_party_common.create_third_party_build_root_attrs() |
         {
             "cxx_runtime_type": attrs.option(attrs.enum(CxxRuntimeType), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "default_platform": attrs.option(attrs.string(), default = None),
             "defaults": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
             "executable_name": attrs.option(attrs.string(), default = None),
@@ -246,10 +240,14 @@ cxx_python_extension = prelude_rule(
             "headers_as_raw_headers_mode": attrs.option(attrs.enum(HeadersAsRawHeadersMode), default = None),
             "include_directories": attrs.set(attrs.string(), sorted = True, default = []),
             "lang_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
+            "lang_platform_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
+            "lang_platform_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
             "lang_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
             "libraries": attrs.list(attrs.string(), default = []),
             "module_name": attrs.option(attrs.string(), default = None),
+            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
             "post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            "post_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
             "precompiled_header": attrs.option(attrs.source(), default = None),
             "prefix_header": attrs.option(attrs.source(), default = None),
             "raw_headers": attrs.set(attrs.source(), sorted = True, default = []),
@@ -352,6 +350,7 @@ prebuilt_python_library = prelude_rule(
         {
             "cxx_header_dirs": attrs.option(attrs.list(attrs.string()), default = None),
             "infer_cxx_header_dirs": attrs.bool(default = False),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "strip_soabi_tags": attrs.bool(
                 default = False,
                 doc = """
@@ -437,8 +436,12 @@ python_binary = prelude_rule(
         {
             "build_args": attrs.list(attrs.arg(), default = []),
             "compile": attrs.option(attrs.bool(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "dummy_omnibus": attrs.option(attrs.dep(), default = None),
             "extension": attrs.option(attrs.string(), default = None),
+            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
+            "platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
+            "platform_preload_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = False)), default = []),
             "repl_only_deps": attrs.list(attrs.dep(), default = []),
             "repl_main": attrs.option(attrs.string(), default = None),
             "prefer_stripped_native_objects": attrs.bool(default = False),
@@ -492,13 +495,17 @@ python_library = prelude_rule(
         # @unsorted-dict-items
         buck.labels_arg() |
         python_common.srcs_arg() |
+        python_common.platform_srcs_arg() |
         python_common.resources_arg() |
+        python_common.platform_resources_arg() |
         python_common.base_module_arg() |
         python_common.deps_arg() |
         python_common.exclude_deps_from_merged_linking_arg() |
         third_party_common.create_third_party_build_root_attrs() |
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "ignore_compile_errors": attrs.bool(default = False),
+            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
             "resources": attrs.named_set(attrs.one_of(attrs.dep(), attrs.source(allow_directory = True)), sorted = True, default = []),
             "type_stubs": attrs.named_set(attrs.source(), sorted = True, default = []),
             "versioned_resources": attrs.option(attrs.versioned(attrs.named_set(attrs.source(), sorted = True)), default = None),
@@ -508,7 +515,6 @@ python_library = prelude_rule(
             "_cxx_toolchain": toolchains_common.cxx(),
             "_python_internal_tools": python_common.internal_tools_arg(),
             "_python_toolchain": toolchains_common.python(),
-            "supports_pyc_content_based_paths": attrs.bool(default = False),
         } |
         buck.licenses_arg() |
         buck.contacts_arg() |
@@ -556,7 +562,9 @@ python_test = prelude_rule(
         {k: attrs.default_only(v) for k, v in cxx_rules.cxx_binary.attrs.items()} |
         buck.inject_test_env_arg() |
         python_common.srcs_arg() |
+        python_common.platform_srcs_arg() |
         python_common.resources_arg() |
+        python_common.platform_resources_arg() |
         python_common.base_module_arg() |
         python_common.exclude_deps_from_merged_linking_arg() |
         {
@@ -601,9 +609,13 @@ python_test = prelude_rule(
             "additional_coverage_targets": attrs.list(attrs.dep(), default = []),
             "build_args": attrs.list(attrs.arg(), default = []),
             "compile": attrs.option(attrs.bool(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "dummy_omnibus": attrs.option(attrs.dep(), default = None),
             "extension": attrs.option(attrs.string(), default = None),
             "needed_coverage": attrs.list(attrs.tuple(attrs.int(), attrs.dep(), attrs.option(attrs.string())), default = []),
+            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
+            "platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
+            "platform_preload_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = False)), default = []),
             "repl_only_deps": attrs.list(attrs.dep(), default = []),
             "repl_main": attrs.option(attrs.string(), default = None),
             "prefer_stripped_native_objects": attrs.bool(default = False),
@@ -632,6 +644,7 @@ python_test_runner = prelude_rule(
         # @unsorted-dict-items
         buck.labels_arg() |
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "main_module": attrs.string(default = ""),
             "src": attrs.source(),
         } |

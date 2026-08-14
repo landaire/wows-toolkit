@@ -57,23 +57,6 @@ load("@prelude//utils:label_provider.bzl", "LabelInfo")
 _JAVA_FILE_EXTENSION = [".java"]
 _SUPPORTED_ARCHIVE_SUFFIXES = [".src.zip", "-sources.jar"]
 
-_JAVAC_PLUGIN_JVM_ARGS = [
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.comp=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.file=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.jvm=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.main=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.model=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.parser=ALL-UNNAMED",
-    "-J--add-exports=jdk.compiler/com.sun.tools.javac.tree=ALL-UNNAMED",
-    "-J--add-opens=jdk.compiler/com.sun.tools.javac.api=ALL-UNNAMED",
-    "-J--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
-    "-J--add-opens=jdk.compiler/com.sun.tools.javac.jvm=ALL-UNNAMED",
-    "-J--add-opens=jdk.compiler/com.sun.tools.javac.processing=ALL-UNNAMED",
-    "-J--add-opens=jdk.compiler/com.sun.tools.javac.util=ALL-UNNAMED",
-]
-
 def _process_classpath(
         actions: AnalysisActions,
         classpath_args: cmd_args,
@@ -469,13 +452,6 @@ def _create_jar_artifact(
         args.append("--skip_javac_run")
     else:
         args += ["--javac_tool", javac_tool]
-        if plugin_params:
-            jvm_args_file = ctx.actions.write(
-                declare_prefixed_name("javac_jvm_args", actions_identifier),
-                _JAVAC_PLUGIN_JVM_ARGS,
-                has_content_based_path = use_content_based_paths,
-            )
-            args += ["--javac_jvm_args_file", jvm_args_file]
 
     if resources:
         resource_dir = _copy_resources(ctx.actions, actions_identifier, java_toolchain, label.package, resources, resources_root, use_content_based_paths)
@@ -519,7 +495,7 @@ def _create_jar_artifact(
     has_postprocessor = hasattr(ctx.attrs, "jar_postprocessor") and ctx.attrs.jar_postprocessor
     final_jar = postprocess_jar(ctx.actions, java_toolchain.zip_scrubber, ctx.attrs.jar_postprocessor[RunInfo], java_toolchain.postprocessor_runner[RunInfo], jar_out, actions_identifier) if has_postprocessor else jar_out
 
-    jar_snapshot = generate_java_classpath_snapshot(ctx.actions, java_toolchain.cp_snapshot_generator, ClasspathSnapshotGranularity("CLASS_MEMBER_LEVEL"), abi or final_jar, actions_identifier)
+    jar_snapshot = generate_java_classpath_snapshot(ctx.actions, java_toolchain.cp_snapshot_generator, ClasspathSnapshotGranularity("CLASS_MEMBER_LEVEL"), abi or final_jar, actions_identifier, getattr(ctx.attrs, "uses_content_based_path_for_jar_snapshot", False))
     return make_compile_outputs(
         full_library = final_jar,
         preprocessed_library = jar_out,
@@ -692,11 +668,11 @@ def build_java_library(
     if (
         common_compile_kwargs and
         srcs and
+        not java_toolchain.is_bootstrap_toolchain and
         not ctx.attrs._is_building_android_binary
     ):
         extra_sub_targets = _nullsafe_subtarget(ctx, extra_sub_targets, common_compile_kwargs)
-        if not java_toolchain.is_bootstrap_toolchain:
-            extra_sub_targets = _semanticdb_subtarget(ctx, extra_sub_targets, java_toolchain, common_compile_kwargs)
+        extra_sub_targets = _semanticdb_subtarget(ctx, extra_sub_targets, java_toolchain, common_compile_kwargs)
 
     gwt_output = None
     if (
@@ -704,7 +680,7 @@ def build_java_library(
         not java_toolchain.is_bootstrap_toolchain and
         not ctx.attrs._is_building_android_binary
     ):
-        gwt_output = ctx.actions.declare_output("gwt_module/{}.jar".format(ctx.label.name), has_content_based_path = False)
+        gwt_output = ctx.actions.declare_output("gwt_module/{}.jar".format(ctx.label.name))
         entries = []
 
         if srcs or resources:
@@ -737,7 +713,6 @@ def build_java_library(
         outputs = outputs,
         deps = ctx.attrs.deps + deps_query + ctx.attrs.exported_deps,
         generate_sources_jar = True,
-        class_to_src_map_deps = getattr(ctx.attrs, "class_to_src_map_deps", []),
     )
     extra_sub_targets = extra_sub_targets | class_to_src_map_sub_targets
 
@@ -812,7 +787,7 @@ def _semanticdb_subtarget(ctx: AnalysisContext, extra_sub_targets: dict, java_to
     if not sourceroot or not semanticdb_javac_plugin:
         return extra_sub_targets
     sourceroot_args = cmd_args(sourceroot, format = "-sourceroot:{}")
-    semanticdb_output = ctx.actions.declare_output("semanticdb", dir = True, has_content_based_path = False)
+    semanticdb_output = ctx.actions.declare_output("semanticdb", dir = True)
     targetroot_args = cmd_args(semanticdb_output.as_output(), format = "-targetroot:{}")
     semanticdb_plugin_params = create_plugin_params(
         ctx,

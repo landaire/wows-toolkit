@@ -27,6 +27,8 @@ APPLETVOS_ARM64 = "appletvos-arm64"
 
 APPLETVSIMULATOR_ARM64 = "appletvsimulator-arm64"
 
+APPLETVSIMULATOR_X86_64 = "appletvsimulator-x86_64"
+
 # iOS Platforms/Flavors
 
 IPHONEOS_ARM64 = "iphoneos-arm64"
@@ -77,6 +79,7 @@ ALL_APPLE_SDKS = tuple([getattr(apple_sdks, field) for field in dir(apple_sdks)]
 appletv_platforms = struct(
     APPLETVOS_ARM64 = APPLETVOS_ARM64,
     APPLETVSIMULATOR_ARM64 = APPLETVSIMULATOR_ARM64,
+    APPLETVSIMULATOR_X86_64 = APPLETVSIMULATOR_X86_64,
 )
 
 ios_platforms = struct(

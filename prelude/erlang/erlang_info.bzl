@@ -120,26 +120,8 @@ Tools = record(
     _tools_binaries = field(ErlangOTPBinariesInfo),
 )
 
-ErtsToolchainApplicationInfo = provider(
-    fields = {
-        "name": provider_field(str),
-        "version": provider_field(str),
-    },
-)
-
-ErtsToolchainInfo = provider(
-    fields = {
-        "applications": provider_field(list[ErtsToolchainApplicationInfo]),
-        "erts_version": provider_field(str),
-        "otp_no_dot_erlang_boot": provider_field(Artifact),
-        "otp_start_boot": provider_field(Artifact),
-        "output": provider_field(Artifact),
-    },
-)
-
 ErlangErrorHandlers = record(
     erlc = field(typing.Callable[[ActionErrorCtx], list[ActionSubError]]),
-    extract_otp_app = field(typing.Callable[[ActionErrorCtx], list[ActionSubError]]),
 )
 
 # toolchain provider
@@ -163,6 +145,8 @@ ErlangToolchainInfo = provider(
         "dependency_analyzer": provider_field(Tool),
         "dependency_finalizer": provider_field(Tool),
         "dependency_merger": provider_field(Tool),
+        # trampoline rerouting stdout to stderr
+        "erlc_trampoline": provider_field(Artifact),
         "escript_trampoline": provider_field(Artifact),
         # name to parse_transform artifacts mapping for core parse_transforms (that are always used) and
         # user defines ones
@@ -180,8 +164,8 @@ ErlangToolchainInfo = provider(
         "utility_modules": provider_field(Artifact),
         # env to be set for toolchain invocations
         "env": provider_field(dict[str, str]),
-        # Erlang Runtime System (ERTS) toolchain metadata
-        "erts_toolchain_info": provider_field(ErtsToolchainInfo),
+        # extracted erts from otp
+        "erts": provider_field(Artifact),
         # error handler
         "error_handler": provider_field(ErlangErrorHandlers),
     },

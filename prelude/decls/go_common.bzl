@@ -95,11 +95,29 @@ def _external_linker_flags_arg():
 """),
     }
 
-def _embed_srcs_arg():
+def _embedcfg_arg():
     return {
-        "embed_srcs": attrs.list(attrs.source(), default = [], doc = """
-    The set of files and directories to be embeded if match go:embed patters, e.g. `//go:embed *.txt`
+        "embedcfg": attrs.option(attrs.source(), default = None, doc = """
+    The embedcfg.json file used by compiler to embed files defined by `//go:embed` directive.
+     This generation of this file is included in the `go` toolkit.
+     For example:
 
+    ```
+    //go:embed *.txt
+    var fs embed.FS
+    ```
+    If the folder contains two files (file1.txt and file2.txt), the embedcfg.json is:
+
+    ```
+    {
+        "Patterns": {
+            "*.txt": ["file1.txt","file2.txt"]
+        },
+        "Files": {
+            "file1.txt": "",
+     "file2.txt": ""
+     }
+    }
     ```
 """),
     }
@@ -148,13 +166,6 @@ def _generate_exported_header():
 """),
     }
 
-def _coverage_enabled():
-    return {
-        "coverage_enabled": attrs.bool(default = True, doc = """
-    Enable test code coverage collection for this target.
-"""),
-    }
-
 go_common = struct(
     deps_arg = _deps_arg,
     srcs_arg = _srcs_arg,
@@ -166,12 +177,11 @@ go_common = struct(
     assembler_flags_arg = _assembler_flags_arg,
     linker_flags_arg = _linker_flags_arg,
     external_linker_flags_arg = _external_linker_flags_arg,
-    embed_srcs_arg = _embed_srcs_arg,
+    embedcfg_arg = _embedcfg_arg,
     cgo_enabled_arg = _cgo_enabled_arg,
     override_cgo_enabled_arg = _override_cgo_enabled_arg,
     build_tags_arg = _build_tags_arg,
     cxx_compiler_flags_arg = _cxx_compiler_flags_arg,
     cxx_preprocessor_flags_arg = _cxx_preprocessor_flags_arg,
     generate_exported_header = _generate_exported_header,
-    coverage_enabled_arg = _coverage_enabled,
 )

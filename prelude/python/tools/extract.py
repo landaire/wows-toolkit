@@ -26,9 +26,10 @@ import tarfile
 import tempfile
 import zipfile
 from pathlib import Path
+from typing import Optional
 
 
-def strip_soabi_tag(path: Path) -> Path | None:
+def strip_soabi_tag(path: Path) -> Optional[Path]:
     """
     Helper to strip any SOABI tag from the given extension path.  Returns `None`
     if no stripping is performed.

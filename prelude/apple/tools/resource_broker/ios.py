@@ -15,6 +15,7 @@ from typing import Optional
 from packaging.version import Version
 
 from .simctl_runtime import list_runtimes, XCSimRuntime
+
 from .simulator import (
     managed_simulators_list_from_stdout,
     Simulator,
@@ -22,7 +23,9 @@ from .simulator import (
     SimulatorState,
     SimulatorType,
 )
+
 from .timeouts import SIMULATOR_BOOT_TIMEOUT
+
 from .utils import execute_generic_text_producing_command
 
 
@@ -128,7 +131,7 @@ def _select_simulator_spec(
             runtime=runtime, simulator_type=simulator_type, device=device
         )
         if device_type:
-            return SimulatorSpec(device_type, f"{runtime.platform} {runtime.version}")
+            return SimulatorSpec(device_type, runtime.name)
     raise RuntimeError(
         "No Xcode simctl compatible os runtime and device available. Try to `sudo xcode-select -s <path_to_xcode>` and *open Xcode to install all required components*."
     )

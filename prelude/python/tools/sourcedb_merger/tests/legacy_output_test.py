@@ -10,7 +10,7 @@
 
 
 import unittest
-from collections.abc import Mapping
+from typing import Mapping
 
 # pyre-fixme[21]: Could not find module `sourcedb_merger.inputs`.
 from sourcedb_merger.inputs import PartialBuildMap, Target, TargetEntry

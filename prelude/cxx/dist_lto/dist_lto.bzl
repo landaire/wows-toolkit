@@ -21,7 +21,6 @@ load("@prelude//cxx:cxx_context.bzl", "get_cxx_toolchain_info")
 load(
     "@prelude//cxx:cxx_link_utility.bzl",
     "cxx_link_cmd_parts",
-    "gc_sections_args",
     "linker_map_args",
 )
 load("@prelude//cxx:cxx_toolchain_types.bzl", "LinkerType")
@@ -53,7 +52,7 @@ _BitcodeLinkData = record(
     bc_file = Artifact,
     plan = Artifact,
     opt_object = Artifact,
-    external_debug_info = Artifact | None,
+    external_debug_info = Artifact,
 )
 
 _ArchiveLinkData = record(
@@ -67,8 +66,6 @@ _ArchiveLinkData = record(
     plan = Artifact,
     link_whole = bool,
     prepend = bool,
-    # Directory for .dwo files when split_debug_mode is "split".
-    dwo_dir = Artifact | None,
 )
 
 _DataType = enum(
@@ -93,7 +90,6 @@ def cxx_gnu_dist_link(
         output: Artifact,
         opts: LinkOptions,
         linker_map: Artifact | None = None,
-        gc_sections_output: Artifact | None = None,
         # This action will only happen if split_dwarf is enabled via the toolchain.
         dwp_tool_available: bool = True,
         executable_link: bool = True) -> LinkedObject:
@@ -170,7 +166,6 @@ def cxx_gnu_dist_link(
     lto_opt = cxx_toolchain.internal_tools.dist_lto.opt[LinkerType("gnu")]
     lto_prepare = cxx_toolchain.internal_tools.dist_lto.prepare[LinkerType("gnu")]
     lto_copy = cxx_toolchain.internal_tools.dist_lto.copy
-    split_debug_mode = cxx_toolchain.split_debug_mode
 
     PREPEND_ARCHIVE_NAMES = [
         # T130644072: If linked with `--whole-archive`, Clang builtins must be at the
@@ -229,14 +224,10 @@ def cxx_gnu_dist_link(
                 add_linkable(idx, linkable)
                 for obj in linkable.objects:
                     name = name_for_obj(link_name, obj)
-                    bc_output = ctx.actions.declare_output(name + ".thinlto.bc", has_content_based_path = False)
-                    plan_output = ctx.actions.declare_output(name + ".opt.plan", has_content_based_path = False)
-                    opt_output = ctx.actions.declare_output(name + ".opt.o", has_content_based_path = False)
-                    external_debug_info = None
-                    if split_debug_mode == SplitDebugMode("split"):
-                        external_debug_info = ctx.actions.declare_output(name + ".opt.dwo", has_content_based_path = False)
-                    elif split_debug_mode == SplitDebugMode("single"):
-                        external_debug_info = opt_output
+                    bc_output = ctx.actions.declare_output(name + ".thinlto.bc")
+                    plan_output = ctx.actions.declare_output(name + ".opt.plan")
+                    opt_output = ctx.actions.declare_output(name + ".opt.o")
+                    opt_dwo_output = ctx.actions.declare_output(name + ".opt.dwo")
 
                     data = _IndexLinkData(
                         data_type = _DataType("bitcode"),
@@ -246,7 +237,7 @@ def cxx_gnu_dist_link(
                             bc_file = bc_output,
                             plan = plan_output,
                             opt_object = opt_output,
-                            external_debug_info = external_debug_info,
+                            external_debug_info = opt_dwo_output,
                         ),
                     )
                     index_link_data.append(data)
@@ -260,15 +251,12 @@ def cxx_gnu_dist_link(
                 # actions on the objects that the manifest reports.
 
                 name = name_for_obj(link_name, linkable.archive.artifact)
-                archive_manifest = ctx.actions.declare_output("%s/%s/manifest.json" % (prepare_cat, name), has_content_based_path = False)
-                archive_objects = ctx.actions.declare_output("%s/%s/objects" % (prepare_cat, name), dir = True, has_content_based_path = False)
-                archive_opt_objects = ctx.actions.declare_output("%s/%s/opt_objects" % (prepare_cat, name), dir = True, has_content_based_path = False)
-                archive_indexes = ctx.actions.declare_output("%s/%s/indexes" % (prepare_cat, name), dir = True, has_content_based_path = False)
-                archive_plan = ctx.actions.declare_output("%s/%s/plan.json" % (prepare_cat, name), has_content_based_path = False)
-                archive_opt_manifest = ctx.actions.declare_output("%s/%s/opt_objects.manifest" % (prepare_cat, name), has_content_based_path = False)
-                archive_dwo_dir = None
-                if split_debug_mode == SplitDebugMode("split"):
-                    archive_dwo_dir = ctx.actions.declare_output("%s/%s/dwo" % (prepare_cat, name), dir = True, has_content_based_path = False)
+                archive_manifest = ctx.actions.declare_output("%s/%s/manifest.json" % (prepare_cat, name))
+                archive_objects = ctx.actions.declare_output("%s/%s/objects" % (prepare_cat, name), dir = True)
+                archive_opt_objects = ctx.actions.declare_output("%s/%s/opt_objects" % (prepare_cat, name), dir = True)
+                archive_indexes = ctx.actions.declare_output("%s/%s/indexes" % (prepare_cat, name), dir = True)
+                archive_plan = ctx.actions.declare_output("%s/%s/plan.json" % (prepare_cat, name))
+                archive_opt_manifest = ctx.actions.declare_output("%s/%s/opt_objects.manifest" % (prepare_cat, name))
                 prepare_args = cmd_args([
                     lto_prepare,
                     "--manifest-out",
@@ -296,7 +284,6 @@ def cxx_gnu_dist_link(
                         plan = archive_plan,
                         link_whole = linkable.link_whole,
                         prepend = link_name in PREPEND_ARCHIVE_NAMES,
-                        dwo_dir = archive_dwo_dir,
                     ),
                 )
                 index_link_data.append(data)
@@ -307,11 +294,11 @@ def cxx_gnu_dist_link(
                 add_linkable(idx, linkable)
                 index_link_data.append(None)
 
-    index_argsfile_out = ctx.actions.declare_output(output.short_path + ".thinlto_index_argsfile", has_content_based_path = False)
-    final_link_index = ctx.actions.declare_output(output.short_path + ".final_link_index", has_content_based_path = False)
-    pre_flags_argsfile = ctx.actions.declare_output(output.short_path + ".thinlto_pre_flags_argsfile", has_content_based_path = False)
-    linkables_argsfile = ctx.actions.declare_output(output.short_path + ".thinlto_linkables_argsfile", has_content_based_path = False)
-    post_flags_argsfile = ctx.actions.declare_output(output.short_path + ".thinlto_post_flags_argsfile", has_content_based_path = False)
+    index_argsfile_out = ctx.actions.declare_output(output.short_path + ".thinlto_index_argsfile")
+    final_link_index = ctx.actions.declare_output(output.short_path + ".final_link_index")
+    pre_flags_argsfile = ctx.actions.declare_output(output.short_path + ".thinlto_pre_flags_argsfile")
+    linkables_argsfile = ctx.actions.declare_output(output.short_path + ".thinlto_linkables_argsfile")
+    post_flags_argsfile = ctx.actions.declare_output(output.short_path + ".thinlto_post_flags_argsfile")
 
     def dynamic_plan(link_plan: Artifact, index_argsfile_out: Artifact, final_link_index: Artifact, pre_flags_argsfile: Artifact, linkables_argsfile: Artifact, post_flags_argsfile: Artifact) -> None:
         def plan(ctx: AnalysisContext, artifacts, outputs):
@@ -421,7 +408,7 @@ def cxx_gnu_dist_link(
             )
 
             index_cat = make_cat("thin_lto_index")
-            index_file_out = ctx.actions.declare_output(make_id(index_cat) + "/index", has_content_based_path = False)
+            index_file_out = ctx.actions.declare_output(make_id(index_cat) + "/index")
             index_out_dir = cmd_args(index_file_out.as_output(), parent = 1)
 
             index_cmd_parts = cxx_link_cmd_parts(cxx_toolchain, executable_link)
@@ -506,7 +493,7 @@ def cxx_gnu_dist_link(
         plan_outputs.extend([link_plan.as_output(), index_argsfile_out.as_output(), final_link_index.as_output(), pre_flags_argsfile.as_output(), linkables_argsfile.as_output(), post_flags_argsfile.as_output()])
         ctx.actions.dynamic_output(dynamic = plan_inputs, inputs = [], outputs = plan_outputs, f = plan)
 
-    link_plan_out = ctx.actions.declare_output(output.short_path + ".link-plan.json", has_content_based_path = False)
+    link_plan_out = ctx.actions.declare_output(output.short_path + ".link-plan.json")
     dynamic_plan(link_plan = link_plan_out, index_argsfile_out = index_argsfile_out, final_link_index = final_link_index, pre_flags_argsfile = pre_flags_argsfile, linkables_argsfile = linkables_argsfile, post_flags_argsfile = post_flags_argsfile)
 
     def prepare_opt_flags(link_infos: list[LinkInfo]) -> cmd_args:
@@ -526,7 +513,7 @@ def cxx_gnu_dist_link(
     # Create an argsfile and dump all the flags to be processed later by lto_opt.
     # These flags are common to all opt actions, we don't need an argfile for each action, one
     # for the entire link unit will do.
-    opt_argsfile = ctx.actions.declare_output(output.short_path + ".lto_opt_argsfile", has_content_based_path = False)
+    opt_argsfile = ctx.actions.declare_output(output.short_path + ".lto_opt_argsfile")
     ctx.actions.write(opt_argsfile.as_output(), opt_common_flags, allow_args = True)
 
     # We declare a separate dynamic_output for every object file. It would
@@ -534,7 +521,7 @@ def cxx_gnu_dist_link(
     # opt actions, but an action needs to re-run whenever the analysis that
     # produced it re-runs. And so, with a single dynamic_output, we'd need to
     # re-run all actions when any of the plans changed.
-    def dynamic_optimize(name: str, initial_object: Artifact, bc_file: Artifact, plan: Artifact, opt_object: Artifact, external_debug_info: Artifact | None):
+    def dynamic_optimize(name: str, initial_object: Artifact, bc_file: Artifact, plan: Artifact, opt_object: Artifact, external_debug_info: Artifact):
         def optimize_object(ctx: AnalysisContext, artifacts, outputs):
             plan_json = artifacts[plan].read_json()
 
@@ -543,13 +530,13 @@ def cxx_gnu_dist_link(
             # need to bind the artifact.
             if not plan_json["is_bc"]:
                 ctx.actions.write(outputs[opt_object], "")
-                if external_debug_info != None and external_debug_info != opt_object:
-                    ctx.actions.write(outputs[external_debug_info], "")
+                ctx.actions.write(outputs[external_debug_info], "")
                 return
 
             opt_cmd = cmd_args(lto_opt)
             opt_cmd.add("--out", outputs[opt_object].as_output())
             opt_cmd.add("--input", initial_object)
+            opt_cmd.add("--create-external-debug-info", outputs[external_debug_info].as_output())
             opt_cmd.add("--index", bc_file)
 
             # When invoking opt and llc via clang, clang will not respect IR metadata to generate
@@ -560,13 +547,12 @@ def cxx_gnu_dist_link(
             # Local thinlto generates .dwo files by default. For distributed thinlto, however, we
             # want to keep all dwo debug info in the object file to reduce the number of files to
             # materialize.
-            if split_debug_mode == SplitDebugMode("none"):
+            if cxx_toolchain.split_debug_mode == SplitDebugMode("none"):
                 opt_cmd.add("--split-dwarf=none")
-            elif split_debug_mode == SplitDebugMode("single"):
+            elif cxx_toolchain.split_debug_mode == SplitDebugMode("single") or getattr(ctx.attrs, "distributed_thinlto_partial_split_dwarf", False):
                 opt_cmd.add("--split-dwarf=single")
-            elif split_debug_mode == SplitDebugMode("split"):
+            elif cxx_toolchain.split_debug_mode == SplitDebugMode("split"):
                 opt_cmd.add("--split-dwarf=split")
-                opt_cmd.add("--dwo", outputs[external_debug_info].as_output())
 
             opt_cmd.add(cmd_args(hidden = opt_common_flags))
             opt_cmd.add("--args", opt_argsfile)
@@ -579,10 +565,7 @@ def cxx_gnu_dist_link(
             opt_cmd.add(cmd_args(hidden = imports + archives))
             ctx.actions.run(opt_cmd, category = make_cat("thin_lto_opt_object"), identifier = name)
 
-        outputs = [opt_object.as_output()]
-        if external_debug_info != None:
-            outputs.append(external_debug_info.as_output())
-        ctx.actions.dynamic_output(dynamic = [plan], inputs = [], outputs = outputs, f = optimize_object)
+        ctx.actions.dynamic_output(dynamic = [plan], inputs = [], outputs = [opt_object.as_output(), external_debug_info.as_output()], f = optimize_object)
 
     def dynamic_optimize_archive(archive: _ArchiveLinkData):
         def optimize_archive(ctx: AnalysisContext, artifacts, outputs):
@@ -591,18 +574,15 @@ def cxx_gnu_dist_link(
                 # Nothing in this directory was lto-able; let's just copy the archive.
                 ctx.actions.copy_file(outputs[archive.opt_objects_dir], archive.objects_dir)
                 ctx.actions.write(outputs[archive.opt_manifest], "")
-                if archive.dwo_dir != None:
-                    ctx.actions.symlinked_dir(outputs[archive.dwo_dir], {})
                 return
 
             output_dir = {}
             output_manifest = cmd_args()
-            dwo_dir = {}
             for entry in plan_json["objects"]:
                 base_dir = plan_json["base_dir"]
                 source_path = paths.relativize(entry["path"], base_dir)
                 if not entry["is_bc"]:
-                    opt_object = ctx.actions.declare_output("%s/%s" % (make_cat("thin_lto_opt_copy"), source_path), has_content_based_path = False)
+                    opt_object = ctx.actions.declare_output("%s/%s" % (make_cat("thin_lto_opt_copy"), source_path))
                     output_manifest.add(opt_object)
                     copy_cmd = cmd_args([
                         lto_copy,
@@ -615,25 +595,20 @@ def cxx_gnu_dist_link(
                     output_dir[source_path] = opt_object
                     continue
 
-                opt_object = ctx.actions.declare_output("%s/%s" % (make_cat("thin_lto_opt_archive"), source_path), has_content_based_path = False)
+                opt_object = ctx.actions.declare_output("%s/%s" % (make_cat("thin_lto_opt_archive"), source_path))
                 output_manifest.add(opt_object)
                 output_dir[source_path] = opt_object
-
                 opt_cmd = cmd_args(lto_opt)
                 opt_cmd.add("--out", opt_object.as_output())
                 opt_cmd.add("--input", entry["path"])
                 opt_cmd.add("--index", entry["bitcode_file"])
 
-                if split_debug_mode == SplitDebugMode("none"):
+                if cxx_toolchain.split_debug_mode == SplitDebugMode("none") or getattr(ctx.attrs, "distributed_thinlto_partial_split_dwarf", False):
                     opt_cmd.add("--split-dwarf=none")
-                elif split_debug_mode == SplitDebugMode("single"):
+                elif cxx_toolchain.split_debug_mode == SplitDebugMode("single"):
                     opt_cmd.add("--split-dwarf=single")
-                elif split_debug_mode == SplitDebugMode("split"):
+                elif cxx_toolchain.split_debug_mode == SplitDebugMode("split"):
                     opt_cmd.add("--split-dwarf=split")
-                    dwo_path = source_path.removesuffix(".o") + ".dwo"
-                    dwo_output = ctx.actions.declare_output("%s/%s" % (make_cat("thin_lto_opt_archive"), dwo_path), has_content_based_path = False)
-                    dwo_dir[dwo_path] = dwo_output
-                    opt_cmd.add("--dwo", dwo_output.as_output())
 
                 opt_cmd.add(cmd_args(hidden = opt_common_flags))
                 opt_cmd.add("--args", opt_argsfile)
@@ -650,13 +625,9 @@ def cxx_gnu_dist_link(
 
             ctx.actions.symlinked_dir(outputs[archive.opt_objects_dir], output_dir)
             ctx.actions.write(outputs[archive.opt_manifest], output_manifest, allow_args = True)
-            if archive.dwo_dir != None:
-                ctx.actions.symlinked_dir(outputs[archive.dwo_dir], dwo_dir)
 
         archive_opt_inputs = [archive.plan]
         archive_opt_outputs = [archive.opt_objects_dir.as_output(), archive.opt_manifest.as_output()]
-        if archive.dwo_dir != None:
-            archive_opt_outputs.append(archive.dwo_dir.as_output())
         ctx.actions.dynamic_output(dynamic = archive_opt_inputs, inputs = [], outputs = archive_opt_outputs, f = optimize_archive)
 
     objects_external_debug_info = []
@@ -665,7 +636,6 @@ def cxx_gnu_dist_link(
             continue
         link_data = artifact.link_data
         if artifact.data_type == _DataType("bitcode"):
-            external_debug_info = link_data.external_debug_info
             dynamic_optimize(
                 name = link_data.name,
                 initial_object = link_data.initial_object,
@@ -674,18 +644,9 @@ def cxx_gnu_dist_link(
                 opt_object = link_data.opt_object,
                 external_debug_info = link_data.external_debug_info,
             )
-
-            if external_debug_info != None:
-                objects_external_debug_info.append(external_debug_info)
+            objects_external_debug_info.append(link_data.external_debug_info)
         elif artifact.data_type == _DataType("archive"):
             dynamic_optimize_archive(link_data)
-
-            # For split mode, add the dwo directory to external_debug_info.
-            # For single mode, the debug info is embedded in the opt_objects.
-            if split_debug_mode == SplitDebugMode("split") and link_data.dwo_dir != None:
-                objects_external_debug_info.append(link_data.dwo_dir)
-            elif split_debug_mode == SplitDebugMode("single"):
-                objects_external_debug_info.append(link_data.opt_objects_dir)
 
     def thin_lto_final_link(ctx: AnalysisContext, artifacts, outputs):
         plan = artifacts[link_plan_out].read_json()
@@ -720,8 +681,6 @@ def cxx_gnu_dist_link(
         link_cmd.add("-o", outputs[output].as_output())
         if linker_map:
             link_cmd.add(linker_map_args(cxx_toolchain, outputs[linker_map].as_output()).flags)
-        if gc_sections_output:
-            link_cmd.add(gc_sections_args(cxx_toolchain, outputs[gc_sections_output].as_output()).flags)
         link_cmd_hidden.extend([
             opt_objects,
         ])
@@ -734,7 +693,7 @@ def cxx_gnu_dist_link(
     ctx.actions.dynamic_output(
         dynamic = final_link_inputs,
         inputs = [],
-        outputs = [output.as_output()] + ([linker_map.as_output()] if linker_map else []) + ([gc_sections_output.as_output()] if gc_sections_output else []),
+        outputs = [output.as_output()] + ([linker_map.as_output()] if linker_map else []),
         f = thin_lto_final_link,
     )
 
@@ -757,7 +716,7 @@ def cxx_gnu_dist_link(
         split_debug_output = None
 
     if dwp_tool_available:
-        dwp_output = ctx.actions.declare_output(output.short_path.removesuffix("-wrapper") + ".dwp", has_content_based_path = False)
+        dwp_output = ctx.actions.declare_output(output.short_path.removesuffix("-wrapper") + ".dwp")
 
         def dynamic_run_dwp_action(ctx: AnalysisContext, artifacts, outputs):
             plan = artifacts[link_plan_out].read_json()
@@ -778,13 +737,11 @@ def cxx_gnu_dist_link(
                         referenced_objects.append(link_data.initial_object)
                 elif artifact.data_type == _DataType("archive"):
                     referenced_objects.append(link_data.opt_objects_dir)
-                    if link_data.dwo_dir != None:
-                        referenced_objects.append(link_data.dwo_dir)
 
             if split_debug_output:
                 referenced_objects += [split_debug_output]
             else:
-                referenced_objects += project_artifacts(ctx.actions, external_debug_info)
+                referenced_objects += project_artifacts(ctx.actions, [external_debug_info])
 
             run_dwp_action(
                 ctx = ctx,

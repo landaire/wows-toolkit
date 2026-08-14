@@ -11,8 +11,7 @@ load("@prelude//:validation_deps.bzl", "get_validation_deps_outputs")
 load("@prelude//apple:apple_library.bzl", "AppleLibraryForDistributionInfo")
 load("@prelude//apple:apple_library_types.bzl", "AppleLibraryInfo")
 load("@prelude//apple:apple_toolchain_types.bzl", "AppleToolchainInfo", "AppleToolsInfo")
-load("@prelude//cxx:cxx_context.bzl", "get_cxx_toolchain_info")
-load("@prelude//linking:link_info.bzl", "LinkStrategy", "get_link_args_for_strategy", "unpack_link_args_object_files_and_lazy_archives_only")
+load("@prelude//linking:link_info.bzl", "LinkStrategy", "get_link_args_for_strategy", "unpack_link_args")
 load("@prelude//linking:linkables.bzl", "linkables")
 load("@prelude//utils:arglike.bzl", "ArgLike")
 
@@ -20,7 +19,7 @@ def apple_static_archive_impl(ctx: AnalysisContext) -> list[Provider]:
     libtool = ctx.attrs._apple_toolchain[AppleToolchainInfo].libtool
     static_archive_linker = ctx.attrs._apple_tools[AppleToolsInfo].static_archive_linker
     archive_name = ctx.attrs.name if ctx.attrs.archive_name == None else ctx.attrs.archive_name
-    output = ctx.actions.declare_output(archive_name, has_content_based_path = False)
+    output = ctx.actions.declare_output(archive_name)
 
     link_args = _get_static_link_args(ctx)
     validation_deps_outputs = get_validation_deps_outputs(ctx)
@@ -97,14 +96,12 @@ def _get_static_link_args(ctx: AnalysisContext) -> list[ArgLike]:
     args = dedupe(args)
 
     transitive_link_args = get_link_args_for_strategy(
-        ctx.actions,
-        ctx.label,
-        get_cxx_toolchain_info(ctx).linker_info,
+        ctx,
         [x.merged_link_info for x in linkables(ctx.attrs.deps)],
         LinkStrategy("static"),
         prefer_stripped = False,
         transformation_spec_context = None,
     )
-    args.append(unpack_link_args_object_files_and_lazy_archives_only(transitive_link_args))
+    args.append(unpack_link_args(transitive_link_args))
 
     return args

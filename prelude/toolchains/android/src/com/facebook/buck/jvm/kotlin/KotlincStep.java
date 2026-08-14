@@ -50,6 +50,8 @@ public class KotlincStep implements IsolatedStep {
 
   private static final String CLASSPATH_FLAG = "-classpath";
   private static final String DESTINATION_FLAG = "-d";
+  private static final String INCLUDE_RUNTIME_FLAG = "-include-runtime";
+  private static final String EXCLUDE_REFLECT = "-no-reflect";
   private static final String X_PLUGIN_ARG = "-Xplugin=";
   private static final String PLUGIN = "-P";
 
@@ -210,7 +212,10 @@ public class KotlincStep implements IsolatedStep {
         returnedStderr = Optional.empty();
       }
 
-      if (declaredDepsBuildResult == StepExecutionResults.SUCCESS_EXIT_CODE && trackClassUsage) {
+      // TODO: add used-classes support for Kosabi 2.0 T232722163
+      if (declaredDepsBuildResult == StepExecutionResults.SUCCESS_EXIT_CODE
+          && trackClassUsage
+          && !shouldKosabiJvmAbiGenUseK2) {
         AbsPath ruleCellRoot = context.getRuleCellRoot();
         RelPath outputJarDirPath = outputPaths.getOutputJarDirPath();
         ClassUsageFileWriterFactory.create(kotlincMode)
@@ -258,7 +263,7 @@ public class KotlincStep implements IsolatedStep {
     }
 
     if (invokingRule.isSourceOnlyAbi()) {
-      configureSourceOnlyOptions(builder, languageVersion, ruleCellRoot);
+      configureSourceOnlyOptions(builder, languageVersion);
     } else if (invokingRule.isSourceAbi()) {
       throw new Error("Source ABI flavor is not supported for Kotlin targets");
     } else if (!buildClasspathEntries.isEmpty()) {
@@ -278,7 +283,11 @@ public class KotlincStep implements IsolatedStep {
       }
     }
 
-    if (trackClassUsage) {
+    builder.add(INCLUDE_RUNTIME_FLAG);
+    builder.add(EXCLUDE_REFLECT);
+
+    // TODO: add used-classes support for Kosabi 2.0 T232722163
+    if (trackClassUsage && !shouldKosabiJvmAbiGenUseK2) {
       depTrackerPath.ifPresentOrElse(
           // New plugin, runtime dependency
           path -> {
@@ -317,9 +326,7 @@ public class KotlincStep implements IsolatedStep {
   }
 
   protected void configureSourceOnlyOptions(
-      ImmutableList.Builder<String> builder,
-      LanguageVersion languageVersion,
-      AbsPath ruleCellRoot) {
+      ImmutableList.Builder<String> builder, LanguageVersion languageVersion) {
     if (languageVersion.getSupportsK2()
         && resolvedKosabiPluginOptionPath.containsKey(
             KosabiConfig.PROPERTY_KOSABI_STUBS_GEN_K2_PLUGIN)) {
@@ -342,9 +349,7 @@ public class KotlincStep implements IsolatedStep {
           resolvedKosabiPluginOptionPath.get(KosabiConfig.PROPERTY_KOSABI_JVM_ABI_GEN_K2_PLUGIN);
       builder.add(X_PLUGIN_ARG + jvmAbiPlugin);
       builder.add(PLUGIN);
-      builder.add(
-          "plugin:com.facebook.k2.jvm.abi.gen:outputDir="
-              + ruleCellRoot.resolve(outputDirectory).toString());
+      builder.add("plugin:com.facebook.k2.jvm.abi.gen:outputDir=" + outputPaths.getClassesDir());
     } else {
       if (resolvedKosabiPluginOptionPath.containsKey(
           KosabiConfig.PROPERTY_KOSABI_JVM_ABI_GEN_PLUGIN)) {

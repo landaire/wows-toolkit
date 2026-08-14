@@ -183,13 +183,6 @@ class Test(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            True,
-            should_scrub_with_focused_targets_output_paths(
-                focused_targets_output_paths,
-                "buck-out/v2/gen/fbsource/fbobjc/some/path/__baz__/__objects__/56628b5feecfab0a/baz.mm.o",
-            ),
-        )
-        self.assertEqual(
             False,
             should_scrub_with_focused_targets_output_paths(
                 focused_targets_output_paths,
@@ -208,13 +201,6 @@ class Test(unittest.TestCase):
             should_scrub_with_focused_targets_output_paths(
                 focused_targets_output_paths,
                 "buck-out/v2/gen/fbsource/56628b5feecfab0a/fbobjc/some/path/__foo__/lib.a",
-            ),
-        )
-        self.assertEqual(
-            False,
-            should_scrub_with_focused_targets_output_paths(
-                focused_targets_output_paths,
-                "buck-out/v2/gen/fbsource/fbobjc/some/path/__foo__/56628b5feecfab0a/lib.a",
             ),
         )
         self.assertEqual(

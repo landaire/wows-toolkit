@@ -142,7 +142,14 @@ list(Suite) ->
             #test_spec_test_case{suite = SuiteName, testcases = TestCases} = list_test:list_tests(
                 Suite, ct_daemon_hooks:get_hooks()
             ),
-            [to_qualified(SuiteName, TestName) || #test_spec_test_info{name = TestName} <- TestCases]
+            [
+                FullTestName
+             || FullTestName <-
+                    [
+                        to_qualified(SuiteName, TestName)
+                     || #test_spec_test_info{name = TestName} <- TestCases
+                    ]
+            ]
     end.
 
 %% running tests

@@ -73,10 +73,7 @@ public class KotlincModeFactory {
           buildDir,
           kotlicWorkingDir,
           KotlinSourceChanges.ToBeCalculated.INSTANCE,
-          ClasspathChangesFactory.create(
-              new SnapshotsActionMetadata(metadata),
-              classpathSnapshots,
-              extraParams.getSkipClasspathRemovalRebuild()),
+          ClasspathChangesFactory.create(new SnapshotsActionMetadata(metadata), classpathSnapshots),
           depFile,
           incrementalCompilationValidator.validate(
               extraParams.getKotlinCompilerPlugins().keySet().stream()

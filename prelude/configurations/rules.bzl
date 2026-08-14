@@ -6,41 +6,36 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//cfg/modifier:constraint_modifier_info.bzl", "make_constraint_modifier_info")
 load("@prelude//cfg/modifier:types.bzl", "ConditionalModifierInfo")
 load(":util.bzl", "util")
 
-_ExecutionModifierInfo = provider(fields = {
-    "execution_modifier": bool,
-})
-
+# config_setting() accepts a list of constraint_values and a list of values
+# (buckconfig keys + expected values) and matches if all of those match.
+#
+# This is implemented as forming a single ConfigurationInfo from the union of the
+# referenced values and the config keys.
+#
+# Attributes:
+#   "constraint_values": attrs.list(attrs.configuration_label(), default = []),
+#   "values": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
 def config_setting_impl(ctx):
     subinfos = [util.constraint_values_to_configuration(ctx.attrs.constraint_values)]
     subinfos.append(ConfigurationInfo(constraints = {}, values = ctx.attrs.values))
-    cfg_info = util.configuration_info_union(subinfos)
-    providers = [DefaultInfo(), cfg_info]
-    if len(ctx.attrs.constraint_values) == 1:
-        # When only have one constraint, we return an additional ConditionalModifierInfo provider for
-        # conditional modifier
-        conditional_modifier_info = ctx.attrs.constraint_values[0][ConditionalModifierInfo]
-        providers.append(conditional_modifier_info)
-    return providers
+    return [DefaultInfo(), util.configuration_info_union(subinfos)]
 
+# constraint_setting() targets just declare the existence of a constraint.
 def constraint_setting_impl(ctx):
-    return [
-        DefaultInfo(),
-        ConstraintSettingInfo(label = ctx.label.raw_target()),
-        # In order for the constraint_value to access the execution modifier info, we need to provide an additional provider here.
-        _ExecutionModifierInfo(execution_modifier = ctx.attrs.execution_modifier),
-    ]
+    return [DefaultInfo(), ConstraintSettingInfo(label = ctx.label.raw_target())]
 
+# constraint_value() declares a specific value of a constraint_setting.
+#
+# Attributes:
+#  constraint_setting: the target constraint that this is a value of
 def constraint_value_impl(ctx):
     constraint_value = ConstraintValueInfo(
         setting = ctx.attrs.constraint_setting[ConstraintSettingInfo],
         label = ctx.label.raw_target(),
     )
-    execution_modifier_info = ctx.attrs.constraint_setting[_ExecutionModifierInfo]
-
     return [
         DefaultInfo(),
         constraint_value,
@@ -51,29 +46,26 @@ def constraint_value_impl(ctx):
             },
             values = {},
         ),
-        make_constraint_modifier_info(
-            constraint_value = constraint_value,
+        ConditionalModifierInfo(
+            inner = constraint_value,
             key = constraint_value.setting.label,
-            execution_modifier = execution_modifier_info.execution_modifier,
-            exec_platform_marker_configuration_info = ctx.attrs._exec_platform_marker[ConfigurationInfo],
         ),
     ]
 
+# constraint() is a unified constraint rule that declares both a constraint setting
+# and its possible values. Values are exposed as subtargets.
+#
+# Attributes:
+#  values: list of value names (strings)
+#  default: default value (must be one of the values)
 def constraint_impl(ctx):
     # Validate values are unique and non-empty
     values = ctx.attrs.values
     if len(values) <= 1:
         fail("constraint() rule must have at least two values: one for the default and at least one alternative to provide constraint choices. Example: values = ['disable', 'enable']")
 
-    # Reserved keywords that cannot be used as values
-    # - 'default': Reserved for aliasing to the actual default value (e.g., :os[default] -> :os[none])
-    # - 'DEFAULT': Reserved to avoid confusion with :os[default]
-    reserved_keywords = ["default", "DEFAULT"]
-
     seen = set()
     for v in values:
-        if v in reserved_keywords:
-            fail("'{}' is a reserved keyword and cannot be used as a constraint value. Use a different name to avoid confusion.".format(v))
         if v in seen:
             fail("Duplicate value '{}' in constraint()".format(v))
         seen.add(v)
@@ -89,16 +81,6 @@ def constraint_impl(ctx):
         label = main_label,
         default = main_label.with_sub_target(default),
     )
-
-    # exec_platform_marker_constraint() and constraint() rule both use this impl,
-    # but only constraint() has this attribute.
-    exec_platform_marker_configuration_info = None
-    if hasattr(ctx.attrs, "_exec_platform_marker"):
-        exec_platform_marker_configuration_info = ctx.attrs._exec_platform_marker[ConfigurationInfo]
-
-    execution_modifier = False
-    if hasattr(ctx.attrs, "execution_modifier"):
-        execution_modifier = ctx.attrs.execution_modifier
 
     # Create subtargets for each value
     sub_targets = {}
@@ -118,22 +100,22 @@ def constraint_impl(ctx):
                 },
                 values = {},
             ),
-            make_constraint_modifier_info(
-                constraint_value = constraint_value,
+            ConditionalModifierInfo(
+                inner = constraint_value,
                 key = main_label,
-                execution_modifier = execution_modifier,
-                exec_platform_marker_configuration_info = exec_platform_marker_configuration_info,
             ),
         ]
-
-    # Add 'default' subtarget that aliases to the actual default value
-    sub_targets["default"] = sub_targets[default]
 
     return [
         DefaultInfo(sub_targets = sub_targets),
         constraint_setting,
     ]
 
+# platform() declares a platform, it is a list of constraint values.
+#
+# Attributes:
+#  constraint_values: list of constraint values that are set for this platform
+#  deps: a list of platform target dependencies, the constraints from these platforms will be part of this platform (unless overridden)
 def platform_impl(ctx):
     subinfos = (
         [dep[PlatformInfo].configuration for dep in ctx.attrs.deps] +
@@ -169,6 +151,5 @@ implemented_rules = {
     "constraint": constraint_impl,
     "constraint_setting": constraint_setting_impl,
     "constraint_value": constraint_value_impl,
-    "exec_platform_marker_constraint": constraint_impl,
     "platform": platform_impl,
 }

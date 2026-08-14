@@ -207,7 +207,6 @@ def _generate_priv_dir(ctx: AnalysisContext) -> Artifact:
             "priv",
         ),
         priv_symlinks,
-        has_content_based_path = False,
     )
 
 def _generate_app_file(
@@ -223,7 +222,7 @@ def _generate_app_file(
     _check_application_dependencies(ctx)
 
     app_file_name = name + ".app"
-    output = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, app_file_name, has_content_based_path = False)
+    output = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, app_file_name)
     app_info_file = _app_info_content(ctx, name, srcs)
 
     erlang_build.utils.run_with_env(
@@ -256,7 +255,7 @@ def _app_info_content(
         name: str,
         srcs: list[Artifact]) -> Artifact:
     """build an app_info.json file that contains the meta information for building the .app file"""
-    app_info = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, "app_info.json", has_content_based_path = False)
+    app_info = ctx.actions.declare_output(erlang_build.utils.BUILD_DIR, "app_info.json")
 
     data = {
         "applications": [
@@ -307,7 +306,7 @@ def link_output(
     if name in build_environment.include_dirs:
         link_spec["include"] = build_environment.include_dirs[name]
 
-    return ctx.actions.symlinked_dir(link_path, link_spec, has_content_based_path = False)
+    return ctx.actions.symlinked_dir(link_path, link_spec)
 
 def _link_src_dir(ctx: AnalysisContext, *, extra_srcs: list[Artifact]) -> Artifact:
     """Link all sources in a src folder"""
@@ -321,7 +320,7 @@ def _link_src_dir(ctx: AnalysisContext, *, extra_srcs: list[Artifact]) -> Artifa
     for extra_srcs in extra_srcs:
         srcs[extra_srcs.basename] = extra_srcs
 
-    return ctx.actions.symlinked_dir(paths.join(erlang_build.utils.BUILD_DIR, "src"), srcs, has_content_based_path = False)
+    return ctx.actions.symlinked_dir(paths.join(erlang_build.utils.BUILD_DIR, "src"), srcs)
 
 def _build_start_dependencies(ctx: AnalysisContext) -> list[StartDependencySet]:
     return build_apps_start_dependencies(

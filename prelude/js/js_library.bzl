@@ -56,6 +56,7 @@ def _build_js_files(
 
     all_output_paths = []
     all_command_args_files = []
+    all_hidden_artifacts = []
     for grouped_src in grouped_srcs:
         identifier = "{}/{}".format(transform_profile, grouped_src.canonical_name)
 
@@ -74,7 +75,7 @@ def _build_js_files(
             "release": ctx.attrs._is_release,
             "sourceJsFileName": _get_virtual_path(ctx, grouped_src.main_source, ctx.attrs.base_path),
             "sourceJsFilePath": grouped_src.main_source,
-            "transformProfile": "default" if transform_profile == "hermes-legacy" else transform_profile,
+            "transformProfile": "default" if transform_profile == "transform-profile-default" else transform_profile,
         }
         if ctx.attrs.extra_json:
             job_args["extraData"] = cmd_args(ctx.attrs.extra_json, delimiter = "")
@@ -82,12 +83,12 @@ def _build_js_files(
         command_args_file = ctx.actions.write_json(
             "{}_command_args".format(identifier),
             job_args,
-            with_inputs = True,
             has_content_based_path = True,
         )
 
         all_output_paths.append(output_path)
         all_command_args_files.append(command_args_file)
+        all_hidden_artifacts.append(cmd_args([output_path.as_output(), grouped_src.main_source] + grouped_src.additional_sources))
 
     batch_size = 25
     command_count = len(all_output_paths)
@@ -99,6 +100,7 @@ def _build_js_files(
             command_args_files = all_command_args_files[start_index:end_index],
             identifier = "{}_{}_batch{}".format(ctx.label.name, transform_profile, batch_number),
             category = "transform",
+            hidden_artifacts = all_hidden_artifacts[start_index:end_index],
             has_content_based_path = True,
         )
 
@@ -132,7 +134,6 @@ def _build_library_files(
     command_args_file = ctx.actions.write_json(
         "library_files_{}_command_args".format(transform_profile),
         job_args,
-        with_inputs = True,
         has_content_based_path = True,
     )
 
@@ -142,6 +143,7 @@ def _build_library_files(
         command_args_files = [command_args_file],
         identifier = transform_profile,
         category = "library_files",
+        hidden_artifacts = [cmd_args([output_path.as_output()] + js_files)],
         has_content_based_path = True,
     )
     return output_path
@@ -172,7 +174,6 @@ def _build_js_library(
     command_args_file = ctx.actions.write_json(
         "library_deps_{}_args".format(transform_profile),
         job_args,
-        with_inputs = True,
         has_content_based_path = True,
     )
 
@@ -182,6 +183,10 @@ def _build_js_library(
         command_args_files = [command_args_file],
         identifier = transform_profile,
         category = "library_dependencies",
+        hidden_artifacts = [cmd_args([
+            output_path.as_output(),
+            library_files,
+        ] + js_library_deps)],
         has_content_based_path = True,
     )
 

@@ -26,7 +26,7 @@ from util import (
 class LiveBuilder(ParBuilder):
     def __init__(self, options, manifest, mode=0o755, linktree_suffix="#linktree"):
         # Default to "default" warnings, as per buck1/buck2.
-        super().__init__(options, manifest, mode)
+        super(LiveBuilder, self).__init__(options, manifest, mode)
         # foo.par -> foo#linktree
         # foo.bar.par -> foo.bar#linktree
         if self.python_home:
@@ -88,7 +88,9 @@ class LiveBuilder(ParBuilder):
                     handle.write(entry.src_data)
 
         header = self._gen_header()
-        output_file.write(bytes(header, "UTF-8"))
+        if sys.version_info[0] >= 3:
+            header = bytes(header, "UTF-8")
+        output_file.write(header)
 
         bootstrap_template = os.path.join(
             os.path.dirname(__file__), "_lpar_bootstrap.sh.template"
@@ -98,6 +100,7 @@ class LiveBuilder(ParBuilder):
             os.chmod(f.name, self.mode)
 
     def _gen_header(self):
+        # TODO we should use pathlib for all this
         linktreedir = self.linktree.rsplit("/", 1)[-1]
 
         base_dir = '$(dirname $(readlink -f "$0"))/' + linktreedir
@@ -150,7 +153,7 @@ class LiveBuilder(ParBuilder):
 
         if options.runtime_env:
             env_list = ["export"]
-            env_list.extend(options.runtime_env)
+            env_list.extend(self.options.runtime_env)
             env = " ".join(env_list)
         else:
             env = ""

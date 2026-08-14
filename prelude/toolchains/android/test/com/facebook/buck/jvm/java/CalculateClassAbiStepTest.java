@@ -21,6 +21,7 @@ import com.facebook.buck.step.TestExecutionContext;
 import com.facebook.buck.testutil.TemporaryPaths;
 import com.facebook.buck.testutil.integration.TestDataHelper;
 import com.facebook.buck.testutil.integration.ZipInspector;
+import com.facebook.buck.util.environment.Platform;
 import com.facebook.buck.util.zip.CustomJarOutputStream;
 import com.google.common.hash.Hashing;
 import com.google.common.io.MoreFiles;
@@ -59,7 +60,14 @@ public class CalculateClassAbiStepTest {
     // investigate why the value is different.
     // NOTE: If this starts failing on CI for no obvious reason it's possible that the offset
     // calculation in ZipConstants.getFakeTime() does not account for DST correctly.
-    String expectedHash = "51b28115808a8684550a7b026154a94075358b68";
+    // Note Mac and Linux produce jar files with different hashes, but the contained files are
+    // identical.
+    String expectedHash =
+        switch (Platform.detect()) {
+          case MACOS -> "51b28115808a8684550a7b026154a94075358b68";
+          case LINUX -> "385fb1f20dcde21864a51a592eac0a0f3eaf7ba6";
+          default -> throw new IllegalStateException("Unsupported platform");
+        };
     assertEquals(expectedHash, seenHash);
 
     // Assert that the abiJar contains non-class resources (like txt files).

@@ -12,7 +12,6 @@ package com.facebook.buck.android;
 
 import static com.google.common.util.concurrent.MoreExecutors.listeningDecorator;
 
-import com.facebook.buck.android.apex.ApexManifestProto.ApexManifest;
 import com.facebook.buck.android.device.TargetDeviceOptions;
 import com.facebook.buck.android.exopackage.AdbUtils;
 import com.facebook.buck.android.exopackage.AndroidDevice;
@@ -28,7 +27,6 @@ import com.facebook.buck.util.Console;
 import com.facebook.buck.util.MoreSuppliers;
 import com.facebook.buck.util.Threads;
 import com.facebook.buck.util.environment.EnvVariablesProvider;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Strings;
@@ -52,7 +50,6 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -67,10 +64,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 /** Helper for executing commands over ADB, especially for multiple devices. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class AdbHelper implements AndroidDevicesHelper {
 
   private static final Logger LOG = Logger.get(AdbHelper.class);
@@ -189,7 +185,7 @@ public class AdbHelper implements AndroidDevicesHelper {
       }
       devices = result.devices;
     } catch (Exception e) {
-      throw new RuntimeException(e.toString());
+      throw new RuntimeException(e.getMessage());
     }
 
     // Start executions on all matching devices.
@@ -483,17 +479,13 @@ public class AdbHelper implements AndroidDevicesHelper {
     final AndroidIntent intent;
     final String intentTargetNiceName;
     if (intentUri != null) {
-      // NULLSAFE_FIXME[Parameter Not Nullable]
       intent =
           new AndroidIntent(
               packageName,
-              // NULLSAFE_FIXME[Parameter Not Nullable]
               null,
               AndroidIntent.ACTION_VIEW,
-              // NULLSAFE_FIXME[Parameter Not Nullable]
               null,
               intentUri,
-              // NULLSAFE_FIXME[Parameter Not Nullable]
               null,
               waitForDebugger,
               skipSetDebugApp);
@@ -527,7 +519,6 @@ public class AdbHelper implements AndroidDevicesHelper {
               activity,
               AndroidIntent.ACTION_MAIN,
               AndroidIntent.CATEGORY_LAUNCHER,
-              // NULLSAFE_FIXME[Parameter Not Nullable]
               null,
               "0x10200000",
               waitForDebugger,
@@ -818,15 +809,7 @@ public class AdbHelper implements AndroidDevicesHelper {
         (device) -> {
           if (options.isApexModeEnabled()) {
 
-            boolean restart = false;
-            if (options.getRestartMode().equals("yes")) { // Restart
-              restart = true;
-            } else if (options.getRestartMode().equals("no")) { // Don't Restart
-              restart = false;
-            } else { // Auto - Only restart shell if rebootless is supported
-              restart = isApexFileSupportsRebootlessUpdate(apk);
-            }
-            return device.installApexOnDevice(apk, quiet, restart);
+            return device.installApexOnDevice(apk, quiet);
           } else {
             return device.installApkOnDevice(
                 apk, installViaSd, quiet, options.isStagedInstallModeEnabled());
@@ -841,50 +824,6 @@ public class AdbHelper implements AndroidDevicesHelper {
               device.installBuildUuidFile(
                   BUILD_METADATA_INSTALL_ROOT, packageName, buck2BuildUuid.get()),
           true);
-    }
-  }
-
-  private boolean isApexFileSupportsRebootlessUpdate(File apexFile) {
-    try {
-      // Open APEX file as a zip archive
-      try (ZipFile zipFile = new ZipFile(apexFile)) {
-        // Find the apex_manifest.pb entry
-        ZipEntry manifestEntry = zipFile.getEntry("apex_manifest.pb");
-
-        if (manifestEntry == null) {
-          LOG.warn("apex_manifest.pb not found in APEX file: %s", apexFile.getName());
-          return false;
-        }
-
-        // Extract the manifest directly to byte array
-        byte[] manifestBytes;
-        try (java.io.InputStream inputStream =
-                Objects.requireNonNull(zipFile.getInputStream(manifestEntry));
-            java.io.ByteArrayOutputStream outputStream = new java.io.ByteArrayOutputStream()) {
-          byte[] buffer = new byte[8192];
-          int bytesRead;
-          while ((bytesRead = inputStream.read(buffer)) != -1) {
-            outputStream.write(buffer, 0, bytesRead);
-          }
-          manifestBytes = outputStream.toByteArray();
-        }
-
-        LOG.info(
-            "Extracted apex_manifest.pb from %s (%d bytes)",
-            apexFile.getName(), manifestBytes.length);
-
-        // Parse manifestBytes to check for rebootless update support
-        ApexManifest apexManifest = ApexManifest.parseFrom(manifestBytes);
-
-        LOG.info(
-            "supportsRebootlessUpdate: %s",
-            apexManifest.getSupportsRebootlessUpdate() ? "true" : "false");
-
-        return apexManifest.getSupportsRebootlessUpdate();
-      }
-    } catch (IOException e) {
-      LOG.warn(e, "Failed to extract apex_manifest.pb from %s", apexFile.getName());
-      return false;
     }
   }
 

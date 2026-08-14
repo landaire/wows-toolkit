@@ -6,8 +6,6 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-from __future__ import annotations
-
 import argparse
 import dataclasses
 import difflib
@@ -86,7 +84,6 @@ class Manifest:
 class DB:
     db: dict[str, Manifest | Alias]
     root: str
-    extra_filetypes: list[str]
 
     def strip_root(self) -> None:
         self.root = strip_prefix(self.root)
@@ -98,11 +95,12 @@ class DB:
 
     @staticmethod
     def from_json(json: Any) -> "DB":
-        expected_keys = {"db", "root", "extra_filetypes"}
-        if set(json.keys()) != expected_keys:
-            raise ValueError(
-                f"Mismatched keys from DB. Expected {expected_keys}, got {json.keys()}"
-            )
+        for key in ("db", "root"):
+            if key not in json:
+                raise ValueError(
+                    f"Unknown type returned from Buck, does not have '{key}' key. Keys are: "
+                    + ", ".join(json.keys())
+                )
 
         inner_db = {}
 
@@ -116,7 +114,6 @@ class DB:
             # strip root, since it's not relevant to these tests
             root="",
             db=inner_db,
-            extra_filetypes=json["extra_filetypes"],
         )
 
         db.strip_root()

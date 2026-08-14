@@ -11,7 +11,6 @@
 package com.facebook.buck.android.exopackage;
 
 import com.facebook.buck.core.filesystems.AbsPath;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableMultimap;
@@ -22,7 +21,6 @@ import java.nio.file.Paths;
 import java.util.Map;
 
 /** Installs secondary dexes for exo. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class DexExoHelper implements ExoHelper {
   @VisibleForTesting public static final Path SECONDARY_DEX_DIR = Paths.get("secondary-dex");
 

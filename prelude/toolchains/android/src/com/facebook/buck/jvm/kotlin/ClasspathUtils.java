@@ -142,6 +142,10 @@ public class ClasspathUtils {
       AbsPath rootPath,
       ImmutableList<AbsPath> allClasspaths,
       ImmutableList<AbsPath> extraClassPathSnapshots) {
+    RelPath snapshotDir =
+        parameters.getOutputPaths().getWorkingDirectory().resolveRel("__classpath_snapshots__");
+    steps.addAll(MakeCleanDirectoryIsolatedStep.of(snapshotDir));
+
     ImmutableList.Builder<AbsPath> classpathSnapshotsBuilder = ImmutableList.builder();
     classpathSnapshotsBuilder.addAll(extraClassPathSnapshots);
     parameters.getClasspathSnapshots().stream()

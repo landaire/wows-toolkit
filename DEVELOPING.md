@@ -33,6 +33,18 @@ If you prefer not to use Nix:
 cargo build -p wows_toolkit --release
 ```
 
+### Buck
+
+Buck2 builds the same binaries from checked-in sources and a pinned toolchain, with no Cargo and no downloads in any build action. Bootstrap once, then build a root alias:
+
+```bash
+nu scripts/refresh-buck-toolchain.nu    # writes the machine-local .buckconfig.local
+buck2 build //:wows_toolkit
+buck2 build -c native_build.mode=release //:wows_toolkit
+```
+
+Cargo remains the way to author dependencies and to run tests against local game data. See the README for the alias list, the hermeticity check, and how to regenerate the vendored dependency and prelude trees.
+
 ## Running Tests
 
 Replay parser tests run against committed fixture replays and require no external data:

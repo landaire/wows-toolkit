@@ -13,7 +13,6 @@ package com.facebook.buck.android.resources.strings;
 import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.io.file.PathMatcher;
 import com.facebook.buck.io.filesystem.impl.ProjectFilesystemUtils;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableCollection;
 import com.google.common.collect.ImmutableList;
 import java.io.IOException;
@@ -23,7 +22,6 @@ import java.nio.file.Path;
  * Copy filtered string resources (values/strings.xml) files to output directory. These will be used
  * by i18n to map resource_id to fbt_hash with resource_name as the intermediary
  */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class StringResourcesUtils {
   private static final String VALUES = "values";
   private static final String STRINGS_XML = "strings.xml";

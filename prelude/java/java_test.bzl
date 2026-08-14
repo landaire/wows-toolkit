@@ -27,7 +27,6 @@ load(
     "@prelude//tests:re_utils.bzl",
     "get_re_executors_from_props",
 )
-load("@prelude//tests:test_listing.bzl", "TestListingInfo")
 load("@prelude//utils:argfile.bzl", "at_argfile")
 load("@prelude//utils:expect.bzl", "expect")
 
@@ -38,7 +37,7 @@ def java_test_impl(ctx: AnalysisContext) -> list[Provider]:
     java_providers = build_java_library(ctx, ctx.attrs.srcs)
     external_runner_test_info = build_junit_test(ctx, java_providers.java_library_info, java_providers.java_packaging_info, java_providers.class_to_src_map)
 
-    providers = [
+    return inject_test_run_info(ctx, external_runner_test_info) + [
         java_providers.java_library_intellij_info,
         java_providers.java_library_info,
         java_providers.java_packaging_info,
@@ -46,10 +45,6 @@ def java_test_impl(ctx: AnalysisContext) -> list[Provider]:
         java_providers.default_info,
         java_providers.class_to_src_map,
     ]
-    if java_providers.validation_info:
-        providers.append(java_providers.validation_info)
-
-    return inject_test_run_info(ctx, external_runner_test_info) + providers
 
 def build_junit_test(
         ctx: AnalysisContext,
@@ -129,27 +124,20 @@ def build_junit_test(
     if ctx.attrs.test_case_timeout_ms:
         cmd.extend(["--default-test-timeout", str(ctx.attrs.test_case_timeout_ms)])
 
-    if ctx.attrs.test_class_names_file and getattr(ctx.attrs, "discover_all_test_classes", False):
-        fail("Cannot set both test_class_names_file and discover_all_test_classes")
-
     if ctx.attrs.test_class_names_file:
         class_names = ctx.attrs.test_class_names_file
     else:
         expect(tests_java_library_info.library_output != None, "Built test library has no output, likely due to missing srcs")
-        class_names = ctx.actions.declare_output("class_names", has_content_based_path = False)
-        discover_all = getattr(ctx.attrs, "discover_all_test_classes", False)
-        list_class_names_args = [
+        class_names = ctx.actions.declare_output("class_names")
+        list_class_names_cmd = cmd_args([
             java_test_toolchain.list_class_names[RunInfo],
             "--jar",
             tests_java_library_info.library_output.full_library,
             "--sources",
-            ctx.actions.write("sources.txt", [] if discover_all else ctx.attrs.srcs),
+            ctx.actions.write("sources.txt", ctx.attrs.srcs),
             "--output",
             class_names.as_output(),
-        ]
-        if discover_all:
-            list_class_names_args.append("--discover-all")
-        list_class_names_cmd = cmd_args(list_class_names_args, hidden = ctx.attrs.srcs)
+        ], hidden = ctx.attrs.srcs)
         ctx.actions.run(list_class_names_cmd, category = "list_class_names")
 
     cmd.extend(["--test-class-names-file", class_names])
@@ -174,8 +162,7 @@ def build_junit_test(
             transitive_class_to_src_map = cmd_args(transitive_class_to_src_map, relative_to = ctx.label.cell_root)
         env["JACOCO_CLASSNAME_SOURCE_MAP"] = transitive_class_to_src_map
 
-    list_tests_info = ctx.attrs._java_test_toolchain[TestListingInfo]
-    list_tests = list_tests_info.list_tests
+    list_tests = java_test_toolchain.list_tests
     if list_tests != None and "tpx:supports_static_listing=true" in ctx.attrs.labels and "tpx:supports_static_listing=false" not in ctx.attrs.labels:
         list_tests_command = cmd_args([
             list_tests[RunInfo],
@@ -195,7 +182,6 @@ def build_junit_test(
         use_project_relative_paths = not run_from_cell_root,
         default_executor = re_executor,
         executor_overrides = executor_overrides,
-        supports_test_execution_caching = ctx.attrs.supports_test_execution_caching,
     )
     return test_info
 

@@ -6,7 +6,6 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//decls:common.bzl", "buck")
 load(":rule_spec.bzl", "RuleRegistrationSpec")
 
 _NL = {
@@ -28,7 +27,7 @@ def _impl(ctx: AnalysisContext):
         ctx.attrs.out,
         content,
         is_executable = ctx.attrs.is_executable,
-        has_content_based_path = ctx.attrs.has_content_based_path,
+        uses_experimental_content_based_path_hashing = ctx.attrs.uses_experimental_content_based_path_hashing,
     )
 
     providers = [DefaultInfo(default_output = output)]
@@ -41,13 +40,14 @@ def _impl(ctx: AnalysisContext):
 registration_spec = RuleRegistrationSpec(
     name = "write_file",
     impl = _impl,
-    attrs = buck.labels_arg() | buck.contacts_arg() | {
+    attrs = {
         # API based on https://github.com/bazelbuild/bazel-skylib/blob/main/docs/write_file_doc.md.
         "content": attrs.list(attrs.string(), default = []),
-        "has_content_based_path": attrs.bool(default = False),
         "is_executable": attrs.bool(default = False),
+        "labels": attrs.list(attrs.string(), default = []),
         "newline": attrs.enum(["auto", "unix", "windows"], default = "auto"),
         "out": attrs.string(),
+        "uses_experimental_content_based_path_hashing": attrs.bool(default = False),
         "_auto_newline": attrs.default_only(
             attrs.string(
                 default = select({

@@ -162,10 +162,9 @@ def compile_args(
     objects = ctx.actions.declare_output(
         "objects-" + artifact_suffix,
         dir = True,
-        has_content_based_path = False,
     )
-    hi = ctx.actions.declare_output("hi-" + artifact_suffix, dir = True, has_content_based_path = False)
-    stubs = ctx.actions.declare_output("stubs-" + artifact_suffix, dir = True, has_content_based_path = False)
+    hi = ctx.actions.declare_output("hi-" + artifact_suffix, dir = True)
+    stubs = ctx.actions.declare_output("stubs-" + artifact_suffix, dir = True)
 
     compile_args.add(
         "-odir",

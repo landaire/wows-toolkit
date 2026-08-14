@@ -154,7 +154,7 @@ def _build_erlang_test(
 
     suite = ctx.attrs.suite
     suite_name = module_name(suite)
-    hermetic_src_dir = ctx.actions.symlinked_dir(paths.join(erlang_build.utils.BUILD_DIR, "src"), {suite.basename: suite}, has_content_based_path = False)
+    hermetic_src_dir = ctx.actions.symlinked_dir(paths.join(erlang_build.utils.BUILD_DIR, "src"), {suite.basename: suite})
 
     erlang_build.build_steps.generate_beam_artifacts(
         ctx,
@@ -266,7 +266,7 @@ def _write_test_info_file(
         "test_suite": test_suite,
         "trampolines": inner_trampolines,
     }
-    test_info_file = ctx.actions.declare_output("tests_info", has_content_based_path = False)
+    test_info_file = ctx.actions.declare_output("tests_info")
     return ctx.actions.write_json(test_info_file, tests_info, with_inputs = True)
 
 def _build_resource_dir(ctx: AnalysisContext, resources: list, target_dir: str) -> [Artifact, None]:
@@ -289,7 +289,6 @@ def _build_resource_dir(ctx: AnalysisContext, resources: list, target_dir: str) 
     return ctx.actions.symlinked_dir(
         target_dir,
         include_symlinks,
-        has_content_based_path = False,
     )
 
 def link_output(
@@ -303,7 +302,7 @@ def link_output(
     }
     if data_dir:
         link_spec[data_dir.basename] = data_dir
-    return ctx.actions.symlinked_dir(ctx.attrs.name, link_spec, has_content_based_path = False)
+    return ctx.actions.symlinked_dir(ctx.attrs.name, link_spec)
 
 def generate_file_map_target(suite: str, prefix: str | None, dir_name: str) -> str | None:
     suite_dir = paths.dirname(suite)

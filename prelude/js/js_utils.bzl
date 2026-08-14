@@ -11,11 +11,10 @@ load("@prelude//apple:apple_resource_types.bzl", "AppleResourceDestination", "Ap
 load("@prelude//apple:resource_groups.bzl", "ResourceGraphInfo", "create_resource_graph")  # @unused `ResourceGraphInfo` used as a type
 load("@prelude//js:js_providers.bzl", "JsBundleInfo")
 load("@prelude//utils:argfile.bzl", "at_argfile")
-load("@prelude//utils:arglike.bzl", "ArgLike")  # @unused Used as a type
 load("@prelude//utils:expect.bzl", "expect")
 load(":worker_tool.bzl", "WorkerToolInfo")
 
-TRANSFORM_PROFILES = ["hermes-legacy", "hermes-stable", "hermes-canary"]
+TRANSFORM_PROFILES = ["transform-profile-default", "hermes-stable", "hermes-canary"]
 
 # Matches the default value for resolver.assetExts in metro-config
 ASSET_EXTENSIONS = [
@@ -52,7 +51,6 @@ ASSET_EXTENSIONS = [
     "ttf",
     # Archives (virtual files)
     "zip",
-    "lottie",
 ]
 
 # Matches the default value for resolver.platforms in metro-config
@@ -137,9 +135,10 @@ def get_bundle_name(ctx: AnalysisContext, default_bundle_name: str) -> str:
 def run_worker_commands(
         ctx: AnalysisContext,
         worker_tool: Dependency,
-        command_args_files: list[ArgLike],
+        command_args_files: list[Artifact],
         identifier: str,
         category: str,
+        hidden_artifacts = [cmd_args],
         has_content_based_path: bool = False):
     worker_args = cmd_args(
         "--command-args-file",
@@ -156,7 +155,10 @@ def run_worker_commands(
             args = worker_args,
             has_content_based_path = has_content_based_path,
         ),
-        hidden = command_args_files,
+        hidden = [
+            hidden_artifacts,
+            command_args_files,
+        ],
     )
 
     ctx.actions.run(
@@ -165,5 +167,4 @@ def run_worker_commands(
         identifier = identifier,
         # Handshake seems more prone to failure when running locally, so workaround by running remotely where possible.
         prefer_remote = True,
-        expect_eligible_for_dedupe = has_content_based_path,
     )

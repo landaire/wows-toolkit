@@ -270,9 +270,9 @@ AndroidLibraryIntellijInfo = provider(
     },
 )
 
-AndroidResourceRDotInfo = provider(
+AndroidPrebuiltAarIntellijInfo = provider(
     # @unsorted-dict-items
-    doc = "Exposes the compiled R.jar for android_prebuilt_aar and android_resource targets",
+    doc = "Information about android prebuilt aar that is required for Intellij project generation",
     fields = {
         "dummy_r_dot_java": provider_field(Artifact | None, default = None),
     },
@@ -366,8 +366,3 @@ def merge_exported_android_resource_info(
             exported_android_resource_infos.append(android_resource)
 
     return ExportedAndroidResourceInfo(resource_infos = dedupe(exported_android_resource_infos))
-
-def get_all_android_packageable_targets(deps: list[Dependency]) -> list[TargetLabel]:
-    android_packageable_infos = filter(None, [dep.get(AndroidPackageableInfo) for dep in deps])
-    android_deps_tsets = filter(None, [dep.deps for dep in android_packageable_infos])
-    return [deps_info.name for android_deps_tset in android_deps_tsets for deps_info in android_deps_tset.traverse()]

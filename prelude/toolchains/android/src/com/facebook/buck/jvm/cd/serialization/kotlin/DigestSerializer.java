@@ -11,7 +11,6 @@
 package com.facebook.buck.jvm.cd.serialization.kotlin;
 
 import com.facebook.buck.jvm.cd.serialization.PathSerializer;
-import com.facebook.infer.annotation.Nullsafe;
 import java.nio.file.Path;
 import java.util.AbstractMap;
 import java.util.Map;
@@ -25,7 +24,6 @@ import java.util.Map;
  *   <li>{@link com.facebook.buck.cd.model.kotlin.Digests} (part of the protocol buffer model).
  * </ul>
  */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class DigestSerializer {
 
   private DigestSerializer() {}

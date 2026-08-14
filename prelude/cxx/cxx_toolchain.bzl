@@ -116,7 +116,6 @@ def cxx_toolchain_impl(ctx):
         compiler_flags = cmd_args(ctx.attrs.cuda_compiler_flags),
         preprocessor_flags = cmd_args(ctx.attrs.cuda_preprocessor_flags),
         allow_cache_upload = ctx.attrs.cuda_compiler_allow_cache_upload,
-        supports_content_based_paths = ctx.attrs.supports_content_based_paths,
     ) if ctx.attrs.cuda_compiler else None
     hip_info = HipCompilerInfo(
         compiler = ctx.attrs.hip_compiler[RunInfo],
@@ -150,7 +149,6 @@ def cxx_toolchain_impl(ctx):
         binary_extension = value_or(ctx.attrs.binary_extension, ""),
         extra_outputs = ctx.attrs.extra_linker_outputs,
         generate_linker_maps = ctx.attrs.generate_linker_maps,
-        generate_gc_sections = ctx.attrs.generate_gc_sections,
         is_pdb_generated = is_pdb_generated(linker_type, ctx.attrs.linker_flags),
         link_binaries_locally = not value_or(ctx.attrs.cache_links, True),
         link_libraries_locally = False,
@@ -185,8 +183,6 @@ def cxx_toolchain_impl(ctx):
         thin_lto_double_codegen_enabled = ctx.attrs.thin_lto_double_codegen_enabled,
         type = linker_type,
         use_archiver_flags = ctx.attrs.use_archiver_flags,
-        supports_content_based_paths_for_archiving = ctx.attrs.supports_content_based_paths_for_archiving,
-        supports_shared_libraries = ctx.attrs.supports_shared_libraries,
     )
 
     utilities_info = BinaryUtilitiesInfo(
@@ -215,7 +211,6 @@ def cxx_toolchain_impl(ctx):
         asm_compiler_info = asm_info,
         binary_utilities_info = utilities_info,
         bolt_enabled = value_or(ctx.attrs.bolt_enabled, False),
-        cell_to_path_prefix_map = ctx.attrs.cell_to_path_prefix_map,
         c_compiler_info = c_info,
         clang_remarks = ctx.attrs.clang_remarks,
         clang_llvm_statistics = value_or(ctx.attrs.clang_llvm_statistics, False),
@@ -239,7 +234,6 @@ def cxx_toolchain_impl(ctx):
         objc_compiler_info = objc_info,
         objcxx_compiler_info = objcxx_info,
         object_format = CxxObjectFormat(object_format),
-        pass_plugin = ctx.attrs.pass_plugin[DefaultInfo].default_outputs[0] if ctx.attrs.pass_plugin else None,
         compiler_flavor_flags = ctx.attrs.compiler_flavor_flags,
         pic_behavior = PicBehavior(ctx.attrs.pic_behavior),
         platform_deps_aliases = ctx.attrs.platform_deps_aliases,
@@ -252,7 +246,6 @@ def cxx_toolchain_impl(ctx):
         minimum_os_version = ctx.attrs.minimum_os_version,
         # TODO(T138705365): Turn on dep files by default
         use_dep_files = value_or(ctx.attrs.use_dep_files, _get_default_use_dep_files(platform_name)),
-        default_deps = ctx.attrs.default_deps,
     )
 
 def cxx_toolchain_extra_attributes(is_toolchain_rule):
@@ -269,7 +262,6 @@ def cxx_toolchain_extra_attributes(is_toolchain_rule):
         "bolt": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "bolt_enabled": attrs.bool(default = False),
         "c_compiler": dep_type(providers = [RunInfo]),
-        "cell_to_path_prefix_map": attrs.dict(key = attrs.string(), value = attrs.string(), default = {}),
         "clang_llvm_statistics": attrs.option(attrs.bool(), default = None),
         "clang_remarks": attrs.option(attrs.string(), default = None),
         "clang_trace": attrs.option(attrs.bool(), default = None),
@@ -280,10 +272,8 @@ def cxx_toolchain_extra_attributes(is_toolchain_rule):
         "custom_tools": attrs.dict(key = attrs.string(), value = dep_type(providers = [RunInfo]), default = {}),
         "cvtres_compiler": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "cxx_compiler": dep_type(providers = [RunInfo]),
-        "default_deps": attrs.list(dep_type(), default = []),
         "dwp": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "gcno_files": attrs.bool(default = False),
-        "generate_gc_sections": attrs.bool(default = False),
         "generate_linker_maps": attrs.bool(default = False),
         "hip_compiler": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "internal_tools": dep_type(providers = [CxxInternalTools], default = "prelude//cxx/tools:internal_tools"),
@@ -301,7 +291,6 @@ def cxx_toolchain_extra_attributes(is_toolchain_rule):
         "objcopy_for_shared_library_interface": dep_type(providers = [RunInfo]),
         "objdump": attrs.option(dep_type(providers = [RunInfo]), default = None),
         "object_format": attrs.enum(CxxObjectFormat.values(), default = "native"),
-        "pass_plugin": attrs.option(dep_type(providers = [DefaultInfo]), default = None),
         "pic_behavior": attrs.enum(PicBehavior.values(), default = "supported"),
         # A placeholder tool that can be used to set up toolchain constraints.
         # Useful when fat and thin toolchahins share the same underlying tools via `command_alias()`,
@@ -324,9 +313,7 @@ def cxx_toolchain_extra_attributes(is_toolchain_rule):
         "split_debug_mode": attrs.enum(SplitDebugMode.values(), default = "none"),
         "strip": dep_type(providers = [RunInfo]),
         "supports_content_based_paths": attrs.bool(default = False),
-        "supports_content_based_paths_for_archiving": attrs.bool(default = False),
         "supports_distributed_thinlto": attrs.bool(default = False),
-        "supports_shared_libraries": attrs.bool(default = True),
         "supports_two_phase_compilation": attrs.bool(default = False),
         "thin_lto_double_codegen_enabled": attrs.bool(default = False),
         "thin_lto_premerger_enabled": attrs.bool(default = False),

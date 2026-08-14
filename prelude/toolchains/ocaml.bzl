@@ -18,7 +18,8 @@ def _system_ocaml_toolchain_impl(_ctx):
     """
 
     return [
-        DefaultInfo(),
+        DefaultInfo(
+        ),
         OCamlToolchainInfo(
             ocaml_compiler = RunInfo(args = ["ocamlopt.opt"]),
 

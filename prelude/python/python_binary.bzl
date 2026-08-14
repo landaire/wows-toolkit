@@ -13,7 +13,6 @@ load(
 )
 load("@prelude//:paths.bzl", "paths")
 load("@prelude//:resources.bzl", "gather_resources")
-load("@prelude//cxx:cxx_context.bzl", "get_opt_cxx_toolchain_info")
 load(
     "@prelude//cxx:cxx_library_utility.bzl",
     "cxx_is_gnu",
@@ -36,7 +35,6 @@ load(
 )
 load("@prelude//linking:strip.bzl", "strip_debug_with_gnu_debuglink")
 load("@prelude//python:compute_providers.bzl", "ExecutableType", "compute_providers")
-load("@prelude//python:python.bzl", "python_attr_preload_deps")
 load(
     "@prelude//python/linking:link_helper.bzl",
     "LinkProviders",
@@ -47,7 +45,7 @@ load(
 load("@prelude//python/linking:native.bzl", "process_native_linking")
 load("@prelude//python/linking:native_python_util.bzl", "compute_link_strategy", "merge_native_deps")
 load("@prelude//python/linking:omnibus.bzl", "process_omnibus_linking")
-load("@prelude//utils:utils.bzl", "value_or")
+load("@prelude//utils:utils.bzl", "flatten", "value_or")
 load(":compile.bzl", "compile_manifests")
 load(
     ":interface.bzl",
@@ -74,7 +72,7 @@ load(
 )
 load(":python_runtime_bundle.bzl", "PythonRuntimeBundleInfo")
 load(":source_db.bzl", "create_dbg_source_db", "create_python_source_db_info", "create_source_db_no_deps")
-load(":toolchain.bzl", "NativeLinkStrategy", "PackageStyle", "PythonToolchainInfo", "get_package_style")
+load(":toolchain.bzl", "NativeLinkStrategy", "PackageStyle", "PythonPlatformInfo", "PythonToolchainInfo", "get_package_style", "get_platform_attr")
 load(":typing.bzl", "create_per_target_type_check")
 load(":versions.bzl", "LibraryName", "LibraryVersion", "gather_versioned_dependencies", "resolve_versions")
 
@@ -129,12 +127,22 @@ def python_executable(
         executable_type: ExecutableType) -> list[Provider] | Promise:
     # Returns a three tuple: the Python binary, all its potential runtime files,
     # and a provider for its source DB.
+
+    # TODO(nmj): See if people are actually setting cxx_platform here. Really
+    #                 feels like it should be a property of the python platform
+    python_platform = ctx.attrs._python_toolchain[PythonPlatformInfo]
+    cxx_toolchain = ctx.attrs._cxx_toolchain
+
     raw_deps = ctx.attrs.deps
+
+    raw_deps.extend(flatten(
+        get_platform_attr(python_platform, cxx_toolchain, ctx.attrs.platform_deps),
+    ))
 
     # `preload_deps` is used later to configure `LD_PRELOAD` environment variable,
     # here we make the actual libraries to appear in the distribution.
-    preload_deps = python_attr_preload_deps(ctx)
-    raw_deps.extend(preload_deps)
+    # TODO: make fully consistent with its usage later
+    raw_deps.extend(ctx.attrs.preload_deps)
 
     selected_deps = resolve_versions(
         gather_versioned_dependencies(raw_deps),
@@ -271,10 +279,8 @@ def _compute_pex_providers(
         link_args: list[LinkArgs],
         extra: dict[str, typing.Any],
         link_extra_artifacts: dict[str, typing.Any],
-        executable_type: ExecutableType,
-        linker_map_data = None,
-        gc_sections_data = None) -> list[Provider] | Promise:
-    dbg_source_db_output = ctx.actions.declare_output("dbg-db.json", has_content_based_path = True)
+        executable_type: ExecutableType) -> list[Provider] | Promise:
+    dbg_source_db_output = ctx.actions.declare_output("dbg-db.json")
     dbg_source_db = create_dbg_source_db(ctx, dbg_source_db_output, src_manifest, python_deps)
 
     extra_artifacts = {key: value for key, value in link_extra_artifacts.items()}
@@ -288,13 +294,15 @@ def _compute_pex_providers(
         entry_point = "runtime/bin/{}".format(ctx.attrs.executable_name)
         build_args.append(cmd_args("--passthrough=--runtime-binary={}".format(entry_point)))
 
-    extra_artifacts["dbg-db.json"] = dbg_source_db_output
+    if dbg_source_db_output:
+        extra_artifacts["dbg-db.json"] = dbg_source_db_output
 
     # Run lazy import analysis using the existing dbg-db.json only if the attribute is enabled
     if getattr(ctx.attrs, "lazy_imports_analyzer", None):
-        lazy_import_analysis_output = ctx.actions.declare_output("safer_lazy_imports/lazy-import-analysis.json", has_content_based_path = False)
+        lazy_import_analysis_output = ctx.actions.declare_output("lazy-import-analysis.json")
         run_lazy_imports_analyzer(ctx, dbg_source_db.other_outputs, lazy_import_analysis_output, dbg_source_db_output)
-        extra_artifacts["safer_lazy_imports/lazy-import-analysis.json"] = lazy_import_analysis_output
+        if lazy_import_analysis_output:
+            extra_artifacts["lazy-import-analysis.json"] = lazy_import_analysis_output
 
     extra_artifacts["sitecustomize.py"] = python_internal_tools.default_sitecustomize
 
@@ -314,12 +322,6 @@ def _compute_pex_providers(
             extra_artifacts[entry_point] = bundle.py_bin
         if ctx.attrs.runtime_bundle_full:
             extra_artifacts["runtime/include/{}".format(bundle.include.basename)] = bundle.include
-
-    # Add additional runtime libs
-    for name, dep in ctx.attrs.runtime_libs.items():
-        dep_info = dep.get(DefaultInfo)
-        if dep_info != None:
-            extra_artifacts["runtime/lib/{}".format(name)] = dep_info.default_outputs[0]
 
     extra_manifests = create_manifest_for_source_map(ctx, "extra_manifests", extra_artifacts)
     package_style = get_package_style(ctx)
@@ -360,14 +362,13 @@ def _compute_pex_providers(
             stripped_shlibs.append((shlib, libdir))
             debuginfo_files.append(((libdir, shlib, ".debuginfo"), debuginfo))
         shared_libs = stripped_shlibs
-        stripped_extensions = {}
         for name, (extension, label) in extensions.items():
             stripped, debuginfo = strip_debug_with_gnu_debuglink(
                 ctx = ctx,
                 name = name,
                 obj = extension.unstripped_output,
             )
-            stripped_extensions[name] = (
+            extensions[name] = (
                 LinkedObject(
                     output = stripped,
                     unstripped_output = extension.unstripped_output,
@@ -376,7 +377,6 @@ def _compute_pex_providers(
                 label,
             )
             debuginfo_files.append((name + ".debuginfo", debuginfo))
-        extensions = stripped_extensions
 
     # Combine sources and extensions into a map of all modules.
     pex_modules = PexModules(
@@ -391,7 +391,7 @@ def _compute_pex_providers(
     )
 
     # Convert preloaded deps to a set of their names to be loaded by.
-    preload_labels = set([_linkable_graph(d).label for d in python_attr_preload_deps(ctx) if _linkable_graph(d)])
+    preload_labels = set([_linkable_graph(d).label for d in ctx.attrs.preload_deps if _linkable_graph(d)])
 
     # Build the PEX.
     pex = make_py_package(
@@ -411,18 +411,6 @@ def _compute_pex_providers(
     )
 
     pex.sub_targets.update(extra)
-
-    if linker_map_data != None:
-        pex.sub_targets["linker-map"] = [DefaultInfo(
-            default_output = linker_map_data.map,
-            other_outputs = [linker_map_data.binary],
-        )]
-
-    if gc_sections_data != None:
-        pex.sub_targets["gc-sections"] = [DefaultInfo(
-            default_output = gc_sections_data.gc_sections,
-            other_outputs = [gc_sections_data.binary],
-        )]
 
     updated_pex = _add_executable_subtargets(ctx, pex, dbg_source_db, dbg_source_db_output, library, main, source_db_no_deps, src_manifest, python_deps)
 
@@ -462,12 +450,12 @@ def _convert_python_library_to_executable(
                 "deps": list(native_deps.values()),
                 "name": "python_linking:" + ctx.attrs.name,
                 "package_style": package_style,
+                "python_toolchain": ctx.attrs._python_toolchain,
                 "rpath": ctx.attrs.name,
                 "static_extension_utils": ctx.attrs.static_extension_utils,
                 "transformation_spec": ctx.attrs.transformation_spec,
                 "_cxx_toolchain": ctx.attrs._cxx_toolchain,
                 "_python_internal_tools": ctx.attrs._python_internal_tools,
-                "_python_toolchain": ctx.attrs._python_toolchain,
             }
             implicit_attrs = {
                 a: getattr(ctx.attrs, a)
@@ -491,11 +479,9 @@ def _convert_python_library_to_executable(
                 providers[LinkProviders].extra,
                 providers[LinkProviders].extra_artifacts,
                 executable_type,
-                providers[LinkProviders].linker_map_data,
-                providers[LinkProviders].gc_sections_data,
             ))
         else:
-            shared_libs, extensions, link_args, extra, extra_artifacts, linker_map_data, gc_sections_data = process_native_linking(
+            shared_libs, extensions, link_args, extra, extra_artifacts = process_native_linking(
                 ctx,
                 deps,
                 python_toolchain,
@@ -522,8 +508,6 @@ def _convert_python_library_to_executable(
                     ))
 
     else:
-        linker_map_data = None
-        gc_sections_data = None
         extensions = {}
         for manifest in library.manifests.traverse():
             if manifest.extensions:
@@ -558,8 +542,6 @@ def _convert_python_library_to_executable(
         extra,
         extra_artifacts,
         executable_type,
-        linker_map_data = linker_map_data if link_strategy == NativeLinkStrategy("native") else None,
-        gc_sections_data = gc_sections_data if link_strategy == NativeLinkStrategy("native") else None,
     )
 
 def python_binary_impl(ctx: AnalysisContext) -> list[Provider] | Promise:
@@ -574,6 +556,20 @@ def python_binary_impl(ctx: AnalysisContext) -> list[Provider] | Promise:
         if main_module.endswith(".py"):
             main_module = main_module[:-3]
 
+    # if "python-version=3.8" in ctx.attrs.labels:
+    #     # buildifier: disable=print
+    #     print((
+    #         "\033[1;33m \u26A0 [Warning] " +
+    #         "{0} 3.8 is EOL, and is going away by the end of H1 2024. " +
+    #         "This build triggered //{1}:{2} which still uses {0} 3.8. " +
+    #         "Make sure someone (you or the appropriate maintainers) upgrades it to {0} 3.10 soon to avoid breakages. " +
+    #         "https://fburl.com/python-eol \033[0m"
+    #     ).format(
+    #         "Cinder" if "python-flavor=cinder" in ctx.attrs.labels else "Python",
+    #         ctx.label.package,
+    #         ctx.attrs.name,
+    #     ))
+
     if main_module != None:
         main = (EntryPointKind("module"), main_module)
     else:
@@ -587,9 +583,6 @@ def python_binary_impl(ctx: AnalysisContext) -> list[Provider] | Promise:
     standalone_resources = qualify_srcs(ctx.label, ctx.attrs.base_module, standalone_resources_map)
     default_resources = qualify_srcs(ctx.label, ctx.attrs.base_module, default_resources_map)
 
-    cxx_toolchain_info = get_opt_cxx_toolchain_info(ctx)
-    toolchain_allow_cache_upload = cxx_toolchain_info.cxx_compiler_info.allow_cache_upload if cxx_toolchain_info else None
-
     return python_executable(
         ctx,
         main,
@@ -597,6 +590,6 @@ def python_binary_impl(ctx: AnalysisContext) -> list[Provider] | Promise:
         default_resources,
         standalone_resources,
         compile = value_or(ctx.attrs.compile, False),
-        allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs, toolchain_allow_cache_upload),
+        allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs),
         executable_type = ExecutableType("binary"),
     )

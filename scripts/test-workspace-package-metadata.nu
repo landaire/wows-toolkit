@@ -6,6 +6,6 @@ def main [] {
     let versions = ($buckfile | lines | where {|line| $line | str starts-with "    version = "})
 
     if ($versions | length) != 2 or ($versions | any {|line| $line != $"    version = \"($cargo_version)\","}) {
-        error make "wgcheck Buck package metadata does not match Cargo.toml."
+        error make {msg: "wgcheck Buck package metadata does not match Cargo.toml."}
     }
 }

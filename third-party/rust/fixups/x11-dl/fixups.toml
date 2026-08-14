@@ -1,1 +1,6 @@
+# The build script probes pkg-config for each X library's libdir, which is host
+# state. A checked-in config.rs with no baked-in directories replaces it.
 buildscript.run = false
+
+[env]
+OUT_DIR = "$(location //third-party/rust/fixups/x11-dl:out_dir)"

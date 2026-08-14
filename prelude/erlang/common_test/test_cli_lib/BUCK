@@ -12,7 +12,6 @@ erlang_application(
         "+debug_info",
         "+warnings_as_errors",
     ],
-    labels = ["test_application"],
     resources = [],
     visibility = ["PUBLIC"],
 )

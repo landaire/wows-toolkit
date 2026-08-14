@@ -159,7 +159,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                 sorted(set(filter(lambda p: p in packages, package_names))),
             )
 
-        output = inner_ctx.actions.declare_output(output_name, has_content_based_path = False)
+        output = inner_ctx.actions.declare_output(output_name)
         inner_ctx.actions.dynamic_output(
             dynamic = [targets_json_file],
             inputs = [],
@@ -178,7 +178,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
             identifier: None | str = None) -> Artifact:
         inner_cmd = cmd_args(cmd)
         subdir = "{}/".format(identifier) if identifier else ""
-        output = inner_ctx.actions.declare_output("debug_scrubbed/{}{}".format(subdir, executable.short_path), has_content_based_path = False)
+        output = inner_ctx.actions.declare_output("debug_scrubbed/{}{}".format(subdir, executable.short_path))
 
         action_execution_properties = get_action_execution_attributes(executable_link_execution_preference)
 
@@ -214,7 +214,10 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
         selected_targets_contain_swift = False
         for infos in debug_info:
             for info in infos:
-                is_swift_debug_info = ArtifactInfoTag("swift_debug_info") in info.tags
+                is_swiftmodule = ArtifactInfoTag("swiftmodule") in info.tags
+                is_swift_pcm = ArtifactInfoTag("swift_pcm") in info.tags
+                is_swift_related = is_swiftmodule or is_swift_pcm
+
                 is_label_included = _is_label_included(info.label, selection_criteria)
 
                 is_any_selected_target_linked_when_using_spec = is_using_spec and is_any_selected_target_linked
@@ -241,11 +244,11 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                     # `selected_target_infos` should only include targets explicitly selected by the user,
                     # not anything included in addition to support the debugger (e.g., `.swiftmodule` files)
                     selected_target_infos.append(info)
-                if is_label_included or (selected_targets_contain_swift and is_swift_debug_info):
+                if is_label_included or (selected_targets_contain_swift and is_swift_related):
                     # There might be a few ArtifactInfo corresponding to the same Label,
                     # so to avoid overwriting, we need to preserve all artifacts.
                     artifact_infos.append(info)
-                    selected_targets_contain_swift = selected_targets_contain_swift or ArtifactInfoTag("swift_debug_info") in info.tags
+                    selected_targets_contain_swift = selected_targets_contain_swift or ArtifactInfoTag("swiftmodule") in info.tags
 
         if json_type == _SelectiveDebuggingJsonType("spec"):
             metadata_output = inner_ctx.actions.write_json(
@@ -271,7 +274,7 @@ def apple_selective_debugging_impl(ctx: AnalysisContext) -> list[Provider]:
                     pretty = True,
                 )
 
-            metadata_output = inner_ctx.actions.declare_output("selective_metadata_with_targets_file.json", has_content_based_path = False)
+            metadata_output = inner_ctx.actions.declare_output("selective_metadata_with_targets_file.json")
             inner_ctx.actions.dynamic_output(
                 dynamic = [targets_json_file],
                 inputs = [],

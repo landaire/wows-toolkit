@@ -28,12 +28,6 @@ cxx_binary(
 )
 
 python_library(
-    name = "apple_platform_lib",
-    srcs = ["apple_platform.py"],
-    visibility = ["PUBLIC"],
-)
-
-python_library(
     name = "lib",
     srcs = glob(
         [
@@ -42,7 +36,6 @@ python_library(
         exclude = [
             "*_test.py",
             "main.py",
-            "apple_platform.py",
         ],
     ),
     resources = [":dummy_binary_for_signing_configured"],
@@ -50,8 +43,6 @@ python_library(
     deps = [
         "prelude//apple/tools:plistlib_utils",
         "prelude//apple/tools/info_plist_processor:process",
-        # @oss-disable[end= ]: "prelude//apple/tools/meta_only/entitlements_mismatch:check_entitlements_lib",
-        ":apple_platform_lib",
     ],
 )
 

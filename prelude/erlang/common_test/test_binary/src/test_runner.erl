@@ -258,7 +258,7 @@ provide_output_file(
     test_artifact_directory:link_to_artifact_dir(
         test_logger:get_std_out(OutputDir, test_runner), OutputDir, ArtifactAnnotationFunction
     ),
-    test_artifact_directory:prepare(OutputDir, Tests, ArtifactAnnotationFunction).
+    test_artifact_directory:prepare(OutputDir, ArtifactAnnotationFunction).
 
 -spec decode_erlang_term(Bin :: binary()) -> dynamic().
 decode_erlang_term(Bin) ->
@@ -370,21 +370,28 @@ g1.t1, g2.t2, g1.t2, g1.t3, g2.t2, we produce:
 """.
 -spec get_requested_tests([#ct_test{}]) -> [{[atom()], [atom()]}].
 get_requested_tests(Tests) ->
-    {TestMap, RevOrderedKeys} = lists:foldl(
-        fun(Test, {Map, Keys}) ->
+    lists:foldl(
+        fun(Test, List) ->
             Groups = Test#ct_test.groups,
-            TestName = Test#ct_test.test_name,
-            case Map of
-                #{Groups := Existing} ->
-                    {Map#{Groups => [TestName | Existing]}, Keys};
-                _ ->
-                    {Map#{Groups => [TestName]}, [Groups | Keys]}
-            end
+            add_or_append(List, {Groups, Test#ct_test.test_name})
         end,
-        {#{}, []},
+        [],
         Tests
+    ).
+
+-spec add_or_append(list({K, list(V)}), {K, V}) -> list({K, list(V)}).
+add_or_append(List, {Key, Value}) ->
+    List0 = lists:map(
+        fun
+            ({Key0, Value0}) when Key0 =:= Key -> {Key0, lists:append(Value0, [Value])};
+            (Other) -> Other
+        end,
+        List
     ),
-    [{Key, lists:reverse(maps:get(Key, TestMap))} || Key <- lists:reverse(RevOrderedKeys)].
+    case List0 =:= List of
+        true -> lists:append(List0, [{Key, [Value]}]);
+        false -> List0
+    end.
 
 -doc """
 Built the test_spec selecting the requested tests and
@@ -428,7 +435,7 @@ Collect all the ct_hooks entries provided by the user, and add the cth_tpx hook 
     CtHooks :: {ct_hooks, [term()]},
     CtOpts1 :: [term()].
 getCtHook(CtOpts0, ResultOutput, ProgressLineFingerprint) ->
-    {CtHooksOpts, CtOpts1} = lists:partition(
+    {CtHooksOpts, CtOpts1} = lists:splitwith(
         fun
             ({ct_hooks, _}) -> true;
             (_) -> false

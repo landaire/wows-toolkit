@@ -49,6 +49,24 @@
       "install_path": "WiX/6.0.2"
     },
     {
+      "name": "zstd",
+      "comment": "Windows ships no zstd; the pinned Buck2 release asset is zstd-compressed.",
+      "url": "https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-v1.5.7-win64.zip",
+      "sha256": "acb4e8111511749dc7a3ebedca9b04190e37a17afeb73f55d4425dbf0b90fad9",
+      "path": "archives/zstd-v1.5.7-win64.zip",
+      "version": "1.5.7",
+      "install_path": "Zstd/1.5.7"
+    },
+    {
+      "name": "buck2",
+      "comment": "Must stay on the release the vendored prelude came from; see prelude/VENDORED_FROM.",
+      "url": "https://github.com/facebook/buck2/releases/download/2025-12-01/buck2-x86_64-pc-windows-msvc.exe.zst",
+      "sha256": "3c9319aa3be0696d89b6fd11177339af0d33516ce9804fe0f43edbdfa53f37e3",
+      "path": "archives/buck2-2025-12-01-x86_64-pc-windows-msvc.exe.zst",
+      "version": "2025-12-01",
+      "install_path": "Buck2/2025-12-01"
+    },
+    {
       "name": "wix_extensions",
       "url": "https://github.com/wixtoolset/wix/releases/download/v6.0.2/artifacts.zip",
       "sha256": "6171eb9e604f344aa7c4a6924e2d22eee49cc1217cc326b532eef29154f88cc1",
@@ -67,6 +85,8 @@
     "rustc": { "path": "Rust/1.92.0/bin/rustc.exe", "version_output": "rustc 1.92.0" },
     "rustdoc": { "path": "Rust/1.92.0/bin/rustdoc.exe", "version_output": "rustdoc 1.92.0" },
     "nasm": { "path": "NASM/3.01/nasm.exe", "version_output": "NASM version 3.01" },
+    "buck2": { "path": "Buck2/2025-12-01/buck2.exe", "version_output": "2025-12-01" },
+    "zstd": { "path": "Zstd/1.5.7/zstd-v1.5.7-win64/zstd.exe", "version_output": "v1.5.7" },
     "wix": { "path": "WiX/6.0.2/wix.exe", "version_output": "6.0.2" },
     "wix_ui_extension": { "path": "WiX/6.0.2/extensions/WixToolset.UI.wixext.6.0.2.nupkg" },
     "wix_util_extension": { "path": "WiX/6.0.2/extensions/WixToolset.Util.wixext.6.0.2.nupkg" }

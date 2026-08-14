@@ -10,10 +10,8 @@
 
 package com.facebook.buck.android.device;
 
-import com.facebook.infer.annotation.Nullsafe;
 import java.util.Optional;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class TargetDeviceOptions {
 
   private boolean useEmulatorsOnlyMode;

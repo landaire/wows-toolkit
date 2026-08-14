@@ -162,6 +162,9 @@ def get_shared_library_name_linker_flags(linker_type: LinkerType, soname: str, f
         for f in shared_library_name_linker_flags_format
     ]
 
+def get_shared_library_install_name(linker_type: LinkerType, soname: str) -> str:
+    return LINKERS[linker_type].shared_library_install_name_format.format(soname)
+
 def get_shared_library_flags(linker_type: LinkerType, flag_overrides: [SharedLibraryFlagOverrides, None] = None) -> list[ArgLike]:
     """
     Arguments to pass to the linker to link a shared library.
@@ -263,7 +266,7 @@ def get_import_library(
         linker_type: LinkerType,
         output_short_path: str) -> (Artifact | None, list[ArgLike]):
     if linker_type == LinkerType("windows"):
-        import_library = ctx.actions.declare_output(output_short_path + ".imp.lib", has_content_based_path = False)
+        import_library = ctx.actions.declare_output(output_short_path + ".imp.lib")
         return import_library, [cmd_args(import_library.as_output(), format = "/IMPLIB:{}")]
     else:
         return None, []
@@ -315,7 +318,7 @@ def get_dumpbin_providers(
         ctx: AnalysisContext,
         binary: Artifact,
         dumpbin_toolchain_path: Artifact) -> list[Provider]:
-    dumpbin_headers_out = ctx.actions.declare_output(binary.short_path + ".dumpbin_headers", has_content_based_path = False)
+    dumpbin_headers_out = ctx.actions.declare_output(binary.short_path + ".dumpbin_headers")
     ctx.actions.run(
         cmd_args(
             cmd_args(dumpbin_toolchain_path, format = "{}/dumpbin.exe"),

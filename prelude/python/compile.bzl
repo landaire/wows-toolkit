@@ -29,10 +29,7 @@ def compile_manifests_for_mode(
         manifests: list[ManifestInfo],
         invalidation_mode: PycInvalidationMode = PycInvalidationMode("unchecked_hash")) -> ManifestInfo:
     mode = invalidation_mode.value.upper()
-    has_content_based_path = (
-        getattr(ctx.attrs, "supports_pyc_content_based_paths", False) == True and
-        ctx.attrs._python_toolchain[PythonToolchainInfo].supports_content_based_paths == True
-    )
+    has_content_based_path = ctx.attrs._python_toolchain[PythonToolchainInfo].supports_content_based_paths == True
     output = ctx.actions.declare_output("bytecode_{}".format(mode), dir = True, has_content_based_path = has_content_based_path)
     bytecode_manifest = ctx.actions.declare_output("bytecode_{}.manifest".format(mode), has_content_based_path = has_content_based_path)
     cmd = [
@@ -64,7 +61,7 @@ def compile_manifests_for_mode(
         env["CINDER_DUMMY_PYC_CACHE_BUSTER"] = "3451"
     elif version and "3.12" in version:
         # for CPython, the magic number *shouldn't* change during the lifetime of a feature release
-        # but internally we do make more significant changes (rarely),
+        # but internally we do make more signifcant changes (rarely),
         # so for those cases we support forced invalidation using this env var
         env["PYTHON312_DUMMY_PYC_CACHE_BUSTER"] = "3532"
 

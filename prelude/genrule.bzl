@@ -23,7 +23,6 @@ GENRULE_OUT_DIR = "out"
 # Currently, some rules require running from the project root, so provide an
 # opt-in list for those here.  Longer-term, these should be ported to actual
 # rule implementations in v2, rather then using `genrule`s.
-# TODO: Roll out root based genrules everywhere and flip the default to get rid of this logic.
 _BUILD_ROOT_LABELS = set([
     # The buck2 test suite
     "buck2_test_build_root",
@@ -66,8 +65,6 @@ def _requires_build_root(ctx: AnalysisContext) -> bool:
     for label in ctx.attrs.labels:
         if label in _BUILD_ROOT_LABELS:
             return True
-    if ctx.attrs.repo_relative_root:
-        return True
     return False
 
 def _requires_local(ctx: AnalysisContext) -> bool:
@@ -88,17 +85,11 @@ _USE_CACHE_MODE = is_full_meta_repo()
 # Extra attributes required by every genrule based on genrule_impl
 def genrule_attributes() -> dict[str, Attr]:
     attributes = {
-        "allow_offline_output_cache": attrs.bool(default = False),
         "always_print_stderr": attrs.bool(default = False),
         "metadata_env_var": attrs.option(attrs.string(), default = None),
         "metadata_path": attrs.option(attrs.string(), default = None),
         "no_outputs_cleanup": attrs.bool(default = False),
         "remote_execution_dependencies": attrs.list(attrs.dict(key = attrs.string(), value = attrs.string()), default = []),
-        "repo_relative_root": attrs.bool(default = False, doc = """
-            If true, the genrule will be executed from the project root, instead of in the genrule location in buck-out.
-            Helps with long paths issues on windows with deeply nested directories, which will usually have long relative paths as inputs.
-            Should eventually default to true.
-        """),
         "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
         "_genrule_toolchain": attrs.default_only(attrs.toolchain_dep(default = "toolchains//:genrule", providers = [GenruleToolchainInfo])),
     }
@@ -182,7 +173,7 @@ def process_genrule(
 
     executable_outs = getattr(ctx.attrs, "executable_outs", None)
 
-    content_based = getattr(ctx.attrs, "has_content_based_path", False)
+    content_based = getattr(ctx.attrs, "uses_experimental_content_based_path_hashing", False) or getattr(ctx.attrs, "has_content_based_path", False)
 
     # TODO(cjhopman): verify output paths are ".", "./", or forward-relative.
     if out_attr != None:
@@ -427,7 +418,6 @@ def process_genrule(
         prefer_local = prefer_local,
         weight = value_or(ctx.attrs.weight, 1),
         allow_cache_upload = cacheable,
-        allow_offline_output_cache = ctx.attrs.allow_offline_output_cache,
         category = category,
         identifier = identifier,
         no_outputs_cleanup = ctx.attrs.no_outputs_cleanup,

@@ -11,7 +11,7 @@
 # the generated docs, and so those should be verified to be accurate and
 # well-formatted (and then delete this TODO)
 
-load(":common.bzl", "AbiGenerationMode")
+load(":common.bzl", "AbiGenerationMode", "UnusedDependenciesAction")
 
 def _test_env():
     return {
@@ -140,9 +140,30 @@ def _required_for_source_only_abi():
 """),
     }
 
+def _on_unused_dependencies():
+    return {
+        "on_unused_dependencies": attrs.option(attrs.enum(UnusedDependenciesAction), default = None, doc = """
+    Action performed when Buck detects that some dependencies are not used during Java compilation.
+
+
+    Note that this feature is experimental and does not handle runtime dependencies.
+
+
+    The valid values are:
+     * `ignore` (default): ignore unused dependencies,
+    * `warn`: emit a warning to the console,
+    * `fail`: fail the compilation.
+
+
+
+    This option overrides the default value from
+    .
+"""),
+    }
+
 def _k2():
     return {
-        "k2": attrs.bool(default = True, doc = """
+        "k2": attrs.bool(default = False, doc = """
     Enables the Kotlin K2 compiler.
     """),
     }
@@ -153,19 +174,6 @@ def _incremental():
             default = True,
             doc = """
                 Enables Kotlin incremental compilation.
-            """,
-        ),
-    }
-
-def _skip_classpath_removal_rebuild():
-    return {
-        "skip_classpath_removal_rebuild": attrs.bool(
-            default = False,
-            doc = """
-                When true, skip forcing a full rebuild when classpath entries are
-                removed. The Kotlin incremental compiler does not reliably detect
-                removed classpath entries (see S618697, D90383250). This trades
-                correctness for build speed.
             """,
         ),
     }
@@ -272,24 +280,28 @@ def _annotation_processors():
         "annotation_processors": attrs.list(attrs.string(), default = []),
     }
 
-def _content_based_path_attr():
-    return attrs.bool(default = select({
-        "DEFAULT": False,
-        # @oss-disable[end= ]: "config//build_mode/constraints:whatsapp": True,
-        # @oss-disable[end= ]: "config//build_mode:arvr_mode[enabled]": True,
-        # @oss-disable[end= ]: "config//os/constraints:android": True,
-        # @oss-disable[end= ]: "config//runtime/constraints:android-host-test": True,
-        # @oss-disable[end= ]: "config//runtime/constraints:android-unit-test": True,
-    }))
+def _content_based_path_for_jar_snapshot():
+    return {
+        "uses_content_based_path_for_jar_snapshot": attrs.bool(default = select({
+            "DEFAULT": False,
+            # @oss-disable[end= ]: "config//build_mode/constraints:whatsapp": True,
+        })),
+    }
 
 def _kotlincd_content_based_paths():
     return {
-        "uses_content_based_paths_for_kotlincd": attrs.bool(default = True),
+        "uses_content_based_paths_for_kotlincd": attrs.bool(default = select({
+            "DEFAULT": False,
+            # @oss-disable[end= ]: "config//build_mode/constraints:whatsapp": True,
+        })),
     }
 
 def _classic_java_content_based_paths():
     return {
-        "uses_content_based_paths_for_classic_java": _content_based_path_attr(),
+        "uses_content_based_paths_for_classic_java": attrs.bool(default = select({
+            "DEFAULT": False,
+            # @oss-disable[end= ]: "config//build_mode/constraints:whatsapp": True,
+        })),
     }
 
 def _javac():
@@ -302,6 +314,11 @@ def _javac():
             """),
     }
 
+def _should_kosabi_jvm_abi_gen_use_k2():
+    return {
+        "should_kosabi_jvm_abi_gen_use_k2": attrs.option(attrs.bool(), default = None),
+    }
+
 jvm_common = struct(
     test_env = _test_env,
     resources_arg = _resources_arg,
@@ -312,16 +329,17 @@ jvm_common = struct(
     source_only_abi_deps = _source_only_abi_deps,
     abi_generation_mode = _abi_generation_mode,
     required_for_source_only_abi = _required_for_source_only_abi,
+    on_unused_dependencies = _on_unused_dependencies,
     k2 = _k2,
     incremental = _incremental,
-    skip_classpath_removal_rebuild = _skip_classpath_removal_rebuild,
     plugins = _plugins,
     kotlin_compiler_plugins = _kotlin_compiler_plugins,
     annotation_processors = _annotation_processors,
     javac = _javac,
     enable_used_classes = _enable_used_classes,
     multi_release_jar = _multi_release_jar,
+    should_kosabi_jvm_abi_gen_use_k2 = _should_kosabi_jvm_abi_gen_use_k2,
     classic_java_content_based_paths = _classic_java_content_based_paths,
+    content_based_path_for_jar_snapshot = _content_based_path_for_jar_snapshot,
     kotlincd_content_based_paths = _kotlincd_content_based_paths,
-    content_based_path_attr = _content_based_path_attr,
 )

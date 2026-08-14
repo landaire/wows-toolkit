@@ -6,21 +6,11 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load(
-    ":apple_bundle_types.bzl",
-    "AppleBundleInfo",
-    "AppleBundleLinkerMapInfo",
-    "AppleInfoPlistInfo",
-)
-load(
-    ":debug.bzl",
-    "AppleDebuggableInfo",
-)
+load(":apple_bundle_types.bzl", "AppleBundleInfo")
 
 def _apple_finalize_bundle_impl(ctx):
-    original_bundle = ctx.attrs.bundle
-    bundle_artifact = original_bundle[DefaultInfo].default_outputs[0]
-    finalized_bundle = ctx.actions.declare_output(bundle_artifact.basename, has_content_based_path = False)
+    bundle_artifact = ctx.attrs.bundle[DefaultInfo].default_outputs[0]
+    finalized_bundle = ctx.actions.declare_output(bundle_artifact.basename)
 
     cmd = cmd_args([
         ctx.attrs.finalizer[RunInfo],
@@ -37,7 +27,7 @@ def _apple_finalize_bundle_impl(ctx):
         identifier = bundle_artifact.basename,
     )
 
-    original_bundle_info = original_bundle[AppleBundleInfo]
+    original_bundle_info = ctx.attrs.bundle[AppleBundleInfo]
     finalized_bundle_info = AppleBundleInfo(
         bundle = finalized_bundle,
         bundle_type = original_bundle_info.bundle_type,
@@ -46,12 +36,10 @@ def _apple_finalize_bundle_impl(ctx):
         skip_copying_swift_stdlib = original_bundle_info.skip_copying_swift_stdlib,
     )
 
-    forwarded_providers = [original_bundle[AppleDebuggableInfo], original_bundle[AppleInfoPlistInfo], original_bundle[AppleBundleLinkerMapInfo]]
-
     return [
         DefaultInfo(default_output = finalized_bundle),
         finalized_bundle_info,
-    ] + forwarded_providers
+    ]
 
 apple_finalize_bundle = rule(
     attrs = {

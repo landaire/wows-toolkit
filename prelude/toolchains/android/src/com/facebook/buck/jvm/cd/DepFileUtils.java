@@ -11,7 +11,6 @@
 package com.facebook.buck.jvm.cd;
 
 import com.facebook.buck.util.json.ObjectMappers;
-import com.facebook.infer.annotation.Nullsafe;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedMap;
@@ -29,7 +28,6 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class DepFileUtils {
 
   /** Maps used-classes.json files to a dep-file that can be used by buck2. */

@@ -97,7 +97,7 @@ def build_load_path_symtree(ctx: AnalysisContext):
         k: p
         for k, p in zip(src_labels, srcs)
     }
-    symlink_dir = ctx.actions.symlinked_dir("_modules_", dict_from_tree, has_content_based_path = False)
+    symlink_dir = ctx.actions.symlinked_dir("_modules_", dict_from_tree)
 
     return symlink_dir
 
@@ -115,7 +115,7 @@ def build_julia_command(ctx):
 
     # build symdir for sources
     srcs_by_path = {f.short_path: f for f in ctx.attrs.srcs}
-    srcs = ctx.actions.symlinked_dir("srcs_tree", srcs_by_path, has_content_based_path = False)
+    srcs = ctx.actions.symlinked_dir("srcs_tree", srcs_by_path)
     if ctx.attrs.main not in srcs_by_path:
         fail("main should be in srcs!")
 
@@ -127,7 +127,7 @@ def build_julia_command(ctx):
 
     # prepare a json file to hold all the data the python preprocessor needs to
     # execute the julia interpreter.
-    json_info_file = ctx.actions.declare_output("artifacts/Overrides.json", has_content_based_path = False)
+    json_info_file = ctx.actions.declare_output("artifacts/Overrides.json")
 
     json_info_dict = {
         "env": julia_toolchain.env,

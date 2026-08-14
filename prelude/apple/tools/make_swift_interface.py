@@ -19,6 +19,7 @@ import pathlib
 import subprocess as proc
 import sys
 from collections.abc import Iterable
+
 from contextlib import contextmanager
 from typing import Optional
 

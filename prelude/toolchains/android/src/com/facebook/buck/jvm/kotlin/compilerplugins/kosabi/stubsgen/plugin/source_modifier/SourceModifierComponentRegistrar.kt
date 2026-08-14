@@ -8,8 +8,6 @@
  * above-listed licenses.
  */
 
-@file:Suppress("DEPRECATION_ERROR")
-
 package com.facebook.kotlin.compilerplugins.kosabi.stubsgen.plugin.source_modifier
 
 import com.facebook.kotlin.compilerplugins.kosabi.common.Logger

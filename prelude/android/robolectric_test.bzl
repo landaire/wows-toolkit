@@ -30,7 +30,7 @@ def robolectric_test_impl(ctx: AnalysisContext) -> list[Provider]:
         runtime_dependencies_dir = ctx.actions.symlinked_dir("runtime_dependencies", {
             runtime_dep.basename: runtime_dep
             for runtime_dep in ctx.attrs.robolectric_runtime_dependencies
-        }, has_content_based_path = False)
+        })
     else:
         runtime_dependencies_dir = None
 
@@ -61,8 +61,8 @@ def robolectric_test_impl(ctx: AnalysisContext) -> list[Provider]:
     )
 
     # Robolectric looks for a file named /com/android/tools/test_config.properties on the classpath
-    test_config_symlinked_dir = ctx.actions.symlinked_dir("test_config_symlinked_dir", {"com/android/tools/test_config.properties": test_config_properties_file}, has_content_based_path = False)
-    test_config_properties_jar = ctx.actions.declare_output("test_config_properties.jar", has_content_based_path = False)
+    test_config_symlinked_dir = ctx.actions.symlinked_dir("test_config_symlinked_dir", {"com/android/tools/test_config.properties": test_config_properties_file})
+    test_config_properties_jar = ctx.actions.declare_output("test_config_properties.jar")
     jar_cmd = cmd_args([
         ctx.attrs._java_toolchain[JavaToolchainInfo].jar,
         "-cfM",  # -c: create new archive, -f: specify the file name, -M: do not create a manifest
@@ -105,11 +105,14 @@ def robolectric_test_impl(ctx: AnalysisContext) -> list[Provider]:
         java_providers.java_global_code_info,
     ]
 
-    java_library_without_compiling_deps = JavaLibraryInfo(
-        compiling_deps = None,
-        library_output = java_providers.java_library_info.library_output,
-        output_for_classpath_macro = java_providers.java_library_info.output_for_classpath_macro,
-    )
-    providers.append(java_library_without_compiling_deps)
+    if ctx.attrs.used_as_dependency_deprecated_do_not_use:
+        providers.append(java_providers.java_library_info)
+    else:
+        java_library_without_compiling_deps = JavaLibraryInfo(
+            compiling_deps = None,
+            library_output = java_providers.java_library_info.library_output,
+            output_for_classpath_macro = java_providers.java_library_info.output_for_classpath_macro,
+        )
+        providers.append(java_library_without_compiling_deps)
 
     return providers

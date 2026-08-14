@@ -12,7 +12,7 @@ load("@prelude//rust:rust_toolchain.bzl", "RustToolchainInfo")
 def _get_rustc_cfg_impl(ctx: AnalysisContext) -> list[Provider]:
     toolchain_info = ctx.attrs._rust_toolchain[RustToolchainInfo]
 
-    out = ctx.actions.declare_output("rustc.cfg", has_content_based_path = True)
+    out = ctx.actions.declare_output("rustc.cfg")
 
     cmd = [
         toolchain_info.compiler,
@@ -24,9 +24,6 @@ def _get_rustc_cfg_impl(ctx: AnalysisContext) -> list[Provider]:
         cmd.append(cmd_args("--target=", toolchain_info.rustc_target_triple, delimiter = ""))
 
     env = {}
-    if ctx.attrs.enable_nightly_cfgs:
-        env["RUSTC_BOOTSTRAP"] = "1"
-
     if toolchain_info.rust_target_path != None:
         env["RUST_TARGET_PATH"] = toolchain_info.rust_target_path[DefaultInfo].default_outputs[0]
 
@@ -37,7 +34,6 @@ def _get_rustc_cfg_impl(ctx: AnalysisContext) -> list[Provider]:
 get_rustc_cfg = rule(
     impl = _get_rustc_cfg_impl,
     attrs = {
-        "enable_nightly_cfgs": attrs.bool(default = False),
         "_rust_toolchain": toolchains_common.rust(),
     },
 )
@@ -45,7 +41,7 @@ get_rustc_cfg = rule(
 def _get_rustc_host_tuple_impl(ctx: AnalysisContext) -> list[Provider]:
     toolchain_info = ctx.attrs._rust_toolchain[RustToolchainInfo]
 
-    out = ctx.actions.declare_output("rustc.host_tuple", has_content_based_path = True)
+    out = ctx.actions.declare_output("rustc.host_tuple")
 
     cmd = [
         toolchain_info.compiler,
@@ -70,7 +66,7 @@ def _linkable_symbol_supports_no_std_impl(ctx: AnalysisContext) -> list[Provider
     # as otherwise the panic handler is missing.
     cfg = "--cfg=set_nostd\n" if toolchain_info.advanced_unstable_linking else ""
 
-    flagfile = ctx.actions.write("cfg", cfg, has_content_based_path = True)
+    flagfile = ctx.actions.write("cfg", cfg)
     return [DefaultInfo(default_output = flagfile)]
 
 linkable_symbol_supports_no_std = rule(

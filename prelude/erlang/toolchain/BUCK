@@ -1,4 +1,3 @@
-load("@prelude//erlang:erlang_headers.bzl", "erlang_headers")
 load("@prelude//erlang:erlang_toolchain.bzl", "erlang_parse_transform", "toolchain_utilities")
 load("@prelude//utils:source_listing.bzl", "source_listing")
 
@@ -31,15 +30,11 @@ toolchain_utilities(
     dependency_analyzer = "dependency_analyzer.erl",
     dependency_finalizer = "dependency_finalizer.erl",
     dependency_merger = "dependency_merger.erl",
+    erlc_trampoline = "erlc_trampoline.sh",
     escript_builder = "escript_builder.erl",
     escript_trampoline = "escript_trampoline.sh",
     extract_from_otp = "extract_from_otp.erl",
     release_variables_builder = "release_variables_builder.erl",
     utility_modules = ["dependency_utils.erl"],
-    visibility = ["PUBLIC"],
-)
-
-erlang_headers(
-    name = "erlang_headers",
     visibility = ["PUBLIC"],
 )

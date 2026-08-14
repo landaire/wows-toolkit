@@ -5,7 +5,7 @@ oncall("android_devxx")
 
 source_listing()
 
-KOTLIN_USE_OLD_VERSION = False
+KOTLIN_USE_OLD_VERSION = read_config("kotlin", "kotlin_version") < "2"
 
 buck_java_library(
     name = "kotlin",

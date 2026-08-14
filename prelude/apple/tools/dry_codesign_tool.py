@@ -11,6 +11,7 @@
 import argparse
 import plistlib
 import shutil
+
 from pathlib import Path
 
 _CODE_SIGN_DRY_RUN_ARGS_FILE = "BUCK_code_sign_args.plist"
@@ -42,11 +43,6 @@ def _args_parser() -> argparse.ArgumentParser:
         required=True,
     )
     parser.add_argument(
-        "--subject-common-name",
-        type=str,
-        required=True,
-    )
-    parser.add_argument(
         "--extra-paths-to-sign",
         type=str,
         nargs="*",
@@ -61,10 +57,7 @@ def _main() -> None:
         # This is always empty string if you check `DryCodeSignStep` class usages in buck1
         "relative-path-to-sign": "",
         "use-entitlements": args.entitlements is not None,
-        "debug-info": {
-            "identity": args.identity,
-            "subject-common-name": args.subject_common_name,
-        },
+        "identity": args.identity,
     }
     if args.extra_paths_to_sign:
         content["extra-paths-to-sign"] = args.extra_paths_to_sign

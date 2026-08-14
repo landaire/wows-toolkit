@@ -2,7 +2,7 @@
 -module(test_info).
 -compile(warn_missing_spec_all).
 
--export([load_from_file/1, write_to_file/2, try_make_path_relative/1]).
+-export([load_from_file/1, write_to_file/2]).
 -include_lib("common/include/buck_ct_records.hrl").
 
 -type test_info() :: #test_info{}.
@@ -41,7 +41,7 @@ load_from_file(TestInfoFile) ->
         providers = Providers1,
         artifact_annotation_mfa = ParsedArtifactAnnotationMFA,
         ct_opts = CtOpts1,
-        erl_cmd = [unicode_characters_to_binary(normalize_erl_cmd(ErlExec)) | ErlFlags],
+        erl_cmd = [unicode_characters_to_binary(make_path_absolute(ErlExec)) | ErlFlags],
         extra_flags = ExtraFlags,
         common_app_env = CommonAppEnv,
         raw_target = RawTarget,
@@ -81,13 +81,6 @@ write_to_file(FileName, TestInfo) ->
     },
     file:write_file(FileName, json:encode(Json), [raw, binary]).
 
--spec normalize_erl_cmd(file:filename_all()) -> file:filename_all().
-normalize_erl_cmd(ErlCmd) when is_binary(ErlCmd) ->
-    case os:find_executable(binary_to_list(ErlCmd)) of
-        false -> make_path_absolute(ErlCmd);
-        AbsolutePath -> AbsolutePath
-    end.
-
 -spec make_path_absolute(file:filename_all()) -> file:filename_all().
 make_path_absolute(Path) ->
     case os:getenv("REPO_ROOT") of
@@ -95,8 +88,6 @@ make_path_absolute(Path) ->
         RepoRoot -> filename:join(RepoRoot, Path)
     end.
 
-%% Length guard: lists:split/2 throws badarg (not a non-matching tuple)
-%% when Path has fewer components than BaseDir.
 -spec try_make_path_relative(file:filename_all()) -> file:filename_all().
 try_make_path_relative(Path) ->
     case filename:pathtype(Path) of
@@ -113,7 +104,7 @@ try_make_path_relative(Path) ->
                 end,
             BaseDirParts = filename:split(BaseDir),
             PathParts = filename:split(Path),
-            case length(PathParts) >= length(BaseDirParts) andalso lists:split(length(BaseDirParts), PathParts) of
+            case lists:split(length(BaseDirParts), PathParts) of
                 {BaseDirParts, RelativeParts} -> filename:join(RelativeParts);
                 _ -> Path
             end

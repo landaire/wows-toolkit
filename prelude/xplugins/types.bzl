@@ -6,22 +6,6 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-XPluginsManifestInfo = provider(fields = {
-    "function_mapping": provider_field(Artifact),
-    "manifest": provider_field(Artifact),
-})
-
-XPluginsDebugArtifactsEntry = record(
-    target = field(Label),
-    manifest_info = field(XPluginsManifestInfo),
-)
-
-XPluginsDebugArtifactsTSet = transitive_set()
-
-XPluginsDebugArtifactsInfo = provider(fields = {
-    "tset": provider_field(XPluginsDebugArtifactsTSet),
-})
-
 XPluginsPluginUsageInfo = provider(fields = {
     "target": provider_field(Label),
     "usage_info": provider_field(Artifact),

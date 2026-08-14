@@ -10,13 +10,7 @@ load("@prelude//rust:build.bzl", "crate_root", "process_env")
 load(
     "@prelude//rust:context.bzl",
     "CompileContext",  # @unused Used as a type
-)
-load(
-    "@prelude//rust:crate_name.bzl",
     "CrateName",  # @unused Used as a type
-)
-load(
-    "@prelude//rust:dep_context.bzl",
     "DepCollectionContext",  # @unused Used as a type
 )
 load("@prelude//rust:link_info.bzl", "attr_crate", "get_available_proc_macros", "resolve_rust_deps")
@@ -48,7 +42,7 @@ def _compute_rust_deps(
         ctx: AnalysisContext,
         dep_ctx: DepCollectionContext) -> list[Dependency]:
     dep_ctx = DepCollectionContext(
-        advanced_unstable_linking = False,
+        advanced_unstable_linking = dep_ctx.advanced_unstable_linking,
         # Include doc deps here for any doctests that may be present in the target.
         include_doc_deps = True,
         is_proc_macro = dep_ctx.is_proc_macro,

@@ -1,7 +1,6 @@
 load("@prelude//:artifacts.bzl", "ArtifactExt", "artifact_ext")
 load("@prelude//:paths.bzl", path_utils = "paths")
 load("@prelude//cxx:cxx_context.bzl", "get_opt_cxx_toolchain_info")
-load("@prelude//cxx:headers.bzl", "as_headers")
 load("@prelude//cxx:preprocessor.bzl", "CPreprocessorInfo")
 load(
     "@prelude//linking:shared_libraries.bzl",
@@ -30,8 +29,6 @@ def is_empty(cxx_headers: list[CPreprocessorInfo]):
     for pps in cxx_headers:
         for pp in pps.set.value:
             for _ in pp.headers:
-                return False
-            for _ in pp.raw_headers:
                 return False
     return True
 
@@ -62,13 +59,6 @@ def create_third_party_build_root(
             for hdr in pp.headers:
                 cmd.add("--path", path_utils.join("include", hdr.namespace, hdr.name), hdr.artifact)
 
-            # Convert raw_headers to proper header paths using as_headers.
-            if pp.raw_headers:
-                raw_dirs = pp.raw_include_dirs + pp.raw_system_include_dirs
-                if raw_dirs:
-                    for hdr in as_headers(ctx, pp.raw_headers, raw_dirs):
-                        cmd.add("--path", path_utils.join("include", hdr.namespace, hdr.name), hdr.artifact)
-
     for dst, path in paths:
         cmd.add("--path", dst, path)
 
@@ -98,7 +88,7 @@ def create_third_party_build_root(
     )
     cmd.add(cmd_args(argsfile, format = "@{}", hidden = [s.lib.output for s in shared_libs]))
 
-    out = ctx.actions.declare_output(out, dir = True, has_content_based_path = False)
+    out = ctx.actions.declare_output(out, dir = True)
     cmd.add(out.as_output())
 
     ctx.actions.run(cmd, category = "third_party_build_root")

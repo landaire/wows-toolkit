@@ -10,7 +10,6 @@
 
 package com.facebook.buck.android.apk;
 
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.base.Strings;
 import java.io.BufferedInputStream;
 import java.io.BufferedReader;
@@ -21,7 +20,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Properties;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class KeystoreProperties {
 
   private final Path keystore;

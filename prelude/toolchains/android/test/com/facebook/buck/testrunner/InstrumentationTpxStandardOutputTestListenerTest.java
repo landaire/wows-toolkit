@@ -10,9 +10,9 @@
 
 package com.facebook.buck.testrunner;
 
+import com.android.ddmlib.IDevice;
 import com.android.ddmlib.testrunner.TestIdentifier;
-import com.facebook.buck.android.TestAndroidDevice;
-import com.facebook.buck.android.exopackage.AndroidDevice;
+import com.facebook.buck.android.TestDevice;
 import com.facebook.buck.testresultsoutput.TestResultsOutputSender;
 import java.io.BufferedReader;
 import java.io.File;
@@ -30,19 +30,19 @@ import org.junit.rules.TemporaryFolder;
 // given a correct order of events and that it outputs the same count of lines.
 /** Tests {@link InstrumentationTpxStandardOutputTestListener} */
 public class InstrumentationTpxStandardOutputTestListenerTest {
-  AndroidDevice testDevice;
+  IDevice testDevice;
   File tempFile;
 
   @Before
   public void setUp() throws IOException {
-    testDevice = new TestAndroidDevice();
+    testDevice = new TestDevice();
     tempFile = folder.newFile("test_results.json");
   }
 
   public InstrumentationTpxStandardOutputTestListener createListener(
       FileOutputStream fileOutputStream) {
     return new InstrumentationTpxStandardOutputTestListener(
-        new TestResultsOutputSender(fileOutputStream), testDevice, null);
+        new TestResultsOutputSender(fileOutputStream), testDevice);
   }
 
   @Rule public TemporaryFolder folder = new TemporaryFolder();
@@ -142,30 +142,6 @@ public class InstrumentationTpxStandardOutputTestListenerTest {
       Assert.assertTrue(endLine.contains("finish"));
       Assert.assertTrue(endLine.contains("testOne (TestClass)"));
       Assert.assertTrue(endLine.contains("Test ignored"));
-
-      Assert.assertNull(reader.readLine());
-    }
-  }
-
-  @Test
-  public void testIgnoredWithoutTestStarted() throws IOException {
-    // Android instrumentation reports DISABLED_ tests and @Ignore tests by calling
-    // testIgnored() without a preceding testStarted(). This must not crash.
-    try (FileOutputStream fileOutputStream = new FileOutputStream(tempFile)) {
-      InstrumentationTpxStandardOutputTestListener listener = createListener(fileOutputStream);
-
-      TestIdentifier testIdentifier = new TestIdentifier("TestClass", "DISABLED_testSkipped");
-      listener.testIgnored(testIdentifier);
-    }
-
-    try (BufferedReader reader = new BufferedReader(new FileReader(tempFile))) {
-      String startLine = reader.readLine();
-      Assert.assertTrue(startLine.contains("start"));
-      Assert.assertTrue(startLine.contains("DISABLED_testSkipped (TestClass)"));
-
-      String endLine = reader.readLine();
-      Assert.assertTrue(endLine.contains("finish"));
-      Assert.assertTrue(endLine.contains("DISABLED_testSkipped (TestClass)"));
 
       Assert.assertNull(reader.readLine());
     }

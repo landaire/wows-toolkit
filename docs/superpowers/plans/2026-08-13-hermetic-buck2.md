@@ -8,6 +8,23 @@
 
 **Tech Stack:** Buck2 prelude Rust/C++ rules, Reindeer local registry vendoring, Nix flakes, Visual Studio Build Tools offline layout, Windows SDK, Rust MSVC, NASM, WiX 6, GitHub Actions.
 
+## Status
+
+Tasks 1-3 are done and verified on `x86_64-unknown-linux-gnu`: all nine aliases
+build in debug and release, every `scripts/test-*.nu` passes, and
+`check-buck-hermetic.nu` accepts each alias while rejecting all ten negative
+fixtures.
+
+Task 4 is written but unverified. No offline Visual Studio layout exists to
+provision against, so the archive hashes in `toolchain-manifest.json` have never
+been checked against a real download and `//toolchains/windows:*` has only ever
+been parsed, never analyzed or built.
+
+Task 5 is written but unverified: `toolchains/platforms` and
+`.github/workflows/buck.yml` exist, and explicit `--target-platforms` selection
+is confirmed on Linux only. macOS has never been built; the Xcode pin in
+`build-support/check-xcode.nu` is unverified against any real Xcode install.
+
 ## Global Constraints
 
 - Buck2 is the direct build command. Nu may be used only for maintenance scripts.
@@ -35,13 +52,13 @@
 - Consumes: Nix `.#buck-toolchain` output.
 - Produces: `.buckconfig.local` containing only a validated toolchain-root configuration; direct `buck2 build` uses explicit tool paths.
 
-- [ ] Write a failing shell test that deletes `.buckconfig.local` and verifies `buck2 audit execution-platform-resolution //:wgcheck` reports the missing toolchain configuration.
-- [ ] Run the test and record the failing diagnostic.
-- [ ] Replace all `system_*_toolchain` uses with custom Rust, C++, and Python toolchain rules that construct every `RunInfo` from `read_root_config("nix_toolchain", "root", ...)`.
-- [ ] Keep `scripts/refresh-buck-toolchain.nu` as an explicit setup command. Remove the Nu Buck wrapper and make `.envrc` load only the Nix shell.
-- [ ] Run `nu scripts/refresh-buck-toolchain.nu`, `buck2 audit execution-platform-resolution //:wgcheck`, and `buck2 build //:wgcheck`.
+- [x] Write a failing shell test that deletes `.buckconfig.local` and verifies `buck2 audit execution-platform-resolution //:wgcheck` reports the missing toolchain configuration.
+- [x] Run the test and record the failing diagnostic.
+- [x] Replace all `system_*_toolchain` uses with custom Rust, C++, and Python toolchain rules that construct every `RunInfo` from `read_root_config("nix_toolchain", "root", ...)`.
+- [x] Keep `scripts/refresh-buck-toolchain.nu` as an explicit setup command. Remove the Nu Buck wrapper and make `.envrc` load only the Nix shell.
+- [x] Run `nu scripts/refresh-buck-toolchain.nu`, `buck2 audit execution-platform-resolution //:wgcheck`, and `buck2 build //:wgcheck`.
 - [ ] Have a fresh reviewer inspect tool actions for bare compiler, linker, Python, or shell paths.
-- [ ] Commit `build: make Buck the direct build interface`.
+- [x] Commit `build: make Buck the direct build interface`.
 
 ### Task 2: Finish offline third-party dependency generation
 
@@ -56,13 +73,13 @@
 - Consumes: root `Cargo.toml`, `Cargo.lock`, and the Nix-pinned Reindeer and cargo-local-registry executables.
 - Produces: `//third-party/rust:*` targets backed only by checked-in `.crate` archives and fixups.
 
-- [ ] Write a failing `nu scripts/check-buck-hermetic.nu //:wgcheck` assertion against a fixture containing `http_archive`, `http_file`, `git_fetch`, `git_repository`, or a URL in an action command.
-- [ ] Run the assertion and verify each fixture fails.
-- [ ] Configure Reindeer local-registry vendoring for all three target platforms and make the update script reject every remote-rule pattern after buckify.
-- [ ] Add explicit build-script fixups for every dependency reachable from each public binary. Use `run = false` for scripts that discover host state or invoke Cargo; model generated sources and native libraries as declared inputs instead.
-- [ ] Run dependency regeneration, verify `third-party/rust/BUCK` has no remote fetch rule, and run the hermetic action check on `//:wgcheck`.
+- [x] Write a failing `nu scripts/check-buck-hermetic.nu //:wgcheck` assertion against a fixture containing `http_archive`, `http_file`, `git_fetch`, `git_repository`, or a URL in an action command.
+- [x] Run the assertion and verify each fixture fails.
+- [x] Configure Reindeer local-registry vendoring for all three target platforms and make the update script reject every remote-rule pattern after buckify.
+- [x] Add explicit build-script fixups for every dependency reachable from each public binary. Use `run = false` for scripts that discover host state or invoke Cargo; model generated sources and native libraries as declared inputs instead.
+- [x] Run dependency regeneration, verify `third-party/rust/BUCK` has no remote fetch rule, and run the hermetic action check on `//:wgcheck`.
 - [ ] Have a fresh reviewer inspect every new fixup for host reads and undeclared network use.
-- [ ] Commit `build: finish offline Rust dependency generation`.
+- [x] Commit `build: finish offline Rust dependency generation`.
 
 ### Task 3: Generate and validate native workspace targets
 
@@ -76,15 +93,15 @@
 - Consumes: public `//third-party/rust:*` targets and platform toolchains.
 - Produces: native libraries, build scripts, and binaries for `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, and `dhat_parse`.
 
-- [ ] Write a failing query test that asserts every public root alias has no `cargo_binaries` dependency and has a native `cargo.rust_binary` owner.
-- [ ] Run it and verify the legacy aliases fail.
-- [ ] Define first-party library and binary targets with their Cargo package environment, features, assets, translations, and direct third-party dependencies.
-- [ ] Define separate feature variants for `dhat_load`, `profile_replay`, and `dhat_parse` so profiling allocators do not affect normal binaries.
-- [ ] Model first-party build scripts with declared sources, `local_manifest_dir`, and `WOWS_GAME_DATA = $(location ...)`; wire their generated output into dependent Rust rules.
-- [ ] Replace the root Cargo genrule and retain every existing public alias name.
-- [ ] Build every alias and run `nu scripts/check-buck-hermetic.nu` for each alias.
+- [x] Write a failing query test that asserts every public root alias has no `cargo_binaries` dependency and has a native `cargo.rust_binary` owner.
+- [x] Run it and verify the legacy aliases fail.
+- [x] Define first-party library and binary targets with their Cargo package environment, features, assets, translations, and direct third-party dependencies.
+- [x] Define separate feature variants for `dhat_load`, `profile_replay`, and `dhat_parse` so profiling allocators do not affect normal binaries.
+- [x] Model first-party build scripts with declared sources, `local_manifest_dir`, and `WOWS_GAME_DATA = $(location ...)`; wire their generated output into dependent Rust rules.
+- [x] Replace the root Cargo genrule and retain every existing public alias name.
+- [x] Build every alias and run `nu scripts/check-buck-hermetic.nu` for each alias.
 - [ ] Have a fresh reviewer inspect feature isolation, resource declarations, and build-script inputs.
-- [ ] Commit `build: add native Buck workspace targets`.
+- [x] Commit `build: add native Buck workspace targets`.
 
 ### Task 4: Add a hermetic Windows MSVC and WiX boundary
 

@@ -14,7 +14,6 @@ import com.facebook.buck.android.apkmodule.APKModule;
 import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.core.filesystems.RelPath;
 import com.facebook.buck.io.filesystem.impl.ProjectFilesystemUtils;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
@@ -22,7 +21,6 @@ import com.google.common.hash.HashCode;
 import com.google.common.hash.Hashing;
 import com.google.common.io.ByteSource;
 import com.google.common.io.Files;
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileVisitOption;
@@ -33,16 +31,13 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.regex.Pattern;
-import java.util.zip.CRC32;
 import java.util.zip.Deflater;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
 /** Utils for merging assets into an apk. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class MergeAssetsUtils {
   public enum BinaryType {
     APK,
@@ -107,7 +102,7 @@ public class MergeAssetsUtils {
             boolean shouldCompress =
                 inputEntry.getMethod() != ZipEntry.STORED
                     && !isNoCompress(apkPath, allNoCompressExtensions, noCompressPattern);
-            try (InputStream stream = Objects.requireNonNull(base.getInputStream(inputEntry))) {
+            try (InputStream stream = base.getInputStream(inputEntry)) {
               outputApkResources.addEntry(
                   stream,
                   inputEntry.getSize(),
@@ -167,7 +162,7 @@ public class MergeAssetsUtils {
             String.format(
                 "Invalid regex pattern in additional_aapt_params --no-compress-regex: '%s'. Error:"
                     + " %s",
-                regex, e.toString()),
+                regex, e.getMessage()),
             e);
       }
     }
@@ -238,38 +233,24 @@ public class MergeAssetsUtils {
     for (Map.Entry<Path, Path> assetPaths : assets.entrySet()) {
       Path packagingPathForAsset = assetPaths.getKey();
       Path fullPathToAsset = assetPaths.getValue();
+      ByteSource assetSource = Files.asByteSource(fullPathToAsset.toFile());
+      HashCode assetCrc32 = assetSource.hash(Hashing.crc32());
+      String apkPath = assetPaths.getKey().toString();
       int compression =
           isNoCompress(packagingPathForAsset.toString(), allNoCompressExtensions, noCompressPattern)
               ? 0
               : Deflater.BEST_COMPRESSION;
-      if (ResourceProcessingConfig.areOptimizationsEnabled()) {
-        byte[] assetBytes = java.nio.file.Files.readAllBytes(fullPathToAsset);
-        CRC32 crc32 = new CRC32();
-        crc32.update(assetBytes);
-        try (InputStream assetStream = new ByteArrayInputStream(assetBytes)) {
-          output.addEntry(
-              assetStream,
-              assetBytes.length,
-              crc32.getValue(),
-              assetsZipRoot.resolve(packagingPathForAsset).toString(),
-              compression,
-              false);
-        }
-      } else {
-        ByteSource assetSource = Files.asByteSource(fullPathToAsset.toFile());
-        HashCode assetCrc32 = assetSource.hash(Hashing.crc32());
-        try (InputStream assetStream = assetSource.openStream()) {
-          output.addEntry(
-              assetStream,
-              assetSource.size(),
-              // CRC32s are only 32 bits, but setCrc() takes a
-              // long.  Avoid sign-extension here during the
-              // conversion to long by masking off the high 32 bits.
-              assetCrc32.asInt() & 0xFFFFFFFFL,
-              assetsZipRoot.resolve(packagingPathForAsset).toString(),
-              compression,
-              false);
-        }
+      try (InputStream assetStream = assetSource.openStream()) {
+        output.addEntry(
+            assetStream,
+            assetSource.size(),
+            // CRC32s are only 32 bits, but setCrc() takes a
+            // long.  Avoid sign-extension here during the
+            // conversion to long by masking off the high 32 bits.
+            assetCrc32.asInt() & 0xFFFFFFFFL,
+            assetsZipRoot.resolve(packagingPathForAsset).toString(),
+            compression,
+            false);
       }
     }
   }

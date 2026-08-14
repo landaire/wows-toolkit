@@ -11,12 +11,9 @@
 package com.facebook.buck.android;
 
 import com.facebook.buck.core.filesystems.AbsPath;
-import com.facebook.infer.annotation.Nullsafe;
 import java.util.Objects;
-import org.jetbrains.annotations.Nullable;
 
 /** Isolated Apk Info. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class IsolatedApkInfo {
 
   private final AbsPath manifestPath;
@@ -48,7 +45,7 @@ public class IsolatedApkInfo {
   }
 
   @Override
-  public boolean equals(@Nullable Object obj) {
+  public boolean equals(Object obj) {
     if (this == obj) {
       return true;
     }

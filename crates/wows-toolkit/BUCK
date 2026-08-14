@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_library")
 
 buildscript = workspace_buildscript(
     name = "wows_toolkit_build",
@@ -136,6 +136,23 @@ workspace_library(
 )
 
 
+# build.rs cannot emit these under Buck: winresource and the link-arg directives
+# run only under Cargo, and winresource additionally discovers rc.exe from host
+# state. The icon resource is linked from //toolchains/windows:app_resource.
+GUI_LINK_FLAGS = os_select(
+    macos = [],
+    linux = [],
+    # The vendor hybrid-graphics shims look these up in the export table by name.
+    # Defining the statics is not enough; an executable exports nothing unless
+    # the linker is told to. Scoped to the GUI binary, which is where the statics
+    # are defined and the only target that opens a surface.
+    windows = [
+        "-Clink-arg=/EXPORT:NvOptimusEnablement,DATA",
+        "-Clink-arg=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA",
+        "-Clink-arg=$(location //toolchains/windows:app_resource)",
+    ],
+)
+
 workspace_binary(
     name = "wows_toolkit_bin",
     crate = "wows_toolkit",
@@ -146,6 +163,7 @@ workspace_binary(
     deps = [":wows_toolkit"] + TOOLKIT_DEPS,
     buildscript = buildscript,
     resources = ["//assets:wows_toolkit_png", "//embedded_resources:constants_json"],
+    rustc_flags = GUI_LINK_FLAGS,
 )
 
 workspace_binary(

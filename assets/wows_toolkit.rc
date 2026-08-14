@@ -1,0 +1,38 @@
+// Replaces what winresource generates under Cargo. winresource shells out to an
+// rc.exe it discovers from host state, so the Buck build compiles this script
+// with the rc.exe pinned in toolchains/windows/toolchain-manifest.json instead.
+//
+// Keep FILEVERSION, PRODUCTVERSION and the two version strings in step with the
+// wows_toolkit package version and wix/version.wxi.
+
+#include <winver.h>
+
+1 ICON "wows_toolkit.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION 1,0,1,0
+PRODUCTVERSION 1,0,1,0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0x0L
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName", "landaire"
+            VALUE "FileDescription", "WoWs Toolkit"
+            VALUE "FileVersion", "1.0.1"
+            VALUE "InternalName", "wows_toolkit.exe"
+            VALUE "OriginalFilename", "wows_toolkit.exe"
+            VALUE "ProductName", "WoWs Toolkit"
+            VALUE "ProductVersion", "1.0.1"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

@@ -59,7 +59,25 @@ This is not considered a World of Warships mod and does not modify your World of
 
 If you do not want to compile the application yourself or make changes to WoWs Toolkit please ignore this section!
 
-Native Buck builds default to debug mode. Build a root alias with `buck2 build //:wows_toolkit`. Use `buck2 build -c native_build.mode=release //:wows_toolkit` for an optimized native release build.
+### Building with Buck
+
+Buck2 builds every binary from checked-in sources and a pinned toolchain, without Cargo and without downloading anything. Run the one-time bootstrap first, which writes the machine-local `.buckconfig.local`:
+
+```
+nu scripts/refresh-buck-toolchain.nu   # macOS and Linux
+./toolchains/windows/verify-toolchain.ps1 -OfflineRoot <layout>   # Windows
+```
+
+Then build any root alias. Builds default to debug mode:
+
+```
+buck2 build //:wows_toolkit
+buck2 build -c native_build.mode=release //:wows_toolkit
+```
+
+The aliases are `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, and `dhat_parse`.
+
+`nu scripts/check-buck-hermetic.nu //:<alias>` fails if anything in that target's action graph reaches outside the declared inputs.
 
 To build yourself, make sure you are using the latest version of stable rust by running `rustup update`. Next, simply run `cargo run --release -p wows_toolkit` from the source code directory.
 
@@ -125,4 +143,8 @@ nix build .#replayshark
 
 ## Buck Dependency Maintenance
 
-Run `nu scripts/update-buck-deps.nu` from a Nix-capable macOS or Linux environment. Native Windows dependency regeneration is not supported; use WSL2 or another supported maintenance host. This requirement applies only to regeneration. Generated native Rust rules do not invoke Nix or Cargo. Legacy Cargo-backed aliases remain until Task 3.
+After changing `Cargo.toml` or `Cargo.lock`, run `nu scripts/update-buck-deps.nu` to re-vendor the dependency sources and regenerate `third-party/rust/BUCK`. Commit the vendored crates, the generated rules, and the fixups together.
+
+`nu scripts/vendor-prelude.nu` re-vendors `prelude/` from the pinned Buck2 binary and reapplies the patches this repo depends on. The prelude must come from the same Buck2 that consumes it, so run it after changing `flake.lock`. Never hand-edit files under `prelude/`.
+
+Both commands need a Nix-capable macOS or Linux environment; on Windows use WSL2 or another maintenance host. That applies only to regeneration. Building needs neither Nix nor Cargo in any Buck action.

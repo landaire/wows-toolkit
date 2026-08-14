@@ -20,7 +20,6 @@ load(
     "LinkerType",
     "PicBehavior",
     "RcCompilerInfo",
-    "RuntimeDependencyHandling",
     "ShlibInterfacesMode",
 )
 load("@prelude//cxx:headers.bzl", "HeaderMode")
@@ -203,7 +202,6 @@ def _cxx_toolchain_from_cxx_tools_info(ctx: AnalysisContext, cxx_tools_info: Cxx
             as_compiler_info = CCompilerInfo(
                 compiler = _run_info(cxx_tools_info.compiler),
                 compiler_type = cxx_tools_info.compiler_type,
-                supports_content_based_paths = ctx.attrs.supports_content_based_paths,
             ),
             asm_compiler_info = CCompilerInfo(
                 compiler = _run_info(cxx_tools_info.asm_compiler),
@@ -226,7 +224,6 @@ def _cxx_toolchain_from_cxx_tools_info(ctx: AnalysisContext, cxx_tools_info: Cxx
             pic_behavior = pic_behavior,
             llvm_link = llvm_link,
             use_dep_files = True,
-            runtime_dependency_handling = RuntimeDependencyHandling("no_symlink"),
         ),
         CxxPlatformInfo(name = target_name),
     ]

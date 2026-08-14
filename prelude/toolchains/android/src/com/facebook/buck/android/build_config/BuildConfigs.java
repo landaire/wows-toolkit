@@ -10,11 +10,9 @@
 
 package com.facebook.buck.android.build_config;
 
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableList;
 
 /** Utilities for generating a {@code BuildConfig.java} file for Android. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class BuildConfigs {
 
   /**

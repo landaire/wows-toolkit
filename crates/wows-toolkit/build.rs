@@ -126,12 +126,25 @@ fn main() {
     copy_embedded_file("EMBEDDED_CONSTANTS", "../../embedded_resources/constants.json", "constants.json");
     copy_embedded_file("WOWS_TOOLKIT_ICON", "../../assets/wows_toolkit.png", "wows_toolkit.png");
 
+    // winresource discovers rc.exe from host state, which a hermetic action
+    // cannot do, and Buck ignores cargo:rustc-link-arg-bin. The Buck build
+    // supplies both from //toolchains/windows: see GUI_LINK_FLAGS in
+    // crates/wows-toolkit/BUCK.
     #[cfg(not(wows_buck_build))]
     if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
         let mut res = winresource::WindowsResource::new();
         res.set_icon("../../assets/wows_toolkit.ico");
         res.compile().unwrap();
 
+        // The vendor hybrid-graphics shims look these up in the export table by
+        // name. Defining the statics is not enough; an executable exports
+        // nothing unless the linker is told to.
+        //
+        // Scoped to the GUI binary, which is where the statics are defined and
+        // the only target that opens a surface. `-bins` would put the directive
+        // on every binary in the crate, and the headless helpers in src/bin
+        // define no such symbol, so the linker would fail them on an export it
+        // cannot resolve.
         if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
             println!("cargo:rustc-link-arg-bin=wows_toolkit=/EXPORT:NvOptimusEnablement,DATA");
             println!("cargo:rustc-link-arg-bin=wows_toolkit=/EXPORT:AmdPowerXpressRequestHighPerformance,DATA");

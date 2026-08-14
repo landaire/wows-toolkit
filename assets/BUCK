@@ -9,3 +9,9 @@ export_file(
     src = "wows_toolkit.ico",
     visibility = ["PUBLIC"],
 )
+
+export_file(
+    name = "wows_toolkit_rc",
+    src = "wows_toolkit.rc",
+    visibility = ["PUBLIC"],
+)

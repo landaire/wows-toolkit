@@ -11,8 +11,6 @@
 # the generated docs, and so those should be verified to be accurate and
 # well-formatted (and then delete this TODO)
 
-load("@prelude//cxx:cxx_toolchain_types.bzl", _RuntimeDependencyHandling = "RuntimeDependencyHandling")
-
 def validate_uri(_s):
     return True
 
@@ -30,7 +28,7 @@ prelude_rule = record(
     cfg = field(typing.Any | None, None),
 )
 
-AbiGenerationMode = ["class", "source", "source_only", "none"]
+AbiGenerationMode = ["unknown", "class", "source", "migrating_to_source_only", "source_only", "unrecognized"]
 
 AnnotationProcessingTool = ["kapt", "javac"]
 
@@ -38,13 +36,15 @@ CxxRuntimeType = ["dynamic", "static"]
 
 CxxSourceType = ["c", "cxx", "cxx_thinlink", "objc", "objcxx", "cuda", "hip", "swift", "c_cpp_output", "cxx_cpp_output", "objc_cpp_output", "objcxx_cpp_output", "cuda_cpp_output", "hip_cpp_output", "assembler_with_cpp", "assembler", "asm_with_cpp", "asm", "pcm"]
 
-DefaultDepsMode = ["none", "deps", "exported_deps"]
+ForkMode = ["none", "per_test"]
 
 HeadersAsRawHeadersMode = ["required", "preferred", "disabled"]
 
 IncludeType = ["local", "system", "raw"]
 
 LinkableDepType = ["static", "static_pic", "shared"]
+
+LogLevel = ["off", "severe", "warning", "info", "config", "fine", "finer", "finest", "all"]
 
 OnDuplicateEntry = ["fail", "overwrite", "append"]
 
@@ -56,7 +56,7 @@ TestType = ["junit", "junit5", "testng"]
 
 UnusedDependenciesAction = ["unknown", "fail", "warn", "ignore", "unrecognized"]
 
-RuntimeDependencyHandling = _RuntimeDependencyHandling.values()
+RuntimeDependencyHandling = ["none", "symlink_single_level_only", "symlink"]
 
 def _name_arg(name_type):
     return {
@@ -98,6 +98,19 @@ def _provided_deps_query_arg():
 """),
     }
 
+def _platform_deps_arg():
+    return {
+        "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = [], doc = """
+    Platform specific dependencies.
+     These should be specified as a list of pairs where the first element is an
+     un-anchored regex (in java.util.regex.Pattern syntax) against which the
+     platform name is matched, and the second element is a list of
+     dependencies (same format as `deps`) that are exported
+     if the platform matches the regex.
+     See `deps` for more information.
+"""),
+    }
+
 def _labels_arg():
     return {
         "labels": attrs.list(attrs.string(), default = [], doc = """
@@ -136,6 +149,26 @@ def _test_label_arg():
 def _run_test_separately_arg(run_test_separately_type):
     return {
         "run_test_separately": run_test_separately_type,
+    }
+
+def _fork_mode():
+    return {
+        "fork_mode": attrs.enum(ForkMode, default = "none", doc = """
+    Controls whether tests will all be run in the same process or a process will be
+     started for each set of tests in a class.
+
+     (This is mainly useful when porting Java tests to Buck from Apache Ant which
+     allows JUnit tasks to set a `fork="yes"` property. It should not be
+     used for new tests since it encourages tests to not cleanup after themselves and
+     increases the tests' computational resources and running time.)
+
+
+    `none`
+    All tests will run in the same process.
+    `per_test`
+    A process will be started for each test class in which all tests of that test class
+     will run.
+"""),
     }
 
 def _test_rule_timeout_ms():
@@ -202,12 +235,14 @@ buck = struct(
     deps_query_arg = _deps_query_arg,
     exec_os_type_arg = _exec_os_type_arg,
     provided_deps_query_arg = _provided_deps_query_arg,
+    platform_deps_arg = _platform_deps_arg,
     labels_arg = _labels_arg,
     visibility_arg = _visibility_arg,
     tests_arg = _tests_arg,
     tests_apple_arg = _tests_apple_arg,
     test_label_arg = _test_label_arg,
     run_test_separately_arg = _run_test_separately_arg,
+    fork_mode = _fork_mode,
     test_rule_timeout_ms = _test_rule_timeout_ms,
     target_os_type_arg = _target_os_type_arg,
     allow_cache_upload_arg = _allow_cache_upload_arg,

@@ -1,8 +1,15 @@
-load(":hermetic_rust.bzl", "hermetic_cxx_toolchain", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "selected_toolchain", "validate_nix_toolchain")
+load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "nix_cxx_toolchain", "selected_toolchain")
 load(":native_build_mode.bzl", "native_build_mode_transition")
 
-hermetic_cxx_toolchain(
-    name = "nix_cxx",
+nix_cxx_toolchain(
+    name = "nix_cxx_macos",
+    os = "macos",
+    visibility = ["PUBLIC"],
+)
+
+nix_cxx_toolchain(
+    name = "nix_cxx_linux",
+    os = "linux",
     visibility = ["PUBLIC"],
 )
 
@@ -12,17 +19,25 @@ hermetic_python_bootstrap_toolchain(
 )
 
 hermetic_rust_toolchain(
-    name = "nix_rust",
+    name = "nix_rust_macos",
     default_edition = "2024",
     rustc_target_triple = "aarch64-apple-darwin",
+    visibility = ["PUBLIC"],
+)
+
+hermetic_rust_toolchain(
+    name = "nix_rust_linux",
+    default_edition = "2024",
+    rustc_target_triple = "x86_64-unknown-linux-gnu",
     visibility = ["PUBLIC"],
 )
 
 selected_toolchain(
     name = "cxx",
     actual = select({
+        "config//os/constraints:linux": ":nix_cxx_linux",
+        "config//os/constraints:macos": ":nix_cxx_macos",
         "config//os/constraints:windows": "//windows:cxx",
-        "DEFAULT": ":nix_cxx",
     }),
     visibility = ["PUBLIC"],
 )
@@ -30,8 +45,9 @@ selected_toolchain(
 selected_toolchain(
     name = "rust",
     actual = select({
+        "config//os/constraints:linux": ":nix_rust_linux",
+        "config//os/constraints:macos": ":nix_rust_macos",
         "config//os/constraints:windows": "//windows:rust",
-        "DEFAULT": ":nix_rust",
     }),
     visibility = ["PUBLIC"],
 )

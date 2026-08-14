@@ -30,8 +30,6 @@ RustExplicitSysrootDeps = record(
 
 PanicRuntime = enum("unwind", "abort", "none")
 
-RustSanitizer = enum("address", "cfi", "hwaddress", "kcfi", "leak", "memory", "memtag", "safestack", "shadow-call-stack", "thread")
-
 # FIXME(JakobDegen): These all have default values for historical reasons. Some of them certainly
 # should, but some of them probably shouldn't?
 # @unsorted-dict-items
@@ -64,8 +62,6 @@ rust_toolchain_attrs = {
     "rustdoc_env": provider_field(dict[str, typing.Any], default = {}),
     # Extra flags for rustdoc invocations
     "rustdoc_flags": provider_field(list[typing.Any], default = []),
-    # Extra flags to pass to the linker
-    "linker_flags": provider_field(list[typing.Any], default = []),
     # When you `buck test` a library, also compile and run example code in its
     # documentation comments.
     "doctests": provider_field(bool, default = False),
@@ -146,16 +142,6 @@ rust_toolchain_attrs = {
     "configuration_hash": provider_field(str | None, default = None),
     # Error handler used to categorize rust errors encountered by users
     "rust_error_handler": provider_field(typing.Any, default = None),
-    # LLVM remarks filter (e.g., "all", "inline") - used with -Cremark flag
-    "remarks": provider_field(str | None, default = None),
-    # Sanitizer to enable via -Zsanitizer=<value> (e.g., "address", "thread", "memory", "leak", "cfi", "hwaddress")
-    # See https://doc.rust-lang.org/beta/unstable-book/compiler-flags/sanitizer.html
-    "sanitizer": provider_field(RustSanitizer | None, default = None),
-    # Substrings that are restricted in target-level rustc_flags. Each entry is
-    # checked via a contains() match against every flag. For example, specifying
-    # "target-feature" will block both "-Ctarget-feature=..." and the split
-    # form "-C" followed by "target-feature=...".
-    "restricted_rustc_flags": provider_field(list[typing.Any], default = []),
 }
 
 RustToolchainInfo = provider(fields = rust_toolchain_attrs)

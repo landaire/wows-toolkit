@@ -38,10 +38,9 @@ public class InstallerServer extends ServerTransportFilter {
   Server grpcServer;
   boolean clientConnected = false;
 
-  public InstallerServer(InstallCommand installer, int tcpPort, long installTimeoutSeconds) {
+  public InstallerServer(InstallCommand installer, int tcpPort) {
     SettableFuture<Void> isDone = SettableFuture.create();
-    InstallerService installerService =
-        new InstallerService(installer, isDone, installTimeoutSeconds);
+    InstallerService installerService = new InstallerService(installer, isDone);
     this.grpcServer = buildServer(installerService, tcpPort);
     Futures.addCallback(
         isDone,

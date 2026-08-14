@@ -36,9 +36,7 @@ load(
 load(
     ":packages.bzl",
     "GoPkg",  # @Unused used as type
-    "GoStdlib",
-    "GoStdlibDynamicValue",
-    "make_link_importcfg",
+    "make_importcfg",
     "merge_pkgs",
 )
 load(":toolchain.bzl", "GoToolchainInfo", "get_toolchain_env_vars")
@@ -144,11 +142,10 @@ def link(
 
     cmd = cmd_args()
 
-    cmd.add(go_toolchain.go_wrapper)
-    cmd.add(["--go", go_toolchain.linker])
-    cmd.add("--")
+    cmd.add(go_toolchain.linker)
     cmd.add(go_toolchain.linker_flags)
 
+    cmd.add("-o", output.as_output())
     cmd.add("-buildmode=" + _build_mode_param(build_mode))
     cmd.add("-buildid=")  # Setting to a static buildid helps make the binary reproducible.
 
@@ -166,7 +163,9 @@ def link(
 
     identifier_prefix = ctx.label.name + "_" + _build_mode_param(build_mode)
 
-    go_stdlib = ctx.attrs._go_stdlib[GoStdlib]
+    importcfg = make_importcfg(ctx, identifier_prefix, all_pkgs, use_shared_code, link = True)
+
+    cmd.add("-importcfg", importcfg)
 
     executable_args = _process_shared_dependencies(ctx, output, deps, link_style)
 
@@ -186,9 +185,7 @@ def link(
 
         # Gather external link args from deps.
         ext_links = get_link_args_for_strategy(
-            ctx.actions,
-            ctx.label,
-            cxx_toolchain.linker_info,
+            ctx,
             cxx_inherited_link_info(deps),
             to_link_strategy(link_style),
             prefer_stripped = False,
@@ -200,8 +197,8 @@ def link(
             cxx_toolchain,
             [ext_links],
         )
-        ext_link_args = cmd_args(hidden = ext_link_args_output.hidden, quote = "shell")
-        ext_link_args.add(executable_args.extra_link_args)
+        ext_link_args = cmd_args(hidden = ext_link_args_output.hidden)
+        ext_link_args.add(cmd_args(executable_args.extra_link_args, quote = "shell"))
         ext_link_args.add(external_linker_flags)
         ext_link_args.add(ext_link_args_output.link_args)
 
@@ -245,63 +242,14 @@ def link(
 
     cmd.add(linker_flags)
 
+    cmd.add(main.pkg_shared if use_shared_code else main.pkg)
+
     env = get_toolchain_env_vars(go_toolchain)
 
-    ctx.actions.dynamic_output_new(_link(
-        go_stdlib_value = go_stdlib.dynamic_value,
-        env_vars = env,
-        link_args = cmd,
-        main_pkg = main,
-        deps_pkgs = all_pkgs,
-        shared = use_shared_code,
-        identifier = identifier_prefix,
-        out = output.as_output(),
-    ))
+    ctx.actions.run(cmd, env = env, category = "go_link", identifier = identifier_prefix)
 
-    # stamp only executable targets
-    if build_mode in [GoBuildMode("exe"), GoBuildMode("pie")]:
-        output = stamp_build_info(ctx, output, has_content_based_path = True)
+    output = stamp_build_info(ctx, output, has_content_based_path = True)
 
-    final_output = ctx.actions.copy_file(final_output_name, output, has_content_based_path = False)
+    final_output = ctx.actions.copy_file(final_output_name, output)
 
     return (final_output, executable_args.runtime_files, executable_args.external_debug_info)
-
-def _link_impl(
-        actions: AnalysisActions,
-        go_stdlib_value: ResolvedDynamicValue,
-        env_vars: dict[str, str | cmd_args | Artifact],
-        link_args: cmd_args,
-        main_pkg: GoPkg,
-        deps_pkgs: dict[str, GoPkg],
-        shared: bool,
-        identifier: str,
-        out: OutputArtifact) -> list[Provider]:
-    go_stdlib_value = go_stdlib_value.providers[GoStdlibDynamicValue]
-
-    deps = merge_pkgs([go_stdlib_value.pkgs, deps_pkgs])
-    importcfg = make_link_importcfg(actions, deps, shared)
-    main_pkg_o = main_pkg.archive_file_shared if shared else main_pkg.archive_file
-
-    cmd = [
-        link_args,
-        ["-importcfg", importcfg],
-        ["-o", out],
-        main_pkg_o,
-    ]
-    actions.run(cmd, env = env_vars, category = "go_link", identifier = identifier)
-    return []
-
-_link = dynamic_actions(
-    impl = _link_impl,
-    # @unsorted-dict-items
-    attrs = {
-        "go_stdlib_value": dynattrs.dynamic_value(),  # GoStdlibDynamicValue
-        "env_vars": dynattrs.value(dict[str, str | cmd_args | Artifact]),
-        "link_args": dynattrs.value(cmd_args),
-        "main_pkg": dynattrs.value(GoPkg),
-        "deps_pkgs": dynattrs.value(dict[str, GoPkg]),
-        "shared": dynattrs.value(bool),
-        "identifier": dynattrs.value(str),
-        "out": dynattrs.output(),
-    },
-)

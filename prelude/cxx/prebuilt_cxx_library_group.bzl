@@ -56,18 +56,14 @@ load(
 )
 load("@prelude//unix:providers.bzl", "UnixEnv", "create_unix_env_info")
 load("@prelude//utils:expect.bzl", "expect")
-load("@prelude//utils:utils.bzl", "filter_and_map_idx", "flatten_dict")
+load("@prelude//utils:utils.bzl", "flatten_dict")
 load(":cxx_context.bzl", "get_cxx_toolchain_info")
 load(
     ":cxx_library_utility.bzl",
     "cxx_attr_dep_metadata",
     "cxx_attr_use_content_based_paths",
     "cxx_inherited_link_info",
-    "cxx_use_shlib_intfs_mode",
-)
-load(
-    ":cxx_toolchain_types.bzl",
-    "ShlibInterfacesMode",
+    "cxx_use_shlib_intfs",
 )
 load(
     ":shared_library_interface.bzl",
@@ -327,8 +323,7 @@ def prebuilt_cxx_library_group_impl(ctx: AnalysisContext) -> list[Provider]:
                 ctx = ctx,
                 shared_libs = flatten_dict([ctx.attrs.shared_libs, ctx.attrs.provided_shared_libs]),
                 args = ctx.attrs.shared_link,
-                # TODO: We should not permit both modes, but to keep builds green we have to for now.
-                shlib_intfs = ctx.attrs.supports_shared_library_interface and (cxx_use_shlib_intfs_mode(ctx, ShlibInterfacesMode("defined_only")) or cxx_use_shlib_intfs_mode(ctx, ShlibInterfacesMode("stub_from_library"))),
+                shlib_intfs = ctx.attrs.supports_shared_library_interface and cxx_use_shlib_intfs(ctx),
             )
             solibs.update({n: LinkedObject(output = lib, unstripped_output = lib) for n, lib in ctx.attrs.shared_libs.items()})
         outputs[output_style] = outs
@@ -356,7 +351,7 @@ def prebuilt_cxx_library_group_impl(ctx: AnalysisContext) -> list[Provider]:
     providers.append(merge_shared_libraries(
         ctx.actions,
         shared_libs,
-        filter_and_map_idx(SharedLibraryInfo, deps + exported_deps),
+        filter(None, [x.get(SharedLibraryInfo) for x in deps + exported_deps]),
     ))
 
     # Create, augment and provide the linkable graph.

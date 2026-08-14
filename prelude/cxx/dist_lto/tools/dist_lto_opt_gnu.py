@@ -21,7 +21,6 @@ import argparse
 import os
 import subprocess
 import sys
-import traceback
 from typing import List
 
 EXIT_SUCCESS, EXIT_FAILURE = 0, 1
@@ -203,50 +202,26 @@ def _cleanup_flags(clang_opt_flags: List[str]) -> List[str]:
     return clean_output
 
 
-# Flags that fbcc consumes and does NOT pass through to the compiler.
-# See fbcode/tools/build/buck/wrappers/fbcc.py for the full list.
-_FBCC_CONSUMED_PREFIXES = (
-    "--log-fbcc",
-    "--fbcc-create-external-debug-info=",
-    "--show-flags",
-)
-
-
-def _fbcc_prefix_end(opt_args: List[str]) -> int:
-    """Return the slice end for the fbcc prefix within opt_args.
-
-    opt_args layout:
-        ['--', <fbcc>, '--cc=<compiler>', <optional fbcc-consumed args>, ...]
-
-    Only args that fbcc *consumes* (strips before invoking the compiler)
-    belong in the prefix.  Pass-through args like ``--target=`` must be
-    excluded: they are already folded into cc1 flags by ``_cleanup_flags``
-    and including them in ``fbcc_cmd`` would place them before ``-cc1``,
-    which prevents clang from entering cc1 mode.
-    """
-    end = 3  # ['--', fbcc, '--cc=...']
-    while end < len(opt_args) and any(
-        opt_args[end].startswith(p) for p in _FBCC_CONSUMED_PREFIXES
-    ):
-        end += 1
-    return end
-
-
 def main(argv: List[str]) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", help="The output native object file.")
     parser.add_argument("--input", help="The input bitcode object file.")
     parser.add_argument("--index", help="The thinlto index file.")
-    parser.add_argument("--split-dwarf", help="Split dwarf option.", default="none")
-    parser.add_argument("--dwo", help="Split-dwarf .dwo file to be created.")
+    parser.add_argument("--split-dwarf", required=False, help="Split dwarf option.")
+    parser.add_argument(
+        "--create-external-debug-info",
+        required=False,
+        help="""
+        Creates empty external debug info file if one was not produced by clang. Needed because buck2 always require output artifacts to exist if declared, but clang do not produce empty files. 
+        This filename should match what clang would otherwise implicitly produce. That is usually <input_base_name.dwo>: https://fburl.com/code/l98cksg9
+        """,
+    )
     parser.add_argument(
         "--args", help="The argsfile containing unfiltered and unprocessed flags."
     )
     parser.add_argument("--debug", action="store_true", help="Dump clang -cc1 flags.")
     parser.add_argument("opt_args", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv[1:])
-    split_dwarf: str = args.split_dwarf
-    dwo: str | None = args.dwo
 
     with open(args.args, "r") as argsfile:
         clang_opt_flags = _filter_flags(argsfile.read().splitlines())
@@ -264,33 +239,22 @@ def main(argv: List[str]) -> int:
             f"-fthinlto-index={args.index}",
         ]
     )
-    if split_dwarf == "none":
-        assert dwo is None
+    if args.split_dwarf == "none":
         clang_opt_flags.append("-gno-split-dwarf")
     else:
-        # Note that -gsplit-dwarf=single does not create a .dwo file.
-        assert (dwo is not None) == (split_dwarf == "split")
         clang_opt_flags.append(f"-gsplit-dwarf={args.split_dwarf}")
 
-    # The following args slices manipulating may be confusing. The opt_args are:
+    # The following args slices manipulating may be confusing. The first 4 element of opt_args are:
     #   1. a spliter "--", it's not used anywhere;
     #   2. the fbcc wrapper script path
-    #   3. the "--cc" arg pointing to the compiler we use
-    #   4. (optional) fbcc-consumed args like "--log-fbcc"
-    #   5. (optional) pass-through args like "--target=" (from buckified toolchains)
+    #   3. the "-cc" arg pointing to the compiler we use
+    #   4. the "-log-fbcc" arg indicating whether we want to log the compiler invocation
     # EXAMPLE: ['--', 'buck-out/v2/gen/fbcode/8e3db19fe005003a/tools/build/buck/wrappers/__fbcc__/fbcc', '--cc=fbcode/third-party-buck/platform010/build/llvm-fb/<ver>/bin/clang++', '--log-fbcc=False', '--target=x86_64-redhat-linux-gnu', ...]
     clang_cc1_flags = _cleanup_flags(args.opt_args[2:] + clang_opt_flags)
     if clang_cc1_flags is None:
         return EXIT_FAILURE
 
-    # Determine the end of fbcc-specific prefix args (fbcc path, --cc=, and
-    # optionally args that fbcc consumes like --log-fbcc).
-    # Only fbcc-consumed args belong in the prefix; pass-through args like
-    # --target= are already folded into clang_cc1_flags by _cleanup_flags
-    # and must NOT appear in fbcc_cmd where they would precede -cc1 and
-    # prevent clang from entering cc1 mode.
-    fbcc_prefix_end = _fbcc_prefix_end(args.opt_args)
-    fbcc_cmd = args.opt_args[1:fbcc_prefix_end] + clang_cc1_flags
+    fbcc_cmd = args.opt_args[1:4] + clang_cc1_flags
 
     if args.debug:
         # Print fbcc commandline and exit.
@@ -302,22 +266,17 @@ def main(argv: List[str]) -> int:
         print("error: opt produced empty file")
         return EXIT_FAILURE
 
-    if dwo is not None:
-        # Unfortunately some users manually add `-gno-split-dwarf` to the
-        # compiler flags contradicting the --split-dwarf setting. Create an
-        # empty file so buck rules are not missing the file...
+    if args.create_external_debug_info:
+        # Creates empty external debug info file if one was not produced by clang. Needed because buck2
+        # always require output artifacts to exist if declared, but clang do not produce empty files.
         try:
-            with open(dwo, "x") as _:
+            with open(args.create_external_debug_info, "x") as _:
                 pass
-        except IOError:
+        except FileExistsError:
             pass
 
     return EXIT_SUCCESS
 
 
 if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv))
-    except subprocess.CalledProcessError as e:
-        traceback.print_exc()
-        sys.exit(e.returncode)
+    sys.exit(main(sys.argv))

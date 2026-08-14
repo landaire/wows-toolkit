@@ -18,21 +18,12 @@ load("@prelude//os_lookup:defs.bzl", "Os", "OsLookup")
 load("@prelude//rust/tools:attrs.bzl", "RustInternalToolsInfo")
 load("@prelude//utils:cmd_script.bzl", "cmd_script")
 load(":build_params.bzl", "BuildParams", "CrateType", "Emit", "ProfileMode")
-load(
-    ":crate_name.bzl",
-    "CrateName",  # @unused Used as a type
-)
-load(":dep_context.bzl", "DepCollectionContext")
-load(
-    ":link_info.bzl",
-    "resolve_deps",
-)
-load(":rust_toolchain.bzl", "RustToolchainInfo")
-load(
-    ":sources.bzl",
-    "RustSources",
-    "RustSourcesTSet",
-    "symlinked_srcs",
+load(":rust_toolchain.bzl", "PanicRuntime", "RustExplicitSysrootDeps", "RustToolchainInfo")
+load(":sources.bzl", "symlinked_srcs")
+
+CrateName = record(
+    simple = field(str | ResolvedStringWithMacros),
+    dynamic = field(Artifact | None),
 )
 
 # Struct for sharing common args between rustc and rustdoc
@@ -44,7 +35,22 @@ CommonArgsInfo = record(
     crate_type = field(CrateType),
     params = field(BuildParams),
     emit = field(Emit),
+    emit_requires_linking = field(bool),
     crate_map = field(list[(CrateName, Label)]),
+)
+
+# Information that determines how dependencies should be collected
+DepCollectionContext = record(
+    advanced_unstable_linking = field(bool),
+    include_doc_deps = field(bool),
+    # Is the target a proc-macro target? This is ignored if `include_doc_deps`
+    # is set, since doc tests in proc macro crates are not built with
+    # `--extern proc_macro`
+    is_proc_macro = field(bool),
+    # From the toolchain, if available
+    explicit_sysroot_deps = field(RustExplicitSysrootDeps | None),
+    # Only needed if `advanced_unstable_linking` is set
+    panic_runtime = field(PanicRuntime),
 )
 
 # Compile info which is reusable between multiple compilation command performed
@@ -58,22 +64,12 @@ CompileContext = record(
     dep_ctx = field(DepCollectionContext),
     exec_is_windows = field(bool),
     internal_tools_info = field(RustInternalToolsInfo),
-    # The linker that we pass to `-Clinker`. This needs to be a wrapper script for two reasons:
-    #  1. The `linker` in the cxx toolchain is a `cmd_args` which might have multiple args, we need
-    #     this to be a single script.
-    #  2. We need to pass some linker args that are applied before the ones rustc passes. There's
-    #     unstable `-Zpre-link-arg` for that, but until that stabilizes, we pass them from within
-    #     this script.
-    linker_with_pre_args = field(cmd_args),
-    # The same pre-args, not wrapped in a script
-    linker_pre_args = field(cmd_args),
+    linker_args = field(cmd_args),
     path_sep = field(str),
     # Dylib name override, if any was provided by the target's `soname` attribute.
     soname = field(str | None),
     # Symlink root containing all sources.
     symlinked_srcs = field(Artifact),
-    # All sources of transitive Rust dependencies, not including doc dependencies.
-    transitive_srcs = field(RustSourcesTSet),
     # Linker args to pass the linker wrapper to rustc.
     sysroot_args = field(cmd_args),
     toolchain_info = field(RustToolchainInfo),
@@ -85,9 +81,7 @@ def compile_context(ctx: AnalysisContext, binary: bool = False) -> CompileContex
     internal_tools_info = ctx.attrs._rust_internal_tools_toolchain[RustInternalToolsInfo]
     cxx_toolchain_info = get_cxx_toolchain_info(ctx)
 
-    srcs = symlinked_srcs(ctx)
-
-    linker_with_pre_args, linker_pre_args = _linker(ctx, cxx_toolchain_info.linker_info, binary = binary)
+    linker = _linker_args(ctx, cxx_toolchain_info.linker_info, binary = binary)
     clippy_wrapper = _clippy_wrapper(ctx, toolchain_info)
 
     dep_ctx = DepCollectionContext(
@@ -98,16 +92,6 @@ def compile_context(ctx: AnalysisContext, binary: bool = False) -> CompileContex
         panic_runtime = toolchain_info.panic_runtime,
     )
 
-    transitive_srcs = ctx.actions.tset(
-        RustSourcesTSet,
-        value = srcs,
-        children = [
-            d.dep[RustSources].tset
-            for d in resolve_deps(ctx, dep_ctx)
-            if RustSources in d.dep
-        ],
-    )
-
     # When we pass explicit sysroot deps, we need to override the default
     # sysroot to avoid accidentally linking against the prebuilt sysroot libs
     # provided by the toolchain.
@@ -116,8 +100,8 @@ def compile_context(ctx: AnalysisContext, binary: bool = False) -> CompileContex
         # in order to appease rustc. For instance, even with -Zexternal-clangrt, rustc will emit a
         # -L{sysroot}/lib/rustlib/{target}/lib on the link line, which will fail if the sysroot dir is empty.
         empty_sysroot = ctx.actions.copied_dir("empty_dir", {
-            "lib/rustlib/{}/lib".format(toolchain_info.rustc_target_triple): ctx.actions.copied_dir("__empty__", {}, has_content_based_path = True),
-        }, has_content_based_path = True)
+            "lib/rustlib/{}/lib".format(toolchain_info.rustc_target_triple): ctx.actions.copied_dir("__empty__", {}),
+        })
         sysroot_args = cmd_args("--sysroot=", empty_sysroot, delimiter = "")
     elif toolchain_info.sysroot_path:
         sysroot_args = cmd_args("--sysroot=", toolchain_info.sysroot_path, delimiter = "")
@@ -134,42 +118,40 @@ def compile_context(ctx: AnalysisContext, binary: bool = False) -> CompileContex
         dep_ctx = dep_ctx,
         exec_is_windows = exec_is_windows,
         internal_tools_info = internal_tools_info,
-        linker_with_pre_args = linker_with_pre_args,
-        linker_pre_args = linker_pre_args,
+        linker_args = linker,
         path_sep = path_sep,
         soname = _attr_soname(ctx),
-        symlinked_srcs = srcs,
-        transitive_srcs = transitive_srcs,
+        symlinked_srcs = symlinked_srcs(ctx),
         sysroot_args = sysroot_args,
         toolchain_info = toolchain_info,
         transitive_dependency_dirs = set(),
     )
 
-def _linker(
+# This is a hack because we need to pass the linker to rustc
+# using -Clinker=path and there is currently no way of doing this
+# without an artifact. We create a wrapper (which is an artifact),
+# and add -Clinker=
+def _linker_args(
         ctx: AnalysisContext,
         linker_info: LinkerInfo,
-        binary: bool = False) -> (cmd_args, cmd_args):
-    pre_args = cmd_args(
+        binary: bool = False) -> cmd_args:
+    linker = cmd_args(
+        linker_info.linker,
         linker_info.linker_flags or [],
         # For "binary" rules, add C++ toolchain binary-specific linker flags.
         # TODO(agallagher): This feels a bit wrong -- it might be better to have
         # the Rust toolchain have it's own `binary_linker_flags` instead of
         # implicltly using the one from the C++ toolchain.
         linker_info.binary_linker_flags if binary else [],
-        ctx.attrs._rust_toolchain[RustToolchainInfo].linker_flags,
         ctx.attrs.linker_flags,
     )
 
     return cmd_script(
         actions = ctx.actions,
         name = "linker_wrapper",
-        cmd = cmd_args(
-            linker_info.linker,
-            pre_args,
-        ),
+        cmd = linker,
         language = ctx.attrs._exec_os_type[OsLookup].script,
-        has_content_based_path = True,
-    ), pre_args
+    )
 
 # Return wrapper script for clippy-driver to make sure sysroot is set right
 # We need to make sure clippy is using the same sysroot - compiler, std libraries -
@@ -188,7 +170,7 @@ def _clippy_wrapper(
 
     if ctx.attrs._exec_os_type[OsLookup].os == Os("windows"):
         wrapper_file, _ = ctx.actions.write(
-            ctx.actions.declare_output("__clippy_driver_wrapper.bat", has_content_based_path = True),
+            ctx.actions.declare_output("__clippy_driver_wrapper.bat"),
             [
                 "@echo off",
                 "set __CLIPPY_INTERNAL_TESTS=true",
@@ -197,11 +179,10 @@ def _clippy_wrapper(
                 cmd_args(clippy_driver, format = "{} %*"),
             ],
             allow_args = True,
-            has_content_based_path = True,
         )
     else:
         wrapper_file, _ = ctx.actions.write(
-            ctx.actions.declare_output("__clippy_driver_wrapper.sh", has_content_based_path = True),
+            ctx.actions.declare_output("__clippy_driver_wrapper.sh"),
             [
                 "#!{}/bin/bash".format(read_root_config("nix_toolchain", "root")),
                 # Force clippy to be clippy: https://github.com/rust-lang/rust-clippy/blob/e405c68b3c1265daa9a091ed9b4b5c5a38c0c0ba/src/driver.rs#L334
@@ -213,7 +194,6 @@ def _clippy_wrapper(
             ],
             is_executable = True,
             allow_args = True,
-            has_content_based_path = True,
         )
 
     return cmd_args(wrapper_file, hidden = [clippy_driver, rustc_print_sysroot])

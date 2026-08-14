@@ -13,7 +13,8 @@
 import argparse
 import pathlib
 import sys
-from collections.abc import Sequence
+
+from typing import Sequence
 
 import inputs
 import outputs

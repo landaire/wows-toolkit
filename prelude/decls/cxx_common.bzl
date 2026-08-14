@@ -11,7 +11,7 @@
 # the generated docs, and so those should be verified to be accurate and
 # well-formatted (and then delete this TODO)
 
-load(":common.bzl", "CxxSourceType", "DefaultDepsMode", "IncludeType", "RawHeadersAsHeadersMode", "RuntimeDependencyHandling")
+load(":common.bzl", "CxxSourceType", "IncludeType", "RawHeadersAsHeadersMode", "RuntimeDependencyHandling")
 
 def _srcs_arg():
     return {
@@ -34,10 +34,14 @@ def _deps_arg():
 """),
     }
 
-def _default_deps_arg(default = "deps"):
+def _platform_srcs_arg():
     return {
-        "default_deps": attrs.enum(DefaultDepsMode, default = default, doc = """
-    Whether to include the default deps from the toolchain, and where to include them (deps, exported_deps, etc).
+        "platform_srcs": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.one_of(attrs.source(), attrs.tuple(attrs.source(), attrs.list(attrs.arg()))), sorted = True)), default = [], doc = """
+    Platform specific source files. These should be specified as a list of pairs where the first
+     element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+     name is matched, and the second element is either a list of source files or a list of tuples of
+     source files and a list of compilation flags to be preprocessed, compiled and assembled if the
+     platform matches the regex. See `srcs` for more information.
 """),
     }
 
@@ -61,6 +65,17 @@ def _headers_arg():
 """),
     }
 
+def _platform_headers_arg():
+    return {
+        "platform_headers": attrs.list(attrs.tuple(attrs.regex(), attrs.named_set(attrs.source(), sorted = True)), default = [], doc = """
+    Platform specific header files. These should be specified as a list of pairs where the first
+     element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+     name is matched, and the second element is either a list of header files or a dictionary of
+     header names to header files that will be made available for inclusion to the source files in the
+     target if the platform matches the regex. See `headers` for more information.
+"""),
+    }
+
 def _exported_headers_arg():
     return {
         "exported_headers": attrs.named_set(attrs.source(), sorted = True, default = [], doc = """
@@ -81,6 +96,18 @@ def _exported_header_style_arg():
         "exported_header_style": attrs.enum(IncludeType, default = "local", doc = """
     How dependents should include exported headers from this rule. Can be either `local`
      (e.g. `-I`) or `system` (e.g. `-isystem`).
+"""),
+    }
+
+def _exported_platform_headers_arg():
+    return {
+        "exported_platform_headers": attrs.list(attrs.tuple(attrs.regex(), attrs.named_set(attrs.source(), sorted = True)), default = [], doc = """
+    Platform specific header files. These should be specified as a list of pairs where the first
+     element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+     name is matched, and the second element is either a list of header files or a dictionary of
+     header names to header files that will be made available for inclusion to the source files in the
+     target and all targets that transitively depend on it if the platform matches the regex.
+     See `headers` for more information.
 """),
     }
 
@@ -125,15 +152,62 @@ def _exported_lang_preprocessor_flags_arg():
 """),
     }
 
+def _lang_platform_preprocessor_flags_arg():
+    return {
+        "lang_platform_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}, doc = """
+    Language- and platform-specific preprocessor flags. These should be specified as a map of C-family language short
+     names, as described in `lang_preprocessor_flags`, to lists of pairs, as described in `platform_preprocessor_flags`.
+"""),
+    }
+
+def _exported_lang_platform_preprocessor_flags_arg():
+    return {
+        "exported_lang_platform_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}, doc = """
+    Just as `lang_platform_preprocessor_flags`, but these flags also apply to
+     rules that transitively depend on this rule.
+"""),
+    }
+
+def _platform_preprocessor_flags_arg():
+    return {
+        "platform_preprocessor_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = [], doc = """
+    Platform specific preprocessor flags. These should be specified as a list of pairs where the first
+     element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+     name is matched, and the second element is a list of flags to use when preprocessing the target's
+     sources. See `preprocessor_flags` for more information.
+"""),
+    }
+
 def _exported_preprocessor_flags_arg(exported_preprocessor_flags_type):
     return {
         "exported_preprocessor_flags": exported_preprocessor_flags_type,
+    }
+
+def _exported_platform_preprocessor_flags_arg():
+    return {
+        "exported_platform_preprocessor_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = [], doc = """
+    Platform specific exported preprocessor flags. These should be specified as a list of pairs where
+     the first element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the
+     platform name is matched, and the second element is a list of flags to use when preprocessing the
+     source files in the target and all targets that transitively depend on it if the platform matches
+     the regex. See `exported_preprocessor_flags` for more information.
+"""),
     }
 
 def _compiler_flags_arg():
     return {
         "compiler_flags": attrs.list(attrs.arg(), default = [], doc = """
     Flags to use when compiling any of the above sources (which require compilation).
+"""),
+    }
+
+def _platform_compiler_flags_arg():
+    return {
+        "platform_compiler_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = [], doc = """
+    Platform specific compiler flags. These should be specified as a list of pairs where the first
+     element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+     name is matched, and the second element is a list of flags to use when compiling the target's
+     sources. See `compiler_flags` for more information.
 """),
     }
 
@@ -150,6 +224,14 @@ def _lang_compiler_flags_arg():
     * `cuda-cpp-output` for Cuda
     * `assembler` for Assembly
     * `asm` for ASM
+"""),
+    }
+
+def _lang_platform_compiler_flags_arg():
+    return {
+        "lang_platform_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}, doc = """
+    Language- and platform-specific compiler flags. These should be specified as a map of C-family language short
+     names, as described in `lang_compiler_flags`, to lists of pairs, as described in `platform_compiler_flags`.
 """),
     }
 
@@ -192,6 +274,18 @@ def _local_linker_script_flags_arg():
 """),
     }
 
+def _platform_linker_flags_arg():
+    return {
+        "platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = [], doc = """
+    Platform-specific linker flags. This argument is specified as a list of pairs where the first
+     element in each pair is an un-anchored regex against which the platform name is matched.
+     The regex should use `java.util.regex.Pattern` syntax.
+     The second element in each pair is a list of linker flags. If the regex matches the
+     platform, these flags are added to the linker command line when the
+     output from this rule is used in a link operation.
+"""),
+    }
+
 def _exported_linker_flags_arg():
     return {
         "exported_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = [], doc = """
@@ -209,6 +303,33 @@ def _exported_post_linker_flags_arg():
      rule, is used in a link operation—with the additional feature
      that these flags are guaranteed to be placed *after* the compiled
      object (`.o`) files on the linker command line.
+"""),
+    }
+
+def _exported_platform_linker_flags_arg():
+    return {
+        "exported_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = [], doc = """
+    Platform-specific linker flags for this rule and for all rules that
+     transitively depend on this rule. This argument is specified
+     as a list of pairs where the first element in each pair is an un-anchored regex
+     against which the platform name is matched.
+     The regex should use `java.util.regex.Pattern` syntax.
+     The second element in each pair is a list of linker flags. If the regex matches the
+     platform, these flags are added to the linker command line when the output from
+     this rule, or the output from any rule that transitively depends on
+     this rule, is used in a link operation.
+"""),
+    }
+
+def _exported_post_platform_linker_flags_arg():
+    return {
+        "exported_post_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = [], doc = """
+    Platform-specific linker flags for this rule and for all
+     rules that transitively depend on this rule—and that
+     are guaranteed to be placed *after* the compiled object
+     (`.o`) files on the linker command line. In other respects,
+     the syntax and semantics of this argument are the same as
+     for the `exported_platform_linker_flags` argument.
 """),
     }
 
@@ -248,6 +369,20 @@ def _exported_deps_arg():
      dependents of this rules, but normal dependencies will not.
     * When `reexport_all_header_dependencies = False`, only exported
      headers of the rules specified here are re-exported.
+"""),
+    }
+
+def _exported_platform_deps_arg():
+    return {
+        "exported_platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = [], doc = """
+    Platform specific dependencies that will also appear to belong to any rules
+     that depend on this one.
+     These should be specified as a list of pairs where the first element is an
+     un-anchored regex (in java.util.regex.Pattern syntax) against which the
+     platform name is matched, and the second element is a list of external
+     dependencies (same format as `exported_deps`) that are exported
+     if the platform matches the regex.
+     See `exported_deps` for more information.
 """),
     }
 
@@ -329,11 +464,9 @@ def _version_arg():
 def _runtime_dependency_handling_arg():
     return {
         "runtime_dependency_handling": attrs.option(attrs.enum(RuntimeDependencyHandling), default = None, doc = """
-    Controls how shared library dependencies are handled at runtime. By default the `no_symlink` behaviour
-    is used, which opts out of symlink creation. If `symlink` is specified then shared library dependencies with
-    `preferred_linkage = "shared"` are automatically detected and included in a symlink tree
-    alongside the executable. Set to `symlink_single_level_only` to only include first-level runtime
-    dependencies in a symlink tree.
+    When this is set to `symlink`, shared library dependencies are included in a symlink tree
+    alongside the resulting executable, even if the link style is not shared. Can be `none` or
+    `symlink`.
 """),
     }
 
@@ -349,36 +482,43 @@ def _use_content_based_paths_arg():
         "use_content_based_paths": attrs.bool(default = True),
     }
 
-def _expect_eligible_for_dedupe_arg():
-    return {
-        "expect_eligible_for_dedupe": attrs.bool(default = False),
-    }
-
 cxx_common = struct(
     srcs_arg = _srcs_arg,
     deps_arg = _deps_arg,
-    default_deps_arg = _default_deps_arg,
+    platform_srcs_arg = _platform_srcs_arg,
     supported_platforms_regex_arg = _supported_platforms_regex_arg,
     headers_arg = _headers_arg,
+    platform_headers_arg = _platform_headers_arg,
     exported_headers_arg = _exported_headers_arg,
     exported_header_style_arg = _exported_header_style_arg,
+    exported_platform_headers_arg = _exported_platform_headers_arg,
     header_namespace_arg = _header_namespace_arg,
     preprocessor_flags_arg = _preprocessor_flags_arg,
     lang_preprocessor_flags_arg = _lang_preprocessor_flags_arg,
     exported_lang_preprocessor_flags_arg = _exported_lang_preprocessor_flags_arg,
+    lang_platform_preprocessor_flags_arg = _lang_platform_preprocessor_flags_arg,
+    exported_lang_platform_preprocessor_flags_arg = _exported_lang_platform_preprocessor_flags_arg,
+    platform_preprocessor_flags_arg = _platform_preprocessor_flags_arg,
     exported_preprocessor_flags_arg = _exported_preprocessor_flags_arg,
+    exported_platform_preprocessor_flags_arg = _exported_platform_preprocessor_flags_arg,
     compiler_flags_arg = _compiler_flags_arg,
+    platform_compiler_flags_arg = _platform_compiler_flags_arg,
     lang_compiler_flags_arg = _lang_compiler_flags_arg,
+    lang_platform_compiler_flags_arg = _lang_platform_compiler_flags_arg,
     linker_extra_outputs_arg = _linker_extra_outputs_arg,
     linker_flags_arg = _linker_flags_arg,
     local_linker_flags_arg = _local_linker_flags_arg,
     local_linker_script_flags_arg = _local_linker_script_flags_arg,
+    platform_linker_flags_arg = _platform_linker_flags_arg,
     exported_linker_flags_arg = _exported_linker_flags_arg,
     exported_post_linker_flags_arg = _exported_post_linker_flags_arg,
+    exported_platform_linker_flags_arg = _exported_platform_linker_flags_arg,
+    exported_post_platform_linker_flags_arg = _exported_post_platform_linker_flags_arg,
     precompiled_header_arg = _precompiled_header_arg,
     force_static = _force_static,
     reexport_all_header_dependencies_arg = _reexport_all_header_dependencies_arg,
     exported_deps_arg = _exported_deps_arg,
+    exported_platform_deps_arg = _exported_platform_deps_arg,
     supports_merged_linking = _supports_merged_linking,
     raw_headers_arg = _raw_headers_arg,
     raw_headers_as_headers_mode_arg = _raw_headers_as_headers_mode_arg,
@@ -389,6 +529,5 @@ cxx_common = struct(
     runtime_dependency_handling_arg = _runtime_dependency_handling_arg,
     use_fbcc_rust_wrapper_arg = _use_fbcc_rust_wrapper_arg,
     use_content_based_paths_arg = _use_content_based_paths_arg,
-    expect_eligible_for_dedupe_arg = _expect_eligible_for_dedupe_arg,
     supports_stripping = _supports_stripping,
 )

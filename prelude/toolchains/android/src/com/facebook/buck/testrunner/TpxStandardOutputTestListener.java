@@ -13,10 +13,8 @@ package com.facebook.buck.testrunner;
 import com.facebook.buck.testresultsoutput.TestResultsOutputEvent.TestStatus;
 import com.facebook.buck.testresultsoutput.TestResultsOutputSender;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * TpxStandardOutputTestListener sends test results to the TPX standard output format. Meant to be
@@ -26,7 +24,6 @@ public class TpxStandardOutputTestListener {
   private final TestResultsOutputSender sender;
 
   private Map<String, TestIdentifierStatus> testIdentifierStatuses = new HashMap<>();
-  private Set<String> finishedTests = new HashSet<>();
 
   private class TestIdentifierStatus {
     private long startTime;
@@ -46,11 +43,6 @@ public class TpxStandardOutputTestListener {
       this.status = TestStatus.SKIP;
       this.trace = trace;
     }
-
-    public void setOmitted(String trace) {
-      this.status = TestStatus.OMIT;
-      this.trace = trace;
-    }
   }
 
   public TpxStandardOutputTestListener(TestResultsOutputSender sender) {
@@ -60,21 +52,19 @@ public class TpxStandardOutputTestListener {
   /**
    * Registers a test identifier with the listener.
    *
-   * @param identifier the test identifier to register
-   * @param startedTime the time the test started, in milliseconds since Unix epoch
+   * @param test the test identifier to register
    */
-  private void registerTest(String identifier, long startedTime) {
-    testIdentifierStatuses.put(identifier, new TestIdentifierStatus(startedTime));
+  private void registerTest(String identifier) {
+    testIdentifierStatuses.put(identifier, new TestIdentifierStatus(System.currentTimeMillis()));
   }
 
   /**
    * Sends a test start event to the TestResultsOutputSender.
    *
-   * @param identifier the test identifier to send the start event for
-   * @param startedTime the time the test started, in milliseconds since Unix epoch
+   * @param test the test identifier to send the start event for
    */
-  private void sendTestStart(String identifier, long startedTime) {
-    sender.sendTestStart(identifier, startedTime);
+  private void sendTestStart(String identifier) {
+    sender.sendTestStart(identifier);
   }
 
   /**
@@ -83,12 +73,8 @@ public class TpxStandardOutputTestListener {
    * @param test identifies the test
    */
   public void testStarted(String identifier) {
-    if (testIdentifierStatuses.containsKey(identifier)) {
-      return;
-    }
-    long startedTime = System.currentTimeMillis();
-    registerTest(identifier, startedTime);
-    sendTestStart(identifier, startedTime);
+    registerTest(identifier);
+    sendTestStart(identifier);
   }
 
   /**
@@ -130,32 +116,13 @@ public class TpxStandardOutputTestListener {
    * @param test identifies the test
    */
   public void testIgnored(String identifier) {
-    String reason =
-        "Test ignored, generally because the test method is annotated with org.junit.Ignore";
     TestIdentifierStatus status = testIdentifierStatuses.get(identifier);
     if (status == null) {
-      // Android instrumentation and JUnit may call testIgnored() without testStarted()
-      // for DISABLED_ prefixed tests and @Ignore annotated tests. Synthesize a complete
-      // start/finish sequence rather than crashing the entire test run.
-      testOmitted(identifier, reason);
-      return;
+      throw new IllegalStateException("testIgnored called without testStarted");
     }
 
-    status.setOmitted(reason);
-  }
-
-  /**
-   * Reports that a test was omitted (e.g., @Ignore annotation). Unlike testIgnored(), this method
-   * handles tests that were filtered out before reaching the listener and creates a complete
-   * start/finish sequence with OMIT status so TPX knows not to retry them.
-   *
-   * @param identifier the test identifier
-   * @param reason the reason the test was omitted
-   */
-  public void testOmitted(String identifier, String reason) {
-    long currentTime = System.currentTimeMillis();
-    sender.sendTestStart(identifier, currentTime);
-    sender.sendTestFinish(identifier, TestStatus.OMIT, currentTime, 0, Optional.of(reason));
+    status.setSkipped(
+        "Test ignored, generally because the test method is annotated with org.junit.Ignore");
   }
 
   /**
@@ -169,14 +136,10 @@ public class TpxStandardOutputTestListener {
    */
   public void testFinished(String identifier) {
     long endedTime = System.currentTimeMillis();
-    TestIdentifierStatus testIdentifierStatus = testIdentifierStatuses.remove(identifier);
+    TestIdentifierStatus testIdentifierStatus = testIdentifierStatuses.get(identifier);
     if (testIdentifierStatus == null) {
-      if (finishedTests.contains(identifier)) {
-        return;
-      }
-      throw new IllegalStateException("testEnded called without testStarted for: " + identifier);
+      throw new IllegalStateException("testEnded called without testStarted");
     }
-    finishedTests.add(identifier);
 
     long duration = endedTime - testIdentifierStatus.startTime;
     TestStatus resultStatus = TestStatus.PASS;

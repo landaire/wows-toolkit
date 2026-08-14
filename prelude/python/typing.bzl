@@ -7,7 +7,6 @@
 # above-listed licenses.
 
 load("@prelude//python:python.bzl", "PythonLibraryInfo")
-# @oss-disable[end= ]: load("@prelude//python/meta_only:config.bzl", "DEFAULT_PY_VERSION")
 load(
     ":manifest.bzl",
     "ManifestInfo",  # @unused Used as a type
@@ -15,7 +14,7 @@ load(
 )
 load(":python.bzl", "PythonLibraryManifestsTSet")
 
-DEFAULT_PY_VERSION = "3.12" # @oss-enable
+DEFAULT_PY_VERSION = "3.12"
 
 # Best-effort guess on what the host sys.platform is
 def get_default_sys_platform() -> str | None:
@@ -58,7 +57,7 @@ def _create_batched_type_check(
         input_config,
         with_inputs = True,
     )
-    output_file = ctx.actions.declare_output("type_check_result{}.json".format(file_suffix), has_content_based_path = False)
+    output_file = ctx.actions.declare_output("type_check_result{}.json".format(file_suffix))
     cmd = cmd_args(
         executable,
         input_file,
@@ -126,7 +125,7 @@ def _create_sharded_type_check(
             input_config,
             with_inputs = True,
         )
-        output_file = ctx.actions.declare_output(output_file_name, has_content_based_path = False)
+        output_file = ctx.actions.declare_output(output_file_name)
         output_files.append(output_file)
 
         cmd = cmd_args(

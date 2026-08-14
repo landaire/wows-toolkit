@@ -1,4 +1,4 @@
-load(":hermetic_msvc.bzl", "hermetic_msvc_rust_toolchain", "hermetic_msvc_tools")
+load(":hermetic_msvc.bzl", "hermetic_msvc_rust_toolchain", "hermetic_msvc_tools", "windows_resource")
 load(":windows-x86_64-msvc.bzl", "windows_x86_64_msvc_platform")
 load(":wix.bzl", "wix_msi")
 load("@prelude//toolchains:cxx.bzl", "cxx_tools_info_toolchain")
@@ -27,6 +27,15 @@ hermetic_msvc_rust_toolchain(
 
 windows_x86_64_msvc_platform(
     name = "windows_x86_64_msvc",
+    visibility = ["PUBLIC"],
+)
+
+windows_resource(
+    name = "app_resource",
+    src = "root//assets:wows_toolkit_rc",
+    resources = ["root//assets:wows_toolkit_ico"],
+    tools = ":msvc_tools",
+    out = "wows_toolkit.res",
     visibility = ["PUBLIC"],
 )
 

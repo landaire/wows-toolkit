@@ -29,8 +29,8 @@ Soname = record(
     ensure_str = field(typing.Callable),
     # Return `True` if the SONAME is respresented as a string.
     is_str = field(bool),
-    # The actual SONAME can be represented by a static string, or the
-    # contents of a file generated at build time.
+    # The the actual SONAME can be rerepsented by a static string, or the
+    # contents of a file genrated at build time.
     _soname = field(str | Artifact),
 )
 
@@ -87,37 +87,8 @@ SharedLibraries = record(
     flavored_libraries = field(dict[LinkableFlavor, SharedLibrary] | None, None),
 )
 
-def _project_external_debug_info(shared_libraries: SharedLibraries) -> cmd_args:
-    rv = cmd_args()
-    for shared_library in shared_libraries.libraries:
-        external_debug_info = shared_library.lib.external_debug_info._tset
-        if external_debug_info:
-            rv.add(external_debug_info.project_as_args("artifacts"))
-    return rv
-
-def _project_symlink_tree(shared_libraries: SharedLibraries) -> list[(bool, str | Artifact, Artifact, Artifact | None)]:
-    rv = []
-    for shared_library in shared_libraries.libraries:
-        soname = shared_library.soname  # type: Soname
-        linked_object = shared_library.lib  # type: LinkedObject
-
-        rv.append((
-            soname.is_str,
-            soname._soname,
-            linked_object.output,
-            linked_object.dwp,
-        ))
-    return rv
-
 # T-set of SharedLibraries
-SharedLibrariesTSet = transitive_set(
-    args_projections = {
-        "external_debug_info": _project_external_debug_info,
-    },
-    json_projections = {
-        "symlink_tree": _project_symlink_tree,
-    },
-)
+SharedLibrariesTSet = transitive_set()
 
 # Shared libraries required by top-level packaging rules (e.g. shared libs
 # for Python binary, symlink trees of shared libs for C++ binaries)
@@ -296,7 +267,7 @@ def gen_shared_libs_action(
         out: str,
         shared_libs: list[SharedLibrary],
         gen_action: typing.Callable,
-        dir = False) -> Artifact:
+        dir = False):
     """
     Produce an action by first resolving all SONAME of the given shlibs and
     enforcing that each SONAME is unique.
@@ -305,7 +276,7 @@ def gen_shared_libs_action(
     to the corresponding shlibs.
     """
 
-    output = actions.declare_output(out, dir = dir, has_content_based_path = False)
+    output = actions.declare_output(out, dir = dir)
 
     def func(actions, artifacts, output):
         def resolve_soname(soname):
@@ -359,7 +330,7 @@ def zip_shlibs(
 
     return zipped
 
-def create_shlib_symlink_tree(actions: AnalysisActions, out: str, shared_libs: list[SharedLibrary]) -> Artifact:
+def create_shlib_symlink_tree(actions: AnalysisActions, out: str, shared_libs: list[SharedLibrary]):
     """
     Merged shared libs into a symlink tree mapping the library's SONAME to
     it's artifact.
@@ -371,7 +342,6 @@ def create_shlib_symlink_tree(actions: AnalysisActions, out: str, shared_libs: l
         gen_action = lambda actions, output, shared_libs: actions.symlinked_dir(
             output,
             {name: shlib.lib.output for name, shlib in shared_libs.items()},
-            has_content_based_path = False,
         ),
         dir = True,
     )
@@ -384,7 +354,6 @@ def create_shlib_dwp_tree(actions: AnalysisActions, out: str, shared_libs: list[
         gen_action = lambda actions, output, shared_libs: actions.symlinked_dir(
             output,
             {name + ".dwp": shlib.lib.dwp for name, shlib in shared_libs.items() if shlib.lib.dwp != None},
-            has_content_based_path = False,
         ),
         dir = True,
     )
@@ -396,7 +365,7 @@ def extract_soname_from_shlib(
     """
     Extract the SONAME from a shared library into a file.
     """
-    soname = actions.declare_output(name, has_content_based_path = False)
+    soname = actions.declare_output(name)
     cmd = cmd_args(
         "sh",
         "-c",

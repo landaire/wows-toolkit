@@ -23,7 +23,6 @@ buck_java_library(
     ],
     deps = [
         "prelude//toolchains/android/third-party:guava",
-        "prelude//toolchains/android/third-party:infer-annotations",
     ],
 )
 
@@ -47,7 +46,6 @@ buck_java_library(
         "prelude//toolchains/android/src/com/facebook/buck/util/zip:zip",
         "prelude//toolchains/android/third-party:d8",
         "prelude//toolchains/android/third-party:guava",
-        "prelude//toolchains/android/third-party:infer-annotations",
     ],
 )
 
@@ -62,25 +60,12 @@ buck_java_library(
         "prelude//toolchains/android/third-party:args4j",
         "prelude//toolchains/android/third-party:d8",
         "prelude//toolchains/android/third-party:guava",
-        "prelude//toolchains/android/third-party:infer-annotations",
-        "prelude//toolchains/android/third-party:kotlin-annotations",
         ":dex",
     ],
 )
 
 buck_java_binary(
     name = "run_d8_binary",
-    java_args_for_run_info = select({
-        "DEFAULT": [],
-        "config//os/constraints:windows": [
-            # Cap heap size to prevent JVM ergonomic sizing from requesting
-            # a 2GB mmap that exceeds the Windows paging file limit.
-            "-Xmx256m",
-            # Use SerialGC to minimize native memory overhead — G1GC's region
-            # reservations compound the paging file pressure on Windows.
-            "-XX:+UseSerialGC",
-        ],
-    }),
     main_class = "com.facebook.buck.android.dex.D8ExecutableMain",
     visibility = [
         "PUBLIC",
@@ -103,8 +88,6 @@ buck_java_library(
         "prelude//toolchains/android/third-party:args4j",
         "prelude//toolchains/android/third-party:d8",
         "prelude//toolchains/android/third-party:guava",
-        "prelude//toolchains/android/third-party:infer-annotations",
-        "prelude//toolchains/android/third-party:kotlin-annotations",
         ":canary",
         ":dex",
     ],
@@ -132,8 +115,6 @@ buck_java_library(
         "prelude//toolchains/android/src/com/facebook/buck/android/apkmodule:module-only",
         "prelude//toolchains/android/third-party:args4j",
         "prelude//toolchains/android/third-party:guava",
-        "prelude//toolchains/android/third-party:infer-annotations",
-        "prelude//toolchains/android/third-party:kotlin-annotations",
         "prelude//toolchains/android/third-party:xz",
         ":canary",
         ":dex",
@@ -161,8 +142,6 @@ buck_java_library(
         "prelude//toolchains/android/src/com/facebook/buck/android/proguard:translator",
         "prelude//toolchains/android/third-party:args4j",
         "prelude//toolchains/android/third-party:guava",
-        "prelude//toolchains/android/third-party:infer-annotations",
-        "prelude//toolchains/android/third-party:kotlin-annotations",
         ":dex",
     ],
 )

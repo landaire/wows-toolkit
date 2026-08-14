@@ -7,21 +7,12 @@
 # above-listed licenses.
 
 load("@prelude//apple:apple_toolchain_types.bzl", "AppleToolsInfo")
-load(
-    ":apple_bundle_types.bzl",
-    "AppleBundleLinkerMapInfo",
-    "AppleInfoPlistInfo",
-)
 load(":apple_package_config.bzl", "IpaCompressionLevel")
 load(":apple_package_types.bzl", "ApplePackageInfo")
-load(
-    ":debug.bzl",
-    "AppleDebuggableInfo",
-)
 
 def apple_package_impl(ctx: AnalysisContext) -> list[Provider]:
     package_name = ctx.attrs.package_name if ctx.attrs.package_name else ctx.attrs.bundle.label.name
-    package = ctx.actions.declare_output("{}.{}".format(package_name, ctx.attrs.ext), has_content_based_path = False)
+    package = ctx.actions.declare_output("{}.{}".format(package_name, ctx.attrs.ext))
 
     contents = (
         ctx.attrs.bundle[DefaultInfo].default_outputs[0] if ctx.attrs.packager else _get_ipa_contents(ctx)
@@ -59,15 +50,7 @@ def apple_package_impl(ctx: AnalysisContext) -> list[Provider]:
     return [DefaultInfo(
         default_output = package,
         sub_targets = sub_targets,
-    ), ApplePackageInfo(
-        name = package_name,
-        app_bundle = contents,
-        extension = ctx.attrs.ext,
-        package = package,
-        dsyms = ctx.attrs.bundle[AppleDebuggableInfo].dsyms,
-        info_plist = ctx.attrs.bundle[AppleInfoPlistInfo].info_plist,
-        linker_maps = ctx.attrs.bundle[AppleBundleLinkerMapInfo].linker_maps,
-    )]
+    ), ApplePackageInfo(name = package_name, extension = ctx.attrs.ext, package = package)]
 
 def _get_ipa_contents(ctx: AnalysisContext) -> Artifact:
     ipa_package_dep = ctx.attrs._ipa_package
@@ -114,7 +97,7 @@ def _get_prepackaged_validators_outputs(ctx: AnalysisContext, prepackaged_conten
             validator = validator
             validator_args = []
 
-        output = ctx.actions.declare_output(validator.label.name + "_{}".format(idx), has_content_based_path = False)
+        output = ctx.actions.declare_output(validator.label.name + "_{}".format(idx))
         outputs.append(output)
 
         ctx.actions.run(

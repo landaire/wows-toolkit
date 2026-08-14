@@ -22,14 +22,12 @@ import com.facebook.buck.jvm.java.JarParameters;
 import com.facebook.buck.jvm.java.ResolvedJavac;
 import com.facebook.buck.step.isolatedsteps.common.MakeCleanDirectoryIsolatedStep;
 import com.facebook.buck.step.isolatedsteps.java.MakeMissingOutputsStep;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 /** Default implementation of {@link LibraryStepsBuilder} */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 class DefaultLibraryStepsBuilder<T extends CompileToJarStepFactory.ExtraParams>
     extends DefaultCompileStepsBuilderBase<T> implements LibraryStepsBuilder {
 

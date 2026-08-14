@@ -10,16 +10,13 @@
 
 package com.facebook.buck.jvm.cd;
 
-import com.facebook.infer.annotation.Nullsafe;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Enumeration;
-import java.util.Objects;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class AbiDirWriter {
 
   public static void writeAbiOutputDir(Path existingAbi, Path outputDir) throws IOException {
@@ -29,7 +26,7 @@ public class AbiDirWriter {
         ZipEntry zipEntry = entries.nextElement();
         if (!zipEntry.isDirectory()) {
           Path abiDirSubPath = outputDir.resolve(zipEntry.getName());
-          Files.createDirectories(Objects.requireNonNull(abiDirSubPath.getParent()));
+          Files.createDirectories(abiDirSubPath.getParent());
           Files.writeString(abiDirSubPath, Long.toHexString(zipEntry.getCrc()));
         }
       }

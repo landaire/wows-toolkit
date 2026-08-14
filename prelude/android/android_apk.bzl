@@ -10,7 +10,6 @@ load("@prelude//:validation_deps.bzl", "get_validation_deps_outputs")
 load("@prelude//android:android_binary.bzl", "get_binary_info")
 load("@prelude//android:android_providers.bzl", "AndroidApkInfo", "AndroidApkUnderTestInfo", "AndroidBinaryNativeLibsInfo", "AndroidBinaryPrimaryPlatformInfo", "AndroidBinaryResourcesInfo", "DexFilesInfo", "ExopackageInfo")
 load("@prelude//android:android_toolchain.bzl", "AndroidToolchainInfo")
-load("@prelude//android:util.bzl", "package_validators_decorator")
 load("@prelude//java:class_to_srcs.bzl", "merge_class_to_source_map_from_jar")
 load("@prelude//java:java_providers.bzl", "KeystoreInfo")
 load("@prelude//java:java_toolchain.bzl", "JavaToolchainInfo")
@@ -28,15 +27,9 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
     resources_info = android_binary_info.resources_info
     validation_outputs = android_binary_info.validation_outputs
 
-    wrapped_build_apk = package_validators_decorator(
-        ctx,
-        build_apk,
-        extension = ".apk",
-    )
-
     keystore = ctx.attrs.keystore[KeystoreInfo]
-    output_apk = wrapped_build_apk(
-        output_filename = ctx.label.name,
+    output_apk = build_apk(
+        label = ctx.label,
         actions = ctx.actions,
         android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo],
         keystore = keystore,
@@ -131,7 +124,7 @@ def android_apk_impl(ctx: AnalysisContext) -> list[Provider]:
     ]
 
 def build_apk(
-        output_filename: str,
+        label: Label,
         actions: AnalysisActions,
         keystore: KeystoreInfo,
         android_toolchain: AndroidToolchainInfo,
@@ -141,7 +134,7 @@ def build_apk(
         compress_resources_dot_arsc: bool = False,
         validation_deps_outputs: [list[Artifact], None] = None,
         packaging_options: dict | None = None) -> Artifact:
-    output_apk = actions.declare_output("{}.apk".format(output_filename), has_content_based_path = False)
+    output_apk = actions.declare_output("{}.apk".format(label.name))
 
     apk_builder_args = cmd_args(
         android_toolchain.apk_builder[RunInfo],
@@ -191,14 +184,12 @@ def build_apk(
 
     if packaging_options:
         for key, value in packaging_options.items():
-            if key == "excluded_resources":
-                apk_builder_args.add("--excluded-resources", actions.write("excluded_resources.txt", value))
-            elif key == "uncompressed_files":
-                apk_builder_args.add("--uncompressed-files", actions.write("uncompressed_files.txt", value))
+            if key != "excluded_resources":
+                fail("Only 'excluded_resources' is supported in packaging_options right now!")
             else:
-                fail("Only 'excluded_resources' and 'uncompressed_files' are supported in packaging_options right now!")
+                apk_builder_args.add("--excluded-resources", actions.write("excluded_resources.txt", value))
 
-    actions.run(apk_builder_args, category = "apk_build", allow_cache_upload = True)
+    actions.run(apk_builder_args, category = "apk_build")
 
     return output_apk
 

@@ -12,7 +12,9 @@ import argparse
 import os
 import shutil
 import subprocess
+
 import tempfile
+
 from pathlib import Path
 
 from apple.tools.re_compatibility_utils.writable import make_dir_recursively_writable

@@ -115,6 +115,8 @@
 
           default = self.packages.${system}.wows-toolkit;
 
+          # Every tool a Buck action may invoke. Actions run with no PATH, so
+          # anything missing here is not merely unpinned, it is unavailable.
           buck-toolchain = symlinkJoin {
             name = "wows-toolkit-buck-toolchain";
             paths = [
@@ -127,6 +129,14 @@
               coreutils
               libiconv
               python3
+              # Unpacking the vendored .crate archives. GNU tar spawns its
+              # decompressor as a separate process, so each one is needed too.
+              gnutar
+              bzip2
+              gzip
+              unzip
+              xz
+              zstd
             ];
           };
 

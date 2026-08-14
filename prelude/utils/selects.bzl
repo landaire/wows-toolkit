@@ -6,13 +6,22 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//utils:type_defs.bzl", "type_utils")
+_SELECT_TYPE = type(select({"DEFAULT": []}))
+
+def _is_select(thing):
+    return type(thing) == _SELECT_TYPE
 
 def _apply(obj, function):
     """
-    Runs select_map(obj, function, recurse=True)
+    If the object is a select, runs `select_map` with `function`.
+    Otherwise, if the object is not a select, invokes `function` on `obj` directly.
     """
-    return select_map(obj, function, recurse = True)
+    if not _is_select(obj):
+        return function(obj)
+    return select_map(
+        obj,
+        lambda obj: _apply(obj, function),
+    )
 
 def _tie_n_impl_inner(objs, pvals, val):
     return _tie_n_impl(objs[1:], pvals + [val])
@@ -21,10 +30,9 @@ def _tie_n_impl(objs, pvals):
     if not objs:
         return tuple(pvals)
 
-    return select_map(
+    return _apply(
         objs[0],
         partial(_tie_n_impl_inner, objs, pvals),
-        recurse = True,
     )
 
 def _tie_n(*objs):
@@ -47,15 +55,14 @@ def _apply_n(objs, func):
     Return a new `select` formed by applying the given function to all possible
     combinations of the given select objects.
     """
-    return select_map(
+    return _apply(
         _tie_n(*objs),
         # Unpack n-tuple and call user-supplied function.
         partial(_apply_n_inner, func),
-        recurse = True,
     )
 
 selects = struct(
     apply = _apply,
     apply_n = _apply_n,
-    is_select = type_utils.is_select,
+    is_select = _is_select,
 )

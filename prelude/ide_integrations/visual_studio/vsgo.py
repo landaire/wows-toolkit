@@ -150,15 +150,18 @@ def main(
         bxl_path, mode_files, fbsource, debug, subprocess_cwd
     )
 
-    explicit_targets = [target for target in targets if is_explicit_target(target)]
-    mode_hashes = get_mode_hashes(
-        sample_target,
-        explicit_targets,
-        mode_files,
-        extra_bxl_options,
-        debug,
-        subprocess_cwd,
-    )
+    if len(mode_files) > 1:
+        explicit_targets = [target for target in targets if is_explicit_target(target)]
+        mode_hashes = get_mode_hashes(
+            sample_target,
+            explicit_targets,
+            mode_files,
+            extra_bxl_options,
+            debug,
+            subprocess_cwd,
+        )
+    else:
+        mode_hashes = {}
 
     if debug:
         print("mode_hashes:", mode_hashes)

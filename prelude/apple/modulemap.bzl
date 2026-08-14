@@ -6,12 +6,11 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//apple:apple_toolchain_types.bzl", "AppleToolsInfo")
+load("@prelude//apple:apple_toolchain_types.bzl", "AppleToolchainInfo", "AppleToolsInfo")
 load(
     "@prelude//apple/swift:swift_incremental_support.bzl",
-    "get_uses_content_based_paths",
+    "get_uses_experimental_content_based_path_hashing",
 )
-load("@prelude//apple/swift:swift_toolchain.bzl", "supports_modulemaps_with_hmaps")
 load(
     "@prelude//cxx:headers.bzl",
     "CHeader",  # @unused Used as a type
@@ -19,7 +18,24 @@ load(
 load(
     "@prelude//cxx:preprocessor.bzl",
     "CPreprocessor",
+    "CPreprocessorArgs",
 )
+
+def preprocessor_info_for_modulemap(
+        ctx: AnalysisContext,
+        name: str,
+        module_name: str,
+        headers: list[CHeader],
+        swift_header: Artifact | None) -> CPreprocessor:
+    preprocessor_info, _ = create_modulemap(ctx, name, module_name, headers, swift_header)
+    return preprocessor_info
+
+def _non_modular_libraries_use_header_maps(ctx: AnalysisContext) -> bool:
+    apple_toolchain = getattr(ctx.attrs, "_apple_toolchain", None)
+    if apple_toolchain:
+        return apple_toolchain[AppleToolchainInfo].modular_libraries_use_header_maps
+
+    return False
 
 def create_modulemap(
         ctx: AnalysisContext,
@@ -27,13 +43,12 @@ def create_modulemap(
         module_name: str,
         headers: list[CHeader],
         swift_header: Artifact | None = None,
-        is_framework: bool = False) -> CPreprocessor:
+        is_framework: bool = False) -> (CPreprocessor, Artifact):
     # We don't want to name this module.modulemap to avoid implicit importing
     if name == "module" and not is_framework:
         fail("Don't use the name `module` for modulemaps, this will allow for implicit importing.")
 
-    uses_content_based_paths = get_uses_content_based_paths(ctx)
-    use_relative_paths = supports_modulemaps_with_hmaps(ctx)
+    uses_experimental_content_based_path_hashing = get_uses_experimental_content_based_path_hashing(ctx)
 
     # Create a map of header import path to artifact location
     header_map = {}
@@ -49,27 +64,26 @@ def create_modulemap(
         swift_header_name = "{}/{}-Swift.h".format(module_name, module_name)
         header_map[swift_header_name] = swift_header
 
-    if use_relative_paths:
-        symlink_tree = None
-    else:
-        # Create a symlink dir for the headers to import
-        symlink_tree_name = name.replace(".", "_") + "_symlink_tree"
-        symlink_tree = ctx.actions.symlinked_dir(symlink_tree_name, header_map, has_content_based_path = uses_content_based_paths)
+    # Create a symlink dir for the headers to import
+    symlink_tree = ctx.actions.symlinked_dir(name.replace(".", "_") + "_symlink_tree", header_map, uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing)
 
-    output = ctx.actions.declare_output(name + ".modulemap", has_content_based_path = uses_content_based_paths)
+    # Create a modulemap at the root of that tree
+    output = ctx.actions.declare_output(name + ".modulemap", uses_experimental_content_based_path_hashing = uses_experimental_content_based_path_hashing)
     cmd = cmd_args(ctx.attrs._apple_tools[AppleToolsInfo].make_modulemap)
-    cmd.add(
+    cmd.add([
         "--output",
         output.as_output(),
         "--name",
         module_name,
-    )
+        "--symlink-tree",
+        symlink_tree,
+    ])
 
     if swift_header:
-        cmd.add(
+        cmd.add([
             "--swift-header",
-            swift_header if use_relative_paths else cmd_args(symlink_tree, format = "{}/" + swift_header_name),
-        )
+            swift_header,
+        ])
 
     if getattr(ctx.attrs, "use_submodules", False):
         cmd.add("--use-submodules")
@@ -77,39 +91,32 @@ def create_modulemap(
     if is_framework:
         cmd.add("--framework")
 
-    for include_path in sorted(header_map.keys()):
+    for hdr in sorted(header_map.keys()):
         # Don't include the Swift header in the mappings, this is handled separately.
-        if include_path == swift_header_name:
-            continue
-
-        if is_framework:
-            # Framework headers are the same as their include paths, they are
-            # compiled relative to the framework's Headers folder.
-            cmd.add(include_path)
-            cmd.add(include_path)
-        elif use_relative_paths:
-            # The path to the header artifact is relative to the containing
-            # folder of the modulemap. We can't get the paths in the prelude,
-            # the relativizing is done in the generation tool.
-            cmd.add(include_path)
-            cmd.add(header_map[include_path])
-        else:
-            # With symlink trees the include path should match the symlink name
-            # nested in the symlink tree root.
-            cmd.add(include_path)
-            cmd.add(cmd_args(symlink_tree, format = "{}/" + include_path))
+        if hdr != swift_header_name:
+            cmd.add(hdr)
 
     ctx.actions.run(cmd, category = "modulemap", identifier = name)
 
-    header_artifacts = header_map.values()
-    modular_args = [cmd_args(output, format = "-fmodule-map-file={}", hidden = header_artifacts)]
-    if not use_relative_paths and not is_framework:
-        # When using relative paths we rely on the hmaps provided by regular
-        # cxx preprocessor.
-        modular_args.append(cmd_args(symlink_tree, format = "-I{}"))
-        header_artifacts.append(symlink_tree)
+    if _non_modular_libraries_use_header_maps(ctx):
+        # When using header maps for non-modular libraries we only set the
+        # symlink tree includes in modular_args for modular rdeps.
+        pp = CPreprocessor(
+            modular_args = [
+                cmd_args(output, format = "-fmodule-map-file={}"),
+                cmd_args(symlink_tree, format = "-I{}"),
+            ],
+            modulemap_path = cmd_args(output),
+            modulemap_artifacts = [output],
+        )
+    else:
+        pp = CPreprocessor(
+            args = CPreprocessorArgs(
+                args = [cmd_args(symlink_tree, format = "-I{}")],
+            ),
+            modular_args = [cmd_args(output, format = "-fmodule-map-file={}")],
+            modulemap_path = cmd_args(output),
+            modulemap_artifacts = [output],
+        )
 
-    return CPreprocessor(
-        modular_args = modular_args,
-        modulemap_artifact = output.with_associated_artifacts(header_artifacts),
-    )
+    return pp, output

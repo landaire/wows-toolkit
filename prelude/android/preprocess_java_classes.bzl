@@ -20,7 +20,7 @@ def get_preprocessed_java_classes(enhance_ctx: EnhancementContext, input_jars: d
 
     input_srcs = {}
     output_jars_to_owners = {}
-    output_dir = ctx.actions.declare_output("preprocessed_java_classes/output_dir", has_content_based_path = False)
+    output_dir = ctx.actions.declare_output("preprocessed_java_classes/output_dir")
     input_jars_to_owners = {}
 
     for i, (input_jar, target_label) in enumerate(input_jars.items()):
@@ -31,9 +31,9 @@ def get_preprocessed_java_classes(enhance_ctx: EnhancementContext, input_jars: d
         output_jar = output_dir.project(jar_name)
         output_jars_to_owners[output_jar] = target_label
 
-    input_dir = ctx.actions.symlinked_dir("preprocessed_java_classes/input_dir", input_srcs, has_content_based_path = False)
+    input_dir = ctx.actions.symlinked_dir("preprocessed_java_classes/input_dir", input_srcs)
     input_jars_map = ctx.actions.write_json("preprocessed_java_classes/input_jars_map.json", input_jars_to_owners)
-    materialized_artifacts_dir = ctx.actions.declare_output("preprocessed_java_classes/materialized_artifacts", has_content_based_path = False)
+    materialized_artifacts_dir = ctx.actions.declare_output("preprocessed_java_classes/materialized_artifacts")
 
     android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo]
     env = {

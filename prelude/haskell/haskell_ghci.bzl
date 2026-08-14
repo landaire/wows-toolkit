@@ -366,7 +366,6 @@ def _replace_macros_in_script_template(
 
     final_script = ctx.actions.declare_output(
         script_template.basename if not output_name else output_name,
-        has_content_based_path = False,
     )
     script_template_processor = haskell_toolchain.script_template_processor[RunInfo]
 
@@ -505,7 +504,7 @@ def _build_preload_deps_root(
 
             object_file = flatten(linkables)[0]
 
-            preload_so = ctx.actions.declare_output(preload_so_name, has_content_based_path = False)
+            preload_so = ctx.actions.declare_output(preload_so_name)
             link = cmd_args(haskell_toolchain.linker)
             link.add(haskell_toolchain.linker_flags)
             link.add(ctx.attrs.linker_flags)
@@ -529,7 +528,7 @@ def _build_preload_deps_root(
 
             preload_symlinks[preload_so_name] = preload_so
 
-    preload_deps_root = ctx.actions.symlinked_dir(preload_libs_root, preload_symlinks, has_content_based_path = False)
+    preload_deps_root = ctx.actions.symlinked_dir(preload_libs_root, preload_symlinks)
     return GHCiPreloadDepsInfo(
         preload_deps_root = preload_deps_root,
         preload_symlinks = preload_symlinks,
@@ -591,7 +590,7 @@ def _write_start_ghci(
     set_cmd.add("\n")
     start_cmd.add(set_cmd)
 
-    header_ghci = ctx.actions.declare_output("header.ghci", has_content_based_path = False)
+    header_ghci = ctx.actions.declare_output("header.ghci")
 
     ctx.actions.write(header_ghci.as_output(), start_cmd)
 
@@ -608,10 +607,10 @@ def haskell_ghci_impl(ctx: AnalysisContext) -> list[Provider]:
     haskell_toolchain = ctx.attrs._haskell_toolchain[HaskellToolchainInfo]
     enable_profiling = ctx.attrs.enable_profiling
 
-    start_ghci_file = ctx.actions.declare_output("start.ghci", has_content_based_path = False)
+    start_ghci_file = ctx.actions.declare_output("start.ghci")
     _write_start_ghci(ctx, start_ghci_file, enable_profiling)
 
-    ghci_bin = ctx.actions.declare_output(ctx.attrs.name + ".bin/ghci", has_content_based_path = False)
+    ghci_bin = ctx.actions.declare_output(ctx.attrs.name + ".bin/ghci")
     _symlink_ghci_binary(ctx, haskell_toolchain, ghci_bin)
 
     preload_deps_info = _build_preload_deps_root(ctx, haskell_toolchain)
@@ -667,7 +666,6 @@ def haskell_ghci_impl(ctx: AnalysisContext) -> list[Provider]:
             symlinked_things = ctx.actions.symlinked_dir(
                 lib_symlinks_root,
                 lib_symlinks,
-                has_content_based_path = False,
             )
 
             package_symlinks.append(symlinked_things)
@@ -728,7 +726,6 @@ def haskell_ghci_impl(ctx: AnalysisContext) -> list[Provider]:
     root_output_dir = ctx.actions.symlinked_dir(
         "__{}__".format(ctx.label.name),
         output_artifacts,
-        has_content_based_path = False,
     )
     run = cmd_args(final_ghci_script, hidden = outputs)
 

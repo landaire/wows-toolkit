@@ -14,6 +14,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNotSame;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import com.facebook.buck.jvm.java.plugin.adapter.BuckJavacPlugin;
 import com.facebook.buck.jvm.java.plugin.adapter.BuckJavacTask;
@@ -108,9 +109,7 @@ public class FrontendOnlyJavacTaskTest extends CompilerTreeApiParameterizedTest 
 
   @Test
   public void testTaskListenersGetEvents() throws Exception {
-    if (!testingTrees()) {
-      return;
-    }
+    assumeTrue(testingTrees());
     List<String> events = new ArrayList<>();
 
     initCompiler(ImmutableMap.of("Foo.java", "public class Foo { }"));
@@ -151,9 +150,7 @@ public class FrontendOnlyJavacTaskTest extends CompilerTreeApiParameterizedTest 
 
   @Test
   public void testTaskListenersCanWorkWithElements() throws Exception {
-    if (!testingTrees()) {
-      return;
-    }
+    assumeTrue(testingTrees());
     AtomicBoolean listenerRan = new AtomicBoolean(false);
 
     initCompiler(ImmutableMap.of("Foo.java", "public class Foo { }"));

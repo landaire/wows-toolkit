@@ -11,7 +11,6 @@
 package com.facebook.buck.android.build_config;
 
 import com.facebook.buck.android.build_config.BuildConfigFields.Field;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.base.Joiner;
 import com.google.common.collect.FluentIterable;
 import com.google.common.collect.ImmutableMap;
@@ -23,13 +22,11 @@ import java.util.Objects;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.jetbrains.annotations.Nullable;
 
 /**
  * List of fields to add to a generated {@code BuildConfig.java} file. Each field knows its Java
  * type, variable name, and value.
  */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class BuildConfigFields implements Iterable<Field> {
 
   /** An individual field in a {@link BuildConfigFields}. */
@@ -77,7 +74,7 @@ public class BuildConfigFields implements Iterable<Field> {
     }
 
     @Override
-    public boolean equals(@Nullable Object obj) {
+    public boolean equals(Object obj) {
       if (this == obj) {
         return true;
       }
@@ -110,10 +107,7 @@ public class BuildConfigFields implements Iterable<Field> {
       input -> {
         Matcher matcher = VARIABLE_DEFINITION_PATTERN.matcher(input);
         if (matcher.matches()) {
-          return Field.of(
-              Objects.requireNonNull(matcher.group("type")),
-              Objects.requireNonNull(matcher.group("name")),
-              Objects.requireNonNull(matcher.group("value")));
+          return Field.of(matcher.group("type"), matcher.group("name"), matcher.group("value"));
         } else {
           throw new RuntimeException(
               String.format("Not a valid BuildConfig variable declaration: %s", input));

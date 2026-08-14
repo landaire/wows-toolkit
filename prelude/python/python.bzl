@@ -12,7 +12,6 @@ load("@prelude//utils:arglike.bzl", "ArgLike")
 load(":compile.bzl", "PycInvalidationMode")
 load(":interface.bzl", "PythonLibraryManifestsInterface")
 load(":manifest.bzl", "ManifestInfo")
-load(":toolchain.bzl", "PythonToolchainInfo")
 
 NativeDepsInfoTSet = transitive_set()
 
@@ -186,17 +185,3 @@ def manifests_to_interface(manifests: PythonLibraryManifestsTSet) -> PythonLibra
         has_hidden_resources = lambda standalone = False: _get_has_hidden_resources(standalone, manifests),
         hidden_resources = lambda standalone = False: _get_hidden_resources(standalone, manifests),
     )
-
-# The exported dependencies, and the default deps (if selected)
-def python_attr_preload_deps(ctx: AnalysisContext) -> list[Dependency]:
-    deps = []
-
-    from_attr = getattr(ctx.attrs, "preload_deps", None)
-    if from_attr:
-        deps.extend(from_attr)
-
-    toolchain = ctx.attrs._python_toolchain[PythonToolchainInfo]
-    if toolchain.preload_deps:
-        deps.extend(toolchain.preload_deps)
-
-    return deps

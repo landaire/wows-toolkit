@@ -36,7 +36,6 @@ load(
 )
 load("@prelude//os_lookup:defs.bzl", "Os", "OsLookup")
 load("@prelude//python:manifest.bzl", "create_manifest_for_entries")
-load("@prelude//python:python.bzl", "python_attr_preload_deps")
 load("@prelude//unix:providers.bzl", "UnixEnv", "create_unix_env_info")
 load("@prelude//utils:arglike.bzl", "ArgLike")
 load(":compile.bzl", "PycInvalidationMode")
@@ -114,12 +113,11 @@ def _live_par_generated_files(
         build_args: list[ArgLike],
         main: EntryPoint,
         preload_libraries: ArgLike,
-        output_suffix: str,
-        linktree_suffix: str = "#link-tree") -> list[(Artifact, str)]:
+        output_suffix: str) -> list[(Artifact, str)]:
     artifacts = []
     artifacts.append((python_internal_tools.run_lpar_main, "__run_lpar_main__.py"))
 
-    lpar_bootstrap = ctx.actions.declare_output("_bootstrap.sh{}".format(output_suffix), has_content_based_path = False)
+    lpar_bootstrap = ctx.actions.declare_output("_bootstrap.sh{}".format(output_suffix))
     gen_bootstrap = cmd_args(python_toolchain.gen_lpar_bootstrap[RunInfo])
 
     # Add passthrough args
@@ -137,8 +135,6 @@ def _live_par_generated_files(
     if ctx.attrs.runtime_env:
         for k, v in ctx.attrs.runtime_env.items():
             gen_bootstrap.add(cmd_args(["--runtime_env={}={}".format(k, v)]))
-    if ctx.attrs.interpreter_args:
-        gen_bootstrap.add(cmd_args(["--runtime-args={}".format(json.encode(ctx.attrs.interpreter_args))]))
 
     gen_bootstrap.add([
         "--python",
@@ -148,40 +144,11 @@ def _live_par_generated_files(
 
     gen_bootstrap.add(preload_libraries)
 
-    gen_bootstrap.add(["--linktree-suffix", linktree_suffix])
     gen_bootstrap.add(["--bootstrap-output", lpar_bootstrap.as_output()])
     gen_bootstrap.add(["--output", output.as_output()])
     ctx.actions.run(gen_bootstrap, category = "par", identifier = "lpar_gen_bootstrap{}".format(output_suffix))
     artifacts.append((lpar_bootstrap, "_bootstrap.sh"))
     return artifacts
-
-def _live_par_windows_bootstrap(
-        ctx: AnalysisContext,
-        output: Artifact,
-        python_toolchain: PythonToolchainInfo,
-        python_internal_tools: PythonInternalToolsInfo,
-        main: EntryPoint,
-        preload_libraries: ArgLike,
-        symlink_tree_path: Artifact,
-        output_suffix: str):
-    # Windows can't use _bootstrap.sh, so reuse existing make_py_package_inplace tool
-    # to generate a Python bootstrap script.
-    bootstrap = cmd_args(python_internal_tools.make_py_package_inplace)
-    bootstrap.add(_pex_bootstrap_args(
-        python_toolchain,
-        main,
-        output,
-        preload_libraries,
-        symlink_tree_path,
-        PackageStyle("inplace"),
-        True,
-    ))
-    if ctx.attrs.runtime_env:
-        for k, v in ctx.attrs.runtime_env.items():
-            bootstrap.add(cmd_args(["--runtime_env", "{}={}".format(k, v)]))
-    for flag in ctx.attrs.interpreter_args:
-        bootstrap.add(cmd_args(["--interpreter_flags={}".format(flag)]))
-    ctx.actions.run(bootstrap, category = "par", identifier = "bootstrap{}".format(output_suffix))
 
 def make_default_info(pex: PexProviders) -> Provider:
     return DefaultInfo(
@@ -208,7 +175,7 @@ def _fail_at_build_time(
         python_internal_tools: PythonInternalToolsInfo,
         msg: str) -> PexProviders:
     error_message = ctx.actions.write("__error_message", msg)
-    dummy_output = ctx.actions.declare_output("__dummy_output", has_content_based_path = False)
+    dummy_output = ctx.actions.declare_output("__dummy_output")
     cmd = cmd_args([
         python_internal_tools.fail_with_message,
         error_message,
@@ -236,6 +203,10 @@ def _fail(
     # occur at analysis time
     fail(msg)
 
+# TODO(nmj): Resources
+# TODO(nmj): Figure out how to harmonize these flags w/ existing make_xar
+#                 invocations. It might be perfectly reasonable to just have a wrapper
+#                 script that invokes make_xar in a slightly different way.
 def make_py_package(
         ctx: AnalysisContext,
         python_toolchain: PythonToolchainInfo,
@@ -275,7 +246,7 @@ def make_py_package(
     if ctx.attrs._exec_os_type[OsLookup].os == Os("macos"):
         # preload_deps might include additional shared libraries which macOS will
         # not be able to load unless they're inside the PAR.
-        _, preload_deps_shared_libraries = gather_dep_libraries(python_attr_preload_deps(ctx))
+        _, preload_deps_shared_libraries = gather_dep_libraries(ctx.attrs.preload_deps)
         shared_libraries = shared_libraries + [
             (lib, "")
             for info in preload_deps_shared_libraries
@@ -433,7 +404,7 @@ def _make_py_package_wrapper(
         pex_modules: PexModules,
         output_suffix: str,
         allow_cache_upload: bool) -> PexProviders:
-    if package_style in [PackageStyle("inplace"), PackageStyle("outplace")] and ctx.attrs.use_rust_make_par:
+    if package_style == PackageStyle("inplace") and ctx.attrs.use_rust_make_par and make_py_package_cmd != None:
         return _make_py_package_live(
             ctx,
             python_toolchain.make_py_package_live[RunInfo],
@@ -446,7 +417,6 @@ def _make_py_package_wrapper(
             python_toolchain,
             python_internal_tools,
             output_suffix,
-            package_style == PackageStyle("outplace"),
         )
     return _make_py_package_impl(
         ctx,
@@ -455,6 +425,7 @@ def _make_py_package_wrapper(
         make_py_package_cmd,
         package_style,
         build_args,
+        len(shared_libraries) > 0,
         preload_libraries,
         common_modules_args,
         dep_artifacts,
@@ -473,6 +444,7 @@ def _make_py_package_impl(
         make_py_package_cmd: RunInfo | None,
         package_style: PackageStyle,
         build_args: list[ArgLike],
+        shared_libraries: bool,
         preload_libraries: cmd_args,
         common_modules_args: cmd_args,
         dep_artifacts: list[ArgLike],
@@ -484,7 +456,7 @@ def _make_py_package_impl(
         allow_cache_upload: bool) -> PexProviders:
     name = "{}{}".format(ctx.attrs.name, output_suffix)
     standalone = package_style == PackageStyle("standalone")
-    inplace = package_style == PackageStyle("inplace")
+    inplace = package_style in [PackageStyle("inplace"), PackageStyle("inplace_lite")]
 
     runtime_files = []
     sub_targets = {}
@@ -519,7 +491,7 @@ def _make_py_package_impl(
                 "Python toolchain does not provide make_py_package_standalone",
             )
     else:
-        symlink_tree_path = ctx.actions.declare_output("{}#link-tree".format(name), dir = True, has_content_based_path = False)
+        symlink_tree_path = ctx.actions.declare_output("{}#link-tree".format(name), dir = True)
 
     modules_args = _pex_modules_args(
         ctx,
@@ -534,12 +506,13 @@ def _make_py_package_impl(
         output_suffix,
     )
 
-    output = ctx.actions.declare_output("{}{}".format(name, ctx.attrs.extension or python_toolchain.pex_extension), has_content_based_path = False)
+    output = ctx.actions.declare_output("{}{}".format(name, ctx.attrs.extension or python_toolchain.pex_extension))
 
     bootstrap_args = _pex_bootstrap_args(
         python_toolchain,
         main,
         output,
+        shared_libraries,
         preload_libraries,
         symlink_tree_path,
         package_style,
@@ -568,8 +541,6 @@ def _make_py_package_impl(
         if ctx.attrs.runtime_env:
             for k, v in ctx.attrs.runtime_env.items():
                 cmd.add(cmd_args(["--passthrough", "--runtime_env={}={}".format(k, v)]))
-        if ctx.attrs.interpreter_args:
-            cmd.add(cmd_args(["--passthrough", "--runtime-args={}".format(json.encode(ctx.attrs.interpreter_args))]))
         if package_style == PackageStyle("outplace"):
             cmd.add(cmd_args("--passthrough=--copy-files", hidden = runtime_artifacts))
 
@@ -599,8 +570,6 @@ def _make_py_package_impl(
         if ctx.attrs.runtime_env:
             for k, v in ctx.attrs.runtime_env.items():
                 bootstrap.add(cmd_args(["--runtime_env", "{}={}".format(k, v)]))
-        for flag in ctx.attrs.interpreter_args:
-            bootstrap.add(cmd_args(["--interpreter_flags={}".format(flag)]))
 
         ctx.actions.run(bootstrap, category = "par", identifier = "bootstrap{}".format(output_suffix))
 
@@ -641,8 +610,7 @@ def _make_py_package_live(
         common_generated_files: list[(Artifact, str)],
         python_toolchain: PythonToolchainInfo,
         python_internal_tools: PythonInternalToolsInfo,
-        output_suffix: str,
-        copy: bool) -> PexProviders:
+        output_suffix: str) -> PexProviders:
     """
     Bundle contents of par into symlink dir
     * generated_files
@@ -677,38 +645,23 @@ def _make_py_package_live(
     sub_targets = {}
     name = "{}{}".format(ctx.attrs.name, output_suffix)
 
-    symlink_tree_path = ctx.actions.declare_output("{}#link-tree".format(name), dir = True, has_content_based_path = False)
-    runtime_files = []
+    symlink_tree_path = ctx.actions.declare_output("{}#link-tree".format(name), dir = True)
+    runtime_files = [symlink_tree_path]
 
-    output = ctx.actions.declare_output("{}{}".format(name, ctx.attrs.extension or python_toolchain.pex_extension), has_content_based_path = False)
+    output = ctx.actions.declare_output("{}{}".format(name, ctx.attrs.extension or python_toolchain.pex_extension))
 
     generated_files = []
     generated_files.extend(common_generated_files)
-
-    is_windows = ctx.attrs._target_os_type[OsLookup].os == Os("windows")
-
-    if is_windows:
-        _live_par_windows_bootstrap(
-            ctx,
-            output,
-            python_toolchain,
-            python_internal_tools,
-            main,
-            preload_libraries,
-            symlink_tree_path,
-            output_suffix,
-        )
-    else:
-        generated_files.extend(_live_par_generated_files(
-            ctx,
-            output,
-            python_toolchain,
-            python_internal_tools,
-            build_args,
-            main,
-            preload_libraries,
-            output_suffix,
-        ))
+    generated_files.extend(_live_par_generated_files(
+        ctx,
+        output,
+        python_toolchain,
+        python_internal_tools,
+        build_args,
+        main,
+        preload_libraries,
+        output_suffix,
+    ))
 
     cmd = cmd_args(make_py_package_live)
     cmd.add(cmd_args(symlink_tree_path.as_output(), format = "--output-path={}"))
@@ -735,7 +688,8 @@ def _make_py_package_live(
         )
 
         # Since we allow including directories for resources we have to enumerate the directory at build time, so we pass the resource artifacts as a hidden arg so that it will be materialized on disk when we build the par.
-        # Note: resource_artifacts are intentionally omitted from `hidden` here to avoid a non-trivial build speed regression.
+        # cmd.add(cmd_args(resource_manifests_path, format = "--resources={}", hidden = [resources, resource_artifacts]))
+        # This was previously broken and the fix incurs a non-trivial build speed regression
         cmd.add(cmd_args(resource_manifests_path, format = "--resources={}", hidden = [resources]))
         runtime_files.extend(resource_artifacts)
 
@@ -752,14 +706,6 @@ def _make_py_package_live(
 
         bytecode_artifacts = pex_modules.manifests.bytecode_artifacts(PycInvalidationMode("checked_hash"))
         runtime_files.extend(bytecode_artifacts)
-
-        # Pass resolved bytecode artifact paths so the Rust builder can replace
-        # the /output_artifacts/ placeholder with actual content hashes.
-        bytecode_artifacts_path = ctx.actions.write(
-            "__bytecode_artifacts{}.txt".format(output_suffix),
-            cmd_args(bytecode_artifacts),
-        )
-        cmd.add(cmd_args(bytecode_artifacts_path, format = "--bytecode-artifacts={}"))
 
     if pex_modules.extra_manifests != None:
         extras_manifest = ctx.actions.write("{}-extra.txt".format(name), [cmd_args(a, p, delimiter = "::") for a, p in pex_modules.extra_manifests.artifacts], with_inputs = True)
@@ -801,26 +747,14 @@ def _make_py_package_live(
 
     generated_manifest = ctx.actions.write("{}-generated.txt".format(name), [cmd_args(a, p, delimiter = "::") for a, p in generated_files], with_inputs = True)
     cmd.add(cmd_args(generated_manifest.without_associated_artifacts(), format = "--generated={}"))
-    runtime_files.extend([a for a, _ in generated_files])
+    runtime_files.append(generated_manifest)
 
-    allow_cache_upload = None
-    if ctx.attrs._exec_os_type[OsLookup].os == Os("windows"):
-        allow_cache_upload = False
+    state = ctx.actions.declare_output("{}-state.json".format(name))
+    cmd.add(cmd_args(state.as_output(), format = "--state={}"))
+    runtime_files.append(state)
+    sub_targets["state"] = [DefaultInfo(default_output = state)]
 
-    if copy:
-        cmd.add(cmd_args("--copy", hidden = runtime_files))
-        ctx.actions.run(
-            cmd,
-            category = "par",
-            identifier = "make_outplace_par{}".format(output_suffix),
-            allow_cache_upload = allow_cache_upload,
-        )
-    else:
-        state = ctx.actions.declare_output("{}-state.json".format(name), has_content_based_path = False)
-        cmd.add(cmd_args(state.as_output(), format = "--state={}"))
-        runtime_files.append(state)
-        sub_targets["state"] = [DefaultInfo(default_output = state)]
-
+    if ctx.attrs.use_rust_make_par_incremental:
         cmd.add(["--incremental"])
         ctx.actions.run(
             cmd,
@@ -829,21 +763,16 @@ def _make_py_package_live(
             category = "par",
             identifier = "make_live_par_incremental{}".format(output_suffix),
             no_outputs_cleanup = True,
-            allow_cache_upload = allow_cache_upload,
         )
+    else:
+        ctx.actions.run(cmd, category = "par", identifier = "make_live_par{}".format(output_suffix), prefer_local = False)
 
-    runtime_files.append(symlink_tree_path)
     hidden_resources = pex_modules.manifests.hidden_resources(False)
     sub_targets["link-tree"] = [DefaultInfo(
         default_output = symlink_tree_path,
         other_outputs = runtime_files + hidden_resources,
         sub_targets = {},
     )]
-
-    run_args = []
-    if is_windows:
-        run_args.append(python_toolchain.interpreter)
-    run_args.append(output)
 
     return PexProviders(
         default_output = output,
@@ -852,7 +781,7 @@ def _make_py_package_live(
         hidden_resources = hidden_resources,
         sub_targets = sub_targets,
         run_cmd = cmd_args(
-            run_args,
+            [output],
             hidden = runtime_files + hidden_resources + [python_toolchain.interpreter],
         ),
     )
@@ -904,6 +833,7 @@ def _pex_bootstrap_args(
         toolchain: PythonToolchainInfo,
         main: EntryPoint,
         output: Artifact,
+        shared_libraries: bool,
         preload_libraries: cmd_args,
         symlink_tree_path: Artifact | None,
         package_style: PackageStyle,
@@ -925,6 +855,9 @@ def _pex_bootstrap_args(
 
     cmd.add(["--main-runner", toolchain.main_runner])
 
+    # Package style `inplace_lite` cannot be used with shared libraries
+    if package_style == PackageStyle("inplace_lite") and not shared_libraries:
+        cmd.add("--use-lite")
     cmd.add(output.as_output())
 
     if package_style == PackageStyle("standalone") and not zip_safe:
@@ -1100,16 +1033,19 @@ def _pex_modules_args(
         cmd.append(cmd_args(bytecode_manifests_path, format = "@{}"))
         hidden.append(bytecode_manifests)
 
-        # To support content-based path hashing, we need to pass in the actual
+        # If content-based path hashing is enabled, we need to pass in the actual
         # bytecode artifacts alongside the manifest in order to replace the
         # placeholder "output_artifacts" portion of the path with the resolved hash.
-        bytecode_artifacts = pex_modules.manifests.bytecode_artifacts(pyc_mode)
+        # This isn't needed for inplace builds which symlink to original bytecode artifacts without path resolution.
+        inplace = package_style in [PackageStyle("inplace"), PackageStyle("inplace_lite")]
+        if not inplace and ctx.attrs._python_toolchain[PythonToolchainInfo].supports_content_based_paths:
+            bytecode_artifacts = pex_modules.manifests.bytecode_artifacts(pyc_mode)
 
-        bytecode_artifacts_path = ctx.actions.write(
-            "__bytecode_artifacts{}.txt".format(output_suffix),
-            cmd_args(bytecode_artifacts),
-        )
-        cmd.append(cmd_args(bytecode_artifacts_path, format = "--bytecode-artifacts={}"))
+            bytecode_artifacts_path = ctx.actions.write(
+                "__bytecode_artifacts{}.txt".format(output_suffix),
+                cmd_args(bytecode_artifacts),
+            )
+            cmd.append(cmd_args(bytecode_artifacts_path, format = "--bytecode-artifacts={}"))
 
     if symlink_tree_path != None:
         cmd.extend(["--modules-dir", symlink_tree_path.as_output()])
@@ -1318,7 +1254,7 @@ def _generate_manifest_module(
 
     if manifest_module_entries == None:
         return None
-    module = ctx.actions.declare_output("manifest/__manifest__.py", has_content_based_path = False)
+    module = ctx.actions.declare_output("manifest/__manifest__.py")
     entries_json = ctx.actions.write_json("manifest/entries.json", manifest_module_entries)
     src_manifests_path = ctx.actions.write(
         "__module_manifests.txt",
@@ -1333,7 +1269,7 @@ def _generate_manifest_module(
     )
     ctx.actions.run(cmd, category = "par", identifier = "manifest-module")
 
-    json_entries_output = ctx.actions.declare_output("manifest/__manifest__.json", has_content_based_path = False)
+    json_entries_output = ctx.actions.declare_output("manifest/__manifest__.json")
     ctx.actions.copy_file(json_entries_output.as_output(), entries_json)
 
     src_manifest = ctx.actions.write_json(

@@ -12,7 +12,12 @@ $"crate::version::Version {
 }
 " | save -f third-party/rust/fixups/rustversion/version.expr
 
-let download_rules = (^rg -n '^\s*(http_(archive|file)|git_(fetch|repository))\(' third-party/rust/BUCK | complete)
-if $download_rules.exit_code == 0 {
-    error make "Reindeer generated a network download rule; vendoring is incomplete."
+let download_rules = (
+    open --raw third-party/rust/BUCK
+    | lines
+    | where $it =~ '^\s*(http_(archive|file)|git_(fetch|repository))\('
+)
+if ($download_rules | is-not-empty) {
+    print -e ($download_rules | first 10 | str join "\n")
+    error make {msg: "Reindeer generated a network download rule; vendoring is incomplete."}
 }

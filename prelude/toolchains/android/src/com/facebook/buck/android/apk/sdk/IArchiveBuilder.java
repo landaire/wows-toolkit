@@ -10,10 +10,8 @@
 
 package com.facebook.buck.android.apk.sdk;
 
-import com.facebook.infer.annotation.Nullsafe;
 import java.io.File;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public interface IArchiveBuilder {
 
   /**

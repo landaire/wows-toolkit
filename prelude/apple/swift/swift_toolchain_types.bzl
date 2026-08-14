@@ -9,10 +9,6 @@
 #####################################################################
 # Providers
 
-load(
-    "@prelude//:artifact_tset.bzl",
-    "ArtifactTSet",  # @unused Used as a type
-)
 load("@prelude//utils:arglike.bzl", "ArgLike")
 
 SwiftObjectFormat = enum(
@@ -23,35 +19,35 @@ SwiftObjectFormat = enum(
     "object-embed-bitcode",
 )
 
-SwiftToolchainInfo = provider(fields = {
-    "architecture": provider_field(str),
-    "compiler": provider_field(cmd_args),
-    "compiler_flags": provider_field(list[ArgLike]),
-    "enforce_dedupe_eligibility": provider_field(bool, default = False),
-    "mk_swift_comp_db": provider_field(RunInfo),
-    "mk_swift_interface": provider_field(cmd_args),
-    "object_format": provider_field(SwiftObjectFormat),
-    "platform_path": provider_field([Artifact, str, None]),
-    "provide_swift_debug_info": provider_field(bool, default = True),
-    "resource_dir": provider_field([Artifact, None]),
-    "sdk_debug_info": provider_field([ArtifactTSet, None]),
-    "sdk_module_path_prefixes": provider_field(dict[str, Artifact]),
-    "sdk_path": provider_field([Artifact, str, None]),
-    "serialized_diags_to_json": provider_field([RunInfo, None], default = None),
-    "supports_explicit_module_debug_serialization": provider_field(bool, default = False),
-    "supports_incremental_file_hashing": provider_field(bool, default = False),
-    "supports_modulemaps_with_hmaps": provider_field(bool, default = False),
-    "supports_relative_resource_dir": provider_field(bool),
-    "swift_experimental_features": provider_field(dict[str, list[str]]),  # { "5": [], "6", [] }
-    "swift_ide_test_tool": provider_field([RunInfo, None], default = None),
-    "swift_stdlib_tool": provider_field(RunInfo),
-    "swift_stdlib_tool_flags": provider_field(list[ArgLike]),
-    "swift_upcoming_features": provider_field(dict[str, list[str]]),  # { "5": [], "6", [] }
-    "uncompiled_clang_sdk_modules_deps": provider_field(dict[str, Dependency]),
-    "uncompiled_swift_sdk_modules_deps": provider_field(dict[str, Dependency]),
-    "use_depsfiles": provider_field(bool, default = False),
-    "uses_content_based_paths": provider_field(bool, default = False),
-})
+SwiftToolchainInfo = provider(
+    fields = {
+        "architecture": provider_field(str),
+        "compiler": provider_field(cmd_args),
+        "compiler_flags": provider_field(list[ArgLike]),
+        "library_interface_uses_swiftinterface": provider_field(bool),
+        "mk_swift_comp_db": provider_field(RunInfo),
+        "mk_swift_interface": provider_field(cmd_args),
+        "object_format": provider_field(SwiftObjectFormat),
+        "platform_path": provider_field([Artifact, str, None]),
+        "provide_swift_debug_info": provider_field(bool, default = True),
+        "resource_dir": provider_field([Artifact, None]),
+        "sdk_module_path_prefixes": provider_field(dict[str, Artifact]),
+        "sdk_path": provider_field([Artifact, str, None]),
+        "serialized_diags_to_json": provider_field([RunInfo, None], default = None),
+        "supports_explicit_module_debug_serialization": provider_field(bool, default = False),
+        "supports_incremental_file_hashing": provider_field(bool, default = False),
+        "supports_relative_resource_dir": provider_field(bool),
+        "swift_experimental_features": provider_field(dict[str, list[str]]),  # { "5": [], "6", [] }
+        "swift_ide_test_tool": provider_field([RunInfo, None], default = None),
+        "swift_stdlib_tool": provider_field(RunInfo),
+        "swift_stdlib_tool_flags": provider_field(list[ArgLike]),
+        "swift_upcoming_features": provider_field(dict[str, list[str]]),  # { "5": [], "6", [] }
+        "uncompiled_clang_sdk_modules_deps": provider_field(dict[str, Dependency]),
+        "uncompiled_swift_sdk_modules_deps": provider_field(dict[str, Dependency]),
+        "use_depsfiles": provider_field(bool, default = False),
+        "uses_experimental_content_based_path_hashing": provider_field(bool, default = False),
+    },
+)
 
 # A provider that represents a non-yet-compiled SDK (Swift or Clang) module,
 # and doesn't contain any artifacts because Swift toolchain isn't resolved yet.
@@ -92,9 +88,16 @@ SdkSwiftOverlayInfo = provider(fields = {
 SwiftCompiledModuleInfo = provider(fields = {
     # Additional flags for the clang importer.
     "clang_importer_args": provider_field(cmd_args | None, default = None),
-    # Clang modulemap path, required for generation of swift_module_map. We use
-    # cmd_args here to expand SDK relative paths.
-    "clang_modulemap_path": provider_field(cmd_args | None, default = None),
+    # Include flags for the clang importer.
+    "clang_module_file_args": provider_field(cmd_args | None, default = None),
+    # Clang modulemap as args which is required for generation of swift_module_map.
+    "clang_modulemap_args": provider_field(cmd_args | None, default = None),
+    # Clang modulemap artifact and associated artifacts (e.g., symlink dir
+    # with headers). For SDK modules, the associated artifact would be the
+    # SDK directory itself (which contains modulemaps).
+    "clang_modulemap_artifacts": provider_field(list[Artifact], default = []),
+    # If present an artifact for the modules swiftinterface.
+    "interface_artifact": provider_field(Artifact | None, default = None),
     "is_framework": provider_field(bool),
     "is_sdk_module": provider_field(bool),
     # If True then contains a compiled swiftmodule, otherwise Clang's pcm.
@@ -104,24 +107,6 @@ SwiftCompiledModuleInfo = provider(fields = {
     # Compiled artifact either swiftmodule or pcm.
     "output_artifact": provider_field(Artifact),
 })
-
-def clang_module_file_args(module_info: SwiftCompiledModuleInfo) -> cmd_args:
-    return cmd_args(
-        "-Xcc",
-        cmd_args(
-            "-fmodule-file=",
-            module_info.module_name,
-            "=",
-            module_info.output_artifact,
-            delimiter = "",
-        ),
-        "-Xcc",
-        cmd_args(
-            "-fmodule-map-file=",
-            module_info.clang_modulemap_path,
-            delimiter = "",
-        ),
-    )
 
 def _add_swiftmodule_search_path(module_info: SwiftCompiledModuleInfo):
     # We need to import the containing folder, not the file itself.
@@ -135,7 +120,7 @@ def _add_clang_module_file_flags(module_info: SwiftCompiledModuleInfo):
     if module_info.is_swiftmodule:
         return []
     else:
-        return [clang_module_file_args(module_info)]
+        return [module_info.clang_module_file_args]
 
 def _add_clang_importer_flags(module_info: SwiftCompiledModuleInfo):
     if module_info.is_swiftmodule:
@@ -150,6 +135,7 @@ def _swift_module_map_struct(module_info: SwiftCompiledModuleInfo):
         # the swiftinterface files as hidden inputs.
         module_path = cmd_args(
             module_info.output_artifact,
+            hidden = filter(None, [module_info.interface_artifact]),
             delimiter = "",
         )
 
@@ -163,7 +149,7 @@ def _swift_module_map_struct(module_info: SwiftCompiledModuleInfo):
             isFramework = module_info.is_framework,
             moduleName = module_info.module_name,
             clangModulePath = module_info.output_artifact,
-            clangModuleMapPath = cmd_args(module_info.clang_modulemap_path, delimiter = ""),
+            clangModuleMapPath = cmd_args([module_info.clang_modulemap_args], delimiter = ""),
         )
 
 SwiftCompiledModuleTset = transitive_set(

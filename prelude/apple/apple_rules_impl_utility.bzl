@@ -102,27 +102,12 @@ def get_swift_incremental_remote_outputs_attrs():
         "incremental_remote_outputs": attrs.bool(default = read_bool("apple", "incremental_remote_outputs", False, False, True)),
     }
 
-def get_swift_incremental_logging_attrs():
-    return {
-        "swift_incremental_logging": attrs.bool(default = read_bool("apple", "swift_incremental_logging_enabled", False, False, True)),
-    }
-
-def get_incremental_split_actions_attrs():
-    return {
-        "_swift_incremental_split_actions": attrs.bool(default = read_bool("apple", "swift_incremental_split_actions", False, False, True)),
-    }
-
 def _apple_bundle_like_common_attrs():
     # `apple_bundle()` and `apple_test()` share a common set of extra attrs
     attribs = {
         # Target-level attribute always takes precedence over buckconfigs.
         "code_signing_configuration": attrs.option(attrs.enum(CodeSignConfiguration.values()), default = None),
         "codesign_type": attrs.option(attrs.enum(CodeSignType.values()), default = None),
-        "entitlements_verification_check_enabled": attrs.bool(default = select({
-            "DEFAULT": read_bool("apple", "entitlements_verification_check_enabled", default = True, root_cell = True),
-            "config//features/apple:entitlements_verification_check_disabled": False,
-            "config//features/apple:entitlements_verification_check_enabled": True,
-        })),
         "fast_adhoc_signing_enabled": attrs.option(attrs.bool(), default = None),
         "provisioning_profile_filter": attrs.option(attrs.string(), default = None),
         "skip_adhoc_resigning_scrubbed_frameworks": attrs.option(attrs.bool(), default = None),
@@ -142,8 +127,6 @@ def _apple_bundle_like_common_attrs():
         "_fast_provisioning_profile_parsing_enabled": attrs.bool(default = False),
         "_incremental_bundling_enabled": attrs.bool(default = False),
         "_profile_bundling_enabled": attrs.bool(default = False),
-        "_provisioning_profile_sources": attrs.dep(default = "fbsource//xplat/buck2/platform/apple:provisioning_profile_sources"),
-        "_provisioning_profile_sources_enabled": attrs.bool(default = read_bool("apple", "provisioning_profile_sources_enabled", False)),
         # FIXME: prelude// should be standalone (not refer to fbsource//)
         "_provisioning_profiles": attrs.dep(default = "fbsource//xplat/buck2/platform/apple:provisioning_profiles"),
         "_resource_bundle": attrs.option(attrs.dep(providers = [AppleBundleResourceInfo]), default = None),
@@ -184,7 +167,6 @@ def apple_test_extra_attrs():
         "stripped": attrs.bool(default = False),
         "swift_compilation_mode": attrs.enum(SwiftCompilationMode.values(), default = "wmo"),
         "swift_package_name": attrs.option(attrs.string(), default = None),
-        "swift_testing": attrs.bool(default = False),
         "test_device_type": attrs.enum(AppleTestDeviceType.values(), default = "default"),
         "test_re_capabilities": attrs.option(attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False), default = None, doc = """
             An optional dictionary with the RE capabilities for the test execution.
@@ -204,9 +186,7 @@ def apple_test_extra_attrs():
     attribs.update(apple_common.apple_toolchain_arg())
     attribs.update(_apple_bundle_like_common_attrs())
     attribs.update(get_swift_incremental_file_hashing_attrs())
-    attribs.update(get_swift_incremental_logging_attrs())
     attribs.update(get_skip_swift_incremental_outputs_attrs())
-    attribs.update(get_incremental_split_actions_attrs())
     return attribs
 
 def apple_xcuitest_extra_attrs():
@@ -254,7 +234,4 @@ def apple_bundle_extra_attrs():
         "_codesign_entitlements": attrs.option(attrs.source(), default = None),
     } | apple_common.debug_artifacts_validators_arg()
     attribs.update(_apple_bundle_like_common_attrs())
-    attribs.update(apple_common.entitlements_suffixed_key_map_arg())
-    attribs.update(apple_common.entitlements_removed_keys_arg())
-    attribs.update(apple_common.entitlements_removed_values_map_arg())
     return attribs

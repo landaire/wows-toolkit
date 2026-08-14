@@ -8,7 +8,6 @@
 
 load("@prelude//:paths.bzl", "paths")
 load("@prelude//java:java_toolchain.bzl", "AbiGenerationMode", "JavaPlatformInfo", "JavaTestToolchainInfo", "JavaToolchainInfo", "JavacProtocol", "PrebuiltJarToolchainInfo")
-load("@prelude//tests:test_listing.bzl", "TestListingInfo")
 
 def _system_java_tool_impl(ctx):
     return [
@@ -24,7 +23,7 @@ system_java_tool = rule(
 )
 
 def _system_java_lib_impl(ctx):
-    output = ctx.actions.declare_output(paths.basename(ctx.attrs.jar), has_content_based_path = False)
+    output = ctx.actions.declare_output(paths.basename(ctx.attrs.jar))
     ctx.actions.run(cmd_args(["ln", "-s", ctx.attrs.jar, output.as_output()]), category = "{}_symlink".format(ctx.attrs.name))
     return [DefaultInfo(default_output = output)]
 
@@ -216,11 +215,9 @@ def _java_test_toolchain_rule_impl(ctx):
             junit_test_runner_main_class_args = ctx.attrs.junit_test_runner_main_class_args,
             jvm_args = ctx.attrs.jvm_args,
             list_class_names = ctx.attrs.list_class_names,
+            list_tests = None,
             test_runner_library_jar = ctx.attrs.test_runner_library_jar,
             testng_test_runner_main_class_args = ctx.attrs.testng_test_runner_main_class_args,
-        ),
-        TestListingInfo(
-            list_tests = ctx.attrs.list_tests,
         ),
     ]
 
@@ -234,7 +231,6 @@ _java_test_toolchain_rule = rule(
             default = [],
         ),
         "list_class_names": attrs.dep(providers = [RunInfo]),
-        "list_tests": attrs.option(attrs.dep(providers = [RunInfo]), default = None),
         "test_runner_library_jar": attrs.source(),
         "testng_test_runner_main_class_args": attrs.list(attrs.string()),
     },

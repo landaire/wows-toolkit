@@ -63,10 +63,8 @@ load(
     "LinkArgsOutput",
     "cxx_link_cmd_parts",
     "cxx_sanitizer_runtime_arguments",
-    "gc_sections_args",
     "generates_split_debug",
     "linker_map_args",
-    "linker_supports_linker_maps",
     "make_link_args",
 )
 load(":debug.bzl", "SplitDebugMode")
@@ -87,16 +85,10 @@ CxxLinkerMapData = record(
     binary = field(Artifact),
 )
 
-CxxGcSectionsData = record(
-    gc_sections = field(Artifact),
-    binary = field(Artifact),
-)
-
 CxxLinkResult = record(
     # The resulting artifact from the link
     linked_object = LinkedObject,
     linker_map_data = [CxxLinkerMapData, None],
-    gc_sections_data = [CxxGcSectionsData, None],
     link_execution_preference_info = LinkExecutionPreferenceInfo,
     # A list of runtime shared libraries
     sanitizer_runtime_files = field(list[Artifact]),
@@ -152,8 +144,8 @@ def cxx_link_into(
     dwp_tool_available = dwp_available(cxx_toolchain_info)
     is_result_executable = result_type.value == "executable"
 
-    if linker_info.generate_linker_maps and linker_supports_linker_maps(linker_info.type):
-        linker_map = ctx.actions.declare_output(output.short_path + "-LinkMap.txt", has_content_based_path = False)
+    if linker_info.generate_linker_maps:
+        linker_map = ctx.actions.declare_output(output.short_path + "-LinkMap.txt")
         linker_map_data = CxxLinkerMapData(
             map = linker_map,
             binary = output,
@@ -162,17 +154,7 @@ def cxx_link_into(
         linker_map = None
         linker_map_data = None
 
-    if linker_info.generate_gc_sections and linker_info.type == LinkerType("gnu"):
-        gc_sections_output = ctx.actions.declare_output(output.short_path + "-gc-sections.json", has_content_based_path = False)
-        gc_sections_data = CxxGcSectionsData(
-            gc_sections = gc_sections_output,
-            binary = output,
-        )
-    else:
-        gc_sections_output = None
-        gc_sections_data = None
-
-    shared_library_interface = ctx.actions.declare_output(output.short_path + ".tbd", has_content_based_path = False) if opts.produce_shared_library_interface else None
+    shared_library_interface = ctx.actions.declare_output(output.short_path + ".tbd") if opts.produce_shared_library_interface else None
     if linker_info.supports_distributed_thinlto and opts.enable_distributed_thinlto:
         if not linker_info.lto_mode == LtoMode("thin"):
             fail("Cannot use distributed thinlto if the cxx toolchain doesn't use thin-lto lto_mode")
@@ -199,7 +181,6 @@ def cxx_link_into(
                 output,
                 opts,
                 linker_map,
-                gc_sections_output,
                 dwp_tool_available,
                 is_result_executable,
             )
@@ -210,7 +191,6 @@ def cxx_link_into(
         return CxxLinkResult(
             linked_object = exe,
             linker_map_data = linker_map_data,
-            gc_sections_data = gc_sections_data,
             link_execution_preference_info = LinkExecutionPreferenceInfo(
                 preference = opts.link_execution_preference,
             ),
@@ -229,16 +209,10 @@ def cxx_link_into(
     sanitizer_runtime_args = cxx_sanitizer_runtime_arguments(ctx, cxx_toolchain_info, output)
 
     def create_local_linker_invocation(add_linker_outputs: bool) -> LinkArgsOutput:
-        if linker_map != None and add_linker_outputs:
+        if linker_info.generate_linker_maps and add_linker_outputs:
             links_with_linker_map = opts.links + [linker_map_args(cxx_toolchain_info, linker_map.as_output())]
         else:
             links_with_linker_map = opts.links
-
-        # Add gc-sections output args if enabled
-        if gc_sections_output != None and add_linker_outputs:
-            links_with_extra_args = links_with_linker_map + [gc_sections_args(cxx_toolchain_info, gc_sections_output.as_output())]
-        else:
-            links_with_extra_args = links_with_linker_map
 
         all_link_args = cmd_args(link_cmd_parts.linker_flags)
         if add_linker_outputs:
@@ -260,7 +234,7 @@ def cxx_link_into(
             ctx,
             ctx.actions,
             cxx_toolchain_info,
-            links_with_extra_args,
+            links_with_linker_map,
             output_short_path = output.short_path,
             link_ordering = opts.link_ordering,
         )
@@ -291,20 +265,19 @@ def cxx_link_into(
         link_unit_generation_link_args.link_args,
         allow_args = True,
         with_inputs = True,
-        has_content_based_path = cxx_toolchain_info.cxx_compiler_info.supports_content_based_paths,
+        uses_experimental_content_based_path_hashing = cxx_toolchain_info.cxx_compiler_info.supports_content_based_paths,
     )
 
     if opts.produce_shared_library_interface:
         # If we ask the linker to produce a shared library interface, it won't produce any other outputs
         # so we shouldn't declare any extra outputs.
         shared_library_interface_generation_linker_args = create_local_linker_invocation(add_linker_outputs = False).link_args
-        output_as_string = cmd_args(get_output_flags(linker_info.type, output), ignore_artifacts = True)
         shared_library_interface_generation_argfile, _ = ctx.actions.write(
             output.short_path + ".cxx_shared_library_interface_generation_argsfile",
-            cmd_args(shared_library_interface_generation_linker_args, output_as_string),
+            shared_library_interface_generation_linker_args,
             allow_args = True,
             with_inputs = True,
-            has_content_based_path = cxx_toolchain_info.cxx_compiler_info.supports_content_based_paths,
+            uses_experimental_content_based_path_hashing = cxx_toolchain_info.cxx_compiler_info.supports_content_based_paths,
         )
         link_cmd_parts = cxx_link_cmd_parts(cxx_toolchain_info, is_result_executable)
         shared_library_interface_generation_command = cmd_args(
@@ -354,7 +327,7 @@ def cxx_link_into(
         )
         separate_debug_info_path_file, _ = ctx.actions.write(
             output.short_path + ".split_debug_paths",
-            project_artifacts(ctx.actions, links_to_rewrite),
+            project_artifacts(ctx.actions, [links_to_rewrite]),
             allow_args = True,
         )
         separate_debug_info_args = cmd_args(
@@ -440,7 +413,7 @@ def cxx_link_into(
         else:
             for link in opts.links:
                 dwp_inputs.add(unpack_link_args(link))
-            dwp_inputs.add(project_artifacts(ctx.actions, external_debug_info))
+            dwp_inputs.add(project_artifacts(ctx.actions, [external_debug_info]))
 
         dwp_artifact = dwp(
             ctx,
@@ -476,7 +449,6 @@ def cxx_link_into(
     return CxxLinkResult(
         linked_object = linked_object,
         linker_map_data = linker_map_data,
-        gc_sections_data = gc_sections_data,
         link_execution_preference_info = link_execution_preference_info,
         sanitizer_runtime_files = sanitizer_runtime_args.sanitizer_runtime_files,
         extra_outputs = extra_linker_outputs.providers,
@@ -498,7 +470,7 @@ _AnonLinkInfoPlaceholder = provider(fields = {
 def _anon_link_impl(ctx):
     (output, result_type, opts) = deserialize_anon_attrs(ctx.actions, ctx.label, ctx.attrs)
 
-    link_result = _cxx_link(
+    link_result = cxx_link(
         ctx = ctx,
         output = output,
         result_type = result_type,
@@ -579,7 +551,6 @@ def _anon_cxx_link(
             external_debug_info = external_debug_info,
         ),
         linker_map_data = None,
-        gc_sections_data = None,
         link_execution_preference_info = LinkExecutionPreferenceInfo(
             preference = LinkExecutionPreference("any"),
         ),
@@ -587,7 +558,7 @@ def _anon_cxx_link(
         shared_library_interface = None,
     )
 
-def _cxx_link(
+def cxx_link(
         ctx: AnalysisContext,
         output: str,
         result_type: CxxLinkResultType,
@@ -602,7 +573,7 @@ def _cxx_link(
         )
     return cxx_link_into(
         ctx = ctx,
-        output = ctx.actions.declare_output(output, has_content_based_path = False),
+        output = ctx.actions.declare_output(output),
         result_type = result_type,
         opts = opts,
     )
@@ -623,31 +594,6 @@ def cxx_link_shared_library(
     """
     Link a shared library into the supplied output.
     """
-    merged_opts = _build_cxx_link_shared_library_options(
-        ctx = ctx,
-        output = output,
-        opts = opts,
-        name = name,
-        shared_library_flags = shared_library_flags,
-    )
-
-    return _cxx_link(
-        ctx = ctx,
-        output = output,
-        result_type = CxxLinkResultType("shared_library"),
-        opts = merged_opts,
-        anonymous = anonymous,
-    )
-
-def _build_cxx_link_shared_library_options(
-        ctx: AnalysisContext,
-        # The destination for the link output.
-        output: str,
-        opts: LinkOptions,
-        # Optional soname to link into shared library.
-        name: [str, None] = None,
-        # Overrides the default flags used to specify building shared libraries
-        shared_library_flags: [SharedLibraryFlagOverrides, None] = None) -> LinkOptions:
     cxx_toolchain = opts.cxx_toolchain or get_cxx_toolchain_info(ctx)
     linker_info = cxx_toolchain.linker_info
     linker_type = linker_info.type
@@ -671,9 +617,17 @@ def _build_cxx_link_shared_library_options(
 
     links_with_extra_args = [LinkArgs(flags = extra_args)] + opts.links + [LinkArgs(flags = import_library_args + deffile_args)]
 
-    return merge_link_options(
+    opts = merge_link_options(
         opts,
         links = links_with_extra_args,
         link_execution_preference = link_execution_preference,
         import_library = import_library,
+    )
+
+    return cxx_link(
+        ctx = ctx,
+        output = output,
+        result_type = CxxLinkResultType("shared_library"),
+        opts = opts,
+        anonymous = anonymous,
     )

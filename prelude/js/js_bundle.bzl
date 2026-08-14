@@ -19,8 +19,12 @@ def _build_dependencies_file(
         transform_profile: str,
         flavors: list[str],
         transitive_js_library_outputs: TransitiveSetArgsProjection) -> Artifact:
-    dependencies_file = ctx.actions.declare_output("{}/dependencies_file", transform_profile, has_content_based_path = False)
+    dependencies_file = ctx.actions.declare_output("{}/dependencies_file", transform_profile)
 
+    # ctx.attrs.extra_json can contain attrs.arg().
+    #
+    # As a result, we need to pass extra_data_args as hidden arguments so that the rule
+    # it is referencing exists as an input.
     extra_data_args = cmd_args(
         ctx.attrs.extra_json if ctx.attrs.extra_json else "{}",
         delimiter = "",
@@ -31,14 +35,13 @@ def _build_dependencies_file(
         "extraData": extra_data_args,
         "flavors": flavors,
         "libraries": transitive_js_library_outputs,
-        "outputFilePath": dependencies_file.as_output(),
+        "outputFilePath": dependencies_file,
         "platform": ctx.attrs._platform,
         "release": ctx.attrs._is_release,
     }
     command_args_file = ctx.actions.write_json(
         "{}_dep_command_args".format(transform_profile),
         job_args,
-        with_inputs = True,
     )
 
     run_worker_commands(
@@ -47,6 +50,11 @@ def _build_dependencies_file(
         command_args_files = [command_args_file],
         identifier = transform_profile,
         category = "dependencies",
+        hidden_artifacts = [cmd_args(
+            dependencies_file.as_output(),
+            extra_data_args,
+            transitive_js_library_outputs,
+        )],
     )
     return dependencies_file
 
@@ -58,19 +66,23 @@ def _build_js_bundle(
         transitive_js_library_outputs: TransitiveSetArgsProjection,
         dependencies_file: Artifact) -> JsBundleInfo:
     base_dir = transform_profile
-    assets_dir = ctx.actions.declare_output("{}/assets_dir".format(base_dir), has_content_based_path = False)
-    bundle_dir_output = ctx.actions.declare_output("{}/js".format(base_dir), dir = True, has_content_based_path = False)
-    misc_dir_path = ctx.actions.declare_output("{}/misc_dir_path".format(base_dir), has_content_based_path = False)
-    source_map = ctx.actions.declare_output("{}/source_map".format(base_dir), has_content_based_path = False)
+    assets_dir = ctx.actions.declare_output("{}/assets_dir".format(base_dir))
+    bundle_dir_output = ctx.actions.declare_output("{}/js".format(base_dir), dir = True)
+    misc_dir_path = ctx.actions.declare_output("{}/misc_dir_path".format(base_dir))
+    source_map = ctx.actions.declare_output("{}/source_map".format(base_dir))
 
+    # ctx.attrs.extra_json can contain attrs.arg().
+    #
+    # As a result, we need to pass extra_data_args as hidden arguments so that the rule
+    # it is referencing exists as an input.
     extra_data_args = cmd_args(
         ctx.attrs.extra_json if ctx.attrs.extra_json else "{}",
         delimiter = "",
     )
     job_args = {
-        "assetsDirPath": assets_dir.as_output(),
+        "assetsDirPath": assets_dir,
         "bundlePath": cmd_args(
-            [bundle_dir_output.as_output(), bundle_name],
+            [bundle_dir_output, bundle_name],
             delimiter = "/",
         ),
         "command": "bundle",
@@ -78,16 +90,15 @@ def _build_js_bundle(
         "extraData": extra_data_args,
         "flavors": flavors,
         "libraries": transitive_js_library_outputs,
-        "miscDirPath": misc_dir_path.as_output(),
+        "miscDirPath": misc_dir_path,
         "platform": ctx.attrs._platform,
         "release": ctx.attrs._is_release,
-        "sourceMapPath": source_map.as_output(),
+        "sourceMapPath": source_map,
     }
 
     command_args_file = ctx.actions.write_json(
         "{}_bundle_command_args".format(base_dir),
         job_args,
-        with_inputs = True,
     )
 
     run_worker_commands(
@@ -95,7 +106,15 @@ def _build_js_bundle(
         worker_tool = ctx.attrs.worker,
         command_args_files = [command_args_file],
         identifier = base_dir,
-        category = "bundle",
+        category = job_args["command"],
+        hidden_artifacts = [cmd_args(
+            bundle_dir_output.as_output(),
+            assets_dir.as_output(),
+            misc_dir_path.as_output(),
+            source_map.as_output(),
+            extra_data_args,
+            transitive_js_library_outputs,
+        )],
     )
 
     return JsBundleInfo(
@@ -112,7 +131,7 @@ def _get_fallback_transform_profile(ctx: AnalysisContext) -> str:
         return ctx.attrs.fallback_transform_profile
 
     if ctx.attrs.fallback_transform_profile == "default" or ctx.attrs.fallback_transform_profile == None:
-        return "hermes-legacy"
+        return "transform-profile-default"
 
     fail("Invalid fallback_transform_profile attribute {}!".format(ctx.attrs.fallback_transform_profile))
 

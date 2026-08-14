@@ -6,8 +6,6 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load("@prelude//cfg/exec_platform:marker.bzl", "get_exec_platform_marker")
-
 def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
     constraints = dict()
     constraints.update(ctx.attrs.cpu_configuration[ConfigurationInfo].constraints)
@@ -29,10 +27,7 @@ def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
         DefaultInfo(),
         platform,
         PlatformInfo(label = str(name), configuration = cfg),
-        ExecutionPlatformRegistrationInfo(
-            platforms = [platform],
-            exec_marker_constraint = get_exec_platform_marker(),
-        ),
+        ExecutionPlatformRegistrationInfo(platforms = [platform]),
     ]
 
 execution_platform = rule(

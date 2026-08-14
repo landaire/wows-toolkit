@@ -10,7 +10,6 @@
 
 package com.facebook.buck.android.manifest;
 
-import com.facebook.infer.annotation.Nullsafe;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -22,14 +21,11 @@ import org.kohsuke.args4j.Option;
  * Main entry point for executing {@link GenerateManifest#replaceApplicationIdPlaceholders(String,
  * boolean)} calls.
  */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class ReplaceApplicationIdPlaceholdersExecutableMain {
   @Option(name = "--manifest", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String manifest;
 
   @Option(name = "--output", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String output;
 
   @Option(name = "--sanity-check-placeholders")
@@ -44,7 +40,7 @@ public class ReplaceApplicationIdPlaceholdersExecutableMain {
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
-      System.err.println(String.valueOf(e.getMessage()));
+      System.err.println(e.getMessage());
       parser.printUsage(System.err);
       System.exit(1);
     }

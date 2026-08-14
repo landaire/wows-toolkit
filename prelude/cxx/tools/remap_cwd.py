@@ -7,17 +7,10 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-# pyre-strict
-
 """
-Usage: remap_cwd.py path/to/compiler [args...]
+Usage: remap_cwd.py path/to/clang++ [args...]
 
-Runs `path/to/compiler [args...] -ffile-prefix-map=$PWD=. -Wa,--debug-prefix-map=$PWD=.`
-
-Flags are appended so that compiler wrappers using "$@" see the real binary as $1. Using $PWD=.
-remaps both DW_AT_comp_dir (which GCC sets to exactly $PWD without trailing slash) and source file
-paths. -Wa,--debug-prefix-map is needed because GCC does not pass -ffile-prefix-map through to the
-assembler for .s/.S/.sx files.
+Runs `path/to/clang++ -ffile-prefix-map=$PWD= [args...]`
 """
 
 import os
@@ -27,12 +20,14 @@ import sys
 
 if __name__ == "__main__":
     cwd = os.getcwd()
+    # Add trailing slash
+    cwd = os.path.join(cwd, "")
 
     ret = subprocess.call(
         [
-            *sys.argv[1:],
-            f"-ffile-prefix-map={cwd}=.",
-            f"-Wa,--debug-prefix-map={cwd}=.",
+            sys.argv[1],
+            f"-ffile-prefix-map={cwd}=",
+            *sys.argv[2:],
         ],
     )
     sys.exit(ret)

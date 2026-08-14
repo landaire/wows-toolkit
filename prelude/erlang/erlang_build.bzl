@@ -111,7 +111,7 @@ def _generate_include_artifacts(
 
     include_files = {hrl.basename: hrl for hrl in header_artifacts}
     dir_name = "{}_private".format(name) if is_private else name
-    include_dir = ctx.actions.symlinked_dir(paths.join(_BUILD_DIR, dir_name, "include"), include_files, has_content_based_path = False)
+    include_dir = ctx.actions.symlinked_dir(paths.join(_BUILD_DIR, dir_name, "include"), include_files)
 
     # dep files
     deps_files = _get_deps_files(ctx, toolchain, header_artifacts)
@@ -159,7 +159,7 @@ def _merged_deps_file(
 
     name = "{}-private".format(name) if is_private else name
 
-    merged_file = ctx.actions.declare_output(_DEP_FILES_DIR, "{}.merged.dep".format(name), has_content_based_path = False)
+    merged_file = ctx.actions.declare_output(_DEP_FILES_DIR, "{}.merged.dep".format(name))
     deps_files_json = ctx.actions.write_json(merged_file.short_path + ".json", deps_files, with_inputs = True)
 
     cmd = cmd_args(toolchain.dependency_merger, merged_file.as_output(), deps_files_json)
@@ -192,7 +192,7 @@ def _generate_beam_artifacts(
     beam_mapping = {}
     for erl in src_artifacts:
         module = module_name(erl)
-        beam_mapping[module] = ctx.actions.declare_output(ebin, "{}.beam".format(module), has_content_based_path = False)
+        beam_mapping[module] = ctx.actions.declare_output(ebin, "{}.beam".format(module))
 
     # detect conflicts
     for key in beam_mapping:
@@ -226,7 +226,7 @@ def _get_deps_files(
     return {src.basename: _get_deps_file(ctx, toolchain, src) for src in srcs}
 
 def _get_deps_file(ctx: AnalysisContext, toolchain: Toolchain, src: Artifact) -> Artifact:
-    dependency_json = ctx.actions.declare_output(_DEP_FILES_DIR, "{}.dep".format(src.short_path), has_content_based_path = False)
+    dependency_json = ctx.actions.declare_output(_DEP_FILES_DIR, "{}.dep".format(src.short_path))
 
     _run_with_env(
         ctx,
@@ -243,7 +243,7 @@ def _build_xyrl(
         xyrl: Artifact,
         custom_include_opt: str) -> Artifact:
     """Generate an erl file out of an xrl or yrl input file."""
-    output = ctx.actions.declare_output(_GENERATED_DIR, "{}.erl".format(module_name(xyrl)), has_content_based_path = False)
+    output = ctx.actions.declare_output(_GENERATED_DIR, "{}.erl".format(module_name(xyrl)))
     erlc = toolchain.otp_binaries.erlc
     custom_include = getattr(ctx.attrs, custom_include_opt, None)
     cmd = cmd_args(erlc)
@@ -271,7 +271,7 @@ def _build_erl(
         output: Artifact) -> None:
     """Compile erl files into beams."""
 
-    final_dep_file = ctx.actions.declare_output(_DEP_FILES_DIR, "{}.final.dep".format(src.short_path), has_content_based_path = False)
+    final_dep_file = ctx.actions.declare_output(_DEP_FILES_DIR, "{}.final.dep".format(src.short_path))
     initial_dep_file = beam_deps_files[src.basename]
     _run_with_env(
         ctx,
@@ -287,10 +287,12 @@ def _build_erl(
     hermetic_src = hermetic_src_dir.project(src.basename)
 
     def dynamic_lambda(ctx: AnalysisContext, artifacts, outputs):
+        trampoline = toolchain.erlc_trampoline
         erlc = toolchain.otp_binaries.erlc
         erl_opts = _get_erl_opts(ctx, toolchain, src)
         deps_args, mapping = _dependencies_to_args(artifacts, final_dep_file, build_environment)
         erlc_cmd = cmd_args(
+            trampoline,
             erlc,
             erl_opts,
             deps_args,

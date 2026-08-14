@@ -129,13 +129,13 @@ def get_modifier_info(
             return conditional_modifier_info.key, conditional_modifier_info.inner
         cfg_info = modifier_info[ConfigurationInfo]
         asserts.true(len(cfg_info.constraints) == 1, "Modifier should only be a single constraint value. Found multiple or none in `{}`".format(modifier))
-        fail("Internal error: Modifer (`{}` type `{}`) with single constraint value should have ConditionalModifierInfo provider.".format(modifier_info, type(modifier_info)))
+        constraint_value_info = list(cfg_info.constraints.values())[0]
+        return constraint_value_info.setting.label, constraint_value_info
     fail("Internal error: Found unexpected modifier `{}` type `{}`".format(modifier, type(modifier)))
 
 def _is_subset(a: ConfigurationInfo, b: ConfigurationInfo) -> bool:
-    for (_constraint_setting, a_constraint_value) in a.constraints.items():
-        setting_info = a_constraint_value.setting
-        b_constraint_value = b.get(setting_info)
+    for (constraint_setting, a_constraint_value) in a.constraints.items():
+        b_constraint_value = b.constraints.get(constraint_setting)
         if a_constraint_value != b_constraint_value:
             return False
     return True

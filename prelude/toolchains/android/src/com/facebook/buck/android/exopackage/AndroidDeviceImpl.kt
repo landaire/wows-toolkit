@@ -34,7 +34,6 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
       quiet: Boolean,
       verifyTempWritable: Boolean,
       stagedInstallMode: Boolean,
-      userId: String?,
   ): Boolean {
     val elapsed = measureTimeMillis {
       if (verifyTempWritable) {
@@ -58,7 +57,6 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
         // if (shouldUseFastDeploy()) append(" --fastdeploy")
 
         if (stagedInstallMode) append(" --staged")
-        if (userId != null) append(" --user $userId")
       }
 
       executeAdbCommandCatching(
@@ -66,11 +64,8 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
           "Failed to install ${apk.name}.",
       )
     }
-    val userSuffix = if (userId != null) " for user $userId" else ""
     val kbps = (apk.length() / 1024.0) / (elapsed / 1000.0)
-    LOG.info(
-        "Installed ${apk.name}$userSuffix (${apk.length()} bytes) in ${elapsed/1000.0} s ($kbps kB/s)"
-    )
+    LOG.info("Installed ${apk.name} (${apk.length()} bytes) in ${elapsed/1000.0} s ($kbps kB/s)")
     return true
   }
 
@@ -88,9 +83,6 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
 
   override fun prepareForApexInstallation(): Boolean {
     executeAdbCommand("root")
-    sleep(5000)
-    executeAdbCommand("wait-for-device")
-
     // Root kills adbd, and sometimes, it takes a while for it to come back
     for (i in 1..3) {
       if (executeAdbShellCommand("whoami").equals("root")) {
@@ -142,46 +134,6 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
           )
         }
 
-        // If the apex package has changed (e.g. not previously), fall back to
-        // remount + push so the apex lands directly in /system/apex.
-        if ((e.message ?: "").contains("INSTALL_FAILED_PACKAGE_CHANGED")) {
-          LOG.info(
-              "INSTALL_FAILED_PACKAGE_CHANGED for ${apex.name}, " +
-                  "attempting fallback install via remount and push"
-          )
-          try {
-            // Remount so that we can write to /system_ext/apex
-            executeAdbCommand("root")
-            executeAdbCommand("wait-for-device")
-            executeAdbCommand("remount")
-
-            // Remount sometimes requires a reboot because verity is enabled.
-            if (executeAdbShellCommand("getprop ro.boot.veritymode") == "enforcing") {
-              executeAdbCommand("reboot")
-              executeAdbCommand("wait-for-device")
-              waitForBootComplete()
-
-              executeAdbCommand("root")
-              executeAdbCommand("wait-for-device")
-              executeAdbCommand("remount")
-            }
-
-            // Potentially make this customizable in the future.
-            executeAdbCommand("push ${apex.absolutePath} /system_ext/apex/")
-
-            // Reboot to activate the apex
-            executeAdbCommand("reboot")
-            executeAdbCommand("wait-for-device")
-            waitForBootComplete()
-          } catch (fallbackError: AdbCommandFailedException) {
-            throw AndroidInstallException.adbCommandFailedException(
-                "Failed to install ${apex.name} via fallback remount+push.",
-                fallbackError.message,
-            )
-          }
-          return@measureTimeMillis
-        }
-
         throw AndroidInstallException.adbCommandFailedException(
             "Failed to install ${apex.name}.",
             e.message,
@@ -205,7 +157,6 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
           // Wait for device to be fully ready after soft reboot
           waitForBootComplete()
           waitForPackageManagerReady()
-          waitForStorageReady()
         } catch (e: AdbCommandFailedException) {
           throw AndroidInstallException.rebootRequired(
               "Failed to stop+start shell; ${apex.name} was installed successfully but device will be in an unknown state until you run 'adb reboot'"
@@ -219,72 +170,40 @@ class AndroidDeviceImpl(val serial: String, val adbUtils: AdbUtils) : AndroidDev
   }
 
   private fun waitForBootComplete() {
-    waitForCondition(
-        command = "getprop sys.boot_completed",
-        condition = { output -> output.trim() == "1" },
-        successMessage = "Boot completed after soft reboot",
-        timeoutMessage = "Device did not complete boot after soft reboot within timeout",
-        timeoutMs = 80000, // Account for Horizon OS Emulator.
+    val timeout = 30000 // 30 seconds
+    val startTime = System.currentTimeMillis()
+
+    while (System.currentTimeMillis() - startTime < timeout) {
+      val bootStatus =
+          executeAdbShellCommand("getprop sys.boot_completed", ignoreFailure = true).trim()
+      if (bootStatus == "1") {
+        LOG.info("Boot completed after soft reboot")
+        return
+      }
+      sleep(100)
+    }
+
+    throw AndroidInstallException.rebootRequired(
+        "Device did not complete boot after soft reboot within timeout"
     )
   }
 
   private fun waitForPackageManagerReady() {
-    waitForCondition(
-        command = "pm",
-        condition = { output -> output.isNotEmpty() && !output.contains("Can't find service") },
-        successMessage = "Package manager service ready",
-        timeoutMessage = "Package manager service did not become ready within timeout",
-    )
-  }
-
-  private fun waitForStorageReady() {
-    waitForCondition(
-        command = "ls /storage/emulated/0 2>&1 || echo STORAGE_NOT_READY",
-        condition = { output ->
-          !output.contains("Transport endpoint is not connected") &&
-              !output.contains("STORAGE_NOT_READY") &&
-              !output.contains("No such file or directory")
-        },
-        successMessage = "Storage filesystem ready",
-        timeoutMessage = "Storage filesystem did not become ready within timeout",
-        timeoutMs = 30000,
-    )
-  }
-
-  /**
-   * Polls a shell command until a condition is met or timeout is reached.
-   *
-   * @param command the shell command to execute
-   * @param condition a predicate that returns true when the desired state is reached
-   * @param successMessage message to log on success
-   * @param timeoutMessage message for the exception if timeout is reached
-   * @param timeoutMs maximum time to wait in milliseconds
-   * @param pollIntervalMs time between polling attempts in milliseconds
-   * @throws AndroidInstallException if the condition is not met within the timeout
-   */
-  private fun waitForCondition(
-      command: String,
-      condition: (String) -> Boolean,
-      successMessage: String,
-      timeoutMessage: String,
-      timeoutMs: Long = 10000,
-      pollIntervalMs: Long = 100,
-  ) {
-    LOG.info("Waiting for condition (timeout: ${timeoutMs}ms): $successMessage")
+    val timeout = 10000 // 10 seconds
     val startTime = System.currentTimeMillis()
-    var attempt = 0
 
-    while (System.currentTimeMillis() - startTime < timeoutMs) {
-      attempt++
-      if (condition(executeAdbShellCommand(command, ignoreFailure = true))) {
-        LOG.info(successMessage)
+    while (System.currentTimeMillis() - startTime < timeout) {
+      val pmOutput = executeAdbShellCommand("pm", ignoreFailure = true)
+      if (pmOutput.isNotEmpty() && !pmOutput.contains("Can't find service")) {
+        LOG.info("Package manager service ready")
         return
       }
-      LOG.info("Attempt $attempt: condition not met, retrying in ${pollIntervalMs}ms...")
-      sleep(pollIntervalMs)
+      sleep(100)
     }
 
-    throw AndroidInstallException.rebootRequired(timeoutMessage)
+    throw AndroidInstallException.rebootRequired(
+        "Package manager service did not become ready within timeout"
+    )
   }
 
   override fun stopPackage(packageName: String) {

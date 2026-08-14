@@ -12,25 +12,16 @@
 # well-formatted (and then delete this TODO)
 
 load("@prelude//:attrs_validators.bzl", "validation_common")
-load("@prelude//:genrule.bzl", "genrule_attributes")
-load(
-    "@prelude//:validation_deps.bzl",
-    "VALIDATION_DEPS_ATTR_NAME",
-)
-load("@prelude//android:build_only_native_code.bzl", "is_build_only_native_code")
-load("@prelude//android:configuration.bzl", "cpu_split_transition", "cpu_transition", "is_building_android_binary_attr")
-load("@prelude//android:cpu_filters.bzl", "ALL_CPU_FILTERS")
+load("@prelude//android:configuration.bzl", "cpu_transition")
 load("@prelude//decls:test_common.bzl", "test_common")
 load("@prelude//transitions:constraint_overrides.bzl", "constraint_overrides")
 load("@prelude//utils:clear_platform.bzl", "clear_platform_transition")
 load(":android_common.bzl", "android_common")
-load(":common.bzl", "AnnotationProcessingTool", "SourceAbiVerificationMode", "TestType", "buck", "prelude_rule")
+load(":common.bzl", "AbiGenerationMode", "AnnotationProcessingTool", "ForkMode", "LogLevel", "OnDuplicateEntry", "SourceAbiVerificationMode", "TestType", "UnusedDependenciesAction", "buck", "prelude_rule")
 load(":core_rules.bzl", "TargetCpuType")
 load(":genrule_common.bzl", "genrule_common")
-load(":java_rules.bzl", "dex_min_sdk_version")
 load(":jvm_common.bzl", "jvm_common")
 load(":re_test_common.bzl", "re_test_common")
-load(":toolchains_common.bzl", "toolchains_common")
 
 CompressionAlgorithm = ["xz", "zstd"]
 
@@ -51,165 +42,6 @@ ResourceCompressionMode = ["disabled", "enabled", "enabled_strings_only", "enabl
 SdkProguardType = ["default", "optimized", "none"]
 
 # @oss-disable[end= ]: GatoradePhase = ["early", "late"]
-
-FORCE_SINGLE_CPU = read_root_config("buck2", "android_force_single_cpu") in ("True", "true")
-FORCE_SINGLE_DEFAULT_CPU = read_root_config("buck2", "android_force_single_default_cpu") in ("True", "true")
-DISABLE_STRIPPING = read_root_config("android", "disable_stripping") in ("True", "true")
-
-# Format is {"ovveride_name": {"re_cap_key": "re_cap_value"}}; for example:
-#    {
-#        "dynamic-listing": {
-#            "platform": "riot",
-#            "pool": "EUREKA_POOL",
-#        },
-#        "test-execution": {
-#            "platform": "riot",
-#            "pool": "EUREKA_POOL",
-#        },
-#    }
-RE_CAPS = attrs.option(attrs.dict(key = attrs.string(), value = attrs.dict(key = attrs.string(), value = attrs.string())), default = None)
-
-# Format is {"ovveride_name": "re_use_case"}; for example:
-#     {
-#         "dynamic-listing": "riot",
-#         "test-execution": "riot",
-#     }
-RE_USE_CASE = attrs.option(attrs.dict(key = attrs.string(), value = attrs.string()), default = None)
-
-# Format is {"ovveride_name": {"param_name": param_value}}; for example:
-#    {
-#        "remote_execution_policy": {"setup_preference_key": "some_json_string"},
-#    }
-META_INTERNAL_EXTRA_PARAMS = attrs.option(attrs.dict(key = attrs.string(), value = attrs.any()), default = None)
-
-# Common attributes shared between android_binary and android_bundle rules
-ANDROID_BINARY_BUNDLE_COMMON_ATTRS = {
-    "aapt2_keep_raw_values": attrs.bool(default = False, doc = ""),
-    "aapt2_locale_filtering": attrs.bool(default = False, doc = ""),
-    "aapt2_preferred_density": attrs.option(attrs.string(), default = None, doc = ""),
-    "additional_aapt_params": attrs.list(attrs.string(), default = [], doc = ""),
-    "allow_r_dot_java_in_secondary_dex": attrs.bool(default = False, doc = ""),
-    "allowed_duplicate_resource_types": attrs.list(attrs.enum(RType), default = [], doc = "Similar to banned_duplicate_resource_types, but lists the types that are allowed to have duplicates. This should only be used if duplicate_resource_behavior is 'ban_by_default'."),
-    "android_sdk_proguard_config": attrs.option(attrs.enum(SdkProguardType), default = None, doc = "The type of proguard configuration to use from the Android SDK. Options are 'default' to use the default config, 'optimized' to use the config with optimizations enabled, or 'none' to not use any standard configuration (you will need to supply your own version, otherwise your app will probably not work)."),
-    "application_module_blocklist": attrs.option(attrs.list(attrs.transition_dep(cfg = cpu_transition)), default = None, doc = ""),
-    "application_module_configs": attrs.dict(key = attrs.string(), value = attrs.list(attrs.transition_dep(cfg = cpu_transition)), sorted = False, default = {}, doc = "A map of module names to lists of targets, where the targets should seed the corresponding module. The seed targets and their exclusive dependencies are packaged into the APK in separate files to allow them to be loaded independently."),
-    "application_module_dependencies": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), sorted = False), default = None, doc = ""),
-    "asset_compression_algorithm": attrs.option(attrs.enum(CompressionAlgorithm), default = None, doc = ""),
-    "banned_duplicate_resource_types": attrs.list(attrs.enum(RType), default = [], doc = "If ['string'] is used, the build will break if multiple string resources with the same name are added in an app's Android Resources. Resource names are name-spaced by resource type, this does not enforce unique names between multiple resource types. AAPT does not enforce this, but you can prevent easy-to-introduce resource bugs by enabling this."),
-    "build_config_values": attrs.list(attrs.string(), default = [], doc = "See the documentation on the values argument for android_build_config()."),
-    "build_config_values_file": attrs.option(attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), default = None, doc = "See the documentation on the values_file argument for android_build_config()."),
-    "build_string_source_map": attrs.bool(default = False, doc = ""),
-    "compiled_resource_apks": attrs.list(attrs.source(), default = [], doc = ""),
-    "compress_asset_libraries": attrs.bool(default = False, doc = ""),
-    "cpu_filters": attrs.list(attrs.enum(TargetCpuType), default = [], doc = """The CPU architecture filter applied to the final apk. Could be a subset of ARM, ARMV7, ARM64, X86, X86_64, MIPS. \
-Note: If you set this parameter, you must setup your NDK, otherwise Buck build will fail."""),
-    "default_module_manifest_skeleton": attrs.option(attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), default = None, doc = ""),
-    "defer_relink": attrs.bool(default = False),
-    "deps": attrs.list(attrs.split_transition_dep(cfg = cpu_split_transition), default = [], doc = """List of build targets whose corresponding compiled Java code, Android resources, and native libraries will be included in the APK. \
-From the transitive closure of these dependencies, the outputs of rules of the following type will be included in the APK: \
-android_library(), android_resource(), cxx_library(), groovy_library(), java_library(), java_binary(), prebuilt_jar(), prebuilt_native_library()."""),
-    "dex_compression": attrs.option(attrs.enum(DexStore), default = None, doc = ""),
-    "disable_pre_dex": attrs.bool(default = False, doc = ""),
-    "duplicate_class_checker_enabled": attrs.bool(default = False, doc = ""),
-    "duplicate_resource_behavior": attrs.enum(DuplicateResourceBehaviour, default = "allow_by_default", doc = "If set to 'ban_by_default', duplicate resource definitions with the same type and name will cause the build to fail, unless they are excluded by allowed_duplicate_resource_types or duplicate_resource_whitelist. If set to 'allow_by_default' (the default), no duplicate resource checks will be performed. They can still be enabled on individual types by using banned_duplicate_resource_types."),
-    "duplicate_resource_whitelist": attrs.option(attrs.source(), default = None, doc = "Either a build target or a path to a file containing a whitelist of resources that should be excluded from duplicate resource detection. Format is one resource per line with the type followed by the name, separated by a space. For example, 'string app_name'."),
-    "enable_bootstrap_dexes": attrs.bool(default = False, doc = ""),
-    "enable_relinker": attrs.bool(default = False, doc = ""),
-    "exclude_duplicate_targets_do_not_use": attrs.list(attrs.dep(), default = [], doc = ""),
-    "exopackage_modes": attrs.list(attrs.enum(ExopackageMode), default = [], doc = ""),
-    "extra_filtered_resources": attrs.list(attrs.string(), default = [], doc = ""),
-    "extra_no_compress_asset_extensions": attrs.list(attrs.string(), default = [], doc = ""),
-    "extra_no_compress_asset_regex": attrs.option(attrs.string(), default = None, doc = ""),
-    "extra_relinker_outputs": attrs.list(attrs.string(), default = [], doc = ""),
-    # @oss-disable[end= ]: "gatorade_extra_args": attrs.list(attrs.arg(), default = [], doc = "Extra Gatorade cross-library step arguments"),
-    # @oss-disable[end= ]: "gatorade_phases": attrs.set(attrs.enum(GatoradePhase), default = []),
-    "ignore_aapt_proguard_config": attrs.bool(default = False, doc = "If true, the proguard config automatically generated by aapt will be ignored."),
-    "includes_vector_drawables": attrs.bool(default = False, doc = "When calling AAPT during the packaging process, pass the --no-version-vectors flag which ensures that any vector drawables which make use of the Android support library are backwards compatible with Android 4.4 and earlier."),
-    "is_cacheable": attrs.bool(default = False, doc = ""),
-    "is_voltron_language_pack_enabled": attrs.bool(default = False, doc = ""),
-    "keystore": attrs.dep(doc = "A build target that identifies a keystore to use to sign the APK."),
-    "locales": attrs.list(attrs.string(), default = [], doc = ""),
-    "manifest": attrs.option(attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), default = None, doc = ""),
-    "manifest_entries": attrs.dict(key = attrs.string(), value = attrs.any(), default = {}, doc = "Insert values into the packaged AndroidManifest.xml file. Valid values are min_sdk_version, target_sdk_version, version_code, version_name, and debug_mode."),
-    "manifest_skeleton": attrs.option(attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), default = None, doc = ""),
-    "min_sdk_version": attrs.option(attrs.int(), default = None),
-    "minimize_primary_dex_size": attrs.bool(default = False, doc = ""),
-    "multidex_min_api": attrs.option(attrs.string(), default = None, doc = ""),
-    "native_library_bolt_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg())), default = None, doc = ""),
-    "native_library_merge_code_generator": attrs.option(attrs.exec_dep(), default = None, doc = ""),
-    "native_library_merge_glue": attrs.option(attrs.split_transition_dep(cfg = cpu_split_transition), default = None, doc = ""),
-    "native_library_merge_linker_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg())), default = None, doc = ""),
-    "native_library_merge_linker_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra linker arguments passed to all merged libraries."),
-    "native_library_merge_map": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.regex()), sorted = False), default = None, doc = "An advanced option for apps with many native libraries."),
-    "native_library_merge_non_asset_libs": attrs.bool(default = False, doc = ""),
-    "native_library_merge_sequence": attrs.option(attrs.list(attrs.one_of(
-        attrs.tuple(attrs.string(), attrs.list(attrs.regex())),
-        attrs.list(attrs.tuple(attrs.string(), attrs.list(attrs.regex()))),
-    )), default = None, doc = ""),
-    "native_library_merge_sequence_blocklist": attrs.option(attrs.list(attrs.regex()), default = None, doc = ""),
-    "native_library_pick_first": attrs.list(attrs.string(), default = [], doc = ""),
-    "no_dx": attrs.list(attrs.dep(), default = [], doc = """List of dependency targets whose Java code should be excluded from the DEX files in the final APK. \
-The classes from these targets will not be dexed, but their other resources will still be included. \
-This might be useful to resolve duplicate class errors when multiple dependencies provide the same class. \
-See [this document](https://www.internalfb.com/intern/staticdocs/confucius/docs/notes/dev/projects/android/resolving_duplicate_classes_with_no_dx/) \
-for how to resolve duplicate classes using this attribute."""),
-    "optimization_passes": attrs.int(default = 1, doc = ""),
-    "package_asset_libraries": attrs.bool(default = False, doc = ""),
-    "package_type": attrs.enum(PackageType, default = "debug", doc = "Determines whether ProGuard will be used when packaging the APK. Acceptable values for package_type are 'debug' and 'release'. The default value is 'debug', which indicates that ProGuard should not be used."),
-    "package_validators": attrs.list(
-        attrs.tuple(
-            attrs.exec_dep(providers = [RunInfo]),
-            attrs.list(attrs.arg(), default = []),
-        ),
-        default = [],
-    ),
-    "package_voltron_asset_libraries": attrs.bool(default = False, doc = "Similar global flag as package_asset_libraries to control voltron module libs specifically."),
-    "packaged_locales": attrs.list(attrs.string(), default = [], doc = ""),
-    "packaging_options": attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), default = {}, doc = ""),
-    "post_filter_resources_cmd": attrs.option(attrs.arg(), default = None, doc = ""),
-    "preprocess_java_classes_bash": attrs.option(attrs.arg(), default = None, doc = ""),
-    "preprocess_java_classes_cmd": attrs.option(attrs.arg(), default = None, doc = ""),
-    "preprocess_java_classes_deps": attrs.list(attrs.dep(), default = [], doc = ""),
-    "primary_dex_patterns": attrs.list(attrs.string(), default = [], doc = ""),
-    "proguard_config": attrs.option(attrs.source(), default = None, doc = "Relative path to a ProGuard configuration file that will be passed via the -include flag when package_type is 'release'."),
-    "proguard_jvm_args": attrs.list(attrs.string(), default = [], doc = ""),
-    "relinker_extra_args": attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg()), sorted = False, default = {}, doc = "Per-library extra linker arguments passed when relinking, mapping sonames to lists of arguments."),
-    "relinker_extra_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra arguments passed when relinking all libraries."),
-    "relinker_extra_deps": attrs.list(attrs.split_transition_dep(cfg = cpu_split_transition), default = [], doc = "Deps statically linked to every native lib by the relinker."),
-    "relinker_whitelist": attrs.list(attrs.regex(), default = [], doc = ""),
-    "resource_compression": attrs.enum(ResourceCompressionMode, default = "disabled", doc = ""),
-    "resource_filter": attrs.list(attrs.string(), default = [], doc = ""),
-    "resource_stable_ids": attrs.option(attrs.source(), default = None, doc = ""),
-    "resource_union_package": attrs.option(attrs.string(), default = None, doc = ""),
-    "secondary_dex_weight_limit": attrs.option(attrs.int(), default = None, doc = ""),
-    "shared_libraries_to_exclude": attrs.list(attrs.label(), default = [], doc = ""),
-    "skip_crunch_pngs": attrs.option(attrs.bool(), default = None, doc = "If True, PNGs in the APK are not crushed by aapt."),
-    "skip_proguard": attrs.bool(default = False, doc = "To produce a release build without running ProGuard set the skip_proguard flag to True. This will still cause ProGuard configuration files to be generated for use by other optimizers like Redex."),
-    "trim_resource_ids": attrs.bool(default = False, doc = ""),
-    "use_split_dex": attrs.bool(default = False, doc = """If this argument is True, Buck enables multidex support for the output APK. \
-Multidex support enables your app to use multiple Dalvik Executable (DEX) bytecode files and thereby \
-work around the 64K limit on the number of methods that can be referenced in a single DEX file."""),
-    "xz_compression_level": attrs.int(default = 4, doc = ""),
-    "_android_toolchain": toolchains_common.android(),
-    "_cxx_toolchain": attrs.split_transition_dep(cfg = cpu_split_transition, default = "toolchains//:android-hack"),
-    "_dex_toolchain": toolchains_common.dex(),
-    "_exec_os_type": buck.exec_os_type_arg(),
-    "_is_building_android_binary": attrs.default_only(attrs.bool(default = True)),
-    "_is_force_single_cpu": attrs.default_only(attrs.bool(default = FORCE_SINGLE_CPU)),
-    "_is_force_single_default_cpu": attrs.default_only(attrs.bool(default = FORCE_SINGLE_DEFAULT_CPU)),
-    "_java_toolchain": toolchains_common.java_for_android(),
-    VALIDATION_DEPS_ATTR_NAME: attrs.set(attrs.transition_dep(cfg = cpu_transition), sorted = True, default = []),
-} | buck.licenses_arg() | buck.labels_arg() | buck.contacts_arg()
-
-ANDROID_BINARY_ATTRS = ANDROID_BINARY_BUNDLE_COMMON_ATTRS | {
-    "strip_libraries": attrs.bool(default = not DISABLE_STRIPPING),
-} | constraint_overrides.attributes
-ANDROID_BUNDLE_ATTRS = ANDROID_BINARY_BUNDLE_COMMON_ATTRS | {
-    "bundle_config_file": attrs.option(attrs.source(), default = None, doc = ""),
-    "module_manifest_skeleton": attrs.dict(default = {}, key = attrs.string(), sorted = False, value = attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), doc = ""),
-    "module_manifests": attrs.option(attrs.transition_dep(cfg = cpu_transition), default = None, doc = ""),
-    "use_derived_apk": attrs.bool(default = False),
-}
 
 android_aar = prelude_rule(
     name = "android_aar",
@@ -262,7 +94,7 @@ android_aar = prelude_rule(
                  the final `BuildConfig` class, therefore that information might need to be replicated
                  manually in the build that's consuming the .aar file.
             """),
-            "deps": attrs.list(attrs.split_transition_dep(cfg = cpu_split_transition), default = [], doc = """
+            "deps": attrs.list(attrs.dep(), default = [], doc = """
                 List of build targets whose corresponding compiled Java code,
                  Android resources, and native libraries will be included in the AAR along with their transitive
                  dependencies. For compile time deps which should not be included in the final AAR,
@@ -270,22 +102,23 @@ android_aar = prelude_rule(
                  * `android_library()` Will be included in the final `classes.jar`* `android_resource()` Will be included in the final `R.txt`,
                  `res/` and `assets/`* `android_build_config()` Will be included in the final `classes.jar`
                  if `include_build_config_class` is True
-                 * `groovy_library()` Will be included in the final `classes.jar`* `java_library()` Will be included in the final `classes.jar`* `prebuilt_jar()` Will be included in the final `classes.jar`* `prebuilt_native_library()` Will be included in the final `jni/` or
+                 * `groovy_library()` Will be included in the final `classes.jar`* `java_library()` Will be included in the final `classes.jar`* `prebuilt_jar()` Will be included in the final `classes.jar`* `ndk_library()` Will be included in the final `jni/` or
+                 `assets/` if `is_asset` is True
+                 * `prebuilt_native_library()` Will be included in the final `jni/` or
                  `assets/` if `is_asset` is True
             """),
             "remove_classes": attrs.list(attrs.regex(), default = [], doc = """
                 List of classes to remove from the output aar. It removes classes from the target's own sources,
                  and its dependencies.
             """),
+            "abi_generation_mode": attrs.option(attrs.enum(AbiGenerationMode), default = None),
             "annotation_processing_tool": attrs.option(attrs.enum(AnnotationProcessingTool), default = None),
             "build_config_values_file": attrs.option(attrs.source(), default = None),
-            "compress_asset_libraries": attrs.default_only(attrs.bool(default = False)),
-            "cpu_filters": attrs.list(attrs.enum(TargetCpuType), default = ALL_CPU_FILTERS),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "enable_relinker": attrs.bool(default = False),
             "excluded_java_deps": attrs.list(attrs.dep(), default = []),
             "extra_arguments": attrs.list(attrs.string(), default = []),
             "extra_kotlinc_arguments": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
-            "extra_relinker_outputs": attrs.list(attrs.string(), default = []),
             "friend_paths": attrs.list(attrs.dep(), default = []),
             # @oss-disable[end= ]: "gatorade_extra_args": attrs.list(attrs.arg(), default = [], doc = "Extra Gatorade cross-library step arguments"),
             # @oss-disable[end= ]: "gatorade_phases": attrs.set(attrs.enum(GatoradePhase), default = []),
@@ -299,49 +132,37 @@ android_aar = prelude_rule(
             "manifest_entries": attrs.dict(key = attrs.string(), value = attrs.any(), default = {}),
             "manifest_file": attrs.option(attrs.source(), default = None),
             "maven_coords": attrs.option(attrs.string(), default = None),
-            "min_sdk_version": attrs.option(attrs.int(), default = None),
             "native_library_bolt_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg())), default = None),
             "native_library_merge_code_generator": attrs.option(attrs.exec_dep(), default = None),
-            "native_library_merge_glue": attrs.option(attrs.split_transition_dep(cfg = cpu_split_transition), default = None),
-            "native_library_merge_linker_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg())), default = None),
-            "native_library_merge_linker_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra linker arguments passed to all merged libraries."),
+            "native_library_merge_glue": attrs.option(attrs.dep(), default = None),
             "native_library_merge_map": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.regex()), sorted = False), default = None),
-            "native_library_merge_non_asset_libs": attrs.bool(default = False),
-            "native_library_merge_sequence": attrs.option(attrs.list(attrs.one_of(
-                attrs.tuple(attrs.string(), attrs.list(attrs.regex())),
-                attrs.list(attrs.tuple(attrs.string(), attrs.list(attrs.regex()))),
-            )), default = None),
+            "native_library_merge_sequence": attrs.option(attrs.list(attrs.any()), default = None),
             "native_library_merge_sequence_blocklist": attrs.option(attrs.list(attrs.regex()), default = None),
-            "package_asset_libraries": attrs.bool(default = True),
-            "package_resources": attrs.bool(default = True),
+            "native_library_merge_non_asset_libs": attrs.bool(default = False),
+            "native_library_merge_linker_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra linker arguments passed to all merged libraries."),
+            "never_mark_as_unused_dependency": attrs.option(attrs.bool(), default = None),
+            "on_unused_dependencies": attrs.option(attrs.enum(UnusedDependenciesAction), default = None),
             "proguard_config": attrs.option(attrs.source(), default = None),
             "relinker_extra_args": attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg()), sorted = False, default = {}, doc = "Per-library extra linker arguments passed when relinking, mapping sonames to lists of arguments."),
             "relinker_extra_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra arguments passed when relinking all libraries."),
-            "relinker_extra_deps": attrs.list(attrs.split_transition_dep(cfg = cpu_split_transition), default = [], doc = "Deps statically linked to every native lib by the relinker."),
+            "relinker_extra_deps": attrs.list(attrs.dep(), default = [], doc = "Deps statically linked to every native lib by the relinker."),
             "relinker_whitelist": attrs.list(attrs.regex(), default = []),
             "required_for_source_only_abi": attrs.bool(default = False),
             "resource_union_package": attrs.option(attrs.string(), default = None),
             "resources": attrs.list(attrs.source(), default = []),
-            "resources_root": attrs.option(attrs.string(), default = None),
+            "resources_root": attrs.option(attrs.source(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source": attrs.option(attrs.string(), default = None),
             "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
             "srcs": attrs.list(attrs.source(), default = []),
-            "strip_libraries": attrs.default_only(attrs.bool(default = not DISABLE_STRIPPING)),
             "target": attrs.option(attrs.string(), default = None),
             "use_jvm_abi_gen": attrs.option(attrs.bool(), default = None),
-            "_android_toolchain": toolchains_common.android(),
-            "_cxx_toolchain": attrs.split_transition_dep(cfg = cpu_split_transition, default = "toolchains//:android-hack"),
-            "_is_building_android_binary": attrs.default_only(attrs.bool(default = True)),
-            "_is_force_single_cpu": attrs.default_only(attrs.bool(default = FORCE_SINGLE_CPU)),
-            "_is_force_single_default_cpu": attrs.default_only(attrs.bool(default = FORCE_SINGLE_DEFAULT_CPU)),
-            "_java_toolchain": toolchains_common.java_for_android(),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
-    ) | jvm_common.abi_generation_mode() | jvm_common.annotation_processors() | jvm_common.plugins() | jvm_common.javac(),
+    ) | jvm_common.annotation_processors() | jvm_common.plugins() | jvm_common.javac(),
 )
 
 android_app_modularity = prelude_rule(
@@ -352,19 +173,14 @@ android_app_modularity = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
-            "application_module_blocklist": attrs.option(attrs.list(attrs.dep()), default = None, doc = ""),
-            "application_module_configs": attrs.dict(key = attrs.string(), value = attrs.list(attrs.dep()), sorted = False, default = {}, doc = ""),
-            "application_module_dependencies": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), sorted = False), default = None, doc = ""),
-            "deps": attrs.list(attrs.dep(), default = [], doc = ""),
-            "no_dx": attrs.list(attrs.dep(), default = [], doc = """List of dependency targets whose Java code should be excluded from the DEX files in the final APK. \
-The classes from these targets will not be dexed, but their other resources will still be included. \
-This might be useful to resolve duplicate class errors when multiple dependencies provide the same class. \
-See [this document](https://www.internalfb.com/intern/staticdocs/confucius/docs/notes/dev/projects/android/resolving_duplicate_classes_with_no_dx/) \
-for how to resolve duplicate classes using this attribute."""),
-            "should_include_classes": attrs.bool(default = True, doc = ""),
-            "should_include_libraries": attrs.bool(default = False, doc = ""),
-            "_android_toolchain": toolchains_common.android(),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
+            "application_module_blocklist": attrs.option(attrs.list(attrs.dep()), default = None),
+            "application_module_configs": attrs.dict(key = attrs.string(), value = attrs.list(attrs.dep()), sorted = False, default = {}),
+            "application_module_dependencies": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), sorted = False), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "deps": attrs.list(attrs.dep(), default = []),
+            "no_dx": attrs.list(attrs.dep(), default = []),
+            "should_include_classes": attrs.bool(default = True),
+            "should_include_libraries": attrs.bool(default = False),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -377,7 +193,103 @@ android_binary = prelude_rule(
     docs = "",
     examples = None,
     further = None,
-    attrs = ANDROID_BINARY_ATTRS,
+    attrs = (
+        {
+            "aapt2_keep_raw_values": attrs.bool(default = False),
+            "aapt2_locale_filtering": attrs.bool(default = False),
+            "aapt2_preferred_density": attrs.option(attrs.string(), default = None),
+            "additional_aapt_params": attrs.list(attrs.string(), default = []),
+            "allow_r_dot_java_in_secondary_dex": attrs.bool(default = False),
+            "allowed_duplicate_resource_types": attrs.list(attrs.enum(RType), default = []),
+            "android_sdk_proguard_config": attrs.option(attrs.enum(SdkProguardType), default = None),
+            "application_module_blocklist": attrs.option(attrs.list(attrs.dep()), default = None),
+            "application_module_configs": attrs.dict(key = attrs.string(), value = attrs.list(attrs.dep()), sorted = False, default = {}),
+            "application_module_dependencies": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), sorted = False), default = None),
+            "asset_compression_algorithm": attrs.option(attrs.enum(CompressionAlgorithm), default = None),
+            "banned_duplicate_resource_types": attrs.list(attrs.enum(RType), default = []),
+            "build_config_values": attrs.list(attrs.string(), default = []),
+            "build_config_values_file": attrs.option(attrs.source(), default = None),
+            "build_string_source_map": attrs.bool(default = False),
+            "compiled_resource_apks": attrs.list(attrs.source(), default = []),
+            "compress_asset_libraries": attrs.bool(default = False),
+            "cpu_filters": attrs.list(attrs.enum(TargetCpuType), default = []),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "default_module_manifest_skeleton": attrs.option(attrs.source(), default = None),
+            "deps": attrs.list(attrs.dep(), default = []),
+            "dex_compression": attrs.option(attrs.enum(DexStore), default = None),
+            "dex_group_lib_limit": attrs.int(default = 0),
+            "disable_pre_dex": attrs.bool(default = False),
+            "duplicate_class_checker_enabled": attrs.bool(default = False),
+            "duplicate_resource_behavior": attrs.enum(DuplicateResourceBehaviour, default = "allow_by_default"),
+            "duplicate_resource_whitelist": attrs.option(attrs.source(), default = None),
+            "enable_bootstrap_dexes": attrs.bool(default = False),
+            "enable_relinker": attrs.bool(default = False),
+            "exclude_duplicate_targets_do_not_use": attrs.list(attrs.dep(), default = []),
+            "exopackage_modes": attrs.list(attrs.enum(ExopackageMode), default = []),
+            "extra_filtered_resources": attrs.list(attrs.string(), default = []),
+            "extra_no_compress_asset_extensions": attrs.list(attrs.string(), default = []),
+            "extra_no_compress_asset_regex": attrs.option(attrs.string(), default = None),
+            "field_ref_count_buffer_space": attrs.int(default = 0),
+            # @oss-disable[end= ]: "gatorade_extra_args": attrs.list(attrs.arg(), default = [], doc = "Extra Gatorade cross-library step arguments"),
+            # @oss-disable[end= ]: "gatorade_phases": attrs.set(attrs.enum(GatoradePhase), default = []),
+            "ignore_aapt_proguard_config": attrs.bool(default = False),
+            "includes_vector_drawables": attrs.bool(default = False),
+            "is_cacheable": attrs.bool(default = False),
+            "is_voltron_language_pack_enabled": attrs.bool(default = False),
+            "keystore": attrs.dep(),
+            "locales": attrs.list(attrs.string(), default = []),
+            "manifest": attrs.option(attrs.source(), default = None),
+            "manifest_entries": attrs.dict(key = attrs.string(), value = attrs.any(), default = {}),
+            "manifest_skeleton": attrs.option(attrs.source(), default = None),
+            "method_ref_count_buffer_space": attrs.int(default = 0),
+            "minimize_primary_dex_size": attrs.bool(default = False),
+            "native_library_bolt_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg())), default = None),
+            "native_library_merge_code_generator": attrs.option(attrs.dep(), default = None),
+            "native_library_merge_glue": attrs.option(attrs.dep(), default = None),
+            "native_library_merge_linker_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra linker arguments passed to all merged libraries."),
+            "native_library_merge_map": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.regex()), sorted = False), default = None),
+            "native_library_merge_non_asset_libs": attrs.bool(default = False),
+            "native_library_merge_sequence": attrs.option(attrs.list(attrs.any()), default = None),
+            "native_library_merge_sequence_blocklist": attrs.option(attrs.list(attrs.regex()), default = None),
+            "native_library_pick_first": attrs.list(attrs.string(), default = []),
+            "no_auto_add_overlay_resources": attrs.bool(default = False),
+            "no_auto_version_resources": attrs.bool(default = False),
+            "no_dx": attrs.list(attrs.dep(), default = []),
+            "no_version_transitions_resources": attrs.bool(default = False),
+            "optimization_passes": attrs.int(default = 1),
+            "package_asset_libraries": attrs.bool(default = False),
+            "package_type": attrs.enum(PackageType, default = "debug"),
+            "package_voltron_asset_libraries": attrs.bool(default = False, doc = "Similar global flag as package_asset_libraries to control voltron module libs specifically."),
+            "packaged_locales": attrs.list(attrs.string(), default = []),
+            "packaging_options": attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), default = {}),
+            "post_filter_resources_cmd": attrs.option(attrs.arg(), default = None),
+            "preprocess_java_classes_bash": attrs.option(attrs.arg(), default = None),
+            "preprocess_java_classes_cmd": attrs.option(attrs.arg(), default = None),
+            "preprocess_java_classes_deps": attrs.list(attrs.dep(), default = []),
+            "primary_dex_patterns": attrs.list(attrs.string(), default = []),
+            "proguard_config": attrs.option(attrs.source(), default = None),
+            "proguard_jvm_args": attrs.list(attrs.string(), default = []),
+            "relinker_extra_args": attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg()), sorted = False, default = {}, doc = "Per-library extra linker arguments passed when relinking, mapping sonames to lists of arguments."),
+            "relinker_extra_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra arguments passed when relinking all libraries."),
+            "relinker_extra_deps": attrs.list(attrs.dep(), default = [], doc = "Deps statically linked to every native lib by the relinker."),
+            "relinker_whitelist": attrs.list(attrs.regex(), default = []),
+            "resource_compression": attrs.enum(ResourceCompressionMode, default = "disabled"),
+            "resource_filter": attrs.list(attrs.string(), default = []),
+            "resource_stable_ids": attrs.option(attrs.source(), default = None),
+            "resource_union_package": attrs.option(attrs.string(), default = None),
+            "secondary_dex_weight_limit": attrs.option(attrs.int(), default = None),
+            "shared_libraries_to_exclude": attrs.list(attrs.label(), default = []),
+            "skip_crunch_pngs": attrs.option(attrs.bool(), default = None),
+            "skip_proguard": attrs.bool(default = False),
+            "strip_libraries": attrs.bool(default = True),
+            "trim_resource_ids": attrs.bool(default = False),
+            "use_split_dex": attrs.bool(default = False),
+            "xz_compression_level": attrs.int(default = 4),
+        } |
+        buck.licenses_arg() |
+        buck.labels_arg() |
+        buck.contacts_arg()
+    ),
     cfg = constraint_overrides.transition,
 )
 
@@ -511,14 +423,12 @@ android_build_config = prelude_rule(
                  Note that values\\_file can be a generated file, as can build\\_config\\_values\\_file as
                  demonstrated in the example below.
             """),
-            "_android_toolchain": toolchains_common.android(),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_is_building_android_binary": is_building_android_binary_attr(),
-            "_java_toolchain": toolchains_common.java_for_android(),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
-        buck.contacts_arg()
+        buck.contacts_arg() |
+        jvm_common.content_based_path_for_jar_snapshot()
     ),
 )
 
@@ -527,7 +437,105 @@ android_bundle = prelude_rule(
     docs = "",
     examples = None,
     further = None,
-    attrs = ANDROID_BUNDLE_ATTRS,
+    attrs = (
+        {
+            "aapt2_keep_raw_values": attrs.bool(default = False),
+            "aapt2_locale_filtering": attrs.bool(default = False),
+            "aapt2_preferred_density": attrs.option(attrs.string(), default = None),
+            "additional_aapt_params": attrs.list(attrs.string(), default = []),
+            "allow_r_dot_java_in_secondary_dex": attrs.bool(default = False),
+            "allowed_duplicate_resource_types": attrs.list(attrs.enum(RType), default = []),
+            "android_sdk_proguard_config": attrs.option(attrs.enum(SdkProguardType), default = None),
+            "application_module_blocklist": attrs.option(attrs.list(attrs.dep()), default = None),
+            "application_module_configs": attrs.dict(key = attrs.string(), value = attrs.list(attrs.dep()), sorted = False, default = {}),
+            "application_module_dependencies": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), sorted = False), default = None),
+            "asset_compression_algorithm": attrs.option(attrs.enum(CompressionAlgorithm), default = None),
+            "banned_duplicate_resource_types": attrs.list(attrs.enum(RType), default = []),
+            "build_config_values": attrs.list(attrs.string(), default = []),
+            "build_config_values_file": attrs.option(attrs.source(), default = None),
+            "build_string_source_map": attrs.bool(default = False),
+            "bundle_config_file": attrs.option(attrs.source(), default = None),
+            "compiled_resource_apks": attrs.list(attrs.source(), default = []),
+            "compress_asset_libraries": attrs.bool(default = False),
+            "cpu_filters": attrs.list(attrs.enum(TargetCpuType), default = []),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "default_module_manifest_skeleton": attrs.option(attrs.source(), default = None),
+            "deps": attrs.list(attrs.dep(), default = []),
+            "dex_compression": attrs.option(attrs.enum(DexStore), default = None),
+            "dex_group_lib_limit": attrs.int(default = 0),
+            "disable_pre_dex": attrs.bool(default = False),
+            "duplicate_class_checker_enabled": attrs.bool(default = False),
+            "duplicate_resource_behavior": attrs.enum(DuplicateResourceBehaviour, default = "allow_by_default"),
+            "duplicate_resource_whitelist": attrs.option(attrs.source(), default = None),
+            "enable_bootstrap_dexes": attrs.bool(default = False),
+            "enable_relinker": attrs.bool(default = False),
+            "exclude_duplicate_targets_do_not_use": attrs.list(attrs.dep(), default = []),
+            "exopackage_modes": attrs.list(attrs.enum(ExopackageMode), default = []),
+            "extra_filtered_resources": attrs.list(attrs.string(), default = []),
+            "extra_no_compress_asset_extensions": attrs.list(attrs.string(), default = []),
+            "extra_no_compress_asset_regex": attrs.option(attrs.string(), default = None),
+            "field_ref_count_buffer_space": attrs.int(default = 0),
+            # @oss-disable[end= ]: "gatorade_extra_args": attrs.list(attrs.arg(), default = [], doc = "Extra Gatorade cross-library step arguments"),
+            # @oss-disable[end= ]: "gatorade_phases": attrs.set(attrs.enum(GatoradePhase), default = []),
+            "ignore_aapt_proguard_config": attrs.bool(default = False),
+            "includes_vector_drawables": attrs.bool(default = False),
+            "is_cacheable": attrs.bool(default = False),
+            "is_voltron_language_pack_enabled": attrs.bool(default = False),
+            "keystore": attrs.dep(),
+            "locales": attrs.list(attrs.string(), default = []),
+            "manifest": attrs.option(attrs.source(), default = None),
+            "manifest_entries": attrs.dict(key = attrs.string(), value = attrs.any(), default = {}),
+            "manifest_skeleton": attrs.option(attrs.source(), default = None),
+            "method_ref_count_buffer_space": attrs.int(default = 0),
+            "minimize_primary_dex_size": attrs.bool(default = False),
+            "module_manifest_skeleton": attrs.dict(default = {}, key = attrs.string(), sorted = False, value = attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source())),
+            "module_manifests": attrs.option(attrs.transition_dep(cfg = cpu_transition), default = None),
+            "native_library_bolt_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg())), default = None),
+            "native_library_merge_code_generator": attrs.option(attrs.dep(), default = None),
+            "native_library_merge_glue": attrs.option(attrs.dep(), default = None),
+            "native_library_merge_linker_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra linker arguments passed to all merged libraries."),
+            "native_library_merge_map": attrs.option(attrs.dict(key = attrs.string(), value = attrs.list(attrs.regex()), sorted = False), default = None),
+            "native_library_merge_non_asset_libs": attrs.bool(default = False),
+            "native_library_merge_sequence": attrs.option(attrs.list(attrs.any()), default = None),
+            "native_library_merge_sequence_blocklist": attrs.option(attrs.list(attrs.regex()), default = None),
+            "native_library_pick_first": attrs.list(attrs.string(), default = []),
+            "no_auto_add_overlay_resources": attrs.bool(default = False),
+            "no_auto_version_resources": attrs.bool(default = False),
+            "no_dx": attrs.list(attrs.dep(), default = []),
+            "no_version_transitions_resources": attrs.bool(default = False),
+            "optimization_passes": attrs.int(default = 1),
+            "package_asset_libraries": attrs.bool(default = False),
+            "package_type": attrs.enum(PackageType, default = "debug"),
+            "package_voltron_asset_libraries": attrs.bool(default = False, doc = "Similar global flag as package_asset_libraries to control voltron module libs specifically."),
+            "packaged_locales": attrs.list(attrs.string(), default = []),
+            "packaging_options": attrs.dict(key = attrs.string(), value = attrs.list(attrs.string()), default = {}),
+            "post_filter_resources_cmd": attrs.option(attrs.arg(), default = None),
+            "preprocess_java_classes_bash": attrs.option(attrs.arg(), default = None),
+            "preprocess_java_classes_cmd": attrs.option(attrs.arg(), default = None),
+            "preprocess_java_classes_deps": attrs.list(attrs.dep(), default = []),
+            "primary_dex_patterns": attrs.list(attrs.string(), default = []),
+            "proguard_config": attrs.option(attrs.source(), default = None),
+            "proguard_jvm_args": attrs.list(attrs.string(), default = []),
+            "relinker_extra_args": attrs.dict(key = attrs.string(), value = attrs.list(attrs.arg()), sorted = False, default = {}, doc = "Per-library extra linker arguments passed when relinking, mapping sonames to lists of arguments."),
+            "relinker_extra_args_all": attrs.list(attrs.arg(), default = [], doc = "Extra arguments passed when relinking all libraries."),
+            "relinker_extra_deps": attrs.list(attrs.dep(), default = [], doc = "Deps statically linked to every native lib by the relinker."),
+            "relinker_whitelist": attrs.list(attrs.regex(), default = []),
+            "resource_compression": attrs.enum(ResourceCompressionMode, default = "disabled"),
+            "resource_filter": attrs.list(attrs.string(), default = []),
+            "resource_stable_ids": attrs.option(attrs.source(), default = None),
+            "resource_union_package": attrs.option(attrs.string(), default = None),
+            "secondary_dex_weight_limit": attrs.option(attrs.int(), default = None),
+            "shared_libraries_to_exclude": attrs.list(attrs.label(), default = []),
+            "skip_crunch_pngs": attrs.option(attrs.bool(), default = None),
+            "skip_proguard": attrs.bool(default = False),
+            "trim_resource_ids": attrs.bool(default = False),
+            "use_split_dex": attrs.bool(default = False),
+            "xz_compression_level": attrs.int(default = 4),
+        } |
+        buck.licenses_arg() |
+        buck.labels_arg() |
+        buck.contacts_arg()
+    ),
 )
 
 android_instrumentation_apk = prelude_rule(
@@ -592,52 +600,15 @@ android_instrumentation_apk = prelude_rule(
         } |
         android_common.deps_apk_arg() |
         {
-            "cpu_filters": attrs.list(attrs.enum(TargetCpuType), default = []),
-            "deps": attrs.list(attrs.split_transition_dep(cfg = cpu_split_transition), default = [], doc = """
-                List of build targets whose corresponding compiled Java code,
-                 Android resources, and native libraries will be included in the APK.
-                 From the transitive closure of these dependencies, the outputs of rules of the following type will be included in the APK:
-                 * `android_library()`* `android_resource()`* `cxx_library()`* `groovy_library()`* `java_library()`* `java_binary()`* `prebuilt_jar()`* `ndk_library()`* `prebuilt_native_library()`
-            """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "disable_pre_dex": attrs.bool(default = False),
             "enable_bootstrap_dexes": attrs.bool(default = False),
             "includes_vector_drawables": attrs.bool(default = False),
-            "is_self_instrumenting": attrs.bool(default = False),
-            "manifest": attrs.option(attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), default = None, doc = """
-                Relative path to the Android manifest for the APK. The common
-                 case is that the manifest will be in the same directory as the
-                 rule, in which case this will simply be
-                 `'AndroidManifest.xml'`, but it can also reference
-                 an `android_manifest()` rule.
-
-                 Prefer using `manifest_skeleton`, which performs merging automatically.
-                 Exactly one of `manifest` and `manifest_skeleton` must be set.
-            """),
-            "manifest_skeleton": attrs.option(attrs.one_of(attrs.transition_dep(cfg = cpu_transition), attrs.source()), default = None, doc = """
-                Relative path to the skeleton Android manifest for the APK.
-                 An `android_manifest()` will be created automatically to merge
-                 all manifests from libraries and resources going into the app.
-                 The common case is that the manifest will be in the same directory as the
-                 rule, in which case this will simply be
-                 `'AndroidManifest.xml'`.
-
-                 Exactly one of `manifest` and `manifest_skeleton` must be set.
-            """),
-            "min_sdk_version": attrs.option(attrs.int(), default = None),
-            "multidex_min_api": attrs.option(attrs.string(), default = None),
+            "use_split_dex": attrs.option(attrs.bool(), default = None),
+            "primary_dex_patterns": attrs.list(attrs.string(), default = []),
             "preprocess_java_classes_bash": attrs.option(attrs.arg(), default = None),
             "preprocess_java_classes_cmd": attrs.option(attrs.arg(), default = None),
             "preprocess_java_classes_deps": attrs.list(attrs.dep(), default = []),
-            "primary_dex_patterns": attrs.list(attrs.string(), default = []),
-            "use_split_dex": attrs.option(attrs.bool(), default = None),
-            "_android_toolchain": toolchains_common.android(),
-            "_cxx_toolchain": attrs.split_transition_dep(cfg = cpu_split_transition, default = "toolchains//:android-hack"),
-            "_dex_toolchain": toolchains_common.dex(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_is_building_android_binary": attrs.default_only(attrs.bool(default = True)),
-            "_is_force_single_cpu": attrs.default_only(attrs.bool(default = FORCE_SINGLE_CPU)),
-            "_is_force_single_default_cpu": attrs.default_only(attrs.bool(default = FORCE_SINGLE_DEFAULT_CPU)),
-            "_java_toolchain": toolchains_common.java_for_android(),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -701,30 +672,19 @@ android_instrumentation_test = prelude_rule(
             "clear_package_data": attrs.bool(default = False, doc = """
                 Runs `pm clear` on the app and test packages before the test run if set to True.
             """),
-            "collect_tombstones": attrs.bool(default = False, doc = """
-                Checks whether the test generated any tombstones, and downloads them from the emulator if true.
-            """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "disable_animations": attrs.bool(default = False, doc = """
                 Disables animations on the emulator if set to True.
             """),
-            "env": attrs.dict(key = attrs.string(), value = attrs.arg(), sorted = False, default = {}),
-            "extra_instrumentation_args": attrs.option(attrs.dict(key = attrs.string(), value = attrs.arg()), default = None),
-            "instrumentation_test_listener": attrs.option(attrs.exec_dep(), default = None),
-            "instrumentation_test_listener_class": attrs.option(attrs.string(), default = None),
-            "is_self_instrumenting": attrs.bool(default = False),
-            "log_extractors": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
-            "meta_internal_extra_params": META_INTERNAL_EXTRA_PARAMS,
-            "re_caps": RE_CAPS,
-            "re_use_case": RE_USE_CASE,
+            "collect_tombstones": attrs.bool(default = False, doc = """
+                Checks whether the test generated any tombstones, and downloads them from the emulator if true.
+            """),
             "record_video": attrs.bool(default = False, doc = "Record video of test run and collect it as TRA"),
+            "log_extractors": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
+            "env": attrs.dict(key = attrs.string(), value = attrs.arg(), sorted = False, default = {}),
             "_android_emulators": attrs.option(attrs.transition_dep(cfg = clear_platform_transition, providers = [LocalResourceInfo]), default = None, doc = """
                 If provided, local resource of "android_emulators" type will be required to run this test locally and this target will be used to manage it. If omitted, local resource of "android_emulators" type will be ignored even if requested by the test runner.
             """),
-            "_android_toolchain": toolchains_common.android(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_java_test_toolchain": toolchains_common.java_for_host_test(),
-            "_java_toolchain": toolchains_common.java_for_android(),
-            "_test_srcs": attrs.list(attrs.source(allow_directory = True), default = []),
         } |
         test_common.attributes()
     ),
@@ -822,42 +782,36 @@ android_library = prelude_rule(
                 jvm_common.k2() |
                 jvm_common.kotlin_compiler_plugins() |
                 jvm_common.incremental() |
-                jvm_common.skip_classpath_removal_rebuild() |
                 jvm_common.kotlincd_content_based_paths() |
                 jvm_common.javac() |
                 jvm_common.enable_used_classes() |
+                jvm_common.content_based_path_for_jar_snapshot() |
                 jvm_common.classic_java_content_based_paths() |
                 {
                     "remove_classes": attrs.list(attrs.regex(), default = [], doc = """
                 List of classes to remove from the output jar. It only removes classes from the target's own
                  sources, not from any of its dependencies.
             """),
-                    "android_optional_jars": attrs.option(attrs.list(attrs.dep()), default = None),
+                    "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
                     "friend_paths": attrs.list(attrs.dep(), default = []),
-                    "jar_postprocessor": attrs.option(attrs.exec_dep(), default = None),
                     "java_version": attrs.option(attrs.string(), default = None),
+                    "jar_postprocessor": attrs.option(attrs.exec_dep(), default = None),
                     "language": attrs.option(attrs.enum(JvmLanguage), default = None),
                     "manifest_file": attrs.option(attrs.source(), default = None),
                     "maven_coords": attrs.option(attrs.string(), default = None),
+                    "never_mark_as_unused_dependency": attrs.option(attrs.bool(), default = None),
+                    "on_unused_dependencies": attrs.option(attrs.enum(UnusedDependenciesAction), default = None),
                     "proguard_config": attrs.option(attrs.source(), default = None),
                     "resource_union_package": attrs.option(attrs.string(), default = None),
-                    "resources_root": attrs.option(attrs.string(), default = None),
+                    "resources_root": attrs.option(attrs.source(), default = None),
                     "runtime_deps": attrs.list(attrs.dep(), default = []),
                     "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
                     "use_jvm_abi_gen": attrs.option(attrs.bool(), default = None),
-                    VALIDATION_DEPS_ATTR_NAME: attrs.set(attrs.dep(), sorted = True, default = []),
-                    "_android_toolchain": toolchains_common.android(),
-                    "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-                    "_dex_min_sdk_version": attrs.default_only(attrs.option(attrs.int(), default = dex_min_sdk_version())),
-                    "_dex_toolchain": toolchains_common.dex(),
-                    "_exec_os_type": buck.exec_os_type_arg(),
-                    "_is_building_android_binary": is_building_android_binary_attr(),
-                    "_java_toolchain": toolchains_common.java_for_android(),
-                    "_kotlin_toolchain": toolchains_common.kotlin_for_android(),
                 }
             ) |
             jvm_common.plugins() |
             validation_common.attrs_validators_arg() |
+            jvm_common.should_kosabi_jvm_abi_gen_use_k2() |
             validation_common.validation_specs_arg() |
             buck.licenses_arg() |
             buck.labels_arg() |
@@ -925,11 +879,25 @@ android_manifest = prelude_rule(
                  `android_library()` rules will be filtered out to become dependent source files for
                  the manifest.
             """),
-            "_android_toolchain": toolchains_common.android(),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
+    ),
+)
+
+android_platform = prelude_rule(
+    name = "android_platform",
+    docs = "",
+    examples = None,
+    further = None,
+    attrs = (
+        # @unsorted-dict-items
+        {
+            "base_platform": attrs.configuration_label(),
+            "native_platforms": attrs.dict(key = attrs.enum(TargetCpuType), value = attrs.configuration_label(), sorted = False, default = {}),
+        }
     ),
 )
 
@@ -987,21 +955,15 @@ android_prebuilt_aar = prelude_rule(
                  files originating from this `.aar` file. The `.so` files will always be packaged directly into
                  the main `.apk`.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "desugar_deps": attrs.list(attrs.dep(), default = []),
             "dex_weight_factor": attrs.int(default = 1),
             "for_primary_apk": attrs.bool(default = False),
             "maven_coords": attrs.option(attrs.string(), default = None),
-            "required_for_source_only_abi": attrs.bool(default = True),
-            "_android_toolchain": toolchains_common.android(),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_dex_min_sdk_version": attrs.default_only(attrs.option(attrs.int(), default = dex_min_sdk_version())),
-            "_dex_toolchain": toolchains_common.dex(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_is_building_android_binary": attrs.default_only(attrs.bool(default = False)),
-            "_java_toolchain": toolchains_common.java_for_android(),
+            "required_for_source_only_abi": attrs.bool(default = False),
         } |
-        jvm_common.classic_java_content_based_paths() |
+        jvm_common.content_based_path_for_jar_snapshot() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -1073,36 +1035,9 @@ android_resource = prelude_rule(
                  running `aapt`.
             """),
             "allowlisted_locales": attrs.option(attrs.set(attrs.string(), sorted = False), default = None),
-            "assets": attrs.option(attrs.one_of(attrs.source(allow_directory = True), attrs.dict(key = attrs.string(), value = attrs.source(), sorted = True)), default = None, doc = """
-                A dictionary mapping relative asset paths to either
-                 the asset files or the build targets that generate them.
-                 The `subdir_glob` function
-                 can be used to generate dictionaries based on a directory structure of files checked
-                 into the repository. Alternatively, this can be a path to a directory containing
-                 Android assets, although this option is deprecated and might be removed in the future.
-            """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "has_whitelisted_strings": attrs.bool(default = False),
-            "project_assets": attrs.option(attrs.source(allow_directory = True), default = None, doc = """
-                A directory containing assets to be used for project generation.
-                 If not provided, defaults to whatever the build uses.
-            """),
-            "project_res": attrs.option(attrs.source(allow_directory = True), default = None, doc = """
-                A directory containing resources to be used for project generation.
-                 If not provided, defaults to whatever the build uses.
-            """),
-            "res": attrs.option(attrs.one_of(attrs.source(allow_directory = True), attrs.dict(key = attrs.string(), value = attrs.source(), sorted = True)), default = None, doc = """
-                A dictionary mapping relative resource paths to either
-                 the resource files or the build targets that generate them.
-                 The `subdir_glob` function
-                 can be used to generate dictionaries based on a directory structure of files checked
-                 into the repository. Alternatively, this can be a path to a directory containing
-                 Android resources, although this option is deprecated and might be removed in the future.
-            """),
             "resource_union": attrs.bool(default = False),
-            "_android_toolchain": toolchains_common.android(),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_is_building_android_binary": attrs.default_only(attrs.bool(default = False)),
-            "_java_toolchain": toolchains_common.java_for_android(),
         }
     ),
 )
@@ -1189,18 +1124,12 @@ apk_genrule = prelude_rule(
                  `aab` can be provided.
             """),
             "cacheable": attrs.option(attrs.bool(), default = None),
-            "default_outs": attrs.option(attrs.set(attrs.string(), sorted = False), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "enable_sandbox": attrs.option(attrs.bool(), default = None),
             "is_cacheable": attrs.bool(default = False),
-            "outs": attrs.option(attrs.dict(key = attrs.string(), value = attrs.set(attrs.string(), sorted = False), sorted = False), default = None),
+            "need_android_tools": attrs.bool(default = False),
             "remote": attrs.option(attrs.bool(), default = None),
-            "type": attrs.string(default = "apk"),
-            "use_derived_apk": attrs.bool(default = False),
-            "_android_toolchain": toolchains_common.android(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_java_toolchain": toolchains_common.java_for_android(),
         } |
-        genrule_attributes() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -1248,7 +1177,7 @@ gen_aidl = prelude_rule(
                  e.g. `app/src/main/aidl`.). This is the same as the path to the
                  `aidl` file relative to what would be returned from `root`.
             """),
-            "import_paths": attrs.list(attrs.arg(), default = [], doc = """
+            "import_paths": attrs.list(attrs.string(), default = [], doc = """
                 A list of additional import statements for the aidl command.
                  (This appends an `-I` argument for each of the provided paths when
                  invoking aidl from the command line.
@@ -1259,9 +1188,7 @@ gen_aidl = prelude_rule(
             "deps": attrs.list(attrs.dep(), default = [], doc = """
                 A list of rules that must be built before this rule.
             """),
-            "_android_toolchain": toolchains_common.android(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_java_toolchain": toolchains_common.java_for_android(),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -1303,7 +1230,61 @@ keystore = prelude_rule(
                 key.alias.password=alias_password
                 ```
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
+        } |
+        buck.licenses_arg() |
+        buck.labels_arg() |
+        buck.contacts_arg()
+    ),
+)
+
+ndk_library = prelude_rule(
+    name = "ndk_library",
+    docs = """
+        An `ndk_library()` is used to define a set of C/C++ files,
+        an `Android.mk` and an `Application.mk` file that
+        are used by the NDK's `ndk-build` tool to generate one or more shared
+        objects.
+    """,
+    examples = None,
+    further = """
+        An `android_binary()` that includes this library will
+        aggregate all of the native shared objects into a directory in the
+        root of the APK named `lib/` or `assets/lib/`.
+
+        Unlike the default invocation of `ndk-build`,
+         `buck` will put all intermediate files and build output
+        into a subdirectory under `buck-out/gen`.
+    """,
+    attrs = (
+        # @unsorted-dict-items
+        {
+            "srcs": attrs.list(attrs.source(), default = [], doc = """
+                The set of files to compile for this rule.
+                 If not provided, `buck` assumes
+                 that all files with the following extensions are part of the build:
+                 `c, cpp, cc, cxx, h, hpp, mk`.
+            """),
+            "deps": attrs.list(attrs.dep(), default = [], doc = """
+                List of build targets to build before this rule.
+            """),
+            "flags": attrs.list(attrs.arg(), default = [], doc = """
+                Array of strings passed verbatim to `ndk-build`. Normally
+                 this is not needed, but in some cases you may want to put something
+                 here. For example, this can be used to build the libraries in debug
+                 mode (`NDK_DEBUG=1`) or set the number of jobs spawned by
+                 `ndk-build` (by default, the same as the number of
+                 cores).
+            """),
+            "is_asset": attrs.bool(default = False, doc = """
+                Normally native shared objects end up in a directory in the root of the APK
+                 named `lib/`. If this parameter is set to `True`, then
+                 these objects are placed in `assets/lib/`. Placing shared objects in
+                 a non-standard location prevents Android from extracting them to the device's
+                 internal storage.
+            """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -1340,7 +1321,7 @@ prebuilt_native_library = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
-            "native_libs": attrs.source(allow_directory = True, doc = """
+            "native_libs": attrs.source(doc = """
                 Path to a directory containing native libraries.
                  This directory has subdirectories for different architectures,
                  such as `armeabi` and `armeabi-v7a`.
@@ -1361,6 +1342,7 @@ prebuilt_native_library = prelude_rule(
                  script, which must be included in the primary APK to take effect. Only one
                  of `is_asset` and `has_wrap_script` can be set for a rule.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
         } |
         buck.licenses_arg() |
@@ -1389,7 +1371,7 @@ robolectric_test = prelude_rule(
             "extra_kotlinc_arguments": attrs.list(attrs.arg(anon_target_compatible = True), default = [], doc = """
                 List of additional arguments to pass into the Kotlin compiler.
             """),
-            "android_optional_jars": attrs.option(attrs.list(attrs.dep()), default = None),
+            "abi_generation_mode": attrs.option(attrs.enum(AbiGenerationMode), default = None),
             "annotation_processing_tool": attrs.option(attrs.enum(AnnotationProcessingTool), default = None),
             "compiled_resource_apks": attrs.list(attrs.source(), default = []),
             "cxx_library_allowlist": attrs.list(attrs.dep(), default = [], doc = """
@@ -1397,61 +1379,56 @@ robolectric_test = prelude_rule(
                 This can be useful if some dependencies are Android-only and won't build for the test host platform.
             """),
             "default_cxx_platform": attrs.option(attrs.string(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
-            "discover_all_test_classes": attrs.bool(default = False),
             "env": attrs.dict(key = attrs.string(), value = attrs.arg(), sorted = False, default = {}),
             "exported_deps": attrs.list(attrs.dep(), default = []),
             "exported_provided_deps": attrs.list(attrs.dep(), default = []),
             "extra_arguments": attrs.list(attrs.string(), default = []),
+            "fork_mode": attrs.enum(ForkMode, default = "none"),
             "friend_paths": attrs.list(attrs.dep(), default = []),
             "jar_postprocessor": attrs.option(attrs.exec_dep(), default = None),
-            "java": attrs.option(attrs.dep(), default = None),
-            "java_agents": attrs.list(attrs.source(), default = []),
             "java_version": attrs.option(attrs.string(), default = None),
+            "java": attrs.option(attrs.dep(), default = None),
             "language": attrs.option(attrs.enum(JvmLanguage), default = None),
             "locales_for_binary_resources": attrs.list(attrs.string(), default = []),
             "manifest_entries": attrs.dict(key = attrs.string(), value = attrs.any(), default = {}),
             "manifest_file": attrs.option(attrs.source(), default = None),
             "manifest_skeleton": attrs.option(attrs.source(), default = None),
             "maven_coords": attrs.option(attrs.string(), default = None),
+            "never_mark_as_unused_dependency": attrs.option(attrs.bool(), default = None),
+            "on_unused_dependencies": attrs.option(attrs.enum(UnusedDependenciesAction), default = None),
             "preferred_density_for_binary_resources": attrs.option(attrs.string(), default = None),
             "proguard_config": attrs.option(attrs.source(), default = None),
             "provided_deps": attrs.list(attrs.dep(), default = []),
             "provided_deps_query": attrs.option(attrs.query(), default = None),
             "remove_classes": attrs.list(attrs.regex(), default = []),
             "required_for_source_only_abi": attrs.bool(default = False),
-            "resource_stable_ids": attrs.option(attrs.source(), default = None),
             "resource_union_package": attrs.option(attrs.string(), default = None),
             "resources": attrs.list(attrs.source(), default = []),
-            "resources_root": attrs.option(attrs.string(), default = None),
-            "robolectric_runtime_dependencies": attrs.list(attrs.source(), default = []),
+            "resources_root": attrs.option(attrs.source(), default = None),
+            "resource_stable_ids": attrs.option(attrs.source(), default = None),
+            "robolectric_runtime_dependencies": attrs.list(attrs.dep(), default = []),
             "run_test_separately": attrs.bool(default = False),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source": attrs.option(attrs.string(), default = None),
             "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
             "srcs": attrs.list(attrs.source(), default = []),
-            "supports_test_execution_caching": attrs.bool(default = False),
+            "std_err_log_level": attrs.option(attrs.one_of(attrs.enum(LogLevel), attrs.int()), default = None),
+            "std_out_log_level": attrs.option(attrs.one_of(attrs.enum(LogLevel), attrs.int()), default = None),
             "target": attrs.option(attrs.string(), default = None),
             "test_case_timeout_ms": attrs.option(attrs.int(), default = None),
-            "test_class_names_file": attrs.option(attrs.source(), default = None),
             "test_rule_timeout_ms": attrs.option(attrs.int(), default = None),
             "test_type": attrs.option(attrs.enum(TestType), default = None),
             "unbundled_resources_root": attrs.option(attrs.source(allow_directory = True), default = None),
             "use_cxx_libraries": attrs.option(attrs.bool(), default = None),
             "use_dependency_order_classpath": attrs.option(attrs.bool(), default = None),
+            "used_as_dependency_deprecated_do_not_use": attrs.bool(default = False),
             "use_jvm_abi_gen": attrs.option(attrs.bool(), default = None),
             "vm_args": attrs.list(attrs.arg(), default = []),
-            "_android_toolchain": toolchains_common.android(),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_is_building_android_binary": attrs.default_only(attrs.bool(default = False)),
-            "_java_test_toolchain": toolchains_common.java_test(),
-            "_java_toolchain": toolchains_common.java_for_host_test(),
-            "_kotlin_toolchain": toolchains_common.kotlin(),
         } |
         android_common.manifest_arg() |
-        jvm_common.abi_generation_mode() |
         jvm_common.annotation_processors() |
         jvm_common.k2() |
         jvm_common.incremental() |
@@ -1469,6 +1446,26 @@ robolectric_test = prelude_rule(
     ),
 )
 
+supermodule_target_graph = prelude_rule(
+    name = "supermodule_target_graph",
+    docs = "",
+    examples = None,
+    further = None,
+    attrs = (
+        # @unsorted-dict-items
+        {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "deps": attrs.set(attrs.dep(), sorted = True, default = []),
+            "label_pattern": attrs.option(attrs.regex(), default = None),
+            "on_duplicate_entry": attrs.enum(OnDuplicateEntry, default = "overwrite"),
+            "out": attrs.string(default = ""),
+        } |
+        buck.licenses_arg() |
+        buck.labels_arg() |
+        buck.contacts_arg()
+    ),
+)
+
 android_rules = struct(
     android_aar = android_aar,
     android_app_modularity = android_app_modularity,
@@ -1479,11 +1476,14 @@ android_rules = struct(
     android_instrumentation_test = android_instrumentation_test,
     android_library = android_library,
     android_manifest = android_manifest,
+    android_platform = android_platform,
     android_prebuilt_aar = android_prebuilt_aar,
     android_resource = android_resource,
     apk_genrule = apk_genrule,
     gen_aidl = gen_aidl,
     keystore = keystore,
+    ndk_library = ndk_library,
     prebuilt_native_library = prebuilt_native_library,
     robolectric_test = robolectric_test,
+    supermodule_target_graph = supermodule_target_graph,
 )

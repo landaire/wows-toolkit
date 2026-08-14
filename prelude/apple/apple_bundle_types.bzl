@@ -125,7 +125,3 @@ AppleBundleTypeAttributeType = enum(
     "extensionkit_extension",
     "watchapp",
 )
-
-AppleInfoPlistInfo = provider(fields = {
-    "info_plist": provider_field(Artifact),
-})

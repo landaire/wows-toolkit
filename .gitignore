@@ -4,7 +4,10 @@ toolchains/windows/offline/installed/*
 buck-out/
 # Machine-local Nix toolchain root written by scripts/refresh-buck-toolchain.nu.
 .buckconfig.local
-dist/
+# Anchored: a bare `dist/` also matches prelude/dist, and a partially checked-out
+# vendored prelude fails to load with an error that never names the ignore rule.
+/dist/
+crates/wt-web/dist/
 .cargo/config.toml
 wows_toolkit.log.*
 .claude/

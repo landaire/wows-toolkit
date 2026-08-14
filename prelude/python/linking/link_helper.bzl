@@ -20,9 +20,7 @@ LinkProviders = provider(
         "extensions": provider_field(typing.Any, default = None),
         "extra": provider_field(typing.Any, default = None),
         "extra_artifacts": provider_field(typing.Any, default = None),
-        "gc_sections_data": provider_field(typing.Any, default = None),
         "link_args": provider_field(typing.Any, default = None),
-        "linker_map_data": provider_field(typing.Any, default = None),
         "shared_libraries": provider_field(typing.Any, default = None),
     },
 )
@@ -31,7 +29,6 @@ cxx_implicit_attrs = {
     "allow_cache_upload": attrs.bool(default = False),
     "anonymous_link_groups": attrs.bool(default = True),
     "binary_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
-    "bolt_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
     "bolt_profile": attrs.option(attrs.source(), default = None),
     "compiler_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
     "cxx_main": attrs.source(default = "prelude//python/tools:embedded_main.cpp"),
@@ -44,6 +41,8 @@ cxx_implicit_attrs = {
     "headers": attrs.set(attrs.source(), sorted = True, default = []),
     "include_directories": attrs.set(attrs.string(), sorted = True, default = []),
     "lang_compiler_flags": attrs.any(default = {}),
+    "lang_platform_compiler_flags": attrs.any(default = {}),
+    "lang_platform_preprocessor_flags": attrs.any(default = {}),
     "lang_preprocessor_flags": attrs.any(default = {}),
     "libraries": attrs.list(attrs.string(), default = []),
     "link_group": attrs.option(attrs.string(), default = None),
@@ -54,6 +53,9 @@ cxx_implicit_attrs = {
     "link_ordering": attrs.option(attrs.any(), default = None),
     "link_style": attrs.option(attrs.any(), default = None),
     "linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+    "platform_compiler_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
+    "platform_headers": attrs.set(attrs.source(), sorted = True, default = []),
+    "platform_preprocessor_flags": attrs.any(default = []),
     "precompiled_header": attrs.option(attrs.dep(), default = None),
     "prefer_stripped_native_objects": attrs.option(attrs.any(), default = None),
     "preload_deps": attrs.list(attrs.dep(), default = []),
@@ -67,10 +69,10 @@ python_implicit_attrs = {
 }
 
 def _process_native_linking_rule_impl(ctx):
-    python_toolchain = ctx.attrs._python_toolchain[PythonToolchainInfo]
+    python_toolchain = ctx.attrs.python_toolchain[PythonToolchainInfo]
     python_internal_tools = ctx.attrs._python_internal_tools[PythonInternalToolsInfo]
     raw_deps = ctx.attrs.deps
-    shared_libs, extensions, link_args, extra, extra_artifacts, linker_map_data, gc_sections_data = process_native_linking(
+    shared_libs, extensions, link_args, extra, extra_artifacts = process_native_linking(
         ctx,
         raw_deps,
         python_toolchain,
@@ -84,8 +86,6 @@ def _process_native_linking_rule_impl(ctx):
         extensions = extensions,
         extra = extra,
         extra_artifacts = extra_artifacts,
-        gc_sections_data = gc_sections_data,
-        linker_map_data = linker_map_data,
     ), DefaultInfo()]
 
 process_native_linking_rule = rule(
@@ -93,6 +93,7 @@ process_native_linking_rule = rule(
     attrs = {
         "deps": attrs.list(attrs.dep()),  # Note: cxx-only deps here
         "package_style": attrs.any(),
+        "python_toolchain": attrs.dep(),
         "rpath": attrs.string(),
         "static_extension_utils": attrs.source(),
         "transformation_spec": attrs.option(
@@ -102,6 +103,5 @@ process_native_linking_rule = rule(
         "use_anon_target_for_analysis": attrs.bool(default = True),
         "_cxx_toolchain": attrs.dep(),
         "_python_internal_tools": attrs.dep(),
-        "_python_toolchain": attrs.dep(),
     } | cxx_implicit_attrs | python_implicit_attrs,
 )

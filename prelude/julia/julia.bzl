@@ -28,21 +28,22 @@ extra_attributes = {
         "main": attrs.string(),
         "srcs": attrs.list(attrs.source(), default = []),
         "_julia_toolchain": julia_toolchain(),
-    } | buck.labels_arg() | buck.contacts_arg(),
+    },
     "julia_jll_library": {
         "jll_name": attrs.string(),
         "lib_mapping": attrs.named_set(attrs.dep()),
         "uuid": attrs.string(),
         "_julia_toolchain": julia_toolchain(),
-    } | buck.labels_arg() | buck.contacts_arg(),
+    },
     "julia_library": {
         "deps": attrs.list(attrs.dep(), default = []),
         "project_toml": attrs.source(),
         "resources": attrs.list(attrs.source(allow_directory = True), default = []),
         "srcs": attrs.list(attrs.source(), default = []),
         "_julia_toolchain": julia_toolchain(),
-    } | buck.labels_arg() | buck.contacts_arg(),
+    },
     "julia_test": {
+        "contacts": attrs.list(attrs.string(), default = []),
         "deps": attrs.list(attrs.dep(), default = []),
         "julia_args": attrs.list(attrs.string(), default = []),
         "julia_flags": attrs.list(attrs.string(), default = []),
@@ -50,5 +51,5 @@ extra_attributes = {
         "srcs": attrs.list(attrs.source(), default = []),
         "_julia_toolchain": julia_toolchain(),
         # TODO: coverage
-    } | buck.labels_arg() | buck.contacts_arg() | buck.inject_test_env_arg() | test_common.attributes(),
+    } | buck.inject_test_env_arg() | test_common.attributes(),
 }

@@ -7,68 +7,92 @@
 # above-listed licenses.
 
 load("@prelude//go:coverage.bzl", "GoCoverageMode")
-load(":tags_helper.bzl", "selects_for_tags", "tag_to_constraint_value")
+load(":tags_helper.bzl", "selects_for_tags", "tag_to_constrant_value")
 
 def _cgo_enabled_transition(platform, refs, attrs):
-    # If attribute is None, do nothing
-    if attrs.cgo_enabled == None:
+    constraints = platform.configuration.constraints
+
+    # Cancel transition if the value already set
+    # to enable using configuration modifiers for overriding this option
+    cgo_enabled_setting = refs.cgo_enabled_true[ConstraintValueInfo].setting
+    if cgo_enabled_setting.label in constraints:
         return platform
 
-    # Override configuration with attribute value
-    configuration = platform.configuration
-    if attrs.cgo_enabled == True:
-        cgo_enabled_value = refs.cgo_enabled_true[ConstraintValueInfo]
+    if attrs.cgo_enabled == None:
+        return platform
+    elif attrs.cgo_enabled == True:
+        cgo_enabled_ref = refs.cgo_enabled_true
     else:
-        cgo_enabled_value = refs.cgo_enabled_false[ConstraintValueInfo]
+        cgo_enabled_ref = refs.cgo_enabled_false
 
-    configuration.insert(cgo_enabled_value)
+    cgo_enabled_value = cgo_enabled_ref[ConstraintValueInfo]
+    constraints[cgo_enabled_value.setting.label] = cgo_enabled_value
+
+    new_cfg = ConfigurationInfo(
+        constraints = constraints,
+        values = platform.configuration.values,
+    )
 
     return PlatformInfo(
         label = platform.label,
-        configuration = configuration,
+        configuration = new_cfg,
     )
 
 def _coverage_mode_transition(platform, refs, attrs):
-    # If attribute is None, do nothing
-    if attrs.coverage_mode == None:
+    constraints = platform.configuration.constraints
+
+    # Cancel transition if the value already set
+    # to enable using configuration modifiers for overriding this option
+    coverage_mode_setting = refs.coverage_mode_set[ConstraintValueInfo].setting
+    if coverage_mode_setting.label in constraints:
         return platform
 
-    # Override configuration with attribute value
-    configuration = platform.configuration
-    if attrs.coverage_mode == "set":
-        coverage_mode_value = refs.coverage_mode_set[ConstraintValueInfo]
+    if attrs.coverage_mode == None:
+        return platform
+    elif attrs.coverage_mode == "set":
+        coverage_mode_ref = refs.coverage_mode_set
     elif attrs.coverage_mode == "count":
-        coverage_mode_value = refs.coverage_mode_count[ConstraintValueInfo]
+        coverage_mode_ref = refs.coverage_mode_count
     elif attrs.coverage_mode == "atomic":
-        coverage_mode_value = refs.coverage_mode_atomic[ConstraintValueInfo]
+        coverage_mode_ref = refs.coverage_mode_atomic
     else:
         fail("`coverage_mode` can be either: 'set', 'count', 'atomic' or None, got: {}".format(attrs.coverage_mode))
 
-    configuration.insert(coverage_mode_value)
+    coverage_mode_value = coverage_mode_ref[ConstraintValueInfo]
+    constraints[coverage_mode_value.setting.label] = coverage_mode_value
+
+    new_cfg = ConfigurationInfo(
+        constraints = constraints,
+        values = platform.configuration.values,
+    )
 
     return PlatformInfo(
         label = platform.label,
-        configuration = configuration,
+        configuration = new_cfg,
     )
 
 def _tags_transition(platform, refs, attrs):
-    # If no build tags, do nothing
+    constraints = platform.configuration.constraints
+
     if not attrs.build_tags:
         return platform
 
-    # Override configuration with attribute values
-    configuration = platform.configuration
     for build_tag in attrs.build_tags:
-        ref_name = "tag_{}__set".format(build_tag)
+        ref_name = "tag_{}__value".format(build_tag)
         if not hasattr(refs, ref_name):
             fail("Add build_tag '{}' to .buckconfig attribute `go.allowed_build_tags` to allow using it".format(build_tag))
 
         tag_value = getattr(refs, ref_name)[ConstraintValueInfo]
-        configuration.insert(tag_value)
+        constraints[tag_value.setting.label] = tag_value
+
+    new_cfg = ConfigurationInfo(
+        constraints = constraints,
+        values = platform.configuration.values,
+    )
 
     return PlatformInfo(
         label = platform.label,
-        configuration = configuration,
+        configuration = new_cfg,
     )
 
 def _force_mingw_on_windows(platform, refs, _):
@@ -113,11 +137,11 @@ _all_level_refs = {
 }
 
 _top_level_refs = {
-    "cgo_enabled_false": "prelude//go/constraints:cgo_enabled[false]",
-    "cgo_enabled_true": "prelude//go/constraints:cgo_enabled[true]",
+    "cgo_enabled_false": "prelude//go/constraints:cgo_enabled_false",
+    "cgo_enabled_true": "prelude//go/constraints:cgo_enabled_true",
 } | {
-    "tag_{}__set".format(tag): constraint_value
-    for tag, constraint_value in tag_to_constraint_value().items()
+    "tag_{}__value".format(tag): constrant_value
+    for tag, constrant_value in tag_to_constrant_value().items()
 } | _all_level_refs
 
 _attrs = ["cgo_enabled", "build_tags"]
@@ -131,9 +155,9 @@ go_binary_transition = transition(
 go_test_transition = transition(
     impl = _chain_transitions(_top_level_transitions + [_coverage_mode_transition]),
     refs = _top_level_refs | {
-        "coverage_mode_atomic": "prelude//go/constraints:coverage_mode[atomic]",
-        "coverage_mode_count": "prelude//go/constraints:coverage_mode[count]",
-        "coverage_mode_set": "prelude//go/constraints:coverage_mode[set]",
+        "coverage_mode_atomic": "prelude//go/constraints:coverage_mode_atomic",
+        "coverage_mode_count": "prelude//go/constraints:coverage_mode_count",
+        "coverage_mode_set": "prelude//go/constraints:coverage_mode_set",
     },
     attrs = _attrs + ["coverage_mode"],
 )
@@ -157,16 +181,16 @@ go_stdlib_transition = transition(
 )
 
 cgo_enabled_attr = attrs.default_only(attrs.option(attrs.bool(), default = select({
-    "prelude//go/constraints:cgo_enabled[auto]": None,
-    "prelude//go/constraints:cgo_enabled[false]": False,
-    "prelude//go/constraints:cgo_enabled[true]": True,
+    "DEFAULT": None,
+    "prelude//go/constraints:cgo_enabled_false": False,
+    "prelude//go/constraints:cgo_enabled_true": True,
 })))
 
 coverage_mode_attr = attrs.default_only(attrs.option(attrs.enum(GoCoverageMode.values()), default = select({
-    "prelude//go/constraints:coverage_mode[atomic]": "atomic",
-    "prelude//go/constraints:coverage_mode[count]": "count",
-    "prelude//go/constraints:coverage_mode[none]": None,
-    "prelude//go/constraints:coverage_mode[set]": "set",
+    "DEFAULT": None,
+    "prelude//go/constraints:coverage_mode_atomic": "atomic",
+    "prelude//go/constraints:coverage_mode_count": "count",
+    "prelude//go/constraints:coverage_mode_set": "set",
 })))
 
 build_tags_attr = attrs.default_only(attrs.list(attrs.string(), default = selects_for_tags()))

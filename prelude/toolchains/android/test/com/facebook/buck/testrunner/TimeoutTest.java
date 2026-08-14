@@ -11,7 +11,6 @@
 package com.facebook.buck.testrunner;
 
 import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import com.google.common.collect.ImmutableSet;
@@ -19,6 +18,7 @@ import com.google.common.collect.Iterables;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
+import org.junit.Assume;
 import org.junit.Test;
 import org.junit.runner.Computer;
 import org.junit.runner.JUnitCore;
@@ -97,19 +97,19 @@ public class TimeoutTest {
 
     @Test
     public void verifyTestRunsOnCreatorThread() {
-      assertTrue(isBeingUsedForTimeoutTest.get());
+      Assume.assumeTrue(isBeingUsedForTimeoutTest.get());
       assertEquals(creatorThreadId, Thread.currentThread().getId());
     }
 
     @Test
     public void testsMayTimeOut() throws InterruptedException {
-      assertTrue(isBeingUsedForTimeoutTest.get());
+      Assume.assumeTrue(isBeingUsedForTimeoutTest.get());
       Thread.sleep(5000);
     }
 
     @Test
     public void failingTestsAreReported() {
-      assertTrue(isBeingUsedForTimeoutTest.get());
+      Assume.assumeTrue(isBeingUsedForTimeoutTest.get());
       fail("This is expected");
     }
   }

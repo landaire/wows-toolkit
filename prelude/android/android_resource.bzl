@@ -10,9 +10,8 @@ load("@prelude//java:java_providers.bzl", "derive_compiling_deps_wrapper", "get_
 load("@prelude//java:java_toolchain.bzl", "JavaToolchainInfo")
 load("@prelude//utils:argfile.bzl", "argfile")
 load("@prelude//utils:expect.bzl", "expect")
-load(":android_providers.bzl", "AndroidResourceInfo", "AndroidResourceRDotInfo", "ExportedAndroidResourceInfo", "RESOURCE_PRIORITY_NORMAL", "merge_android_packageable_info")
+load(":android_providers.bzl", "AndroidResourceInfo", "ExportedAndroidResourceInfo", "RESOURCE_PRIORITY_NORMAL", "merge_android_packageable_info")
 load(":android_toolchain.bzl", "AndroidToolchainInfo")
-load(":r_dot_java.bzl", "get_dummy_r_dot_java")
 
 JAVA_PACKAGE_FILENAME = "java_package.txt"
 
@@ -78,21 +77,6 @@ def android_resource_impl(ctx: AnalysisContext) -> list[Provider]:
     providers.append(resource_info)
     providers.append(merge_android_packageable_info(ctx.label, ctx.actions, ctx.attrs.deps, manifest = ctx.attrs.manifest, resource_info = resource_info))
     providers.append(get_java_packaging_info(ctx, ctx.attrs.deps))
-
-    # Generate R.jar for autodeps support if we have resources
-    if res and resource_info.text_symbols:
-        android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo]
-        dummy_r_dot_java_info = get_dummy_r_dot_java(
-            ctx,
-            android_toolchain.merge_android_resources[RunInfo],
-            [resource_info],
-            None,
-        )
-        android_resource_r_dot_info = AndroidResourceRDotInfo(
-            dummy_r_dot_java = dummy_r_dot_java_info.library_output.abi,
-        )
-        providers.append(android_resource_r_dot_info)
-
     providers.append(DefaultInfo(default_output = default_output, sub_targets = sub_targets))
     compiling_deps = derive_compiling_deps_wrapper(ctx.actions, None, ctx.attrs.deps)
     providers.append(get_global_code_info(ctx, ctx.attrs.deps, ctx.attrs.deps, None, compiling_deps, [compiling_deps] if compiling_deps else [], ctx.attrs._java_toolchain[JavaToolchainInfo].global_code_config))
@@ -117,7 +101,7 @@ def aapt2_compile(
     )
     aapt2_command.extend(["-o", aapt2_output.as_output()])
 
-    ctx.actions.run(cmd_args(aapt2_command), category = "aapt2_compile", identifier = identifier, allow_cache_upload = True)
+    ctx.actions.run(cmd_args(aapt2_command), category = "aapt2_compile", identifier = identifier)
 
     return aapt2_output
 

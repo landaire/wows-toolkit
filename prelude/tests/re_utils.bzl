@@ -58,15 +58,9 @@ def maybe_add_run_as_bundle_label(ctx: AnalysisContext, labels: list[str]) -> No
     if re_arg.default_run_as_bundle or read_config("tpx", "force_run_as_bundle") == "True":
         labels.extend(["run_as_bundle"])
 
-def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [dict, None] = None) -> ([CommandExecutorConfig, None], dict[str, CommandExecutorConfig]):
+def get_re_executors_from_props(ctx: AnalysisContext) -> ([CommandExecutorConfig, None], dict[str, CommandExecutorConfig]):
     """
     Convert the `remote_execution` properties param into `CommandExecutorConfig` objects to use with test providers.
-
-    Args:
-        ctx: The analysis context.
-        dynamic_image_override: If provided, overrides the `remote_execution_dynamic_image`
-            from `remote_execution` props. Use this to inject a resolved snapshotted fbpkg
-            image (with pinned uuid) at analysis time.
 
     Returns (default_executor, executor_overrides).
     """
@@ -87,24 +81,14 @@ def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [d
     listing_capabilities = re_props_copy.pop("listing_capabilities", None)
     remote_cache_enabled = re_props_copy.pop("remote_cache_enabled", None)
     re_dependencies = re_props_copy.pop("dependencies", [])
-    re_gang_workers = re_props_copy.pop("gang_workers", [])
-    re_gang = re_props_copy.pop("gang", None)
     local_enabled = re_props_copy.pop("local_enabled", False)
-    local_listing_enabled = re_props_copy.pop("local_listing_enabled", None)
+    local_listing_enabled = re_props_copy.pop("local_listing_enabled", False)
     re_resource_units = re_props_copy.pop("resource_units", None)
     re_listing_resource_units = re_props_copy.pop("listing_resource_units", re_resource_units)
     re_dynamic_image = re_props_copy.pop("remote_execution_dynamic_image", None)
-    if dynamic_image_override != None:
-        re_dynamic_image = dynamic_image_override
     if re_props_copy:
         unexpected_props = ", ".join(re_props_copy.keys())
         fail("found unexpected re props: " + unexpected_props)
-
-    meta_internal_extra_params = None
-    if re_gang != None:
-        meta_internal_extra_params = {
-            "remote_execution_gang": re_gang,
-        }
 
     default_executor = CommandExecutorConfig(
         local_enabled = local_enabled,
@@ -113,22 +97,19 @@ def get_re_executors_from_props(ctx: AnalysisContext, dynamic_image_override: [d
         remote_execution_use_case = use_case or "tpx-default",
         remote_cache_enabled = remote_cache_enabled,
         remote_execution_dependencies = re_dependencies,
-        remote_execution_gang_workers = re_gang_workers,
         remote_execution_resource_units = re_resource_units,
         remote_execution_dynamic_image = re_dynamic_image,
-        meta_internal_extra_params = meta_internal_extra_params,
     )
 
     listing_executor = default_executor
-    if listing_capabilities != None or local_listing_enabled != None:
+    if listing_capabilities:
         listing_executor = CommandExecutorConfig(
-            local_enabled = local_listing_enabled if local_listing_enabled != None else local_enabled,
+            local_enabled = local_listing_enabled or False,
             remote_enabled = True,
-            remote_execution_properties = listing_capabilities if listing_capabilities != None else capabilities,
+            remote_execution_properties = listing_capabilities,
             remote_execution_use_case = use_case or "tpx-default",
             remote_cache_enabled = remote_cache_enabled,
             remote_execution_resource_units = re_listing_resource_units,
             remote_execution_dynamic_image = re_dynamic_image,
-            meta_internal_extra_params = meta_internal_extra_params,
         )
     return default_executor, {"listing": listing_executor}

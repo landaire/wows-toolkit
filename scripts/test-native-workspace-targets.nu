@@ -22,19 +22,19 @@ def main [] {
         let dep_query = (["deps(" $target ", 1)"] | str join)
         let deps = (do { ^buck2 uquery $dep_query } | complete)
         if $deps.exit_code != 0 {
-            error make $"Buck query failed for ($target): ($deps.stderr)"
+            error make {msg: $"Buck query failed for ($target): ($deps.stderr)"}
         }
         if ($deps.stdout | str contains "//:cargo_binaries") {
-            error make $"($target) depends on the legacy cargo_binaries target."
+            error make {msg: $"($target) depends on the legacy cargo_binaries target."}
         }
 
         let owner_query = (["kind('rust_binary', deps(" $target "))"] | str join)
         let owners = (do { ^buck2 cquery $owner_query } | complete)
         if $owners.exit_code != 0 {
-            error make $"Buck configured query failed for ($target): ($owners.stderr)"
+            error make {msg: $"Buck configured query failed for ($target): ($owners.stderr)"}
         }
         if ($owners.stdout | str trim | is-empty) {
-            error make $"($target) has no native rust_binary owner."
+            error make {msg: $"($target) has no native rust_binary owner."}
         }
 
         ^buck2 build $target

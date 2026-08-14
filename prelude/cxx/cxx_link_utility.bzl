@@ -51,12 +51,6 @@ def generates_split_debug(toolchain: CxxToolchainInfo):
 
     return True
 
-def linker_supports_linker_maps(linker_type: LinkerType) -> bool:
-    """
-    Returns whether the given linker type supports generating linker maps.
-    """
-    return linker_type in [LinkerType("darwin"), LinkerType("gnu")]
-
 def linker_map_args(toolchain: CxxToolchainInfo, linker_map) -> LinkArgs:
     linker_type = toolchain.linker_info.type
     if linker_type == LinkerType("darwin"):
@@ -74,20 +68,7 @@ def linker_map_args(toolchain: CxxToolchainInfo, linker_map) -> LinkArgs:
             linker_map,
         ]
     else:
-        fail("Linker type {} not supported for linker maps".format(linker_type))
-    return LinkArgs(flags = flags)
-
-def gc_sections_args(toolchain: CxxToolchainInfo, gc_sections_output) -> LinkArgs:
-    """Generate linker args for gc-sections output file."""
-    linker_type = toolchain.linker_info.type
-    if linker_type == LinkerType("gnu"):
-        # The linker wrapper (ld.py) handles --write-gc-sections-output flag
-        flags = [
-            "--write-gc-sections-output",
-            gc_sections_output,
-        ]
-    else:
-        fail("gc-sections output is only supported for GNU linker, got: {}".format(linker_type))
+        fail("Linker type {} not supported".format(linker_type))
     return LinkArgs(flags = flags)
 
 LinkArgsOutput = record(
@@ -106,8 +87,7 @@ def make_link_args(
         cxx_toolchain_info: CxxToolchainInfo,
         links: list[LinkArgs],
         output_short_path: [str, None] = None,
-        link_ordering: [LinkOrdering, None] = None,
-        has_content_based_path: bool = False) -> LinkArgsOutput:
+        link_ordering: [LinkOrdering, None] = None) -> LinkArgsOutput:
     """
     Merges LinkArgs. Returns the args, files that must be present for those
     args to work when passed to a linker, and optionally an artifact where DWO
@@ -127,7 +107,7 @@ def make_link_args(
     pdb_artifact = None
     if linker_info.is_pdb_generated and output_short_path != None:
         pdb_filename = paths.replace_extension(output_short_path, ".pdb")
-        pdb_artifact = actions.declare_output(pdb_filename, has_content_based_path = has_content_based_path)
+        pdb_artifact = actions.declare_output(pdb_filename)
         hidden.append(pdb_artifact.as_output())
 
     if linker_type == LinkerType("darwin"):
@@ -219,76 +199,36 @@ def executable_shared_lib_arguments(
         cxx_toolchain: CxxToolchainInfo,
         output: Artifact,
         shared_libs: list[SharedLibrary]) -> ExecutableSharedLibArguments:
-    def create_external_debug_info() -> list[TransitiveSetArgsProjection]:
-        return project_artifacts(
-            actions = ctx.actions,
-            tsets = [shlib.lib.external_debug_info for shlib in shared_libs],
-        )
-
-    def create_shared_libs_symlink_tree_windows() -> list[Artifact]:
-        return [ctx.actions.symlink_file(
-            shlib.lib.output.basename,
-            shlib.lib.output,
-            has_content_based_path = False,
-        ) for shlib in shared_libs]
-
-    def create_shared_libs_symlink_trees(shared_libs_symlink_tree_name_arg: str, dwp_symlink_tree_name_arg: str) -> (Artifact, Artifact) | None:
-        if not shared_libs:
-            return None
-
-        shared_libs_symlink_tree = create_shlib_symlink_tree(
-            actions = ctx.actions,
-            out = shared_libs_symlink_tree_name_arg,
-            shared_libs = shared_libs,
-        )
-        dwp_symlink_tree = create_shlib_dwp_tree(ctx.actions, dwp_symlink_tree_name_arg, shared_libs)
-        return (shared_libs_symlink_tree, dwp_symlink_tree)
-
-    return executable_shared_lib_arguments_template(
-        cxx_toolchain,
-        output,
-        create_external_debug_info,
-        create_shared_libs_symlink_trees,
-        create_shared_libs_symlink_tree_windows,
-    )
-
-def executable_shared_lib_arguments_template(
-        cxx_toolchain: CxxToolchainInfo,
-        output: Artifact,
-        create_external_debug_info: typing.Callable[[], list[TransitiveSetArgsProjection]],
-        create_shared_libs_symlink_trees: typing.Callable[[str, str], (Artifact, Artifact) | None],
-        create_shared_libs_symlink_tree_windows: typing.Callable[[], list[Artifact]]) -> ExecutableSharedLibArguments:
-    """A generic/templated version of `executable_shared_lib_arguments` that takes in `Callable`s for constructing
-    the shared libs symlink tree and external debug info.
-
-    The shared libs symlink tree is constructed differently depending on if the SharedLibraries are stored in a `record`
-    or in a `TransitiveSet`.
-    """
-
     extra_link_args = []
     runtime_files = []
     shared_libs_symlink_tree = None
 
     # External debug info is materialized only when the executable is the output
     # of a build. Do not add to runtime_files.
-    external_debug_info = create_external_debug_info()
+    external_debug_info = project_artifacts(
+        actions = ctx.actions,
+        tsets = [shlib.lib.external_debug_info for shlib in shared_libs],
+    )
 
     linker_type = cxx_toolchain.linker_info.type
 
     dwp_symlink_tree = None
-    if linker_type == LinkerType("windows"):
-        shared_libs_symlink_tree = create_shared_libs_symlink_tree_windows()
-        runtime_files.extend(shared_libs_symlink_tree)
-        # Windows doesn't support rpath.
+    if len(shared_libs) > 0:
+        if linker_type == LinkerType("windows"):
+            shared_libs_symlink_tree = [ctx.actions.symlink_file(
+                shlib.lib.output.basename,
+                shlib.lib.output,
+            ) for shlib in shared_libs]
+            runtime_files.extend(shared_libs_symlink_tree)
+            # Windows doesn't support rpath.
 
-    else:
-        symlink_trees = create_shared_libs_symlink_trees(
-            shared_libs_symlink_tree_name(output),
-            _dwp_symlink_tree_name(output),
-        )
-
-        if symlink_trees:
-            shared_libs_symlink_tree, dwp_symlink_tree = symlink_trees
+        else:
+            shared_libs_symlink_tree = create_shlib_symlink_tree(
+                actions = ctx.actions,
+                out = shared_libs_symlink_tree_name(output),
+                shared_libs = shared_libs,
+            )
+            dwp_symlink_tree = create_shlib_dwp_tree(ctx.actions, _dwp_symlink_tree_name(output), shared_libs)
             runtime_files.append(shared_libs_symlink_tree)
             rpath_reference = get_rpath_origin(linker_type)
 

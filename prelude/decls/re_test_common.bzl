@@ -19,8 +19,6 @@ def _opts_for_tests_arg() -> Attr:
     #     "use_case": str | None
     #     "remote_cache_enabled": bool | None
     #     "dependencies": list<Dict<str, str>> | []
-    #     "gang_workers": list<Dict<str, str>> | []
-    #     "gang": Dict<str, str | int | Dict<str, str>> | None
     #     "resource_units": int | None
     #     "remote_execution_dynamic_image": dict<str, str | list<str>> | None
     # }
@@ -33,8 +31,6 @@ def _opts_for_tests_arg() -> Attr:
                     value = attrs.one_of(
                         attrs.string(),
                         attrs.list(attrs.string()),
-                        attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False),
-                        attrs.int(),
                     ),
                     sorted = False,
                 ),

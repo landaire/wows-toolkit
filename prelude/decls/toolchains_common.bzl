@@ -23,39 +23,25 @@ load(
     "@prelude//kotlin:kotlin_toolchain.bzl",
     "KotlinToolchainInfo",
 )
-load("@prelude//python:python_wheel_toolchain.bzl", "PythonWheelToolchainInfo")
 load("@prelude//python:toolchain.bzl", "PythonPlatformInfo", "PythonToolchainInfo")
-load("@prelude//python/cython:cython_toolchain.bzl", "CythonToolchainInfo")
 load("@prelude//python_bootstrap:python_bootstrap.bzl", "PythonBootstrapToolchainInfo")
 load("@prelude//rust:rust_toolchain.bzl", "RustToolchainInfo")
 load("@prelude//tests:remote_test_execution_toolchain.bzl", "RemoteTestExecutionToolchainInfo")
-load("@prelude//tests:test_listing.bzl", "TestListingInfo")
 load("@prelude//tests:test_toolchain.bzl", "TestToolchainInfo")
 load("@prelude//zip_file:zip_file_toolchain.bzl", "ZipFileToolchainInfo")
 
-def _toolchain(lang: str, providers: list[typing.Any], *, default: typing.Any = None) -> Attr:
-    return attrs.toolchain_dep(default = default or ("toolchains//:" + lang), providers = providers)
+def _toolchain(lang: str, providers: list[typing.Any]) -> Attr:
+    return attrs.toolchain_dep(default = "toolchains//:" + lang, providers = providers)
 
 def _android_toolchain():
-    return _toolchain("android", [AndroidToolchainInfo, AndroidPlatformInfo, TestListingInfo])
+    return _toolchain("android", [AndroidToolchainInfo, AndroidPlatformInfo])
 
 def _csharp_toolchain():
     return _toolchain("csharp", [CSharpToolchainInfo])
 
-def _cython_toolchain():
-    return _toolchain("cython", [CythonToolchainInfo])
-
 def _cxx_toolchain():
     # `CxxToolchainInfo, CxxPlatformInfo`, but python doesn't require it
-    lang = "cxx"
-
-    # Portions of the macro layers use the `default_deps` attribute to set this
-    # to the `:cxx_no_default_deps` option. If a targets has within_view checks
-    # that don't list `toolchains//:` they will experience an error. We can avoid
-    # this by ensuring the `within_deps` checks inside buck see either of the
-    # toolchains below as a possible default value, even though one of them is
-    # never able to be selected in this expression.
-    return _toolchain(lang, [], default = select({"DEFAULT": "toolchains//:" + lang, "config//:none": "toolchains//:cxx_no_default_deps"}))
+    return _toolchain("cxx", [])
 
 def _dex_toolchain():
     return _toolchain("dex", [DexToolchainInfo])
@@ -82,7 +68,7 @@ def _java_for_host_test_toolchain():
     return _toolchain("java_for_host_test", [JavaToolchainInfo, JavaPlatformInfo])
 
 def _java_test_toolchain():
-    return _toolchain("java_test", [JavaTestToolchainInfo, TestListingInfo])
+    return _toolchain("java_test", [JavaTestToolchainInfo])
 
 def _kotlin_toolchain():
     return _toolchain("kotlin", [KotlinToolchainInfo])
@@ -100,9 +86,6 @@ def _python_toolchain():
 def _python_bootstrap_toolchain():
     return _toolchain("python_bootstrap", [PythonBootstrapToolchainInfo])
 
-def _python_wheel_toolchain():
-    return _toolchain("python_wheel", [PythonWheelToolchainInfo])
-
 def _rust_toolchain():
     return _toolchain("rust", [RustToolchainInfo])
 
@@ -119,7 +102,6 @@ toolchains_common = struct(
     android = _android_toolchain,
     csharp = _csharp_toolchain,
     cxx = _cxx_toolchain,
-    cython = _cython_toolchain,
     dex = _dex_toolchain,
     go = _go_toolchain,
     go_bootstrap = _go_bootstrap_toolchain,
@@ -134,7 +116,6 @@ toolchains_common = struct(
     prebuilt_jar = _prebuilt_jar_toolchain,
     python = _python_toolchain,
     python_bootstrap = _python_bootstrap_toolchain,
-    python_wheel = _python_wheel_toolchain,
     test_toolchain = _test_toolchain,
     rust = _rust_toolchain,
     zip_file = _zip_file_toolchain,

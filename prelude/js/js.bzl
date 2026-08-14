@@ -17,9 +17,7 @@ def _select_platform():
     return select({
         "DEFAULT": select({
             "DEFAULT": "android",
-            "config//os/constraints:appletvos": "ios",
             "config//os/constraints:iphoneos": "ios",
-            "config//os/constraints:macos": "macos",
             "config//os/constraints:windows": "windows",
         }),
         "config//react-native:macos": "macos",
@@ -70,10 +68,6 @@ extra_attributes = {
         ),
     },
     "js_bundle_genrule": genrule_attributes() | {
-        "has_content_based_path": attrs.bool(default = select({
-            "DEFAULT": False,
-            "config//features/apple:content_based_path_hashing_enabled": True,
-        })),
         "type": attrs.string(
             default = "js_bundle_genrule",
         ),

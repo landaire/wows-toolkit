@@ -3,6 +3,7 @@ param(
     [string]$OfflineRoot,
     [string]$InstallRoot = (Join-Path $PSScriptRoot "offline/installed"),
     [string]$ManifestPath = (Join-Path $PSScriptRoot "toolchain-manifest.json"),
+    [string]$BuckConfigPath = "",
     [switch]$ArchivesOnly
 )
 
@@ -80,6 +81,42 @@ foreach ($name in @("include", "lib", "ucrt_lib", "um_lib")) {
     if (-not (Test-Path -LiteralPath $path -PathType Container)) {
         Fail "Missing Windows SDK $name directory: $path"
     }
+}
+
+if ($BuckConfigPath) {
+    # Buck reads these instead of resolving any tool through PATH. This is the
+    # Windows counterpart of scripts/refresh-buck-toolchain.nu.
+    $installed = (Resolve-Path -LiteralPath $InstallRoot).Path
+    $tool = { param($name) Join-Path $installed $manifest.tools[$name].path }
+
+    # Derive the MSVC root from cl.exe rather than pinning the version twice:
+    # <msvc>/bin/Hostx64/x64/cl.exe
+    $msvcRoot = Split-Path (Split-Path (Split-Path (Split-Path (& $tool "cl") -Parent) -Parent) -Parent) -Parent
+    $sdkInclude = Join-Path $installed $manifest.sdk.include
+
+    $include = @(
+        (Join-Path $msvcRoot "include")
+        (Join-Path $sdkInclude "ucrt")
+        (Join-Path $sdkInclude "um")
+        (Join-Path $sdkInclude "shared")
+    ) -join ";"
+    $lib = @(
+        (Join-Path $msvcRoot "lib\x64")
+        (Join-Path $installed $manifest.sdk.ucrt_lib)
+        (Join-Path $installed $manifest.sdk.um_lib)
+    ) -join ";"
+
+    @(
+        "[hermetic_tools]"
+        "ar = $(& $tool "lib")"
+        "cc = $(& $tool "cl")"
+        "cxx = $(& $tool "cl")"
+        "nasm = $(& $tool "nasm")"
+        "include = $include"
+        "lib = $lib"
+        ""
+    ) -join "`n" | Set-Content -LiteralPath $BuckConfigPath -Encoding utf8
+    Write-Host "Wrote $BuckConfigPath."
 }
 
 Write-Host "Verified offline Windows toolchain at $InstallRoot."

@@ -21,7 +21,7 @@ This script:
 A full usage might be something like this:
 
 $ cat template.in
-(see prelude/python/run_inplace.py.in)
+(see prelude/python/run_inplace_lite.py.in)
 $ ./make_py_package_inplace.py  \\
     --template prelude/python/run_inplace.py.in \\
     # These two args create the hashbang for the bootstrapper script \\
@@ -58,6 +58,13 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="The template file for the .pex bootstrapper script",
     )
+    parser.add_argument(
+        "--template-lite",
+        required=True,
+        type=Path,
+        help="The template file for the .pex bootstrapper script, if it's simple",
+    )
+
     parser.add_argument(
         "--preload",
         type=Path,
@@ -108,6 +115,11 @@ def parse_args() -> argparse.Namespace:
         help="The link tree directory to use at runtime",
     )
     parser.add_argument(
+        "--use-lite",
+        help="Whether to use the lite template",
+        action="store_true",
+    )
+    parser.add_argument(
         "output",
         type=Path,
         help="Where to write the bootstrapper script to",
@@ -133,12 +145,6 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="environment variables to set before launching the runtime. (e.g. -e FOO=BAR BAZ=QUX)",
     )
-    parser.add_argument(
-        "--interpreter_flags",
-        action="append",
-        default=[],
-        help="additional flags to pass to the Python interpreter (e.g. -Xgil=0)",
-    )
     # Compatibility with existing make_par scripts
     parser.add_argument("--passthrough", action="append", default=[])
     # No-op, added for compatibility with existing make_par scripts
@@ -152,7 +158,12 @@ def parse_args() -> argparse.Namespace:
 def write_bootstrapper(args: argparse.Namespace) -> None:
     """Write the .pex bootstrapper script using a template"""
 
-    with open(args.template, "r", encoding="utf8") as fin:
+    template = (
+        args.template_lite
+        if (args.use_lite and not args.runtime_env)
+        else args.template
+    )
+    with open(template, "r", encoding="utf8") as fin:
         data = fin.read()
 
     # Because this can be invoked from other directories, find the relative path
@@ -179,14 +190,7 @@ def write_bootstrapper(args: argparse.Namespace) -> None:
         python = os.path.abspath(python)
 
     new_data = data.replace("<PYTHON>", f"/usr/bin/env {python}")
-    # Keep the shebang placeholder empty — Linux doesn't support multiple args
-    # after /usr/bin/env, so interpreter flags can't go in the shebang line.
     new_data = new_data.replace("<PYTHON_INTERPRETER_FLAGS>", "")
-    # Instead, pass interpreter flags via the Python variable that the re-exec
-    # path uses (e.g. -Xgil=0 for free-threaded builds).
-    new_data = new_data.replace(
-        "<PYTHON_RUNTIME_FLAGS>", " ".join(args.interpreter_flags or [])
-    )
 
     new_data = new_data.replace("<MODULES_DIR>", str(relative_modules_dir))
     main_module = args.entry_point

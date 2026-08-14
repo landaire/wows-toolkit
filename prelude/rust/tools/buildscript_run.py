@@ -23,20 +23,6 @@ IS_WINDOWS: bool = os.name == "nt"
 TOOL_CWD: str = os.path.join(os.getcwd(), "")
 
 
-def buildscript_environment(
-    action_environment: dict[str, str],
-    allowed_names: set[str],
-    safe_path: str,
-) -> dict[str, str]:
-    environment = {
-        name: action_environment[name]
-        for name in allowed_names
-        if name in action_environment
-    }
-    environment["PATH"] = safe_path
-    return environment
-
-
 def eprint(*args: Any, **kwargs: Any) -> None:
     print(*args, end="\n", file=sys.stderr, flush=True, **kwargs)
 
@@ -116,9 +102,7 @@ def create_cwd(path: Path, manifest_dir: Path) -> Path:
         if dir_entry.name not in ["rust-toolchain", "rust-toolchain.toml"]:
             link = path.joinpath(dir_entry.name)
             link.unlink(missing_ok=True)
-            link.symlink_to(
-                os.path.relpath(dir_entry, path), target_is_directory=dir_entry.is_dir()
-            )
+            link.symlink_to(os.path.relpath(dir_entry, path))
 
     return path
 
@@ -153,7 +137,6 @@ def ensure_rustc_available(
         subprocess.check_output(  # noqa: P204
             [rustc, "--version"],
             cwd=cwd,
-            env=env,
             shell=IS_WINDOWS,
         )
         # A multiplexed sysroot may involve another fetch,
@@ -162,7 +145,6 @@ def ensure_rustc_available(
             subprocess.check_output(  # noqa: P204
                 [rustc, f"--target={target}", "--version"],
                 cwd=cwd,
-                env=env,
                 shell=IS_WINDOWS,
             )
     except OSError as ex:
@@ -204,8 +186,6 @@ class Args(NamedTuple):
     outfile: IO[str]
     rustc_link_lib: bool
     rustc_link_search: bool
-    allowed_env: list[str]
-    safe_path: str
 
 
 def arg_parse() -> Args:
@@ -218,8 +198,6 @@ def arg_parse() -> Args:
     parser.add_argument("--outfile", type=argparse.FileType("w"), required=True)
     parser.add_argument("--rustc-link-lib", action="store_true")
     parser.add_argument("--rustc-link-search", action="store_true")
-    parser.add_argument("--allowed-env", action="append", default=[])
-    parser.add_argument("--safe-path", required=True)
 
     return Args(**vars(parser.parse_args()))
 
@@ -228,15 +206,8 @@ def main() -> None:  # noqa: C901
     args = arg_parse()
 
     env = cfg_env(args.rustc_cfg)
-    env.update(
-        buildscript_environment(
-            dict(os.environ),
-            set(args.allowed_env),
-            args.safe_path,
-        )
-    )
 
-    out_dir = env.get("OUT_DIR")
+    out_dir = os.getenv("OUT_DIR")
     assert out_dir is not None, "OUT_DIR env is missing"
     os.makedirs(out_dir, exist_ok=True)
     env["OUT_DIR"] = os.path.abspath(out_dir)
@@ -244,21 +215,14 @@ def main() -> None:  # noqa: C901
     cwd = create_cwd(args.create_cwd, args.manifest_dir)
     env["CARGO_MANIFEST_DIR"] = os.path.abspath(cwd)
 
+    env = dict(os.environ, **env)
+
     target = env.get("TARGET")
     if target is None:
         assert args.rustc_host_tuple, "TARGET env is missing"
         with args.rustc_host_tuple.open(encoding="utf-8") as f:
             target = f.read().strip()
             env["TARGET"] = target
-
-    if os.sep in env.get("LD", ""):
-        env["LD"] = os.path.abspath(env["LD"])
-    if os.sep in env.get("CC", ""):
-        env["CC"] = os.path.abspath(env["CC"])
-    if os.sep in env.get("CXX", ""):
-        env["CXX"] = os.path.abspath(env["CXX"])
-    if os.sep in env.get("AR", ""):
-        env["AR"] = os.path.abspath(env["AR"])
 
     ensure_rustc_available(
         env=env,

@@ -20,7 +20,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import traceback
 from typing import List, Tuple
 
 
@@ -43,7 +42,7 @@ def _gen_filename(filename: str, num_of_instance: int) -> str:
     # for 2nd instance, it's file_1.o
     if num_of_instance > 1:
         basename, extension = os.path.splitext(filename)
-        return f"{basename}_{num_of_instance - 1}{extension}"
+        return f"{basename}_{num_of_instance-1}{extension}"
     else:
         return filename
 
@@ -164,9 +163,4 @@ def main(argv: List[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv))
-    except subprocess.CalledProcessError as e:
-        traceback.print_exc()
-        sys.exit(e.returncode)
+sys.exit(main(sys.argv))

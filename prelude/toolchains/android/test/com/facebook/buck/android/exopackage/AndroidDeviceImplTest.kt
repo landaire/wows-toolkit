@@ -10,20 +10,14 @@
 
 package com.facebook.buck.android.exopackage
 
-import com.facebook.buck.installer.android.AndroidInstallException
 import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Before
+import org.junit.Ignore
 import org.junit.Test
-import org.mockito.kotlin.any
 import org.mockito.kotlin.argThat
-import org.mockito.kotlin.doAnswer
-import org.mockito.kotlin.doReturn
-import org.mockito.kotlin.eq
-import org.mockito.kotlin.inOrder
 import org.mockito.kotlin.mock
 import org.mockito.kotlin.never
 import org.mockito.kotlin.verify
@@ -71,6 +65,45 @@ class AndroidDeviceImplTest {
     assertTrue(result)
   }
 
+  @Ignore
+  @Test
+  fun testInstallApkOnDeviceWithFastdeploy() {
+    val apkFile = mock<File>()
+    whenever(apkFile.absolutePath).thenReturn("/path/to/test.apk")
+    whenever(apkFile.name).thenReturn("test.apk")
+    whenever(apkFile.length()).thenReturn(1024L)
+    whenever(mockAdbUtils.executeAdbShellCommand("getprop ro.build.version.sdk", serialNumber))
+        .thenReturn("29")
+
+    // Test with SDK >= 29 (with fastdeploy)
+    val result = androidDevice.installApkOnDevice(apkFile, false, false, false, false)
+
+    verify(mockAdbUtils)
+        .executeAdbCommand("install -r -d --fastdeploy ${apkFile.absolutePath}", serialNumber)
+    assertTrue(result)
+  }
+
+  @Ignore
+  @Test
+  fun testInstallApkOnDeviceWithFastdeployAndStaged() {
+    val apkFile = mock<File>()
+    whenever(apkFile.absolutePath).thenReturn("/path/to/test.apk")
+    whenever(apkFile.name).thenReturn("test.apk")
+    whenever(apkFile.length()).thenReturn(1024L)
+    whenever(mockAdbUtils.executeAdbShellCommand("getprop ro.build.version.sdk", serialNumber))
+        .thenReturn("30")
+
+    // Test with SDK >= 29 and staged install mode
+    val result = androidDevice.installApkOnDevice(apkFile, false, false, false, true)
+
+    verify(mockAdbUtils)
+        .executeAdbCommand(
+            "install -r -d --fastdeploy --staged ${apkFile.absolutePath}",
+            serialNumber,
+        )
+    assertTrue(result)
+  }
+
   @Test
   fun testInstallApkOnDeviceWithInvalidSdkVersion() {
     val apkFile = mock<File>()
@@ -100,15 +133,6 @@ class AndroidDeviceImplTest {
     // Mock package manager ready check
     whenever(mockAdbUtils.executeAdbShellCommand("pm", serialNumber, true))
         .thenReturn("Package manager is ready")
-    // Mock storage ready check
-    whenever(
-            mockAdbUtils.executeAdbShellCommand(
-                "ls /storage/emulated/0 2>&1 || echo STORAGE_NOT_READY",
-                serialNumber,
-                true,
-            )
-        )
-        .thenReturn("Android\nDownload\nPictures")
 
     val result = androidDevice.installApexOnDevice(apexFile, false, true, true)
 
@@ -121,12 +145,6 @@ class AndroidDeviceImplTest {
     verify(mockAdbUtils).executeAdbShellCommand("start", serialNumber)
     verify(mockAdbUtils).executeAdbShellCommand("getprop sys.boot_completed", serialNumber, true)
     verify(mockAdbUtils).executeAdbShellCommand("pm", serialNumber, true)
-    verify(mockAdbUtils)
-        .executeAdbShellCommand(
-            "ls /storage/emulated/0 2>&1 || echo STORAGE_NOT_READY",
-            serialNumber,
-            true,
-        )
     assertTrue(result)
   }
 
@@ -248,178 +266,5 @@ class AndroidDeviceImplTest {
     val result = androidDevice.getDiskSpace()
 
     assertEquals(listOf("64G", "32G", "32G"), result)
-  }
-
-  @Test
-  fun testInstallApexFallbackOnPackageChanged() {
-    val apexFile = mock<File>()
-    whenever(apexFile.absolutePath).thenReturn("/path/to/test.apex")
-    whenever(apexFile.name).thenReturn("test.apex")
-    whenever(apexFile.length()).thenReturn(1024L)
-
-    // First install attempt fails with INSTALL_FAILED_PACKAGE_CHANGED
-    doAnswer { throw AdbCommandFailedException("INSTALL_FAILED_PACKAGE_CHANGED") }
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(
-            eq("install --apex --force-non-staged /path/to/test.apex"),
-            eq(serialNumber),
-            any(),
-        )
-
-    // Stub adb commands used in the fallback path
-    doReturn("").whenever(mockAdbUtils).executeAdbCommand(eq("root"), eq(serialNumber), any())
-    doReturn("")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    doReturn("remount succeeded")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("remount"), eq(serialNumber), any())
-    doReturn("")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("push /path/to/test.apex /system_ext/apex/"), eq(serialNumber), any())
-    doReturn("").whenever(mockAdbUtils).executeAdbCommand(eq("reboot"), eq(serialNumber), any())
-
-    // Verity is not enabled — no intermediate reboot needed
-    whenever(mockAdbUtils.executeAdbShellCommand("getprop ro.boot.veritymode", serialNumber))
-        .thenReturn("disabled")
-
-    // Mock boot completion check for final reboot
-    whenever(mockAdbUtils.executeAdbShellCommand("getprop sys.boot_completed", serialNumber, true))
-        .thenReturn("1")
-
-    val result = androidDevice.installApexOnDevice(apexFile, false, false, true)
-    assertTrue(result)
-
-    val inOrder = inOrder(mockAdbUtils)
-    // Original install attempt
-    inOrder
-        .verify(mockAdbUtils)
-        .executeAdbCommand(
-            eq("install --apex --force-non-staged /path/to/test.apex"),
-            eq(serialNumber),
-            any(),
-        )
-    // Step 1: root, wait-for-device, remount
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("root"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("remount"), eq(serialNumber), any())
-    // Step 5: push apex
-    inOrder
-        .verify(mockAdbUtils)
-        .executeAdbCommand(eq("push /path/to/test.apex /system_ext/apex/"), eq(serialNumber), any())
-    // Step 6: reboot
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("reboot"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-  }
-
-  @Test
-  fun testInstallApexFallbackOnPackageChangedWithVerityReboot() {
-    val apexFile = mock<File>()
-    whenever(apexFile.absolutePath).thenReturn("/path/to/test.apex")
-    whenever(apexFile.name).thenReturn("test.apex")
-    whenever(apexFile.length()).thenReturn(1024L)
-
-    // First install attempt fails with INSTALL_FAILED_PACKAGE_CHANGED
-    doAnswer { throw AdbCommandFailedException("INSTALL_FAILED_PACKAGE_CHANGED") }
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(
-            eq("install --apex --force-non-staged /path/to/test.apex"),
-            eq(serialNumber),
-            any(),
-        )
-
-    // Stub adb commands used in the fallback path
-    doReturn("").whenever(mockAdbUtils).executeAdbCommand(eq("root"), eq(serialNumber), any())
-    doReturn("")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    doReturn("remount succeeded")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("remount"), eq(serialNumber), any())
-    doReturn("")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("push /path/to/test.apex /system_ext/apex/"), eq(serialNumber), any())
-    doReturn("").whenever(mockAdbUtils).executeAdbCommand(eq("reboot"), eq(serialNumber), any())
-
-    // Verity is enabled — triggers intermediate reboot
-    whenever(mockAdbUtils.executeAdbShellCommand("getprop ro.boot.veritymode", serialNumber))
-        .thenReturn("enforcing")
-
-    // Mock boot completion check
-    whenever(mockAdbUtils.executeAdbShellCommand("getprop sys.boot_completed", serialNumber, true))
-        .thenReturn("1")
-
-    val result = androidDevice.installApexOnDevice(apexFile, false, false, true)
-    assertTrue(result)
-
-    val inOrder = inOrder(mockAdbUtils)
-    // Original install attempt
-    inOrder
-        .verify(mockAdbUtils)
-        .executeAdbCommand(
-            eq("install --apex --force-non-staged /path/to/test.apex"),
-            eq(serialNumber),
-            any(),
-        )
-    // Step 1: root, wait-for-device, remount
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("root"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("remount"), eq(serialNumber), any())
-    // Steps 2-3: verity reboot cycle
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("reboot"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    // Step 4: root, wait-for-device, remount again after reboot
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("root"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("remount"), eq(serialNumber), any())
-    // Step 5: push apex
-    inOrder
-        .verify(mockAdbUtils)
-        .executeAdbCommand(eq("push /path/to/test.apex /system_ext/apex/"), eq(serialNumber), any())
-    // Step 6: final reboot
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("reboot"), eq(serialNumber), any())
-    inOrder.verify(mockAdbUtils).executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-  }
-
-  @Test
-  fun testInstallApexFallbackOnPackageChangedPushFails() {
-    val apexFile = mock<File>()
-    whenever(apexFile.absolutePath).thenReturn("/path/to/test.apex")
-    whenever(apexFile.name).thenReturn("test.apex")
-    whenever(apexFile.length()).thenReturn(1024L)
-
-    // First install attempt fails with INSTALL_FAILED_PACKAGE_CHANGED
-    doAnswer { throw AdbCommandFailedException("INSTALL_FAILED_PACKAGE_CHANGED") }
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(
-            eq("install --apex --force-non-staged /path/to/test.apex"),
-            eq(serialNumber),
-            any(),
-        )
-
-    // Stub adb commands
-    doReturn("").whenever(mockAdbUtils).executeAdbCommand(eq("root"), eq(serialNumber), any())
-    doReturn("")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("wait-for-device"), eq(serialNumber), any())
-    doReturn("remount succeeded")
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("remount"), eq(serialNumber), any())
-
-    // Verity not enabled
-    whenever(mockAdbUtils.executeAdbShellCommand("getprop ro.boot.veritymode", serialNumber))
-        .thenReturn("disabled")
-
-    // Push fails
-    doAnswer { throw AdbCommandFailedException("push failed: no space left on device") }
-        .whenever(mockAdbUtils)
-        .executeAdbCommand(eq("push /path/to/test.apex /system_ext/apex/"), eq(serialNumber), any())
-
-    try {
-      androidDevice.installApexOnDevice(apexFile, false, false, true)
-      fail("Expected AndroidInstallException")
-    } catch (e: AndroidInstallException) {
-      assertTrue(e.message!!.contains("fallback remount+push"))
-    }
   }
 }

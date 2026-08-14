@@ -21,13 +21,12 @@ def command_alias_impl(ctx: AnalysisContext):
         base = _get_os_base(ctx, target_os.os)
 
     output = command_alias(
-        actions = ctx.actions,
-        path = ctx.attrs.executable_name,
-        target_os = target_os,
-        base = base,
-        args = cmd_args(ctx.attrs.args),
-        env = ctx.attrs.env,
-        labels = ctx.attrs.labels,
+        ctx,
+        ctx.attrs.executable_name,
+        target_os,
+        base,
+        cmd_args(ctx.attrs.args),
+        ctx.attrs.env,
     )
 
     default_info = DefaultInfo(
@@ -88,8 +87,7 @@ CommandAliasOutput = record(
 )
 
 def command_alias(
-        *,
-        actions: AnalysisActions,
+        ctx: AnalysisContext,
         # The path at which to write the output to, without an extension - that will be added
         path: str | None,
         # The target where this script should be able to run (this may actually be your exec platform)
@@ -98,9 +96,7 @@ def command_alias(
         # depending on `uname`
         base: RunInfo | dict[str, RunInfo],
         args: cmd_args,
-        env: dict[str, ArgLike],
-        labels: list[str],
-        has_content_based_path: bool = False) -> CommandAliasOutput:
+        env: dict[str, ArgLike]) -> CommandAliasOutput:
     if path == "":
         fail("Path cannot be empty string")
 
@@ -117,9 +113,9 @@ def command_alias(
         windows_trampoline_path = "__command_alias_trampoline.bat"
 
     if target_os.script == ScriptLanguage("sh"):
-        trampoline, hidden = _command_alias_write_trampoline_unix(actions, unix_trampoline_path, base, args, env, has_content_based_path)
+        trampoline, hidden = _command_alias_write_trampoline_unix(ctx, unix_trampoline_path, base, args, env)
     elif target_os.script == ScriptLanguage("bat"):
-        trampoline, hidden = _command_alias_write_trampoline_windows(actions, windows_trampoline_path, base, args, env, labels, has_content_based_path)
+        trampoline, hidden = _command_alias_write_trampoline_windows(ctx, windows_trampoline_path, base, args, env)
     else:
         fail("Unsupported script language: {}".format(target_os.script))
 
@@ -138,12 +134,11 @@ def command_alias(
     )
 
 def _command_alias_write_trampoline_unix(
-        actions: AnalysisActions,
+        ctx: AnalysisContext,
         path: str,
         base: RunInfo | dict[str, RunInfo],
         args: cmd_args,
-        env: dict[str, ArgLike],
-        has_content_based_path: bool) -> (Artifact, cmd_args):
+        env: dict[str, ArgLike]) -> (Artifact, cmd_args):
     trampoline_args = cmd_args()
     trampoline_args.add("#!/usr/bin/env bash")
     trampoline_args.add("set -euo pipefail")
@@ -195,34 +190,31 @@ done
 
     trampoline_args.add('exec "${R_ARGS[@]}" "$@"')
 
-    trampoline = actions.declare_output(path, has_content_based_path = has_content_based_path)
+    trampoline = ctx.actions.declare_output(path)
     trampoline_args = cmd_args(
         trampoline_args,
         relative_to = (trampoline, 1),
         absolute_prefix = "BUCK_COMMAND_ALIAS_ABSOLUTE_PREFIX/",
     )
-    actions.write(
+    ctx.actions.write(
         trampoline.as_output(),
         trampoline_args,
         allow_args = True,
         is_executable = True,
-        has_content_based_path = has_content_based_path,
     )
 
     return trampoline, trampoline_args
 
 def _command_alias_write_trampoline_windows(
-        actions: AnalysisActions,
+        ctx: AnalysisContext,
         path: str,
         base: RunInfo,
         args: cmd_args,
-        env: dict[str, ArgLike],
-        labels: list[str],
-        has_content_based_path: bool) -> (Artifact, cmd_args):
+        env: dict[str, ArgLike]) -> (Artifact, cmd_args):
     trampoline_args = cmd_args()
     trampoline_args.add("@echo off")
 
-    if "close_stdin" in labels:
+    if "close_stdin" in ctx.attrs.labels:
         # Avoids waiting for input on the "Terminate batch job (Y/N)?" prompt.
         # The prompt itself is unavoidable, but we can avoid having to wait for input.
         # This will call the same trampoline batch file with stdin disabled
@@ -242,18 +234,17 @@ def _command_alias_write_trampoline_windows(
 
     trampoline_args.add(cmd)
 
-    trampoline = actions.declare_output(path, has_content_based_path = has_content_based_path)
+    trampoline = ctx.actions.declare_output(path)
     trampoline_args = cmd_args(
         trampoline_args,
         relative_to = (trampoline, 1),
         absolute_prefix = "%BUCK_COMMAND_ALIAS_ABSOLUTE%/",
     )
-    actions.write(
+    ctx.actions.write(
         trampoline.as_output(),
         trampoline_args,
         allow_args = True,
         is_executable = True,
-        has_content_based_path = has_content_based_path,
     )
 
     return trampoline, trampoline_args

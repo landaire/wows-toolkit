@@ -20,7 +20,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import javax.annotation.Nullable;
 
 /** Basic implementation of AndroidDevice for mocking purposes. */
 public class TestAndroidDevice implements AndroidDevice {
@@ -31,8 +30,7 @@ public class TestAndroidDevice implements AndroidDevice {
       boolean installViaSd,
       boolean quiet,
       boolean verifyTempWritable,
-      boolean stagedInstallMode,
-      @Nullable String userId) {
+      boolean stagedInstallMode) {
     throw new UnsupportedOperationException();
   }
 

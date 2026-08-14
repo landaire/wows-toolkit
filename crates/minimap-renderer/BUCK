@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_library")
 
 buildscript = workspace_buildscript(
     name = "minimap-renderer-buildscript",
@@ -23,12 +23,6 @@ MINIMAP_DEPS = [
     "//third-party/rust:indicatif",
     "//third-party/rust:muxide",
     "//third-party/rust:openh264",
-    "//third-party/rust:objc2",
-    "//third-party/rust:objc2-core-foundation",
-    "//third-party/rust:objc2-core-media",
-    "//third-party/rust:objc2-core-video",
-    "//third-party/rust:objc2-foundation",
-    "//third-party/rust:objc2-video-toolbox",
     "//third-party/rust:rav1e",
     "//third-party/rust:resvg",
     "//third-party/rust:rkyv",
@@ -41,9 +35,32 @@ MINIMAP_DEPS = [
     "//third-party/rust:tracing",
     "//third-party/rust:tracing-subscriber",
     "//third-party/rust:yuvutils-rs",
-]
+] + os_select(
+    # VideoToolbox on macOS, wgpu-backed GPU encode everywhere else, matching the
+    # cfg-gated dependency sections of Cargo.toml.
+    macos = [
+        "//third-party/rust:objc2",
+        "//third-party/rust:objc2-core-foundation",
+        "//third-party/rust:objc2-core-media",
+        "//third-party/rust:objc2-core-video",
+        "//third-party/rust:objc2-foundation",
+        "//third-party/rust:objc2-video-toolbox",
+    ],
+    linux = [
+        "//third-party/rust:gpu-video",
+        "//third-party/rust:wgpu",
+    ],
+    windows = [
+        "//third-party/rust:gpu-video",
+        "//third-party/rust:wgpu",
+    ],
+)
 
-MINIMAP_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv", "videotoolbox"]
+MINIMAP_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv"] + os_select(
+    macos = ["videotoolbox"],
+    linux = ["vulkan"],
+    windows = ["vulkan"],
+)
 
 workspace_library(
     name = "wows_minimap_renderer",

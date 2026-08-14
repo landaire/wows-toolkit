@@ -11,7 +11,4 @@ buck_java_library(
     visibility = [
         "PUBLIC",
     ],
-    deps = [
-        "prelude//toolchains/android/third-party:infer-annotations",
-    ],
 )

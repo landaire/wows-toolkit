@@ -10,7 +10,6 @@
 
 package com.facebook.buck.android.resources;
 
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -30,7 +29,6 @@ import java.util.stream.IntStream;
  *
  * <p>In practice, aapt always generates .arsc files with package_count == 1.
  */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class ResourceTable extends ResChunk {
   public static final int HEADER_SIZE = 12;
 

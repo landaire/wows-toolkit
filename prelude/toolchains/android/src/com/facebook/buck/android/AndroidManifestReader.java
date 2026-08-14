@@ -10,11 +10,9 @@
 
 package com.facebook.buck.android;
 
-import com.facebook.infer.annotation.Nullsafe;
 import java.util.List;
 
 /** Allows querying an Android manifest file for various types of information. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public interface AndroidManifestReader {
 
   /**

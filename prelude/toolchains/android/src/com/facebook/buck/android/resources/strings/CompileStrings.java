@@ -15,7 +15,6 @@ import com.facebook.buck.core.filesystems.AbsPath;
 import com.facebook.buck.io.filesystem.impl.ProjectFilesystemUtils;
 import com.facebook.buck.io.pathformat.PathFormatter;
 import com.facebook.buck.util.xml.XmlDomParser;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
@@ -33,7 +32,7 @@ import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -80,7 +79,6 @@ import org.xml.sax.SAXException;
  *
  * and dumps this map into the output file. See {@link StringResources} for the file format.
  */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class CompileStrings {
 
   private static final String ENGLISH_STRING_PATH_SUFFIX = "res/values/strings.xml";
@@ -149,16 +147,16 @@ public class CompileStrings {
     // We merge these because we want the individual .fbstr files to be self contained for
     // simplicity except for "en" because the string is already in Android resources.
     for (String regionSpecificLocale : regionSpecificToBaseLocaleMap.keySet()) {
-      String baseLocale =
-          Objects.requireNonNull(regionSpecificToBaseLocaleMap.get(regionSpecificLocale));
+      String baseLocale = regionSpecificToBaseLocaleMap.get(regionSpecificLocale);
       if (!resourcesByLocale.containsKey(baseLocale) || ENGLISH_LOCALE.equals(baseLocale)) {
         continue;
       }
 
       resourcesByLocale.put(
           regionSpecificLocale,
-          Objects.requireNonNull(resourcesByLocale.get(regionSpecificLocale))
-              .getMergedResources(Objects.requireNonNull(resourcesByLocale.get(baseLocale))));
+          resourcesByLocale
+              .get(regionSpecificLocale)
+              .getMergedResources(resourcesByLocale.get(baseLocale)));
     }
 
     for (String locale : filesByLocale.keySet()) {
@@ -196,7 +194,7 @@ public class CompileStrings {
       Matcher matcher = NON_ENGLISH_STRING_FILE_PATTERN.matcher(path);
 
       if (matcher.matches()) {
-        String baseLocale = Objects.requireNonNull(matcher.group(1));
+        String baseLocale = matcher.group(1);
         String country = matcher.group(2);
         String locale = country == null ? baseLocale : baseLocale + "_" + country;
         if (country != null && !regionSpecificToBaseLocaleMap.containsKey(locale)) {
@@ -243,9 +241,9 @@ public class CompileStrings {
         continue;
       }
 
-      String type = Objects.requireNonNull(matcher.group(1));
-      String resourceName = Objects.requireNonNull(matcher.group(2));
-      Integer resourceId = Integer.parseInt(Objects.requireNonNull(matcher.group(3)), 16);
+      String type = matcher.group(1);
+      String resourceName = matcher.group(2);
+      Integer resourceId = Integer.parseInt(matcher.group(3), 16);
       switch (type) {
         case "string":
           stringResourceNameToIdMap.put(resourceName, resourceId);
@@ -296,7 +294,7 @@ public class CompileStrings {
   public void scrapeStringNodes(
       NodeList stringNodes, Map<Integer, EnumMap<Gender, String>> stringsMap) {
     for (int i = 0; i < stringNodes.getLength(); ++i) {
-      Element element = (Element) Objects.requireNonNull(stringNodes.item(i));
+      Element element = (Element) stringNodes.item(i);
       String resourceName = element.getAttribute("name");
       Gender gender = getGender(element);
 
@@ -313,7 +311,7 @@ public class CompileStrings {
         continue;
       }
 
-      genderMap.put(gender, Objects.requireNonNull(element.getTextContent()));
+      genderMap.put(gender, element.getTextContent());
       stringsMap.put(resId, genderMap);
     }
   }
@@ -325,7 +323,7 @@ public class CompileStrings {
       Map<Integer, EnumMap<Gender, ImmutableMap<String, String>>> pluralsMap) {
 
     for (int i = 0; i < pluralNodes.getLength(); ++i) {
-      Element element = (Element) Objects.requireNonNull(pluralNodes.item(i));
+      Element element = (Element) pluralNodes.item(i);
       String resourceName = element.getAttribute("name");
       Gender gender = getGender(element);
 
@@ -346,13 +344,9 @@ public class CompileStrings {
 
       NodeList itemNodes = element.getElementsByTagName("item");
       for (int j = 0; j < itemNodes.getLength(); ++j) {
-        Node itemNode = Objects.requireNonNull(itemNodes.item(j));
-        String quantity =
-            Objects.requireNonNull(
-                Objects.requireNonNull(
-                        Objects.requireNonNull(itemNode.getAttributes()).getNamedItem("quantity"))
-                    .getNodeValue());
-        quantityToStringBuilder.put(quantity, Objects.requireNonNull(itemNode.getTextContent()));
+        Node itemNode = itemNodes.item(j);
+        String quantity = itemNode.getAttributes().getNamedItem("quantity").getNodeValue();
+        quantityToStringBuilder.put(quantity, itemNode.getTextContent());
       }
 
       genderMap.put(gender, quantityToStringBuilder.build());
@@ -366,7 +360,7 @@ public class CompileStrings {
       NodeList arrayNodes, Map<Integer, EnumMap<Gender, ImmutableList<String>>> arraysMap) {
 
     for (int i = 0; i < arrayNodes.getLength(); ++i) {
-      Element element = (Element) Objects.requireNonNull(arrayNodes.item(i));
+      Element element = (Element) arrayNodes.item(i);
       String resourceName = element.getAttribute("name");
       Gender gender = getGender(element);
 
@@ -389,8 +383,7 @@ public class CompileStrings {
         continue;
       }
       for (int j = 0; j < itemNodes.getLength(); ++j) {
-        arrayValues.add(
-            Objects.requireNonNull(Objects.requireNonNull(itemNodes.item(j)).getTextContent()));
+        arrayValues.add(itemNodes.item(j).getTextContent());
       }
 
       genderMap.put(gender, arrayValues.build());

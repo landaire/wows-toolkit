@@ -10,7 +10,7 @@ load("constants.bxl", "ADDITIONAL_TARGETS", "BY_MODES", "DEBUG_ARGS", "DEBUG_CMD
 load("get_attrs.bxl", "get_attrs", "get_cxx_toolchain", "get_unified_value")
 load("get_compiler_settings.bxl", "get_compiler_settings", "get_exported_compiler_settings")
 load("get_linker_settings.bxl", "get_exported_linker_settings", "get_linker_settings")
-load("utils.bxl", "dedupe_by_value", "dirname", "flatten_lists", "gen_guid", "get_output_path", "get_project_file_path", "get_vs_configuration", "infer_settings_by_modes", "log_debug", "log_warn", "merge", "suffix", "translate_content_based_path")
+load("utils.bxl", "dedupe_by_value", "dirname", "flatten_lists", "gen_guid", "get_output_path", "get_project_file_path", "get_vs_configuration", "infer_settings_by_modes", "log_debug", "log_warn", "merge", "suffix")
 
 def _get_application_type_and_platform(mode_file):
     if "android" in mode_file:
@@ -102,12 +102,8 @@ def _get_debug_settings(target: bxl.ConfiguredTargetNode, attrs: dict, attrs_laz
             debug_settings[DEBUG_ENV]["PATH"] = ";".join(oxx_runner_path) + ";" + debug_settings[DEBUG_ENV]["PATH"]
     elif attrs["buck_type"] == "command_alias" and attrs["exe"] == "fbsource//arvr/tools/buck:launcher":
         # Replicate launcher behavior as it launches binary via child process which Visual Studio cannot debug into. https://fburl.com/code/sb7e6zi7
-        exe_path = debug_settings[DEBUG_ARGS][0]
-
-        # Infer config based path as content based path varies after local changes.
-        exe_path = translate_content_based_path(exe_path, target.label, cli_args)
-        debug_settings[DEBUG_CMD] = "$(RepoRoot)\\" + exe_path
-        debug_settings[DEBUG_PWD] = "$(RepoRoot)\\" + dirname(exe_path, separator = "\\")
+        debug_settings[DEBUG_CMD] = "$(RepoRoot)\\" + debug_settings[DEBUG_ARGS][0]
+        debug_settings[DEBUG_PWD] = "$(RepoRoot)\\" + dirname(debug_settings[DEBUG_ARGS][0], separator = "\\")
         debug_settings[DEBUG_ARGS].pop(0)
     elif attrs["buck_type"] == "command_alias" and attrs["exe"]:
         # Replicate generic command_alias as buck launches exe binary via child process which Visual Studio cannot debug into.
@@ -191,9 +187,9 @@ def get_vs_settings(target: bxl.ConfiguredTargetNode, toolchain, attrs: dict, vs
     attrs_lazy = target.resolved_attrs_lazy(bxl_ctx)
 
     # NB: We want to keep dep label as a label type to find rel path, instead of using strings like the rest of attrs
-    deps = get_unified_value(attrs_lazy, "deps")
+    deps = get_unified_value(attrs_lazy, "deps", "platform_deps")
     deps = flatten_lists([d.values() if isinstance(d, dict) else d for d in deps])
-    exported_deps = get_unified_value(attrs_lazy, "exported_deps")
+    exported_deps = get_unified_value(attrs_lazy, "exported_deps", "exported_platform_deps")
     exported_deps = flatten_lists([d.values() if isinstance(d, dict) else d for d in exported_deps])
     if attrs["buck_type"] == "alias":
         exported_deps.append(attrs_lazy.get("actual"))
@@ -267,7 +263,7 @@ def _main(bxl_ctx):
     attrs = get_attrs(target_node, bxl_ctx)
     toolchain = get_cxx_toolchain(target_node, bxl_ctx)
     attrs_artifact = actions.write_json(get_project_file_path(target_node.label, ".attrs.json"), attrs, pretty = True)
-    vs_settings_artifact = actions.declare_output(get_project_file_path(target_node.label, ".vs_settings.json"), has_content_based_path = False)
+    vs_settings_artifact = actions.declare_output(get_project_file_path(target_node.label, ".vs_settings.json"))
 
     def f(ctx, artifacts, outputs, cli_args = bxl_ctx.cli_args, root = bxl_ctx.root()):
         attrs = artifacts[attrs_artifact].read_json()

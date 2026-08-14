@@ -56,9 +56,6 @@ def _matches_or_array_is_subset_of(
 ) -> bool:
     if expected_value is None:
         return actual_value is None
-    if actual_value == "*":
-        # Certain entitlements have a wildcard value, which means any value is allowed.
-        return True
     if (
         actual_value is None
         and platform.is_desktop()
@@ -147,7 +144,7 @@ def _make_multiple_matching_profiles_message(
 ) -> str:
     messages = [f"Found MULTIPLE matching profiles: {len(profiles)}"]
     messages += [
-        f"    Matching Profile = UUID:{profile.uuid}, creation date: {profile.creation_date}, file path: {profile.file_path}"
+        f"    Matching Profile = UUID:{profile.uuid}, file path: {profile.file_path}"
         for profile in profiles
     ]
 
@@ -190,8 +187,7 @@ def _filter_matching_selected_provisioning_profile_infos(
 
 
 # See `ProvisioningProfileStore::getBestProvisioningProfile` in `ProvisioningProfileStore.java` for Buck v1 equivalent
-# This function operates on data types only without performing any IO or process invocation.
-def select_best_provisioning_profile_core(
+def select_best_provisioning_profile(
     info_plist_metadata: InfoPlistMetadata,
     code_signing_identities: list[CodeSigningIdentity],
     provisioning_profiles: list[ProvisioningProfileMetadata],
@@ -235,6 +231,16 @@ def select_best_provisioning_profile_core(
 
     for profile in provisioning_profiles:
         app_id = profile.get_app_id()
+        if maybe_team_id_constraint and maybe_team_id_constraint != app_id.team_id:
+            log_mismatched_profile(
+                TeamIdMismatch(
+                    profile=profile,
+                    team_id=app_id.team_id,
+                    team_id_constraint=maybe_team_id_constraint,
+                )
+            )
+            continue
+
         bundle_id = app_id.bundle_id
         current_match_length = _bundle_match_length(
             info_plist_metadata.bundle_id, bundle_id
@@ -245,16 +251,6 @@ def select_best_provisioning_profile_core(
                     profile=profile,
                     bundle_id=app_id.bundle_id,
                     bundle_id_constraint=info_plist_metadata.bundle_id,
-                )
-            )
-            continue
-
-        if maybe_team_id_constraint and maybe_team_id_constraint != app_id.team_id:
-            log_mismatched_profile(
-                TeamIdMismatch(
-                    profile=profile,
-                    team_id=app_id.team_id,
-                    team_id_constraint=maybe_team_id_constraint,
                 )
             )
             continue

@@ -16,6 +16,7 @@ Generate a __manifest__.py module containing build metadata for a Python package
 import argparse
 import json
 from pathlib import Path
+from typing import Dict, Optional
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def path_to_module(path: str) -> str | None:
+def path_to_module(path: str) -> Optional[str]:
     for suffix in (".py", ".so", ".pyd"):
         if path.endswith(suffix):
             return path[: -len(suffix)].replace("/", ".").replace("\\", ".")
@@ -58,7 +59,7 @@ def main() -> None:
             f"Output path '{output}' already exists, refusing to overwrite."
         )
 
-    modules: dict[str, str] = {}
+    modules: Dict[str, str] = {}
 
     with open(args.module_manifests) as me:
         module_manifests = me.read().splitlines()

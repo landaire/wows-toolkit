@@ -15,8 +15,7 @@ load("@prelude//rust:clippy_configuration.bzl", "ClippyConfiguration")
 load("@prelude//rust:link_info.bzl", "RustProcMacroPlugin")
 load("@prelude//rust:rust_binary.bzl", "rust_binary_impl", "rust_test_impl")
 load("@prelude//rust:rust_library.bzl", "rust_library_impl")
-load(":common.bzl", "RuntimeDependencyHandling", "buck", "prelude_rule")
-load(":cxx_common.bzl", "cxx_common")
+load(":common.bzl", "buck", "prelude_rule")
 load(":native_common.bzl", "native_common")
 load(":re_test_common.bzl", "re_test_common")
 load(":rust_common.bzl", "rust_common", "rust_target_dep")
@@ -25,17 +24,16 @@ def _rust_common_attributes(is_binary: bool):
     return buck.licenses_arg() | buck.labels_arg() | buck.contacts_arg() | {
         "clippy_configuration": attrs.option(attrs.dep(providers = [ClippyConfiguration]), default = None),
         "coverage": attrs.bool(default = False),
+        "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         "default_platform": attrs.option(attrs.string(), default = None),
         "flagged_deps": attrs.list(attrs.tuple(rust_target_dep(is_binary), attrs.list(attrs.string())), default = []),
         "incremental_enabled": attrs.bool(default = False),
         "resources": attrs.named_set(attrs.one_of(attrs.dep(), attrs.source()), sorted = True, default = []),
         "rustdoc_flags": attrs.list(attrs.arg(), default = []),
         "separate_debug_info": attrs.bool(default = False),
-        "use_content_based_paths": attrs.bool(default = True),
-        "uses_restricted_rustc_flags": attrs.bool(default = False),
         "_exec_os_type": buck.exec_os_type_arg(),
         "_target_os_type": buck.target_os_type_arg(),
-    } | cxx_common.default_deps_arg()
+    }
 
 def _rust_binary_attrs_group(prefix: str) -> dict[str, Attr]:
     attrs = (rust_common.deps_arg(is_binary = True) |
@@ -58,13 +56,6 @@ _RUST_EXECUTABLE_ATTRIBUTES = {
     "link_group_min_binary_node_count": attrs.option(attrs.int(), default = None),
     "rpath": attrs.bool(default = False, doc = """
               Set the "rpath" in the executable when using a shared link style.
-          """),
-    "runtime_dependency_handling": attrs.option(attrs.enum(RuntimeDependencyHandling), default = None, doc = """
-              Controls how shared library dependencies are handled at runtime. If not set,
-              falls back to the CXX toolchain default. If ``symlink`` is specified then shared
-              library dependencies with ``preferred_linkage = "shared"`` are automatically
-              detected and included in a symlink tree alongside the executable. If ``no_symlink``
-              is specified then shared library dependencies are not included in the symlink tree.
           """),
     "_build_info": BUILD_INFO_ATTR,
 }
@@ -206,7 +197,6 @@ rust_library = prelude_rule(
             "crate_dynamic": attrs.option(attrs.dep(), default = None),
             "doc_env": rust_common.env_arg()["env"],
             "doctests": attrs.option(attrs.bool(), default = None),
-            "include_in_android_merge_map_output": attrs.bool(default = True),
             "proc_macro": attrs.bool(default = False),
             "supports_python_dlopen": attrs.option(attrs.bool(), default = None),
         } |
@@ -217,7 +207,6 @@ rust_library = prelude_rule(
         third_party_common.create_third_party_build_root_attrs()
     ),
     uses_plugins = [RustProcMacroPlugin],
-    supports_incoming_transition = True,
 )
 
 rust_test = prelude_rule(

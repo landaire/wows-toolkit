@@ -10,7 +10,6 @@
 
 package com.facebook.buck.testrunner;
 
-import com.facebook.buck.testrunner.reportlayer.PerfettoReportLayer;
 import com.facebook.buck.testrunner.reportlayer.TombstonesReportLayer;
 import com.facebook.buck.testrunner.reportlayer.VideoRecordingReportLayer;
 import java.io.File;
@@ -46,8 +45,7 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
       boolean clearPackageData,
       boolean disableAnimations,
       String preTestSetupScript,
-      List<String> extraApksToInstall,
-      @Nullable Integer userId) {
+      List<String> extraApksToInstall) {
     super(
         deviceArgs,
         packageName,
@@ -71,8 +69,7 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
         clearPackageData,
         disableAnimations,
         preTestSetupScript,
-        extraApksToInstall,
-        userId);
+        extraApksToInstall);
   }
 
   @SuppressWarnings("PMD.BlacklistedSystemGetenv")
@@ -104,15 +101,11 @@ public class InstrumentationTestRunnerForClout extends InstrumentationTestRunner
             argsParser.clearPackageData,
             argsParser.disableAnimations,
             argsParser.preTestSetupScript,
-            argsParser.extraApksToInstall,
-            argsParser.userId);
+            argsParser.extraApksToInstall);
     if (argsParser.recordVideo) {
       runner.addReportLayer(new VideoRecordingReportLayer(runner));
     }
     runner.addReportLayer(new TombstonesReportLayer(runner, argsParser.collectTombstones));
-    if (argsParser.collectPerfetto) {
-      runner.addReportLayer(new PerfettoReportLayer(runner));
-    }
     return runner;
   }
 

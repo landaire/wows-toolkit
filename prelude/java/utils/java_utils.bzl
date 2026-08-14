@@ -103,9 +103,7 @@ def get_default_info(
         packaging_info: JavaPackagingInfo,
         extra_sub_targets: dict = {}) -> DefaultInfo:
     sub_targets = get_classpath_subtargets(actions, packaging_info)
-    default_info = DefaultInfo(
-        sub_targets = extra_sub_targets | sub_targets,
-    )
+    default_info = DefaultInfo()
     if outputs:
         abis = [
             ("class-abi", outputs.class_abi),
@@ -135,8 +133,7 @@ def get_class_to_source_map_info(
         ctx: AnalysisContext,
         outputs: [JavaCompileOutputs, None],
         deps: list[Dependency],
-        generate_sources_jar: bool = False,
-        class_to_src_map_deps: list[Dependency] = []) -> (JavaClassToSourceMapInfo, Artifact | None, dict):
+        generate_sources_jar: bool = False) -> (JavaClassToSourceMapInfo, Artifact | None, dict):
     sub_targets = {}
     class_to_srcs = None
     class_to_srcs_debuginfo = None
@@ -161,14 +158,11 @@ def get_class_to_source_map_info(
         if sources_jar:
             sub_targets["sources.jar"] = [DefaultInfo(default_output = sources_jar)]
 
-    # Include class_to_src_map_deps for classmap collection. These are deps that
-    # only contribute to the class-to-source map (for debugging) but not to compilation.
-    all_classmap_deps = deps + class_to_src_map_deps
     class_to_src_map_info = create_class_to_source_map_info(
         ctx = ctx,
         mapping = class_to_srcs,
         mapping_debuginfo = class_to_srcs_debuginfo,
-        deps = all_classmap_deps,
+        deps = deps,
     )
     if outputs != None:
         sub_targets["debuginfo"] = [DefaultInfo(default_output = class_to_src_map_info.debuginfo)]

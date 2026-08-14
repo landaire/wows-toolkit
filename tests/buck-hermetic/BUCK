@@ -1,4 +1,6 @@
-load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
+# The same wrapper the generated third-party rules use, so the probe measures
+# what a vendored crate's build script actually receives.
+load("//build-support/buck:third_party_rules.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 load(":fixture_rules.bzl", "fixture_action")
 
@@ -114,4 +116,14 @@ fixture_action(
 alias(
     name = "bare_tool_action_alias",
     actual = ":bare_tool_action",
+)
+
+fixture_action(
+    name = "system_tool_path_action",
+    content = "/bin/sh unpack.sh && /usr/bin/tar -xf archive.tar",
+)
+
+alias(
+    name = "system_tool_path_action_alias",
+    actual = ":system_tool_path_action",
 )

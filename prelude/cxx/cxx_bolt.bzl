@@ -27,14 +27,14 @@ def cxx_use_bolt(ctx: AnalysisContext) -> bool:
 
 def bolt(ctx: AnalysisContext, prebolt_output: Artifact, external_debug_info: ArtifactTSet, identifier: [str, None], generate_dwp: bool, allow_cache_upload: bool = False) -> CxxBoltOutput:
     output_name = prebolt_output.short_path.removesuffix("-wrapper")
-    postbolt_output = ctx.actions.declare_output(output_name, has_content_based_path = False)
+    postbolt_output = ctx.actions.declare_output(output_name)
     dwo_output = None
     bolt_msdk = get_cxx_toolchain_info(ctx).binary_utilities_info.bolt_msdk
 
     if not bolt_msdk or not cxx_use_bolt(ctx):
         fail("Cannot use bolt if bolt_msdk is not available or bolt profile is not available")
 
-    materialized_external_debug_info = project_artifacts(ctx.actions, external_debug_info)
+    materialized_external_debug_info = project_artifacts(ctx.actions, [external_debug_info])
 
     # bolt command format:
     # {llvm_bolt} {input_bin} -o $OUT -data={fdata} {args}
@@ -49,7 +49,7 @@ def bolt(ctx: AnalysisContext, prebolt_output: Artifact, external_debug_info: Ar
     )
 
     if generate_dwp:
-        dwo_output = ctx.actions.declare_output(output_name + ".dwo.d", dir = True, has_content_based_path = False)
+        dwo_output = ctx.actions.declare_output(output_name + ".dwo.d", dir = True)
         args.add(cmd_args(dwo_output.as_output(), format = "--dwarf-output-path={}"))
         args = cmd_args(
             "/bin/sh",
@@ -71,7 +71,7 @@ def bolt(ctx: AnalysisContext, prebolt_output: Artifact, external_debug_info: Ar
     output = postbolt_output
 
     if strip_stapsdt:
-        stripped_postbolt_output = ctx.actions.declare_output(output_name + "-nostapsdt", has_content_based_path = False)
+        stripped_postbolt_output = ctx.actions.declare_output(output_name + "-nostapsdt")
         ctx.actions.run(
             # We --rename-section instead of --remove-section because objcopy's processing
             # in an invalid ELF file

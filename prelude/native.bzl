@@ -7,6 +7,7 @@
 # above-listed licenses.
 
 # `native` is fine to use in the prelude for v2
+# @lint-ignore-every BUCKLINT
 
 # This is buck2's shim import. Any public symbols here will be available within
 # **all** interpreted files.
@@ -26,7 +27,6 @@ load("@prelude//python:toolchain.bzl", _python = "python")
 load("@prelude//rust:link_info.bzl", "RustLinkInfo")
 load("@prelude//rust:rust_common.bzl", "rust_common_macro_wrapper")
 load("@prelude//rust:rust_library.bzl", "rust_library_macro_wrapper")
-load("@prelude//rust:sources.bzl", "RustSources")
 load("@prelude//rust:with_workspace.bzl", "with_rust_workspace")
 load("@prelude//user:all.bzl", _user_rules = "rules")
 load("@prelude//utils:buckconfig.bzl", _read_config = "read_config_with_logging", _read_root_config = "read_root_config_with_logging", log_buckconfigs = "LOG_BUCKCONFIGS")
@@ -191,8 +191,6 @@ def _android_aar_macro_stub(
     )
 
 def _convert_kotlin_compiler_plugins(kotlin_compiler_plugins):
-    if type(kotlin_compiler_plugins) == type(select({})):
-        return native.select_map(kotlin_compiler_plugins, _convert_kotlin_compiler_plugins)
     if type(kotlin_compiler_plugins) == type({}):
         return [
             (key, value)
@@ -288,6 +286,10 @@ def _prebuilt_cxx_library_macro_stub(
         versioned_exported_preprocessor_flags = None,
         exported_lang_preprocessor_flags = None,
         versioned_exported_lang_preprocessor_flags = None,
+        exported_platform_preprocessor_flags = None,
+        versioned_exported_platform_preprocessor_flags = None,
+        exported_lang_platform_preprocessor_flags = None,
+        versioned_exported_lang_platform_preprocessor_flags = None,
         static_lib = None,
         versioned_static_lib = None,
         static_pic_lib = None,
@@ -305,6 +307,14 @@ def _prebuilt_cxx_library_macro_stub(
         exported_lang_preprocessor_flags = _concat(
             exported_lang_preprocessor_flags,
             _versioned_param_to_select(versioned_exported_lang_preprocessor_flags),
+        ),
+        exported_platform_preprocessor_flags = _concat(
+            exported_platform_preprocessor_flags,
+            _versioned_param_to_select(versioned_exported_platform_preprocessor_flags),
+        ),
+        exported_lang_platform_preprocessor_flags = _concat(
+            exported_lang_platform_preprocessor_flags,
+            _versioned_param_to_select(versioned_exported_lang_platform_preprocessor_flags),
         ),
         static_lib = selects.apply_n(
             [static_lib, selects.apply(versioned_static_lib, _versioned_param_to_select)],
@@ -508,6 +518,7 @@ def _prebuilt_apple_framework_macro_stub(**kwargs):
 
 def _prebuilt_apple_xcframework_macro_stub(**kwargs):
     prebuilt_apple_xcframework_macro_impl(
+        alias_rule = __rules__["alias"],
         filegroup_rule = __rules__["filegroup"],
         genrule = __rules__["genrule"],
         prebuilt_apple_framework_rule = __rules__["prebuilt_apple_framework"],
@@ -571,7 +582,6 @@ __shimmed_native__.update({"cxx": _cxx, "python": _python})
 __shimmed_native__.update({
     "__internal_autodeps_hacks__": struct(
         rust_link_info = RustLinkInfo,
-        rust_sources = RustSources,
     ),
 })
 

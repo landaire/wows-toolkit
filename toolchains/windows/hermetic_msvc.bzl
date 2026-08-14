@@ -31,8 +31,10 @@ def _rustc_flags():
     return ["-Copt-level=0", "-Cdebuginfo=2"]
 
 def _rustc_env(root):
+    # No PATH: rustc is pointed at link.exe explicitly through -Clinker, so the
+    # only ambient lookup it would otherwise perform is removed. INCLUDE and LIB
+    # have no such flag and must be passed as environment.
     return {
-        "PATH": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64"),
         "INCLUDE": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/include"),
         "LIB": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/lib/x64"),
         "LIBPATH": _tool(root, "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/lib/x64"),
@@ -96,4 +98,38 @@ hermetic_msvc_rust_toolchain = rule(
     impl = _hermetic_msvc_rust_toolchain_impl,
     attrs = {"default_edition": attrs.string(), "tools": attrs.dep(providers = [WindowsToolPathsInfo])},
     is_toolchain_rule = True,
+)
+
+def _windows_resource_impl(ctx):
+    tools = ctx.attrs.tools[WindowsToolPathsInfo]
+    output = ctx.actions.declare_output(ctx.attrs.out)
+
+    # rc.exe resolves #include and the icon relative to the script, so the script
+    # and every file it names must sit in one directory.
+    sources = ctx.actions.symlinked_dir(
+        "rc_sources",
+        {src.short_path: src for src in [ctx.attrs.src] + ctx.attrs.resources},
+    )
+
+    ctx.actions.run(
+        cmd_args(
+            tools.rc,
+            "/nologo",
+            cmd_args(output.as_output(), format = "/fo{}"),
+            cmd_args(sources, format = "{}/" + ctx.attrs.src.short_path),
+            hidden = [sources],
+        ),
+        category = "windows_resource",
+        env = {"PATH": ""},
+    )
+    return [DefaultInfo(default_output = output)]
+
+windows_resource = rule(
+    impl = _windows_resource_impl,
+    attrs = {
+        "out": attrs.string(),
+        "resources": attrs.list(attrs.source(), default = []),
+        "src": attrs.source(),
+        "tools": attrs.exec_dep(providers = [WindowsToolPathsInfo]),
+    },
 )

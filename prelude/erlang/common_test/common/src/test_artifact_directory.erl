@@ -13,7 +13,6 @@ Used by TPX to upload diagnostic reports.
 """.
 -compile(warn_missing_spec_all).
 
--include_lib("common/include/buck_ct_records.hrl").
 -include_lib("kernel/include/logger.hrl").
 
 -import(common_util, [unicode_characters_to_list/1]).
@@ -21,7 +20,7 @@ Used by TPX to upload diagnostic reports.
 -define(raw_file_access, prim_file).
 
 %% Public API
--export([prepare/3, link_to_artifact_dir/3, find_log_private/1]).
+-export([prepare/2, link_to_artifact_dir/3]).
 
 -export_type([dir_path/0]).
 
@@ -76,19 +75,15 @@ coverage_tmp_dir() ->
 
 % Collect, create and link the logs and other relevant files in
 % the artefacts directory.
--spec prepare(ExecutionDir, Tests, ArtifactAnnotationFunction) -> ok when
+-spec prepare(ExecutionDir, ArtifactAnnotationFunction) -> ok when
     ExecutionDir :: file:filename_all(),
-    Tests :: [#ct_test{}],
     ArtifactAnnotationFunction :: artifact_annotations:annotation_function().
-prepare(ExecutionDir, Tests, ArtifactAnnotationFunction) ->
+prepare(ExecutionDir, ArtifactAnnotationFunction) ->
     with_artifact_dir(
         fun(_ArtifactDir) ->
             link_tar_ball(ExecutionDir),
             link_to_artifact_dir(
                 join_paths(ExecutionDir, "erlang.perfetto-trace"), ExecutionDir, ArtifactAnnotationFunction
-            ),
-            link_to_artifact_dir(
-                join_paths(ExecutionDir, "result_exec.json"), ExecutionDir, ArtifactAnnotationFunction
             ),
             case coverage_tmp_dir() of
                 undefined ->
@@ -111,9 +106,11 @@ prepare(ExecutionDir, Tests, ArtifactAnnotationFunction) ->
                         filelib:is_regular(File, ?raw_file_access)
                     ],
                     link_to_artifact_dir(
-                        join_paths(LogPrivate, "test_metrics.tcompact.b64"),
+                        join_paths(LogPrivate, "test_metrics.log.json"),
                         LogPrivate,
-                        fun(FileName) -> artifact_annotations:test_metrics_artifact_annotation(FileName, Tests) end
+                        fun(FileName) ->
+                            #{type => #{generic_blob => #{}}, description => list_to_binary(FileName)}
+                        end
                     )
             end,
             ok
@@ -139,7 +136,7 @@ link_to_artifact_dir(File, Root, ArtifactAnnotationMFA) ->
                 unicode_characters_to_list(string:replace(RelativePath, "/", ".", all)),
             case filelib:is_file(File, ?raw_file_access) of
                 true ->
-                    file:make_symlink(filename:absname(File), join_paths(ArtifactDir, FullFileName)),
+                    file:make_symlink(File, join_paths(ArtifactDir, FullFileName)),
                     Annotation = artifact_annotations:create_artifact_annotation(FullFileName, ArtifactAnnotationMFA),
                     dump_annotation(Annotation, FullFileName);
                 _ ->

@@ -6,11 +6,15 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-load(
-    ":crate_name.bzl",
-    "CrateName",
-    "crate_name_as_cmd_arg",
-)
+load(":context.bzl", "CrateName")
+
+def crate_name_as_cmd_arg(crate: CrateName) -> cmd_args | str | ResolvedStringWithMacros:
+    if crate.dynamic:
+        # TODO: consider using `cmd_args(crate.dynamic, quote = "json")` so it
+        # doesn't fall apart on paths containing ')'
+        return cmd_args(crate.dynamic, format = "$(cat {})")
+    else:
+        return crate.simple
 
 # Create `--extern` flag. For crates with a name computed during analysis:
 #

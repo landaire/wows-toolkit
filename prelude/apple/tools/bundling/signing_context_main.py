@@ -12,7 +12,6 @@ import argparse
 import base64
 import json
 from pathlib import Path
-from typing import Optional
 
 from apple.tools.code_signing.codesign_bundle import (
     selection_profile_context_from_signing_context,
@@ -22,36 +21,6 @@ from .signing_context import (
     add_args_for_signing_context,
     signing_context_and_selected_identity_from_args,
 )
-
-
-def _build_signing_info_json(
-    args: argparse.Namespace,
-    selected_identity: Optional[str],
-    selection_profile_context: Optional[object],
-) -> dict:
-    if not args.codesign:
-        return {}
-
-    signing_info: dict = {
-        "codesign_type": "adhoc" if args.ad_hoc else "distribution",
-    }
-
-    if selected_identity:
-        signing_info["codesign_identity"] = selected_identity
-
-    if selection_profile_context:
-        selected_profile_info = selection_profile_context.selected_profile_info
-        profile_metadata = selected_profile_info.profile
-        signing_info["provisioning_profile"] = {
-            "uuid": profile_metadata.uuid,
-            "file_name": profile_metadata.file_path.name,
-        }
-        signing_info["signing_certificate"] = {
-            "fingerprint": selected_profile_info.identity.fingerprint,
-            "subject_common_name": selected_profile_info.identity.subject_common_name,
-        }
-
-    return signing_info
 
 
 def _main() -> None:
@@ -64,21 +33,11 @@ def _main() -> None:
         type=Path,
         help="Path to the output JSON file.",
     )
-    parser.add_argument(
-        "--signing-info-output",
-        required=False,
-        type=Path,
-        help="Path to the output JSON file for simplified signing identity metadata.",
-    )
     add_args_for_signing_context(parser)
 
     args = parser.parse_args()
     signing_context, selected_identity = (
         signing_context_and_selected_identity_from_args(args)
-    )
-
-    selection_profile_context = selection_profile_context_from_signing_context(
-        signing_context
     )
 
     with open(args.output, "w") as output_file:
@@ -94,6 +53,9 @@ def _main() -> None:
             # signing cert fingerprint (i.e., SHA1 hash of cert in DER format)
             signing_context_json_obj["codesign_identity"] = selected_identity
 
+        selection_profile_context = selection_profile_context_from_signing_context(
+            signing_context
+        )
         if selection_profile_context:
             selected_profile_info = selection_profile_context.selected_profile_info
             profile_metadata = selected_profile_info.profile
@@ -117,13 +79,6 @@ def _main() -> None:
             output_file,
             indent=4,
         )
-
-    if args.signing_info_output:
-        signing_info = _build_signing_info_json(
-            args, selected_identity, selection_profile_context
-        )
-        with open(args.signing_info_output, "w") as signing_info_file:
-            json.dump(signing_info, signing_info_file, indent=4)
 
 
 if __name__ == "__main__":

@@ -50,7 +50,7 @@ def erlang_escript_impl(ctx: AnalysisContext) -> list[Provider]:
             artifacts[artifact.short_path] = artifact
 
     escript_name = _escript_name(ctx)
-    output = ctx.actions.declare_output(escript_name, has_content_based_path = False)
+    output = ctx.actions.declare_output(escript_name)
 
     args = ctx.attrs.emu_args
 
@@ -157,7 +157,7 @@ EscriptDir = escript:script_name(),""",
         paths.join(erlang_build.utils.BUILD_DIR, "erlang_escript_trampoline.erl"),
         data,
     )
-    my_output = ctx.actions.declare_output("erlang_escript_trampoline.beam", has_content_based_path = False)
+    my_output = ctx.actions.declare_output("erlang_escript_trampoline.beam")
 
     erlang_build.utils.run_with_env(
         ctx,

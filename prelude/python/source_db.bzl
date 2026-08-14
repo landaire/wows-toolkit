@@ -7,6 +7,7 @@
 # above-listed licenses.
 
 load("@prelude//python:python.bzl", "PythonLibraryInfo")
+load("@prelude//utils:argfile.bzl", "at_argfile")
 load(":internal_tools.bzl", "PythonInternalToolsInfo")
 load(
     ":manifest.bzl",
@@ -43,9 +44,12 @@ def create_dbg_source_db(
     # Pass manifests for transitive deps.
     dep_manifests = ctx.actions.tset(PythonLibraryManifestsTSet, children = [d.manifests for d in python_deps])
 
-    dependency_manifests = cmd_args(dep_manifests.project_as_args("source_manifests"))
-    deps_file = ctx.actions.write("deps_path.txt", dependency_manifests, has_content_based_path = True)
-    cmd.add(cmd_args(deps_file, format = "--dependency_manifests={}", hidden = dependency_manifests))
+    dependencies = cmd_args(dep_manifests.project_as_args("source_manifests"), format = "--dependency={}")
+    cmd.add(at_argfile(
+        actions = ctx.actions,
+        name = "dbg_source_db_dependencies",
+        args = dependencies,
+    ))
 
     artifacts.append(dep_manifests.project_as_args("source_artifacts"))
     ctx.actions.run(cmd, category = "py_dbg_source_db", error_handler = python_toolchain.python_error_handler)
@@ -56,13 +60,13 @@ def create_source_db_no_deps(
         ctx: AnalysisContext,
         srcs: [dict[str, Artifact], None]) -> DefaultInfo:
     content = {} if srcs == None else srcs
-    output = ctx.actions.write_json("db_no_deps.json", content, has_content_based_path = True)
+    output = ctx.actions.write_json("db_no_deps.json", content)
     return DefaultInfo(default_output = output, other_outputs = content.values())
 
 def create_source_db_no_deps_from_manifest(
         ctx: AnalysisContext,
         srcs: ManifestInfo) -> DefaultInfo:
-    output = ctx.actions.declare_output("db_no_deps.json", has_content_based_path = True)
+    output = ctx.actions.declare_output("db_no_deps.json")
     cmd = cmd_args(ctx.attrs._python_internal_tools[PythonInternalToolsInfo].make_source_db_no_deps)
     cmd.add(cmd_args(output.as_output(), format = "--output={}"))
     cmd.add(srcs.manifest)

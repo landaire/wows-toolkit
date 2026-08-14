@@ -6,7 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-def _is_any(predicate: typing.Callable, iterable: typing.Iterable) -> bool:
+def _is_any(predicate, iterable):
     """
     This expression lazily iterates the container with 0 new allocations.
     In the event that the iterable is empty, it will return False.
@@ -28,7 +28,7 @@ def _is_any(predicate: typing.Callable, iterable: typing.Iterable) -> bool:
 
     return False
 
-def _is_all(predicate: typing.Callable, iterable: typing.Iterable) -> bool:
+def _is_all(predicate, iterable):
     """
     This expression lazily iterates the container with 0 new allocations.
     In the event that the iterable is empty, it will return False.

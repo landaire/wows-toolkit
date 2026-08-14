@@ -332,18 +332,21 @@ def standard_java_test(
         name,
         run_test_separately = False,
         vm_args = None,
+        fork_mode = "none",
         labels = None,
         with_test_data = False,
         **kwargs):
     test_srcs = native.glob(["*Test.java"])
 
     if len(test_srcs) > 0:
+        # @lint-ignore BUCKLINT
         buck_java_test(
             name = name,
             srcs = test_srcs,
             resources = native.glob(["testdata/**"]) if with_test_data else [],
             vm_args = vm_args,
             run_test_separately = run_test_separately,
+            fork_mode = fork_mode,
             labels = (labels or []) + ["buck2_run_from_cell_root"],
             **kwargs
         )

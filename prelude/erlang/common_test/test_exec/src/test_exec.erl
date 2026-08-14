@@ -29,7 +29,7 @@ start(_Type, _Args) ->
             test_exec_sup:start_link(TestEnv);
         _ ->
             %% hack to make startup not fail if no config is set
-            {ok, spawn_link(timer, sleep, [infinity])}
+            {ok, spawn(fun() -> ok end)}
     end.
 
 -spec stop(State) -> ok when

@@ -66,6 +66,10 @@ public class KotlinCStepsBuilder {
 
     LanguageVersion kotlincLanguageVersion = extraParams.getLanguageVersion();
 
+    if (invokingRule.isSourceOnlyAbi() && !extraParams.getShouldKosabiJvmAbiGenUseK2()) {
+      kotlincLanguageVersion = LanguageVersion.Companion.getK1();
+    }
+
     KotlincStep kotlincStep =
         new KotlincStep(
             invokingRule,
@@ -104,7 +108,7 @@ public class KotlinCStepsBuilder {
                     classpathSnapshots),
             kotlinCDAnalytics,
             kotlincLanguageVersion,
-            kotlincLanguageVersion.getSupportsK2());
+            extraParams.getShouldKosabiJvmAbiGenUseK2() && kotlincLanguageVersion.getSupportsK2());
     steps.add(kotlincStep);
   }
 

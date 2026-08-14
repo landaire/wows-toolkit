@@ -142,7 +142,7 @@ stop() ->
     true = erlang:monitor_node(Node, true),
     %% kill node
     %% elp:ignore W0014
-    _Pid = erlang:spawn(Node, fun erlang:halt/0),
+    _Pid = erlang:spawn(Node, fun() -> erlang:halt() end),
     %% wait for node to come down
     receive
         {nodedown, Node} -> ok
@@ -178,9 +178,6 @@ node_main([Parent, OutputDirAtom]) ->
 
     %% setup logger and prepare IO
     ok = ct_daemon_logger:start(OutputDir),
-
-    %% setup capture-aware group leader to support ct:capture_* API
-    ok = setup_capture_group_leader(),
 
     true = net_kernel:connect_node(Parent),
 
@@ -302,17 +299,3 @@ get_domain_type() ->
 -spec get_runner_pid() -> pid() | undefined.
 get_runner_pid() ->
     global:whereis_name(ct_daemon_runner:name(node())).
-
--spec setup_capture_group_leader() -> ok.
-setup_capture_group_leader() ->
-    %% Create a capture-aware group leader that handles {capture, Pid} messages
-    %% from ct:capture_start()/test_server:capture_start()
-    OriginalGL = erlang:group_leader(),
-    case ct_daemon_capture:start_link(OriginalGL) of
-        {ok, CaptureGL} ->
-            true = erlang:group_leader(CaptureGL, self()),
-            ok;
-        _ ->
-            %% If capture setup fails, continue without it
-            ok
-    end.

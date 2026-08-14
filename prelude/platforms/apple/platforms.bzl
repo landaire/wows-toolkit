@@ -17,7 +17,6 @@ load(
 )
 load(
     "@prelude//platforms/apple:constants.bzl",
-    "appletv_platforms",
     "ios_platforms",
     "mac_catalyst_platforms",
     "mac_platforms",
@@ -30,11 +29,6 @@ _SUPPORTED_IOS_PLATFORMS = [
     ios_platforms.IPHONEOS_ARM64,
     ios_platforms.IPHONESIMULATOR_ARM64,
     ios_platforms.IPHONESIMULATOR_X86_64,
-]
-
-_SUPPORTED_APPLETV_PLATFORMS = [
-    appletv_platforms.APPLETVOS_ARM64,
-    appletv_platforms.APPLETVSIMULATOR_ARM64,
 ]
 
 _SUPPORTED_MACOS_PLATFORMS = [
@@ -58,7 +52,6 @@ _ANALYSIS_CONSTRAINTS = ["ovr_config//bitcode/constraints:bitcode"]
 _DEFAULT_ANALYSIS_IOS_PLATFORM = ios_platforms.IPHONEOS_ARM64
 _DEFAULT_ANALYSIS_MACOS_PLATFORM = mac_platforms.MACOS_X86_64
 _DEFAULT_ANALYSIS_WATCHOS_PLATFORM = watch_platforms.WATCHOS_ARM64
-_DEFAULT_ANALYSIS_APPLETVOS_PLATFORM = appletv_platforms.APPLETVOS_ARM64
 
 DEFAULT_SUPPORTED_CXX_PLATFORMS = _SUPPORTED_IOS_PLATFORMS
 
@@ -192,8 +185,6 @@ def set_apple_platforms(
             return _SUPPORTED_MAC_CATALYST_PLATFORMS
         elif platform in _SUPPORTED_WATCHOS_PLATFORMS:
             return _SUPPORTED_WATCHOS_PLATFORMS
-        elif platform in _SUPPORTED_APPLETV_PLATFORMS:
-            return _SUPPORTED_APPLETV_PLATFORMS
         else:
             return None
 
@@ -239,6 +230,7 @@ def _define_platform(
         visibility,
         deps,
         platform_rule) -> None:
+    # @lint-ignore BUCKLINT - We set the visibility to PUBLIC directly and can bypass fb_native
     platform_rule(
         name = _get_generated_name(base_name, platform, build_mode),
         constraint_values = constraint_values,
@@ -267,10 +259,6 @@ def _get_analysis_platform_for_supported_platforms(supported_cxx_platforms) -> s
     for platform in _SUPPORTED_WATCHOS_PLATFORMS:
         if platform in supported_cxx_platforms:
             return _DEFAULT_ANALYSIS_WATCHOS_PLATFORM
-
-    for platform in _SUPPORTED_APPLETV_PLATFORMS:
-        if platform in supported_cxx_platforms:
-            return _DEFAULT_ANALYSIS_APPLETVOS_PLATFORM
 
     return _DEFAULT_ANALYSIS_IOS_PLATFORM
 

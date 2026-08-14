@@ -373,18 +373,19 @@ def generate_java_classpath_snapshot(
         snapshot_generator: Dependency | None,
         granularity: ClasspathSnapshotGranularity,
         library: Artifact,
-        action_identifier: str | None) -> Artifact | None:
+        action_identifier: str | None,
+        uses_content_based_path: bool) -> Artifact | None:
     if not snapshot_generator:
         return None
     identifier = (
         "{}_".format(action_identifier) if action_identifier else ""
-    ) + library.short_path.replace("/", "_").rsplit(".", 1)[0]  # remove the extension and preserve any [foo.baz].[jar] or [thing-1.2.3.4].[jar] style names
+    ) + library.short_path.replace("/", "_").split(".")[0]
     output = actions.declare_output(
         "{}_jar_snapshot_{}.bin".format(
             identifier,
             "cl" if ClasspathSnapshotGranularity("CLASS_LEVEL") == granularity else "cml",
         ),
-        has_content_based_path = True,
+        has_content_based_path = uses_content_based_path,
     )
     actions.run(
         [

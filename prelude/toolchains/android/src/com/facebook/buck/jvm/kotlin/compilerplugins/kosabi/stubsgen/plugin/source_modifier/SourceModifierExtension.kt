@@ -114,38 +114,39 @@ class SourceModifierExtension(
       sources: Collection<KtFile>,
   ): Collection<KtFile> {
 
-    val strippedFiles = sources.map { file ->
-      when (file) {
-        // A file produced by [KStub]
-        is FakeKtFile -> file
-        else -> {
-          val cachedFile = cachedProcessedSources[file.virtualFilePath]
-          if (cachedFile != null) {
-            return@map cachedFile
-          }
-
-          val rangesToStrip = calculateRangesToStrip(file).map { it to "" }
-          val rangesToReplace = calculateRangesToReplace(file).map { it to "TODO()" }
-          // @oss-disable: val rangesForTypealiasReplace =
-              // @oss-disable: calculateKnownTypealiasImportsReplace(file)
-          // This is temporary solution for Parcelable
-          val generateCodeInParcelable = generateFakeParcelableCodegen(file)
-          val replacesRanges =
-              (rangesToStrip +
-                      rangesToReplace +
-                      // @oss-disable: rangesForTypealiasReplace +
-                      generateCodeInParcelable)
-                  .sortedByDescending { it.first.first }
-
-          val nonNestedRanges = removeNestedRanges(replacesRanges)
-          val strippedContent: String =
-              nonNestedRanges.fold(file.text) { remainingContent, (range, replacement) ->
-                remainingContent.replaceRange(range, replacement)
+    val strippedFiles =
+        sources.map { file ->
+          when (file) {
+            // A file produced by [KStub]
+            is FakeKtFile -> file
+            else -> {
+              val cachedFile = cachedProcessedSources[file.virtualFilePath]
+              if (cachedFile != null) {
+                return@map cachedFile
               }
-          generateFakeKtFile(file.manager, file.virtualFilePath, file.name, strippedContent)
+
+              val rangesToStrip = calculateRangesToStrip(file).map { it to "" }
+              val rangesToReplace = calculateRangesToReplace(file).map { it to "TODO()" }
+              // @oss-disable: val rangesForTypealiasReplace =
+                  // @oss-disable: calculateKnownTypealiasImportsReplace(file)
+              // This is temporary solution for Parcelable
+              val generateCodeInParcelable = generateFakeParcelableCodegen(file)
+              val replacesRanges =
+                  (rangesToStrip +
+                          rangesToReplace +
+                          // @oss-disable: rangesForTypealiasReplace +
+                          generateCodeInParcelable)
+                      .sortedByDescending { it.first.first }
+
+              val nonNestedRanges = removeNestedRanges(replacesRanges)
+              val strippedContent: String =
+                  nonNestedRanges.fold(file.text) { remainingContent, (range, replacement) ->
+                    remainingContent.replaceRange(range, replacement)
+                  }
+              generateFakeKtFile(file.manager, file.virtualFilePath, file.name, strippedContent)
+            }
+          }
         }
-      }
-    }
 
     // smart cast to access elements
     sources as MutableList<KtFile>
@@ -320,15 +321,14 @@ class SourceModifierExtension(
     val delegatesOnTypedNonPrivateProps =
         file
             .collectDescendantsOfType<KtProperty>()
-            .filter { !it.isPrivate() && it.isTypedProperty() }
+            .filter { !it.isPrivate() && it.isTypedClassProp() }
             .mapNotNull { it.getChildOfType<KtPropertyDelegate>() }
     return (untypedPrivateNameFunctions + privateProps + delegatesOnTypedNonPrivateProps + inits)
         .map { it.startOffset until it.endOffset }
   }
 }
 
-private fun KtProperty.isTypedProperty(): Boolean =
-    (isMember || isTopLevel) && typeReference != null
+private fun KtProperty.isTypedClassProp(): Boolean = isMember && typeReference != null
 
 private fun removeNestedRanges(ranges: List<Pair<IntRange, String>>): List<Pair<IntRange, String>> {
   val result = mutableListOf<Pair<IntRange, String>>()

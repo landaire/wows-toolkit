@@ -11,7 +11,6 @@
 # the generated docs, and so those should be verified to be accurate and
 # well-formatted (and then delete this TODO)
 
-load("@prelude//cfg/exec_platform:marker.bzl", "get_exec_platform_marker")
 load("@prelude//transitions:constraint_overrides.bzl", "constraint_overrides")
 load(":common.bzl", "OnDuplicateEntry", "buck", "prelude_rule", "validate_uri")
 load(":genrule_common.bzl", "genrule_common")
@@ -25,16 +24,6 @@ RemoteFileType = ["data", "executable", "exploded_zip"]
 
 TargetCpuType = ["arm", "armv7", "arm64", "x86", "x86_64", "mips", "riscv64"]
 
-def _has_content_based_path_attr():
-    return {
-        "has_content_based_path": attrs.bool(default = select({
-            "DEFAULT": False,
-            # @oss-disable[end= ]: "config//os/constraints:android": True,
-            # @oss-disable[end= ]: "config//runtime/constraints:android-host-test": True,
-            # @oss-disable[end= ]: "config//runtime/constraints:android-unit-test": True,
-        })),
-    }
-
 alias = prelude_rule(
     name = "alias",
     docs = "",
@@ -44,6 +33,7 @@ alias = prelude_rule(
         # @unsorted-dict-items
         {
             "actual": attrs.option(attrs.dep(pulls_and_pushes_plugins = plugins.All)),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -205,6 +195,7 @@ command_alias = prelude_rule(
                 If provided, use this name for the trampoline script (with an extension added if
                  required by the platform).
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "resources": attrs.list(attrs.source(), default = []),
             "run_using_single_arg": attrs.bool(default = False, doc = """
                 Ensure that the command alias can be run as a single argument (instead of
@@ -221,13 +212,7 @@ command_alias = prelude_rule(
 
 config_setting = prelude_rule(
     name = "config_setting",
-    docs = """
-        `config_setting()` accepts a list of `constraint_values` and a list of values
-        (buckconfig keys + expected values) and matches if all of those match.
-
-        This is implemented as forming a single `ConfigurationInfo` from the union of the
-        referenced values and the config keys.
-    """,
+    docs = "",
     examples = None,
     further = None,
     attrs = (
@@ -241,68 +226,17 @@ config_setting = prelude_rule(
 
 configuration_alias = prelude_rule(
     name = "configuration_alias",
-    docs = """
-        `configuration_alias()` acts like `alias()` but for configuration targets.
-
-        The `configuration_alias` itself is a configuration rule and the `actual` attribute
-        is expected to be a target defined by a configuration rule (such as `constraint`,
-        `constraint_setting`, `constraint_value`, `config_setting`, or `platform`).
-
-        Unlike regular `alias()`, `configuration_alias()` can be used wherever configuration
-        targets are expected, such as in `select()` keys or `platform.constraint_values`.
-
-        This rule is particularly useful for creating backwards-compatible aliases to constraint
-        values defined using the unified `constraint()` rule, where values are referenced via
-        subtargets (e.g., `:os[linux]`).
-    """,
-    examples = """
-        ```
-        # Define a constraint with multiple values using the unified constraint rule
-        constraint(
-            name = "os",
-            values = ["linux", "macos", "windows", "none"],
-            default = "none",
-        )
-
-        configuration_alias(
-            name = "linux",
-            actual = ":os[linux]",
-        )
-
-        configuration_alias(
-            name = "macos",
-            actual = ":os[macos]",
-        )
-
-        # The alias can be used in platform definitions
-        platform(
-            name = "linux_platform",
-            constraint_values = [
-                ":linux",  # Using the alias instead of :os[linux]
-            ],
-        )
-
-        # The alias can be used in select() expressions
-        genrule(
-            name = "my_rule",
-            cmd = select({
-                ":linux": "echo linux",
-                ":macos": "echo macos",
-                ":os[none]": "echo other",  # Can also use subtarget directly
-            }),
-            out = "out.txt",
-        )
-        ```
-    """,
+    docs = "",
+    examples = None,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
-            "actual": attrs.dep(pulls_and_pushes_plugins = plugins.All, doc = """
-                The target to alias. This should be a target defined by a configuration rule
-                such as `constraint`, `constraint_setting`, `constraint_value`, `config_setting`,
-                or `platform`.
-            """),
+            # configuration_alias acts like alias but for configuration rules.
+
+            # The configuration_alias itself is a configuration rule and the `actual` argument is
+            # expected to be a configuration rule as well.
+            "actual": attrs.dep(pulls_and_pushes_plugins = plugins.All),
         }
     ),
 )
@@ -326,7 +260,7 @@ configured_alias = prelude_rule(
             "actual": attrs.label(),
             "configured_actual": attrs.option(attrs.configured_dep(), default = None),
             "fallback_actual": attrs.option(attrs.dep(), default = None),
-
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             # We use a separate field instead of re-purposing `actual`, as we want
             # to keep output format compatibility with v1.
             # If `configured_actual` is `None`, fallback to this unconfigured dep.
@@ -340,31 +274,24 @@ configured_alias = prelude_rule(
 
 constraint_setting = prelude_rule(
     name = "constraint_setting",
-    docs = "Declares the existence of a constraint, whose values are defined using `constraint_value()`. Consider using the newer `constraint()` instead.",
+    docs = "",
     examples = None,
     further = None,
     attrs = (
         {
-            "execution_modifier": attrs.bool(default = False),
         }
     ),
 )
 
 constraint_value = prelude_rule(
     name = "constraint_value",
-    docs = "Declares a specific value of a `constraint_setting`. Consider using the newer `constraint()` instead.",
+    docs = "",
     examples = None,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
-            "constraint_setting": attrs.configuration_label(
-                doc = "The constraint setting this value is attached to.",
-            ),
-            # Dependency on the exec platform marker constraint.
-            # Modifiers with execution_modifier=False will be wrapped in a conditional modifier
-            # that skips them on exec platforms.
-            "_exec_platform_marker": attrs.dep(providers = [ConfigurationInfo], default = get_exec_platform_marker()),
+            "constraint_setting": attrs.configuration_label(),
         }
     ),
 )
@@ -373,64 +300,21 @@ constraint = prelude_rule(
     name = "constraint",
     docs = """
         Unified constraint rule that defines both a constraint setting and its possible values.
-        Values are exposed as subtargets, e.g., `cfg//:os[linux]`.
+        Values are exposed as subtargets, e.g., cfg//:os[linux].
     """,
     examples = """
-        ```
         constraint(
             name = "os",
             values = ["linux", "macos", "windows"],
             default = "linux",
         )
-        ```
     """,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
-            "values": attrs.list(
-                attrs.string(),
-                doc = "List of value names.",
-            ),
-            "default": attrs.string(
-                doc = "Default value (must be one of the `values`).",
-            ),
-            "execution_modifier": attrs.bool(default = False),
-            # Dependency on the exec platform marker constraint.
-            # Modifiers with execution_modifier=False will be wrapped in a conditional modifier
-            # that skips them on exec platforms.
-            "_exec_platform_marker": attrs.dep(providers = [ConfigurationInfo], default = get_exec_platform_marker()),
-        }
-    ),
-)
-
-exec_platform_marker_constraint = prelude_rule(
-    name = "exec_platform_marker_constraint",
-    docs = """
-        Special constraint rule for defining execution platform markers.
-        This rule has the same semantics as `constraint()` but exists to avoid
-        circular dependency issues when other constraint/constraint_value rules
-        need to depend on the exec platform marker.
-        Should only be defined once in a repo.
-    """,
-    examples = """
-        exec_platform_marker_constraint(
-            name = "is_exec_platform",
-            values = ["true", "false"],
-            default = "false",
-        )
-    """,
-    further = None,
-    attrs = (
-        # @unsorted-dict-items
-        {
-            "values": attrs.list(
-                attrs.string(),
-                doc = "List of value names.",
-            ),
-            "default": attrs.string(
-                doc = "Default value (must be one of the `values`).",
-            ),
+            "values": attrs.list(attrs.string()),
+            "default": attrs.string(),
         }
     ),
 )
@@ -535,8 +419,10 @@ export_file = prelude_rule(
                  However, this mode does not work across repositories or if the 'out' property is set.
                  For read-only operations, 'reference' can be more performant.
             """),
+            "has_content_based_path": attrs.bool(default = False),
+            "uses_experimental_content_based_path_hashing": attrs.bool(default = False),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
-        _has_content_based_path_attr() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -553,6 +439,7 @@ external_test_runner = prelude_rule(
         # @unsorted-dict-items
         {
             "binary": attrs.dep(),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -602,11 +489,13 @@ filegroup = prelude_rule(
                 Override the executable bit for every file in the filegroup. If not set, the executable bits are preserved.
                 Cannot be used if `copy` is set to false.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "has_content_based_path": attrs.bool(default = False),
             "out": attrs.option(attrs.string(), default = None, doc = """
                 The name of the output directory. Defaults to the rule's name.
             """),
+            "uses_experimental_content_based_path_hashing": attrs.bool(default = False),
         } |
-        _has_content_based_path_attr() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -785,8 +674,9 @@ genrule = prelude_rule(
                 Only valid if the `outs` arg is present. Dictates which of those named outputs are marked as
                 executable.
             """),
+            "has_content_based_path": attrs.bool(default = False),
+            "uses_experimental_content_based_path_hashing": attrs.bool(default = False),
         } |
-        _has_content_based_path_attr() |
         genrule_common.env_arg() |
         genrule_common.environment_expansion_separator() |
         {
@@ -806,10 +696,11 @@ genrule = prelude_rule(
                  changes in the future.
             """),
             "cacheable": attrs.option(attrs.bool(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "need_android_tools": attrs.bool(default = False),
             "_exec_os_type": buck.exec_os_type_arg(),
         } |
         genrule_common.error_handler_arg() |
-        genrule_common.allow_offline_output_cache_arg() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -862,10 +753,11 @@ http_archive = prelude_rule(
         remote_common.sha256_arg() |
         remote_common.unarchive_args() |
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "sha1": attrs.option(attrs.string(), default = None),
             "size_bytes": attrs.option(attrs.int(), default = None),
+            "has_content_based_path": attrs.bool(default = False),
         } |
-        _has_content_based_path_attr() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -955,10 +847,11 @@ http_file = prelude_rule(
                  this can also be used via `run` and the
                  `$(exe )` `string parameter macros`
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "sha1": attrs.option(attrs.string(), default = None),
             "size_bytes": attrs.option(attrs.int(), default = None),
+            "has_content_based_path": attrs.bool(default = False),
         } |
-        _has_content_based_path_attr() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -967,22 +860,14 @@ http_file = prelude_rule(
 
 platform = prelude_rule(
     name = "platform",
-    docs = "Declares a platform, which is a build configuration composed of constraint values.",
+    docs = "",
     examples = None,
     further = None,
     attrs = (
         # @unsorted-dict-items
         {
-            "constraint_values": attrs.list(
-                attrs.configuration_label(),
-                default = [],
-                doc = "List of constraint values that are set for this platform.",
-            ),
-            "deps": attrs.list(
-                attrs.configuration_label(),
-                default = [],
-                doc = "List of other platform target dependencies. The constraints from these platforms will be part of this platform (unless overridden)",
-            ),
+            "constraint_values": attrs.list(attrs.configuration_label(), default = []),
+            "deps": attrs.list(attrs.configuration_label(), default = []),
         }
     ),
 )
@@ -1091,9 +976,10 @@ remote_file = prelude_rule(
 
                  Zip archive which will be automatically unzipped into an output directory.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "sha256": attrs.option(attrs.string(), default = None),
+            "has_content_based_path": attrs.bool(default = False),
         } |
-        _has_content_based_path_attr() |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -1183,6 +1069,7 @@ test_suite = prelude_rule(
             # This diff makes the behaviors match by adding a test_deps attribute to test_suite on buck2 that is used as a deps attribute. In the macro layer, we set test_deps = tests if we are using buck2.
             # For more context: https://fb.prod.workplace.com/groups/603286664133355/posts/682567096205311/?comment_id=682623719532982&reply_comment_id=682650609530293
             "test_deps": attrs.list(attrs.dep(), default = []),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -1213,6 +1100,7 @@ versioned_alias = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "versions": attrs.dict(key = attrs.string(), value = attrs.dep(), sorted = False, default = {}),
         } |
         buck.licenses_arg() |
@@ -1434,7 +1322,7 @@ worker_tool = prelude_rule(
                  rule being built more than once. Be careful not to use this setting with tools that don't expect
                  to process the same input—with different contents—twice!
             """),
-
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             # FIXME: prelude// should be standalone (not refer to fbsource//)
             "_worker_tool_runner": attrs.default_only(attrs.dep(default = "prelude//js/worker_runner:worker_tool_runner")),
         } |
@@ -1541,15 +1429,12 @@ zip_file = prelude_rule(
                 * `append`: all entries are added to the output file.
                 * `fail`: fail the build when duplicate entries are present.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
     ),
-)
-
-core_args = struct(
-    has_content_based_path_attr = _has_content_based_path_attr,
 )
 
 core_rules = struct(
@@ -1561,7 +1446,6 @@ core_rules = struct(
     constraint_setting = constraint_setting,
     constraint = constraint,
     constraint_value = constraint_value,
-    exec_platform_marker_constraint = exec_platform_marker_constraint,
     export_file = export_file,
     external_test_runner = external_test_runner,
     filegroup = filegroup,

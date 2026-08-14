@@ -1,0 +1,23 @@
+platform(
+    name = "macos_arm64",
+    constraint_values = [
+        "config//os/constraints:macos",
+        "config//cpu/constraints:arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "linux_x86_64",
+    constraint_values = [
+        "config//os/constraints:linux",
+        "config//cpu/constraints:x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+alias(
+    name = "windows_x86_64_msvc",
+    actual = "//windows:windows_x86_64_msvc",
+    visibility = ["PUBLIC"],
+)

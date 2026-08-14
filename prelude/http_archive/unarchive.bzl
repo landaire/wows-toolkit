@@ -48,6 +48,26 @@ def archive_type(url_or_path: str, typ: str | None) -> str:
 #
 # 1. The cmd_args with the unarchive command
 # 2. A bool indicating whether the prefix still needs to be stripped (in cases where the tool used to uncompress does not support this feature).
+def _nix_tool(name):
+    root = read_root_config("nix_toolchain", "root")
+    if root == None:
+        fail("Missing [nix_toolchain] root. Run `nu scripts/refresh-buck-toolchain.nu` before invoking Buck2.")
+    return root + "/bin/" + name
+
+# GNU tar spawns its decompressor through PATH, which the actions clear.
+_NIX_TAR_DECOMPRESSORS = {
+    "tar.bz2": "bzip2",
+    "tar.gz": "gzip",
+    "tar.xz": "xz",
+    "tar.zst": "unzstd",
+}
+
+def _nix_tar_flags(ext_type: str) -> list[str]:
+    decompressor = _NIX_TAR_DECOMPRESSORS.get(ext_type)
+    if decompressor == None:
+        return []
+    return ["--use-compress-program=" + _nix_tool(decompressor)]
+
 def _unarchive_cmd(
         ext_type: str,
         exec_is_windows: bool,
@@ -94,8 +114,8 @@ def _unarchive_cmd(
             "-P",
         ] if exec_is_windows else []
         return cmd_args(
-            "tar",
-            _TAR_FLAGS[ext_type],
+            "tar" if exec_is_windows else _nix_tool("tar"),
+            _TAR_FLAGS[ext_type] if exec_is_windows else _nix_tar_flags(ext_type),
             os_flags,
             "-x",
             "-f",
@@ -104,7 +124,8 @@ def _unarchive_cmd(
         ), False
     elif ext_type == "zip":
         # gnutar does not intrinsically support zip
-        return cmd_args(archive, format = "unzip {}"), bool(strip_prefix)
+        unzip = "unzip" if exec_is_windows else _nix_tool("unzip")
+        return cmd_args(archive, format = unzip + " {}"), bool(strip_prefix)
     else:
         fail()
 
@@ -135,8 +156,8 @@ def unarchive(
         first_param = "%1"
     else:
         ext = "sh"
-        mkdir = "mkdir -p {}"
-        interpreter = ["/bin/sh"]
+        mkdir = _nix_tool("mkdir") + " -p {}"
+        interpreter = [_nix_tool("bash")]
         first_param = '"$1"'
 
     # Unpack archive to output directory.
@@ -149,8 +170,8 @@ def unarchive(
         # Tar excludes files using globs, but we take regexes, so we need to
         # apply our regexes onto the file listing and produce an exclusion list
         # that just has strings.
-        exclusions = ctx.actions.declare_output(output_name + "_exclusions", has_content_based_path = False)
-        contents = ctx.actions.declare_output(output_name + "_contents", has_content_based_path = False)
+        exclusions = ctx.actions.declare_output(output_name + "_exclusions")
+        contents = ctx.actions.declare_output(output_name + "_contents")
         tar_script, _ = ctx.actions.write(
             "{}_listing.{}".format(output_name, ext),
             [cmd_args(
@@ -189,7 +210,7 @@ def unarchive(
     unarchive_cmd, needs_strip_prefix = _unarchive_cmd(ext_type, exec_is_windows, archive, strip_prefix)
 
     output = ctx.actions.declare_output(output_name, dir = True, has_content_based_path = has_content_based_path)
-    script_output = ctx.actions.declare_output(output_name + "_tmp", dir = True, has_content_based_path = False) if needs_strip_prefix else output
+    script_output = ctx.actions.declare_output(output_name + "_tmp", dir = True) if needs_strip_prefix else output
 
     script, _ = ctx.actions.write(
         "{}_unpack.{}".format(output_name, ext),

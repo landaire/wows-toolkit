@@ -1,4 +1,3 @@
 [buildscript.run]
-env = { DEBUG = "true", OPT_LEVEL = "0", PROFILE = "debug" }
 rustc_link_lib = true
 rustc_link_search = true

@@ -25,27 +25,26 @@ def get_nullsafe_info(
     nullsafe_extra_args = java_toolchain.nullsafe_extra_args
 
     if nullsafe_plugin:
-        nullsafe_output = ctx.actions.declare_output("reports", dir = True, has_content_based_path = True)
+        nullsafe_output = ctx.actions.declare_output("reports", dir = True)
+        nullsafe_plugin_params = create_plugin_params(ctx, [nullsafe_plugin])
 
-        plugin_args = cmd_args()
-        plugin_args.add("nullsafe.reportToJava=false")
-        plugin_args.add(cmd_args(
+        nullsafe_args = cmd_args(
+            "-XDcompilePolicy=simple",
+            "-Anullsafe.reportToJava=false",
+        )
+        nullsafe_args.add(cmd_args(
             nullsafe_output.as_output(),
-            format = "nullsafe.writeJsonReportToDir={}",
+            format = "-Anullsafe.writeJsonReportToDir={}",
         ))
         if nullsafe_signatures:
-            plugin_args.add(cmd_args(
+            nullsafe_args.add(cmd_args(
                 nullsafe_signatures,
-                format = "nullsafe.signatures={}",
+                format = "-Anullsafe.signatures={}",
             ))
-
         if nullsafe_extra_args:
-            plugin_args.add(nullsafe_extra_args)
+            nullsafe_args.add(nullsafe_extra_args)
 
-        nullsafe_plugin_params = create_plugin_params(ctx, [(nullsafe_plugin, plugin_args)])
-
-        # -XDcompilePolicy=simple is a javac flag, not a plugin option
-        extra_arguments.add("-XDcompilePolicy=simple")
+        extra_arguments.add(nullsafe_args)
 
         return NullsafeInfo(
             output = nullsafe_output,

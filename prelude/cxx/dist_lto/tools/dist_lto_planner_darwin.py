@@ -19,6 +19,8 @@ This script:
 Starlark code holds a representation of each input object file or archive in memory in an array. When code here needs to communicate characteristics about a particular element of this array, it encodes this using the index into this array. These indices are referred to as "starlark array index"
 """
 
+# pyre-unsafe
+
 import argparse
 import dataclasses
 import json
@@ -27,7 +29,6 @@ import os.path
 import subprocess
 import sys
 import tempfile
-import traceback
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -277,9 +278,9 @@ def main(argv):
 
             merge_state = None
             if premerger_enabled:
-                assert os.path.exists(merged_bitcode_path), (
-                    f"missing merged bitcode file at {merged_bitcode_path}"
-                )
+                assert os.path.exists(
+                    merged_bitcode_path
+                ), f"missing merged bitcode file at {merged_bitcode_path}"
                 merge_state = read_merged_bitcode_file(merged_bitcode_path)
                 if merge_state == BitcodeMergeState.ABSORBED:
                     absorbed_source_files.add(path)
@@ -323,9 +324,4 @@ def main(argv):
         )
 
 
-if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv))
-    except subprocess.CalledProcessError as e:
-        traceback.print_exc()
-        sys.exit(e.returncode)
+sys.exit(main(sys.argv))

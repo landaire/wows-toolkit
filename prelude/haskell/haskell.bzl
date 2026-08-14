@@ -460,7 +460,7 @@ def _make_package(
     ]
     pkg_conf = ctx.actions.write("pkg-" + artifact_suffix + ".conf", conf)
 
-    db = ctx.actions.declare_output("db-" + artifact_suffix, has_content_based_path = False)
+    db = ctx.actions.declare_output("db-" + artifact_suffix)
 
     # While the list of hlis is unique, there may be multiple packages in the same db.
     # Cutting down the GHC_PACKAGE_PATH significantly speeds up GHC.
@@ -573,7 +573,7 @@ def _build_haskell_lib(
     objfiles = _srcs_to_objfiles(ctx, compiled.objects, osuf)
 
     if link_style == LinkStyle("shared"):
-        lib = ctx.actions.declare_output(lib_short_path, has_content_based_path = False)
+        lib = ctx.actions.declare_output(lib_short_path)
         link = cmd_args(
             [haskell_toolchain.linker] +
             [haskell_toolchain.linker_flags] +
@@ -593,9 +593,7 @@ def _build_haskell_lib(
         )
 
         infos = get_link_args_for_strategy(
-            ctx.actions,
-            ctx.label,
-            linker_info,
+            ctx,
             nlis,
             to_link_strategy(link_style),
             prefer_stripped = False,
@@ -616,8 +614,7 @@ def _build_haskell_lib(
     else:  # static flavours
         # TODO: avoid making an archive for a single object, like cxx does
         # (but would that work with Template Haskell?)
-        # TODO: Opt haskell actions into content based paths.
-        archive = make_archive(ctx, lib_short_path, objfiles, force_disable_content_based_path = True)
+        archive = make_archive(ctx, lib_short_path, objfiles)
         lib = archive.artifact
         libs = [lib] + (archive.external_objects if archive.archive_contents_type == ArchiveContentsType("thin") else [])
         link_infos = LinkInfos(
@@ -888,9 +885,7 @@ def haskell_library_impl(ctx: AnalysisContext) -> list[Provider]:
         args.add(linker_info.linker_flags)
         args.add(unpack_link_args(
             get_link_args_for_strategy(
-                ctx.actions,
-                ctx.label,
-                linker_info,
+                ctx,
                 [merged_link_info],
                 to_link_strategy(link_style),
                 prefer_stripped = False,
@@ -958,7 +953,7 @@ def haskell_binary_impl(ctx: AnalysisContext) -> list[Provider]:
 
     haskell_toolchain = ctx.attrs._haskell_toolchain[HaskellToolchainInfo]
 
-    output = ctx.actions.declare_output(ctx.attrs.name, has_content_based_path = False)
+    output = ctx.actions.declare_output(ctx.attrs.name)
     link = cmd_args(
         [haskell_toolchain.compiler] +
         ["-o", output.as_output()] +
@@ -1135,11 +1130,8 @@ def haskell_binary_impl(ctx: AnalysisContext) -> list[Provider]:
             if li != None:
                 nlis.append(li)
         sos.extend(traverse_shared_library_info(shlib_info, transformation_provider = None))
-        cxx_toolchain = ctx.attrs._cxx_toolchain[CxxToolchainInfo]
         infos = get_link_args_for_strategy(
-            ctx.actions,
-            ctx.label,
-            cxx_toolchain.linker_info,
+            ctx,
             nlis,
             to_link_strategy(link_style),
             prefer_stripped = False,

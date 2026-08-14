@@ -108,10 +108,8 @@ public class KosabiStubgenStep extends KotlincStep {
 
   @Override
   protected void configureSourceOnlyOptions(
-      ImmutableList.Builder<String> builder,
-      LanguageVersion languageVersion,
-      AbsPath ruleCellRoot) {
-    super.configureSourceOnlyOptions(builder, languageVersion, ruleCellRoot);
+      ImmutableList.Builder<String> builder, LanguageVersion languageVersion) {
+    super.configureSourceOnlyOptions(builder, languageVersion);
     builder.add("-P");
     builder.add(pluginPath + ":stubsgen-dir=" + stubgenDir.toString());
 

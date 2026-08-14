@@ -13,7 +13,9 @@ from pathlib import Path
 from typing import List, Optional, Type, TypeVar
 
 from .apple_platform import ApplePlatform
+
 from .identity import CodeSigningIdentity
+
 from .provisioning_profile_metadata import ProvisioningProfileMetadata
 
 META_IOS_DEVELOPER_CERTIFICATE_LINK: str = "https://www.internalfb.com/intern/qa/5198/how-do-i-get-the-fb-ios-developer-certificate"
@@ -154,7 +156,7 @@ _T = TypeVar("T")
 def interpret_provisioning_profile_diagnostics(
     diagnostics: List[IProvisioningProfileDiagnostics],
     bundle_id: str,
-    provisioning_profiles_dirs: List[Path],
+    provisioning_profiles_dir: Path,
     identities: List[CodeSigningIdentity],
     log_file_path: Optional[Path] = None,
 ) -> str:
@@ -162,23 +164,10 @@ def interpret_provisioning_profile_diagnostics(
         raise RuntimeError(
             "Expected diagnostics information for at least one mismatching provisioning profile."
         )
-    if not provisioning_profiles_dirs:
-        raise RuntimeError("Expected at least one provisioning profiles directory.")
 
-    dirs_msg = ", ".join(f"`{d}`" for d in provisioning_profiles_dirs)
-    header = f"Failed to find provisioning profile in directories {dirs_msg} that is suitable for code signing. Here is the best guess for how to fix it:\n\n⚠️  "
+    header = f"Failed to find provisioning profile in directory `{provisioning_profiles_dir}` that is suitable for code signing. Here is the best guess for how to fix it:\n\n⚠️  "
     footer = f"\n\nFor more info about running on an iOS device read {META_IOS_BUILD_AND_RUN_ON_DEVICE_LINK}."
     if log_file_path:
-        non_bundle_id_mismatches = [
-            f"`{mismatch.profile.file_path.name}`: {mismatch.log_message()}"
-            for mismatch in diagnostics
-            if not isinstance(mismatch, BundleIdMismatch)
-        ]
-        if non_bundle_id_mismatches:
-            provisioning_profile_errors = "\n\n".join(non_bundle_id_mismatches)
-            footer += f" Mismatched profiles:\n\n{provisioning_profile_errors}\n"
-        else:
-            footer += f" All mismatches were due to Bundle ID `{bundle_id}` not matching any provisioning profile.\n"
         footer += (
             f" Full list of mismatched profiles can be found at `{log_file_path}`.\n"
         )

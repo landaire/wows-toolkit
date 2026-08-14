@@ -10,10 +10,7 @@
 
 package com.facebook.buck.android.apk.sdk;
 
-import com.facebook.infer.annotation.Nullsafe;
-
 /** An exception thrown during packaging of an APK file. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public final class ApkCreationException extends Exception {
   private static final long serialVersionUID = 1L;
 

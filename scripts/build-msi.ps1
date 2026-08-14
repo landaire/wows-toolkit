@@ -6,8 +6,15 @@ param()
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
+# The provisioned Buck2, not whatever is on PATH: the vendored prelude only
+# loads under the release it was expanded from.
+$buck2 = "toolchains/windows/offline/installed/Buck2/2025-12-01/buck2.exe"
+if (-not (Test-Path -LiteralPath $buck2 -PathType Leaf)) {
+    throw "Missing $buck2. Run toolchains/windows/provision-toolchain.ps1 first."
+}
+
 $target = "toolchains//windows:wows_toolkit_msi"
-$output = & buck2 build --show-output --target-platforms toolchains//windows:windows_x86_64_msvc -c native_build.mode=release $target
+$output = & $buck2 build --show-output --target-platforms toolchains//windows:windows_x86_64_msvc -c native_build.mode=release $target
 if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }

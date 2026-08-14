@@ -32,6 +32,9 @@ def get_aapt2_link(
         android_manifest: Artifact,
         manifest_entries: dict,
         includes_vector_drawables: bool,
+        no_auto_version: bool,
+        no_version_transitions: bool,
+        no_auto_add_overlay: bool,
         no_resource_removal: bool,
         should_keep_raw_values: bool,
         package_id_offset: int,
@@ -54,20 +57,20 @@ def get_aapt2_link(
 
         # aapt2 only supports @ for -R or input files, not for all args, so we pass in all "normal"
         # args here.
-        resources_apk = ctx.actions.declare_output("{}/resource-apk.ap_".format(identifier), has_content_based_path = False)
+        resources_apk = ctx.actions.declare_output("{}/resource-apk.ap_".format(identifier))
         aapt2_command.add(["-o", resources_apk.as_output()])
-        proguard_config = ctx.actions.declare_output("{}/proguard_config.pro".format(identifier), has_content_based_path = False)
+        proguard_config = ctx.actions.declare_output("{}/proguard_config.pro".format(identifier))
         aapt2_command.add(["--proguard", proguard_config.as_output()])
 
         # We don't need the R.java output, but aapt2 won't output R.txt unless we also request R.java.
         # A drawback of this is that the directory structure for the R.java output is deep, resulting
         # in long path issues on Windows. The structure is <path to target>/<identifier>/unused-rjava/<package>/R.java
         # We can declare a custom dummy package to drastically shorten <package>, which is sketchy, but effective
-        r_dot_java = ctx.actions.declare_output("{}/unused-rjava".format(identifier), dir = True, has_content_based_path = False)
+        r_dot_java = ctx.actions.declare_output("{}/unused-rjava".format(identifier), dir = True)
         aapt2_command.add(["--java", r_dot_java.as_output()])
         aapt2_command.add(["--custom-package", "dummy.package"])
 
-        r_dot_txt = ctx.actions.declare_output("{}/R.txt".format(identifier), has_content_based_path = False)
+        r_dot_txt = ctx.actions.declare_output("{}/R.txt".format(identifier))
         aapt2_command.add(["--output-text-symbols", r_dot_txt.as_output()])
 
         aapt2_command.add(["--manifest", android_manifest])
@@ -75,7 +78,12 @@ def get_aapt2_link(
 
         if includes_vector_drawables:
             aapt2_command.add("--no-version-vectors")
-        aapt2_command.add("--auto-add-overlay")
+        if no_auto_version:
+            aapt2_command.add("--no-auto-version")
+        if no_version_transitions:
+            aapt2_command.add("--no-version-transitions")
+        if not no_auto_add_overlay:
+            aapt2_command.add("--auto-add-overlay")
         if use_proto_format:
             aapt2_command.add("--proto-format")
         if no_resource_removal:
@@ -130,7 +138,7 @@ def get_aapt2_link(
 
         aapt2_command.add(additional_aapt2_params)
 
-        ctx.actions.run(aapt2_command, category = "aapt2_link", identifier = identifier, allow_cache_upload = True, error_handler = aapt_link_error_handler)
+        ctx.actions.run(aapt2_command, category = "aapt2_link", identifier = identifier, error_handler = aapt_link_error_handler)
 
         # The normal resource filtering apparatus is super slow, because it extracts the whole apk,
         # strips files out of it, then repackages it.
@@ -140,12 +148,12 @@ def get_aapt2_link(
         #
         # If zip -d returns that there was nothing to do, then we don't fail.
         if len(extra_filtered_resources) > 0:
-            filtered_resources_apk = ctx.actions.declare_output("{}/filtered-resource-apk.ap_".format(identifier), has_content_based_path = False)
+            filtered_resources_apk = ctx.actions.declare_output("{}/filtered-resource-apk.ap_".format(identifier))
             filter_resources_cmd = cmd_args(ctx.attrs._android_toolchain[AndroidToolchainInfo].aapt2_filter_resources)
             filter_resources_cmd.add(cmd_args(resources_apk, format = "--input-apk={}"))
             filter_resources_cmd.add(cmd_args(filtered_resources_apk.as_output(), format = "--output-apk={}"))
             filter_resources_cmd.add(cmd_args(extra_filtered_resources, format = "--extra-filtered-resources={}"))
-            ctx.actions.run(filter_resources_cmd, category = "aapt2_filter_resources", identifier = identifier, allow_cache_upload = True)
+            ctx.actions.run(filter_resources_cmd, category = "aapt2_filter_resources", identifier = identifier)
             primary_resources_apk = filtered_resources_apk
         else:
             primary_resources_apk = resources_apk
@@ -169,22 +177,21 @@ def get_module_manifest_in_proto_format(
 
     # aapt2 only supports @ for -R or input files, not for all args, so we pass in all "normal"
     # args here.
-    resources_apk = ctx.actions.declare_output("{}/resource-apk.ap_".format(module_name), has_content_based_path = False)
+    resources_apk = ctx.actions.declare_output("{}/resource-apk.ap_".format(module_name))
     aapt2_command.add(["-o", resources_apk.as_output()])
     aapt2_command.add(["--manifest", android_manifest])
     aapt2_command.add(["-I", android_toolchain.android_jar])
     aapt2_command.add(["-I", primary_resources_apk])
     aapt2_command.add("--proto-format")
 
-    ctx.actions.run(aapt2_command, category = "aapt2_link", identifier = module_name, allow_cache_upload = True, error_handler = aapt_link_error_handler)
+    ctx.actions.run(aapt2_command, category = "aapt2_link", identifier = module_name, error_handler = aapt_link_error_handler)
 
-    proto_manifest_dir = ctx.actions.declare_output("{}/proto_format_manifest".format(module_name), has_content_based_path = False)
+    proto_manifest_dir = ctx.actions.declare_output("{}/proto_format_manifest".format(module_name))
     proto_manifest = proto_manifest_dir.project("AndroidManifest.xml")
     ctx.actions.run(
         cmd_args(["unzip", resources_apk, "AndroidManifest.xml", "-d", proto_manifest_dir.as_output()]),
         category = "unzip_proto_format_manifest",
         identifier = module_name,
-        allow_cache_upload = True,
     )
 
     return proto_manifest

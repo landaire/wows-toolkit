@@ -19,14 +19,12 @@ import com.facebook.buck.jvm.java.CompileToJarStepFactory;
 import com.facebook.buck.jvm.java.CompilerOutputPathsValue;
 import com.facebook.buck.jvm.java.JarParameters;
 import com.facebook.buck.jvm.java.ResolvedJavac;
-import com.facebook.infer.annotation.Nullsafe;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 /** Builder that creates library jar steps. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public interface LibraryStepsBuilder extends CompileStepsBuilder {
 
   void addMakeMissingOutputsStep(RelPath annotationsPath);

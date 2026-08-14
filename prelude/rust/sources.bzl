@@ -6,21 +6,7 @@
 # of this source tree. You may select, at your option, one of the
 # above-listed licenses.
 
-def _get_artifacts(sources: Artifact) -> list[Artifact]:
-    return [sources]
-
-RustSourcesTSet = transitive_set(
-    args_projections = {
-        "artifacts": _get_artifacts,
-    },
-)
-
-# Sources of all transitive Rust dependencies. This is required for compilation in order to
-# guarantee consistent crate hashes between local and remote actions.
-# See https://github.com/rust-lang/rust/issues/153898
-RustSources = provider(fields = {
-    "tset": RustSourcesTSet,
-})
+RustSources = provider(fields = {})
 
 def srcs_arg():
     return {
@@ -64,7 +50,7 @@ def srcs_filegroup_arg():
             doc = """
     Directory of sources already combined together from `srcs` + `mapped_srcs`.
     This allows sources to be located in a different Buck package than the one
-    containing the rust_library target which compiles those sources.
+    containing the rust_library target which copmiles those sources.
 
     When using `srcs_filegroup`, the attributes `srcs` and `mapped_srcs` cannot
     also be passed, and `crate_root` must be passed.
@@ -89,8 +75,6 @@ def symlinked_srcs(ctx: AnalysisContext) -> Artifact:
     srcs = {src.short_path: src for src in ctx.attrs.srcs}
     srcs.update({k: v for v, k in ctx.attrs.mapped_srcs.items()})
 
-    use_cbp = getattr(ctx.attrs, "use_content_based_paths", False)
-
     if "generated" in getattr(ctx.attrs, "labels", []):
         # For generated code targets, we always want to copy files in the [sources]
         # subtarget, never symlink.
@@ -101,7 +85,7 @@ def symlinked_srcs(ctx: AnalysisContext) -> Artifact:
         # VS Code will expand symlinks when doing go-to-definition. In normal source
         # files this takes us back to the correct path, but for generated files the
         # expanded path may not be a well-formed crate layout.
-        return ctx.actions.copied_dir("__srcs", srcs, has_content_based_path = use_cbp)
+        return ctx.actions.copied_dir("__srcs", srcs)
     else:
         # Decide whether to use symlinked_dir or copied_dir.
         #
@@ -112,29 +96,21 @@ def symlinked_srcs(ctx: AnalysisContext) -> Artifact:
         prefixes = {}
         for src in sorted(srcs.keys(), key = len, reverse = True):
             if src in prefixes:
-                return ctx.actions.copied_dir("__srcs", srcs, has_content_based_path = use_cbp)
+                return ctx.actions.copied_dir("__srcs", srcs)
             components = src.split("/")
             for i in range(1, len(components)):
                 prefixes["/".join(components[:i])] = None
 
     # Otherwise, symlink it.
-    return ctx.actions.symlinked_dir("__srcs", srcs, has_content_based_path = use_cbp)
+    return ctx.actions.symlinked_dir("__srcs", srcs)
 
 def _rust_filegroup_impl(ctx: AnalysisContext) -> list[Provider]:
-    srcs = symlinked_srcs(ctx)
-    tset = ctx.actions.tset(
-        RustSourcesTSet,
-        value = srcs,
-        children = [],
-    )
     return [
-        DefaultInfo(default_output = srcs),
-        RustSources(tset = tset),
+        DefaultInfo(default_output = symlinked_srcs(ctx)),
+        RustSources(),
     ]
 
 rust_filegroup = rule(
     impl = _rust_filegroup_impl,
-    attrs = srcs_arg() | mapped_srcs_arg() | {
-        "use_content_based_paths": attrs.bool(default = True),
-    },
+    attrs = srcs_arg() | mapped_srcs_arg(),
 )

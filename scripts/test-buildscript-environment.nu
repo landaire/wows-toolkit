@@ -15,6 +15,6 @@ def main [] {
     )
 
     if ($actions | str contains $hostile_marker) {
-        error make "A hostile inherited environment value reached a build-script action."
+        error make {msg: "A hostile inherited environment value reached a build-script action."}
     }
 }

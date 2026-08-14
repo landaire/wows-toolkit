@@ -15,7 +15,6 @@ import com.facebook.buck.android.aapt.RDotTxtEntry.RType;
 import com.facebook.buck.core.util.log.Logger;
 import com.facebook.buck.util.ThrowingPrintWriter;
 import com.facebook.buck.util.json.ObjectMappers;
-import com.facebook.infer.annotation.Nullsafe;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Joiner;
@@ -48,7 +47,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class MergeAndroidResources {
   private static final Logger LOG = Logger.get(MergeAndroidResources.class);
 
@@ -217,8 +215,7 @@ public class MergeAndroidResources {
       }
       JsonNode jsonData = ObjectMappers.READER.readTree(ObjectMappers.createParser(path));
       for (String packageName : (Iterable<String>) jsonData::fieldNames) {
-        Iterator<JsonNode> rDotTxtLines =
-            Objects.requireNonNull(jsonData.get(packageName)).elements();
+        Iterator<JsonNode> rDotTxtLines = jsonData.get(packageName).elements();
         while (rDotTxtLines.hasNext()) {
           String rDotTxtLine = rDotTxtLines.next().asText();
           symbolsBuilder.put(packageName, parseEntryOrThrow(rDotTxtLine));
@@ -232,7 +229,7 @@ public class MergeAndroidResources {
       throws IOException {
     for (String rDotJavaPackage : rDotJavaPackages) {
       Path outputFile = getPathToRDotJava(outputDir, rDotJavaPackage);
-      Files.createDirectories(Objects.requireNonNull(outputFile.getParent()));
+      Files.createDirectories(outputFile.getParent());
       Files.write(
           outputFile,
           String.format("package %s;\n\npublic class R {}\n", rDotJavaPackage)
@@ -268,7 +265,7 @@ public class MergeAndroidResources {
     ImmutableList.Builder<Integer> allGrayscaleImagesBuilder = ImmutableList.builder();
     for (String rDotJavaPackage : packageToResources.keySet()) {
       Path outputFile = getPathToRDotJava(outputDir, rDotJavaPackage);
-      Files.createDirectories(Objects.requireNonNull(outputFile.getParent()));
+      Files.createDirectories(outputFile.getParent());
       try (ThrowingPrintWriter writer =
           new ThrowingPrintWriter(new FileOutputStream(outputFile.toFile()))) {
         writer.format("package %s;\n\n", rDotJavaPackage);
@@ -284,7 +281,7 @@ public class MergeAndroidResources {
                   || referencedResources.contains(rDotJavaPackage + "." + res.name);
           RType type = res.type;
           if (isUsed) {
-            if (!Objects.equals(type, lastType)) {
+            if (!type.equals(lastType)) {
               // If the previous type needs to be closed, close it.
               if (lastType != null) {
                 writer.println("  }\n");
@@ -373,7 +370,7 @@ public class MergeAndroidResources {
           outputDir
               .resolve(drawablesPackageReplaced)
               .resolve(String.format("%s.java", arrayHolderClassCustom));
-      Files.createDirectories(Objects.requireNonNull(customOutputFile.getParent()));
+      Files.createDirectories(customOutputFile.getParent());
       writePackagePrivateArrayHolderClass(
           customOutputFile,
           drawablesPackage,

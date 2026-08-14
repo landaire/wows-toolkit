@@ -13,6 +13,7 @@ package com.facebook.buck.util.environment;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeTrue;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -37,6 +38,7 @@ public class PlatformTest {
   @Test
   public void nullFileTest() throws IOException {
     Platform platform = Platform.detect();
+    assumeTrue(platform != Platform.UNKNOWN);
 
     File nullFile = platform.getNullDevicePath().toFile();
 

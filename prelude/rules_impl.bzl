@@ -16,7 +16,7 @@ load("@prelude//:remote_file.bzl", "remote_file_impl")
 load("@prelude//:sh_binary.bzl", "sh_binary_impl")
 load("@prelude//:sh_test.bzl", "sh_test_impl")
 load("@prelude//:test_suite.bzl", "test_suite_impl")
-load("@prelude//android:android.bzl", _android_implemented_rules = "implemented_rules")
+load("@prelude//android:android.bzl", _android_extra_attributes = "extra_attributes", _android_implemented_rules = "implemented_rules")
 load("@prelude//android:configuration.bzl", "is_building_android_binary_attr")
 load("@prelude//apple:apple_common.bzl", "apple_common")
 load("@prelude//apple:apple_rules_decls.bzl", "apple_rules")
@@ -37,11 +37,13 @@ load("@prelude//decls:android_rules.bzl", "android_rules")
 load("@prelude//decls:common.bzl", "IncludeType", "buck")
 load("@prelude//decls:core_rules.bzl", "core_rules")
 load("@prelude//decls:cxx_rules.bzl", "BUILD_INFO_ATTR", "cxx_rules")
-load("@prelude//decls:cython_rules.bzl", "cython_rules")
+load("@prelude//decls:d_rules.bzl", "d_rules")
 load("@prelude//decls:dotnet_rules.bzl", "dotnet_rules")
 load("@prelude//decls:erlang_rules.bzl", "erlang_rules")
 load("@prelude//decls:git_rules.bzl", "git_rules")
 load("@prelude//decls:go_rules.bzl", "go_rules")
+load("@prelude//decls:groovy_rules.bzl", "groovy_rules")
+load("@prelude//decls:halide_rules.bzl", "halide_rules")
 load("@prelude//decls:haskell_rules.bzl", "haskell_rules")
 load("@prelude//decls:java_rules.bzl", "java_rules")
 load("@prelude//decls:js_rules.bzl", "js_rules")
@@ -51,6 +53,7 @@ load("@prelude//decls:ocaml_rules.bzl", "ocaml_rules")
 load("@prelude//decls:python_rules.bzl", "python_rules")
 load("@prelude//decls:re_test_common.bzl", "re_test_common")
 load("@prelude//decls:rust_rules.bzl", "rust_rules")
+load("@prelude//decls:scala_rules.bzl", "scala_rules")
 load("@prelude//decls:shell_rules.bzl", "shell_rules")
 load("@prelude//decls:third_party_common.bzl", "third_party_common")
 load("@prelude//decls:toolchains_common.bzl", "toolchains_common")
@@ -71,11 +74,11 @@ load("@prelude//haskell:haskell_haddock.bzl", "haskell_haddock_impl")
 load("@prelude//haskell:haskell_ide.bzl", "haskell_ide_impl")
 load("@prelude//haskell:library_info.bzl", "HaskellLibraryProvider")
 load("@prelude//http_archive:http_archive.bzl", "http_archive_impl")
-load("@prelude//java:java.bzl", _java_implemented_rules = "implemented_rules")
+load("@prelude//java:java.bzl", _java_extra_attributes = "extra_attributes", _java_implemented_rules = "implemented_rules")
 load("@prelude//js:js.bzl", _js_extra_attributes = "extra_attributes", _js_implemented_rules = "implemented_rules")
 load("@prelude//js:worker_tool.bzl", "worker_tool")
 load("@prelude//julia:julia.bzl", _julia_extra_attributes = "extra_attributes", _julia_implemented_rules = "implemented_rules")
-load("@prelude//kotlin:kotlin.bzl", _kotlin_implemented_rules = "implemented_rules")
+load("@prelude//kotlin:kotlin.bzl", _kotlin_extra_attributes = "extra_attributes", _kotlin_implemented_rules = "implemented_rules")
 load("@prelude//linking:execution_preference.bzl", "link_execution_preference_attr")
 load("@prelude//linking:link_info.bzl", "LinkOrdering")
 load("@prelude//linking:types.bzl", "Linkage")
@@ -92,9 +95,6 @@ load("@prelude//python:python_library.bzl", "python_library_impl")
 load("@prelude//python:python_needed_coverage_test.bzl", "python_needed_coverage_test_impl")
 load("@prelude//python:python_runtime_bundle.bzl", "python_runtime_bundle_impl")
 load("@prelude//python:python_test.bzl", "python_test_impl")
-load("@prelude//python/cython:cython_library.bzl", "cython_library_impl")
-load("@prelude//python/cython:cython_static_extension.bzl", "cython_static_extension_impl")
-load("@prelude//python/cython:cython_toolchain.bzl", "cython_toolchain_impl")
 load("@prelude//python_bootstrap:python_bootstrap.bzl", "PythonBootstrapSources", "python_bootstrap_binary_impl", "python_bootstrap_library_impl")
 load("@prelude//third-party:providers.bzl", "ThirdPartyBuildInfo")
 load("@prelude//transitions:constraint_overrides.bzl", "constraint_overrides")
@@ -103,11 +103,13 @@ load("@prelude//zip_file:zip_file.bzl", _zip_file_extra_attributes = "extra_attr
 _ANDROID_RULES_KEY = "android"
 _CORE_RULES_KEY = "core"
 _CXX_RULES_KEY = "cxx"
-_CYTHON_RULES_KEY = "cython"
+_D_RULES_KEY = "d"
 _DOTNET_RULES_KEY = ".NET"
 _ERLANG_RULES_KEY = "erlang"
 _GIT_RULES_KEY = "git"
 _GO_RULES_KEY = "go"
+_GROOVY_RULES_KEY = "groovy"
+_HALIDE_RULES_KEY = "halide"
 _HASKELL_RULES_KEY = "haskell"
 _APPLE_RULES_KEY = "apple"
 _JAVA_RULES_KEY = "java"
@@ -117,6 +119,7 @@ _LUA_RULES_KEY = "lua"
 _OCAML_RULES_KEY = "ocaml"
 _PYTHON_RULES_KEY = "python"
 _RUST_RULES_KEY = "rust"
+_SCALA_RULES_KEY = "scala"
 _SHELL_RULES_KEY = "shell"
 _UNCATEGORIZED_RULES_KEY = "uncategorized"
 
@@ -127,11 +130,13 @@ categorized_rule_decl_records = {
     _ANDROID_RULES_KEY: android_rules,
     _CORE_RULES_KEY: core_rules,
     _CXX_RULES_KEY: cxx_rules,
-    _CYTHON_RULES_KEY: cython_rules,
+    _D_RULES_KEY: d_rules,
     _DOTNET_RULES_KEY: dotnet_rules,
     _ERLANG_RULES_KEY: erlang_rules,
     _GIT_RULES_KEY: git_rules,
     _GO_RULES_KEY: go_rules,
+    _GROOVY_RULES_KEY: groovy_rules,
+    _HALIDE_RULES_KEY: halide_rules,
     _HASKELL_RULES_KEY: haskell_rules,
     _APPLE_RULES_KEY: apple_rules,
     _JAVA_RULES_KEY: java_rules,
@@ -141,6 +146,7 @@ categorized_rule_decl_records = {
     _OCAML_RULES_KEY: ocaml_rules,
     _PYTHON_RULES_KEY: python_rules,
     _RUST_RULES_KEY: rust_rules,
+    _SCALA_RULES_KEY: scala_rules,
     _SHELL_RULES_KEY: shell_rules,
     _UNCATEGORIZED_RULES_KEY: uncategorized_rules,
 }
@@ -189,11 +195,6 @@ extra_implemented_rules = struct(
     prebuilt_cxx_library_group = prebuilt_cxx_library_group_impl,
     windows_resource = windows_resource_impl,
     transformation_spec = transformation_spec_impl,
-
-    #cython
-    cython_library = cython_library_impl,
-    cython_static_extension = cython_static_extension_impl,
-    cython_toolchain = cython_toolchain_impl,
 
     # C++ / LLVM
     llvm_link_bitcode = llvm_link_bitcode_impl,
@@ -268,7 +269,7 @@ def _python_runtime_bundle_attrs():
         "py_version": attrs.string(doc = "The version of python this represents"),
         "shared_libs": attrs.list(attrs.dep(), default = [], doc = "Additional shared libraries required by this runtime"),
         "stdlib": attrs.string(doc = "The python standard library"),
-    } | buck.labels_arg() | buck.contacts_arg()
+    }
 
 _dotnet_extra_attributes = {
     "csharp_library": {
@@ -377,6 +378,7 @@ control how the dependencies of this library are linked, use `link_style` instea
 
 _go_extra_attributes = {
     "go_binary": {
+        "embedcfg": attrs.option(attrs.source(allow_directory = False), default = None),
         "resources": attrs.list(attrs.one_of(attrs.dep(), attrs.source(allow_directory = True)), default = []),
         "_build_info": BUILD_INFO_ATTR,
         "_build_tags": build_tags_attr,
@@ -390,6 +392,7 @@ _go_extra_attributes = {
         "_go_bootstrap_toolchain": toolchains_common.go_bootstrap(),
     },
     "go_exported_library": {
+        "embedcfg": attrs.option(attrs.source(allow_directory = False), default = None),
         "_build_info": BUILD_INFO_ATTR,
         "_build_tags": build_tags_attr,
         "_cxx_toolchain": toolchains_common.cxx(),
@@ -398,6 +401,7 @@ _go_extra_attributes = {
         "_go_toolchain": toolchains_common.go(),
     },
     "go_library": {
+        "embedcfg": attrs.option(attrs.source(allow_directory = False), default = None),
         "_build_tags": build_tags_attr,
         "_cgo_enabled": cgo_enabled_attr,
         "_coverage_mode": coverage_mode_attr,
@@ -415,6 +419,7 @@ _go_extra_attributes = {
     },
     "go_test": {
         "coverage_mode": attrs.option(attrs.enum(GoCoverageMode.values()), default = None),
+        "embedcfg": attrs.option(attrs.source(allow_directory = False), default = None),
         "resources": attrs.list(attrs.source(allow_directory = True), default = []),
         "_build_info": BUILD_INFO_ATTR,
         "_build_tags": build_tags_attr,
@@ -423,7 +428,16 @@ _go_extra_attributes = {
         "_exec_os_type": buck.exec_os_type_arg(),
         "_go_stdlib": attrs.default_only(attrs.dep(default = "prelude//go/tools:stdlib")),
         "_go_toolchain": toolchains_common.go(),
-        "_testmaingen": attrs.default_only(attrs.exec_dep(providers = [RunInfo], default = "prelude//go/tools:testmaingen")),
+        "_testmaingen": attrs.default_only(attrs.exec_dep(providers = [RunInfo], default = "prelude//go_bootstrap/tools:go_testmaingen")),
+    },
+}
+
+_groovy_extra_attributes = {
+    "groovy_library": {
+        "resources_root": attrs.option(attrs.string(), default = None),
+    },
+    "groovy_test": {
+        "resources_root": attrs.option(attrs.string(), default = None),
     },
 }
 
@@ -464,12 +478,12 @@ _python_extra_attributes = {
         "has_content_based_path": attrs.bool(default = False),
         "main": attrs.source(),
         "_python_bootstrap_toolchain": toolchains_common.python_bootstrap(),
-    } | buck.labels_arg() | buck.contacts_arg(),
+    },
     "python_bootstrap_library": {
         "deps": attrs.list(attrs.dep(providers = [PythonBootstrapSources]), default = []),
         "has_content_based_path": attrs.bool(default = False),
         "srcs": attrs.list(attrs.source()),
-    } | buck.labels_arg() | buck.contacts_arg(),
+    },
     "python_needed_coverage_test": dict(
         contacts = attrs.list(attrs.string(), default = []),
         env = attrs.dict(key = attrs.string(), value = attrs.arg(), sorted = False, default = {}),
@@ -506,24 +520,19 @@ _uncategorized_extra_attributes = {
     },
 }
 
-_cython_extra_attributes = {
-    "cython_library": _cxx_extra_library_attrs,
-    "cython_static_extension": _cxx_extra_library_attrs,
-}
-
 categorized_extra_attributes = {
-    _ANDROID_RULES_KEY: {},
+    _ANDROID_RULES_KEY: _android_extra_attributes,
     _CORE_RULES_KEY: _core_extra_attributes,
     _CXX_RULES_KEY: cxx_extra_attributes,
-    _CYTHON_RULES_KEY: _cython_extra_attributes,
     _DOTNET_RULES_KEY: _dotnet_extra_attributes,
     _GO_RULES_KEY: _go_extra_attributes,
+    _GROOVY_RULES_KEY: _groovy_extra_attributes,
     _HASKELL_RULES_KEY: _haskell_extra_attributes,
     _APPLE_RULES_KEY: _apple_extra_attributes,
-    _JAVA_RULES_KEY: {},
+    _JAVA_RULES_KEY: _java_extra_attributes,
     _JS_RULES_KEY: _js_extra_attributes,
     _JULIA_RULES_KEY: _julia_extra_attributes,
-    _KOTLIN_RULES_KEY: {},
+    _KOTLIN_RULES_KEY: _kotlin_extra_attributes,
     _MATLAB_RULES_KEY: _matlab_extra_attributes,
     _OCAML_RULES_KEY: _ocaml_extra_attributes,
     _PYTHON_RULES_KEY: _python_extra_attributes,

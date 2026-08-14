@@ -4,13 +4,15 @@ nu build-support/check-xcode.nu
 
 let toolchain_root = (^nix build --no-link --print-out-paths .#buck-toolchain | str trim)
 
-for tool in [
+let required = [
     "ar"
     "bash"
     "clang"
     "clang++"
     "clippy-driver"
+    "ld.lld"
     "llvm-link"
+    "nasm"
     "nm"
     "objcopy"
     "objdump"
@@ -19,11 +21,24 @@ for tool in [
     "rustc"
     "rustdoc"
     "strip"
-] {
+]
+
+for tool in $required {
     let tool_path = $"($toolchain_root)/bin/($tool)"
     if not ($tool_path | path exists) {
-        error make $"Nix Buck toolchain is missing ($tool_path)."
+        error make {msg: $"Nix Buck toolchain is missing ($tool_path)."}
     }
 }
 
-$"[nix_toolchain]\nroot = ($toolchain_root)\n" | save -f .buckconfig.local
+# Buck reads these instead of resolving any tool through PATH.
+[
+    "[nix_toolchain]"
+    $"root = ($toolchain_root)"
+    ""
+    "[hermetic_tools]"
+    $"ar = ($toolchain_root)/bin/ar"
+    $"cc = ($toolchain_root)/bin/clang"
+    $"cxx = ($toolchain_root)/bin/clang++"
+    $"nasm = ($toolchain_root)/bin/nasm"
+    ""
+] | str join "\n" | save -f .buckconfig.local

@@ -15,7 +15,6 @@ import com.facebook.buck.io.file.GlobPatternMatcher;
 import com.facebook.buck.io.file.PathMatcher;
 import com.facebook.buck.io.filesystem.impl.ProjectFilesystemUtils;
 import com.facebook.buck.util.json.ObjectMappers;
-import com.facebook.infer.annotation.Nullsafe;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableBiMap;
@@ -28,62 +27,49 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Map;
-import java.util.Objects;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
-import org.jetbrains.annotations.Nullable;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 
 /** Entry point for filtering resources. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class FilterResourcesExecutableMain {
   private static final ImmutableList<PathMatcher> NON_ASSET_FILENAMES_MATCHERS =
       ImmutableList.of(GlobPatternMatcher.of("**/.DS_Store"));
 
   @Option(name = "--in-res-dir-to-out-res-dir-map", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String inResDirToOutResDirMapPath;
 
   @Option(name = "--voltron-in-res-dir-to-out-res-dir-map")
-  @Nullable
-  private String voltronInResDirToOutResDirMapPath = null;
+  private String voltronInResDirToOutResDirMapPath;
 
   @Option(name = "--target-densities")
-  @Nullable
-  private String targetDensities = null;
+  private String targetDensities;
 
   @Option(name = "--enable-string-as-assets-filtering")
   private boolean enableStringsAsAssetsFiltering;
 
   @Option(name = "--not-filtered-string-dirs")
-  @Nullable
-  private String notFilteredStringDirsFile = null;
+  private String notFilteredStringDirsFile;
 
   @Option(name = "--string-files-list-output")
-  @Nullable
-  private String stringFilesListOutput = null;
+  private String stringFilesListOutput;
 
   @Option(name = "--locales")
-  @Nullable
-  private String localesString = null;
+  private String localesString;
 
   @Option(name = "--packaged-locales")
-  @Nullable
-  private String packagedLocalesString = null;
+  private String packagedLocalesString;
 
   @Option(name = "--post-filter-resources-cmd")
-  @Nullable
-  private String postFilterResourcesCmd = null;
+  private String postFilterResourcesCmd;
 
   @Option(name = "--post-filter-resources-cmd-override-symbols-output")
-  @Nullable
-  private String postFilterResourcesCmdOverrideSymbols = null;
+  private String postFilterResourcesCmdOverrideSymbols;
 
   @Option(name = "--allowlisted-locales")
-  @Nullable
-  private String allowlistedLocalesFile = null;
+  private String allowlistedLocalesFile;
 
   public static void main(String[] args) throws IOException {
     FilterResourcesExecutableMain main = new FilterResourcesExecutableMain();
@@ -93,7 +79,7 @@ public class FilterResourcesExecutableMain {
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
-      System.err.println(e.toString());
+      System.err.println(e.getMessage());
       parser.printUsage(System.err);
       System.exit(1);
     }
@@ -105,8 +91,7 @@ public class FilterResourcesExecutableMain {
         ObjectMappers.READER.readValue(
             ObjectMappers.createParser(Paths.get(inResDirToOutResDirMapPath)),
             new TypeReference<Map<String, ImmutableBiMap<Path, Path>>>() {});
-    ImmutableBiMap<Path, Path> inResDirToOutResDirMap =
-        Objects.requireNonNull(rawMap.get("res_dir_map"));
+    ImmutableBiMap<Path, Path> inResDirToOutResDirMap = rawMap.get("res_dir_map");
     ImmutableSet<ResourceFilters.Density> targetDensitiesSet =
         targetDensities != null
             ? Arrays.stream(targetDensities.split(","))
@@ -148,97 +133,62 @@ public class FilterResourcesExecutableMain {
             notFilteredStringDirs,
             allowlistedLocalesDirs);
 
-    timed(
-        "Copying & filtering resources",
-        () -> {
-          FilteredDirectoryCopier.copyDirsParallel(
-              root,
-              ProjectFilesystemUtils.getIgnoreFilter(root, true, NON_ASSET_FILENAMES_MATCHERS),
-              inResDirToOutResDirMap,
-              filteringPredicate);
-        });
+    FilteredDirectoryCopier.copyDirs(
+        root,
+        ProjectFilesystemUtils.getIgnoreFilter(root, true, NON_ASSET_FILENAMES_MATCHERS),
+        inResDirToOutResDirMap,
+        filteringPredicate);
 
     if (voltronInResDirToOutResDirMapPath != null) {
-      timed(
-          "Copying & filtering voltron resources",
-          () -> {
-            Map<String, ImmutableBiMap<Path, Path>> rawVoltronMap =
-                ObjectMappers.READER.readValue(
-                    ObjectMappers.createParser(Paths.get(voltronInResDirToOutResDirMapPath)),
-                    new TypeReference<Map<String, ImmutableBiMap<Path, Path>>>() {});
-            ImmutableBiMap<Path, Path> voltronInResDirToOutResDirMap =
-                Objects.requireNonNull(rawVoltronMap.get("res_dir_map"));
+      Map<String, ImmutableBiMap<Path, Path>> rawVoltronMap =
+          ObjectMappers.READER.readValue(
+              ObjectMappers.createParser(Paths.get(voltronInResDirToOutResDirMapPath)),
+              new TypeReference<Map<String, ImmutableBiMap<Path, Path>>>() {});
+      ImmutableBiMap<Path, Path> voltronInResDirToOutResDirMap = rawVoltronMap.get("res_dir_map");
 
-            FilteredDirectoryCopier.copyDirsParallel(
-                root,
-                ProjectFilesystemUtils.getEmptyIgnoreFilter(),
-                voltronInResDirToOutResDirMap,
-                FilteringPredicate.getVoltronLanguagePackPredicate());
-          });
+      FilteredDirectoryCopier.copyDirs(
+          root,
+          ProjectFilesystemUtils.getEmptyIgnoreFilter(),
+          voltronInResDirToOutResDirMap,
+          FilteringPredicate.getVoltronLanguagePackPredicate());
     }
 
     if (postFilterResourcesCmd != null) {
-      timed(
-          "Running post-filter-resources command",
-          () -> {
-            Preconditions.checkState(
-                postFilterResourcesCmdOverrideSymbols != null,
-                "Must specify an override symbols file if a post-filter-resources-cmd is"
-                    + " specified!");
-            ImmutableList.Builder<String> postFilterResourcesCmdList = ImmutableList.builder();
-            postFilterResourcesCmdList
-                .addAll(
-                    Arrays.stream(postFilterResourcesCmd.split("\\s+"))
-                        .collect(Collectors.toList()))
-                .add(inResDirToOutResDirMapPath)
-                .add(postFilterResourcesCmdOverrideSymbols);
-            Process postFilterResourcesProcess =
-                new ProcessBuilder().command(postFilterResourcesCmdList.build()).start();
-            try {
-              int exitCode = postFilterResourcesProcess.waitFor();
-              if (exitCode != 0) {
-                String error =
-                    new String(
-                        Objects.requireNonNull(postFilterResourcesProcess.getErrorStream())
-                            .readAllBytes());
-                throw new RuntimeException("post_filter_resources_cmd failed with error: " + error);
-              }
-            } catch (InterruptedException e) {
-              throw new RuntimeException(e);
-            }
-          });
+      Preconditions.checkState(
+          postFilterResourcesCmdOverrideSymbols != null,
+          "Must specify an override symbols file if a post-filter-resources-cmd is specified!");
+      ImmutableList.Builder<String> postFilterResourcesCmdList = ImmutableList.builder();
+      postFilterResourcesCmdList
+          .addAll(Arrays.stream(postFilterResourcesCmd.split("\\s+")).collect(Collectors.toList()))
+          .add(inResDirToOutResDirMapPath)
+          .add(postFilterResourcesCmdOverrideSymbols);
+      Process postFilterResourcesProcess =
+          new ProcessBuilder().command(postFilterResourcesCmdList.build()).start();
+      try {
+        int exitCode = postFilterResourcesProcess.waitFor();
+        if (exitCode != 0) {
+          String error = new String(postFilterResourcesProcess.getErrorStream().readAllBytes());
+          throw new RuntimeException("post_filter_resources_cmd failed with error: " + error);
+        }
+      } catch (InterruptedException e) {
+        throw new RuntimeException(e);
+      }
     }
 
     // We need to output a list of all the string files if and only if we are doing
     // strings-as-assets filtering.
     Preconditions.checkState(enableStringsAsAssetsFiltering == (stringFilesListOutput != null));
     if (stringFilesListOutput != null) {
-      timed(
-          "Writing string files list",
-          () -> {
-            Files.write(
-                Paths.get(stringFilesListOutput),
-                (Iterable<String>)
-                    GetStringsFiles.getFilesAsStream(
-                                root,
-                                ProjectFilesystemUtils.getEmptyIgnoreFilter(),
-                                inResDirToOutResDirMap.keySet().asList())
-                            .map(Path::toString)
-                        ::iterator);
-          });
+      ImmutableList<Path> allStringFiles =
+          GetStringsFiles.getFiles(
+              root,
+              ProjectFilesystemUtils.getEmptyIgnoreFilter(),
+              inResDirToOutResDirMap.keySet().asList());
+      Files.write(
+          Paths.get(stringFilesListOutput),
+          allStringFiles.stream().map(Path::toString).collect(Collectors.toList()));
     }
 
     System.exit(0);
-  }
-
-  private static <E extends Exception> void timed(String name, ThrowingRunnable<E> runnable)
-      throws E {
-    long start = System.currentTimeMillis();
-    try {
-      runnable.run();
-    } finally {
-      long end = System.currentTimeMillis();
-      System.err.println(name + " took " + (end - start) + "ms");
-    }
   }
 }

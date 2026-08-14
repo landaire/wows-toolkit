@@ -73,7 +73,7 @@ go_binary = prelude_rule(
         go_common.assembler_flags_arg() |
         go_common.linker_flags_arg() |
         go_common.external_linker_flags_arg() |
-        go_common.embed_srcs_arg() |
+        go_common.embedcfg_arg() |
         {
             "build_mode": attrs.option(attrs.enum(BuildMode), doc = """
                 Determines the build mode (equivalent of `-buildmode`). Can be
@@ -83,7 +83,6 @@ go_binary = prelude_rule(
         go_common.package_root_arg() |
         go_common.cgo_enabled_arg() |
         go_common.build_tags_arg() |
-        go_common.coverage_enabled_arg() |
         cxx_common.headers_arg() |
         cxx_common.header_namespace_arg() |
         go_common.cxx_preprocessor_flags_arg() |
@@ -93,6 +92,7 @@ go_binary = prelude_rule(
                 Static files to be symlinked into the working directory of the test. You can access these in your
                  by opening the files as relative paths, e.g. `ioutil.ReadFile("testdata/input")`.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "platform": attrs.option(attrs.string(), default = None),
         } |
         buck.licenses_arg() |
@@ -173,13 +173,13 @@ go_exported_library = prelude_rule(
         go_common.cgo_enabled_arg() |
         go_common.build_tags_arg() |
         go_common.generate_exported_header() |
-        go_common.coverage_enabled_arg() |
-        go_common.embed_srcs_arg() |
         {
             "resources": attrs.list(attrs.source(), default = [], doc = """
                 Static files to be symlinked into the working directory of the test. You can access these in your
                  by opening the files as relative paths, e.g. `ioutil.ReadFile("testdata/input")`.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "embedcfg": attrs.option(attrs.source(), default = None),
             "platform": attrs.option(attrs.string(), default = None),
         } |
         buck.licenses_arg() |
@@ -219,7 +219,7 @@ go_library = prelude_rule(
         go_common.deps_arg() |
         go_common.compiler_flags_arg() |
         go_common.assembler_flags_arg() |
-        go_common.embed_srcs_arg() |
+        go_common.embedcfg_arg() |
         go_common.package_root_arg() |
         go_common.override_cgo_enabled_arg() |
         cxx_common.headers_arg() |
@@ -228,9 +228,9 @@ go_library = prelude_rule(
         go_common.cxx_compiler_flags_arg() |
         go_common.external_linker_flags_arg() |
         go_common.link_style_arg() |
-        go_common.coverage_enabled_arg() |
         go_common.generate_exported_header() |
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -321,7 +321,6 @@ go_test = prelude_rule(
         } |
         go_common.deps_arg() |
         go_common.link_style_arg() |
-        go_common.coverage_enabled_arg() |
         go_common.link_mode_arg() |
         {
             "build_mode": attrs.option(attrs.enum(BuildMode), doc = """
@@ -333,7 +332,7 @@ go_test = prelude_rule(
         go_common.assembler_flags_arg() |
         go_common.linker_flags_arg() |
         go_common.external_linker_flags_arg() |
-        go_common.embed_srcs_arg() |
+        go_common.embedcfg_arg() |
         go_common.package_root_arg() |
         go_common.cgo_enabled_arg() |
         go_common.build_tags_arg() |
@@ -357,6 +356,7 @@ go_test = prelude_rule(
         } |
         buck.run_test_separately_arg(run_test_separately_type = attrs.bool(default = False)) |
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "platform": attrs.option(attrs.string(), default = None),
             "runner": attrs.option(attrs.dep(), default = None),
             "specs": attrs.option(attrs.arg(json = True), default = None),
@@ -376,9 +376,7 @@ go_bootstrap_binary = prelude_rule(
         {
             "build_args": attrs.list(attrs.string(), default = [], doc = """Package name, file names and build flags"""),
             "workdir": attrs.string(default = "", doc = """Change to subdir before running the command"""),
-        } |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        }
     ),
 )
 

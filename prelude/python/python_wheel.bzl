@@ -51,7 +51,6 @@ load(
     "create_manifest_for_shared_libs",
 )
 load("@prelude//python:python.bzl", "PythonLibraryInfo")
-load("@prelude//python:python_wheel_toolchain.bzl", "PythonWheelToolchainInfo")
 load("@prelude//python:toolchain.bzl", "PythonToolchainInfo")
 load("@prelude//transitions:constraint_overrides.bzl", "constraint_overrides")
 load("@prelude//utils:expect.bzl", "expect")
@@ -77,33 +76,11 @@ def _link_deps(
 
     return depth_first_traversal_by(link_infos, deps, find_deps)
 
-def _python_version_from_tag(tag):
-    """Extract Python version from a wheel tag: "py3.12" -> "3.12", "cp312" -> "3.12"."""
-    version = tag
-    for prefix in ("cp", "py"):
-        if tag.startswith(prefix):
-            version = tag[len(prefix):]
-            break
-    if "." in version:
-        return version
-    if len(version) >= 2:
-        return version[0] + "." + version[1:]
-    return version
-
-def _cpython_tag(python_version):
-    """Convert Python version to CPython tag: "3.12" -> "cp312"."""
-    return "cp" + python_version.replace(".", "")
-
 def _whl_cmd(
         ctx: AnalysisContext,
         output: Artifact,
-        platform: str,
-        abi: str,
-        python: str,
         manifests: list[ManifestInfo] = [],
-        srcs: dict[str, Artifact] = {},
-        computed_metadata: dict[str, str] = {},
-        readme: Artifact | None = None) -> cmd_args:
+        srcs: dict[str, Artifact] = {}) -> cmd_args:
     cmd = []
 
     cmd.append(ctx.attrs._wheel[RunInfo])
@@ -112,9 +89,6 @@ def _whl_cmd(
     cmd.append(output.as_output())
     cmd.append("--name={}".format(ctx.attrs.dist or ctx.attrs.name))
     cmd.append("--version={}".format(ctx.attrs.version))
-    cmd.append("--python-tag={}".format(python))
-    cmd.append("--abi-tag={}".format(abi))
-    cmd.append("--platform-tag={}".format(platform))
 
     if ctx.attrs.entry_points:
         cmd.append("--entry-points={}".format(json.encode(ctx.attrs.entry_points)))
@@ -122,14 +96,11 @@ def _whl_cmd(
     for key, val in ctx.attrs.extra_metadata.items():
         cmd.extend(["--metadata", key, val])
 
-    for key, val in computed_metadata.items():
-        cmd.extend(["--metadata", key, val])
+    version_matcher = ">=" if ctx.attrs.support_future_python_versions else "=="
+    cmd.extend(["--metadata", "Requires-Python", "{}{}.*".format(version_matcher, ctx.attrs.python[2:])])
 
     for requires in ctx.attrs.requires:
         cmd.extend(["--metadata", "Requires-Dist", requires])
-
-    if readme != None:
-        cmd.extend(["--readme", readme])
 
     for name, script in ctx.attrs.scripts.items():
         cmd.extend(["--data", paths.join("scripts", name), script])
@@ -166,20 +137,11 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
     sub_targets = {}
 
     libraries = {}
-    seen_raw_targets = {}
     for lib in ctx.attrs.libraries:
         libraries[lib.label] = lib
-        seen_raw_targets[str(lib.label.raw_target())] = True
     if ctx.attrs.libraries_query != None:
         for lib in ctx.attrs.libraries_query:
             if PythonLibraryInfo in lib:
-                raw = str(lib.label.raw_target())
-                if raw in seen_raw_targets:
-                    # Same target in a different configuration (e.g. due to
-                    # a configuration transition in the dep graph).
-                    # Keep the first instance.
-                    continue
-                seen_raw_targets[raw] = True
                 libraries[lib.label] = lib
 
     python_toolchain = ctx.attrs._python_toolchain[PythonToolchainInfo]
@@ -203,7 +165,7 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
 
         # Run the patchelf -- this will just copy if it turns out the given
         # path isn't and ELF file.
-        out = ctx.actions.declare_output(paths.join("__patched__", dst), has_content_based_path = False)
+        out = ctx.actions.declare_output(paths.join("__patched__", dst))
         cmd = cmd_args(
             ctx.attrs._patchelf[RunInfo],
             "--output",
@@ -229,12 +191,6 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
         if manifests.extensions != None:
             ((extension, _),) = manifests.extensions.items()
             if extension in extensions:
-                existing = extensions[extension]
-                if existing.label.raw_target() == dep.label.raw_target():
-                    # Same target in a different configuration (e.g. due to
-                    # a configuration transition in the dep graph).
-                    # Keep the first instance.
-                    continue
                 fail("Duplicate extension entry for {}. Did your library_query forget to filter by `target_deps()`?".format(extension))
             extensions[extension] = dep
 
@@ -410,33 +366,6 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
             ),
         )
 
-    # Resolve platform: use attr if set, otherwise fall back to toolchain default
-    wheel_toolchain = ctx.attrs._python_wheel_toolchain[PythonWheelToolchainInfo]
-    python = value_or(ctx.attrs.python, wheel_toolchain.python)
-    platform = ctx.attrs.platform or wheel_toolchain.platform
-    if not platform:
-        fail("platform must be set either on python_wheel target or in python_wheel_toolchain")
-
-    # Resolve ABI tag: explicit attr > toolchain default
-    abi = value_or(ctx.attrs.abi, wheel_toolchain.abi)
-
-    # Auto-detect CPython tags for wheels with native extensions (PEP 427).
-    # When native extensions are present and no explicit ABI override is set,
-    # switch from py*-none to cpXXX-cpXXX tags.
-    python_version = _python_version_from_tag(python)
-
-    # Normalize python tag to PEP 425 format: "py3.12" -> "py312"
-    if "." in python:
-        python = python.replace(".", "")
-
-    if extensions and abi == "none":
-        cp_tag = _cpython_tag(python_version)
-        python = cp_tag
-        abi = cp_tag
-
-    # Computed metadata for WHEEL/METADATA files
-    computed_metadata = {"Requires-Python": "==" + python_version + ".*"}
-
     def normalize_name(name):
         # Normalize name part of the *.whl file per:
         #  * https://packaging.python.org/en/latest/specifications/recording-installed-packages/#the-dist-info-directory
@@ -465,23 +394,14 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
         # only normalize `dist` in the *.whl filename (NOT the dist name in dist-info/METADATA)
         normalize_name(dist),
         ctx.attrs.version,
-        python,
-        abi,
-        platform,
+        ctx.attrs.python,
+        ctx.attrs.abi,
+        ctx.attrs.platform,
     ]
 
     # Action to create wheel.
-    wheel = ctx.actions.declare_output("{}.whl".format("-".join(name_parts)), has_content_based_path = False)
-    whl_cmd = _whl_cmd(
-        ctx = ctx,
-        output = wheel,
-        platform = platform,
-        abi = abi,
-        python = python,
-        manifests = srcs + native_srcs,
-        computed_metadata = computed_metadata,
-        readme = ctx.attrs.readme,
-    )
+    wheel = ctx.actions.declare_output("{}.whl".format("-".join(name_parts)))
+    whl_cmd = _whl_cmd(ctx = ctx, output = wheel, manifests = srcs + native_srcs)
     ctx.actions.run(whl_cmd, category = "wheel")
 
     # Create symlink tree for inplace module layout.
@@ -499,7 +419,7 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
                 hidden = [a for (a, _) in manifest.artifacts],
             ),
         )
-    link_tree = ctx.actions.declare_output("__editable__/tree.d", dir = True, has_content_based_path = False)
+    link_tree = ctx.actions.declare_output("__editable__/tree.d", dir = True)
     link_tree_cmd = cmd_args(
         ctx.attrs._create_link_tree[RunInfo],
         cmd_args(link_tree.as_output(), format = "--output={}"),
@@ -508,7 +428,7 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
     ctx.actions.run(link_tree_cmd, category = "link_tree")
 
     # Create <dist>.pth to put in the wheel and points to the symlink tree.
-    pth = ctx.actions.declare_output("__editable__/{}.pth".format(dist), has_content_based_path = False)
+    pth = ctx.actions.declare_output("__editable__/{}.pth".format(dist))
     pth_cmd = cmd_args(
         "sh",
         "-c",
@@ -524,17 +444,8 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
     ctx.actions.run(pth_cmd, category = "pth", local_only = True)
 
     # Action to create editable wheel.
-    ewheel = ctx.actions.declare_output("__editable__/{}.whl".format("-".join(name_parts)), has_content_based_path = False)
-    ewhl_cmd = _whl_cmd(
-        ctx = ctx,
-        output = ewheel,
-        platform = platform,
-        abi = abi,
-        python = python,
-        srcs = {"{}.pth".format(dist): pth},
-        computed_metadata = computed_metadata,
-        readme = ctx.attrs.readme,
-    )
+    ewheel = ctx.actions.declare_output("__editable__/{}.whl".format("-".join(name_parts)))
+    ewhl_cmd = _whl_cmd(ctx = ctx, output = ewheel, srcs = {"{}.pth".format(dist): pth})
     ctx.actions.run(ewhl_cmd, category = "editable_wheel")
     sub_targets["editable"] = [
         DefaultInfo(
@@ -550,14 +461,23 @@ def _impl(ctx: AnalysisContext) -> list[Provider]:
 
     return providers
 
+_default_python = select({
+    "ovr_config//third-party/python/constraints:3.10": "py3.10",
+    "ovr_config//third-party/python/constraints:3.11": "py3.11",
+    "ovr_config//third-party/python/constraints:3.12": "py3.12",
+    "ovr_config//third-party/python/constraints:3.8": "py3.8",
+    "ovr_config//third-party/python/constraints:3.9": "py3.9",
+})
+
 python_wheel = rule(
     impl = _impl,
-    cfg = constraint_overrides.python_transition,
+    cfg = constraint_overrides.transition,
     attrs = dict(
         dist = attrs.option(attrs.string(), default = None),
         version = attrs.string(default = "1.0.0"),
-        python = attrs.option(attrs.string(), default = None),
-        abi = attrs.option(attrs.string(), default = None),
+        python = attrs.string(
+            # @oss-disable[end= ]: default = _default_python,
+        ),
         entry_points = attrs.dict(
             key = attrs.string(),
             value = attrs.dict(
@@ -572,11 +492,13 @@ python_wheel = rule(
             value = attrs.string(),
             default = {},
         ),
-        readme = attrs.option(attrs.source(), default = None),
-        platform = attrs.option(
-            attrs.string(),
-            default = None,
-            doc = "Platform tag for the wheel. If not set, uses the toolchain default.",
+        abi = attrs.string(default = "none"),
+        platform = attrs.string(
+            default = select({
+                "DEFAULT": "any",
+                # @oss-disable[end= ]: "ovr_config//os:linux-arm64": "linux_aarch64",
+                # @oss-disable[end= ]: "ovr_config//os:linux-x86_64": "linux_x86_64",
+            }),
         ),
         omnibus = attrs.bool(default = False),
         libraries = attrs.list(attrs.dep(providers = [PythonLibraryInfo]), default = []),
@@ -586,17 +508,15 @@ python_wheel = rule(
         resources = attrs.dict(key = attrs.string(), value = attrs.source(), default = {}),
         rpaths = attrs.list(attrs.string(), default = []),
         lib_dir = attrs.option(attrs.string(), default = None),
+        support_future_python_versions = attrs.bool(default = False),
         labels = attrs.list(attrs.string(), default = []),
-        deffile = attrs.option(attrs.source(), default = None),
         linker_flags = attrs.list(attrs.arg(anon_target_compatible = True), default = []),
         anonymous_link = attrs.bool(default = True),
         link_execution_preference = link_execution_preference_attr(),
         _wheel = attrs.default_only(attrs.exec_dep(default = "prelude//python/tools:wheel")),
         _patchelf = attrs.default_only(attrs.exec_dep(default = "prelude//python/tools:patchelf")),
-        _python_wheel_toolchain = toolchains_common.python_wheel(),
         _create_link_tree = attrs.default_only(attrs.exec_dep(default = "prelude//python/tools:create_link_tree")),
         _cxx_toolchain = toolchains_common.cxx(),
         _python_toolchain = toolchains_common.python(),
-        opt_by_default_enabled = attrs.bool(default = False),
     ) | constraint_overrides.attributes,
 )

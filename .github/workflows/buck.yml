@@ -1,0 +1,139 @@
+name: Buck
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Builds every public binary through the native Buck graph and proves the graph
+# stays hermetic. Provisioning is the only step allowed to reach the network:
+# each job drops its network access before the first Buck action runs.
+
+env:
+  ALIASES: >-
+    //:wows_toolkit //:wowsunpack //:wows_data_mgr //:replayshark
+    //:minimap_renderer //:wgcheck //:dhat_load //:profile_replay //:dhat_parse
+
+jobs:
+  linux:
+    name: Linux x86_64
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      # Realize every store path Buck will need while the network is still up.
+      - name: Provision the pinned toolchain
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      - name: Disable network access
+        run: |
+          sudo iptables -P OUTPUT DROP
+          sudo iptables -A OUTPUT -o lo -j ACCEPT
+          sudo ip6tables -P OUTPUT DROP || true
+          sudo ip6tables -A OUTPUT -o lo -j ACCEPT || true
+
+      - name: Build every alias
+        run: nix develop --command buck2 build $ALIASES
+
+      - name: Build every alias in release mode
+        run: nix develop --command buck2 build -c native_build.mode=release $ALIASES
+
+      - name: Check the action graph is hermetic
+        run: |
+          for alias in $ALIASES; do
+            nix develop --command nu scripts/check-buck-hermetic.nu "$alias"
+            nix develop --command nu scripts/check-buck-hermetic.nu "$alias" release
+          done
+
+      - name: Buck build-graph tests
+        run: |
+          for test in scripts/test-*.nu; do
+            nix develop --command nu "$test"
+          done
+
+  macos:
+    name: macOS ARM64
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      # build-support/check-xcode.nu rejects anything but the pinned Xcode, so a
+      # runner image that moves off it fails here rather than silently building
+      # against a different SDK.
+      - name: Select the pinned Xcode
+        run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+
+      - name: Provision the pinned toolchain
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      # Deliberately not tolerant of failure: a block that silently does nothing
+      # would leave the offline claim untested.
+      - name: Disable network access
+        run: |
+          echo "block drop out proto { tcp udp } from any to !127.0.0.1" | sudo pfctl -ef -
+
+      - name: Build every alias
+        run: nix develop --command buck2 build $ALIASES
+
+      - name: Check the action graph is hermetic
+        run: |
+          for alias in $ALIASES; do
+            nix develop --command nu scripts/check-buck-hermetic.nu "$alias"
+          done
+
+  windows:
+    name: Windows x86_64 MSVC
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Downloads every pinned archive, verifies its hash, installs from the
+      # offline layout, and writes the machine-local .buckconfig.local. Buck2
+      # itself is one of the pinned archives.
+      - name: Provision the offline toolchain
+        shell: pwsh
+        run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "${{ runner.temp }}/offline"
+
+      - name: Disable network access
+        shell: pwsh
+        run: |
+          New-NetFirewallRule -DisplayName "buck-no-egress" -Direction Outbound `
+            -Action Block -RemoteAddress Internet | Out-Null
+
+      - name: Build every alias
+        shell: pwsh
+        run: |
+          $buck2 = "toolchains/windows/offline/installed/Buck2/2025-12-01/buck2.exe"
+          & $buck2 build --target-platforms toolchains//windows:windows_x86_64_msvc `
+            -c native_build.mode=release $env:ALIASES.Split(" ", [StringSplitOptions]::RemoveEmptyEntries)
+
+      - name: Build the unsigned MSI
+        shell: pwsh
+        run: ./scripts/build-msi.ps1
+
+      # Signing is deliberately outside the build graph: a downstream workflow
+      # signs these exact artifacts and has no permission to rebuild them.
+      - name: Publish unsigned artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64-unsigned
+          path: |
+            buck-out/**/wows_toolkit.exe
+            buck-out/**/wows_toolkit.pdb
+            buck-out/**/wows-toolkit-windows-x86_64-unsigned.msi

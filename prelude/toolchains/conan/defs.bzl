@@ -247,7 +247,7 @@ def _conan_package_extract_impl(ctx: AnalysisContext) -> list[Provider]:
     sub_targets = {}
 
     for filename in ctx.attrs.files:
-        output = ctx.actions.declare_output(filename, has_content_based_path = False)
+        output = ctx.actions.declare_output(filename)
         cmd.add(["--file-from", filename, "--file-to", output.as_output()])
         if filename in sub_targets:
             fail("File-name collision: " + filename)
@@ -261,7 +261,7 @@ def _conan_package_extract_impl(ctx: AnalysisContext) -> list[Provider]:
         # This adds a counter prefix to avoid the overlap.
         prefix = str(i) + "/"
         i += 1
-        output = ctx.actions.declare_output(prefix + dirname, has_content_based_path = False)
+        output = ctx.actions.declare_output(prefix + dirname)
         cmd.add(["--directory-from", dirname, "--directory-to", output.as_output()])
         if dirname in sub_targets:
             fail("Directory-name collision: " + dirname)
@@ -362,8 +362,10 @@ def conan_component(
         # TODO[AH] Implement prebuilt_cxx_library_group.
         fail("Support for package components with multiple libraries is not yet implemented.")
         #"contacts": attrs.list(attrs.string(), default = []),
+        #"default_host_platform": attrs.option(attrs.configuration_label(), default = None),
         #"deps": attrs.list(attrs.dep(), default = []),
         #"exported_deps": attrs.list(attrs.dep(), default = []),
+        #"exported_platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
         #"exported_preprocessor_flags": attrs.list(attrs.string(), default = []),
         #"import_libs": attrs.dict(key = attrs.string(), value = attrs.source(), sorted = False, default = {}),
         #"include_dirs": attrs.list(attrs.source(), default = []),
@@ -422,13 +424,13 @@ def _conan_generate_impl(ctx: AnalysisContext) -> list[Provider]:
     conan_init = ctx.attrs._conan_init[ConanInitInfo]
     conan_generate = ctx.attrs._conan_generate[RunInfo]
 
-    install_folder = ctx.actions.declare_output("install-folder", has_content_based_path = False)
-    output_folder = ctx.actions.declare_output("output-folder", has_content_based_path = False)
-    user_home = ctx.actions.declare_output("user-home", has_content_based_path = False)
-    manifests = ctx.actions.declare_output("manifests", has_content_based_path = False)
-    install_info = ctx.actions.declare_output("install-info.json", has_content_based_path = False)
-    trace_log = ctx.actions.declare_output("trace.log", has_content_based_path = False)
-    targets_out = ctx.actions.declare_output(ctx.label.name + ".bzl", has_content_based_path = False)
+    install_folder = ctx.actions.declare_output("install-folder")
+    output_folder = ctx.actions.declare_output("output-folder")
+    user_home = ctx.actions.declare_output("user-home")
+    manifests = ctx.actions.declare_output("manifests")
+    install_info = ctx.actions.declare_output("install-info.json")
+    trace_log = ctx.actions.declare_output("trace.log")
+    targets_out = ctx.actions.declare_output(ctx.label.name + ".bzl")
 
     cmd = cmd_args(
         [conan_generate] +
@@ -482,8 +484,8 @@ def _conan_init_impl(ctx: AnalysisContext) -> list[Provider]:
     conan_toolchain = ctx.attrs._conan_toolchain[ConanToolchainInfo]
     conan_init = ctx.attrs._conan_init[RunInfo]
 
-    user_home = ctx.actions.declare_output("user-home", has_content_based_path = False)
-    trace_log = ctx.actions.declare_output("trace.log", has_content_based_path = False)
+    user_home = ctx.actions.declare_output("user-home")
+    trace_log = ctx.actions.declare_output("trace.log")
 
     cmd = cmd_args(
         [conan_init] +
@@ -523,9 +525,9 @@ def _conan_lock_impl(ctx: AnalysisContext) -> list[Provider]:
     conan_init = ctx.attrs._conan_init[ConanInitInfo]
     conan_lock = ctx.attrs._conan_lock[RunInfo]
 
-    lockfile_out = ctx.actions.declare_output("conan.lock", has_content_based_path = False)
-    user_home = ctx.actions.declare_output("user-home", has_content_based_path = False)
-    trace_log = ctx.actions.declare_output("trace.log", has_content_based_path = False)
+    lockfile_out = ctx.actions.declare_output("conan.lock")
+    user_home = ctx.actions.declare_output("user-home")
+    trace_log = ctx.actions.declare_output("trace.log")
 
     cmd = cmd_args(
         [conan_lock] +
@@ -568,14 +570,14 @@ def _conan_package_impl(ctx: AnalysisContext) -> list[Provider]:
     conan_init = ctx.attrs._conan_init[ConanInitInfo]
     conan_package = ctx.attrs._conan_package[RunInfo]
 
-    install_folder = ctx.actions.declare_output("install-folder", has_content_based_path = False)
-    output_folder = ctx.actions.declare_output("output-folder", has_content_based_path = False)
-    user_home = ctx.actions.declare_output("user-home", has_content_based_path = False)
-    manifests = ctx.actions.declare_output("manifests", has_content_based_path = False)
-    install_info = ctx.actions.declare_output("install-info.json", has_content_based_path = False)
-    trace_log = ctx.actions.declare_output("trace.log", has_content_based_path = False)
-    cache_out = ctx.actions.declare_output("cache-out", has_content_based_path = False)
-    package_out = ctx.actions.declare_output("package", has_content_based_path = False)
+    install_folder = ctx.actions.declare_output("install-folder")
+    output_folder = ctx.actions.declare_output("output-folder")
+    user_home = ctx.actions.declare_output("user-home")
+    manifests = ctx.actions.declare_output("manifests")
+    install_info = ctx.actions.declare_output("install-info.json")
+    trace_log = ctx.actions.declare_output("trace.log")
+    cache_out = ctx.actions.declare_output("cache-out")
+    package_out = ctx.actions.declare_output("package")
 
     cmd = cmd_args(
         [conan_package] +
@@ -655,7 +657,7 @@ def _profile_env_var(name, value) -> cmd_args:
     return cmd_args([name, cmd_args(value, delimiter = " ")], delimiter = "=")
 
 def _make_wrapper_script(ctx, name, tool):
-    wrapper = ctx.actions.declare_output(name, has_content_based_path = False)
+    wrapper = ctx.actions.declare_output(name)
     return ctx.actions.write(
         wrapper,
         cmd_args([
@@ -728,7 +730,7 @@ def _conan_profile_impl(ctx: AnalysisContext) -> list[Provider]:
         content.append(_profile_env_tool(ctx, "CXX", cxx.cxx_compiler_info.compiler))
         content.append(_profile_env_var("CXXFLAGS", cxx.cxx_compiler_info.compiler_flags))
 
-    output = ctx.actions.declare_output(ctx.label.name, has_content_based_path = False)
+    output = ctx.actions.declare_output(ctx.label.name)
     content = cmd_args(
         content,
         relative_to = (output, 1),
@@ -791,7 +793,7 @@ conan_update = rule(
 def _lock_generate_impl(ctx: AnalysisContext) -> list[Provider]:
     lock_generate = ctx.attrs._lock_generate[RunInfo]
 
-    targets_out = ctx.actions.declare_output(ctx.label.name + ".bzl", has_content_based_path = False)
+    targets_out = ctx.actions.declare_output(ctx.label.name + ".bzl")
 
     cmd = cmd_args(
         [lock_generate] +

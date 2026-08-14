@@ -8,8 +8,6 @@
 
 load("@prelude//:paths.bzl", "paths")
 load("@prelude//apple/swift:swift_compilation.bzl", "extract_swiftmodule_linkables", "get_swiftmodule_linker_flags")
-load("@prelude//cxx:cxx_context.bzl", "get_cxx_toolchain_info")
-load("@prelude//cxx:cxx_toolchain_types.bzl", "CxxToolchainInfo", "LinkerType")
 load(
     "@prelude//cxx:transformation_spec.bzl",
     "TransformationSpecContext",  # @unused Used as a type
@@ -23,13 +21,12 @@ load(
     "MergedLinkInfo",
     "SwiftmoduleLinkable",  # @unused Used as a type
     "get_link_args_for_strategy",
-    "has_framework_linkable",
+    "merge_framework_linkables",
     "merge_swiftmodule_linkables",
 )
 load("@prelude//utils:expect.bzl", "expect")
 load(":apple_framework_versions.bzl", "get_framework_linker_args", "validate_sdk_frameworks")
 load(":apple_toolchain_types.bzl", "AppleToolchainInfo")
-load(":apple_utility.bzl", "has_apple_toolchain")
 
 _IMPLICIT_SDKROOT_FRAMEWORK_SEARCH_PATHS = [
     "$SDKROOT/Library/Frameworks",
@@ -42,40 +39,25 @@ def apple_create_frameworks_linkable(ctx: AnalysisContext) -> [FrameworksLinkabl
         return None
 
     return FrameworksLinkable(
-        libraries = ctx.attrs.libraries,
-        frameworks = ctx.attrs.frameworks,
+        library_names = [_library_name(x) for x in ctx.attrs.libraries],
+        unresolved_framework_paths = _get_non_sdk_unresolved_framework_directories(ctx.attrs.frameworks),
+        framework_names = [to_framework_name(x) for x in ctx.attrs.frameworks],
     )
 
-def _has_darwin_linker(ctx: AnalysisContext) -> bool:
-    return has_apple_toolchain(ctx) or ctx.attrs._cxx_toolchain[CxxToolchainInfo].linker_info.type == LinkerType("darwin")
-
-def _get_apple_frameworks_linker_flags(ctx: AnalysisContext, linkables: list[[FrameworksLinkable, None]]) -> cmd_args:
-    if not has_framework_linkable(linkables):
+def _get_apple_frameworks_linker_flags(ctx: AnalysisContext, linkable: [FrameworksLinkable, None]) -> cmd_args:
+    if not linkable:
         return cmd_args()
 
-    frameworks = set()
-    libraries = set()
-    for linkable in linkables:
-        if not linkable:
-            continue
-
-        frameworks.update(linkable.frameworks)
-        libraries.update(linkable.libraries)
-
-    framework_names = [to_framework_name(framework) for framework in frameworks]
-    unresolved_framework_paths = _get_non_sdk_unresolved_framework_directories(frameworks)
-
-    expanded_frameworks_paths = _expand_sdk_framework_paths(ctx, unresolved_framework_paths)
+    expanded_frameworks_paths = _expand_sdk_framework_paths(ctx, linkable.unresolved_framework_paths)
     flags = _get_framework_search_path_flags(expanded_frameworks_paths)
-    flags.add(get_framework_linker_args(ctx, framework_names))
-    flags.add(cmd_args([_library_name(library) for library in libraries], format = "-l{}"))
+    flags.add(get_framework_linker_args(ctx, linkable.framework_names))
+
+    for library_name in linkable.library_names:
+        flags.add("-l" + library_name)
 
     return flags
 
 def get_framework_search_path_flags(ctx: AnalysisContext) -> cmd_args:
-    if not _has_darwin_linker(ctx):
-        return cmd_args()
-
     validate_sdk_frameworks(ctx.attrs.frameworks)
     unresolved_framework_dirs = _get_non_sdk_unresolved_framework_directories(ctx.attrs.frameworks)
     expanded_framework_dirs = _expand_sdk_framework_paths(ctx, unresolved_framework_dirs)
@@ -88,17 +70,11 @@ def _get_framework_search_path_flags(frameworks: list[cmd_args]) -> cmd_args:
 
     return flags
 
-def _get_non_sdk_unresolved_framework_directories(frameworks: typing.Iterable) -> set[str]:
+def _get_non_sdk_unresolved_framework_directories(frameworks: list[typing.Any]) -> list[typing.Any]:
     # We don't want to include SDK directories as those are already added via `isysroot` flag in toolchain definition.
     # Adding those directly via `-F` will break building Catalyst applications as frameworks from support directory
     # won't be found and those for macOS platform will be used.
-    directories = set()
-    for framework in frameworks:
-        directory = _non_sdk_unresolved_framework_directory(framework)
-        if directory:
-            directories.add(directory)
-
-    return directories
+    return dedupe(filter(None, [_non_sdk_unresolved_framework_directory(x) for x in frameworks]))
 
 def to_framework_name(framework_path: str) -> str:
     name, ext = paths.split_extension(paths.basename(framework_path))
@@ -114,11 +90,7 @@ def _library_name(library: str) -> str:
         fail("unexpected library: {}".format(library))
     return paths.split_extension(name[3:])[0]
 
-def _expand_sdk_framework_paths(ctx: AnalysisContext, unresolved_framework_paths: set[str]) -> list[cmd_args]:
-    # When _apple_toolchain is not available (e.g., cxx_library used as apple_library swap),
-    # we cannot expand $PLATFORM_DIR or $SDKROOT paths. Skip those paths gracefully.
-    if not hasattr(ctx.attrs, "_apple_toolchain"):
-        return [cmd_args(p) for p in unresolved_framework_paths if not p.startswith("$")]
+def _expand_sdk_framework_paths(ctx: AnalysisContext, unresolved_framework_paths: list[str]) -> list[cmd_args]:
     return [_expand_sdk_framework_path(ctx, unresolved_framework_path) for unresolved_framework_path in unresolved_framework_paths]
 
 def _expand_sdk_framework_path(ctx: AnalysisContext, framework_path: str) -> cmd_args:
@@ -162,21 +134,17 @@ def apple_build_link_args_with_deduped_flags(
         transformation_spec_context: TransformationSpecContext | None,
         swiftmodule_linkable: [SwiftmoduleLinkable, None] = None,
         prefer_stripped: bool = False) -> LinkArgs:
-    if _has_darwin_linker(ctx):
-        frameworks_linkables = [x.frameworks[link_strategy] for x in deps_merged_link_infos] + [frameworks_linkable]
-        swiftmodule_linkables = [x.swiftmodules[link_strategy] for x in deps_merged_link_infos] + [swiftmodule_linkable]
-        link_info = _apple_link_info_from_linkables(
-            ctx,
-            frameworks_linkables,
-            swiftmodule_linkables,
-        )
-    else:
-        link_info = None
+    frameworks_linkables = [x.frameworks[link_strategy] for x in deps_merged_link_infos] + [frameworks_linkable]
+    swiftmodule_linkables = [x.swiftmodules[link_strategy] for x in deps_merged_link_infos] + [swiftmodule_linkable]
+
+    link_info = _apple_link_info_from_linkables(
+        ctx,
+        frameworks_linkables,
+        swiftmodule_linkables,
+    )
 
     return get_link_args_for_strategy(
-        ctx.actions,
-        ctx.label,
-        get_cxx_toolchain_info(ctx).linker_info,
+        ctx,
         deps_merged_link_infos,
         link_strategy,
         prefer_stripped,
@@ -189,9 +157,6 @@ def apple_get_link_info_by_deduping_link_infos(
         infos: list[[LinkInfo, None]],
         framework_linkable: [FrameworksLinkable, None] = None,
         swiftmodule_linkable: [SwiftmoduleLinkable, None] = None) -> [LinkInfo, None]:
-    if not _has_darwin_linker(ctx):
-        return None
-
     # When building a framework or executable, all frameworks used by the statically-linked
     # deps in the subtree need to be linked.
     #
@@ -222,7 +187,7 @@ def _apple_link_info_from_linkables(
     """
     Returns a LinkInfo for the frameworks, swiftmodules, and swiftruntimes or None if there's none of those.
     """
-    framework_link_args = _get_apple_frameworks_linker_flags(ctx, framework_linkables)
+    framework_link_args = _get_apple_frameworks_linker_flags(ctx, merge_framework_linkables(framework_linkables))
     sdk_swift_module_link_args = get_swiftmodule_linker_flags(ctx, merge_swiftmodule_linkables(ctx, swiftmodule_linkables))
 
     return LinkInfo(

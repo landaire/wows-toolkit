@@ -41,7 +41,7 @@ def prebuilt_jar_impl(ctx: AnalysisContext) -> list[Provider]:
     output = ctx.actions.declare_output("symlink/{}".format(binary_jar.short_path), has_content_based_path = ctx.attrs.uses_content_based_paths)
     ctx.actions.symlink_file(output, binary_jar)
 
-    gwt_output = ctx.actions.declare_output("{}-gwt.jar".format(ctx.label.name), has_content_based_path = False)
+    gwt_output = ctx.actions.declare_output("{}-gwt.jar".format(ctx.label.name))
     ctx.actions.copy_file(gwt_output, ctx.attrs.source_jar if ctx.attrs.source_jar else ctx.attrs.binary_jar)
 
     abi = None
@@ -55,6 +55,7 @@ def prebuilt_jar_impl(ctx: AnalysisContext) -> list[Provider]:
         ClasspathSnapshotGranularity("CLASS_LEVEL"),
         abi or output,
         "",
+        ctx.attrs.uses_content_based_path_for_jar_snapshot,
     )
 
     library_output_classpath_entry = JavaClasspathEntry(

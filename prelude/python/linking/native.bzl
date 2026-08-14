@@ -24,7 +24,6 @@ load(
     "Traversal",
 )
 load("@prelude//cxx:headers.bzl", "cxx_get_regular_cxx_headers_layout")
-load("@prelude//cxx:link.bzl", "CxxGcSectionsData", "CxxLinkerMapData")  # @unused Used as a type
 load(
     "@prelude//cxx:link_groups.bzl",
     "LinkGroupLibSpec",
@@ -66,7 +65,6 @@ load(
 )
 load("@prelude//linking:types.bzl", "Linkage")
 load("@prelude//python:internal_tools.bzl", "PythonInternalToolsInfo")
-load("@prelude//python:python.bzl", "python_attr_preload_deps")
 load("@prelude//python:toolchain.bzl", "PackageStyle")
 load("@prelude//utils:argfile.bzl", "at_argfile")
 load(":native_python_util.bzl", "CxxExtensionLinkInfo", "CxxExtensionLinkInfoReduced", "merge_cxx_extension_info", "reduce_cxx_extension_info")  # @unused Used as a type
@@ -242,7 +240,7 @@ def _compute_cxx_extension_info(ctx, deps) -> (CxxExtensionLinkInfo, CxxExtensio
         ctx.actions,
         deps + executable_deps,
         # Add in dlopen-enabled libs from first-order deps.
-        shared_deps = ctx.attrs.deps + python_attr_preload_deps(ctx),
+        shared_deps = ctx.attrs.deps + ctx.attrs.preload_deps,
     )
     extension_info_reduced = reduce_cxx_extension_info(extension_info)
     return extension_info, extension_info_reduced
@@ -264,9 +262,9 @@ def _compute_cxx_executable_info(
         CxxSrcWithFlags(file = static_extension_info_out, flags = []),
     ]
 
-    # All deps involved in the link.
+    # All deps inolved in the link.
     link_deps = (
-        linkables(ctx.attrs.executable_deps + python_attr_preload_deps(ctx)) +
+        linkables(ctx.attrs.executable_deps + ctx.attrs.preload_deps) +
         extension_info_reduced.linkable_providers
     )
 
@@ -281,20 +279,6 @@ def _compute_cxx_executable_info(
     extra_binary_link_flags = []
 
     extra_binary_link_flags.extend(python_toolchain.binary_linker_flags)
-
-    # Force the linker to retain all PyInit symbols for embeddable C extensions.
-    # The generated static_extension_info.cpp references these symbols via asm
-    # directives, but the linker may still drop archive members that define them
-    # if nothing else references them (e.g. when link groups or --gc-sections
-    # are in play). Adding -u flags ensures the linker treats them as undefined
-    # entry points and pulls in the necessary object files from archives.
-    pyinit_symbols = extension_info_reduced.python_module_names.values()
-    if pyinit_symbols:
-        pyinit_argsfile = ctx.actions.write(
-            "__pyinit_undefined_symbols__.argsfile",
-            cmd_args(["-u" + sym for sym in pyinit_symbols]),
-        )
-        extra_binary_link_flags.append(cmd_args(pyinit_argsfile, format = "@{}"))
 
     linker_info = get_cxx_toolchain_info(ctx).linker_info
 
@@ -348,8 +332,12 @@ def _compute_cxx_executable_info(
         exe_allow_cache_upload = bool(allow_cache_upload) or _cxx_exe_allow_cache_upload(ctx),
         compiler_flags = ctx.attrs.compiler_flags,
         lang_compiler_flags = ctx.attrs.lang_compiler_flags,
+        platform_compiler_flags = ctx.attrs.platform_compiler_flags,
+        lang_platform_compiler_flags = ctx.attrs.lang_platform_compiler_flags,
         preprocessor_flags = ctx.attrs.preprocessor_flags,
         lang_preprocessor_flags = ctx.attrs.lang_preprocessor_flags,
+        platform_preprocessor_flags = ctx.attrs.platform_preprocessor_flags,
+        lang_platform_preprocessor_flags = ctx.attrs.lang_platform_preprocessor_flags,
         error_handler = python_toolchain.python_error_handler,
         allow_cache_upload = cxx_attrs_get_allow_cache_upload(ctx.attrs, get_cxx_toolchain_info(ctx).cxx_compiler_info.allow_cache_upload),
         precompiled_header = ctx.attrs.precompiled_header,
@@ -370,9 +358,8 @@ def process_native_linking(
     list[LinkArgs],
     dict[str, typing.Any],
     dict[str, typing.Any],
-    [CxxLinkerMapData, None],
-    [CxxGcSectionsData, None],
 ):
+    #TODO @dcssiva: fix types
     extra = {}
     extra_artifacts = {}
 
@@ -383,7 +370,7 @@ def process_native_linking(
     inherited_preprocessor_info = cxx_inherited_preprocessor_infos(executable_deps)
 
     # Generate an additional C file as input
-    static_extension_info_out = ctx.actions.declare_output("static_extension_info.cpp", has_content_based_path = False)
+    static_extension_info_out = ctx.actions.declare_output("static_extension_info.cpp")
     argfile = at_argfile(
         actions = ctx.actions,
         name = "generate_static_extension_info.argsfile",
@@ -396,6 +383,7 @@ def process_native_linking(
     cmd.add(cmd_args(argfile))
     cmd.add(cmd_args(static_extension_info_out.as_output(), format = "--output={}"))
 
+    # TODO we don't need to do this ...
     ctx.actions.run(cmd, category = "generate_static_extension_info")
 
     extra["static_extension_info"] = [DefaultInfo(default_output = static_extension_info_out)]
@@ -435,6 +423,7 @@ def process_native_linking(
     # potentially all of them before startup.
     shared_libs = [(s, "runtime/lib") for s in executable_info.shared_libs]
 
+    # TODO expect(len(executable_info.runtime_files) == 0, "OH NO THERE ARE RUNTIME FILES")
     extra_artifacts.update(extension_info_reduced.artifacts)
     shared_libs.append((
         create_shlib(
@@ -451,4 +440,4 @@ def process_native_linking(
 
     link_args = executable_info.link_args
     extra_artifacts["static_extension_finder.py"] = ctx.attrs.static_extension_finder
-    return shared_libs, extensions, link_args, extra, extra_artifacts, executable_info.linker_map_data, executable_info.gc_sections_data
+    return shared_libs, extensions, link_args, extra, extra_artifacts

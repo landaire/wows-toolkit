@@ -120,7 +120,6 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
                 jars_to_owners,
                 ctx.attrs.primary_dex_patterns,
                 enable_bootstrap_dexes = ctx.attrs.enable_bootstrap_dexes,
-                multidex_min_api = ctx.attrs.multidex_min_api,
             )
         else:
             dex_files_info = get_single_primary_dex(
@@ -145,7 +144,7 @@ This will lead to overbuilding and is not supported. Configuration {} not found 
     )
 
     output_apk = build_apk(
-        output_filename = ctx.label.name,
+        label = ctx.label,
         actions = ctx.actions,
         android_toolchain = ctx.attrs._android_toolchain[AndroidToolchainInfo],
         keystore = apk_under_test_info.keystore,

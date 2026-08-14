@@ -12,27 +12,13 @@
 # well-formatted (and then delete this TODO)
 
 load("@prelude//:attrs_validators.bzl", "validation_common")
-load("@prelude//:genrule.bzl", "genrule_attributes")
-load("@prelude//:validation_deps.bzl", "VALIDATION_DEPS_ATTR_NAME")
-load("@prelude//android:build_only_native_code.bzl", "is_build_only_native_code")
-load("@prelude//android:configuration.bzl", "is_building_android_binary_attr")
-load("@prelude//android:min_sdk_version.bzl", "get_min_sdk_version_constraint_value_name", "get_min_sdk_version_range")
 load("@prelude//decls:test_common.bzl", "test_common")
 load("@prelude//transitions:constraint_overrides.bzl", "constraint_overrides")
-load(":common.bzl", "SourceAbiVerificationMode", "TestType", "buck", "prelude_rule")
+load(":common.bzl", "AbiGenerationMode", "LogLevel", "SourceAbiVerificationMode", "TestType", "UnusedDependenciesAction", "buck", "prelude_rule")
 load(":jvm_common.bzl", "jvm_common")
 load(":re_test_common.bzl", "re_test_common")
-load(":toolchains_common.bzl", "toolchains_common")
 
 Style = ["obf", "pretty", "detailed"]
-
-def dex_min_sdk_version():
-    min_sdk_version_dict = {"DEFAULT": None}
-    for min_sdk in get_min_sdk_version_range():
-        constraint = "prelude//android/constraints:{}".format(get_min_sdk_version_constraint_value_name(min_sdk))
-        min_sdk_version_dict[constraint] = min_sdk
-
-    return select(min_sdk_version_dict)
 
 gwt_binary = prelude_rule(
     name = "gwt_binary",
@@ -42,6 +28,7 @@ gwt_binary = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "draft_compile": attrs.bool(default = False),
             "experimental_args": attrs.list(attrs.string(), default = []),
@@ -52,8 +39,6 @@ gwt_binary = prelude_rule(
             "strict": attrs.bool(default = False),
             "style": attrs.enum(Style, default = "obf"),
             "vm_args": attrs.list(attrs.string(), default = []),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_java_toolchain": toolchains_common.java(),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -73,16 +58,14 @@ jar_genrule = prelude_rule(
             "cacheable": attrs.option(attrs.bool(), default = None),
             "cmd": attrs.option(attrs.arg(), default = None),
             "cmd_exe": attrs.option(attrs.arg(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "enable_sandbox": attrs.option(attrs.bool(), default = None),
             "environment_expansion_separator": attrs.option(attrs.string(), default = None),
             "weight": attrs.option(attrs.int(), default = None),
+            "need_android_tools": attrs.bool(default = False),
             "remote": attrs.option(attrs.bool(), default = None),
             "srcs": attrs.named_set(attrs.source(), sorted = False, default = []),
             "type": attrs.option(attrs.string(), default = None),
-        } |
-        genrule_attributes() |
-        {
-            "_java_toolchain": toolchains_common.java(),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -98,13 +81,13 @@ java_annotation_processor = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "does_not_affect_abi": attrs.bool(default = False),
             "isolate_class_loader": attrs.bool(default = False),
             "processor_class": attrs.string(default = ""),
             "supports_abi_generation_from_source": attrs.bool(default = False),
             "runs_on_java_only": attrs.bool(default = False),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -151,8 +134,7 @@ java_binary = prelude_rule(
                  file will be used but the `main_class` will override the main
                  class in the manifest.
             """),
-            "java_args_for_run_info": attrs.list(attrs.string(), default = []),
-            "meta_inf_directory": attrs.option(attrs.source(allow_directory = True), default = None, doc = """
+            "meta_inf_directory": attrs.option(attrs.source(), default = None, doc = """
                 Note: This has beta support currently.
                  If provided, the contents in this directory will end up in the
                  `META-INF` directory inside the generated JAR file.
@@ -183,6 +165,7 @@ java_binary = prelude_rule(
             """),
             "concat_deps": attrs.bool(default = False, doc = "Use zip concatenation instead of repacking all dependency jars, which is faster"),
             "default_cxx_platform": attrs.option(attrs.string(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "generate_wrapper": attrs.bool(default = False),
             "do_not_create_inner_jar": attrs.bool(default = False),
             "incremental_target_prefix": attrs.option(attrs.string(), default = None),
@@ -191,12 +174,7 @@ java_binary = prelude_rule(
             "proguard_config": attrs.option(attrs.source(), default = None),
             "proguard_jvm_args": attrs.list(attrs.string(), default = []),
             "proguard_library_jars": attrs.list(attrs.source(), default = []),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_is_building_android_binary": is_building_android_binary_attr(),
-            "_java_toolchain": toolchains_common.java(),
         } |
-        constraint_overrides.attributes |
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg()
@@ -311,26 +289,21 @@ java_library = prelude_rule(
         jvm_common.abi_generation_mode() |
         jvm_common.source_only_abi_deps() |
         jvm_common.required_for_source_only_abi() |
+        jvm_common.on_unused_dependencies() |
         jvm_common.plugins() |
         jvm_common.multi_release_jar() |
         jvm_common.javac() |
+        jvm_common.content_based_path_for_jar_snapshot() |
         jvm_common.classic_java_content_based_paths() |
         {
-            "class_to_src_map_deps": attrs.list(attrs.dep(), default = []),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "jar_postprocessor": attrs.option(attrs.exec_dep(), default = None),
             "manifest_file": attrs.option(attrs.source(), default = None),
             "maven_coords": attrs.option(attrs.string(), default = None),
+            "never_mark_as_unused_dependency": attrs.option(attrs.bool(), default = None),
             "proguard_config": attrs.option(attrs.source(), default = None),
-            "resources_root": attrs.option(attrs.string(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
-            VALIDATION_DEPS_ATTR_NAME: attrs.set(attrs.dep(), sorted = True, default = []),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_dex_min_sdk_version": attrs.option(attrs.int(), default = dex_min_sdk_version()),
-            "_dex_toolchain": toolchains_common.dex(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_is_building_android_binary": is_building_android_binary_attr(),
-            "_java_toolchain": toolchains_common.java(),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -347,12 +320,12 @@ java_plugin = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "does_not_affect_abi": attrs.bool(default = False),
             "isolate_class_loader": attrs.bool(default = False),
             "plugin_name": attrs.string(default = ""),
             "supports_abi_generation_from_source": attrs.bool(default = False),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
@@ -410,9 +383,18 @@ java_test = prelude_rule(
             """),
         } |
         buck.run_test_separately_arg(run_test_separately_type = attrs.bool(default = False)) |
+        buck.fork_mode() |
         re_test_common.test_args() |
         buck.test_rule_timeout_ms() |
         {
+            "std_out_log_level": attrs.option(attrs.one_of(attrs.enum(LogLevel), attrs.int()), default = None, doc = """
+                Log level for messages from the source under test that buck will output to
+                 std out.
+                 Value must be a valid `java.util.logging.Level` value.
+            """),
+            "std_err_log_level": attrs.option(attrs.one_of(attrs.enum(LogLevel), attrs.int()), default = None, doc = """
+                Same as `std_out_log_level`, but for std err.
+            """),
             "use_cxx_libraries": attrs.option(attrs.bool(), default = None, doc = """
                 Whether or not to build and link against `cxx_library()` dependencies when testing.
             """),
@@ -425,45 +407,38 @@ java_test = prelude_rule(
             """),
         } |
         jvm_common.test_env() |
-        jvm_common.abi_generation_mode() |
         {
+            "abi_generation_mode": attrs.option(attrs.enum(AbiGenerationMode), default = None),
             "default_cxx_platform": attrs.option(attrs.string(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps_query": attrs.option(attrs.query(), default = None),
-            "discover_all_test_classes": attrs.bool(default = False),
             "exported_deps": attrs.list(attrs.dep(), default = []),
             "exported_provided_deps": attrs.list(attrs.dep(), default = []),
             "extra_arguments": attrs.list(attrs.string(), default = []),
             "jar_postprocessor": attrs.option(attrs.exec_dep(), default = None),
             "java_version": attrs.option(attrs.string(), default = None),
             "java": attrs.option(attrs.dep(), default = None),
-            "java_agents": attrs.list(attrs.source(), default = []),
             "manifest_file": attrs.option(attrs.source(), default = None),
             "maven_coords": attrs.option(attrs.string(), default = None),
+            "never_mark_as_unused_dependency": attrs.option(attrs.bool(), default = None),
+            "on_unused_dependencies": attrs.option(attrs.enum(UnusedDependenciesAction), default = None),
             "proguard_config": attrs.option(attrs.source(), default = None),
             "provided_deps": attrs.list(attrs.dep(), default = []),
             "remove_classes": attrs.list(attrs.regex(), default = []),
             "required_for_source_only_abi": attrs.bool(default = False),
-            "resources_root": attrs.option(attrs.string(), default = None),
+            "resources_root": attrs.option(attrs.source(), default = None),
             "runner": attrs.option(attrs.dep(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
             "source_only_abi_deps": attrs.list(attrs.dep(), default = []),
             "specs": attrs.option(attrs.arg(json = True), default = None),
-            "supports_test_execution_caching": attrs.bool(default = False),
             "test_case_timeout_ms": attrs.option(attrs.int(), default = None),
-            "test_class_names_file": attrs.option(attrs.source(), default = None),
             "unbundled_resources_root": attrs.option(attrs.source(allow_directory = True), default = None),
             "use_dependency_order_classpath": attrs.option(attrs.bool(), default = None),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_is_building_android_binary": attrs.default_only(attrs.bool(default = False)),
-            "_java_test_toolchain": toolchains_common.java_test(),
-            "_java_toolchain": toolchains_common.java(),
         } |
         buck.licenses_arg() |
-        buck.contacts_arg() |
-        validation_common.attrs_validators_arg()
-    ) | jvm_common.annotation_processors() | jvm_common.plugins() | jvm_common.javac() | test_common.attributes() | jvm_common.classic_java_content_based_paths(),
+        buck.contacts_arg()
+    ) | jvm_common.annotation_processors() | jvm_common.plugins() | jvm_common.javac() | test_common.attributes() | jvm_common.content_based_path_for_jar_snapshot() | jvm_common.classic_java_content_based_paths(),
 )
 
 java_test_runner = prelude_rule(
@@ -474,6 +449,8 @@ java_test_runner = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         {
+            "abi_generation_mode": attrs.option(attrs.enum(AbiGenerationMode), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "exported_deps": attrs.list(attrs.dep(), default = []),
             "exported_provided_deps": attrs.list(attrs.dep(), default = []),
@@ -482,12 +459,14 @@ java_test_runner = prelude_rule(
             "main_class": attrs.string(default = ""),
             "manifest_file": attrs.option(attrs.source(), default = None),
             "maven_coords": attrs.option(attrs.string(), default = None),
+            "never_mark_as_unused_dependency": attrs.option(attrs.bool(), default = None),
+            "on_unused_dependencies": attrs.option(attrs.enum(UnusedDependenciesAction), default = None),
             "proguard_config": attrs.option(attrs.source(), default = None),
             "provided_deps": attrs.list(attrs.dep(), default = []),
             "remove_classes": attrs.list(attrs.regex(), default = []),
             "required_for_source_only_abi": attrs.bool(default = False),
             "resources": attrs.list(attrs.source(), default = []),
-            "resources_root": attrs.option(attrs.string(), default = None),
+            "resources_root": attrs.option(attrs.source(), default = None),
             "runtime_deps": attrs.list(attrs.dep(), default = []),
             "source": attrs.option(attrs.string(), default = None),
             "source_abi_verification_mode": attrs.option(attrs.enum(SourceAbiVerificationMode), default = None),
@@ -498,7 +477,6 @@ java_test_runner = prelude_rule(
         buck.licenses_arg() |
         buck.labels_arg() |
         buck.contacts_arg() |
-        jvm_common.abi_generation_mode() |
         jvm_common.annotation_processors() |
         jvm_common.plugins() |
         jvm_common.javac()
@@ -554,23 +532,20 @@ prebuilt_jar = prelude_rule(
                  build, so this should be empty.
             """),
             "desugar_deps": attrs.list(attrs.dep(), default = []),
-            "generate_abi": attrs.bool(default = True),
-            "is_executable": attrs.bool(default = False),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
+            "generate_abi": attrs.bool(default = False),
             "maven_coords": attrs.option(attrs.string(), default = None),
-            # Prebuilt jars are quick to build, and often contain third-party code, which in turn is
-            # often a source of annotations and constants. To ease migration to ABI generation from
-            # source without deps, we have them present during ABI gen by default.
-            "required_for_source_only_abi": attrs.bool(default = True),
-            "uses_content_based_paths": jvm_common.content_based_path_attr(),
-            "_build_only_native_code": attrs.default_only(attrs.bool(default = is_build_only_native_code())),
-            "_dex_min_sdk_version": attrs.option(attrs.int(), default = dex_min_sdk_version()),
-            "_dex_toolchain": toolchains_common.dex(),
-            "_exec_os_type": buck.exec_os_type_arg(),
-            "_prebuilt_jar_toolchain": toolchains_common.prebuilt_jar(),
+            "never_mark_as_unused_dependency": attrs.bool(default = False),
+            "required_for_source_only_abi": attrs.bool(default = False),
+            "uses_content_based_paths": attrs.bool(default = select({
+                # @oss-disable[end= ]: "config//build_mode/constraints:whatsapp": True,
+                "DEFAULT": False,
+            })),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
-        buck.contacts_arg()
+        buck.contacts_arg() |
+        jvm_common.content_based_path_for_jar_snapshot()
     ),
 )
 

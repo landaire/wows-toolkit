@@ -14,7 +14,7 @@ load("@prelude//apple:apple_utility.bzl", "get_apple_architecture")
 # @oss-disable[end= ]: load("@prelude//apple/meta_only:shared_library_interfaces.bzl", "get_shared_library_interface_generation_linker_flags")
 load(
     "@prelude//apple/swift:swift_incremental_support.bzl",
-    "get_uses_content_based_paths",
+    "get_uses_experimental_content_based_path_hashing",
 )
 load("@prelude//cxx:cxx_context.bzl", "get_cxx_toolchain_info")
 load(
@@ -647,7 +647,7 @@ def generate_shared_library_interface(
     interface_generation_linker_args.add(dynamic_libraries)
     output_as_string = cmd_args(output, ignore_artifacts = True)
     interface_generation_linker_args.add("-o", output_as_string)
-    interface_generation_linker_argsfile = ctx.actions.declare_output(output.basename + ".shared_library_interface_generation_argsfile", has_content_based_path = False)
+    interface_generation_linker_argsfile = ctx.actions.declare_output(output.basename + ".shared_library_interface_generation_argsfile")
     interface_generation_linker_argsfile, _ = ctx.actions.write(
         interface_generation_linker_argsfile,
         interface_generation_linker_args,
@@ -710,7 +710,7 @@ def cxx_darwin_dist_link(
 
     prepared_archive_artifacts = {}
 
-    uses_content_based_paths = get_uses_content_based_paths(ctx)
+    uses_content_based_paths = get_uses_experimental_content_based_path_hashing(ctx)
 
     recorded_artifact_names = {}
     for link in link_infos:
@@ -754,8 +754,6 @@ def cxx_darwin_dist_link(
 
     def prepare_opt_flags(link_infos: list[LinkInfo]) -> cmd_args:
         opt_flags = cmd_args(cxx_toolchain.linker_info.dist_thin_lto_codegen_flags)
-        if cxx_toolchain.pass_plugin:
-            opt_flags.add(cmd_args(cxx_toolchain.pass_plugin, format = "-fpass-plugin={}"))
         opt_flags.add(get_target_sdk_version_flags(ctx))
         for link in link_infos:
             opt_flags.add(link.dist_thin_lto_codegen_flags)

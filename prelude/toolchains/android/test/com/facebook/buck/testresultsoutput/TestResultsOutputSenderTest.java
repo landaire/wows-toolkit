@@ -78,10 +78,9 @@ public class TestResultsOutputSenderTest {
         TestResultsOutputSender.fromEnvName(customEnvVarName);
     assertTrue(sender.isPresent());
 
-    long startedTime = 1700000000000L;
-    sender.get().sendTestStart("test_test_name", startedTime);
+    sender.get().sendTestStart("test_test_name");
 
-    String expected = "{\"start\":{\"name\":\"test_test_name\",\"started_time\":1700000000000}}\n";
+    String expected = "{\"start\":{\"name\":\"test_test_name\"}}\n";
 
     assertOutputMatchesExpected(expected, tempFile);
   }

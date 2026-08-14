@@ -33,9 +33,6 @@ import com.facebook.buck.jvm.kotlin.cd.workertool.postexecutors.ClassAbiWriter;
 import com.facebook.buck.jvm.kotlin.cd.workertool.postexecutors.ClassAbiWriterFactory;
 import com.facebook.buck.jvm.kotlin.cd.workertool.postexecutors.PreviousStateWriter;
 import com.facebook.buck.jvm.kotlin.cd.workertool.postexecutors.PreviousStateWriterFactory;
-import com.facebook.buck.jvm.kotlin.cd.workertool.postexecutors.SkippedCompilationTracker;
-import com.facebook.buck.jvm.kotlin.cd.workertool.postexecutors.SkippedCompilationTrackerFactory;
-import com.facebook.buck.util.zip.ZipScrubber;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSortedSet;
@@ -48,7 +45,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
@@ -89,8 +85,6 @@ public class KotlinCDCommand implements JvmCDCommand {
   private final PostBuildParams postBuildParams;
   private final Optional<Path> actionMetadataPath;
   private final Logger logger;
-  private final SkippedCompilationTracker kotlinClassesTracker;
-  private final SkippedCompilationTracker jvmAbiTracker;
 
   public KotlinCDCommand(String[] args, ImmutableMap<String, String> env)
       throws CmdLineException, IOException {
@@ -119,20 +113,6 @@ public class KotlinCDCommand implements JvmCDCommand {
     this.executionPlatform = env.get("INSIDE_RE_WORKER") != null ? "remote_execution" : "local";
     KotlinCDAnalytics kotlinCDAnalytics = initKotlinCDAnalytics();
     cleanupOldPostBuildOutputs();
-
-    // Capture pre-compilation timestamps for tracking which files skip compilation.
-    this.kotlinClassesTracker =
-        SkippedCompilationTrackerFactory.create(
-            postBuildParams.getFilesWhichSkippedCompilation(),
-            buildKotlinCommand.getKotlinExtraParams().getKotlinClassesDir().getPath());
-    this.jvmAbiTracker =
-        SkippedCompilationTrackerFactory.create(
-            postBuildParams.getJvmAbiFilesWhichSkippedCompilation(),
-            buildKotlinCommand
-                .getKotlinExtraParams()
-                .getJvmAbiGenWorkingDir()
-                .map(absPath -> absPath.getPath())
-                .orElse(null));
 
     this.stepsBuilder =
         new KotlinStepsBuilder(
@@ -361,55 +341,12 @@ public class KotlinCDCommand implements JvmCDCommand {
   @Override
   public void postExecute() throws IOException {
     maybeCreateIncrementalStateDir();
-    maybeRunPostProcessor();
     maybeWriteClassAbi();
     maybeWriteAbiDir();
-    kotlinClassesTracker.writeSkippedFiles();
-    jvmAbiTracker.writeSkippedFiles();
     maybeWriteDepFile();
     maybeCreateOptionalDirs();
     maybeWriteUsedJarsFile();
     maybeWritePreviousStateForNextIncrementalRun();
-  }
-
-  protected void maybeRunPostProcessor() throws IOException {
-    String postProcessorCmd = postBuildParams.getPostProcessorCmd();
-    if (postProcessorCmd == null) {
-      return;
-    }
-
-    Path libraryJar = postBuildParams.getLibraryJar();
-    Preconditions.checkNotNull(libraryJar, "libraryJar must be set when postProcessorCmd is set");
-
-    Path tempDir = Files.createTempDirectory("postprocessor");
-    try {
-      Path postprocessedJar = tempDir.resolve("postprocessed_output.jar");
-      List<String> cmd = new ArrayList<>(Arrays.asList(postProcessorCmd.split("\\s+")));
-      cmd.add(libraryJar.toString());
-      cmd.add(postprocessedJar.toString());
-
-      logger.info("Executing post-processor: %s", String.join(" ", cmd));
-      ProcessBuilder pb = new ProcessBuilder(cmd);
-      pb.inheritIO();
-      Process process = pb.start();
-      int exitCode;
-      try {
-        exitCode = process.waitFor();
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new IOException("Post-processor interrupted", e);
-      }
-      if (exitCode != 0) {
-        throw new IOException("Post-processor command failed with exit code " + exitCode);
-      }
-
-      Files.copy(postprocessedJar, libraryJar, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-    } finally {
-      MostFiles.deleteRecursivelyIfExists(AbsPath.of(tempDir.toAbsolutePath()));
-    }
-
-    // Scrub the jar to normalize timestamps for deterministic builds
-    ZipScrubber.scrubZip(libraryJar);
   }
 
   @Override

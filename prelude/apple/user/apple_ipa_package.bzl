@@ -80,11 +80,10 @@ def _get_ipa_contents(ctx: AnalysisContext) -> Artifact:
     return ctx.actions.copied_dir(
         "__unzipped_ipa_contents__",
         contents,
-        has_content_based_path = False,
     )
 
 def _build_symbols_dir(ctx) -> Artifact:
-    symbols_dir = ctx.actions.declare_output("__symbols__", dir = True, has_content_based_path = False)
+    symbols_dir = ctx.actions.declare_output("__symbols__", dir = True)
     ctx.actions.run(
         cmd_args(["mkdir", "-p", symbols_dir.as_output()]),
         category = "watchos_symbols_dir",
@@ -99,7 +98,7 @@ def _get_swift_support_dir(ctx, bundle_output: Artifact, bundle_info: AppleBundl
     # .app -> app
     # This is the way the input is expected.
     extension = bundle_output.extension[1:]
-    swift_support_dir = ctx.actions.declare_output("__swift_dylibs__", dir = True, has_content_based_path = False)
+    swift_support_dir = ctx.actions.declare_output("__swift_dylibs__", dir = True)
     script, _ = ctx.actions.write(
         "build_swift_support.sh",
         [

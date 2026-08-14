@@ -11,12 +11,10 @@
 # the generated docs, and so those should be verified to be accurate and
 # well-formatted (and then delete this TODO)
 
-load("@prelude//:attrs_validators.bzl", "validation_common")
 load("@prelude//apple:apple_common.bzl", "apple_common")
 load("@prelude//cxx:cuda.bzl", "CudaCompileStyle")
 load("@prelude//cxx:headers.bzl", "CPrecompiledHeaderInfo")
 load("@prelude//cxx:link_groups_types.bzl", "LINK_GROUP_MAP_ATTR")
-load("@prelude//decls:core_rules.bzl", "core_args")
 load("@prelude//decls:test_common.bzl", "test_common")
 load("@prelude//decls:toolchains_common.bzl", "toolchains_common")
 load("@prelude//linking:execution_preference.bzl", "link_execution_preference_attr")
@@ -52,6 +50,7 @@ def _cxx_binary_and_test_attrs():
         # of the target's dependencies.
         "coverage_instrumentation_compiler_flags": attrs.list(attrs.string(), default = []),
         "cuda_compile_style": attrs.enum(CudaCompileStyle.values(), default = "mono"),
+        "distributed_thinlto_partial_split_dwarf": attrs.bool(default = False),
         "enable_distributed_thinlto": attrs.bool(default = False),
         "exported_needs_coverage_instrumentation": attrs.bool(default = False),
         "extra_dwp_flags": attrs.list(attrs.string(), default = []),
@@ -66,7 +65,7 @@ def _cxx_binary_and_test_attrs():
         "_build_info": BUILD_INFO_ATTR,
         "_cxx_hacks": attrs.dep(default = "prelude//cxx/tools:cxx_hacks"),
         "_cxx_toolchain": toolchains_common.cxx(),
-    } | validation_common.attrs_validators_arg()
+    }
     ret.update(constraint_overrides.attributes)
     return ret
 
@@ -79,6 +78,8 @@ CxxToolProviderType = ["clang", "clang_cl", "clang_windows", "gcc", "windows", "
 LinkerProviderType = ["darwin", "gnu", "windows", "unknown", "wasm"]
 
 PicType = ["pic", "pdc"]
+
+SharedLibraryInterfaceParamsType = ["disabled", "enabled", "defined_only"]
 
 cxx_binary = prelude_rule(
     name = "cxx_binary",
@@ -125,14 +126,18 @@ cxx_binary = prelude_rule(
     attrs = (
         # @unsorted-dict-items
         cxx_common.srcs_arg() |
+        cxx_common.platform_srcs_arg() |
         cxx_common.headers_arg() |
+        cxx_common.platform_headers_arg() |
         cxx_common.header_namespace_arg() |
         cxx_common.preprocessor_flags_arg() |
+        cxx_common.platform_preprocessor_flags_arg() |
         cxx_common.compiler_flags_arg() |
+        cxx_common.platform_compiler_flags_arg() |
         cxx_common.linker_extra_outputs_arg() |
         cxx_common.linker_flags_arg() |
+        cxx_common.platform_linker_flags_arg() |
         cxx_common.precompiled_header_arg() |
-        cxx_common.default_deps_arg() |
         native_common.link_style() |
         native_common.link_group_deps() |
         native_common.link_group_public_deps_label() |
@@ -146,6 +151,7 @@ cxx_binary = prelude_rule(
         cxx_common.use_content_based_paths_arg() |
         {
             "cxx_runtime_type": attrs.option(attrs.enum(CxxRuntimeType), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "default_platform": attrs.option(attrs.string(), default = None),
             "defaults": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
             "deps": attrs.list(attrs.dep(), default = []),
@@ -156,19 +162,23 @@ cxx_binary = prelude_rule(
             "frameworks": attrs.list(attrs.string(), default = []),
             "headers_as_raw_headers_mode": attrs.option(attrs.enum(HeadersAsRawHeadersMode), default = None),
             "lang_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
+            "lang_platform_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
+            "lang_platform_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
             "lang_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
             "libraries": attrs.list(attrs.string(), default = []),
             "link_deps_query_whole": attrs.bool(default = False),
             "link_group": attrs.option(attrs.string(), default = None),
             "link_group_map": LINK_GROUP_MAP_ATTR,
+            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
             "post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            "post_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
             "prefer_stripped_objects": attrs.bool(default = False),
             "prefix_header": attrs.option(attrs.source(), default = None),
             "resources": attrs.named_set(attrs.source(), sorted = True, default = []),
             "thin_lto": attrs.bool(default = False),
             "version_universe": attrs.option(attrs.string(), default = None),
             "weak_framework_names": attrs.list(attrs.string(), default = []),
-            "use_header_units": attrs.one_of(attrs.bool(), attrs.enum(["stub"]), default = False),
+            "use_header_units": attrs.bool(default = False),
         } |
         buck.allow_cache_upload_arg() |
         buck.licenses_arg() |
@@ -315,6 +325,11 @@ cxx_genrule = prelude_rule(
                  Use the *pattern* parameter to specify a regular expression that matches the build targets that use these flags.
 
 
+
+                `$(platform-name)`
+                The platform flavor with which this `cxx_genrule` was specified.
+
+
                 #### Parameterized Macros
 
                  It is also possible to expand references to other rules within the
@@ -407,35 +422,50 @@ cxx_genrule = prelude_rule(
                 Whether this target should be executed in a sandbox or not.
             """),
             "cacheable": attrs.option(attrs.bool(), default = None),
+            "has_content_based_path": attrs.bool(default = False),
+            "uses_experimental_content_based_path_hashing": attrs.bool(default = False),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "default_outs": attrs.option(attrs.set(attrs.string(), sorted = False), default = None),
+            "need_android_tools": attrs.bool(default = False),
             "outs": attrs.option(attrs.dict(key = attrs.string(), value = attrs.set(attrs.string(), sorted = False), sorted = False), default = None),
             "remote": attrs.option(attrs.bool(), default = None),
         } |
         buck.licenses_arg() |
         buck.labels_arg() |
-        buck.contacts_arg() |
-        core_args.has_content_based_path_attr()
+        buck.contacts_arg()
     ),
 )
 
 library_attrs = (
     # @unsorted-dict-items
     cxx_common.srcs_arg() |
+    cxx_common.platform_srcs_arg() |
     cxx_common.headers_arg() |
+    cxx_common.platform_headers_arg() |
     cxx_common.exported_headers_arg() |
     cxx_common.exported_header_style_arg() |
+    cxx_common.exported_platform_headers_arg() |
     cxx_common.header_namespace_arg() |
     cxx_common.preprocessor_flags_arg() |
     cxx_common.lang_preprocessor_flags_arg() |
+    cxx_common.platform_preprocessor_flags_arg() |
+    cxx_common.lang_platform_preprocessor_flags_arg() |
     cxx_common.exported_preprocessor_flags_arg(exported_preprocessor_flags_type = attrs.list(attrs.arg(), default = [])) |
     cxx_common.exported_lang_preprocessor_flags_arg() |
+    cxx_common.exported_platform_preprocessor_flags_arg() |
+    cxx_common.exported_lang_platform_preprocessor_flags_arg() |
     cxx_common.compiler_flags_arg() |
     cxx_common.lang_compiler_flags_arg() |
+    cxx_common.platform_compiler_flags_arg() |
+    cxx_common.lang_platform_compiler_flags_arg() |
     cxx_common.linker_extra_outputs_arg() |
     cxx_common.linker_flags_arg() |
     cxx_common.local_linker_flags_arg() |
+    cxx_common.platform_linker_flags_arg() |
     cxx_common.exported_linker_flags_arg() |
     cxx_common.exported_post_linker_flags_arg() |
+    cxx_common.exported_platform_linker_flags_arg() |
+    cxx_common.exported_post_platform_linker_flags_arg() |
     native_common.link_style() |
     native_common.link_whole(link_whole_type = attrs.option(attrs.bool(), default = None)) |
     native_common.soname() |
@@ -466,6 +496,7 @@ library_attrs = (
     native_common.preferred_linkage(preferred_linkage_type = attrs.option(attrs.enum(Linkage.values()), default = None)) |
     cxx_common.reexport_all_header_dependencies_arg() |
     cxx_common.exported_deps_arg() |
+    cxx_common.exported_platform_deps_arg() |
     cxx_common.precompiled_header_arg() |
     apple_common.extra_xcode_sources() |
     apple_common.extra_xcode_files() |
@@ -474,8 +505,6 @@ library_attrs = (
     cxx_common.version_arg() |
     cxx_common.use_fbcc_rust_wrapper_arg() |
     cxx_common.use_content_based_paths_arg() |
-    cxx_common.expect_eligible_for_dedupe_arg() |
-    validation_common.attrs_validators_arg() |
     {
         "archive_allow_cache_upload": attrs.bool(default = False),
         "bridging_header": attrs.option(attrs.source(), default = None),
@@ -497,7 +526,9 @@ library_attrs = (
         "link_group": attrs.option(attrs.string(), default = None),
         "link_group_map": LINK_GROUP_MAP_ATTR,
         "module_name": attrs.option(attrs.string(), default = None),
+        "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
         "post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+        "post_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
         "prefix_header": attrs.option(attrs.source(), default = None),
         "resources": attrs.named_set(attrs.source(), sorted = True, default = []),
         "sdk_modules": attrs.list(attrs.string(), default = []),
@@ -508,12 +539,11 @@ library_attrs = (
         "uses_cxx_explicit_modules": attrs.bool(default = False),
         "version_universe": attrs.option(attrs.string(), default = None),
         "weak_framework_names": attrs.list(attrs.string(), default = []),
-        "use_header_units": attrs.one_of(attrs.bool(), attrs.enum(["stub"]), default = False, doc = """
+        "use_header_units": attrs.bool(default = False, doc = """
             If True, makes any header unit exported by a dependency (including
             recursively) through export_header_unit available to the compiler. If
             false, the compilation ignores header units, regardless of what is
-            exported by dependencies. If "stub", uses stub header units instead
-            of full PCM files.
+            exported by dependencies.
         """),
         "export_header_unit": attrs.option(attrs.enum(["include", "preload"]), default = None, doc = """
             If not None, export a C++20 header unit visible to dependants (including
@@ -617,11 +647,39 @@ cxx_library = prelude_rule(
             '-fno-omit-frame-pointer',
           ],
         )
+
+        # A rule that uses different headers and sources per platform
+        cxx_library(
+          name = 'vector',
+          # Because of platform_headers, this file can include "config.h"
+          # and get the architecture specific header
+          srcs = ['vector.cpp'],
+          platform_srcs = [
+            ('.*armv7$', 'armv7.S'),
+            ('.*x86_64$', 'x86_64.S'),
+          ],
+          exported_headers = [
+            'vector.h',
+          ],
+          platform_headers = [
+            (
+              '.*armv7$',
+              {
+                'config.h': 'config-armv7.h',
+              }
+            ),
+            (
+              '.*x86_64$',
+              {
+                'config.h': 'config-x86_64.h',
+              }
+            ),
+          ],
+        )
         ```
     """,
     further = None,
-    attrs = library_attrs |
-            cxx_common.default_deps_arg("exported_deps"),
+    attrs = library_attrs,
 )
 
 cxx_precompiled_header = prelude_rule(
@@ -742,6 +800,7 @@ cxx_precompiled_header = prelude_rule(
             "compile_pch_file": attrs.bool(default = False, doc = """
                 Whether to compile the precompiled header file or use legacy mode.
             """),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = [], doc = """
                 Dependency rules which export headers used by the header specified in `src`.
             """),
@@ -802,14 +861,14 @@ windows_resource = prelude_rule(
     attrs = (
         cxx_common.srcs_arg() |
         cxx_common.headers_arg() |
+        cxx_common.platform_headers_arg() |
         cxx_common.header_namespace_arg() |
         cxx_common.raw_headers_arg() |
         cxx_common.include_directories_arg() |
         {
             "deps": attrs.list(attrs.dep(), default = []),
         } |
-        buck.labels_arg() |
-        buck.contacts_arg()
+        buck.labels_arg()
     ),
 )
 
@@ -836,7 +895,6 @@ cxx_test = prelude_rule(
         buck.inject_test_env_arg() |
         cxx_common.srcs_arg() |
         cxx_common.headers_arg() |
-        cxx_common.default_deps_arg() |
         cxx_common.preprocessor_flags_arg() |
         cxx_common.compiler_flags_arg() |
         cxx_common.linker_flags_arg() |
@@ -901,6 +959,7 @@ cxx_test = prelude_rule(
         {
             "additional_coverage_targets": attrs.list(attrs.source(), default = []),
             "cxx_runtime_type": attrs.option(attrs.enum(CxxRuntimeType), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "default_platform": attrs.option(attrs.string(), default = None),
             "defaults": attrs.dict(key = attrs.string(), value = attrs.string(), sorted = False, default = {}),
             "deps": attrs.list(attrs.dep(), default = []),
@@ -912,25 +971,33 @@ cxx_test = prelude_rule(
             "header_namespace": attrs.option(attrs.string(), default = None),
             "headers_as_raw_headers_mode": attrs.option(attrs.enum(HeadersAsRawHeadersMode), default = None),
             "lang_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
+            "lang_platform_compiler_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
+            "lang_platform_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
             "lang_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
             "libraries": attrs.list(attrs.string(), default = []),
             "link_deps_query_whole": attrs.bool(default = False),
             "link_group": attrs.option(attrs.string(), default = None),
             "link_group_map": LINK_GROUP_MAP_ATTR,
             "linker_extra_outputs": attrs.list(attrs.string(), default = []),
+            "platform_compiler_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = []),
+            "platform_deps": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.dep(), sorted = True)), default = []),
+            "platform_headers": attrs.list(attrs.tuple(attrs.regex(), attrs.named_set(attrs.source(), sorted = True)), default = []),
+            "platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
+            "platform_preprocessor_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())), default = []),
+            "platform_srcs": attrs.list(attrs.tuple(attrs.regex(), attrs.set(attrs.one_of(attrs.source(), attrs.tuple(attrs.source(), attrs.list(attrs.arg()))), sorted = True)), default = []),
             "post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            "post_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
             "prefer_stripped_objects": attrs.bool(default = False),
             "prefix_header": attrs.option(attrs.source(), default = None),
             "thin_lto": attrs.bool(default = False),
             "use_default_test_main": attrs.option(attrs.bool(), default = None),
             "version_universe": attrs.option(attrs.string(), default = None),
             "weak_framework_names": attrs.list(attrs.string(), default = []),
-            "use_header_units": attrs.one_of(attrs.bool(), attrs.enum(["stub"]), default = False, doc = """
+            "use_header_units": attrs.bool(default = False, doc = """
                 If True, makes any header unit exported by a dependency (including
                 recursively) through export_header_unit available to the compiler. If
                 false, the compilation ignores header units, regardless of what is
-                exported by dependencies. If "stub", uses stub header units instead
-                of full PCM files.
+                exported by dependencies.
             """),
         } |
         buck.allow_cache_upload_arg() |
@@ -1000,6 +1067,7 @@ cxx_toolchain = prelude_rule(
             "cxx_compiler_type": attrs.option(attrs.enum(CxxToolProviderType), default = None),
             "cxx_preprocessor_flags": attrs.list(attrs.arg(), default = []),
             "debug_path_prefix_map_sanitizer_format": attrs.option(attrs.string(), default = None),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "dist_thin_lto_codegen_flags": attrs.list(attrs.arg(), default = []),
             "executable_linker_flags": attrs.list(
                 attrs.arg(anon_target_compatible = True),
@@ -1044,6 +1112,7 @@ cxx_toolchain = prelude_rule(
             "shared_dep_runtime_ld_flags": attrs.list(attrs.arg(), default = []),
             "shared_library_extension": attrs.string(default = ""),
             "shared_library_interface_flags": attrs.list(attrs.string(), default = []),
+            "shared_library_interface_type": attrs.enum(SharedLibraryInterfaceParamsType),
             "shared_library_versioned_extension_format": attrs.string(default = ""),
             "static_dep_runtime_ld_flags": attrs.list(attrs.arg(), default = []),
             "static_library_extension": attrs.string(default = ""),
@@ -1095,6 +1164,29 @@ prebuilt_cxx_library = prelude_rule(
           ],
         )
         ```
+
+         A prebuilt library with multiple builds for multiple platforms.
+
+
+        ```
+        prebuilt_cxx_library(
+          name = 'mylib',
+          soname = 'libmylib.so',
+          platform_shared_lib = [
+            ('android-arm', 'android-arm/libmylib.so'),
+            ('android-x86', 'android-x86/libmylib.so'),
+            ('iphonesimulator-x86_64', 'iphonesimulator-x86_64/libmylib.so'),
+          ],
+          platform_static_lib = [
+            ('android-arm', 'android-arm/libmylib.a'),
+            ('android-x86', 'android-x86/libmylib.a'),
+            ('iphonesimulator-x86_64', 'iphonesimulator-x86_64/libmylib.a'),
+          ],
+          exported_headers = [
+            'mylib.h',
+          ],
+        )
+        ```
     """,
     further = None,
     attrs = (
@@ -1106,6 +1198,30 @@ prebuilt_cxx_library = prelude_rule(
             "header_only": attrs.bool(default = False, doc = """
                 Indicates if this library only consists of headers or not. If this is set to
                  `True`, Buck will not link this library into any library that depends on it.
+            """),
+            "platform_header_dirs": attrs.option(attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.source()))), default = None, doc = """
+                Platform specific header directories. These should be specified as a list of pairs where the first
+                 element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+                 name is matched, and the second element is either a list of header directories.
+                 See `header_dirs` for more information.
+            """),
+            "platform_shared_lib": attrs.option(attrs.list(attrs.tuple(attrs.regex(), attrs.source())), default = None, doc = """
+                Platform specific shared library. These should be specified as a list of pairs where the first
+                 element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+                 name is matched, and the second element the path to the library.
+                 See `shared_lib` for more information.
+            """),
+            "platform_static_lib": attrs.option(attrs.list(attrs.tuple(attrs.regex(), attrs.source())), default = None, doc = """
+                Platform specific static library. These should be specified as a list of pairs where the first
+                 element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+                 name is matched, and the second element the path to the library.
+                 See `static_lib` for more information.
+            """),
+            "platform_static_pic_lib": attrs.option(attrs.list(attrs.tuple(attrs.regex(), attrs.source())), default = None, doc = """
+                Platform specific static PIC library. These should be specified as a list of pairs where the first
+                 element is an un-anchored regex (in java.util.regex.Pattern syntax) against which the platform
+                 name is matched, and the second element the path to the library.
+                 See `static_pic_lib` for more information.
             """),
             "shared_lib": attrs.option(attrs.source(), default = None, doc = """
                 The path to the library to use when performing shared linking.
@@ -1119,26 +1235,32 @@ prebuilt_cxx_library = prelude_rule(
         } |
         cxx_common.supported_platforms_regex_arg() |
         cxx_common.exported_headers_arg() |
+        cxx_common.exported_platform_headers_arg() |
         cxx_common.header_namespace_arg() |
         cxx_common.exported_preprocessor_flags_arg(exported_preprocessor_flags_type = attrs.list(attrs.arg(), default = [])) |
+        cxx_common.exported_platform_preprocessor_flags_arg() |
         cxx_common.exported_linker_flags_arg() |
         cxx_common.force_static(force_static_type = attrs.bool(default = False)) |
         native_common.preferred_linkage(preferred_linkage_type = attrs.option(attrs.enum(Linkage.values()), default = None)) |
         cxx_common.exported_deps_arg() |
-        cxx_common.default_deps_arg("exported_deps") |
+        cxx_common.exported_platform_deps_arg() |
         cxx_common.supports_merged_linking() |
         cxx_common.local_linker_flags_arg() |
         cxx_common.local_linker_script_flags_arg() |
         cxx_common.version_arg() |
         {
             "can_be_asset": attrs.bool(default = False),
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deffile": attrs.option(attrs.source(), default = None, doc = """
                 Specifies the *.def file used on windows to modify a dll's exports in place of explicit `__declspec(dllexport)` declarations.
                  The default is to not use a defile.
             """),
             "deps": attrs.list(attrs.dep(), default = []),
+            "exported_lang_platform_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False, default = {}),
             "exported_lang_preprocessor_flags": attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False, default = {}),
+            "exported_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
             "exported_post_linker_flags": attrs.list(attrs.arg(anon_target_compatible = True), default = []),
+            "exported_post_platform_linker_flags": attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg(anon_target_compatible = True))), default = []),
             "extract_soname": attrs.bool(default = False),
             "frameworks": attrs.list(attrs.string(), default = []),
             "import_lib": attrs.option(attrs.source(), default = None),
@@ -1151,7 +1273,9 @@ prebuilt_cxx_library = prelude_rule(
             "provided": attrs.bool(default = False),
             "soname": attrs.option(attrs.string(), default = None),
             "supports_shared_library_interface": attrs.bool(default = True),
+            "versioned_exported_lang_platform_preprocessor_flags": attrs.versioned(attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg()))), sorted = False)),
             "versioned_exported_lang_preprocessor_flags": attrs.versioned(attrs.dict(key = attrs.enum(CxxSourceType), value = attrs.list(attrs.arg()), sorted = False)),
+            "versioned_exported_platform_preprocessor_flags": attrs.versioned(attrs.list(attrs.tuple(attrs.regex(), attrs.list(attrs.arg())))),
             "versioned_exported_preprocessor_flags": attrs.versioned(attrs.list(attrs.arg())),
             "versioned_header_dirs": attrs.option(attrs.versioned(attrs.list(attrs.source())), default = None),
             "versioned_import_lib": attrs.option(attrs.versioned(attrs.source()), default = None),
@@ -1221,7 +1345,7 @@ prebuilt_cxx_library_group = prelude_rule(
             "static_link": attrs.list(attrs.string(), default = [], doc = """
                 The arguments to use when linking this library group using the static link style.
                  The actual paths to libraries should be listed in the `static_libs` parameter,
-                 and referenced via the `$(lib [index])` macro in these args.
+                 and referenced via the the `$(lib [index])` macro in these args.
             """),
             "static_libs": attrs.list(attrs.source(), default = [], doc = """
                 The paths to the libraries used when using the static link style.
@@ -1231,7 +1355,7 @@ prebuilt_cxx_library_group = prelude_rule(
             "static_pic_link": attrs.list(attrs.string(), default = [], doc = """
                 The arguments to use when linking this library group using the static-pic link style.
                  The actual paths to libraries should be listed in the `static_pic_libs`
-                 parameter, and referenced via the `$(lib [index])` macro in
+                 parameter, and referenced via the the `$(lib [index])` macro in
                  these args.
             """),
             "static_pic_libs": attrs.list(attrs.source(), default = [], doc = """
@@ -1242,7 +1366,7 @@ prebuilt_cxx_library_group = prelude_rule(
             "shared_link": attrs.list(attrs.string(), default = [], doc = """
                 The arguments to use when linking this library group using the shared link style.
                  The actual paths to libraries should be listed in the `shared_libs`
-                 parameter, and referenced via the `$(lib [name])` macro (or the
+                 parameter, and referenced via the the `$(lib [name])` macro (or the
                  `$(rel-lib [name])` macro, when the shared library should be linked
                  using the `-L[dir] -l[name]` style) in these args.
             """),
@@ -1257,9 +1381,11 @@ prebuilt_cxx_library_group = prelude_rule(
             """),
         } |
         cxx_common.exported_deps_arg() |
+        cxx_common.exported_platform_deps_arg() |
         cxx_common.version_arg() |
         cxx_common.supported_platforms_regex_arg() |
         {
+            "default_host_platform": attrs.option(attrs.configuration_label(), default = None),
             "deps": attrs.list(attrs.dep(), default = []),
             "import_libs": attrs.dict(key = attrs.string(), value = attrs.source(), sorted = False, default = {}),
             "include_dirs": attrs.list(attrs.source(allow_directory = True), default = []),

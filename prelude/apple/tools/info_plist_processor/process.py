@@ -11,6 +11,7 @@
 import json
 import plistlib
 import sys
+
 from typing import Any, IO, Optional, TextIO
 
 from apple.tools.plistlib_utils import detect_format_and_load

@@ -12,7 +12,6 @@ load(
 )
 load(
     "@prelude//:resources.bzl",
-    "create_relocatable_resources_info",
     "create_resource_db",
     "gather_resources",
 )
@@ -21,11 +20,6 @@ load(
     "cxx_attr_deps",
 )
 load("@prelude//cxx:cxx_link_utility.bzl", "executable_shared_lib_arguments")
-load(
-    "@prelude//cxx:cxx_toolchain_types.bzl",
-    "PicBehavior",
-    "RuntimeDependencyHandling",
-)
 load("@prelude//cxx:cxx_utility.bzl", "cxx_attrs_get_allow_cache_upload")
 load(
     "@prelude//cxx:link_groups.bzl",
@@ -44,14 +38,8 @@ load(
 )
 load(
     "@prelude//linking:link_info.bzl",
-    "LibOutputStyle",
     "LinkStrategy",
-    "get_lib_output_style",
     "process_link_strategy_for_pic_behavior",
-)
-load(
-    "@prelude//linking:linkable_graph.bzl",
-    "create_linkable_graph",
 )
 load(
     "@prelude//linking:shared_libraries.bzl",
@@ -96,7 +84,6 @@ load(
     "DEFAULT_STATIC_LINK_STRATEGY",
     "attr_simple_crate_for_filenames",
     "inherited_external_debug_info",
-    "inherited_linkable_graphs",
     "inherited_rust_cxx_link_group_info",
     "inherited_shared_libs",
 )
@@ -104,17 +91,6 @@ load(":named_deps.bzl", "write_named_deps_names")
 load(":outputs.bzl", "RustcExtraOutputsInfo", "output_as_diag_subtargets")
 load(":profile.bzl", "make_profile_providers")
 load(":resources.bzl", "rust_attr_resources")
-
-def _get_runtime_dependency_handling(ctx: AnalysisContext, compile_ctx: CompileContext) -> RuntimeDependencyHandling:
-    """Read runtime_dependency_handling from attribute, falling back to CXX toolchain default."""
-    if ctx.attrs.runtime_dependency_handling:
-        return RuntimeDependencyHandling(ctx.attrs.runtime_dependency_handling)
-
-    # Toolchains that don't support shared libraries (e.g. WASM, bare-metal)
-    # cannot create symlink trees, so skip runtime dependency handling.
-    if not compile_ctx.cxx_toolchain_info.linker_info.supports_shared_libraries:
-        return RuntimeDependencyHandling("no_symlink")
-    return compile_ctx.cxx_toolchain_info.runtime_dependency_handling
 
 def _strategy_params(
         ctx: AnalysisContext,
@@ -166,11 +142,11 @@ def _rust_binary_common(
     if enable_late_build_info_stamping:
         allow_cache_upload = True
         unstamped_name = output_filename(compile_ctx, simple_crate, Emit("link"), params, "-unstamped")
-        predeclared_output = ctx.actions.declare_output(unstamped_name, has_content_based_path = False)
-        final_output = ctx.actions.declare_output(name, has_content_based_path = False)
+        predeclared_output = ctx.actions.declare_output(unstamped_name)
+        final_output = ctx.actions.declare_output(name)
     else:
         # If not using late build info stamping, then the output will be stamped eagerly in rust_compile
-        predeclared_output = ctx.actions.declare_output(name, has_content_based_path = False)
+        predeclared_output = ctx.actions.declare_output(name)
         final_output = predeclared_output
 
     build_graph_info = new_build_graph_info(ctx, cxx_deps)
@@ -197,27 +173,9 @@ def _rust_binary_common(
         targets_consumed_by_link_groups = {}
         filtered_targets = []
 
-    runtime_dep_handling = _get_runtime_dependency_handling(ctx, compile_ctx)
-
     shlib_deps = []
     if link_strategy == LinkStrategy("shared") or rust_cxx_link_group_info != None:
         shlib_deps = inherited_shared_libs(ctx, compile_ctx.dep_ctx)
-    elif runtime_dep_handling == RuntimeDependencyHandling("symlink"):
-        # Include all transitive runtime shared library deps in a symlink tree.
-        # Only collect libs that would actually be built as shared libraries
-        # given the current link strategy, matching cxx_binary behavior.
-        linkable_graphs_tset = inherited_linkable_graphs(ctx, compile_ctx.dep_ctx)
-        all_graphs = []
-        for graphs in linkable_graphs_tset.traverse():
-            all_graphs.extend(graphs)
-        linkable_graph = create_linkable_graph(ctx, deps = all_graphs)
-        for linkable_node in linkable_graph.nodes.traverse():
-            if linkable_node.linkable == None:
-                continue
-            preferred_linkage = linkable_node.linkable.preferred_linkage
-            output_style = get_lib_output_style(link_strategy, preferred_linkage, PicBehavior("supported"))
-            if output_style == LibOutputStyle("shared_lib") and not linkable_node.linkable.stub:
-                shlib_deps.append(merge_shared_libraries(ctx.actions, node = linkable_node.linkable.shared_libs))
 
     shlib_info = merge_shared_libraries(ctx.actions, deps = shlib_deps)
 
@@ -240,7 +198,7 @@ def _rust_binary_common(
 
     # link groups shared libraries link args are directly added to the link command,
     # we don't have to add them here
-    executable_shlib_args = executable_shared_lib_arguments(
+    executable_args = executable_shared_lib_arguments(
         ctx,
         compile_ctx.cxx_toolchain_info,
         final_output,
@@ -254,7 +212,7 @@ def _rust_binary_common(
         emit = Emit("link"),
         params = params,
         default_roots = default_roots,
-        extra_link_args = executable_shlib_args.extra_link_args,
+        extra_link_args = executable_args.extra_link_args,
         predeclared_output = predeclared_output,
         extra_flags = extra_flags,
         allow_cache_upload = allow_cache_upload,
@@ -266,24 +224,21 @@ def _rust_binary_common(
     if enable_late_build_info_stamping:
         stamp_build_info(ctx, link.output, final_output)
 
-    args = cmd_args(final_output, hidden = executable_shlib_args.runtime_files)
+    args = cmd_args(final_output, hidden = executable_args.runtime_files)
     external_debug_info = project_artifacts(
         actions = ctx.actions,
-        tsets = inherited_external_debug_info(
+        tsets = [inherited_external_debug_info(
             ctx,
             compile_ctx.dep_ctx,
+            link.dwo_output_directory,
             link_strategy,
-        ),
+        )],
     )
-    if link.compile_output.dwo_output_directory:
-        external_debug_info.append(link.compile_output.dwo_output_directory)
 
     # If we have some resources, write it to the resources JSON file and add
     # it and all resources to "runtime_files" so that we make to materialize
     # them with the final binary.
-    runtime_files = list(executable_shlib_args.runtime_files)
-    relocatable_resources_json = None
-    relocatable_resources_contents = None
+    runtime_files = list(executable_args.runtime_files)
     if resources:
         resources_hidden = [create_resource_db(
             ctx = ctx,
@@ -296,11 +251,6 @@ def _rust_binary_common(
             resources_hidden.extend(resource.other_outputs)
         args.add(cmd_args(hidden = resources_hidden))
         runtime_files.extend(resources_hidden)
-        relocatable_resources_json, relocatable_resources_contents = create_relocatable_resources_info(
-            ctx = ctx,
-            name = name,
-            resources = resources,
-        )
 
     # A simple dict of sub-target key to artifact, which we'll convert to
     # DefaultInfo providers at the end
@@ -330,7 +280,7 @@ def _rust_binary_common(
                     for soname, shlib in str_soname_shlibs.items()
                     if shlib.lib.dwp
                 ],
-                "rpathtree": ["{}:{}[rpath-tree]".format(ctx.label.path, ctx.label.name)] if executable_shlib_args.shared_libs_symlink_tree else [],
+                "rpathtree": ["{}:{}[rpath-tree]".format(ctx.label.path, ctx.label.name)] if executable_args.shared_libs_symlink_tree else [],
             },
         ),
         sub_targets = {
@@ -342,9 +292,9 @@ def _rust_binary_common(
         },
     )]
 
-    if isinstance(executable_shlib_args.shared_libs_symlink_tree, Artifact):
+    if isinstance(executable_args.shared_libs_symlink_tree, Artifact):
         sub_targets["rpath-tree"] = [DefaultInfo(
-            default_output = executable_shlib_args.shared_libs_symlink_tree,
+            default_output = executable_args.shared_libs_symlink_tree,
             other_outputs = [
                 shlib.lib.output
                 for shlib in shared_libs
@@ -402,29 +352,10 @@ def _rust_binary_common(
         metadata_incr = diag_artifacts[True],
         clippy = clippy_artifacts[False],
         clippy_incr = clippy_artifacts[True],
-        remarks = None,  # Exposed via subtargets, not this provider
     )]
 
     incr_enabled = ctx.attrs.incremental_enabled
     extra_compiled_targets.update(output_as_diag_subtargets(diag_artifacts[incr_enabled], clippy_artifacts[incr_enabled]))
-
-    # Add remarks subtargets (lazy - only built when subtarget requested)
-    # Uses `params` to match the actual binary's link strategy
-    remarks = rust_compile(
-        ctx = ctx,
-        compile_ctx = compile_ctx,
-        emit = Emit("link"),
-        params = params,
-        default_roots = default_roots,
-        extra_flags = extra_flags,
-        incremental_enabled = False,
-        profile_mode = ProfileMode("remarks"),
-        transformation_spec_context = transformation_spec_context,
-    )
-    if remarks.compile_output.remarks_txt:
-        extra_compiled_targets["remarks.txt"] = remarks.compile_output.remarks_txt
-    if remarks.compile_output.remarks_json:
-        extra_compiled_targets["remarks.json"] = remarks.compile_output.remarks_json
 
     extra_compiled_targets["expand"] = rust_compile(
         ctx = ctx,
@@ -451,7 +382,7 @@ def _rust_binary_common(
         emit = Emit("link"),
         params = params,
         default_roots = default_roots,
-        extra_link_args = executable_shlib_args.extra_link_args,
+        extra_link_args = executable_args.extra_link_args,
         extra_flags = extra_flags,
         rust_cxx_link_group_info = rust_cxx_link_group_info,
         incremental_enabled = ctx.attrs.incremental_enabled,
@@ -463,7 +394,7 @@ def _rust_binary_common(
         emit = Emit("link"),
         params = params,
         default_roots = default_roots,
-        extra_link_args = executable_shlib_args.extra_link_args,
+        extra_link_args = executable_args.extra_link_args,
         extra_flags = extra_flags,
         rust_cxx_link_group_info = rust_cxx_link_group_info,
         incremental_enabled = ctx.attrs.incremental_enabled,
@@ -502,20 +433,20 @@ def _rust_binary_common(
     if named_deps_names:
         extra_compiled_targets["named_deps"] = named_deps_names
 
-    if link.link_output.dwp_output:
+    if link.dwp_output:
         sub_targets["dwp"] = [
             DefaultInfo(
-                default_output = link.link_output.dwp_output,
+                default_output = link.dwp_output,
                 other_outputs = [
                     shlib.lib.dwp
                     for shlib in shared_libs
                     if shlib.lib.dwp
-                ] + ([executable_shlib_args.dwp_symlink_tree] if executable_shlib_args.dwp_symlink_tree else []),
+                ] + ([executable_args.dwp_symlink_tree] if executable_args.dwp_symlink_tree else []),
             ),
         ]
 
-    if link.link_output.pdb:
-        sub_targets[PDB_SUB_TARGET] = get_pdb_providers(pdb = link.link_output.pdb, binary = final_output)
+    if link.pdb:
+        sub_targets[PDB_SUB_TARGET] = get_pdb_providers(pdb = link.pdb, binary = final_output)
 
     dupmbin_toolchain = compile_ctx.cxx_toolchain_info.dumpbin_toolchain_path
     if dupmbin_toolchain:
@@ -529,14 +460,12 @@ def _rust_binary_common(
     providers += [
         DefaultInfo(
             default_output = final_output,
-            other_outputs = runtime_files + executable_shlib_args.external_debug_info + external_debug_info,
+            other_outputs = runtime_files + executable_args.external_debug_info + external_debug_info,
             sub_targets = sub_targets,
         ),
         DistInfo(
             shared_libs = shlib_info.set,
             nondebug_runtime_files = runtime_files,
-            relocatable_resources_contents = relocatable_resources_contents,
-            relocatable_resources_json = relocatable_resources_json,
         ),
     ]
     providers.append(rust_analyzer_provider(

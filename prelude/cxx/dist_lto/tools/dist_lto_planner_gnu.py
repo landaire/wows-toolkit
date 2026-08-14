@@ -30,13 +30,14 @@ Both opt and link plans use indices to refer to other files because it allows th
 code to easily map back to other objects held in buck memory.
 """
 
+# pyre-unsafe
+
 import argparse
 import json
 import os
 import os.path
 import subprocess
 import sys
-import traceback
 from typing import List
 
 
@@ -45,9 +46,9 @@ def _get_argsfile(args) -> str:
     argsfiles = list(
         filter(lambda arg: arg.endswith("thinlto_index_argsfile"), args.index_args)
     )
-    assert len(argsfiles) == 1, (
-        f"expect only 1 argsfile but seeing multiple ones: {argsfiles}"
-    )
+    assert (
+        len(argsfiles) == 1
+    ), f"expect only 1 argsfile but seeing multiple ones: {argsfiles}"
     argsfile = argsfiles[0]
     if argsfile.startswith("@"):
         argsfile = argsfile[1:]
@@ -331,10 +332,9 @@ def main(argv):
     lib_search_path = _extract_lib_search_path(argsfile)
 
     # build index file for final link use
-    with (
-        open(index_path("index.full")) as full_index_input,
-        open(args.final_link_index, "w") as final_link_index_output,
-    ):
+    with open(index_path("index.full")) as full_index_input, open(
+        args.final_link_index, "w"
+    ) as final_link_index_output:
         final_link_index_output.write("\n".join(lib_search_path) + "\n")
 
         def write_pre_flags(idx):
@@ -410,9 +410,4 @@ def main(argv):
             write_post_flags(idx)
 
 
-if __name__ == "__main__":
-    try:
-        sys.exit(main(sys.argv))
-    except subprocess.CalledProcessError as e:
-        traceback.print_exc()
-        sys.exit(e.returncode)
+sys.exit(main(sys.argv))

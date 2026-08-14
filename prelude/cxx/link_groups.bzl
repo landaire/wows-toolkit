@@ -86,13 +86,11 @@ load(
 load(
     ":groups_types.bzl",
     "MATCH_ALL_LABEL",
-    "MATCH_DIRECT_DEPS_LABEL",
     "NO_MATCH_LABEL",
     "should_discard_group",
 )
 load(
     ":link.bzl",
-    "CxxLinkerMapData",  # @unused Used as a type
     "cxx_link_shared_library",
 )
 load(
@@ -160,7 +158,6 @@ LinkGroupLibSpec = record(
 _LinkedLinkGroup = record(
     artifact = field(LinkedObject),
     library = field([LinkGroupLib, None], None),
-    linker_map_data = field([CxxLinkerMapData, None], None),
 )
 
 _LinkedLinkGroups = record(
@@ -565,20 +562,7 @@ def get_filtered_labels_to_links_map(
             link_name = target_group,
         )
 
-    filtered_groups = [None, NO_MATCH_LABEL, MATCH_ALL_LABEL, MATCH_DIRECT_DEPS_LABEL]
-
-    # Pre-compute which MATCH_DIRECT_DEPS targets should be included in this link group.
-    # A MATCH_DIRECT_DEPS target is included only if there's a target in the current
-    # link group which has a direct dependency on that MATCH_DIRECT_DEPS target.
-    match_direct_deps_for_current_group = set()
-    for target in linkables:
-        target_link_group = build_context.link_group_mappings.get(target)
-        if target_link_group == link_group or target_link_group == MATCH_ALL_LABEL:
-            node = build_context.linkable_graph.nodes[target]
-            for dep in node.deps + node.exported_deps:
-                dep_link_group = build_context.link_group_mappings.get(dep)
-                if dep_link_group == MATCH_DIRECT_DEPS_LABEL:
-                    match_direct_deps_for_current_group.add(dep)
+    filtered_groups = [None, NO_MATCH_LABEL, MATCH_ALL_LABEL]
 
     output_style = get_lib_output_style(build_context.link_strategy, Linkage("any"), build_context.pic_behavior) if build_context.link_strategy != LinkStrategy("shared") else LibOutputStyle("shared_lib")
 
@@ -591,9 +575,8 @@ def get_filtered_labels_to_links_map(
         # We should always add force-static libs to the link.
         is_force_static_lib = force_static_follows_dependents and node.preferred_linkage == Linkage("static") and not node.ignore_force_static_follows_dependents
 
-        # If this belongs to the match all link group, the group currently being
-        # evaluated, or is a MATCH_DIRECT_DEPS target that has a direct rdep in this group
-        matches_current_link_group = target_link_group == link_group or target_link_group == MATCH_ALL_LABEL or target in match_direct_deps_for_current_group
+        # If this belongs to the match all link group or the group currently being evaluated
+        matches_current_link_group = target_link_group == link_group or target_link_group == MATCH_ALL_LABEL
 
         if link_group_preferred_linkage == Linkage("shared"):
             # filter out any dependencies to be discarded
@@ -694,7 +677,7 @@ def get_public_link_group_nodes(
             if crosses_link_group_boundary(current_group, new_group):
                 external_link_group_nodes.add(dep)
 
-    SPECIAL_LINK_GROUPS = [MATCH_ALL_LABEL, MATCH_DIRECT_DEPS_LABEL, NO_MATCH_LABEL]
+    SPECIAL_LINK_GROUPS = [MATCH_ALL_LABEL, NO_MATCH_LABEL]
 
     # Additionally identify exported_deps of those marked nodes (except those included in all groups or included in the main executable).
 
@@ -787,15 +770,6 @@ def _find_all_relevant_roots(
                 relevant_roots[link_group].add(node_target)
         elif node_link_group in link_groups_for_full_traversal and node_link_group != NO_MATCH_LABEL:
             relevant_roots[node_link_group].add(node_target)
-
-        # For MATCH_DIRECT_DEPS support: if this node belongs to a real link group and has
-        # a direct dep on a MATCH_DIRECT_DEPS target, add that target to this link group
-        if node_link_group and node_link_group in relevant_roots:
-            for dep in node.deps + node.exported_deps:
-                dep_link_group = link_group_mappings.get(dep)
-                if dep_link_group == MATCH_DIRECT_DEPS_LABEL:
-                    relevant_roots[node_link_group].add(dep)
-
         return node.all_deps
 
     depth_first_traversal_by(
@@ -825,13 +799,6 @@ def find_relevant_roots(
             roots.append(node_target)
         elif node_link_group == link_group:
             roots.append(node_target)
-
-            # For MATCH_DIRECT_DEPS support: if this node has a direct dep on a MATCH_DIRECT_DEPS target,
-            # add that target to the roots for this link group
-            for dep in node.deps + node.exported_deps:
-                dep_link_group = link_group_mappings.get(dep)
-                if dep_link_group == MATCH_DIRECT_DEPS_LABEL:
-                    roots.append(dep)
         else:
             return node.all_deps
 
@@ -868,7 +835,6 @@ def _get_roots_from_mappings(
 _CreatedLinkGroup = record(
     linked_object = field(LinkedObject),
     labels_to_links = field(FinalLabelsToLinks),
-    linker_map_data = field([CxxLinkerMapData, None], None),
 )
 
 _CreateLinkGroupParams = record(
@@ -958,7 +924,6 @@ def _create_link_group(
     return _CreatedLinkGroup(
         linked_object = link_result.linked_object,
         labels_to_links = filtered_labels_to_links,
-        linker_map_data = link_result.linker_map_data,
     )
 
 def _stub_library(
@@ -1200,8 +1165,8 @@ def create_link_groups(
             # If link group has root it always being linked statically
             targets_consumed_by_link_groups[link_group_spec.root.label] = link_group_spec.group.name
 
-        # On GNU, use shlib interfaces when the tool is available.
-        if cxx_is_gnu(ctx) and get_cxx_toolchain_info(ctx).linker_info.mk_shlib_intf != None:
+        # On GNU, use shlib interfaces.
+        if cxx_is_gnu(ctx):
             shlib_for_link = shared_library_interface(
                 ctx = ctx,
                 shared_lib = link_group_lib.output,
@@ -1239,7 +1204,6 @@ def create_link_groups(
                     default = link_info,
                 ),
             ),
-            linker_map_data = created_link_group.linker_map_data,
         )
 
         # Merge and format all symbol files into flags that we can pass into

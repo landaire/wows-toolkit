@@ -11,42 +11,33 @@
 package com.facebook.buck.android.build_config;
 
 import com.facebook.buck.util.ThrowingPrintWriter;
-import com.facebook.infer.annotation.Nullsafe;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import org.jetbrains.annotations.Nullable;
 import org.kohsuke.args4j.CmdLineException;
 import org.kohsuke.args4j.CmdLineParser;
 import org.kohsuke.args4j.Option;
 
 /** Main entry point for generating BuildConfig.java. */
-@Nullsafe(Nullsafe.Mode.LOCAL)
 public class GenerateBuildConfigExecutableMain {
   @Option(name = "--source", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String source;
 
   @Option(name = "--java-package", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String javaPackage;
 
   @Option(name = "--use-constant-expressions", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String useConstantExpressions;
 
   @Option(name = "--default-values-file", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String defaultValuesFile;
 
   @Option(name = "--values-file")
-  @Nullable
   private String valuesFile;
 
   @Option(name = "--output", required = true)
-  // NULLSAFE_FIXME[Field Not Initialized]
   private String output;
 
   public static void main(String[] args) throws IOException {
@@ -57,7 +48,7 @@ public class GenerateBuildConfigExecutableMain {
       main.run();
       System.exit(0);
     } catch (CmdLineException e) {
-      System.err.println(e.toString());
+      System.err.println(e.getMessage());
       parser.printUsage(System.err);
       System.exit(1);
     }

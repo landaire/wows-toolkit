@@ -21,9 +21,6 @@ class KotlinCDLoggingContext(
 
   val classpathChangesParam = (mode as? ModeParam.Incremental)?.classpathChangesParam
 
-  var numKotlinTokens: Long = 0L
-  var numJavaTokens: Long = 0L
-
   private val _extras: MutableMap<String, MutableList<String>> = mutableMapOf()
   val extras: Map<String, List<String>>
     get() = _extras
