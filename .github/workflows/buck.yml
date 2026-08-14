@@ -7,7 +7,7 @@ on:
 
 # Builds every public binary through the native Buck graph and proves the graph
 # stays hermetic. Provisioning is the only step allowed to reach the network:
-# the job drops its network access before the first Buck action runs.
+# every Buck step after it runs in a network namespace of its own.
 
 env:
   ALIASES: >-
@@ -39,30 +39,25 @@ jobs:
       - name: Verify the vendored prelude matches the pinned buck2
         run: nix build .#checks.x86_64-linux.prelude-version -L
 
-      - name: Disable network access
-        run: |
-          sudo iptables -P OUTPUT DROP
-          sudo iptables -A OUTPUT -o lo -j ACCEPT
-          sudo ip6tables -P OUTPUT DROP || true
-          sudo ip6tables -A OUTPUT -o lo -j ACCEPT || true
-
+      # Every step below runs Buck without a network, run-offline.sh explains
+      # why each one needs the wrapper rather than the build steps alone.
       - name: Build every alias
-        run: nix develop --command buck2 build $ALIASES
+        run: nix develop --command bash scripts/run-offline.sh buck2 build $ALIASES
 
       - name: Build every alias in release mode
-        run: nix develop --command buck2 build -c native_build.mode=release $ALIASES
+        run: nix develop --command bash scripts/run-offline.sh buck2 build -c native_build.mode=release $ALIASES
 
       - name: Check the action graph is hermetic
         run: |
           for alias in $ALIASES; do
-            nix develop --command nu scripts/check-buck-hermetic.nu "$alias"
-            nix develop --command nu scripts/check-buck-hermetic.nu "$alias" release
+            nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias"
+            nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias" release
           done
 
       - name: Buck build-graph tests
         run: |
           for test in scripts/test-*.nu; do
-            nix develop --command nu "$test"
+            nix develop --command bash scripts/run-offline.sh nu "$test"
           done
 
 # macOS and Windows are absent as CI jobs, though both build locally.
