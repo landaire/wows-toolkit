@@ -16,7 +16,8 @@ function Fail([string]$Message) {
 
 function Get-RequiredPath([string]$Path, [string]$Description) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        Fail "Missing $Description: $Path"
+        # Braces are required: `$Description:` parses as a scope qualifier.
+        Fail "Missing ${Description}: $Path"
     }
     return $Path
 }

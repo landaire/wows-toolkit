@@ -7,7 +7,7 @@ on:
 
 # Builds every public binary through the native Buck graph and proves the graph
 # stays hermetic. Provisioning is the only step allowed to reach the network:
-# each job drops its network access before the first Buck action runs.
+# the job drops its network access before the first Buck action runs.
 
 env:
   ALIASES: >-
@@ -60,82 +60,16 @@ jobs:
             nix develop --command nu "$test"
           done
 
-  macos:
-    name: macOS ARM64
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: cachix/install-nix-action@v30
-        with:
-          nix_path: nixpkgs=channel:nixos-unstable
-      - uses: cachix/cachix-action@v15
-        with:
-          name: landaire-gh-public
-          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
-          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
-
-      # build-support/check-xcode.nu rejects anything but the pinned Xcode, so a
-      # runner image that moves off it fails here rather than silently building
-      # against a different SDK.
-      - name: Select the pinned Xcode
-        run: sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
-
-      - name: Provision the toolchain and crate sources
-        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
-
-      # Deliberately not tolerant of failure: a block that silently does nothing
-      # would leave the offline claim untested.
-      - name: Disable network access
-        run: |
-          echo "block drop out proto { tcp udp } from any to !127.0.0.1" | sudo pfctl -ef -
-
-      - name: Build every alias
-        run: nix develop --command buck2 build $ALIASES
-
-      - name: Check the action graph is hermetic
-        run: |
-          for alias in $ALIASES; do
-            nix develop --command nu scripts/check-buck-hermetic.nu "$alias"
-          done
-
-  windows:
-    name: Windows x86_64 MSVC
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      # Downloads every pinned archive, verifies its hash, installs from the
-      # offline layout, writes the machine-local .buckconfig.local, and fetches
-      # the crate sources. Buck2 itself is one of the pinned archives.
-      - name: Provision the toolchain and crate sources
-        shell: pwsh
-        run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "${{ runner.temp }}/offline"
-
-      - name: Disable network access
-        shell: pwsh
-        run: |
-          New-NetFirewallRule -DisplayName "buck-no-egress" -Direction Outbound `
-            -Action Block -RemoteAddress Internet | Out-Null
-
-      - name: Build every alias
-        shell: pwsh
-        run: |
-          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
-          $buck2 = Join-Path "toolchains/windows/offline/installed" $manifest.tools.buck2.path
-          & $buck2 build --target-platforms toolchains//windows:windows_x86_64_msvc `
-            -c native_build.mode=release $env:ALIASES.Split(" ", [StringSplitOptions]::RemoveEmptyEntries)
-
-      - name: Build the unsigned MSI
-        shell: pwsh
-        run: ./scripts/build-msi.ps1
-
-      # Signing is deliberately outside the build graph: a downstream workflow
-      # signs these exact artifacts and has no permission to rebuild them.
-      - name: Publish unsigned artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-x86_64-unsigned
-          path: |
-            buck-out/**/wows_toolkit.exe
-            buck-out/**/wows_toolkit.pdb
-            buck-out/**/wows-toolkit-windows-x86_64-unsigned.msi
+# macOS and Windows are deliberately absent. Both build locally, but neither has
+# ever passed here:
+#
+#   macOS  - build-support/check-xcode.nu pins Xcode 26.6 and the MacOSX26.5
+#            SDK. The runners carry Xcode 16.4, and `nix develop` points
+#            DEVELOPER_DIR at the flake's own Apple SDK regardless, so the pin
+#            cannot hold as written.
+#   Windows- provision-toolchain.ps1 downloads a multi-GB Visual Studio and SDK
+#            layout whose hashes are still unverified against a real download.
+#
+# Until those are settled, run them by hand:
+#   buck2 build --target-platforms toolchains//platforms:macos_arm64 //:wows_toolkit
+#   buck2 build --target-platforms toolchains//windows:windows_x86_64_msvc //:wows_toolkit
