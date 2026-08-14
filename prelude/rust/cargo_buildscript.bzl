@@ -261,6 +261,7 @@ def _cargo_buildscript_impl(ctx: AnalysisContext) -> list[Provider]:
         "CXX",
         "HOST",
         "LD",
+        "OPT_LEVEL",
         "OUT_DIR",
         "RUST_BACKTRACE",
         "RUSTC",

@@ -1,4 +1,30 @@
+load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
+load("@prelude//rust:cargo_package.bzl", "cargo")
 load(":fixture_rules.bzl", "fixture_action")
+
+cargo.rust_binary(
+    name = "opt_level_probe_buildscript",
+    srcs = ["opt_level_probe/build.rs"],
+    crate = "build_script_build",
+    crate_root = "opt_level_probe/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "opt_level_probe",
+        "CARGO_PKG_NAME": "opt_level_probe",
+        "CARGO_PKG_VERSION": "0.0.0",
+    },
+    visibility = [],
+)
+
+buildscript_run(
+    name = "opt_level_probe",
+    buildscript_rule = ":opt_level_probe_buildscript",
+    package_name = "opt_level_probe",
+    version = "0.0.0",
+    local_manifest_dir = "opt_level_probe",
+    visibility = [],
+)
 
 fixture_action(
     name = "remote_action",

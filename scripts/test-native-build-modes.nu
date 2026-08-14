@@ -23,6 +23,21 @@ def main [] {
     if not ($release_actions.stdout | str contains "-Copt-level=3") {
         error make "Release action graph is missing -Copt-level=3."
     }
+    let debug_probe = (^buck2 build --show-output '//tests/buck-hermetic:opt_level_probe[rustc_flags]' | complete)
+    let release_probe = (^buck2 build --show-output -c native_build.mode=release '//tests/buck-hermetic:opt_level_probe[rustc_flags]' | complete)
+
+    if $debug_probe.exit_code != 0 or $release_probe.exit_code != 0 {
+        error make "Buck build failed while checking build-script mode propagation."
+    }
+    let debug_flags = (open --raw ($debug_probe.stdout | lines | last | split row " " | last) | str trim)
+    let release_flags = (open --raw ($release_probe.stdout | lines | last | split row " " | last) | str trim)
+
+    if $debug_flags != "--env-set=BUILD_SCRIPT_OPT_LEVEL=0" {
+        error make "Debug build scripts are missing OPT_LEVEL=0 propagation."
+    }
+    if $release_flags != "--env-set=BUILD_SCRIPT_OPT_LEVEL=3" {
+        error make "Release build scripts are missing OPT_LEVEL=3 propagation."
+    }
     let hard_coded_buildscript_profile = (^rg -n '"PROFILE": "debug"' third-party/rust/BUCK | complete)
     if $hard_coded_buildscript_profile.exit_code == 0 {
         error make "A third-party build script hard-codes the debug profile."
