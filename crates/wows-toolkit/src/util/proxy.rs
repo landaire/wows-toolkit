@@ -80,6 +80,9 @@ fn normalize_proxy_url(raw: &str) -> Option<String> {
 /// Read the `ProxyServer` value, which is either one proxy for every scheme or
 /// a `scheme=host:port` list. HTTPS is what this app speaks; its own entry wins,
 /// then the HTTP entry, which is the one most such lists actually set.
+// Only system_proxy calls this, and only on Windows. `test` keeps it compiled
+// everywhere else, because the parsing is worth testing on every platform.
+#[cfg(any(target_os = "windows", test))]
 fn proxy_for_https(value: &str) -> Option<String> {
     if !value.contains('=') {
         return normalize_proxy_url(value);
@@ -96,6 +99,7 @@ fn proxy_for_https(value: &str) -> Option<String> {
 
 /// Split a `ProxyOverride` list, expanding Windows' `<local>` token into the
 /// loopback names a client can actually match on.
+#[cfg(any(target_os = "windows", test))]
 fn parse_bypass(value: &str) -> Vec<String> {
     let mut out = Vec::new();
     for entry in value.split(';') {

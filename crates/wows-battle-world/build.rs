@@ -116,9 +116,7 @@ fn resolved_build_dir(registry: &Registry, data_dir: &Path, build: u32) -> Optio
 }
 
 fn cas_object_path(dump_dir: &Path, hash: &str) -> Option<PathBuf> {
-    let Some((prefix, suffix)) = hash.get(..2).zip(hash.get(2..)) else {
-        return None;
-    };
+    let (prefix, suffix) = hash.get(..2).zip(hash.get(2..))?;
     dump_dir.parent().map(|base| base.join("common").join(prefix).join(suffix))
 }
 
