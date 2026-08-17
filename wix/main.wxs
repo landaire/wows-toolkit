@@ -1,6 +1,5 @@
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
      xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
-  <?include version.wxi?>
 
   <Package Name="WoWs Toolkit"
            Manufacturer="Lander Brandt"
