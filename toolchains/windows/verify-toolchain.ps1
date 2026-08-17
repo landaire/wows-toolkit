@@ -1,3 +1,5 @@
+#Requires -Version 7
+
 param(
     [Parameter(Mandatory = $true)]
     [string]$OfflineRoot,
@@ -57,6 +59,19 @@ foreach ($archive in $manifest.archives) {
     Test-ArchiveHash $archive
 }
 
+# vs_BuildTools.exe resolves its payload from Microsoft's channel manifest, so
+# its pinned hash does not pin the toolset version. Take whatever it installed.
+$msvcToolsets = Join-Path $InstallRoot "VisualStudio/BuildTools/VC/Tools/MSVC"
+if (Test-Path -LiteralPath $msvcToolsets -PathType Container) {
+    $toolsets = @(Get-ChildItem -LiteralPath $msvcToolsets -Directory)
+    if ($toolsets.Count -ne 1) {
+        Fail "Expected exactly one MSVC toolset under $msvcToolsets, found $($toolsets.Count)."
+    }
+    foreach ($entry in @($manifest.tools.Keys)) {
+        $manifest.tools[$entry].path = $manifest.tools[$entry].path.Replace("{msvc}", $toolsets[0].Name)
+    }
+}
+
 $vsArchive = $manifest.archives | Where-Object { $_.name -eq "visual_studio_build_tools" } | Select-Object -First 1
 $vsLayout = Join-Path $OfflineRoot $vsArchive.layout_path
 if (-not (Test-Path -LiteralPath $vsLayout -PathType Container)) {
@@ -68,9 +83,10 @@ if ($ArchivesOnly) {
     exit 0
 }
 
-& (Join-Path $vsLayout "vs_BuildTools.exe") --verify --noWeb --quiet --wait
-if ($LASTEXITCODE -ne 0) {
-    Fail "Visual Studio offline layout verification failed with exit code $LASTEXITCODE."
+$vsVerify = Start-Process -FilePath (Join-Path $vsLayout "vs_BuildTools.exe") `
+    -ArgumentList @("--layout", $vsLayout, "--verify", "--quiet", "--wait") -Wait -PassThru
+if ($vsVerify.ExitCode -ne 0) {
+    Fail "Visual Studio offline layout verification failed with exit code $($vsVerify.ExitCode)."
 }
 
 foreach ($entry in $manifest.tools.GetEnumerator()) {
@@ -125,7 +141,8 @@ if ($BuckConfigPath) {
         "nasm = $(& $tool "nasm")"
         "python = $(& $tool "python")"
         "wix = $(& $tool "wix")"
-        "wix_extensions = $(Join-Path $installed "WiX/6.0.2/extensions")"
+        "wix_ui_extension = $(& $tool "wix_ui_extension")"
+        "wix_util_extension = $(& $tool "wix_util_extension")"
         "include = $include"
         "lib_paths = $libPaths"
         ""

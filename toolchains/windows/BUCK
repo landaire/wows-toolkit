@@ -49,7 +49,7 @@ wix_msi(
     ],
     binaries = {"wows_toolkit.exe": "root//crates/wows-toolkit:wows_toolkit_bin"},
     pdbs = {},
-    version_input = "root//wix:version_wxi",
+    version = "1.0.1",
     out = "wows-toolkit-windows-x86_64-unsigned.msi",
     visibility = ["PUBLIC"],
 )

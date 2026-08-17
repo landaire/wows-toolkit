@@ -13,16 +13,20 @@ WindowsToolPathsInfo = provider(fields = {
     "rustdoc": provider_field(typing.Any),
     "nasm": provider_field(typing.Any),
     "wix": provider_field(typing.Any),
-    "wix_extensions": provider_field(typing.Any),
+    "wix_ui_extension": provider_field(typing.Any),
+    "wix_util_extension": provider_field(typing.Any),
 })
 
 # Every tool is an absolute path published by toolchains/windows/verify-toolchain.ps1,
 # the same mechanism scripts/refresh-buck-toolchain.nu uses on macOS and Linux.
 # Taking the toolchain as a source directory instead would make Buck digest the
 # whole multi-gigabyte Visual Studio and SDK tree on every build.
-def _tool(name):
+def _tool(name, optional = False):
     path = read_root_config("hermetic_tools", name)
     if path == None:
+        if optional:
+            # Only the installer needs it, so let everything else configure.
+            return ""
         fail("Missing [hermetic_tools] {}. Run toolchains/windows/verify-toolchain.ps1 before invoking Buck2.".format(name))
     return path
 
@@ -88,15 +92,20 @@ def _msvc_tools_impl(ctx):
             rustdoc = ctx.attrs.rustdoc,
             nasm = ctx.attrs.nasm,
             wix = wix,
-            wix_extensions = ctx.attrs.wix_extensions,
+            wix_ui_extension = ctx.attrs.wix_ui_extension,
+            wix_util_extension = ctx.attrs.wix_util_extension,
         ),
     ]
 
-_TOOL_ATTRS = ["ar", "cc", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc", "wix", "wix_extensions"]
+_TOOL_ATTRS = ["ar", "cc", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc"]
+
+# WiX is needed by the MSI target alone. Requiring it at package load would stop
+# every Windows target configuring on a machine that never builds an installer.
+_WIX_ATTRS = ["wix", "wix_ui_extension", "wix_util_extension"]
 
 _hermetic_msvc_tools_rule = rule(
     impl = _msvc_tools_impl,
-    attrs = {name: attrs.string() for name in _TOOL_ATTRS},
+    attrs = {name: attrs.string() for name in _TOOL_ATTRS + _WIX_ATTRS},
 )
 
 def hermetic_msvc_tools(name, visibility):
@@ -105,7 +114,7 @@ def hermetic_msvc_tools(name, visibility):
     _hermetic_msvc_tools_rule(
         name = name,
         visibility = visibility,
-        **{attr: _tool(attr) for attr in _TOOL_ATTRS}
+        **{attr: _tool(attr, attr in _WIX_ATTRS) for attr in _TOOL_ATTRS + _WIX_ATTRS}
     )
 
 def _hermetic_msvc_rust_toolchain_impl(ctx):

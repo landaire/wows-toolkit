@@ -1,6 +1,12 @@
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    # A -test tag builds and publishes exactly like a release, but lands as a
+    # prerelease so a cutover can be exercised without pretending to ship.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-test.[0-9]+"]
+    # A ci/** branch rehearses the whole pipeline and publishes nothing, so the
+    # release path can be exercised without notifying anyone watching releases.
+    branches: ["ci/**"]
+  workflow_dispatch:
 
 permissions:
   id-token: write
@@ -20,6 +26,11 @@ jobs:
         # up to the next ## heading) and use it as the release body. Fall back
         # to auto-generated notes if the tag has no release-notes entry.
         run: |
+          if [[ "$GITHUB_REF_NAME" == *-test.* ]]; then
+            echo "Testing buck2 cutover" > release_notes.md
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           version="${GITHUB_REF_NAME#v}"
           # Match "## <version> " by prefix (trailing space disambiguates
           # 0.1.6 from 0.1.69); stop at the next "## " section heading.
@@ -35,35 +46,86 @@ jobs:
           fi
 
       - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_notes.md
-          generate_release_notes: ${{ steps.notes.outputs.found == 'false' }}
+          generate_release_notes: ${{ steps.notes.outputs.found == 'false' && !contains(github.ref_name, '-test') }}
+          prerelease: ${{ contains(github.ref_name, '-test') }}
+          name: ${{ contains(github.ref_name, '-test') && 'Testing buck2 cutover' || '' }}
 
-  # ── Windows (signed) ──────────────────────────────────────────────────
+  # ── Windows (Buck, signed) ────────────────────────────
   windows:
     name: Windows
     needs: create-release
     runs-on: windows-latest
     environment: release-signing
+    defaults:
+      run:
+        working-directory: C:\w
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.92.0
-          targets: x86_64-pc-windows-msvc
-
-      - name: Install NASM
-        # rav1e's `asm` feature needs nasm. Avoid third-party JS actions.
+      # buck-out paths carry a configuration hash, a doubled target name and a
+      # content hash: 234 characters before any prefix. The runner workspace
+      # adds 31, which puts link.exe past MAX_PATH. A junction does not help,
+      # because buck2 canonicalises its project root back to the real path, so
+      # the tree is copied somewhere genuinely short.
+      - name: Copy the checkout to a short path
         shell: pwsh
-        run: ./scripts/install-nasm-windows.ps1
+        working-directory: ${{ github.workspace }}
+        run: |
+          # Defender holds freshly written artifacts long enough that buck2's
+          # materialiser fails to replace them ("Binary being executed").
+          Add-MpPreference -ExclusionPath "C:\w", "C:\bt", "$env:RUNNER_TEMP" -ErrorAction SilentlyContinue
+          robocopy $env:GITHUB_WORKSPACE C:\w /E /NFL /NDL /NJH /NJS /NP | Out-Null
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with $LASTEXITCODE" }
+          $LASTEXITCODE = 0
+          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1
 
-      - name: Build release binary
-        run: cargo build --release --target x86_64-pc-windows-msvc -p wows_toolkit --features av1-asm
+      # Visual Studio caps the length of its install root too, hence C:\bt.
+      - name: Provision the Buck toolchain
+        shell: pwsh
+        run: |
+          try {
+            ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+          } catch {
+            # ::error:: text lands in the check annotations, which are readable
+            # without a token; the job log is not.
+            $msg = (($_ | Out-String) -replace "`r?`n", " | ")
+            Write-Host "::error::PROVISION: $msg"
+            Get-ChildItem $env:TEMP -Filter *.log -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.LastWriteTime -gt (Get-Date).AddMinutes(-25) } |
+              Sort-Object LastWriteTime -Descending | Select-Object -First 2 | ForEach-Object {
+                $tail = ((Get-Content $_.FullName -Tail 30) -join " | ")
+                if ($tail.Length -gt 3000) { $tail = $tail.Substring($tail.Length - 3000) }
+                Write-Host "::error::$($_.Name): $tail"
+              }
+            exit 1
+          }
+
+      - name: Build the executable and installer
+        id: buck
+        shell: pwsh
+        run: |
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
+          $common = @("-c", "native_build.mode=release", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
+
+          $exeOut = & $buck2 build @common --show-output //:wows_toolkit
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $msiOut = & $buck2 build @common --show-output toolchains//windows:wows_toolkit_msi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $exe = ($exeOut | Select-String -Pattern 'wows_toolkit\.exe$' | Select-Object -Last 1).ToString().Split(" ")[-1]
+          $msi = ($msiOut | Select-String -Pattern '\.msi$' | Select-Object -Last 1).ToString().Split(" ")[-1]
+
+          # Buck outputs are read-only, and signing rewrites in place.
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item $exe dist/wows_toolkit.exe
+          Copy-Item $msi "dist/wows-toolkit-windows-x86_64.msi"
+          Get-ChildItem dist | ForEach-Object { $_.IsReadOnly = $false }
+          "msi=C:\w\dist\wows-toolkit-windows-x86_64.msi" >> $env:GITHUB_OUTPUT
 
       - name: Azure login
         uses: azure/login@v2
@@ -72,17 +134,16 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      # The installer is built before this runs, so it carries an unsigned
+      # executable. Closing that needs the two-pass repackaging in Task 6.
       - name: Sign executable
         uses: azure/trusted-signing-action@v1
         with:
           endpoint: https://eus.codesigning.azure.net/
           signing-account-name: wows-toolkit
           certificate-profile-name: wows-toolkit
-          files: ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\wows_toolkit.exe
+          files: C:\w\dist\wows_toolkit.exe
           file-digest: SHA256
-
-      - name: Build MSI installer
-        run: ./scripts/build-msi.ps1 -SkipBuild
 
       - name: Sign MSI
         uses: azure/trusted-signing-action@v1
@@ -90,23 +151,25 @@ jobs:
           endpoint: https://eus.codesigning.azure.net/
           signing-account-name: wows-toolkit
           certificate-profile-name: wows-toolkit
-          files: ${{ github.workspace }}\target\wix\*.msi
+          files: ${{ steps.buck.outputs.msi }}
           file-digest: SHA256
 
       - name: Create zip archive
+        shell: pwsh
         run: |
-          Copy-Item -Recurse "crates/wt-translations/translations" "translations"
-          Compress-Archive -Path "target/x86_64-pc-windows-msvc/release/wows_toolkit.exe","target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb","README.md","translations" -DestinationPath "wows_toolkit_${{ github.ref_name }}_windows.zip"
+          $slug = "${{ github.ref_name }}" -replace "/", "-"
+          Copy-Item -Recurse "crates/wt-translations/translations" "translations" -Force
+          Compress-Archive -Path "dist/wows_toolkit.exe","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
 
       - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            wows_toolkit_${{ github.ref_name }}_windows.zip
-            target/x86_64-pc-windows-msvc/release/wows_toolkit.pdb
-            target/wix/*.msi
+            C:\w\dist\*.zip
+            C:\w\dist\*.msi
 
-  # ── Linux (Flatpak) ───────────────────────────────────────────────────
+  # ── Linux (Buck, Flatpak) ─────────────────────────────
   linux:
     name: Linux Flatpak
     needs: create-release
@@ -114,46 +177,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install system dependencies
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+
+      - name: Provision the Buck toolchain
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      - name: Build the release binary
+        id: buck
+        run: |
+          out=$(nix develop --command buck2 build -c native_build.mode=release --show-output //:wows_toolkit)
+          echo "$out"
+          rel=$(echo "$out" | awk '/wows_toolkit$/ { print $NF }' | tail -1)
+          mkdir -p dist
+          cp "$rel" dist/wows_toolkit
+          chmod +w dist/wows_toolkit
+
+      # Linking through the Nix toolchain records store paths as the ELF
+      # interpreter and runpath, and the Flatpak runtime has neither. Verified
+      # against org.freedesktop.Platform//24.08: patched, the binary runs there.
+      - name: Make the binary loadable outside Nix
+        run: |
+          nix develop --command patchelf             --set-interpreter /lib64/ld-linux-x86-64.so.2             --remove-rpath dist/wows_toolkit
+          readelf -l dist/wows_toolkit | grep -i interpreter
+
+      - name: Install Flatpak
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libx11-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxi-dev \
-            libgl-dev \
-            libfontconfig-dev \
-            libssl-dev \
-            libvulkan-dev \
-            pkg-config \
-            nasm \
-            flatpak
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.92.0
-          targets: x86_64-unknown-linux-gnu
-
-      # Keyed to match warm-release-cache.yml, which populates this key from
-      # main. Runs here are tag-scoped, and a tag's cache is unreachable from
-      # every later run, so writing one back would only cost upload time.
-      # Must sit after the toolchain install: the key embeds the rustc version
-      # and would otherwise be computed against the runner image's default.
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-release
-          save-if: "false"
-
-      - name: Build release binary
-        # Four concurrent release-mode rustc processes on the largest crates
-        # exhaust the 16 GB runner and it gets killed with no diagnostic.
-        env:
-          CARGO_BUILD_JOBS: "2"
-        run: cargo build --release --target x86_64-unknown-linux-gnu -p wows_toolkit --features av1-asm
+          sudo apt-get install -y flatpak
 
       - name: Set up Flatpak
         run: |
@@ -164,42 +221,28 @@ jobs:
         run: |
           APP_ID="io.github.landaire.WoWsToolkit"
 
-          # Initialise build directory against the runtime
           flatpak build-init build-dir "$APP_ID" org.freedesktop.Sdk org.freedesktop.Platform 24.08
 
-          # Install binary and data
           mkdir -p build-dir/files/bin
-          cp target/x86_64-unknown-linux-gnu/release/wows_toolkit build-dir/files/bin/
+          cp dist/wows_toolkit build-dir/files/bin/
           cp -r crates/wt-translations/translations build-dir/files/bin/translations
 
-          # Desktop entry (renamed to match app ID)
           mkdir -p build-dir/files/share/applications
           cp assets/wows-toolkit.desktop "build-dir/files/share/applications/${APP_ID}.desktop"
 
-          # Icon
           mkdir -p build-dir/files/share/icons/hicolor/256x256/apps
           cp assets/icon-256.png "build-dir/files/share/icons/hicolor/256x256/apps/${APP_ID}.png"
 
-          # AppStream metainfo
           mkdir -p build-dir/files/share/metainfo
           cp "assets/${APP_ID}.metainfo.xml" build-dir/files/share/metainfo/
 
-          # Finish build with sandbox permissions
-          flatpak build-finish build-dir \
-            --share=ipc \
-            --share=network \
-            --socket=x11 \
-            --socket=wayland \
-            --socket=fallback-x11 \
-            --device=dri \
-            --filesystem=host:ro \
-            --command=wows_toolkit
+          flatpak build-finish build-dir             --share=ipc             --share=network             --socket=x11             --socket=wayland             --socket=fallback-x11             --device=dri             --filesystem=host:ro             --command=wows_toolkit
 
-          # Export to a local repo and create a single-file bundle
           flatpak build-export repo build-dir
           flatpak build-bundle repo "WoWs_Toolkit-x86_64.flatpak" "$APP_ID"
 
       - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: WoWs_Toolkit-x86_64.flatpak
@@ -212,19 +255,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
+      - uses: cachix/install-nix-action@v30
         with:
-          toolchain: 1.92.0
-          targets: aarch64-apple-darwin
+          nix_path: nixpkgs=channel:nixos-unstable
 
-      - name: Install NASM
-        run: brew install nasm
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
-      - name: Build release binary
-        run: cargo build --release --target aarch64-apple-darwin -p wows_toolkit --features av1-asm
+      # check-macos-sdk.nu asserts the pinned SDK is the one in use, so no host
+      # Xcode is involved and the frameworks come from the flake.
+      - name: Provision the Buck toolchain
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      - name: Build the release binary
+        run: |
+          out=$(nix develop --command buck2 build -c native_build.mode=release             --target-platforms toolchains//platforms:macos_arm64 --show-output //:wows_toolkit)
+          echo "$out"
+          rel=$(echo "$out" | awk '/wows_toolkit$/ { print $NF }' | tail -1)
+          mkdir -p dist
+          cp "$rel" dist/wows_toolkit
+          chmod +w dist/wows_toolkit
+          otool -L dist/wows_toolkit | head -20
+          # The binary is staged, and the runner does not have room for
+          # buck-out plus the nix store plus a disk image.
+          df -h / | tail -1
+          nix develop --command buck2 clean
+          df -h / | tail -1
+
+      - name: Name the artifacts
+        id: name
+        run: echo "slug=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
 
       - name: Generate .icns icon
         run: |
@@ -249,7 +311,7 @@ jobs:
           mkdir -p "$APP/Contents/MacOS"
           mkdir -p "$APP/Contents/Resources"
 
-          cp target/aarch64-apple-darwin/release/wows_toolkit "$APP/Contents/MacOS/wows_toolkit"
+          cp dist/wows_toolkit "$APP/Contents/MacOS/wows_toolkit"
           chmod +x "$APP/Contents/MacOS/wows_toolkit"
           cp wows_toolkit.icns "$APP/Contents/Resources/"
           cp -r crates/wt-translations/translations "$APP/Contents/MacOS/translations"
@@ -286,9 +348,10 @@ jobs:
           hdiutil create -volname "WoWs Toolkit" \
             -srcfolder "WoWs Toolkit.app" \
             -ov -format UDZO \
-            "wows_toolkit_${{ github.ref_name }}_macos.dmg"
+            "wows_toolkit_${{ steps.name.outputs.slug }}_macos.dmg"
 
       - name: Upload release asset
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: wows_toolkit_${{ github.ref_name }}_macos.dmg
+          files: wows_toolkit_${{ steps.name.outputs.slug }}_macos.dmg

@@ -1,9 +1,15 @@
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-test.[0-9]+"]
+    branches: ["ci/**"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+# The tools come from the same graph as the desktop app. minimap_renderer ships
+# once: the second Cargo build here never passed --no-default-features, so the
+# _cpu binary it produced was the same build under another name.
 
 jobs:
   build-windows:
@@ -11,82 +17,85 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.92.0
-          targets: x86_64-pc-windows-msvc
-
-      - name: Install NASM
-        # rav1e's `asm` feature (default in cpu-av1) requires nasm. Avoid JS actions.
+      # buck2 canonicalises its project root, so a junction resolves back to
+      # the long workspace path and link.exe still hits MAX_PATH. Copy instead.
+      - name: Copy the checkout to a short path
         shell: pwsh
-        run: ./scripts/install-nasm-windows.ps1
-
-      - name: Build release binary
         run: |
-          cargo build --release --target x86_64-pc-windows-msvc -p wowsunpack
-          cargo build --release --target x86_64-pc-windows-msvc -p wows-data-mgr
-          cargo build --release --target x86_64-pc-windows-msvc -p replayshark
-          cargo build --release --target x86_64-pc-windows-msvc -p wows_minimap_renderer --features cpu
-          Move-Item -Path ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\minimap_renderer.exe `
-            -Destination ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\minimap_renderer_cpu.exe
-          cargo build --release --target x86_64-pc-windows-msvc -p wows_minimap_renderer
+          # Defender holds freshly written artifacts long enough that buck2's
+          # materialiser fails to replace them ("Binary being executed").
+          Add-MpPreference -ExclusionPath "C:\w", "C:\bt", "$env:RUNNER_TEMP" -ErrorAction SilentlyContinue
+          robocopy $env:GITHUB_WORKSPACE C:\w /E /NFL /NDL /NJH /NJS /NP | Out-Null
+          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with $LASTEXITCODE" }
+          $LASTEXITCODE = 0
 
-      - name: Package artifacts
+      - name: Provision the Buck toolchain
+        shell: pwsh
+        working-directory: C:\w
+        run: ./toolchains/windows/provision-toolchain.ps1 -OfflineRoot "$env:RUNNER_TEMP\bo" -InstallRoot "C:\bt"
+
+      - name: Build the tools
+        shell: pwsh
+        working-directory: C:\w
         run: |
-          New-Item -ItemType Directory -Path ${{ github.workspace }}\artifacts
-          Move-Item -Path ${{ github.workspace }}\target\x86_64-pc-windows-msvc\release\*.exe `
-          -Destination ${{ github.workspace }}\artifacts\
-          Compress-Archive -Path ${{ github.workspace }}\artifacts\*.exe `
-          -DestinationPath ${{ github.workspace }}\wows_toolkit_tools_${{ github.ref_name }}_win64.zip
+          $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
+          $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
+          $targets = @("//:wowsunpack", "//:wows_data_mgr", "//:replayshark", "//:minimap_renderer")
+          $out = & $buck2 build -c native_build.mode=release --target-platforms toolchains//windows:windows_x86_64_msvc --show-output @targets
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force artifacts | Out-Null
+          foreach ($line in $out) {
+            $path = ($line -split " ")[-1]
+            if ($path -like "*.exe") { Copy-Item $path artifacts/ }
+          }
+          Get-ChildItem artifacts | ForEach-Object { $_.IsReadOnly = $false }
+          $slug = "${{ github.ref_name }}" -replace "/", "-"
+          Compress-Archive -Path artifacts/*.exe -DestinationPath "wows_toolkit_tools_${slug}_win64.zip"
 
       - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: wows_toolkit_tools_${{ github.ref_name }}_win64.zip
+          files: wows_toolkit_tools_*_win64.zip
 
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - uses: cachix/install-nix-action@v30
         with:
-          toolchain: 1.92.0
-          targets: x86_64-unknown-linux-gnu
+          nix_path: nixpkgs=channel:nixos-unstable
 
-      - name: Install NASM and zip
-        # rav1e's `asm` feature (default in our cpu-av1 path) requires nasm; zip bundles the release tools.
-        run: sudo apt-get update && sudo apt-get install -y nasm zip
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
 
-      - name: Build release binary
+      - name: Provision the Buck toolchain
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      - name: Build the tools
         run: |
-          cargo build --release --target x86_64-unknown-linux-gnu -p wowsunpack
-          cargo build --release --target x86_64-unknown-linux-gnu -p wows-data-mgr
-          cargo build --release --target x86_64-unknown-linux-gnu -p replayshark
-          cargo build --release --target x86_64-unknown-linux-gnu -p wows_minimap_renderer --features cpu
-          mv -f ./target/x86_64-unknown-linux-gnu/release/minimap_renderer \
-          ./target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu
-          cargo build --release --target x86_64-unknown-linux-gnu -p wows_minimap_renderer
-
-      - name: Package artifacts
-        run: |
-          mkdir ${{ github.workspace }}/artifacts
-          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wowsunpack ${{ github.workspace }}/artifacts/
-          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/replayshark ${{ github.workspace }}/artifacts/
-          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/wows-data-mgr ${{ github.workspace }}/artifacts/
-          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer_cpu ${{ github.workspace }}/artifacts/
-          mv ${{ github.workspace }}/target/x86_64-unknown-linux-gnu/release/minimap_renderer ${{ github.workspace }}/artifacts/
-          zip -j ${{ github.workspace }}/wows_toolkit_tools_${{ github.ref_name }}_linux64.zip ${{ github.workspace }}/artifacts/*
+          sudo apt-get update && sudo apt-get install -y zip
+          out=$(nix develop --command buck2 build -c native_build.mode=release --show-output \
+            //:wowsunpack //:wows_data_mgr //:replayshark //:minimap_renderer)
+          echo "$out"
+          mkdir -p artifacts
+          echo "$out" | awk 'NF > 1 { print $NF }' | while read -r path; do cp "$path" artifacts/; done
+          chmod +w artifacts/*
+          # Linking through Nix records a store path as the interpreter, and that
+          # path exists only on the builder.
+          for f in artifacts/*; do
+            nix develop --command patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$f"
+          done
+          slug="${GITHUB_REF_NAME//\//-}"
+          zip -j "wows_toolkit_tools_${slug}_linux64.zip" artifacts/*
 
       - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            wows_toolkit_tools_${{ github.ref_name }}_linux64.zip
+            wows_toolkit_tools_*_linux64.zip
             game_versions.toml

@@ -2,7 +2,7 @@ name: Buck
 
 on:
   push:
-    branches: [main]
+    branches: [main, "ci/**"]
   pull_request:
 
 # Builds every public binary through the native Buck graph and proves the graph
@@ -60,15 +60,29 @@ jobs:
             nix develop --command bash scripts/run-offline.sh nu "$test"
           done
 
-# macOS and Windows are absent as CI jobs, though both build locally.
-#
-#   macOS  - build-support/check-macos-sdk.nu makes the flake's nix-pinned Apple
-#            SDK the boundary, which is exactly what `nix develop` sets
-#            DEVELOPER_DIR to, so no host Xcode is required. A macOS arm64 job is
-#            not wired up here yet but is no longer blocked.
-#   Windows- provision-toolchain.ps1 downloads a multi-GB Visual Studio and SDK
-#            layout whose hashes are still unverified against a real download.
-#
-# Until those are settled, run them by hand:
-#   buck2 build --target-platforms toolchains//platforms:macos_arm64 //:wows_toolkit
-#   buck2 build --target-platforms toolchains//windows:windows_x86_64_msvc //:wows_toolkit
+  macos:
+    name: macOS arm64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v30
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      - name: Provision the toolchain and crate sources
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      # One mode only: macOS runner minutes bill at a multiple of Linux, and the
+      # graph itself is already covered there in both modes.
+      - name: Build every alias
+        run: |
+          nix develop --command buck2 build -c native_build.mode=release --target-platforms toolchains//platforms:macos_arm64 $ALIASES
+
+# Windows is absent as a CI job. It builds and releases from the graph, but
+# provisioning mirrors a multi-GB Visual Studio layout on every run because
+# nothing is cached, so it is left to the release workflow until then.

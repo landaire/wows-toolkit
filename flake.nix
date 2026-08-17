@@ -264,6 +264,11 @@
               llvmPackages.llvm
             ]
             ++ lib.optionals stdenv.hostPlatform.isLinux [
+              # Linking through this toolchain records store paths as the ELF
+              # interpreter and runpath, which no Flatpak runtime has. Packaging
+              # repoints them before the binary is bundled.
+              patchelf
+
               # GUI libs
               libxkbcommon
               libGL

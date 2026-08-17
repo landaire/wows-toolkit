@@ -11,15 +11,14 @@
       "version": "17.14.37531.7",
       "install_path": "VisualStudio/BuildTools",
       "component_ids": [
-        "Microsoft.VisualStudio.Workload.NativeDesktop",
         "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
         "Microsoft.VisualStudio.Component.VC.CMake.Project"
       ]
     },
     {
       "name": "windows_sdk",
-      "url": "https://go.microsoft.com/fwlink/?linkid=2361208",
-      "sha256": "adc5dc9441f5e36f6abc58fdd30572a33e6b8446a74b23f503427cd31305af0d",
+      "url": "https://download.microsoft.com/download/dba6f26e-0fb0-43bd-be9a-e3e24becb4a3/26100.8249.260414-1640.ge_release_svc_im_WindowsSDK.iso",
+      "sha256": "239d1505a6e739ba0a64712008198136186013d4b68c86389afe96112076b9dd",
       "path": "archives/windows-sdk-10.0.26100.8249.iso",
       "version": "10.0.26100.8249",
       "install_path": "WindowsKits/10"
@@ -85,21 +84,21 @@
     }
   ],
   "tools": {
-    "cl": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/cl.exe", "version": "19.44.37537.0" },
-    "link": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/link.exe", "version": "14.44.37537.0" },
-    "lib": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/lib.exe", "version": "14.44.37537.0" },
-    "ml64": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/14.44.37537/bin/Hostx64/x64/ml64.exe", "version": "14.44.37537.0" },
-    "rc": { "path": "WindowsKits/10/bin/10.0.26100.0/x64/rc.exe", "version": "10.0.26100.8249" },
-    "midl": { "path": "WindowsKits/10/bin/10.0.26100.0/x64/midl.exe", "version": "10.0.26100.8249" },
-    "rustc": { "path": "Rust/1.92.0/bin/rustc.exe", "version_output": "rustc 1.92.0" },
-    "rustdoc": { "path": "Rust/1.92.0/bin/rustdoc.exe", "version_output": "rustdoc 1.92.0" },
-    "nasm": { "path": "NASM/3.01/nasm.exe", "version_output": "NASM version 3.01" },
+    "cl": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/cl.exe" },
+    "link": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/link.exe" },
+    "lib": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/lib.exe" },
+    "ml64": { "path": "VisualStudio/BuildTools/VC/Tools/MSVC/{msvc}/bin/Hostx64/x64/ml64.exe" },
+    "rc": { "path": "WindowsKits/10/bin/10.0.26100.0/x64/rc.exe", "version": "10.0.26100.8249 (WinBuild.160101.0800)" },
+    "midl": { "path": "WindowsKits/10/bin/10.0.26100.0/x64/midl.exe", "version": "10.0.26100.8249 (WinBuild.160101.0800)" },
+    "rustc": { "path": "Rust/1.92.0/Rust/bin/rustc.exe", "version_output": "rustc 1.92.0" },
+    "rustdoc": { "path": "Rust/1.92.0/Rust/bin/rustdoc.exe", "version_output": "rustdoc 1.92.0" },
+    "nasm": { "path": "NASM/3.01/nasm-3.01/nasm.exe", "version_output": "NASM version 3.01" },
     "buck2": { "path": "Buck2/2026-07-31/buck2.exe", "version_output": "2026-07-31" },
     "zstd": { "path": "Zstd/1.5.7/zstd-v1.5.7-win64/zstd.exe", "version_output": "v1.5.7" },
     "python": { "path": "Python/3.13.7/python.exe", "version_output": "Python 3.13.7" },
-    "wix": { "path": "WiX/6.0.2/wix.exe", "version_output": "6.0.2" },
-    "wix_ui_extension": { "path": "WiX/6.0.2/extensions/WixToolset.UI.wixext.6.0.2.nupkg" },
-    "wix_util_extension": { "path": "WiX/6.0.2/extensions/WixToolset.Util.wixext.6.0.2.nupkg" }
+    "wix": { "path": "WiX/6.0.2/PFiles64/WiX Toolset v6.0/bin/wix.exe", "version_output": "6.0.2" },
+    "wix_ui_extension": { "path": "WiX/6.0.2/extensions/WixToolset.UI.wixext/wixext6/WixToolset.UI.wixext.dll" },
+    "wix_util_extension": { "path": "WiX/6.0.2/extensions/WixToolset.Util.wixext/wixext6/WixToolset.Util.wixext.dll" }
   },
   "sdk": {
     "include": "WindowsKits/10/Include/10.0.26100.0",

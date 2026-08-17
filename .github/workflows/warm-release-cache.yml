@@ -1,11 +1,8 @@
 name: Warm release cache
 
-# Release artifacts are built only on tags, so nothing ever writes a
-# release-mode dependency cache from the default branch and every release
-# recompiles the whole graph from cold. A cold release build is also what
-# pushes the hosted runner past its memory limit. These jobs build the same
-# targets on main under the same keys, so the tag runs restore a warm cache
-# and only compile workspace crates.
+# The desktop and CLI releases build from the Buck graph now and no longer read
+# this cache. What remains is the wasm app, which pages.yml still builds with
+# trunk and which benefits from a warm dependency cache on main.
 #
 # rust-cache stores dependency artifacts only, so the cache goes stale when
 # the lockfile or the toolchain moves, not when app code changes. The weekly
@@ -36,44 +33,6 @@ jobs:
   # Mirrors the Linux Flatpak job in build.yml. The toolchain, target, feature
   # set and env must match it exactly or the restored artifacts fingerprint
   # differently and get rebuilt anyway.
-  linux:
-    name: Linux release dependencies
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libxkbcommon-dev \
-            libwayland-dev \
-            libx11-dev \
-            libxcursor-dev \
-            libxrandr-dev \
-            libxi-dev \
-            libgl-dev \
-            libfontconfig-dev \
-            libssl-dev \
-            libvulkan-dev \
-            pkg-config \
-            nasm
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: 1.92.0
-          targets: x86_64-unknown-linux-gnu
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: linux-release
-          cache-on-failure: true
-
-      - name: Build release binary
-        run: cargo build --release --target x86_64-unknown-linux-gnu -p wows_toolkit --features av1-asm
-
-  # Mirrors the tactics build in pages.yml.
   wasm:
     name: wasm release dependencies
     runs-on: ubuntu-latest
