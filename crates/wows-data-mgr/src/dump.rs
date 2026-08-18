@@ -272,8 +272,8 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
         relink_build(&output_dir, &cas_root, &metadata, TreeSync::AddAndRepoint)?;
     } else {
         tracing::warn!(
-            "build {build} is not materialized, so the newly extracted files were not linked into its tree; \
-             run `relink` to materialize it",
+            "build {build} has no materialized tree, so the newly extracted files are in the store and in \
+             metadata.toml but not on disk; run `relink` to materialize the build",
             build = metadata.build
         );
     }
