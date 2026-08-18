@@ -204,8 +204,13 @@ pub fn dump_renderer_data(
     // Write enhanced metadata with file hashes. The derived artifacts (rkyv
     // blob, compressed copies) are generated and content-addressed by the same
     // step the refresh-derived command uses, so dumps and refreshes agree.
-    let mut metadata =
-        BuildMetadata { version: version_str.to_string(), build, files: file_hashes, derived: BTreeMap::new() };
+    let mut metadata = BuildMetadata {
+        version: version_str.to_string(),
+        build,
+        materialized: false,
+        files: file_hashes,
+        derived: BTreeMap::new(),
+    };
     refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
     metadata.save(&output_dir.join("metadata.toml"))?;
 
@@ -580,13 +585,17 @@ fn derive_game_params_rkyv(vfs: &VfsPath) -> Option<Vec<u8>> {
     }
 }
 
-/// Store `data` in the CAS and point `link_path` at it, replacing any file or
-/// symlink already there. Returns the content hash.
-fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<String, Report> {
-    let hash = cas::store(cas_root, data)?;
+/// Store `data` in the CAS and return its hash. Nothing is written to the build
+/// directory: `metadata` is the record of what a build holds.
+fn store_only(data: &[u8], cas_root: &Path) -> Result<String, Report> {
+    cas::store(cas_root, data)
+}
+
+/// Point `link_path` at the stored object, replacing whatever is there. Only
+/// for a build whose metadata says it is materialized.
+fn relink_artifact(hash: &str, link_path: &Path, cas_root: &Path) -> Result<(), Report> {
     let _ = std::fs::remove_file(link_path);
-    cas::link_file(cas_root, &hash, link_path)?;
-    Ok(hash)
+    cas::link_file(cas_root, hash, link_path)
 }
 
 /// Generate and content-address a build's derived artifacts: the rkyv game
@@ -597,8 +606,8 @@ fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<St
 /// `wowsunpack::game_params::types` schema; the on-disk rkyv is only
 /// consulted as a fallback when that derivation fails, whether because the
 /// source file is absent or because conversion errored or panicked. Each
-/// artifact is stored in the CAS, linked back into `build_dir`, and recorded
-/// in `metadata.derived`. Idempotent.
+/// artifact is stored in the CAS and recorded in `metadata.derived`; it is also
+/// linked back into `build_dir` when `metadata.materialized` is set. Idempotent.
 ///
 /// Artifacts that cannot be regenerated keep the entry they already had:
 /// `metadata.toml`, not the build directory, is the record of what a build
@@ -611,6 +620,7 @@ pub fn refresh_build_derived(
     metadata: &mut BuildMetadata,
 ) -> Result<Vec<String>, Report> {
     let recorded = std::mem::take(&mut metadata.derived);
+    let materialized = metadata.materialized;
 
     let rkyv_path = build_dir.join("game_params.rkyv");
     let rkyv_bytes = derive_game_params_rkyv(&crate::cas_vfs::resolve_vfs(build_dir, cas_root, metadata));
@@ -622,13 +632,19 @@ pub fn refresh_build_derived(
         None => None,
     };
     if let Some(rkyv_bytes) = rkyv_bytes {
-        let hash = store_and_relink(&rkyv_bytes, &rkyv_path, cas_root)?;
+        let hash = store_only(&rkyv_bytes, cas_root)?;
+        if materialized {
+            relink_artifact(&hash, &rkyv_path, cas_root)?;
+        }
         metadata.derived.insert("game_params.rkyv".to_string(), hash);
 
         let compressed =
             ruzstd::encoding::compress_to_vec(rkyv_bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
         let zst_path = build_dir.join("game_params.rkyv.zst");
-        let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
+        let hash = store_only(&compressed, cas_root)?;
+        if materialized {
+            relink_artifact(&hash, &zst_path, cas_root)?;
+        }
         metadata.derived.insert("game_params.rkyv.zst".to_string(), hash);
     } else if recorded.contains_key("game_params.rkyv") {
         tracing::warn!(
@@ -656,7 +672,10 @@ pub fn refresh_build_derived(
                 continue;
             }
             let bytes = std::fs::read(&mo_path).attach_with(|| format!("Failed to read {}", mo_path.display()))?;
-            let hash = store_and_relink(&bytes, &mo_path, cas_root)?;
+            let hash = store_only(&bytes, cas_root)?;
+            if materialized {
+                relink_artifact(&hash, &mo_path, cas_root)?;
+            }
             metadata.derived.insert(mo_rel, hash);
         }
     }
@@ -669,7 +688,10 @@ pub fn refresh_build_derived(
         let compressed =
             ruzstd::encoding::compress_to_vec(mo_bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
         let zst_path = build_dir.join(format!("{mo_rel}.zst"));
-        let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
+        let hash = store_only(&compressed, cas_root)?;
+        if materialized {
+            relink_artifact(&hash, &zst_path, cas_root)?;
+        }
         metadata.derived.insert(format!("{mo_rel}.zst"), hash);
     }
 
@@ -865,10 +887,16 @@ pub fn relink_builds(output_base: &Path, only_build: Option<u32>) -> Result<BTre
     let mut repointed = BTreeMap::new();
     for entry in targets {
         let build_dir = output_base.join(&entry.dir);
-        let Some(metadata) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
+        let Some(mut metadata) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
             bail!("{} has no readable metadata.toml", entry.dir);
         };
         let paths = relink_build(&build_dir, &cas_root, &metadata)?;
+        // The tree exists now, so the record says so: every other command reads
+        // this rather than probing the directory.
+        if !metadata.materialized {
+            metadata.materialized = true;
+            metadata.save(&build_dir.join("metadata.toml"))?;
+        }
         if !paths.is_empty() {
             repointed.insert(entry.dir.clone(), paths);
         }
@@ -1311,7 +1339,7 @@ fn relink_all_builds(output_base: &Path, cas_root: &Path) -> Result<(), Report> 
         std::fs::read_dir(output_base).attach_with(|| format!("Failed to read {}", output_base.display()))?.flatten()
     {
         let build_dir = entry.path();
-        let Some(meta) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
+        let Some(mut meta) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
             continue;
         };
         let vfs_dir = build_dir.join("vfs");
@@ -1327,6 +1355,12 @@ fn relink_all_builds(output_base: &Path, cas_root: &Path) -> Result<(), Report> 
         }
         for (rel, hash) in &meta.derived {
             relink(rel, hash, &build_dir);
+        }
+        // The tree exists now, so the record says so: every other command reads
+        // this rather than probing the directory.
+        if !meta.materialized {
+            meta.materialized = true;
+            meta.save(&build_dir.join("metadata.toml"))?;
         }
     }
     Ok(())
@@ -1821,6 +1855,33 @@ mod maintenance_tests {
     }
 
     #[test]
+    fn relink_records_that_the_build_is_materialized() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"hi").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(&build_dir).unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.files.insert("content/x.dat".into(), hash);
+        meta.save(&build_dir.join("metadata.toml")).unwrap();
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        index.upsert(BuildEntry {
+            version: "1.2.3".into(),
+            build: 100,
+            dir: "1.2.3_100".into(),
+            dumped_at: "now".into(),
+        });
+        index.save(&base.path().join("builds.toml")).unwrap();
+
+        if relink_builds(base.path(), None).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+
+        assert!(BuildMetadata::load(&build_dir.join("metadata.toml")).unwrap().materialized);
+    }
+
+    #[test]
     fn refresh_derived_content_addresses_translations() {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path();
@@ -1832,12 +1893,55 @@ mod maintenance_tests {
         std::fs::write(&mo, b"catalog bytes").unwrap();
 
         let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
+        meta.materialized = true;
         refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
 
         // The catalog is now a symlink into the shared store, recorded in derived.
         assert!(std::fs::symlink_metadata(&mo).unwrap().file_type().is_symlink());
         assert_eq!(std::fs::read(&mo).unwrap(), b"catalog bytes");
         assert!(meta.derived.contains_key("translations/ru/LC_MESSAGES/global.mo"));
+    }
+
+    #[test]
+    fn refresh_derived_does_not_materialize_an_unmaterialized_build() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(build_dir.join("translations/ru/LC_MESSAGES")).unwrap();
+        std::fs::write(build_dir.join("translations/ru/LC_MESSAGES/global.mo"), b"catalog").unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+
+        refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
+
+        // The bytes are recorded and stored; nothing was linked, because nothing
+        // asked for this build to be materialized.
+        let hash = meta.derived.get("translations/ru/LC_MESSAGES/global.mo").expect("recorded");
+        assert!(cas::object_exists(&cas_root, hash));
+        let mo = build_dir.join("translations/ru/LC_MESSAGES/global.mo");
+        assert!(!mo.symlink_metadata().unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&mo).unwrap(), b"catalog");
+    }
+
+    #[test]
+    fn refresh_derived_relinks_a_materialized_build() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(build_dir.join("translations/ru/LC_MESSAGES")).unwrap();
+        std::fs::write(build_dir.join("translations/ru/LC_MESSAGES/global.mo"), b"catalog").unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.materialized = true;
+
+        refresh_build_derived(&build_dir, &cas_root, &mut meta).unwrap();
+
+        let mo = build_dir.join("translations/ru/LC_MESSAGES/global.mo");
+        let link = mo.symlink_metadata().expect("the catalog should still be present");
+        if !link.file_type().is_symlink() {
+            eprintln!("skipping the link assertion: cannot create symlinks on this platform/account");
+            return;
+        }
+        // The link resolves to the stored object.
+        assert_eq!(std::fs::read(&mo).unwrap(), b"catalog");
     }
 
     /// A build whose materialised tree was pruned still owns its artifacts:

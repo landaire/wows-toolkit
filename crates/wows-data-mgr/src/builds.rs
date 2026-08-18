@@ -110,6 +110,18 @@ impl BuildsIndex {
 pub struct BuildMetadata {
     pub version: String,
     pub build: u32,
+    /// Whether this build's files are also materialized as symlinks in its
+    /// directory. The tree is a convenience for humans reading a dump; readers
+    /// resolve every path through `files`/`derived` and the shared store, so a
+    /// build with no tree is complete. Only `relink` sets this, and only
+    /// `prune-materialized` clears it.
+    ///
+    /// Defaults to false, which is also what metadata written before this field
+    /// existed reads as. A tree such a dump left on disk is not a claim that the
+    /// build is materialized: nothing infers one from the directory, and
+    /// `relink` is what records it.
+    #[serde(default)]
+    pub materialized: bool,
     /// VFS file path -> CAS hash. Only present in new-format dumps.
     #[serde(default)]
     pub files: BTreeMap<String, String>,
@@ -333,6 +345,7 @@ mod tests {
         let mut meta = BuildMetadata {
             version: "15.2.0".into(),
             build: 12100000,
+            materialized: false,
             files: BTreeMap::new(),
             derived: BTreeMap::new(),
         };
@@ -491,5 +504,43 @@ mod tests {
         let loaded = BuildMetadata::load(&path).unwrap();
         assert_eq!(loaded.version, "15.1.0");
         assert!(!loaded.has_file_hashes());
+    }
+
+    #[test]
+    fn materialized_defaults_to_false_and_round_trips() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("metadata.toml");
+        // Metadata written before the flag existed: a build is not claimed to be
+        // materialized unless it says so.
+        let old_format = "version = \"1.2.3\"\nbuild = 100\n\n[files]\n\"content/x.dat\" = \"0123456789abcdef0123\"\n";
+        std::fs::write(&path, old_format).unwrap();
+        let loaded = BuildMetadata::load(&path).unwrap();
+        assert!(!loaded.materialized);
+        assert_eq!(loaded.files.get("content/x.dat").map(String::as_str), Some("0123456789abcdef0123"));
+
+        // Rewriting old metadata keeps the answer: nothing infers a tree.
+        loaded.save(&path).unwrap();
+        assert!(!BuildMetadata::load(&path).unwrap().materialized);
+
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.materialized = true;
+        meta.files.insert("content/x.dat".into(), "0123456789abcdef0123".into());
+        meta.save(&path).unwrap();
+
+        assert!(BuildMetadata::load(&path).unwrap().materialized);
+    }
+
+    #[test]
+    fn an_unrecorded_tree_does_not_make_a_build_materialized() {
+        let dir = tempfile::tempdir().unwrap();
+        let build_dir = dir.path().join("1.2.3_100");
+        std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
+        std::fs::write(build_dir.join("vfs/content/x.dat"), b"left by an older dump").unwrap();
+        let path = build_dir.join("metadata.toml");
+        std::fs::write(&path, "version = \"1.2.3\"\nbuild = 100\n").unwrap();
+
+        // A tree an older dump left behind is not a claim. Only relink records one,
+        // so the flag stays false until a human asks for the tree.
+        assert!(!BuildMetadata::load(&path).unwrap().materialized);
     }
 }
