@@ -115,9 +115,11 @@ pub fn export_glb(
     let mut bin_data: Vec<u8> = Vec::new();
     let mut gltf_primitives = Vec::new();
     let mut mat_cache = MaterialCache::new();
+    let mut image_cache = ImageCache::new();
 
     for prim in &primitives {
-        let gltf_prim = add_primitive_to_root(&mut root, &mut bin_data, prim, texture_set, &mut mat_cache)?;
+        let gltf_prim =
+            add_primitive_to_root(&mut root, &mut bin_data, prim, texture_set, &mut mat_cache, &mut image_cache)?;
         gltf_primitives.push(gltf_prim);
     }
 
@@ -1261,6 +1263,7 @@ pub fn export_merged_models_glb(
 
     let mut bin_data: Vec<u8> = Vec::new();
     let mut mat_cache = MaterialCache::new();
+    let mut image_cache = ImageCache::new();
     let empty_textures = TextureSet::empty();
     let mut scene_nodes = Vec::new();
     let mut exported = 0usize;
@@ -1278,7 +1281,8 @@ pub fn export_merged_models_glb(
     let build_mesh = |model_idx: usize,
                       root: &mut json::Root,
                       bin_data: &mut Vec<u8>,
-                      mat_cache: &mut MaterialCache|
+                      mat_cache: &mut MaterialCache,
+                      image_cache: &mut ImageCache|
      -> Result<Option<json::Index<json::Mesh>>, Report<ExportError>> {
         let record = &merged.models[model_idx];
         let vp = &record.visual_proto;
@@ -1302,7 +1306,7 @@ pub fn export_merged_models_glb(
 
         let mut gltf_primitives = Vec::new();
         for prim in &primitives {
-            let gltf_prim = add_primitive_to_root(root, bin_data, prim, &empty_textures, mat_cache)?;
+            let gltf_prim = add_primitive_to_root(root, bin_data, prim, &empty_textures, mat_cache, image_cache)?;
             gltf_primitives.push(gltf_prim);
         }
 
@@ -1328,7 +1332,7 @@ pub fn export_merged_models_glb(
             let mesh = if let Some(&cached) = mesh_cache.get(&model_idx) {
                 cached
             } else {
-                match build_mesh(model_idx, &mut root, &mut bin_data, &mut mat_cache)? {
+                match build_mesh(model_idx, &mut root, &mut bin_data, &mut mat_cache, &mut image_cache)? {
                     Some(m) => {
                         mesh_cache.insert(model_idx, m);
                         m
@@ -1351,7 +1355,7 @@ pub fn export_merged_models_glb(
     } else {
         // Prototype mode: one node per model at origin (no transforms).
         for (i, _record) in merged.models.iter().enumerate() {
-            let Some(mesh) = build_mesh(i, &mut root, &mut bin_data, &mut mat_cache)? else {
+            let Some(mesh) = build_mesh(i, &mut root, &mut bin_data, &mut mat_cache, &mut image_cache)? else {
                 continue;
             };
 
@@ -1538,7 +1542,9 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
 
         let empty_textures = TextureSet::empty();
         let mut mat_cache = MaterialCache::new();
-        let gltf_prim = add_primitive_to_root(&mut root, &mut bin_data, &prim, &empty_textures, &mut mat_cache)?;
+        let mut image_cache = ImageCache::new();
+        let gltf_prim =
+            add_primitive_to_root(&mut root, &mut bin_data, &prim, &empty_textures, &mut mat_cache, &mut image_cache)?;
         gltf_primitives.push(gltf_prim);
     }
 
@@ -1965,43 +1971,70 @@ impl MaterialCache {
     }
 }
 
+/// Deduplicates embedded images by content. The same texture path backs many
+/// parts, and every camo scheme repeats that, so without this the identical PNG
+/// is embedded once per part per scheme. Keyed by the bytes themselves rather
+/// than a hash: a false merge would silently paint the wrong texture, and the
+/// bytes are already held by the `TextureSet`.
+struct ImageCache {
+    images: HashMap<Vec<u8>, json::Index<json::Image>>,
+}
+
+impl ImageCache {
+    fn new() -> Self {
+        Self { images: HashMap::new() }
+    }
+}
+
 /// Embed a PNG image in the glTF binary buffer and create a textured material.
 /// Returns the material index.
 ///
+/// Images are deduplicated by content via `image_cache`: a byte-identical PNG
+/// is embedded once and reused across parts and camo schemes.
+///
 /// `uv_transform` is an optional `[scale_x, scale_y, offset_x, offset_y]` applied
-/// via `KHR_texture_transform` for tiled camouflage textures.
+/// via `KHR_texture_transform` for tiled camouflage textures. Because the transform
+/// lives on the glTF texture (not the image), a shared image still gets its own
+/// texture per distinct transform.
 fn create_textured_material(
     root: &mut json::Root,
     bin_data: &mut Vec<u8>,
+    image_cache: &mut ImageCache,
     png_bytes: &[u8],
     material_name: &str,
     image_name: Option<String>,
     uv_transform: Option<[f32; 4]>,
 ) -> json::Index<json::Material> {
-    let byte_offset = bin_data.len();
-    bin_data.extend_from_slice(png_bytes);
-    pad_to_4(bin_data);
-    let byte_length = png_bytes.len();
+    let image = match image_cache.images.get(png_bytes) {
+        Some(existing) => *existing,
+        None => {
+            let byte_offset = bin_data.len();
+            bin_data.extend_from_slice(png_bytes);
+            pad_to_4(bin_data);
 
-    let bv = root.push(json::buffer::View {
-        buffer: json::Index::new(0),
-        byte_length: USize64::from(byte_length),
-        byte_offset: Some(USize64::from(byte_offset)),
-        byte_stride: None,
-        target: None,
-        name: None,
-        extensions: Default::default(),
-        extras: Default::default(),
-    });
+            let bv = root.push(json::buffer::View {
+                buffer: json::Index::new(0),
+                byte_length: USize64::from(png_bytes.len()),
+                byte_offset: Some(USize64::from(byte_offset)),
+                byte_stride: None,
+                target: None,
+                name: None,
+                extensions: Default::default(),
+                extras: Default::default(),
+            });
 
-    let image = root.push(json::Image {
-        buffer_view: Some(bv),
-        mime_type: Some(json::image::MimeType("image/png".to_string())),
-        uri: None,
-        name: image_name,
-        extensions: Default::default(),
-        extras: Default::default(),
-    });
+            let image = root.push(json::Image {
+                buffer_view: Some(bv),
+                mime_type: Some(json::image::MimeType("image/png".to_string())),
+                uri: None,
+                name: image_name,
+                extensions: Default::default(),
+                extras: Default::default(),
+            });
+            image_cache.images.insert(png_bytes.to_vec(), image);
+            image
+        }
+    };
 
     let sampler = root.push(json::texture::Sampler {
         mag_filter: Some(Valid(json::texture::MagFilter::Linear)),
@@ -2057,6 +2090,7 @@ fn add_primitive_to_root(
     prim: &DecodedPrimitive,
     texture_set: &TextureSet,
     mat_cache: &mut MaterialCache,
+    image_cache: &mut ImageCache,
 ) -> Result<json::mesh::Primitive, Report<ExportError>> {
     let mut attributes = BTreeMap::new();
 
@@ -2235,7 +2269,15 @@ fn add_primitive_to_root(
     if !mat_cache.materials.contains_key(&cache_key) {
         // Create the default material (base albedo or untextured).
         let default_mat = if let Some(png_bytes) = prim.mfm_stem.as_ref().and_then(|stem| texture_set.base.get(stem)) {
-            create_textured_material(root, bin_data, png_bytes, &prim.material_name, prim.mfm_stem.clone(), None)
+            create_textured_material(
+                root,
+                bin_data,
+                image_cache,
+                png_bytes,
+                &prim.material_name,
+                prim.mfm_stem.clone(),
+                None,
+            )
         } else {
             create_untextured_material(root, &prim.material_name)
         };
@@ -2252,6 +2294,7 @@ fn add_primitive_to_root(
                     Some(create_textured_material(
                         root,
                         bin_data,
+                        image_cache,
                         png_bytes,
                         &format!("{} [{}]", prim.material_name, scheme_name),
                         Some(format!("{stem}_{scheme_name}")),
@@ -3207,6 +3250,7 @@ pub fn export_ship_glb(
 
     let mut bin_data: Vec<u8> = Vec::new();
     let mut mat_cache = MaterialCache::new();
+    let mut image_cache = ImageCache::new();
 
     // Collect mesh nodes grouped by category.
     let mut grouped_nodes: BTreeMap<PartGroup, Vec<json::Index<json::Node>>> = BTreeMap::new();
@@ -3243,7 +3287,8 @@ pub fn export_ship_glb(
 
         let mut gltf_primitives = Vec::new();
         for prim in &primitives {
-            let gltf_prim = add_primitive_to_root(&mut root, &mut bin_data, prim, texture_set, &mut mat_cache)?;
+            let gltf_prim =
+                add_primitive_to_root(&mut root, &mut bin_data, prim, texture_set, &mut mat_cache, &mut image_cache)?;
             gltf_primitives.push(gltf_prim);
         }
 
@@ -3352,4 +3397,51 @@ pub fn export_ship_glb(
     glb.to_writer(writer).map_err(|e| Report::new(ExportError::Io(e.to_string())))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_identical_pngs_share_one_image() {
+        let mut root = json::Root::default();
+        let mut bin = Vec::new();
+        let mut cache = ImageCache::new();
+        let png = vec![1u8, 2, 3, 4];
+
+        let a = create_textured_material(&mut root, &mut bin, &mut cache, &png, "hull", None, None);
+        let b = create_textured_material(&mut root, &mut bin, &mut cache, &png, "deckhouse", None, None);
+
+        assert_ne!(a.value(), b.value(), "each part keeps its own material");
+        assert_eq!(root.images.len(), 1, "byte-identical pngs share one image");
+        assert_eq!(bin.len(), 4, "the bytes are embedded once");
+    }
+
+    #[test]
+    fn distinct_pngs_get_their_own_images() {
+        let mut root = json::Root::default();
+        let mut bin = Vec::new();
+        let mut cache = ImageCache::new();
+
+        create_textured_material(&mut root, &mut bin, &mut cache, &[1u8, 2, 3, 4], "hull", None, None);
+        create_textured_material(&mut root, &mut bin, &mut cache, &[5u8, 6, 7, 8], "deckhouse", None, None);
+
+        assert_eq!(root.images.len(), 2, "distinct bytes are distinct images");
+        assert_eq!(bin.len(), 8);
+    }
+
+    #[test]
+    fn a_shared_image_still_gets_its_own_uv_transform() {
+        let mut root = json::Root::default();
+        let mut bin = Vec::new();
+        let mut cache = ImageCache::new();
+        let png = vec![1u8, 2, 3, 4];
+
+        create_textured_material(&mut root, &mut bin, &mut cache, &png, "plain", None, None);
+        create_textured_material(&mut root, &mut bin, &mut cache, &png, "tiled", None, Some([4.0, 4.0, 0.0, 0.0]));
+
+        assert_eq!(root.images.len(), 1, "the image is shared");
+        assert_eq!(root.textures.len(), 2, "a uv transform lives on the texture, so it needs its own");
+    }
 }
