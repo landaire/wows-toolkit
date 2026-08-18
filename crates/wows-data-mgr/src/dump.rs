@@ -2276,12 +2276,16 @@ mod maintenance_tests {
         // Content that is not a link into the store is the user's, not ours.
         let real = build_dir.join("vfs/content/notes.txt");
         std::fs::write(&real, b"keep me").unwrap();
-        // A symlink into some OTHER store (a backup, a sibling base) must survive:
-        // the removal rule is "resolves into THIS build's store", not "any symlink".
-        let outside = base.path().join("outside.bin");
-        std::fs::write(&outside, b"not ours").unwrap();
+        // A symlink into a DIFFERENT build's store (a sibling base) must survive:
+        // the removal rule is "resolves into THIS build's store", not "any store
+        // link". The target must be real and store-shaped, or a lexical rule that
+        // only checks the path shape would wrongly spare it too.
+        let other_base = base.path().join("other_base");
+        let other_cas_root = cas::cas_root(&other_base);
+        let other_hash = cas::store(&other_cas_root, b"someone else's bytes").unwrap();
+        let other_target = cas::cas_path(&other_cas_root, &other_hash);
         let foreign = build_dir.join("vfs/content/foreign.dat");
-        assert!(try_symlink(&outside, &foreign));
+        assert!(try_symlink(&other_target, &foreign));
 
         relink_build(&build_dir, &cas_root, &meta).unwrap();
 
@@ -2290,9 +2294,9 @@ mod maintenance_tests {
         assert_eq!(std::fs::read(&real).unwrap(), b"keep me");
         assert!(
             foreign.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()),
-            "a link into another store must survive"
+            "a link into a different build's store must survive"
         );
-        assert_eq!(std::fs::read(&outside).unwrap(), b"not ours");
+        assert_eq!(std::fs::read(&foreign).unwrap(), b"someone else's bytes");
         assert!(cas::object_exists(&cas_root, &hash), "the store keeps the bytes either way");
     }
 
