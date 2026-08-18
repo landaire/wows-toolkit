@@ -104,8 +104,10 @@ pub struct BuildData {
     #[allow(dead_code)]
     pub build_dir: PathBuf,
 
-    /// If this data was loaded from a dump directory (not the live install),
-    /// this holds the dump path for translation reloading.
+    /// The dump directory this data came from, if it was loaded from one and
+    /// not from the live install. Reads go through the build's metadata, so
+    /// this is a handle for opening it and for reaching sibling dumps in the
+    /// same base (the GUI-asset fallbacks), never a path to read files at.
     pub dump_dir: Option<PathBuf>,
 }
 

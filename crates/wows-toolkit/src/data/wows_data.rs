@@ -338,18 +338,23 @@ impl BuildDataCache {
                 None => continue,
             };
 
+            // A dump's catalogs are resolved through its metadata.toml: they
+            // live in the shared store, and a build with no materialized tree
+            // (every downloaded build, and any build after prune-materialized)
+            // has nothing at the literal path.
+            let dump_cas = data.dump_dir.as_deref().and_then(wows_data_mgr::cas_vfs::BuildCas::open);
+
             let mut found = false;
             for dir in &attempted_dirs {
                 // Try live install first, then dump directory
                 let live_path = self.wows_dir.join(format!("bin/{build}/res/texts/{dir}/LC_MESSAGES/global.mo"));
-                let dump_path =
-                    data.dump_dir.as_ref().map(|d| d.join(format!("translations/{dir}/LC_MESSAGES/global.mo")));
                 let mo_path = if live_path.exists() {
                     live_path
-                } else if let Some(ref dp) = dump_path
-                    && dp.exists()
+                } else if let Some(path) = dump_cas
+                    .as_ref()
+                    .and_then(|cas| cas.derived_path(&format!("translations/{dir}/LC_MESSAGES/global.mo")))
                 {
-                    dp.clone()
+                    path
                 } else {
                     continue;
                 };
