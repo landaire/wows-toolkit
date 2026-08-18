@@ -1358,8 +1358,8 @@ fn verify_builds_audited(
                         broken_links.push(rel.clone());
                     }
                 }
-                broken_links.sort();
             }
+            broken_links.sort();
             unindexed = unindexed_paths(&build_dir, &meta)?;
         }
 
