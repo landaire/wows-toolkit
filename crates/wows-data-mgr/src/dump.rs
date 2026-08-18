@@ -580,18 +580,6 @@ fn derive_game_params_rkyv(vfs: &VfsPath) -> Option<Vec<u8>> {
     }
 }
 
-/// The filesystem a build's own game files are read through when regenerating
-/// its derived artifacts. `metadata.files` is the record of what the build
-/// holds, and every downloaded build has no materialized tree at all; the
-/// physical tree is the only copy for a legacy build that has no hashes.
-fn source_vfs(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata) -> VfsPath {
-    if metadata.has_file_hashes() {
-        VfsPath::new(crate::cas_vfs::CasVfs::new(cas_root.to_path_buf(), &metadata.files))
-    } else {
-        VfsPath::new(wowsunpack::vfs::PhysicalFS::new(build_dir.join("vfs")))
-    }
-}
-
 /// Store `data` in the CAS and point `link_path` at it, replacing any file or
 /// symlink already there. Returns the content hash.
 fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<String, Report> {
@@ -603,11 +591,14 @@ fn store_and_relink(data: &[u8], link_path: &Path, cas_root: &Path) -> Result<St
 
 /// Generate and content-address a build's derived artifacts: the rkyv game
 /// params blob, its zstd copy, and the English translation catalog's zstd copy.
-/// The rkyv blob is derived from `vfs/content/GameParams.data` against the
-/// current `wowsunpack::game_params::types` schema; the on-disk rkyv is only
-/// consulted as a fallback when the extracted vfs is missing or conversion
-/// fails. Each artifact is stored in the CAS, linked back into `build_dir`,
-/// and recorded in `metadata.derived`. Idempotent.
+/// The rkyv blob is derived from `content/GameParams.data` read through
+/// `resolve_vfs` (the manifest-backed store for a CAS-format build, the
+/// physical `vfs/` tree for a legacy one) against the current
+/// `wowsunpack::game_params::types` schema; the on-disk rkyv is only
+/// consulted as a fallback when that derivation fails, whether because the
+/// source file is absent or because conversion errored or panicked. Each
+/// artifact is stored in the CAS, linked back into `build_dir`, and recorded
+/// in `metadata.derived`. Idempotent.
 ///
 /// Artifacts that cannot be regenerated keep the entry they already had:
 /// `metadata.toml`, not the build directory, is the record of what a build
@@ -622,7 +613,7 @@ pub fn refresh_build_derived(
     let recorded = std::mem::take(&mut metadata.derived);
 
     let rkyv_path = build_dir.join("game_params.rkyv");
-    let rkyv_bytes = derive_game_params_rkyv(&source_vfs(build_dir, cas_root, metadata));
+    let rkyv_bytes = derive_game_params_rkyv(&crate::cas_vfs::resolve_vfs(build_dir, cas_root, metadata));
     let rkyv_bytes = match rkyv_bytes {
         Some(b) => Some(b),
         None if rkyv_path.exists() => {
@@ -1827,40 +1818,6 @@ mod maintenance_tests {
         assert_eq!(std::fs::read(&link).unwrap(), b"icon bytes");
         // Idempotent: nothing to migrate the second time.
         assert!(!migrate_cas_dir_name(base).unwrap());
-    }
-
-    #[test]
-    fn derived_source_reads_a_manifest_build_from_the_store() {
-        let base = tempfile::tempdir().unwrap();
-        let cas_root = cas::cas_root(base.path());
-        let hash = cas::store(&cas_root, b"pickled params").unwrap();
-        let build_dir = base.path().join("1.2.3_100");
-        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
-        meta.files.insert("content/GameParams.data".into(), hash);
-
-        // No vfs/ tree exists: every downloaded build looks exactly like this.
-        let vfs = source_vfs(&build_dir, &cas_root, &meta);
-
-        let mut data = Vec::new();
-        vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
-        assert_eq!(data, b"pickled params");
-    }
-
-    #[test]
-    fn derived_source_reads_a_legacy_build_from_its_tree() {
-        let base = tempfile::tempdir().unwrap();
-        let cas_root = cas::cas_root(base.path());
-        let build_dir = base.path().join("0.6.0_50");
-        std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
-        std::fs::write(build_dir.join("vfs/content/GameParams.data"), b"legacy params").unwrap();
-        // No file hashes: the tree is the only copy of the data.
-        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
-
-        let vfs = source_vfs(&build_dir, &cas_root, &meta);
-
-        let mut data = Vec::new();
-        vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
-        assert_eq!(data, b"legacy params");
     }
 
     #[test]

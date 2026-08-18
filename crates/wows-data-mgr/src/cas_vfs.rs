@@ -43,6 +43,18 @@ impl CasVfs {
     }
 }
 
+/// The filesystem a build's own game files are read through. Manifest hashes
+/// mean the bytes are in the shared store, which is every downloaded build and
+/// needs no materialized tree; no hashes means a legacy build whose `vfs/`
+/// tree is the only copy of the data.
+pub(crate) fn resolve_vfs(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata) -> VfsPath {
+    if metadata.has_file_hashes() {
+        VfsPath::new(CasVfs::new(cas_root.to_path_buf(), &metadata.files))
+    } else {
+        VfsPath::new(PhysicalFS::new(build_dir.join("vfs")))
+    }
+}
+
 /// Resolves how to read one downloaded build: a [`CasVfs`] over the manifest
 /// when the build is CAS-format, or a `PhysicalFS` over a legacy `vfs/` tree
 /// when the manifest carries no file hashes.
@@ -92,10 +104,8 @@ impl BuildCas {
     pub fn vfs(&self) -> VfsPath {
         if self.metadata.has_file_hashes() {
             self.prune_materialized_tree();
-            VfsPath::new(CasVfs::new(self.cas_root.clone(), &self.metadata.files))
-        } else {
-            VfsPath::new(PhysicalFS::new(self.dump_dir.join("vfs")))
         }
+        resolve_vfs(&self.dump_dir, &self.cas_root, &self.metadata)
     }
 
     /// On-disk path for a derived artifact (e.g. `game_params.rkyv` or a
@@ -370,6 +380,40 @@ mod tests {
         let mut data = Vec::new();
         vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
         assert_eq!(data, b"params bytes");
+    }
+
+    #[test]
+    fn resolve_vfs_reads_a_manifest_build_from_the_store() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"pickled params").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.files.insert("content/GameParams.data".into(), hash);
+
+        // No vfs/ tree exists: every downloaded build looks exactly like this.
+        let vfs = resolve_vfs(&build_dir, &cas_root, &meta);
+
+        let mut data = Vec::new();
+        vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
+        assert_eq!(data, b"pickled params");
+    }
+
+    #[test]
+    fn resolve_vfs_reads_a_legacy_build_from_its_tree() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let build_dir = base.path().join("0.6.0_50");
+        std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
+        std::fs::write(build_dir.join("vfs/content/GameParams.data"), b"legacy params").unwrap();
+        // No file hashes: the tree is the only copy of the data.
+        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+
+        let vfs = resolve_vfs(&build_dir, &cas_root, &meta);
+
+        let mut data = Vec::new();
+        vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
+        assert_eq!(data, b"legacy params");
     }
 
     #[test]
