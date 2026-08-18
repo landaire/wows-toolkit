@@ -1,6 +1,9 @@
 #!/usr/bin/env nu
 
-nu build-support/check-xcode.nu
+if $nu.os-info.name == "macos" {
+    let macos_sdk = (^nix build --no-link --print-out-paths .#macos-sdk | str trim)
+    nu build-support/check-macos-sdk.nu $macos_sdk
+}
 
 let toolchain_root = (^nix build --no-link --print-out-paths .#buck-toolchain | str trim)
 

@@ -34,6 +34,11 @@ jobs:
       - name: Provision the toolchain and crate sources
         run: nix develop --command nu scripts/refresh-buck-toolchain.nu
 
+      # Fails with a clear message if the vendored prelude was expanded from a
+      # different buck2 than the pinned one, before the load-time error would.
+      - name: Verify the vendored prelude matches the pinned buck2
+        run: nix build .#checks.x86_64-linux.prelude-version -L
+
       - name: Disable network access
         run: |
           sudo iptables -P OUTPUT DROP
@@ -60,13 +65,12 @@ jobs:
             nix develop --command nu "$test"
           done
 
-# macOS and Windows are deliberately absent. Both build locally, but neither has
-# ever passed here:
+# macOS and Windows are absent as CI jobs, though both build locally.
 #
-#   macOS  - build-support/check-xcode.nu pins Xcode 26.6 and the MacOSX26.5
-#            SDK. The runners carry Xcode 16.4, and `nix develop` points
-#            DEVELOPER_DIR at the flake's own Apple SDK regardless, so the pin
-#            cannot hold as written.
+#   macOS  - build-support/check-macos-sdk.nu makes the flake's nix-pinned Apple
+#            SDK the boundary, which is exactly what `nix develop` sets
+#            DEVELOPER_DIR to, so no host Xcode is required. A macOS arm64 job is
+#            not wired up here yet but is no longer blocked.
 #   Windows- provision-toolchain.ps1 downloads a multi-GB Visual Studio and SDK
 #            layout whose hashes are still unverified against a real download.
 #

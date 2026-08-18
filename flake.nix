@@ -109,8 +109,22 @@
 
       # Build workspace deps once, share across packages
       cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+      # Fail if the vendored prelude was expanded from a different buck2 than the
+      # pinned one. This guards the version skew that breaks hermetic builds: a
+      # prelude and binary that disagree fail at load time. VENDORED_FROM records
+      # the buck2 that scripts/vendor-prelude.nu expanded the prelude from.
+      preludeVersionMatch = pkgs.runCommand "prelude-version-match" {
+        nativeBuildInputs = [pkgs.bash pkgs.gnugrep];
+      } ''
+        bash ${./build-support/buck/check-prelude-version.sh} \
+          "$(${buck2Pinned}/bin/buck2 --version)" ${./prelude/VENDORED_FROM}
+        touch $out
+      '';
     in
       with pkgs; {
+        checks.prelude-version = preludeVersionMatch;
+
         packages = let
           # Runtime libraries needed by the GUI (X11, Wayland, GL, Vulkan)
           guiRuntimeLibs = lib.optionals stdenv.hostPlatform.isLinux [
@@ -211,6 +225,12 @@
               inherit cargoArtifacts;
               cargoExtraArgs = "-p replayshark";
             });
+        }
+        # The nix-pinned macOS SDK the Buck toolchain's wrapped clang bakes in.
+        # scripts/refresh-buck-toolchain.nu passes its path to check-macos-sdk.nu
+        # so an ambient DEVELOPER_DIR/SDKROOT is verified to be exactly this one.
+        // lib.optionalAttrs stdenv.hostPlatform.isDarwin {
+          macos-sdk = pkgs.apple-sdk;
         };
 
         devShells.default = mkShell rec {
