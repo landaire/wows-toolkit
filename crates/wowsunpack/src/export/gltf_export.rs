@@ -3225,6 +3225,13 @@ pub struct BarrelPitch {
     pub barrel_bone_indices: Vec<u8>,
 }
 
+/// The LoD a sub-model actually renders at. Parts author shallower ladders than
+/// the hull, so a deep request clamps into each part's own ladder; `None` means
+/// the part authors no LoD at all and there is nothing to clamp to.
+fn clamped_lod(requested: usize, authored: usize) -> Option<usize> {
+    authored.checked_sub(1).map(|deepest| requested.min(deepest))
+}
+
 /// Export multiple sub-models as a single GLB with separate named meshes/nodes.
 ///
 /// Each sub-model becomes a separate selectable object in Blender.
@@ -3258,18 +3265,12 @@ pub fn export_ship_glb(
     let self_id_index = db.build_self_id_index();
 
     for sub in sub_models {
-        // Validate LOD — skip sub-models that don't have enough LODs.
-        if sub.visual.lods.is_empty() || lod >= sub.visual.lods.len() {
-            eprintln!(
-                "Warning: sub-model '{}' has {} LODs, skipping (requested LOD {})",
-                sub.name,
-                sub.visual.lods.len(),
-                lod
-            );
+        let Some(sub_lod) = clamped_lod(lod, sub.visual.lods.len()) else {
+            eprintln!("Warning: sub-model '{}' has no LODs, skipping", sub.name);
             continue;
-        }
+        };
 
-        let lod_entry = &sub.visual.lods[lod];
+        let lod_entry = &sub.visual.lods[sub_lod];
         let primitives = collect_primitives(
             sub.visual,
             sub.geometry,
@@ -3281,7 +3282,7 @@ pub fn export_ship_glb(
         )?;
 
         if primitives.is_empty() {
-            eprintln!("Warning: sub-model '{}' has no primitives for LOD {lod}", sub.name);
+            eprintln!("Warning: sub-model '{}' has no primitives for LOD {sub_lod}", sub.name);
             continue;
         }
 
@@ -3443,5 +3444,21 @@ mod tests {
 
         assert_eq!(root.images.len(), 1, "the image is shared");
         assert_eq!(root.textures.len(), 2, "a uv transform lives on the texture, so it needs its own");
+    }
+
+    #[test]
+    fn a_part_with_fewer_lods_clamps_to_its_deepest() {
+        assert_eq!(clamped_lod(4, 2), Some(1), "a 2-lod part uses its deepest, not nothing");
+    }
+
+    #[test]
+    fn a_part_with_enough_lods_uses_the_requested_one() {
+        assert_eq!(clamped_lod(1, 4), Some(1));
+        assert_eq!(clamped_lod(0, 4), Some(0));
+    }
+
+    #[test]
+    fn a_part_with_no_lods_has_nothing_to_clamp_to() {
+        assert_eq!(clamped_lod(0, 0), None);
     }
 }
