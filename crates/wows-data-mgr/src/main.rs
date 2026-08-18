@@ -109,10 +109,8 @@ enum Commands {
         output: PathBuf,
     },
 
-    /// Regenerate derived artifacts (rkyv blob, compressed copies) for dumped
-    /// builds, deduplicate them into content-addressed storage, then garbage
-    /// collect CAS objects no longer referenced by any build. Pass `--no-gc`
-    /// to keep orphaned objects around (run `gc` later to reclaim them).
+    /// Regenerate derived artifacts (rkyv blob, compressed copies) with GC
+    /// enabled by default.
     RefreshDerived {
         /// Directory containing dumps (same as dump-renderer-data --output)
         #[arg(short, long)]
@@ -129,10 +127,8 @@ enum Commands {
         no_gc: bool,
     },
 
-    /// Index content a build tree holds that `metadata.toml` never recorded: a
-    /// store link whose path has no entry. Nothing keeps such an object alive
-    /// and no consistency check reads it, so it is one `gc` away from being
-    /// lost. Links with no object behind them are reported, never indexed.
+    /// Index content a build tree holds that `metadata.toml` never recorded.
+    /// Symlinks pointing to an invalid object are skipped.
     Reindex {
         /// Directory containing dumps (same as dump-renderer-data --output)
         #[arg(short, long)]
@@ -143,9 +139,8 @@ enum Commands {
         build: Option<u32>,
     },
 
-    /// Re-materialise build trees from `metadata.toml`, repointing any link
-    /// that names something other than what its entry says. Metadata is the
-    /// authority; a link left over from an earlier extraction is not.
+    /// Re-materializes a build's filesystem from the `metadata.toml`. i.e.
+    /// fixes up the filesystem under a build path.
     Relink {
         /// Directory containing dumps (same as dump-renderer-data --output)
         #[arg(short, long)]
@@ -170,7 +165,7 @@ enum Commands {
     },
 
     /// Delete content-addressed objects no longer referenced by any dumped
-    /// build. This is the only command that removes shared storage.
+    /// build.
     Gc {
         /// Directory containing dumps (same as dump-renderer-data --output)
         #[arg(short, long)]
@@ -182,9 +177,7 @@ enum Commands {
     RequiredPaths,
 
     /// Add missing assets (maps, and with --with-gui the gui/ dirs) to an
-    /// existing build without re-extracting data it already has. Regenerates the
-    /// rkyv blob with the current parser. Only needs gui + spaces_* packages on
-    /// disk, not the multi-GiB basecontent package.
+    /// existing build without re-extracting data it already has.
     CompleteBuild {
         /// Build number to complete (must already exist in builds.toml)
         #[arg(long)]
@@ -203,9 +196,7 @@ enum Commands {
         with_gui: bool,
     },
 
-    /// Fold a legacy `vfs_common/` store into `common/` and relink every build,
-    /// healing a dump base where a redump created `common/` while old builds
-    /// still reference `vfs_common/`.
+    /// Fold a legacy `vfs_common/` store into `common/` and relink every build.
     MigrateCas {
         /// Directory containing dumps (same as dump-renderer-data --output)
         #[arg(short, long)]
@@ -235,8 +226,7 @@ enum Commands {
 
     /// Copy dumped builds from a local source dump base into a destination
     /// (e.g. the toolkit's data cache), deduplicating against content already
-    /// present. The offline equivalent of the toolkit's GitHub download, for
-    /// testing cache updates without publishing data.
+    /// present.
     Update {
         /// Source dump base to copy from (must contain builds.toml and common/)
         #[arg(long)]
