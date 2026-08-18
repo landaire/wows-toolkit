@@ -553,30 +553,42 @@ fn store_and_link(
 
 // -- Derived artifact generation (shared by dump and refresh-derived) --
 
-/// Convert `vfs_dir/content/GameParams.data` into a rkyv-encoded `Vec<Param>`
-/// using the current `wowsunpack` schema. Returns `None` when the source file
-/// is missing or the conversion fails (panic from a layout-incompatible older
-/// pickle, or serialization error). Diagnostics are logged via stderr.
-fn derive_game_params_rkyv(vfs_dir: &Path) -> Option<Vec<u8>> {
-    if !vfs_dir.join("content/GameParams.data").exists() {
+/// Convert `content/GameParams.data` read through `vfs` into a rkyv-encoded
+/// `Vec<Param>` using the current `wowsunpack` schema. Returns `None` when the
+/// source file is missing or the conversion fails (panic from a
+/// layout-incompatible older pickle, or serialization error). Diagnostics are
+/// logged via stderr.
+fn derive_game_params_rkyv(vfs: &VfsPath) -> Option<Vec<u8>> {
+    if !vfs.join("content/GameParams.data").ok()?.exists().unwrap_or(false) {
         return None;
     }
-    let vfs = VfsPath::new(wowsunpack::vfs::PhysicalFS::new(vfs_dir));
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let gmp = GameMetadataProvider::from_vfs(&vfs)?;
+        let gmp = GameMetadataProvider::from_vfs(vfs)?;
         let params: Vec<Param> = gmp.params().iter().map(|p| Arc::unwrap_or_clone(Arc::clone(p))).collect();
         cache::encode(&params).map_err(|e| report!("Failed to serialize: {e}"))
     }));
     match result {
         Ok(Ok(bytes)) => Some(bytes),
         Ok(Err(e)) => {
-            eprintln!("WARN: GameParams re-derivation failed for {}: {e:?}", vfs_dir.display());
+            eprintln!("WARN: GameParams re-derivation failed: {e:?}");
             None
         }
         Err(_) => {
-            eprintln!("WARN: GameParams re-derivation panicked for {} (incompatible pickle format)", vfs_dir.display(),);
+            eprintln!("WARN: GameParams re-derivation panicked (incompatible pickle format)");
             None
         }
+    }
+}
+
+/// The filesystem a build's own game files are read through when regenerating
+/// its derived artifacts. `metadata.files` is the record of what the build
+/// holds, and every downloaded build has no materialized tree at all; the
+/// physical tree is the only copy for a legacy build that has no hashes.
+fn source_vfs(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata) -> VfsPath {
+    if metadata.has_file_hashes() {
+        VfsPath::new(crate::cas_vfs::CasVfs::new(cas_root.to_path_buf(), &metadata.files))
+    } else {
+        VfsPath::new(wowsunpack::vfs::PhysicalFS::new(build_dir.join("vfs")))
     }
 }
 
@@ -610,7 +622,7 @@ pub fn refresh_build_derived(
     let recorded = std::mem::take(&mut metadata.derived);
 
     let rkyv_path = build_dir.join("game_params.rkyv");
-    let rkyv_bytes = derive_game_params_rkyv(&build_dir.join("vfs"));
+    let rkyv_bytes = derive_game_params_rkyv(&source_vfs(build_dir, cas_root, metadata));
     let rkyv_bytes = match rkyv_bytes {
         Some(b) => Some(b),
         None if rkyv_path.exists() => {
@@ -627,6 +639,11 @@ pub fn refresh_build_derived(
         let zst_path = build_dir.join("game_params.rkyv.zst");
         let hash = store_and_relink(&compressed, &zst_path, cas_root)?;
         metadata.derived.insert("game_params.rkyv.zst".to_string(), hash);
+    } else if recorded.contains_key("game_params.rkyv") {
+        tracing::warn!(
+            "build {}: kept the recorded game_params.rkyv; it could not be re-derived from this build's GameParams.data",
+            metadata.build
+        );
     }
 
     // Content-address the per-locale translation catalogs (raw .mo files copied
@@ -1810,6 +1827,40 @@ mod maintenance_tests {
         assert_eq!(std::fs::read(&link).unwrap(), b"icon bytes");
         // Idempotent: nothing to migrate the second time.
         assert!(!migrate_cas_dir_name(base).unwrap());
+    }
+
+    #[test]
+    fn derived_source_reads_a_manifest_build_from_the_store() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"pickled params").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.files.insert("content/GameParams.data".into(), hash);
+
+        // No vfs/ tree exists: every downloaded build looks exactly like this.
+        let vfs = source_vfs(&build_dir, &cas_root, &meta);
+
+        let mut data = Vec::new();
+        vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
+        assert_eq!(data, b"pickled params");
+    }
+
+    #[test]
+    fn derived_source_reads_a_legacy_build_from_its_tree() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let build_dir = base.path().join("0.6.0_50");
+        std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
+        std::fs::write(build_dir.join("vfs/content/GameParams.data"), b"legacy params").unwrap();
+        // No file hashes: the tree is the only copy of the data.
+        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+
+        let vfs = source_vfs(&build_dir, &cas_root, &meta);
+
+        let mut data = Vec::new();
+        vfs.join("content/GameParams.data").unwrap().open_file().unwrap().read_to_end(&mut data).unwrap();
+        assert_eq!(data, b"legacy params");
     }
 
     #[test]
