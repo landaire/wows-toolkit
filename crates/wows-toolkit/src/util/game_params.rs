@@ -35,7 +35,7 @@ pub fn game_params_bin_path(build: u32) -> PathBuf {
 /// install, and a dumped build never appears there, so a cache written for one
 /// would be removed on the next start.
 pub fn build_override_root(build: u32) -> Option<PathBuf> {
-    Some(crate::storage_dir()?.join("build_overrides").join(build.to_string()))
+    wows_data_mgr::overrides::build_override_root(build)
 }
 
 /// Remove ALL versioned game_params cache files (for schema changes).
@@ -118,4 +118,18 @@ pub fn load_game_params(vfs: &VfsPath, game_version: usize) -> Result<GameMetada
     debug!("took {} seconds to load", (now - start).as_secs());
 
     Ok(metadata_provider)
+}
+
+#[cfg(test)]
+mod tests {
+    /// The CLIs resolve the override root through wows-data-mgr; if the two
+    /// disagree, a cache rebuilt by one tool is invisible to the other.
+    #[test]
+    fn override_root_matches_the_apps_storage_dir() {
+        let Some(storage) = crate::storage_dir() else {
+            eprintln!("skipping: no storage dir on this machine");
+            return;
+        };
+        assert_eq!(super::build_override_root(13015811), Some(storage.join("build_overrides").join("13015811")));
+    }
 }

@@ -38,6 +38,7 @@ pub mod constants;
 pub mod download_repo;
 pub mod dump;
 pub mod manifest;
+pub mod overrides;
 pub mod registry;
 
 use std::path::Path;
@@ -106,12 +107,23 @@ pub fn game_dir_for_build(build: u32) -> Option<PathBuf> {
 pub struct Dump {
     dump_dir: PathBuf,
     cas: Option<cas_vfs::BuildCas>,
+    override_root: Option<PathBuf>,
 }
 
 impl Dump {
     /// Resolve `dump_dir`, parsing its manifest once when it has one.
     pub fn open(dump_dir: &Path) -> Self {
-        Self { dump_dir: dump_dir.to_path_buf(), cas: cas_vfs::BuildCas::open(dump_dir) }
+        Self { dump_dir: dump_dir.to_path_buf(), cas: cas_vfs::BuildCas::open(dump_dir), override_root: None }
+    }
+
+    /// Point this dump at a writable directory whose contents shadow its derived
+    /// artifacts, so a cache that no longer loads can be rebuilt once and reused
+    /// without editing a dump that may be shared and read-only.
+    pub fn set_override_root(&mut self, root: PathBuf) {
+        if let Some(cas) = self.cas.as_mut() {
+            cas.set_override_root(root.clone());
+        }
+        self.override_root = Some(root);
     }
 
     /// A VFS over the dump's game files.
@@ -128,10 +140,35 @@ impl Dump {
         match &self.cas {
             Some(cas) => cas.derived_path(rel),
             None => {
+                if let Some(root) = &self.override_root {
+                    let path = root.join(rel);
+                    if path.exists() {
+                        return Some(path);
+                    }
+                }
                 let path = self.dump_dir.join(rel);
                 path.exists().then_some(path)
             }
         }
+    }
+
+    /// Where to write an override for `rel`, creating its parent directory.
+    /// `None` when no override root is set or the directory cannot be created,
+    /// in which case the caller simply does not cache.
+    pub fn derived_write_path(&self, rel: &str) -> Option<PathBuf> {
+        match &self.cas {
+            Some(cas) => cas.derived_write_path(rel),
+            None => {
+                let path = self.override_root.as_ref()?.join(rel);
+                std::fs::create_dir_all(path.parent()?).ok()?;
+                Some(path)
+            }
+        }
+    }
+
+    /// The build this dump holds, or `None` for a dump with no manifest.
+    pub fn build(&self) -> Option<u32> {
+        self.cas.as_ref().map(|cas| cas.metadata().build)
     }
 
     /// Whether this dump has game files to read. Callers that skip when data is
@@ -260,6 +297,39 @@ mod dump_tests {
 
         assert!(!dump.has_game_files());
         assert!(dump.derived_path("game_params.rkyv").is_none());
+    }
+
+    #[test]
+    fn override_shadows_the_dumps_own_derived_copy() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = cas_dump(base.path(), &[], &[("game_params.rkyv", b"stale bytes")]);
+        let overrides = base.path().join("overrides");
+
+        let mut dump = Dump::open(&dump_dir);
+        dump.set_override_root(overrides.clone());
+        let write_path = dump.derived_write_path("game_params.rkyv").expect("a place to write");
+        std::fs::write(&write_path, b"fresh bytes").unwrap();
+
+        assert_eq!(write_path, overrides.join("game_params.rkyv"));
+        assert_eq!(std::fs::read(dump.derived_path("game_params.rkyv").unwrap()).unwrap(), b"fresh bytes");
+        assert_eq!(dump.build(), Some(100));
+    }
+
+    #[test]
+    fn legacy_dump_honours_an_override_too() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = legacy_dump(base.path(), &[("content/GameParams.data", b"params")]);
+        std::fs::write(dump_dir.join("game_params.rkyv"), b"stale bytes").unwrap();
+        let overrides = base.path().join("overrides");
+
+        let mut dump = Dump::open(&dump_dir);
+        dump.set_override_root(overrides.clone());
+        let write_path = dump.derived_write_path("game_params.rkyv").expect("a place to write");
+        std::fs::write(&write_path, b"fresh bytes").unwrap();
+
+        assert_eq!(std::fs::read(dump.derived_path("game_params.rkyv").unwrap()).unwrap(), b"fresh bytes");
+        // A legacy dump has no manifest, so it has no build number to report.
+        assert_eq!(dump.build(), None);
     }
 }
 
