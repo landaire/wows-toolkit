@@ -24,11 +24,17 @@ fn load(ship: &str, options: &ShipExportOptions) -> ShipModelContext {
     assets.load_ship_from_vehicle(&vehicle, options).expect("ctx")
 }
 
-/// Names of every node in the file, so a part that vanished can be identified
-/// rather than merely counted.
-fn node_names(glb: &[u8]) -> std::collections::BTreeSet<String> {
+/// How many nodes carry each name. A multiset, not a set: several sub-models can
+/// share a name, and a set would let a surviving twin mask a dropped part.
+fn node_name_counts(glb: &[u8]) -> std::collections::BTreeMap<String, usize> {
     let g = gltf::Gltf::from_slice(glb).expect("parse glb");
-    g.nodes().filter_map(|n| n.name().map(str::to_string)).collect()
+    let mut counts = std::collections::BTreeMap::new();
+    for node in g.nodes() {
+        if let Some(name) = node.name() {
+            *counts.entry(name.to_string()).or_insert(0) += 1;
+        }
+    }
+    counts
 }
 
 #[test]
@@ -46,11 +52,19 @@ fn a_deep_lod_keeps_every_part() {
     // 0 entry (a dedup stub, superseded by the Bow/MidBack/MidFront/Stern
     // regions) and a non-empty LOD 1 entry (a distinct low-poly far mesh), so
     // clamping into it at a deep request legitimately adds a node. The
-    // invariant under test is "no part disappears", which is why this
-    // compares node names rather than counts.
-    let at_lod0 = node_names(&lod0);
-    let at_lod3 = node_names(&lod3);
-    let dropped: Vec<&String> = at_lod0.difference(&at_lod3).collect();
+    // invariant under test is "no part disappears", so this compares
+    // per-name node counts rather than a name set: several sub-models
+    // (symmetric mounts, misc parts) share a name, and a plain set would let
+    // a surviving twin mask a dropped one.
+    let at_lod0 = node_name_counts(&lod0);
+    let at_lod3 = node_name_counts(&lod3);
+    // A name absent from lod3's map genuinely occurs zero times there, which
+    // is exactly the drop this assertion exists to catch.
+    let dropped: Vec<String> = at_lod0
+        .iter()
+        .filter(|(name, count)| at_lod3.get(*name).copied().unwrap_or(0) < **count)
+        .map(|(name, count)| format!("{name} ({count} at lod0, {} at lod3)", at_lod3.get(name).copied().unwrap_or(0)))
+        .collect();
     assert!(dropped.is_empty(), "a deep lod clamped these parts away instead of using their deepest: {dropped:?}");
     assert!(lod3.len() < lod0.len(), "a deep lod is smaller than lod 0");
 }
