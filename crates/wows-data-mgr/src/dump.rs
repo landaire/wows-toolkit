@@ -869,10 +869,11 @@ fn write_constants_for_build(
     true
 }
 
-/// Re-materialise a build tree from `metadata.toml`: every indexed path gets a
-/// link at the object the entry names. Paths whose object is not in the store
-/// are left alone, since a link to nothing is what `verify` already reports.
-/// Returns the paths that had to be repointed.
+/// Sync a build tree to `metadata.toml`: every indexed path gets a link at the
+/// object the entry names, and every link the manifest no longer names is
+/// removed. Paths whose object is not in the store are left alone, since a
+/// link to nothing is what `verify` already reports. Returns the paths that
+/// had to be repointed.
 pub fn relink_build(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata) -> Result<Vec<String>, Report> {
     let mut repointed = Vec::new();
     for (rel, hash) in metadata.files.iter().chain(metadata.derived.iter()) {
@@ -888,6 +889,23 @@ pub fn relink_build(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata)
         repointed.push(rel.clone());
     }
     repointed.sort();
+
+    // A tree is a materialization of metadata.toml, so relinking is a sync in
+    // both directions: a path the manifest dropped keeps no link. Only links
+    // into this build's store are removed; real files are the user's.
+    for rel in unindexed_paths(build_dir, metadata)? {
+        let path = build_dir.join(&rel);
+        let Ok(link) = path.symlink_metadata() else {
+            continue;
+        };
+        if !link.file_type().is_symlink() || cas::link_target_hash(&path).is_none() {
+            continue;
+        }
+        if let Err(e) = std::fs::remove_file(&path) {
+            tracing::warn!("failed to remove stale link {} (left in place): {e}", path.display());
+        }
+    }
+
     Ok(repointed)
 }
 
@@ -923,6 +941,48 @@ pub fn relink_builds(output_base: &Path, only_build: Option<u32>) -> Result<BTre
         }
     }
     Ok(repointed)
+}
+
+/// Delete the materialized symlink trees of every build in `output_base` (or
+/// one build). Returns the links removed per build directory, omitting builds
+/// that had nothing to remove.
+///
+/// The inverse of [`relink_builds`]. Readers resolve every file through
+/// `metadata.toml` and `common/`, so a build with no tree is fully readable;
+/// this reclaims the directory entries a materialized tree costs.
+pub fn prune_materialized_trees(
+    output_base: &Path,
+    only_build: Option<u32>,
+) -> Result<BTreeMap<String, usize>, Report> {
+    let index = BuildsIndex::load(&output_base.join("builds.toml"));
+    let targets: Vec<&BuildEntry> = match only_build {
+        Some(build) => index.builds.iter().filter(|entry| entry.build == build).collect(),
+        None => index.builds.iter().collect(),
+    };
+    if targets.is_empty() {
+        bail!("No matching builds found in {}", output_base.join("builds.toml").display());
+    }
+
+    let mut pruned = BTreeMap::new();
+    for entry in targets {
+        let build_dir = output_base.join(&entry.dir);
+        let Some(cas) = crate::cas_vfs::BuildCas::open(&build_dir) else {
+            bail!("{} has no readable metadata.toml", entry.dir);
+        };
+        let removed = cas.prune_materialized_tree();
+        // metadata.toml is the record of whether a tree exists, so clearing the
+        // tree clears the claim.
+        if let Some(mut metadata) = BuildMetadata::load(&build_dir.join("metadata.toml"))
+            && metadata.materialized
+        {
+            metadata.materialized = false;
+            metadata.save(&build_dir.join("metadata.toml"))?;
+        }
+        if removed > 0 {
+            pruned.insert(entry.dir.clone(), removed);
+        }
+    }
+    Ok(pruned)
 }
 
 /// Reindex every dumped build (or one build when `only_build` is given),
@@ -1973,6 +2033,43 @@ mod maintenance_tests {
     }
 
     #[test]
+    fn prune_materialized_trees_reports_what_it_removed() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"rkyv").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(&build_dir).unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        // A build with links is a materialized build.
+        meta.materialized = true;
+        meta.files.insert("content/x.dat".into(), hash.clone());
+        meta.derived.insert("game_params.rkyv".into(), hash.clone());
+        meta.save(&build_dir.join("metadata.toml")).unwrap();
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        index.upsert(BuildEntry {
+            version: "1.2.3".into(),
+            build: 100,
+            dir: "1.2.3_100".into(),
+            dumped_at: "now".into(),
+        });
+        index.save(&base.path().join("builds.toml")).unwrap();
+        if cas::link_file(&cas_root, &hash, &build_dir.join("game_params.rkyv")).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+
+        let removed = prune_materialized_trees(base.path(), None).unwrap();
+
+        assert_eq!(removed.get("1.2.3_100"), Some(&1));
+        assert!(build_dir.join("game_params.rkyv").symlink_metadata().is_err());
+        // The store keeps the bytes; only the convenience link went away.
+        assert!(cas::object_exists(&cas_root, &hash));
+        // The tree is gone, so the record says so.
+        assert!(!BuildMetadata::load(&build_dir.join("metadata.toml")).unwrap().materialized);
+        assert!(prune_materialized_trees(base.path(), None).unwrap().is_empty());
+    }
+
+    #[test]
     fn refresh_derived_content_addresses_translations() {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path();
@@ -2115,6 +2212,35 @@ mod maintenance_tests {
 
         assert_eq!(repointed, vec!["gui/icon.png".to_string()]);
         assert_eq!(std::fs::read(&link).unwrap(), b"current bytes");
+    }
+
+    #[test]
+    fn relink_removes_links_the_manifest_no_longer_records() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"hi").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.materialized = true;
+        meta.files.insert("content/x.dat".into(), hash.clone());
+
+        // A link an earlier dump left behind, for a path no manifest entry names.
+        let stale = build_dir.join("vfs/content/gone.dat");
+        if cas::link_file(&cas_root, &hash, &stale).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+        // Content that is not a link into the store is the user's, not ours.
+        let real = build_dir.join("vfs/content/notes.txt");
+        std::fs::write(&real, b"keep me").unwrap();
+
+        relink_build(&build_dir, &cas_root, &meta).unwrap();
+
+        assert!(stale.symlink_metadata().is_err(), "a link the manifest does not record must go");
+        assert!(build_dir.join("vfs/content/x.dat").exists(), "a recorded path must be materialized");
+        assert_eq!(std::fs::read(&real).unwrap(), b"keep me");
+        assert!(cas::object_exists(&cas_root, &hash), "the store keeps the bytes either way");
     }
 
     #[test]

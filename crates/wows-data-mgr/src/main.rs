@@ -156,6 +156,19 @@ enum Commands {
         build: Option<u32>,
     },
 
+    /// Delete the materialized symlink trees in build directories. Readers
+    /// resolve every file through metadata.toml and common/, so the trees are a
+    /// browsing convenience. Never removes content objects.
+    PruneMaterialized {
+        /// Directory containing dumps (same as dump-renderer-data --output)
+        #[arg(short, long)]
+        output: PathBuf,
+
+        /// Only prune this build (default: every build in the base)
+        #[arg(long)]
+        build: Option<u32>,
+    },
+
     /// Delete content-addressed objects no longer referenced by any dumped
     /// build. This is the only command that removes shared storage.
     Gc {
@@ -283,6 +296,7 @@ fn link_target(command: &Commands) -> Option<(PathBuf, Option<u32>)> {
         | Commands::Gc { .. }
         | Commands::MigrateCas { .. }
         | Commands::Relink { .. }
+        | Commands::PruneMaterialized { .. }
         | Commands::RequiredPaths
         | Commands::Verify { .. }
         | Commands::List
@@ -517,6 +531,19 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
             }
             let total: usize = repointed.values().map(Vec::len).sum();
             println!("Repointed {total} link(s) across {} build(s).", repointed.len());
+            return Ok(());
+        }
+        Commands::PruneMaterialized { output, build } => {
+            let pruned = dump::prune_materialized_trees(output, *build)?;
+            if pruned.is_empty() {
+                println!("No materialized trees to prune.");
+                return Ok(());
+            }
+            for (dir, removed) in &pruned {
+                println!("  {dir} - removed {removed} link(s)");
+            }
+            let total: usize = pruned.values().sum();
+            println!("Removed {total} link(s) across {} build(s).", pruned.len());
             return Ok(());
         }
         Commands::Gc { output } => {
@@ -774,6 +801,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
         Commands::RefreshDerived { .. }
         | Commands::Reindex { .. }
         | Commands::Relink { .. }
+        | Commands::PruneMaterialized { .. }
         | Commands::Gc { .. }
         | Commands::RequiredPaths
         | Commands::Update { .. }

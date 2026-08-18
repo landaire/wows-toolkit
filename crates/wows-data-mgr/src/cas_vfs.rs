@@ -98,14 +98,16 @@ impl BuildCas {
         &self.metadata
     }
 
-    /// A VFS for the build. CAS-format builds get a [`CasVfs`] (and a one-time
-    /// prune of any stale symlinked tree); legacy builds get a `PhysicalFS`
-    /// over the real `vfs/` directory.
+    /// A VFS for the build. CAS-format builds get a [`CasVfs`] over the
+    /// manifest; legacy builds get a `PhysicalFS` over the real `vfs/`
+    /// directory. Reading never writes: the materialized tree, when a build has
+    /// one, is untouched.
     pub fn vfs(&self) -> VfsPath {
         if self.metadata.has_file_hashes() {
-            self.prune_materialized_tree();
+            VfsPath::new(CasVfs::new(self.cas_root.clone(), &self.metadata.files))
+        } else {
+            VfsPath::new(PhysicalFS::new(self.dump_dir.join("vfs")))
         }
-        resolve_vfs(&self.dump_dir, &self.cas_root, &self.metadata)
     }
 
     /// On-disk path for a derived artifact (e.g. `game_params.rkyv` or a
@@ -136,40 +138,51 @@ impl BuildCas {
         Some(path)
     }
 
-    /// Remove the redundant materialized tree a symlink-era download left behind:
-    /// the `vfs/` directory and any artifact named in `derived`. Only called for
-    /// CAS-format builds, where `common/` holds the real bytes.
+    /// Remove the build's materialized symlink tree: the `vfs/` directory and
+    /// any artifact named in `derived`. The bytes live in `common/` and every
+    /// reader resolves them through `metadata.toml`, so the tree is a browsing
+    /// convenience. Returns the number of links removed.
     ///
     /// Conservative and best-effort: a path is deleted only when it is a symlink
-    /// that resolves into this build's CAS store (`common/`). Real files and
-    /// symlinks pointing elsewhere are left untouched, so user data is never
-    /// destroyed. Every deletion is fault-tolerant: if removing a link fails
-    /// (e.g. it requires elevated rights), the failure is logged and the link is
-    /// left in place rather than propagating an error. Idempotent.
-    fn prune_materialized_tree(&self) {
+    /// that resolves into this build's CAS store. Real files and symlinks
+    /// pointing elsewhere are left untouched, so user data is never destroyed.
+    /// A deletion that fails (an elevated-rights link, say) is logged and left
+    /// in place rather than propagating an error. Idempotent.
+    ///
+    /// The legacy guard is new: the prune used to be reachable only from the
+    /// CAS branch of `vfs()`, and a legacy dump's tree is its only copy of the
+    /// data.
+    pub fn prune_materialized_tree(&self) -> usize {
+        if !self.metadata.has_file_hashes() {
+            return 0;
+        }
+        let mut removed = 0;
         let vfs_dir = self.dump_dir.join("vfs");
         if vfs_dir.exists() {
-            self.prune_symlink_tree(&vfs_dir);
+            removed += self.prune_symlink_tree(&vfs_dir);
         }
         for rel in self.metadata.derived.keys() {
-            self.remove_if_cas_symlink(&self.dump_dir.join(rel));
+            removed += usize::from(self.remove_if_cas_symlink(&self.dump_dir.join(rel)));
         }
+        removed
     }
 
     /// Recursively prune CAS symlinks under `dir`, then remove directories left
     /// empty. Descends real subdirectories; never follows symlinks into the CAS.
-    fn prune_symlink_tree(&self, dir: &Path) {
+    /// Returns the number of links removed.
+    fn prune_symlink_tree(&self, dir: &Path) -> usize {
+        let mut removed = 0;
         let Ok(read) = std::fs::read_dir(dir) else {
-            return;
+            return removed;
         };
         for entry in read.flatten() {
             let Ok(file_type) = entry.file_type() else {
                 continue;
             };
             if file_type.is_symlink() {
-                self.remove_if_cas_symlink(&entry.path());
+                removed += usize::from(self.remove_if_cas_symlink(&entry.path()));
             } else if file_type.is_dir() {
-                self.prune_symlink_tree(&entry.path());
+                removed += self.prune_symlink_tree(&entry.path());
             }
             // Real files are left untouched.
         }
@@ -178,23 +191,27 @@ impl BuildCas {
         {
             tracing::debug!("leaving dir {} in place: {e}", dir.display());
         }
+        removed
     }
 
     /// Delete `path` only when it is a symlink resolving into this build's CAS
     /// store. Logs and continues on any error (including deletion requiring
-    /// elevated rights) so cleanup never fails a load.
-    fn remove_if_cas_symlink(&self, path: &Path) {
+    /// elevated rights) so cleanup never fails a load. Returns whether it
+    /// removed the link.
+    fn remove_if_cas_symlink(&self, path: &Path) -> bool {
         let is_symlink = path.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false);
         if !is_symlink {
-            return;
+            return false;
         }
         if !symlink_points_into(path, &self.cas_root) {
             tracing::warn!("not pruning symlink that does not point into the CAS: {}", path.display());
-            return;
+            return false;
         }
         if let Err(e) = std::fs::remove_file(path) {
             tracing::warn!("failed to prune symlink {} (left in place): {e}", path.display());
+            return false;
         }
+        true
     }
 }
 
@@ -553,9 +570,10 @@ mod tests {
         assert!(try_symlink(&outside, &foreign));
 
         let cas = BuildCas::open(&dump_dir).unwrap();
-        let _ = cas.vfs();
+        let removed = cas.prune_materialized_tree();
 
         // CAS symlinks (vfs tree + derived) are pruned; the CAS objects survive.
+        assert_eq!(removed, 2);
         assert!(!vfs_file.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()));
         assert!(!derived_link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()));
         assert!(x_target.exists());
@@ -565,8 +583,31 @@ mod tests {
         assert_eq!(std::fs::read(&outside).unwrap(), b"keep me");
         // metadata.toml is never touched, and a second prune is a no-op.
         assert!(dump_dir.join("metadata.toml").exists());
-        let _ = cas.vfs();
+        assert_eq!(cas.prune_materialized_tree(), 0);
         assert!(dump_dir.join("metadata.toml").exists());
+    }
+
+    #[test]
+    fn buildcas_vfs_leaves_the_materialized_tree_alone() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = cas_build(base.path(), &[("content/x.dat", b"hi")], &[("game_params.rkyv", b"rkyv")]);
+        let cas_root = base.path().join("common");
+
+        let derived_link = dump_dir.join("game_params.rkyv");
+        let rkyv_target = cas::cas_path(&cas_root, &cas::hash_bytes(b"rkyv"));
+        if !try_symlink(&rkyv_target, &derived_link) {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+
+        let cas = BuildCas::open(&dump_dir).unwrap();
+        let _ = cas.vfs();
+        let _ = cas.vfs();
+
+        // Reading a build is not a licence to edit it: metadata.toml is the record,
+        // the tree belongs to whoever is browsing it.
+        assert!(derived_link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()));
+        assert_eq!(std::fs::read(&derived_link).unwrap(), b"rkyv");
     }
 
     #[test]
@@ -579,7 +620,7 @@ mod tests {
         std::fs::write(&real, b"real bytes").unwrap();
 
         let cas = BuildCas::open(&dump_dir).unwrap();
-        let _ = cas.vfs();
+        let _ = cas.prune_materialized_tree();
         assert_eq!(std::fs::read(&real).unwrap(), b"real bytes");
     }
 
