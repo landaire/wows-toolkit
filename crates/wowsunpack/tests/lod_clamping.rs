@@ -24,9 +24,11 @@ fn load(ship: &str, options: &ShipExportOptions) -> ShipModelContext {
     assets.load_ship_from_vehicle(&vehicle, options).expect("ctx")
 }
 
-fn node_count(glb: &[u8]) -> usize {
+/// Names of every node in the file, so a part that vanished can be identified
+/// rather than merely counted.
+fn node_names(glb: &[u8]) -> std::collections::BTreeSet<String> {
     let g = gltf::Gltf::from_slice(glb).expect("parse glb");
-    g.nodes().count()
+    g.nodes().filter_map(|n| n.name().map(str::to_string)).collect()
 }
 
 #[test]
@@ -40,12 +42,15 @@ fn a_deep_lod_keeps_every_part() {
     let mut lod3 = Vec::new();
     load("WSD011_Smaland_1955", &deep).export_glb(&mut lod3).expect("lod 3");
 
-    // Equality does not hold on Smaland's hull sub-model: its own LOD 0 entry
-    // is a dedup stub (0 primitives, superseded by the Bow/MidBack/MidFront/
-    // Stern regions), while its LOD 1 entry is a distinct low-poly far mesh.
-    // Clamping into that entry at a deep request legitimately adds a node
-    // instead of dropping one, so the invariant under test is "never fewer",
-    // not "always equal".
-    assert!(node_count(&lod3) >= node_count(&lod0), "a deep lod clamps parts, it does not drop them");
+    // Node counts alone don't hold: Smaland's hull sub-model has an empty LOD
+    // 0 entry (a dedup stub, superseded by the Bow/MidBack/MidFront/Stern
+    // regions) and a non-empty LOD 1 entry (a distinct low-poly far mesh), so
+    // clamping into it at a deep request legitimately adds a node. The
+    // invariant under test is "no part disappears", which is why this
+    // compares node names rather than counts.
+    let at_lod0 = node_names(&lod0);
+    let at_lod3 = node_names(&lod3);
+    let dropped: Vec<&String> = at_lod0.difference(&at_lod3).collect();
+    assert!(dropped.is_empty(), "a deep lod clamped these parts away instead of using their deepest: {dropped:?}");
     assert!(lod3.len() < lod0.len(), "a deep lod is smaller than lod 0");
 }
