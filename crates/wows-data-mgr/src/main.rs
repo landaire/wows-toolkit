@@ -488,10 +488,13 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             } else {
                 let damaged: usize = summary.damaged.values().map(Vec::len).sum();
                 println!(
-                    "Skipping garbage collection: {} build(s) reference {damaged} object(s) missing from the store \
-                     and {} build(s) failed to refresh. Run `verify --check-hashes`, restore the store, then `gc`.",
+                    "Skipping garbage collection: {} build(s) reference {damaged} object(s) missing from the store, \
+                     {} build(s) failed to refresh, and {} build(s) have a vfs/ tree their metadata does not record. \
+                     Run `relink` to record and repoint those trees, `verify --check-hashes` to inspect the rest, \
+                     restore the store, then `gc`.",
                     summary.damaged.len(),
-                    summary.failed.len()
+                    summary.failed.len(),
+                    summary.stale_trees.len()
                 );
             }
             return Ok(None);

@@ -735,15 +735,19 @@ pub struct RefreshSummary {
     pub damaged: BTreeMap<String, Vec<String>>,
     /// Build directories whose refresh failed outright.
     pub failed: Vec<String>,
+    /// Build directories whose metadata claims no tree but which have one on
+    /// disk, so their links still point at the objects the refresh replaced.
+    pub stale_trees: Vec<String>,
 }
 
 impl RefreshSummary {
     /// Whether the metadata across the base is a trustworthy statement of what
     /// the store must keep. GC deletes every object no build references, so
     /// collecting against a record known to be damaged or incomplete turns a
-    /// recoverable inconsistency into deleted content.
+    /// recoverable inconsistency into deleted content. A stale tree counts:
+    /// its links are outside the record and point at objects GC would take.
     pub fn safe_to_gc(&self) -> bool {
-        self.damaged.is_empty() && self.failed.is_empty()
+        self.damaged.is_empty() && self.failed.is_empty() && self.stale_trees.is_empty()
     }
 }
 
@@ -820,11 +824,25 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<Re
                     );
                     summary.damaged.insert(entry.dir.clone(), missing_objects);
                 }
+                // Metadata is the authority on materialization; this probe
+                // reconciles a dump written before the flag existed, whose
+                // tree is real though the record does not claim it. What is on
+                // disk drives the warning and the GC decision, never a
+                // decision to materialize a build.
                 if !metadata.materialized {
-                    tracing::warn!(
-                        "build {} is not materialized, so its tree was not updated; run `relink` to materialize it",
-                        metadata.build
-                    );
+                    if build_dir.join("vfs").is_dir() {
+                        tracing::warn!(
+                            "build {} has a vfs/ tree its metadata does not record, so the tree still links the \
+                             objects this refresh replaced; run `relink` to record and repoint it",
+                            metadata.build
+                        );
+                        summary.stale_trees.push(entry.dir.clone());
+                    } else {
+                        tracing::warn!(
+                            "build {} is not materialized, so its tree was not updated; run `relink` to materialize it",
+                            metadata.build
+                        );
+                    }
                 }
             }
             Err(e) => {
@@ -2536,6 +2554,24 @@ mod maintenance_tests {
         assert_eq!(summary.damaged.get("1.0.0_100"), Some(&vec!["game_params.rkyv".to_string()]));
     }
 
+    /// A dump written before the `materialized` flag existed has a real tree
+    /// its record does not claim, so the refresh stores new objects while the
+    /// tree keeps pointing at the old ones. Collecting then deletes what that
+    /// tree still reads.
+    #[test]
+    fn refresh_derived_withholds_gc_when_a_build_has_an_unrecorded_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let hash = cas::store(&cas::cas_root(base), b"params blob").unwrap();
+        base_with_build(base, &[("game_params.rkyv", &hash)]);
+        std::fs::create_dir_all(base.join("1.0.0_100/vfs/content")).unwrap();
+
+        let summary = refresh_derived(base, None).unwrap();
+
+        assert!(!summary.safe_to_gc());
+        assert_eq!(summary.stale_trees, vec!["1.0.0_100".to_string()]);
+    }
+
     #[test]
     fn refresh_derived_vouches_for_a_base_whose_objects_are_all_present() {
         let dir = tempfile::tempdir().unwrap();
@@ -2547,5 +2583,7 @@ mod maintenance_tests {
 
         assert!(summary.safe_to_gc());
         assert!(summary.damaged.is_empty());
+        // A build with no tree at all is the ordinary case, not a stale one.
+        assert!(summary.stale_trees.is_empty());
     }
 }
