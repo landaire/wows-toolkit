@@ -221,7 +221,9 @@ enum Commands {
         #[arg(short, long)]
         output: PathBuf,
 
-        /// Also check that each reconstructed symlink resolves to a readable file
+        /// Also check that each materialized symlink resolves to a readable
+        /// file. A build whose metadata does not claim a tree is complete and
+        /// is skipped.
         #[arg(long)]
         check_links: bool,
 

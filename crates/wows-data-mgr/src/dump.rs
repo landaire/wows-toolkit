@@ -1304,15 +1304,20 @@ fn verify_builds_audited(
         let mut broken_links = Vec::new();
         let mut unindexed = Vec::new();
         if check_links {
-            for (rel, _) in meta.files.iter().chain(meta.derived.iter()) {
-                let path = build_dir.join("vfs").join(rel);
-                // Derived artifacts live at the build root, not under vfs/.
-                let candidate = if path.exists() { path } else { build_dir.join(rel) };
-                if !candidate.exists() {
-                    broken_links.push(rel.clone());
+            // metadata.toml says whether this build has a tree. A build without
+            // one is complete, and has no links to check.
+            if meta.materialized {
+                for (rel, _) in meta.files.iter().chain(meta.derived.iter()) {
+                    // Derived artifacts materialize at the build root, content
+                    // files under vfs/.
+                    let vfs_path = build_dir.join("vfs").join(rel);
+                    let candidate = if vfs_path.symlink_metadata().is_ok() { vfs_path } else { build_dir.join(rel) };
+                    if !candidate.exists() {
+                        broken_links.push(rel.clone());
+                    }
                 }
+                broken_links.sort();
             }
-            broken_links.sort();
             unindexed = unindexed_paths(&build_dir, &meta)?;
         }
 
@@ -2389,6 +2394,66 @@ mod maintenance_tests {
 
         assert_eq!(reports[0].unindexed, vec!["vfs/gui/stray.png".to_string()]);
         assert!(!reports[0].is_ok());
+    }
+
+    /// A build with no tree has nothing to link-check: metadata.toml plus the
+    /// store is a complete build, and an absent tree is not damage.
+    #[test]
+    fn check_links_ignores_a_build_with_no_materialized_tree() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"hi").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(&build_dir).unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        // No tree, and the metadata does not claim one.
+        meta.files.insert("content/x.dat".into(), hash);
+        meta.save(&build_dir.join("metadata.toml")).unwrap();
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        index.upsert(BuildEntry {
+            version: "1.2.3".into(),
+            build: 100,
+            dir: "1.2.3_100".into(),
+            dumped_at: "now".into(),
+        });
+        index.save(&base.path().join("builds.toml")).unwrap();
+
+        let reports = verify_builds(base.path(), true, false).unwrap();
+
+        assert!(reports[0].broken_links.is_empty(), "{:?}", reports[0].broken_links);
+        assert!(reports[0].missing_objects.is_empty());
+    }
+
+    /// A materialized build's tree is still checked: a link whose target was
+    /// collected is a real broken link, not noise.
+    #[test]
+    fn check_links_still_reports_a_dangling_materialized_link() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"hi").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        std::fs::create_dir_all(build_dir.join("vfs/content")).unwrap();
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.materialized = true;
+        meta.files.insert("content/x.dat".into(), hash.clone());
+        meta.save(&build_dir.join("metadata.toml")).unwrap();
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        index.upsert(BuildEntry {
+            version: "1.2.3".into(),
+            build: 100,
+            dir: "1.2.3_100".into(),
+            dumped_at: "now".into(),
+        });
+        index.save(&base.path().join("builds.toml")).unwrap();
+        if cas::link_file(&cas_root, &hash, &build_dir.join("vfs/content/x.dat")).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+        std::fs::remove_file(cas::cas_path(&cas_root, &hash)).unwrap();
+
+        let reports = verify_builds(base.path(), true, false).unwrap();
+
+        assert_eq!(reports[0].broken_links, vec!["content/x.dat".to_string()]);
     }
 
     /// Set up a dump base holding one registered build with the given derived
