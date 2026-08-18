@@ -22,9 +22,9 @@ struct Args {
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
 
-    /// Skip materializing the build as a symlink tree after the command
-    /// finishes. The dump is read through metadata.toml and the shared store
-    /// either way; the tree is there for humans browsing it.
+    /// Skip materializing the newly dumped build as a symlink tree. The dump
+    /// is read through metadata.toml and the shared store either way; the tree
+    /// is there for humans browsing it.
     #[arg(long, global = true)]
     no_link: bool,
 
@@ -283,29 +283,15 @@ enum Commands {
     },
 }
 
-/// The dump base and build a command created, which is what gets materialized
-/// unless `--no-link` says otherwise. `None` for a command that created no
-/// build: commands that touch existing builds leave each one's materialization
-/// as its own metadata records it, and pruning exists to remove a tree.
-fn link_target(command: &Commands) -> Option<(PathBuf, Option<u32>)> {
-    match command {
-        Commands::DumpRendererData { output, build, .. } => Some((output.clone(), *build)),
-        Commands::CompleteBuild { output, build, .. } => Some((output.clone(), Some(*build))),
-        Commands::Update { output, build, .. } => Some((output.clone(), *build)),
-        Commands::Download { .. }
-        | Commands::RefreshDerived { .. }
-        | Commands::Reindex { .. }
-        | Commands::Gc { .. }
-        | Commands::MigrateCas { .. }
-        | Commands::Relink { .. }
-        | Commands::PruneMaterialized { .. }
-        | Commands::RequiredPaths
-        | Commands::Verify { .. }
-        | Commands::List
-        | Commands::Detect { .. }
-        | Commands::Remove { .. }
-        | Commands::Register { .. } => None,
-    }
+/// The dump base and the one build a command created, which is what gets
+/// materialized unless `--no-link` says otherwise. Naming a concrete build is
+/// what keeps the link step off every other build in the base. Commands that
+/// only touch existing builds report nothing: each keeps the materialization
+/// its own metadata records, and pruning exists to remove a tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LinkTarget {
+    output: PathBuf,
+    build: u32,
 }
 
 fn find_repo_root() -> Result<PathBuf, Report> {
@@ -394,6 +380,14 @@ fn resolve_dump_renderer_plan(
     })
 }
 
+impl DumpRendererPlan {
+    /// What this dump materializes: the build the selector resolved to, never
+    /// the raw `--build` argument, which is absent for `--latest`/`--version`.
+    fn link_target(&self) -> LinkTarget {
+        LinkTarget { output: self.output.clone(), build: self.target }
+    }
+}
+
 fn execute_dump_renderer_plan(plan: DumpRendererPlan, data_dir: &Path) -> Result<(), Report> {
     let game_dir = match plan.source {
         DumpDataSource::Supplied(path) => path,
@@ -467,19 +461,19 @@ fn main() -> Result<(), Report> {
     let repo_root = find_repo_root()?;
     let data_dir = resolve_data_dir(&args.data_dir)?;
 
-    run(&args, &repo_root, &data_dir)?;
+    let created = run(&args, &repo_root, &data_dir)?;
 
     if !args.no_link
-        && let Some((output, build)) = link_target(&args.command)
+        && let Some(target) = created
     {
-        let repointed = dump::relink_builds(&output, build)?;
+        let repointed = dump::relink_builds(&target.output, Some(target.build))?;
         let total: usize = repointed.values().map(Vec::len).sum();
         println!("Materialized {total} link(s) across {} build(s).", repointed.len());
     }
     Ok(())
 }
 
-fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
+fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarget>, Report> {
     // These commands don't need the version manifest, so handle them before
     // loading it (a malformed game_versions.toml must not block them).
     match &args.command {
@@ -500,13 +494,13 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
                     summary.failed.len()
                 );
             }
-            return Ok(());
+            return Ok(None);
         }
         Commands::Reindex { output, build } => {
             let reports = dump::reindex_builds(output, *build)?;
             if reports.is_empty() {
                 println!("Every file in every build tree is already indexed.");
-                return Ok(());
+                return Ok(None);
             }
             for (dir, report) in &reports {
                 println!("  {dir} - indexed {} file(s), {} unbacked", report.added.len(), report.unbacked.len());
@@ -520,49 +514,50 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
             }
             let added: usize = reports.values().map(|r| r.added.len()).sum();
             println!("Indexed {added} file(s) across {} build(s).", reports.len());
-            return Ok(());
+            return Ok(None);
         }
         Commands::Relink { output, build } => {
             let repointed = dump::relink_builds(output, *build)?;
             if repointed.is_empty() {
                 println!("Every build tree already matches its metadata.");
-                return Ok(());
+                return Ok(None);
             }
             for (dir, paths) in &repointed {
                 println!("  {dir} - repointed {} link(s)", paths.len());
             }
             let total: usize = repointed.values().map(Vec::len).sum();
             println!("Repointed {total} link(s) across {} build(s).", repointed.len());
-            return Ok(());
+            return Ok(None);
         }
         Commands::PruneMaterialized { output, build } => {
             let pruned = dump::prune_materialized_trees(output, *build)?;
             if pruned.is_empty() {
                 println!("No materialized trees to prune.");
-                return Ok(());
+                return Ok(None);
             }
             for (dir, removed) in &pruned {
                 println!("  {dir} - removed {removed} link(s)");
             }
             let total: usize = pruned.values().sum();
             println!("Removed {total} link(s) across {} build(s).", pruned.len());
-            return Ok(());
+            return Ok(None);
         }
         Commands::Gc { output } => {
             println!("Garbage-collecting orphaned CAS objects...");
-            return dump::gc_cas(output);
+            dump::gc_cas(output)?;
+            return Ok(None);
         }
         Commands::RequiredPaths => {
             for glob in dump::required_path_globs() {
                 println!("{glob}");
             }
-            return Ok(());
+            return Ok(None);
         }
         Commands::CompleteBuild { build, game_dir, output, with_gui } => {
             println!("Completing build {build} from {} (with_gui={with_gui})...", game_dir.display());
             let map_count = dump::complete_build(game_dir, *build, output, *with_gui)?;
             println!("Done: extracted {map_count} map(s) and regenerated derived data.");
-            return Ok(());
+            return Ok(None);
         }
         Commands::MigrateCas { output } => {
             println!("Merging vfs_common/ into common/ and relinking builds in {}...", output.display());
@@ -572,13 +567,13 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
             } else {
                 println!("Nothing to migrate (no vfs_common/ present).");
             }
-            return Ok(());
+            return Ok(None);
         }
         Commands::Verify { output, check_links, check_hashes } => {
             let reports = dump::verify_builds(output, *check_links, *check_hashes)?;
             if reports.is_empty() {
                 println!("No builds found in {}", output.display());
-                return Ok(());
+                return Ok(None);
             }
             let mut broken = 0;
             let mut corrupt_hashes = std::collections::BTreeSet::new();
@@ -637,7 +632,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
             if broken > 0 {
                 bail!("{broken} build(s) inconsistent");
             }
-            return Ok(());
+            return Ok(None);
         }
         Commands::Update { from, output, latest, build, version, force } => {
             let selector = if *latest {
@@ -658,7 +653,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
             }
             let copied = synced.iter().filter(|s| s.copied).count();
             println!("Done: {copied} copied, {} up to date.", synced.len() - copied);
-            return Ok(());
+            return Ok(None);
         }
         _ => {}
     }
@@ -674,8 +669,9 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
             output,
             *force,
         )?;
+        let target = plan.link_target();
         execute_dump_renderer_plan(plan, data_dir)?;
-        return Ok(());
+        return Ok(Some(target));
     }
 
     let mut reg = registry::load_registry(&data_dir.join("versions.toml"));
@@ -696,7 +692,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
 
             if !force && reg.has_build(target) {
                 println!("Build {target} already available. Use --force to re-download.");
-                return Ok(());
+                return Ok(None);
             }
 
             let entry = manifest.get(target);
@@ -836,7 +832,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
 
                 println!("Registered {} as latest path", path.display());
                 println!("Currently available builds: {:?}", builds);
-                return Ok(());
+                return Ok(None);
             }
 
             let builds = wowsunpack::game_data::list_available_builds(&path)
@@ -878,7 +874,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
         }
     }
 
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -997,7 +993,7 @@ mod tests {
         assert_eq!(entry.localization, None);
     }
 
-    fn manifest_fixture() -> GameVersionManifest {
+    pub(super) fn manifest_fixture() -> GameVersionManifest {
         toml::from_str(
             r#"
             [versions.13015711]
@@ -1022,28 +1018,28 @@ mod tests {
 
 #[cfg(test)]
 mod link_flag_tests {
-    use super::Commands;
-    use super::link_target;
+    use super::LinkTarget;
+    use super::resolve_dump_renderer_plan;
+    use super::tests::manifest_fixture;
+    use std::path::Path;
     use std::path::PathBuf;
 
+    /// The link step materializes the build the dump resolved to. Reading the
+    /// raw `--build` argument instead left it absent for `--latest` and
+    /// `--version`, and an absent build means every build in the base.
     #[test]
-    fn only_build_creating_commands_are_link_targets() {
-        let dumped = Commands::DumpRendererData {
-            latest: false,
-            build: Some(13015811),
-            version: None,
-            output: PathBuf::from("out"),
-            force: false,
-            game_dir: None,
-        };
-        assert_eq!(link_target(&dumped), Some((PathBuf::from("out"), Some(13015811))));
+    fn a_dump_links_the_build_its_selector_resolved_to() {
+        let manifest = manifest_fixture();
 
-        // Refreshing touches builds that already exist; each keeps whatever
-        // materialization its own metadata records, so there is nothing here to
-        // decide.
-        let refreshed = Commands::RefreshDerived { output: PathBuf::from("out"), build: None, no_gc: false };
-        assert_eq!(link_target(&refreshed), None);
+        for (latest, build, version, expected) in [
+            (true, None, None, 13_100_000),
+            (false, Some(13_015_711), None, 13_015_711),
+            (false, None, Some("15.7"), 13_015_712),
+        ] {
+            let plan =
+                resolve_dump_renderer_plan(&manifest, latest, build, version, None, Path::new("out"), false).unwrap();
 
-        assert_eq!(link_target(&Commands::RequiredPaths), None);
+            assert_eq!(plan.link_target(), LinkTarget { output: PathBuf::from("out"), build: expected });
+        }
     }
 }
