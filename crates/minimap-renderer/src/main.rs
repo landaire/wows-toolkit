@@ -203,6 +203,11 @@ struct Args {
     #[arg(long)]
     recreate_game_params: bool,
 
+    /// Directory for a locally rebuilt game params cache. Defaults to a
+    /// per-build directory in the toolkit's data dir, shared with the GUI.
+    #[arg(long)]
+    game_params_cache: Option<PathBuf>,
+
     /// The replay file to process (primary perspective)
     #[arg(required_unless_present_any = ["generate_config", "check_encoder"])]
     replay: Option<PathBuf>,
@@ -281,7 +286,7 @@ fn main() -> Result<(), Report> {
         args.extracted_dir.as_ref().map(|extracted| resolve_extracted_dir(extracted, &replay_version)).transpose()?;
 
     let (vfs_owned, specs, game_params, controller_game_params) = if let Some(ref resolved) = resolved_extracted {
-        load_from_extracted(resolved, &replay_version, args.recreate_game_params)?
+        load_from_extracted(resolved, &replay_version, args.recreate_game_params, args.game_params_cache.as_deref())?
     } else {
         let game_dir = args.game_dir.as_ref().expect("game directory is required");
         load_from_game_dir(game_dir, &replay_version)?
@@ -632,7 +637,7 @@ fn load_from_game_dir(game_dir: &std::path::Path, replay_version: &Version) -> R
         GameMetadataProvider::from_vfs(&vfs).map_err(|e| report!("Failed to load GameParams for controller: {e:?}"))?;
 
     let mo_path = game_data::translations_path(game_dir, replay_build);
-    load_translations(&mo_path, &mut game_params, &mut controller_game_params);
+    load_translations(Some(&mo_path), &mut game_params, &mut controller_game_params);
 
     Ok((vfs, specs, game_params, controller_game_params))
 }
@@ -735,17 +740,27 @@ fn load_from_extracted(
     extracted_dir: &std::path::Path,
     _replay_version: &Version,
     recreate_game_params: bool,
+    params_cache: Option<&std::path::Path>,
 ) -> Result<LoadedGameData, Report> {
     use std::borrow::Cow;
     use std::io::Read;
+    use wows_data_mgr::overrides;
     use wowsunpack::data::DataFileWithCallback;
     use wowsunpack::rpc::entitydefs::parse_scripts;
 
     info!("Loading from extracted directory: {}", extracted_dir.display());
 
-    let dump = wows_data_mgr::Dump::open(extracted_dir);
+    let mut dump = wows_data_mgr::Dump::open(extracted_dir);
     if !dump.has_game_files() {
         bail!("no game files found in {}", extracted_dir.display());
+    }
+    // A dump may be a shared, read-only checkout of the published archive, so a
+    // cache rebuilt against the current rkyv format goes to a local per-build
+    // directory every tool resolves the same way.
+    if let Some(root) =
+        params_cache.map(std::path::Path::to_path_buf).or_else(|| dump.build().and_then(overrides::build_override_root))
+    {
+        dump.set_override_root(root);
     }
     let vfs = dump.vfs();
 
@@ -762,25 +777,26 @@ fn load_from_extracted(
     };
 
     // Load GameParams: try rkyv cache first, fall back to VFS if --recreate-game-params
-    let rkyv_path = extracted_dir.join("game_params.rkyv");
-    let params: Vec<Param> = match wowsunpack::game_params::cache::load(&rkyv_path) {
+    let rkyv_path = dump.derived_path("game_params.rkyv");
+    let params: Vec<Param> = match rkyv_path.as_deref().and_then(wowsunpack::game_params::cache::load) {
         Some(params) => {
             info!("Loaded game params from rkyv cache");
             params
         }
         None if recreate_game_params => {
-            if rkyv_path.exists() {
-                warn!("Existing game_params.rkyv is incompatible (missing magic or wrong version); recreating");
-            } else {
-                info!("game_params.rkyv not found, creating from GameParams.data");
+            match &rkyv_path {
+                Some(path) => warn!("game params cache at {} does not load; recreating", path.display()),
+                None => info!("no game params cache in this dump, creating from GameParams.data"),
             }
-            recreate_rkyv_from_vfs(&vfs, &rkyv_path)?
+            let write_path = dump
+                .derived_write_path("game_params.rkyv")
+                .ok_or_else(|| report!("nowhere to write a rebuilt game params cache"))?;
+            recreate_rkyv_from_vfs(&vfs, &write_path)?
         }
         None => {
             bail!(
-                "game_params.rkyv at {} is missing or incompatible.\n\
-                   Hint: pass --recreate-game-params to rebuild from GameParams.data",
-                rkyv_path.display()
+                "the game params cache for this dump is missing or does not load.\n\
+                   Hint: pass --recreate-game-params to rebuild it from GameParams.data"
             );
         }
     };
@@ -795,9 +811,8 @@ fn load_from_extracted(
     let mut controller_game_params = GameMetadataProvider::from_params_with_vfs(params, &vfs)
         .map_err(|e| report!("Failed to build controller GameMetadataProvider: {e:?}"))?;
 
-    // Load translations
-    let mo_path = extracted_dir.join("translations/en/LC_MESSAGES/global.mo");
-    load_translations(&mo_path, &mut game_params, &mut controller_game_params);
+    let mo_path = dump.derived_path("translations/en/LC_MESSAGES/global.mo");
+    load_translations(mo_path.as_deref(), &mut game_params, &mut controller_game_params);
 
     Ok((vfs, specs, game_params, controller_game_params))
 }
@@ -815,25 +830,23 @@ fn recreate_rkyv_from_vfs(vfs: &VfsPath, rkyv_path: &std::path::Path) -> Result<
     Ok(params)
 }
 
+/// Apply the gettext catalog at `mo_path` to both providers. Ship names fall
+/// back to raw param indices when no catalog is available.
 fn load_translations(
-    mo_path: &std::path::Path,
+    mo_path: Option<&std::path::Path>,
     game_params: &mut GameMetadataProvider,
     controller_game_params: &mut GameMetadataProvider,
 ) {
-    if mo_path.exists() {
-        if let Ok(file) = File::open(mo_path)
-            && let Ok(catalog) = gettext::Catalog::parse(file)
-        {
-            game_params.set_translations(catalog);
-            if let Ok(file2) = File::open(mo_path)
-                && let Ok(catalog2) = gettext::Catalog::parse(file2)
-            {
-                controller_game_params.set_translations(catalog2);
-            }
-        } else {
-            warn!(path = ?mo_path, "Failed to parse translations");
-        }
-    } else {
+    let Some(mo_path) = mo_path.filter(|path| path.exists()) else {
         warn!(path = ?mo_path, "Translations not found, ship names will be unavailable");
+        return;
+    };
+    let parse = || File::open(mo_path).ok().and_then(|file| gettext::Catalog::parse(file).ok());
+    match (parse(), parse()) {
+        (Some(catalog), Some(controller_catalog)) => {
+            game_params.set_translations(catalog);
+            controller_game_params.set_translations(controller_catalog);
+        }
+        _ => warn!(path = ?mo_path, "Failed to parse translations"),
     }
 }
