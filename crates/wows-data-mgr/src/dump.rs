@@ -91,9 +91,10 @@ pub fn dump_exists(output_base: &Path, version_str: &str, build: u32) -> bool {
 
 /// Dump game data with content-addressed deduplication.
 ///
-/// VFS files are stored in `{output_base}/common/` by hash, with symlinks
-/// in the build's `vfs/` directory. Non-VFS files (game_params.rkyv, translations)
-/// are stored directly in the build directory.
+/// Every file (VFS content, translation catalogs, derived artifacts) is
+/// stored in `{output_base}/common/` by hash and recorded in `metadata.toml`.
+/// No tree is written into the build directory; materializing one is
+/// `relink`'s job.
 ///
 /// When `progress` is `Some`, a CLI progress bar is updated during extraction.
 /// When `allow_existing` is true and a complete dump already exists, returns immediately.
@@ -106,7 +107,6 @@ pub fn dump_renderer_data(
     allow_existing: bool,
 ) -> Result<(), Report> {
     let output_dir = dump_dir(output_base, version_str, build);
-    let vfs_dir = output_dir.join("vfs");
     let cas_root = cas::cas_root(output_base);
 
     if output_dir.join("metadata.toml").exists() {
@@ -129,29 +129,20 @@ pub fn dump_renderer_data(
 
     let mut dir_counts: BTreeMap<&str, usize> = BTreeMap::new();
     for dir in VFS_DIRS {
-        let count = extract_vfs_dir_cas(&vfs, dir, &vfs_dir, &cas_root, &mut file_hashes, progress)?;
+        let count = extract_vfs_dir_cas(&vfs, dir, &cas_root, &mut file_hashes, progress)?;
         dir_counts.insert(dir, count);
     }
     let mut missing_files = Vec::new();
     for file in REQUIRED_VFS_FILES {
-        if !extract_vfs_file_cas(&vfs, file, &vfs_dir, &cas_root, &mut file_hashes)? {
+        if !extract_vfs_file_cas(&vfs, file, &cas_root, &mut file_hashes)? {
             missing_files.push(*file);
         }
         if let Some(pb) = progress {
             pb.inc(1);
         }
     }
-    let map_count =
-        extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &vfs_dir, &cas_root, &mut file_hashes, progress)?;
-    extract_map_files_cas(
-        &vfs,
-        "content/gameplay",
-        MAP_FILES_GAMEPLAY,
-        &vfs_dir,
-        &cas_root,
-        &mut file_hashes,
-        progress,
-    )?;
+    let map_count = extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &cas_root, &mut file_hashes, progress)?;
+    extract_map_files_cas(&vfs, "content/gameplay", MAP_FILES_GAMEPLAY, &cas_root, &mut file_hashes, progress)?;
 
     if let Some(pb) = progress {
         pb.finish_and_clear();
@@ -188,7 +179,17 @@ pub fn dump_renderer_data(
     std::fs::create_dir_all(&output_dir)
         .attach_with(|| format!("Failed to create output directory {}", output_dir.display()))?;
 
-    dump_all_translations(game_dir, build, &output_dir)?;
+    let mut metadata = BuildMetadata {
+        version: version_str.to_string(),
+        build,
+        // Extraction stores into common/ and records here. Materializing a
+        // tree is the link step's job.
+        materialized: false,
+        files: file_hashes,
+        derived: BTreeMap::new(),
+    };
+
+    dump_all_translations(game_dir, build, &cas_root, &mut metadata.derived)?;
 
     // Fetch and store versioned constants (non-fatal)
     #[cfg(feature = "constants")]
@@ -201,16 +202,9 @@ pub fn dump_renderer_data(
         }
     }
 
-    // Write enhanced metadata with file hashes. The derived artifacts (rkyv
-    // blob, compressed copies) are generated and content-addressed by the same
-    // step the refresh-derived command uses, so dumps and refreshes agree.
-    let mut metadata = BuildMetadata {
-        version: version_str.to_string(),
-        build,
-        materialized: false,
-        files: file_hashes,
-        derived: BTreeMap::new(),
-    };
+    // The derived artifacts (rkyv blob, compressed copies) are generated and
+    // content-addressed by the same step the refresh-derived command uses, so
+    // dumps and refreshes agree.
     refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
     metadata.save(&output_dir.join("metadata.toml"))?;
 
@@ -230,9 +224,10 @@ pub fn dump_renderer_data(
 
 /// Add the assets an existing build is missing without re-extracting the data it
 /// already has. Extracts maps (and, with `with_gui`, the `gui/` asset dirs) from
-/// `game_dir` into the build's `vfs/`, then regenerates derived artifacts (the
-/// rkyv game-params blob, with the current parser) from the build's existing
-/// `GameParams.data`.
+/// `game_dir` into the store and records them, then regenerates derived
+/// artifacts (the rkyv game-params blob, with the current parser) from the
+/// build's existing `GameParams.data`. The build's tree, if it has one, is
+/// relinked to pick up the new entries; a build with no tree stays that way.
 ///
 /// Unlike [`dump_renderer_data`], this never reads `content/GameParams.data`,
 /// `scripts/`, or other already-present data from the game install, so the caller
@@ -248,7 +243,6 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
         .ok_or_else(|| report!("build {build} is not in builds.toml; dump it normally first"))?
         .clone();
     let output_dir = output_base.join(&entry.dir);
-    let vfs_dir = output_dir.join("vfs");
     let cas_root = cas::cas_root(output_base);
     let meta_path = output_dir.join("metadata.toml");
     let mut metadata =
@@ -261,21 +255,12 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
         // VFS_DIRS (e.g. scripts/entity_defs) would need packages we deliberately
         // skip, and that data is already present in the build.
         for dir in VFS_DIRS.iter().filter(|d| d.starts_with("gui")) {
-            extract_vfs_dir_cas(&vfs, dir, &vfs_dir, &cas_root, &mut metadata.files, None)?;
+            extract_vfs_dir_cas(&vfs, dir, &cas_root, &mut metadata.files, None)?;
         }
     }
 
-    let map_count =
-        extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &vfs_dir, &cas_root, &mut metadata.files, None)?;
-    extract_map_files_cas(
-        &vfs,
-        "content/gameplay",
-        MAP_FILES_GAMEPLAY,
-        &vfs_dir,
-        &cas_root,
-        &mut metadata.files,
-        None,
-    )?;
+    let map_count = extract_map_files_cas(&vfs, "spaces", MAP_FILES_SPACES, &cas_root, &mut metadata.files, None)?;
+    extract_map_files_cas(&vfs, "content/gameplay", MAP_FILES_GAMEPLAY, &cas_root, &mut metadata.files, None)?;
     if map_count == 0 {
         bail!("no maps extracted for build {build}; refusing to record an incomplete build");
     }
@@ -283,6 +268,15 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
     // Regenerate derived artifacts from the build's existing GameParams.data,
     // picking up the current parser. Needs no package downloads.
     refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
+    if metadata.materialized {
+        relink_build(&output_dir, &cas_root, &metadata)?;
+    } else {
+        tracing::warn!(
+            "build {build} is not materialized, so the newly extracted files were not linked into its tree; \
+             run `relink` to materialize it",
+            build = metadata.build
+        );
+    }
     metadata.save(&meta_path)?;
     Ok(map_count)
 }
@@ -479,15 +473,21 @@ fn copy_build_from_local(
         std::fs::remove_dir_all(&output_dir)
             .attach_with(|| format!("failed to clear destination build dir {}", output_dir.display()))?;
     }
+    std::fs::create_dir_all(&output_dir)
+        .attach_with(|| format!("failed to create destination build dir {}", output_dir.display()))?;
 
-    // Recreate the extracted vfs tree and derived artifacts as symlinks into the
-    // destination CAS.
-    let vfs_dir = output_dir.join("vfs");
-    for (rel, hash) in &metadata.files {
-        cas::link_file(&dst_cas, hash, &vfs_dir.join(rel))?;
-    }
-    for (rel, hash) in &metadata.derived {
-        cas::link_file(&dst_cas, hash, &output_dir.join(rel))?;
+    // A copy is as materialized as its source claimed to be; nothing else here
+    // creates a tree.
+    if metadata.materialized {
+        let vfs_dir = output_dir.join("vfs");
+        for (rel, hash) in &metadata.files {
+            cas::link_file(&dst_cas, hash, &vfs_dir.join(rel))?;
+        }
+        for (rel, hash) in &metadata.derived {
+            cas::link_file(&dst_cas, hash, &output_dir.join(rel))?;
+        }
+    } else {
+        tracing::debug!("build {} is not materialized; copy stores objects only", entry.build);
     }
 
     // Versioned constants, when present alongside the source build.
@@ -515,7 +515,15 @@ fn register_build(output_base: &Path, entry: &BuildEntry) -> Result<(), Report> 
 
 // -- Translation dumping --
 
-fn dump_all_translations(game_dir: &Path, build: u32, output_dir: &Path) -> Result<(), Report> {
+/// Store every locale's message catalog from the install in the CAS and record
+/// it in `derived`. The catalogs are copies of game files rather than
+/// derivations, which is why nothing else can regenerate them.
+fn dump_all_translations(
+    game_dir: &Path,
+    build: u32,
+    cas_root: &Path,
+    derived: &mut BTreeMap<String, String>,
+) -> Result<(), Report> {
     let texts_dir = game_dir.join("bin").join(build.to_string()).join("res/texts");
     if !texts_dir.exists() {
         tracing::warn!("Translations directory not found: {}", texts_dir.display());
@@ -528,12 +536,20 @@ fn dump_all_translations(game_dir: &Path, build: u32, output_dir: &Path) -> Resu
         if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
             continue;
         }
-        let lang = entry.file_name();
+        let lang = entry.file_name().to_string_lossy().into_owned();
         let mo_src = entry.path().join("LC_MESSAGES/global.mo");
-        if mo_src.exists() {
-            let mo_dest = output_dir.join("translations").join(&lang).join("LC_MESSAGES/global.mo");
-            std::fs::create_dir_all(mo_dest.parent().unwrap())?;
-            std::fs::copy(&mo_src, &mo_dest)?;
+        if !mo_src.exists() {
+            continue;
+        }
+        let bytes = std::fs::read(&mo_src).attach_with(|| format!("Failed to read {}", mo_src.display()))?;
+        let hash = cas::store(cas_root, &bytes)?;
+        derived.insert(format!("translations/{lang}/LC_MESSAGES/global.mo"), hash);
+        if lang == "en" {
+            // The web client fetches only the English catalog, zstd-compressed.
+            let compressed =
+                ruzstd::encoding::compress_to_vec(bytes.as_slice(), ruzstd::encoding::CompressionLevel::Fastest);
+            let hash = cas::store(cas_root, &compressed)?;
+            derived.insert("translations/en/LC_MESSAGES/global.mo.zst".to_string(), hash);
         }
     }
     Ok(())
@@ -541,17 +557,16 @@ fn dump_all_translations(game_dir: &Path, build: u32, output_dir: &Path) -> Resu
 
 // -- CAS-aware extraction helpers --
 
-/// Read a VFS file into a buffer, store in CAS, and create a link in the build's vfs dir.
-fn store_and_link(
+/// Read a VFS file into the CAS and record its hash in the manifest. The bytes
+/// are the store's; `metadata.files` is the record that they belong to this
+/// build.
+fn store_and_record(
     data: &[u8],
     rel_path: &str,
-    vfs_dir: &Path,
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
 ) -> Result<(), Report> {
     let hash = cas::store(cas_root, data)?;
-    let link_path = vfs_dir.join(rel_path.trim_start_matches('/'));
-    cas::link_file(cas_root, &hash, &link_path)?;
     file_hashes.insert(rel_path.trim_start_matches('/').to_string(), hash);
     Ok(())
 }
@@ -804,6 +819,12 @@ pub fn refresh_derived(output_base: &Path, only_build: Option<u32>) -> Result<Re
                         missing_objects[0]
                     );
                     summary.damaged.insert(entry.dir.clone(), missing_objects);
+                }
+                if !metadata.materialized {
+                    tracing::warn!(
+                        "build {} is not materialized, so its tree was not updated; run `relink` to materialize it",
+                        metadata.build
+                    );
                 }
             }
             Err(e) => {
@@ -1424,6 +1445,8 @@ fn migrate_build_to_cas(build_dir: &Path, cas_root: &Path, metadata: &mut BuildM
             metadata.files.insert(rel, hash);
         }
     }
+    // This build had a tree, and the migration keeps it.
+    metadata.materialized = true;
     refresh_build_derived(build_dir, cas_root, metadata)?;
     Ok(())
 }
@@ -1431,7 +1454,6 @@ fn migrate_build_to_cas(build_dir: &Path, cas_root: &Path, metadata: &mut BuildM
 fn extract_vfs_dir_cas(
     vfs: &VfsPath,
     vfs_path: &str,
-    vfs_dir: &Path,
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
     progress: Option<&ProgressBar>,
@@ -1463,7 +1485,7 @@ fn extract_vfs_dir_cas(
                 continue;
             }
         };
-        store_and_link(&buf, rel, vfs_dir, cas_root, file_hashes)?;
+        store_and_record(&buf, rel, cas_root, file_hashes)?;
         count += 1;
         if let Some(pb) = progress {
             pb.inc(1);
@@ -1476,7 +1498,6 @@ fn extract_vfs_dir_cas(
 fn extract_vfs_file_cas(
     vfs: &VfsPath,
     vfs_path: &str,
-    vfs_dir: &Path,
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
 ) -> Result<bool, Report> {
@@ -1495,7 +1516,7 @@ fn extract_vfs_file_cas(
             return Ok(false);
         }
     };
-    store_and_link(&buf, vfs_path, vfs_dir, cas_root, file_hashes)?;
+    store_and_record(&buf, vfs_path, cas_root, file_hashes)?;
     Ok(true)
 }
 
@@ -1505,7 +1526,6 @@ fn extract_map_files_cas(
     vfs: &VfsPath,
     parent_dir: &str,
     filenames: &[&str],
-    vfs_dir: &Path,
     cas_root: &Path,
     file_hashes: &mut BTreeMap<String, String>,
     progress: Option<&ProgressBar>,
@@ -1541,7 +1561,7 @@ fn extract_map_files_cas(
                     continue;
                 }
             };
-            store_and_link(&buf, rel, vfs_dir, cas_root, file_hashes)?;
+            store_and_record(&buf, rel, cas_root, file_hashes)?;
             count += 1;
             if let Some(pb) = progress {
                 pb.inc(1);
@@ -1608,6 +1628,22 @@ mod maintenance_tests {
             dumped_at: String::new(),
         });
         index.save(&path).unwrap();
+    }
+
+    #[test]
+    fn extraction_stores_without_writing_to_the_build_dir() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let build_dir = base.path().join("1.2.3_100");
+        let mut file_hashes = BTreeMap::new();
+
+        store_and_record(b"content bytes", "/content/x.dat", &cas_root, &mut file_hashes).unwrap();
+
+        // The manifest gains the entry and the store gains the bytes. The build
+        // directory is not touched: a tree is what `relink` is for.
+        let hash = file_hashes.get("content/x.dat").expect("recorded");
+        assert!(cas::object_exists(&cas_root, hash));
+        assert!(!build_dir.exists());
     }
 
     /// An object rewritten in place keeps its name, so existence checking sees
