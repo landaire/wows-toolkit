@@ -466,7 +466,7 @@ fn main() -> Result<(), Report> {
     if !args.no_link
         && let Some(target) = created
     {
-        let repointed = dump::relink_builds(&target.output, Some(target.build))?;
+        let repointed = dump::relink_builds(&target.output, Some(target.build), dump::TreeSync::AddAndRepoint)?;
         let total: usize = repointed.values().map(Vec::len).sum();
         println!("Materialized {total} link(s) across {} build(s).", repointed.len());
     }
@@ -517,7 +517,7 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
             return Ok(None);
         }
         Commands::Relink { output, build } => {
-            let repointed = dump::relink_builds(output, *build)?;
+            let repointed = dump::relink_builds(output, *build, dump::TreeSync::Full)?;
             if repointed.is_empty() {
                 println!("Every build tree already matches its metadata.");
                 return Ok(None);

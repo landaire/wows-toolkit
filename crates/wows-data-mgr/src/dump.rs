@@ -269,7 +269,7 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
     // picking up the current parser. Needs no package downloads.
     refresh_build_derived(&output_dir, &cas_root, &mut metadata)?;
     if metadata.materialized {
-        relink_build(&output_dir, &cas_root, &metadata)?;
+        relink_build(&output_dir, &cas_root, &metadata, TreeSync::AddAndRepoint)?;
     } else {
         tracing::warn!(
             "build {build} is not materialized, so the newly extracted files were not linked into its tree; \
@@ -869,12 +869,31 @@ fn write_constants_for_build(
     true
 }
 
+/// How far a relink syncs a build tree to `metadata.toml`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TreeSync {
+    /// Link every recorded path and repoint any link that names something
+    /// else, leaving the rest of the tree alone. What runs automatically after
+    /// a dump: a link the manifest does not name is content `reindex` can
+    /// still recover, and removing it strands the object for the next `gc`.
+    AddAndRepoint,
+    /// The above plus removal of every link into this build's store that the
+    /// manifest does not name. What the explicit `relink` command runs, where
+    /// syncing the tree in both directions is the point.
+    Full,
+}
+
 /// Sync a build tree to `metadata.toml`: every indexed path gets a link at the
-/// object the entry names, and every link the manifest no longer names is
-/// removed. Paths whose object is not in the store are left alone, since a
-/// link to nothing is what `verify` already reports. Returns the paths that
-/// had to be repointed.
-pub fn relink_build(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata) -> Result<Vec<String>, Report> {
+/// object the entry names, and under [`TreeSync::Full`] every link the
+/// manifest no longer names is removed. Paths whose object is not in the store
+/// are left alone, since a link to nothing is what `verify` already reports.
+/// Returns the paths that had to be repointed.
+pub fn relink_build(
+    build_dir: &Path,
+    cas_root: &Path,
+    metadata: &BuildMetadata,
+    sync: TreeSync,
+) -> Result<Vec<String>, Report> {
     let mut repointed = Vec::new();
     for (rel, hash) in metadata.files.iter().chain(metadata.derived.iter()) {
         if !cas::object_exists(cas_root, hash) {
@@ -890,17 +909,17 @@ pub fn relink_build(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata)
     }
     repointed.sort();
 
-    // A tree is a materialization of metadata.toml, so relinking is a sync in
-    // both directions: a path the manifest dropped keeps no link. Only links
-    // that resolve into THIS build's store are removed; real files, and
-    // symlinks aimed elsewhere (another base, a backup), are the user's.
+    // A full sync materializes metadata.toml in both directions: a path the
+    // manifest dropped keeps no link. Only links that resolve into THIS
+    // build's store are removed; real files, and symlinks aimed elsewhere
+    // (another base, a backup), are the user's.
     //
     // Skipped for a legacy build: `metadata.files` is empty there, so every
     // store link in its tree would read as unindexed, and deleting it would
     // destroy the tree's only copy of the data. An unindexed store link in a
     // CAS-format build is recoverable content that `reindex` records; it is
     // safe to remove here because the manifest, not the tree, is authoritative.
-    if metadata.has_file_hashes() {
+    if sync == TreeSync::Full && metadata.has_file_hashes() {
         for rel in unindexed_paths(build_dir, metadata)? {
             let path = build_dir.join(&rel);
             let Ok(link) = path.symlink_metadata() else {
@@ -920,8 +939,13 @@ pub fn relink_build(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata)
 }
 
 /// Re-materialise every dumped build (or one build when `only_build` is given)
-/// from its metadata. Returns the repointed paths per build that needed any.
-pub fn relink_builds(output_base: &Path, only_build: Option<u32>) -> Result<BTreeMap<String, Vec<String>>, Report> {
+/// from its metadata, syncing each tree as far as `sync` says. Returns the
+/// repointed paths per build that needed any.
+pub fn relink_builds(
+    output_base: &Path,
+    only_build: Option<u32>,
+    sync: TreeSync,
+) -> Result<BTreeMap<String, Vec<String>>, Report> {
     let index = BuildsIndex::load(&output_base.join("builds.toml"));
     let cas_root = cas::cas_root(output_base);
 
@@ -939,7 +963,7 @@ pub fn relink_builds(output_base: &Path, only_build: Option<u32>) -> Result<BTre
         let Some(mut metadata) = BuildMetadata::load(&build_dir.join("metadata.toml")) else {
             bail!("{} has no readable metadata.toml", entry.dir);
         };
-        let paths = relink_build(&build_dir, &cas_root, &metadata)?;
+        let paths = relink_build(&build_dir, &cas_root, &metadata, sync)?;
         // The tree exists now, so the record says so: every other command reads
         // this rather than probing the directory.
         if !metadata.materialized {
@@ -2042,7 +2066,7 @@ mod maintenance_tests {
         });
         index.save(&base.path().join("builds.toml")).unwrap();
 
-        if relink_builds(base.path(), None).is_err() {
+        if relink_builds(base.path(), None, TreeSync::Full).is_err() {
             eprintln!("skipping: cannot create symlinks on this platform/account");
             return;
         }
@@ -2255,7 +2279,7 @@ mod maintenance_tests {
         let mut meta = BuildMetadata { version: "1.0.0".into(), build: 100, ..Default::default() };
         meta.files.insert("gui/icon.png".into(), current.clone());
 
-        let repointed = relink_build(&build_dir, &cas_root, &meta).unwrap();
+        let repointed = relink_build(&build_dir, &cas_root, &meta, TreeSync::Full).unwrap();
 
         assert_eq!(repointed, vec!["gui/icon.png".to_string()]);
         assert_eq!(std::fs::read(&link).unwrap(), b"current bytes");
@@ -2292,7 +2316,7 @@ mod maintenance_tests {
         let foreign = build_dir.join("vfs/content/foreign.dat");
         assert!(try_symlink(&other_target, &foreign));
 
-        relink_build(&build_dir, &cas_root, &meta).unwrap();
+        relink_build(&build_dir, &cas_root, &meta, TreeSync::Full).unwrap();
 
         assert!(stale.symlink_metadata().is_err(), "a link the manifest does not record must go");
         assert!(build_dir.join("vfs/content/x.dat").exists(), "a recorded path must be materialized");
@@ -2303,6 +2327,35 @@ mod maintenance_tests {
         );
         assert_eq!(std::fs::read(&foreign).unwrap(), b"someone else's bytes");
         assert!(cas::object_exists(&cas_root, &hash), "the store keeps the bytes either way");
+    }
+
+    /// Removing a link the manifest does not name is a sync, which is what an
+    /// explicit `relink` asks for. The step that runs automatically after a
+    /// dump must leave it: `reindex` recovers such content, and deleting the
+    /// link is what makes its object an orphan for the next `gc`.
+    #[test]
+    fn only_a_full_sync_removes_a_link_the_manifest_does_not_name() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"hi").unwrap();
+        let build_dir = base.path().join("1.2.3_100");
+        let mut meta = BuildMetadata { version: "1.2.3".into(), build: 100, ..Default::default() };
+        meta.materialized = true;
+        meta.files.insert("content/x.dat".into(), hash.clone());
+        let unrecorded = build_dir.join("vfs/content/gone.dat");
+        if cas::link_file(&cas_root, &hash, &unrecorded).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+
+        relink_build(&build_dir, &cas_root, &meta, TreeSync::AddAndRepoint).unwrap();
+
+        assert!(unrecorded.symlink_metadata().is_ok(), "the automatic link step keeps recoverable content");
+        assert!(build_dir.join("vfs/content/x.dat").exists(), "a recorded path is still materialized");
+
+        relink_build(&build_dir, &cas_root, &meta, TreeSync::Full).unwrap();
+
+        assert!(unrecorded.symlink_metadata().is_err(), "an explicit relink syncs the tree in both directions");
     }
 
     /// A legacy build's tree is its only copy of the data: `metadata.files` is
@@ -2321,7 +2374,7 @@ mod maintenance_tests {
         }
         let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
 
-        let repointed = relink_build(&build_dir, &cas_root, &meta).unwrap();
+        let repointed = relink_build(&build_dir, &cas_root, &meta, TreeSync::Full).unwrap();
 
         assert!(repointed.is_empty());
         assert!(link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()));
