@@ -1364,6 +1364,18 @@ fn relink_all_builds(output_base: &Path, cas_root: &Path) -> Result<(), Report> 
             continue;
         };
         let vfs_dir = build_dir.join("vfs");
+
+        // A rename migration reconciles the record with what is on disk, unlike
+        // every other caller of this module, which trusts `materialized` and
+        // never infers it from the directory. A legacy build's metadata
+        // predates the field and reads false even though its tree is real;
+        // probing for the tree here is how that tree's links get repointed at
+        // the renamed store instead of dangling. A build that never had a tree
+        // is left alone.
+        if !meta.materialized && !vfs_dir.is_dir() {
+            continue;
+        }
+
         let relink = |rel: &str, hash: &str, base: &Path| {
             let link = base.join(rel);
             let _ = std::fs::remove_file(&link);
@@ -1888,6 +1900,49 @@ mod maintenance_tests {
         assert_eq!(std::fs::read(&link).unwrap(), b"icon bytes");
         // Idempotent: nothing to migrate the second time.
         assert!(!migrate_cas_dir_name(base).unwrap());
+    }
+
+    /// A rename migration probes for a real `vfs/` directory as a narrow,
+    /// deliberate exception to trusting `materialized` -- everywhere else the
+    /// record leads. A legacy build's metadata predates the field (reads
+    /// false) but its tree is real, so it must be relinked and the flag
+    /// caught up; a manifest-only build with no tree must be left untouched.
+    #[test]
+    fn relink_all_builds_only_touches_a_build_that_already_has_a_tree() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        let cas_root = base.join(cas::CAS_DIR);
+
+        // Legacy build: a real vfs/ tree on disk, metadata reads unmaterialized.
+        let legacy_hash = cas::store(&cas_root, b"icon bytes").unwrap();
+        let legacy_dir = base.join("1.0.0_100");
+        let legacy_link = legacy_dir.join("vfs/gui/x.png");
+        std::fs::create_dir_all(legacy_link.parent().unwrap()).unwrap();
+        std::fs::write(&legacy_link, b"stale placeholder").unwrap();
+        write_build_metadata(&legacy_dir, "1.0.0", 100, &[("gui/x.png", &legacy_hash)]);
+
+        // Fresh CAS-format build: no tree, materialized explicitly false.
+        let manifest_hash = cas::store(&cas_root, b"other bytes").unwrap();
+        let manifest_dir = base.join("2.0.0_200");
+        write_build_metadata(&manifest_dir, "2.0.0", 200, &[("content/x.dat", &manifest_hash)]);
+
+        if relink_all_builds(base, &cas_root).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+
+        // The legacy build's tree was relinked, and the record now says so.
+        match legacy_link.symlink_metadata() {
+            Ok(m) if m.file_type().is_symlink() => {
+                assert_eq!(std::fs::read(&legacy_link).unwrap(), b"icon bytes");
+            }
+            _ => eprintln!("skipping the link assertion: cannot create symlinks on this platform/account"),
+        }
+        assert!(BuildMetadata::load(&legacy_dir.join("metadata.toml")).unwrap().materialized);
+
+        // The manifest-only build was left alone: no tree, flag unchanged.
+        assert!(!manifest_dir.join("vfs").exists());
+        assert!(!BuildMetadata::load(&manifest_dir.join("metadata.toml")).unwrap().materialized);
     }
 
     #[test]
