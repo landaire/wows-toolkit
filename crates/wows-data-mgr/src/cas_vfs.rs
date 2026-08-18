@@ -135,9 +135,10 @@ impl BuildCas {
     }
 
     /// Remove the build's materialized symlink tree: the `vfs/` directory and
-    /// any artifact named in `derived`. The bytes live in `common/` and every
-    /// reader resolves them through `metadata.toml`, so the tree is a browsing
-    /// convenience. Returns the number of links removed.
+    /// any artifact named in `derived`, along with the directories that leaves
+    /// empty. The bytes live in `common/` and every reader resolves them
+    /// through `metadata.toml`, so the tree is a browsing convenience. Returns
+    /// the number of links removed.
     ///
     /// Conservative and best-effort: a path is deleted only when it is a symlink
     /// that resolves into this build's CAS store. Real files and symlinks
@@ -157,9 +158,28 @@ impl BuildCas {
             removed += self.prune_symlink_tree(&vfs_dir);
         }
         for rel in self.metadata.derived.keys() {
-            removed += usize::from(self.remove_if_cas_symlink(&self.dump_dir.join(rel)));
+            let path = self.dump_dir.join(rel);
+            if self.remove_if_cas_symlink(&path) {
+                removed += 1;
+                self.remove_emptied_parents(&path);
+            }
         }
         removed
+    }
+
+    /// Remove the directories a removed link left empty, stopping at the build
+    /// directory. An empty `translations/<lang>/LC_MESSAGES/` beside a build
+    /// whose catalogs are all in the store reads as a dump that never
+    /// extracted them. A directory that still holds anything is left alone,
+    /// and the build directory itself is never removed.
+    fn remove_emptied_parents(&self, removed_link: &Path) {
+        let mut current = removed_link.parent();
+        while let Some(dir) = current {
+            if dir == self.dump_dir || !dir.starts_with(&self.dump_dir) || std::fs::remove_dir(dir).is_err() {
+                return;
+            }
+            current = dir.parent();
+        }
     }
 
     /// Recursively prune CAS symlinks under `dir`, then remove directories left
@@ -605,6 +625,32 @@ mod tests {
         // the tree belongs to whoever is browsing it.
         assert!(derived_link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()));
         assert_eq!(std::fs::read(&derived_link).unwrap(), b"rkyv");
+    }
+
+    /// An empty `translations/` skeleton beside a build whose catalogs are all
+    /// in the store reads as a dumper that never extracted them, which is
+    /// exactly the conclusion issue 45 reported.
+    #[test]
+    fn buildcas_prune_leaves_no_empty_directories_behind() {
+        let base = tempfile::tempdir().unwrap();
+        let dump_dir = cas_build(
+            base.path(),
+            &[("content/x.dat", b"hi")],
+            &[("translations/en/LC_MESSAGES/global.mo", b"catalog")],
+        );
+        let link = dump_dir.join("translations/en/LC_MESSAGES/global.mo");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        let target = cas::cas_path(&base.path().join("common"), &cas::hash_bytes(b"catalog"));
+        if !try_symlink(&target, &link) {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+
+        let cas = BuildCas::open(&dump_dir).unwrap();
+        assert_eq!(cas.prune_materialized_tree(), 1);
+
+        assert!(!dump_dir.join("translations").exists(), "no empty skeleton survives the prune");
+        assert!(dump_dir.join("metadata.toml").exists(), "the build directory itself is never removed");
     }
 
     #[test]
