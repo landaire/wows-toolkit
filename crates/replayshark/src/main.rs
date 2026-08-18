@@ -1063,7 +1063,7 @@ fn load_metadata_provider(
                 Path::new(game_dir),
                 version.build_number().expect("replay version carries a build"),
             );
-            apply_translations(&mo_path, &mut provider);
+            apply_translations(Some(&mo_path), &mut provider);
             Ok(provider)
         }
         (None, Some(extracted)) => {
@@ -1083,8 +1083,8 @@ fn load_metadata_provider(
                 None => GameMetadataProvider::from_vfs(&vfs)
                     .map_err(|e| report!("failed to load game params from VFS: {e:?}"))?,
             };
-            let mo_path = dir.join("translations/en/LC_MESSAGES/global.mo");
-            apply_translations(&mo_path, &mut provider);
+            let mo_path = dump.derived_path("translations/en/LC_MESSAGES/global.mo");
+            apply_translations(mo_path.as_deref(), &mut provider);
             Ok(provider)
         }
         (None, None) => Err(report!("Game directory or extracted files directory must be supplied")),
@@ -1093,7 +1093,11 @@ fn load_metadata_provider(
 
 /// Load a `.mo` translation catalog into the provider. Ship names are
 /// unavailable (param indices are shown instead) when this fails.
-fn apply_translations(mo_path: &Path, provider: &mut GameMetadataProvider) {
+fn apply_translations(mo_path: Option<&Path>, provider: &mut GameMetadataProvider) {
+    let Some(mo_path) = mo_path else {
+        eprintln!("# warning: no translation catalog for this build (ship names unavailable)");
+        return;
+    };
     match File::open(mo_path) {
         Ok(file) => match gettext::Catalog::parse(file) {
             Ok(catalog) => provider.set_translations(catalog),
