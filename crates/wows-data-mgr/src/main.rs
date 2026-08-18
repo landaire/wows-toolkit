@@ -22,11 +22,17 @@ struct Args {
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
 
+    /// Skip materializing the build as a symlink tree after the command
+    /// finishes. The dump is read through metadata.toml and the shared store
+    /// either way; the tree is there for humans browsing it.
+    #[arg(long, global = true)]
+    no_link: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Clone)]
 enum Commands {
     /// Download game data for a specific version via DepotDownloader
     Download {
@@ -262,6 +268,30 @@ enum Commands {
     },
 }
 
+/// The dump base and build a command created, which is what gets materialized
+/// unless `--no-link` says otherwise. `None` for a command that created no
+/// build: commands that touch existing builds leave each one's materialization
+/// as its own metadata records it, and pruning exists to remove a tree.
+fn link_target(command: &Commands) -> Option<(PathBuf, Option<u32>)> {
+    match command {
+        Commands::DumpRendererData { output, build, .. } => Some((output.clone(), *build)),
+        Commands::CompleteBuild { output, build, .. } => Some((output.clone(), Some(*build))),
+        Commands::Update { output, build, .. } => Some((output.clone(), *build)),
+        Commands::Download { .. }
+        | Commands::RefreshDerived { .. }
+        | Commands::Reindex { .. }
+        | Commands::Gc { .. }
+        | Commands::MigrateCas { .. }
+        | Commands::Relink { .. }
+        | Commands::RequiredPaths
+        | Commands::Verify { .. }
+        | Commands::List
+        | Commands::Detect { .. }
+        | Commands::Remove { .. }
+        | Commands::Register { .. } => None,
+    }
+}
+
 fn find_repo_root() -> Result<PathBuf, Report> {
     let mut dir = std::env::current_dir()?;
     loop {
@@ -421,6 +451,19 @@ fn main() -> Result<(), Report> {
     let repo_root = find_repo_root()?;
     let data_dir = resolve_data_dir(&args.data_dir)?;
 
+    run(&args, &repo_root, &data_dir)?;
+
+    if !args.no_link
+        && let Some((output, build)) = link_target(&args.command)
+    {
+        let repointed = dump::relink_builds(&output, build)?;
+        let total: usize = repointed.values().map(Vec::len).sum();
+        println!("Materialized {total} link(s) across {} build(s).", repointed.len());
+    }
+    Ok(())
+}
+
+fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<(), Report> {
     // These commands don't need the version manifest, so handle them before
     // loading it (a malformed game_versions.toml must not block them).
     match &args.command {
@@ -602,13 +645,13 @@ fn main() -> Result<(), Report> {
             output,
             *force,
         )?;
-        execute_dump_renderer_plan(plan, &data_dir)?;
+        execute_dump_renderer_plan(plan, data_dir)?;
         return Ok(());
     }
 
     let mut reg = registry::load_registry(&data_dir.join("versions.toml"));
 
-    match args.command {
+    match args.command.clone() {
         Commands::Download { latest, build, version, force, username } => {
             let target = if latest {
                 manifest.latest_build().ok_or_else(|| rootcause::report!("No versions in game_versions.toml"))?
@@ -628,9 +671,9 @@ fn main() -> Result<(), Report> {
             }
 
             let entry = manifest.get(target);
-            download::download_build(target, entry, &data_dir, &repo_root, username.as_deref())?;
+            download::download_build(target, entry, data_dir, repo_root, username.as_deref())?;
 
-            let version_str = detect::detect_version_for_build(&data_dir, target)?;
+            let version_str = detect::detect_version_for_build(data_dir, target)?;
             reg.set_downloaded(target, &version_str);
             registry::save_registry(&reg, &data_dir.join("versions.toml"))?;
 
@@ -944,5 +987,33 @@ mod tests {
             "#,
         )
         .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod link_flag_tests {
+    use super::Commands;
+    use super::link_target;
+    use std::path::PathBuf;
+
+    #[test]
+    fn only_build_creating_commands_are_link_targets() {
+        let dumped = Commands::DumpRendererData {
+            latest: false,
+            build: Some(13015811),
+            version: None,
+            output: PathBuf::from("out"),
+            force: false,
+            game_dir: None,
+        };
+        assert_eq!(link_target(&dumped), Some((PathBuf::from("out"), Some(13015811))));
+
+        // Refreshing touches builds that already exist; each keeps whatever
+        // materialization its own metadata records, so there is nothing here to
+        // decide.
+        let refreshed = Commands::RefreshDerived { output: PathBuf::from("out"), build: None, no_gc: false };
+        assert_eq!(link_target(&refreshed), None);
+
+        assert_eq!(link_target(&Commands::RequiredPaths), None);
     }
 }
