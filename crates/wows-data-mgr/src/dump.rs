@@ -892,17 +892,27 @@ pub fn relink_build(build_dir: &Path, cas_root: &Path, metadata: &BuildMetadata)
 
     // A tree is a materialization of metadata.toml, so relinking is a sync in
     // both directions: a path the manifest dropped keeps no link. Only links
-    // into this build's store are removed; real files are the user's.
-    for rel in unindexed_paths(build_dir, metadata)? {
-        let path = build_dir.join(&rel);
-        let Ok(link) = path.symlink_metadata() else {
-            continue;
-        };
-        if !link.file_type().is_symlink() || cas::link_target_hash(&path).is_none() {
-            continue;
-        }
-        if let Err(e) = std::fs::remove_file(&path) {
-            tracing::warn!("failed to remove stale link {} (left in place): {e}", path.display());
+    // that resolve into THIS build's store are removed; real files, and
+    // symlinks aimed elsewhere (another base, a backup), are the user's.
+    //
+    // Skipped for a legacy build: `metadata.files` is empty there, so every
+    // store link in its tree would read as unindexed, and deleting it would
+    // destroy the tree's only copy of the data. An unindexed store link in a
+    // CAS-format build is recoverable content that `reindex` records; it is
+    // safe to remove here because the manifest, not the tree, is authoritative.
+    if metadata.has_file_hashes() {
+        for rel in unindexed_paths(build_dir, metadata)? {
+            let path = build_dir.join(&rel);
+            let Ok(link) = path.symlink_metadata() else {
+                continue;
+            };
+            if !link.file_type().is_symlink() || !crate::cas_vfs::symlink_points_into(&path, cas_root) {
+                continue;
+            }
+            tracing::info!("removing stale link {} (not in metadata.toml)", path.display());
+            if let Err(e) = std::fs::remove_file(&path) {
+                tracing::warn!("failed to remove stale link {} (left in place): {e}", path.display());
+            }
         }
     }
 
@@ -971,8 +981,11 @@ pub fn prune_materialized_trees(
         };
         let removed = cas.prune_materialized_tree();
         // metadata.toml is the record of whether a tree exists, so clearing the
-        // tree clears the claim.
+        // tree clears the claim. Gated on the same condition prune itself uses:
+        // a legacy build's tree is never actually pruned (it is the only copy
+        // of its data), so its `materialized` flag must not be cleared either.
         if let Some(mut metadata) = BuildMetadata::load(&build_dir.join("metadata.toml"))
+            && metadata.has_file_hashes()
             && metadata.materialized
         {
             metadata.materialized = false;
@@ -2069,6 +2082,35 @@ mod maintenance_tests {
         assert!(prune_materialized_trees(base.path(), None).unwrap().is_empty());
     }
 
+    /// A legacy build's tree is its only copy of the data: pruning must leave
+    /// both the tree and the `materialized` flag alone, even though
+    /// `relink_all_builds` can set that flag true for a hash-less build.
+    #[test]
+    fn prune_materialized_trees_leaves_a_legacy_build_untouched() {
+        let base = tempfile::tempdir().unwrap();
+        let build_dir = base.path().join("0.6.0_50");
+        let tree_file = build_dir.join("vfs/content/GameParams.data");
+        std::fs::create_dir_all(tree_file.parent().unwrap()).unwrap();
+        std::fs::write(&tree_file, b"legacy params").unwrap();
+        let mut meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+        meta.materialized = true;
+        meta.save(&build_dir.join("metadata.toml")).unwrap();
+        let mut index = BuildsIndex::load(&base.path().join("builds.toml"));
+        index.upsert(BuildEntry {
+            version: "0.6.0".into(),
+            build: 50,
+            dir: "0.6.0_50".into(),
+            dumped_at: "now".into(),
+        });
+        index.save(&base.path().join("builds.toml")).unwrap();
+
+        let pruned = prune_materialized_trees(base.path(), None).unwrap();
+
+        assert!(pruned.is_empty(), "nothing was removed from a legacy build's tree");
+        assert_eq!(std::fs::read(&tree_file).unwrap(), b"legacy params");
+        assert!(BuildMetadata::load(&build_dir.join("metadata.toml")).unwrap().materialized);
+    }
+
     #[test]
     fn refresh_derived_content_addresses_translations() {
         let dir = tempfile::tempdir().unwrap();
@@ -2234,13 +2276,57 @@ mod maintenance_tests {
         // Content that is not a link into the store is the user's, not ours.
         let real = build_dir.join("vfs/content/notes.txt");
         std::fs::write(&real, b"keep me").unwrap();
+        // A symlink into some OTHER store (a backup, a sibling base) must survive:
+        // the removal rule is "resolves into THIS build's store", not "any symlink".
+        let outside = base.path().join("outside.bin");
+        std::fs::write(&outside, b"not ours").unwrap();
+        let foreign = build_dir.join("vfs/content/foreign.dat");
+        assert!(try_symlink(&outside, &foreign));
 
         relink_build(&build_dir, &cas_root, &meta).unwrap();
 
         assert!(stale.symlink_metadata().is_err(), "a link the manifest does not record must go");
         assert!(build_dir.join("vfs/content/x.dat").exists(), "a recorded path must be materialized");
         assert_eq!(std::fs::read(&real).unwrap(), b"keep me");
+        assert!(
+            foreign.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()),
+            "a link into another store must survive"
+        );
+        assert_eq!(std::fs::read(&outside).unwrap(), b"not ours");
         assert!(cas::object_exists(&cas_root, &hash), "the store keeps the bytes either way");
+    }
+
+    /// A legacy build's tree is its only copy of the data: `metadata.files` is
+    /// empty there, so every store link would read as unindexed. Relink must
+    /// not run its removal pass on such a build at all.
+    #[test]
+    fn relink_leaves_a_legacy_build_tree_alone() {
+        let base = tempfile::tempdir().unwrap();
+        let cas_root = cas::cas_root(base.path());
+        let hash = cas::store(&cas_root, b"legacy params").unwrap();
+        let build_dir = base.path().join("0.6.0_50");
+        let link = build_dir.join("vfs/content/GameParams.data");
+        if cas::link_file(&cas_root, &hash, &link).is_err() {
+            eprintln!("skipping: cannot create symlinks on this platform/account");
+            return;
+        }
+        let meta = BuildMetadata { version: "0.6.0".into(), build: 50, ..Default::default() };
+
+        let repointed = relink_build(&build_dir, &cas_root, &meta).unwrap();
+
+        assert!(repointed.is_empty());
+        assert!(link.symlink_metadata().is_ok_and(|m| m.file_type().is_symlink()));
+        assert_eq!(std::fs::read(&link).unwrap(), b"legacy params");
+    }
+
+    /// Create a file symlink, returning false when the platform/account forbids
+    /// it. Tests that need symlinks skip gracefully when this returns false.
+    fn try_symlink(target: &Path, link: &Path) -> bool {
+        #[cfg(windows)]
+        let result = std::os::windows::fs::symlink_file(target, link);
+        #[cfg(not(windows))]
+        let result = std::os::unix::fs::symlink(target, link);
+        result.is_ok()
     }
 
     #[test]

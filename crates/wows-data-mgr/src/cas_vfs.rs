@@ -103,11 +103,7 @@ impl BuildCas {
     /// directory. Reading never writes: the materialized tree, when a build has
     /// one, is untouched.
     pub fn vfs(&self) -> VfsPath {
-        if self.metadata.has_file_hashes() {
-            VfsPath::new(CasVfs::new(self.cas_root.clone(), &self.metadata.files))
-        } else {
-            VfsPath::new(PhysicalFS::new(self.dump_dir.join("vfs")))
-        }
+        resolve_vfs(&self.dump_dir, &self.cas_root, &self.metadata)
     }
 
     /// On-disk path for a derived artifact (e.g. `game_params.rkyv` or a
@@ -149,9 +145,8 @@ impl BuildCas {
     /// A deletion that fails (an elevated-rights link, say) is logged and left
     /// in place rather than propagating an error. Idempotent.
     ///
-    /// The legacy guard is new: the prune used to be reachable only from the
-    /// CAS branch of `vfs()`, and a legacy dump's tree is its only copy of the
-    /// data.
+    /// A legacy build (no file hashes) is skipped entirely: its tree is the
+    /// only copy of its data.
     pub fn prune_materialized_tree(&self) -> usize {
         if !self.metadata.has_file_hashes() {
             return 0;
@@ -219,8 +214,10 @@ impl BuildCas {
 /// the (possibly relative) link target against the link's own directory and
 /// compares canonicalized paths. A broken link (target already garbage
 /// collected) cannot be canonicalized, so it falls back to a lexical check that
-/// the target traverses the CAS directory name, keeping the prune conservative.
-fn symlink_points_into(link: &Path, cas_root: &Path) -> bool {
+/// the target traverses the CAS directory name, keeping the check conservative.
+/// Shared by the prune and by relink's stale-link removal: both must delete a
+/// link only when it resolves into THIS build's store, never another one.
+pub(crate) fn symlink_points_into(link: &Path, cas_root: &Path) -> bool {
     let Ok(target) = std::fs::read_link(link) else {
         return false;
     };
