@@ -44,7 +44,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Expand runner swap
-        run: ./scripts/expand-runner-swap.sh 16G
+        run: bash scripts/expand-runner-swap.sh 16G
 
       - uses: cachix/install-nix-action@v30
         with:

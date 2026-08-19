@@ -1,13 +1,28 @@
 [env]
-# Make NASM discoverable to rav1e's build.rs without forcing contributors to
-# fix their system PATH. Covers both the project-local install dropped by
-# `mise run setup` and the winget default install location. Nonexistent
-# entries (e.g. the Windows path on Linux/macOS) are ignored. Active in any
-# shell with `mise activate`, and via `mise exec -- <cmd>`.
-_.path = [".tooling/nasm", "C:/Program Files/NASM"]
+# Make the project-local tools discoverable without forcing contributors to
+# fix their system PATH. tools/ holds the DotSlash shims; .tooling/ holds what
+# `mise run setup` downloads. Nonexistent entries (e.g. the Windows paths on
+# Linux/macOS) are ignored. Active in any shell with `mise activate`, and via
+# `mise exec -- <cmd>`.
+_.path = ["tools", ".tooling/nasm", "C:/Program Files/NASM"]
+# Written by `mise run setup`: the clang and llvm-ar that ring needs to build
+# for wasm32. Absent until setup has run, which mise tolerates.
+_.file = { path = ".tooling/dev.env", redact = false }
+
+# reindeer is not published to crates.io under that name. It used to be
+# reachable only through the Nix devShell, which is what forced Windows
+# contributors into WSL. buck2 is not installed here at all: it comes from
+# tools/buck2 via DotSlash, pinned to the release the vendored prelude was
+# expanded from. See tools/README.md.
+[tasks.install-reindeer]
+description = "Install the reindeer used to regenerate third-party/rust/BUCK"
+# +stable, because rust-toolchain.toml pins 1.92 for this workspace and
+# reindeer's own dependencies need a newer rustc. Its repository holds several
+# packages with binaries, hence the explicit package name.
+run = "cargo +stable install --locked --git https://github.com/facebookincubator/reindeer reindeer"
 
 [tasks.setup]
-description = "Ensure the local build environment is configured (currently: NASM for rav1e asm)."
+description = "Download and locate the tools a native build needs (NASM, clang, llvm-ar)."
 run = "python scripts/setup.py"
 
 [tasks.fmt]

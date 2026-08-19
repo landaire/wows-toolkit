@@ -44,7 +44,7 @@ jobs:
 
       - name: Expand runner swap
         if: env.BUILD_TACTICS == 'true'
-        run: ./scripts/expand-runner-swap.sh 16G
+        run: bash scripts/expand-runner-swap.sh 16G
 
       - name: Install Nix
         if: env.BUILD_TACTICS == 'true'

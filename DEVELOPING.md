@@ -2,9 +2,32 @@
 
 ## Prerequisites
 
-### Recommended: Nix
+### Windows
 
-[Nix](https://nixos.org/download/) is the recommended way to set up a development environment (even on Windows if you're going to be touching `wows-data-mgr`). Running `nix develop` gives you everything you need in a single command:
+Everything runs natively; Nix and WSL are not needed. You need:
+
+- [Rust](https://rustup.rs/) (1.92+, from `rust-toolchain.toml`)
+- Visual Studio 2022 with the **C++ Clang Compiler for Windows** component.
+  `ring` hardcodes clang when targeting wasm32 and `cc` has no MSVC fallback
+  there, so `cargo check -p wt-web --target wasm32-unknown-unknown` cannot run
+  without it. Standalone LLVM (`winget install -e --id LLVM.LLVM`) works too.
+- [mise](https://mise.jdx.dev/), then `mise run setup`. That downloads the
+  NASM pinned by `toolchains/windows/toolchain-manifest.json` (rav1e builds its
+  AV1 SIMD with it), locates clang and llvm-ar, and writes `.tooling/dev.env`
+  with the `CC_wasm32_unknown_unknown` and `AR_wasm32_unknown_unknown` that
+  mise loads into every shell.
+- [DotSlash](https://dotslash-cli.com/docs/installation/) if you want to run
+  Buck. `tools/buck2` then resolves to the exact Buck2 release the vendored
+  prelude was expanded from, with no manual install. See `tools/README.md`.
+- `mise run install-reindeer`, only if you need to regenerate
+  `third-party/rust/BUCK` after changing a dependency.
+
+`mise run setup` exits non-zero and tells you what to install if anything is
+missing, so run it first and again after installing.
+
+### Recommended on Linux and macOS: Nix
+
+[Nix](https://nixos.org/download/) is the recommended way to set up a development environment on Linux and macOS. Running `nix develop` gives you everything you need in a single command:
 
 - The exact Rust toolchain version from `rust-toolchain` (with all required components)
 - [DepotDownloader](https://github.com/SteamRE/DepotDownloader) for downloading game data (no separate .NET install needed)
@@ -20,7 +43,7 @@ cargo build -p wows_toolkit --release
 
 ### Manual setup (without Nix)
 
-If you prefer not to use Nix:
+If you prefer not to use Nix on Linux or macOS:
 
 - [Rust](https://rustup.rs/) (1.92+)
 - [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (only needed for downloading game data; requires .NET)
@@ -109,7 +132,7 @@ nu scripts/update-buck-deps.nu
 
 This vendors every crate source, regenerates `third-party/rust/BUCK`, flattens multi-line values in the generated environment, and fails if Reindeer emitted a network download rule. Commit `Cargo.toml`, `Cargo.lock`, the generated BUCK file, and any fixups together. The vendored `.crate` archives are not committed; other people get them from `Cargo.lock` on their next setup.
 
-It needs Nix and only runs on macOS or Linux; on Windows use WSL2. That applies to regeneration only. Building needs neither Nix nor Cargo.
+It needs `reindeer` and `rustc` on PATH; run `mise run install-reindeer` once. That applies to regeneration only. Building needs neither Nix nor Cargo.
 
 Build the affected targets with Buck before pushing. A new dependency that pulls in a build script or native code usually needs a fixup, and CI will not let it through without one.
 
@@ -247,7 +270,7 @@ The CI pipeline (`.github/workflows/rust.yml`) runs on every push and PR:
 - **Clippy**: `cargo clippy --workspace --all-features -- -D warnings`
 - **Test**: `cargo test --workspace`
 
-`.github/workflows/buck.yml` builds every alias through Buck on Linux, macOS, and Windows. Each job provisions only its pinned toolchain, drops network access before the first Buck action, builds every alias, and runs the hermeticity check. The Windows job publishes the unsigned `.exe`, `.pdb`, and `.msi`; signing is a separate workflow that consumes those artifacts and cannot rebuild them.
+`.github/workflows/buck.yml` builds every alias through Buck on Linux and macOS. Each job provisions only its pinned toolchain, drops network access before the first Buck action, builds every alias, and runs the hermeticity check. Windows is not one of those jobs: provisioning mirrors a multi-gigabyte Visual Studio layout and nothing caches it yet, so Windows-only graph breakage surfaces in `build.yml` at tag time instead.
 
 Release builds (`.github/workflows/build.yml`) run on GitHub release creation and produce:
 

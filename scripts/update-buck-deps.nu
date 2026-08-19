@@ -1,7 +1,10 @@
 #!/usr/bin/env nu
 
-^nix develop --command reindeer vendor
-^nix develop --command reindeer buckify
+# reindeer and rustc come from PATH, which mise populates ([tools] in
+# mise.toml, plus rust-toolchain.toml). Going through `nix develop` restricted
+# this to Linux and macOS, so Windows had to run it under WSL.
+^reindeer vendor
+^reindeer buckify
 rm -r -f third-party/rust/.cargo
 
 # Buck spills long command lines into a line-oriented args file, so an argument
@@ -22,7 +25,7 @@ let flattened = (
 )
 $"($flattened)\n" | save -f third-party/rust/BUCK
 
-let rustc = (^nix develop --command rustc --version | parse -r 'rustc 1\.(?<minor>\d+)\.(?<patch>\d+)' | first)
+let rustc = (^rustc --version | parse -r 'rustc 1\.(?<minor>\d+)\.(?<patch>\d+)' | first)
 $"crate::version::Version {
     minor: ($rustc.minor),
     patch: ($rustc.patch),

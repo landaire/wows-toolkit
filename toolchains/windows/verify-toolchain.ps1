@@ -133,6 +133,10 @@ if ($BuckConfigPath) {
         "cxx = $(& $tool "cl")"
         "link = $(& $tool "link")"
         "ml64 = $(& $tool "ml64")"
+    # ring hardcodes clang when targeting wasm32 and cc-rs has no MSVC
+    # fallback for that target, so the VS Clang component is required.
+    "clang = $(& $tool "clang")"
+    "llvm_ar = $(& $tool "llvm_ar")"
         "rc = $(& $tool "rc")"
         "cvtres = $cvtres"
         "midl = $(& $tool "midl")"

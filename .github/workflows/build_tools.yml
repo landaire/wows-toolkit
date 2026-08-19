@@ -67,7 +67,7 @@ jobs:
         run: |
           sudo apt-get update && sudo apt-get install -y zip unzip
           slug="${GITHUB_REF_NAME//\//-}"
-          ./scripts/package-tools.sh "$slug" nix develop --command buck2
+          bash scripts/package-tools.sh "$slug" nix develop --command buck2
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
