@@ -2,7 +2,7 @@ on:
   push:
     # A -test tag builds and publishes exactly like a release, but lands as a
     # prerelease so a cutover can be exercised without pretending to ship.
-    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-test.[0-9]+"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-(alpha|beta|test)[0-9]+"]
     # A ci/** branch rehearses the whole pipeline and publishes nothing, so the
     # release path can be exercised without notifying anyone watching releases.
     branches: ["ci/**"]
