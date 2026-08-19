@@ -636,6 +636,7 @@ fn controls(
         None => loading_placeholder(ui),
     }
 
+    ui.separator();
     size_line(ui, draft, meta, size_model, pending_scheme_fetch, load_generation, estimate_cache);
 
     outcome
@@ -659,6 +660,20 @@ fn loading_placeholder(ui: &mut egui::Ui) {
         ui.add(egui::Spinner::new().size(12.0));
         ui.label(t!("ui.armor.export.loading_details").as_ref());
     });
+}
+
+/// Renders the total size label with a hover breakdown of the two terms
+/// that make it up: geometry (summed accessor bytes, exact) and textures
+/// (raw RGBA at the selected tier scaled by a measured constant, an
+/// estimate). The split is what tells a user staring at a large total
+/// whether the mesh detail or the texture resolution control is the one to
+/// reach for.
+fn size_estimate_label(ui: &mut egui::Ui, estimate: &SizeEstimate) {
+    let total = humansize::format_size(estimate.total(), humansize::BINARY);
+    let geometry = humansize::format_size(estimate.geometry_bytes, humansize::BINARY);
+    let textures = humansize::format_size(estimate.texture_bytes, humansize::BINARY);
+    ui.label(t!("ui.armor.export.size_estimate", size = total).as_ref())
+        .on_hover_text(t!("ui.armor.export.size_breakdown", geometry = geometry, textures = textures).as_ref());
 }
 
 /// Renders the size estimate, a spinner while it is unavailable, or an
@@ -709,16 +724,14 @@ fn size_line(
     if let Some((cached_key, cached)) = estimate_cache
         && *cached_key == key
     {
-        let size = humansize::format_size(cached.total(), humansize::BINARY);
-        ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
+        size_estimate_label(ui, cached);
         return;
     }
 
     match model.priced_estimate(&options) {
         Ok(estimate) => {
+            size_estimate_label(ui, &estimate);
             *estimate_cache = Some((key, estimate));
-            let size = humansize::format_size(estimate.total(), humansize::BINARY);
-            ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
         }
         Err(unpriced) => {
             let pending_ids: Vec<CamoSchemeId> = unpriced
@@ -865,6 +878,15 @@ mod tests {
         let options = draft_to_options(&d);
         assert!(!options.textures, "armor is untextured");
         assert_eq!(options.camos, CamoSelection::BaseOnly, "a camo cannot apply to armor");
+    }
+
+    #[test]
+    fn the_size_breakdown_sums_to_the_total_the_label_shows() {
+        // The hover text and the label draw from the same `SizeEstimate`,
+        // but from two different accessors (`geometry_bytes`/`texture_bytes`
+        // vs `total()`); this guards against those two ever disagreeing.
+        let estimate = SizeEstimate { geometry_bytes: 12_345, texture_bytes: 987_654 };
+        assert_eq!(estimate.geometry_bytes + estimate.texture_bytes, estimate.total());
     }
 
     #[test]

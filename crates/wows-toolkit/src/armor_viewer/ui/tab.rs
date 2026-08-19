@@ -618,7 +618,7 @@ impl ToolkitTabViewer<'_> {
                 // Handle deferred export from context menu
                 if let Some(export_req) = deferred_export.take() {
                     if state.export_dialog.as_ref().is_some_and(export_dialog::ExportDialog::is_exporting) {
-                        self.tab_state.toasts.lock().info("An export is already running");
+                        self.tab_state.toasts.lock().info(t!("ui.armor.export.already_running").to_string());
                     } else {
                         // TODO(Task 10): source from persisted export defaults.
                         let defaults = ExportDefaults::default();
@@ -837,7 +837,7 @@ impl ToolkitTabViewer<'_> {
         // Handle export signal from toolbar button
         if let Some(export_req) = export_cell.take() {
             if state.export_dialog.as_ref().is_some_and(export_dialog::ExportDialog::is_exporting) {
-                self.tab_state.toasts.lock().info("An export is already running");
+                self.tab_state.toasts.lock().info(t!("ui.armor.export.already_running").to_string());
             } else {
                 // TODO(Task 10): source from persisted export defaults.
                 let defaults = ExportDefaults::default();
@@ -1164,7 +1164,11 @@ fn spawn_ship_export(
             let _ = finished_sender.send(());
             return;
         };
-        let result = (|| -> Result<(), String> {
+        // The Ok payload is the written file's length, read back from the same
+        // handle right after the writer finishes -- `None` when the metadata
+        // read itself fails, so the toast can fall back to the sizeless
+        // message instead of reporting a 0-byte sentinel.
+        let result = (|| -> Result<Option<u64>, String> {
             use wowsunpack::game_params::types::GameParamProvider;
             let param = ship_assets.metadata().game_param_by_index(&param_idx);
             let vehicle =
@@ -1172,11 +1176,18 @@ fn spawn_ship_export(
             let ctx = ship_assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
             let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
             ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
-            Ok(())
+            Ok(file.metadata().ok().map(|m| m.len()))
         })();
         match result {
-            Ok(()) => {
-                toasts.lock().success(format!("Exported {}", ship_name));
+            Ok(written_bytes) => {
+                let message = match written_bytes {
+                    Some(bytes) => {
+                        let size = humansize::format_size(bytes, humansize::BINARY);
+                        t!("ui.armor.export.exported_with_size", ship = ship_name.clone(), size = size).to_string()
+                    }
+                    None => t!("ui.armor.export.exported", ship = ship_name.clone()).to_string(),
+                };
+                toasts.lock().success(message);
             }
             Err(e) => {
                 toasts.lock().error(format!("Export failed: {e}"));
