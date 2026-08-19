@@ -23,6 +23,7 @@ let required = [
     "ranlib"
     "rustc"
     "rustdoc"
+    "rustfmt"
     "strip"
 ]
 
@@ -44,6 +45,8 @@ for tool in $required {
     $"cxx = ($toolchain_root)/bin/clang++"
     $"nasm = ($toolchain_root)/bin/nasm"
     $"python = ($toolchain_root)/bin/python3"
+    # The prelude has no rustfmt support; bxl/lint.bxl runs it directly.
+    $"rustfmt = ($toolchain_root)/bin/rustfmt"
     ""
 ] | str join "\n" | save -f .buckconfig.local
 

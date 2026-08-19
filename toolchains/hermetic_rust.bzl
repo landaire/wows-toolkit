@@ -115,6 +115,27 @@ hermetic_rust_toolchain = rule(
     is_toolchain_rule = True,
 )
 
+def _hermetic_rustfmt_impl(ctx):
+    return [DefaultInfo(), RunInfo(args = [ctx.attrs.rustfmt])]
+
+_hermetic_rustfmt_rule = rule(
+    impl = _hermetic_rustfmt_impl,
+    attrs = {"rustfmt": attrs.string()},
+)
+
+def hermetic_rustfmt(name, visibility):
+    """A plain runnable rustfmt.
+
+    RustToolchainInfo has no rustfmt field, so bxl/lint.bxl runs this target
+    instead. Both platform bootstraps publish the path, so one rule covers all
+    three; read_root_config is load-time only, hence the macro.
+    """
+    _hermetic_rustfmt_rule(
+        name = name,
+        rustfmt = _hermetic_tool("rustfmt"),
+        visibility = visibility,
+    )
+
 def _hermetic_cxx_toolchain_impl(ctx):
     linker_type = LinkerType(ctx.attrs.linker_type)
 

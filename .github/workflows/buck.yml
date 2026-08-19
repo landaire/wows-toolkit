@@ -55,6 +55,13 @@ jobs:
             nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias" release
           done
 
+      # bxl/lint.bxl builds the [clippy.json] sub-target of every first-party
+      # rust target in one invocation, and lint.nu decides pass or fail from
+      # the diagnostics: the prelude builds them with infallible_diagnostics,
+      # so the action succeeds even when compilation does not.
+      - name: Lint through Buck
+        run: nix develop --command bash scripts/run-offline.sh nu scripts/lint.nu
+
       - name: Buck build-graph tests
         run: |
           for test in scripts/test-*.nu; do

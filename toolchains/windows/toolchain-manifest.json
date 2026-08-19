@@ -119,6 +119,12 @@
       "path": "Rust/1.92.0/Rust/bin/rustdoc.exe",
       "version_output": "rustdoc 1.92.0"
     },
+    "clippy_driver": {
+      "path": "Rust/1.92.0/Rust/bin/clippy-driver.exe"
+    },
+    "rustfmt": {
+      "path": "Rust/1.92.0/Rust/bin/rustfmt.exe"
+    },
     "nasm": {
       "path": "NASM/3.01/nasm-3.01/nasm.exe",
       "version_output": "NASM version 3.01"

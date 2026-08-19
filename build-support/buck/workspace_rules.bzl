@@ -2,6 +2,11 @@ load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
 load("@prelude//rust:cargo_package.bzl", "cargo")
 load("@prelude//rust/buildscript:buildscript_platform.bzl", "transition_alias")
 
+# Every crate but wgcheck is on the workspace edition; a crate that pins its own
+# has to say so here too, because the Rust rules cannot read Cargo.toml.
+# scripts/test-workspace-package-metadata.nu fails when the two disagree.
+_DEFAULT_EDITION = "2024"
+
 def _cargo_env(crate, package, version):
     # A pre-release suffix belongs to _PRE, not to _PATCH, which is what a
     # plain split on "." would produce for 1.0.2-beta1.
@@ -61,7 +66,7 @@ def native_binary_alias(name, actual):
         incoming_transition = "toolchains//:{}_transition".format(mode),
     )
 
-def workspace_buildscript(name, crate, package, version, deps = [], env = {}, srcs = None, rustc_flags = []):
+def workspace_buildscript(name, crate, package, version, edition = _DEFAULT_EDITION, deps = [], env = {}, srcs = None, rustc_flags = []):
     if srcs == None:
         srcs = glob(["**"], exclude = ["BUCK", "Cargo.lock"])
 
@@ -72,7 +77,7 @@ def workspace_buildscript(name, crate, package, version, deps = [], env = {}, sr
         srcs = srcs,
         crate = "build_script_build",
         crate_root = "build.rs",
-        edition = "2024",
+        edition = edition,
         env = _cargo_env("build_script_build", package, version),
         rustc_flags = rustc_flags,
         visibility = [],
@@ -92,19 +97,23 @@ def workspace_buildscript(name, crate, package, version, deps = [], env = {}, sr
     )
     return run_name
 
-def workspace_library(name, crate, package, version, features = [], deps = [], buildscript = None, resources = []):
+def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = []):
     env = _cargo_env(crate, package, version)
     rustc_flags = []
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)]
 
-    cargo.rust_library(
+    # native.rust_library, not cargo.rust_library: the cargo wrappers exist for
+    # reindeer's vendored crates and prepend --cap-lints=allow, which silently
+    # caps every first-party lint too and makes [clippy.json] always empty.
+    native.rust_library(
         name = name,
         srcs = glob(["**"], exclude = ["BUCK", "Cargo.lock"]) + resources,
+        doctests = False,
         crate = crate,
         crate_root = "src/lib.rs",
-        edition = "2024",
+        edition = edition,
         env = env,
         features = features,
         rustc_flags = rustc_flags,
@@ -113,19 +122,20 @@ def workspace_library(name, crate, package, version, features = [], deps = [], b
         deps = deps,
     )
 
-def workspace_binary(name, crate, package, version, crate_root, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
+def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):
     env = _cargo_env(crate, package, version)
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
     rustc_flags = rustc_flags + _profile_rustc_flags()
 
-    cargo.rust_binary(
+    # See workspace_library: the cargo wrapper would cap lints to allow.
+    native.rust_binary(
         name = name,
         srcs = glob(["**"], exclude = ["BUCK", "Cargo.lock"]),
         crate = crate,
         crate_root = crate_root,
-        edition = "2024",
+        edition = edition,
         env = env,
         features = features,
         rustc_flags = rustc_flags,

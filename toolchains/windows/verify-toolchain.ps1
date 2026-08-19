@@ -133,15 +133,17 @@ if ($BuckConfigPath) {
         "cxx = $(& $tool "cl")"
         "link = $(& $tool "link")"
         "ml64 = $(& $tool "ml64")"
-    # ring hardcodes clang when targeting wasm32 and cc-rs has no MSVC
-    # fallback for that target, so the VS Clang component is required.
-    "clang = $(& $tool "clang")"
-    "llvm_ar = $(& $tool "llvm_ar")"
+        # ring hardcodes clang when targeting wasm32 and cc-rs has no MSVC
+        # fallback there, so the Visual Studio Clang component is required.
+        "clang = $(& $tool "clang")"
+        "llvm_ar = $(& $tool "llvm_ar")"
         "rc = $(& $tool "rc")"
         "cvtres = $cvtres"
         "midl = $(& $tool "midl")"
         "rustc = $(& $tool "rustc")"
         "rustdoc = $(& $tool "rustdoc")"
+        "clippy_driver = $(& $tool "clippy_driver")"
+        "rustfmt = $(& $tool "rustfmt")"
         "nasm = $(& $tool "nasm")"
         "python = $(& $tool "python")"
         "wix = $(& $tool "wix")"

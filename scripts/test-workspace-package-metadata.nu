@@ -13,6 +13,21 @@ def crate-version [dir: path] {
     if ($declared | describe) == "string" { $declared } else { workspace-version }
 }
 
+# A crate on an edition other than the workspace one has to repeat it in its
+# BUCK file. Getting this wrong compiles the crate under the wrong language
+# edition, which changes semantics, not just lints.
+def crate-edition [dir: path] {
+    let declared = (open ($dir | path join "Cargo.toml") | get package.edition)
+    if ($declared | describe) == "string" { $declared } else { open Cargo.toml | get workspace.package.edition }
+}
+
+def buck-editions [buckfile: path] {
+    open --raw $buckfile
+    | lines
+    | where {|line| $line | str starts-with "    edition = " }
+    | each {|line| $line | str replace --all --regex '^\s+edition = "(.*)",$' '$1' }
+}
+
 def buck-versions [buckfile: path] {
     open --raw $buckfile
     | lines
@@ -29,6 +44,21 @@ def main [] {
             if $found != $expected {
                 $failures = ($failures | append $"($dir)/BUCK declares version ($found), Cargo.toml says ($expected)")
             }
+        }
+
+        let expected_edition = (crate-edition $dir)
+        let buckfile = ($dir | path join "BUCK")
+        let found_editions = (buck-editions $buckfile)
+        for found in $found_editions {
+            if $found != $expected_edition {
+                $failures = ($failures | append $"($dir)/BUCK declares edition ($found), Cargo.toml says ($expected_edition)")
+            }
+        }
+        # An omitted edition takes workspace_rules.bzl's default, so silence
+        # here is only correct when the crate is on the workspace edition.
+        let workspace_edition = (open Cargo.toml | get workspace.package.edition)
+        if ($found_editions | is-empty) and $expected_edition != $workspace_edition {
+            $failures = ($failures | append $"($dir)/BUCK omits edition, but Cargo.toml pins ($expected_edition)")
         }
     }
 

@@ -1,4 +1,4 @@
-load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "nix_cxx_toolchain", "selected_toolchain")
+load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "nix_cxx_toolchain", "selected_toolchain")
 load(":native_build_mode.bzl", "native_build_mode_transition")
 
 nix_cxx_toolchain(
@@ -15,6 +15,11 @@ nix_cxx_toolchain(
 
 hermetic_python_bootstrap_toolchain(
     name = "python_bootstrap",
+    visibility = ["PUBLIC"],
+)
+
+hermetic_rustfmt(
+    name = "rustfmt",
     visibility = ["PUBLIC"],
 )
 

@@ -46,18 +46,24 @@ description = "Runs cargo-clippy-fix against all features"
 run = "cargo clippy --fix --all-features --all-targets --allow-dirty"
 depends_post = ["fmt"]
 
+[tasks.lint]
+description = "Lints the first-party Rust graph through Buck (clippy and rustfmt)"
+run = "nu scripts/lint.nu"
+
 [tasks.fix-all]
-description = "Runs clippy fix, fmt, lints the publish (default-feature) config, and checks WASM target"
+description = "Runs clippy fix, lints through Buck, checks the WASM target, then formats"
 run = [
-    "cargo clippy --fix --all-features --all-targets --allow-dirty",
-    # Mirror CI's strict pass: `cargo clippy --fix` exits 0 even when
-    # non-auto-fixable lints remain, so without this a warning anywhere in the
-    # workspace sails through locally and fails CI.
-    "cargo clippy --workspace --all-targets --all-features -- -D warnings",
-    # Lint the default-feature config the published crates build with: --all-features
-    # hides feature-gated dead code (e.g. a helper used only by a parsing-gated fn).
-    # wows_minimap_renderer is omitted (native rav1e build dep); the all-features pass covers it.
-    "cargo clippy --all-targets -p wows-core -p wowsunpack -p wows_replays -p wows-battle-world -p wows-data-mgr -p wows-replay-insights -p wt-translations -- -D warnings",
+    # Buck has no autofix, so this stays on Cargo. --allow-staged because jj
+    # has no index of its own and anything in git's aborts the fix.
+    "cargo clippy --fix --all-features --all-targets --allow-dirty --allow-staged",
+    # The strict pass. `cargo clippy --fix` exits 0 even when non-auto-fixable
+    # lints remain, so without this a warning sails through locally and fails
+    # CI. Buck resolves features per target, which is what the hand-maintained
+    # default-feature crate list here used to approximate: --all-features hides
+    # feature-gated dead code, and no single Cargo invocation sees both.
+    "nu scripts/lint.nu clippy",
+    # Still Cargo: the Buck graph has no wasm32 platform yet, and wt-web has no
+    # BUCK file. Needs clang, which `mise run setup` provisions.
     "cargo check -p wt-web --target wasm32-unknown-unknown",
 ]
 depends_post = ["fmt"]

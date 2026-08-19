@@ -1,7 +1,8 @@
 #![allow(unexpected_cfgs)]
 
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 

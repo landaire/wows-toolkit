@@ -11,6 +11,8 @@ WindowsToolPathsInfo = provider(fields = {
     "ml64": provider_field(typing.Any),
     "rustc": provider_field(typing.Any),
     "rustdoc": provider_field(typing.Any),
+    "clippy_driver": provider_field(typing.Any),
+    "rustfmt": provider_field(typing.Any),
     "nasm": provider_field(typing.Any),
     "wix": provider_field(typing.Any),
     "wix_ui_extension": provider_field(typing.Any),
@@ -90,6 +92,8 @@ def _msvc_tools_impl(ctx):
             ml64 = ml64,
             rustc = ctx.attrs.rustc,
             rustdoc = ctx.attrs.rustdoc,
+            clippy_driver = ctx.attrs.clippy_driver,
+            rustfmt = ctx.attrs.rustfmt,
             nasm = ctx.attrs.nasm,
             wix = wix,
             wix_ui_extension = ctx.attrs.wix_ui_extension,
@@ -97,7 +101,10 @@ def _msvc_tools_impl(ctx):
         ),
     ]
 
-_TOOL_ATTRS = ["ar", "cc", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc"]
+# clang and llvm_ar are deliberately absent: verify-toolchain.ps1 publishes them
+# for the Cargo wasm32 build, but no Buck rule consumes them yet, and requiring
+# them here would fail package loading for everyone who does not need them.
+_TOOL_ATTRS = ["ar", "cc", "clippy_driver", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc", "rustfmt"]
 
 # WiX is needed by the MSI target alone. Requiring it at package load would stop
 # every Windows target configuring on a machine that never builds an installer.
@@ -121,7 +128,10 @@ def _hermetic_msvc_rust_toolchain_impl(ctx):
     tools = ctx.attrs.tools[WindowsToolPathsInfo]
     return [DefaultInfo(), RustToolchainInfo(
         allow_lints = [],
-        clippy_driver = RunInfo(args = [tools.rustc]),
+        # Not tools.rustc: pointing this at rustc makes every [clippy.txt] and
+        # [clippy.json] sub-target produce an empty diagnostic file, so the
+        # whole lint surface silently passes on Windows.
+        clippy_driver = RunInfo(args = [tools.clippy_driver]),
         clippy_toml = None,
         compiler = RunInfo(args = [tools.rustc]),
         default_edition = ctx.attrs.default_edition,

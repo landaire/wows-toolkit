@@ -1,0 +1,94 @@
+""" Batch lint entry points over the whole first-party Rust graph.
+
+`clippy` builds the [clippy.json] sub-target of every first-party rust target
+in one invocation and prints where the diagnostics landed. `rustfmt` checks
+formatting for the sources of those same targets.
+
+Neither decides pass or fail: the prelude builds clippy diagnostics with
+infallible_diagnostics = True, so the action succeeds even when compilation
+fails and BUILD SUCCEEDED proves nothing. scripts/lint-report.nu reads the JSON
+and sets the exit code.
+"""
+
+_RUST_KINDS = "^rust_(binary|library|test)$"
+
+# Matches workspace_rules.bzl; only reached if a target omits the attribute.
+_DEFAULT_EDITION = "2024"
+
+# reindeer's vendored crates are not ours to lint, and the prelude caps their
+# lints to allow anyway.
+_THIRD_PARTY = "root//third-party"
+
+def _first_party_rust(ctx):
+    targets = ctx.cli_args.target
+    nodes = ctx.uquery().kind(_RUST_KINDS, ctx.uquery().eval(targets))
+    return [node for node in nodes if not str(node.label).startswith(_THIRD_PARTY)]
+
+def _clippy_impl(ctx):
+    nodes = _first_party_rust(ctx)
+    configured = ctx.configured_targets(nodes, modifiers = ctx.modifiers)
+    labels = [target.label.with_sub_target("clippy.json") for target in configured]
+
+    ensured = ctx.output.ensure_multiple(ctx.build(labels))
+    diagnostics = {}
+    for label, artifacts in ensured.items():
+        diagnostics[str(label.raw_target())] = [
+            artifact.abs_path()
+            for artifact in artifacts
+        ]
+
+    ctx.output.print_json({
+        "kind": "clippy",
+        "root": ctx.root(),
+        "diagnostics": diagnostics,
+    })
+
+def _rustfmt_impl(ctx):
+    nodes = _first_party_rust(ctx)
+
+    # srcs are Artifacts whose short_path is relative to the owning package, so
+    # the repository-relative path needs the package prefix back on the front.
+    # Grouped by edition: rustfmt parses to the edition it is told, and a 2021
+    # crate formatted as 2024 reports differences that are not real.
+    by_edition = {}
+    for node in nodes:
+        package = node.label.package
+        edition = node.get_attr("edition") or _DEFAULT_EDITION
+        for src in node.get_attr("srcs") or []:
+            # A srcs entry can also be a label, when a target generates the
+            # source; rustfmt has nothing to say about those.
+            if type(src) != "Artifact":
+                continue
+            if src.extension != ".rs":
+                continue
+            by_edition.setdefault(edition, {})[package + "/" + src.short_path] = True
+
+    ctx.output.print_json({
+        "kind": "rustfmt",
+        "root": ctx.root(),
+        # rustfmt takes many files per invocation, so the driver runs one per
+        # edition rather than one per file.
+        "sources_by_edition": {
+            edition: sorted(paths.keys())
+            for edition, paths in by_edition.items()
+        },
+    })
+
+_TARGET_ARG = {
+    "target": cli_args.string(
+        default = "root//...",
+        doc = "Target pattern to lint. Defaults to the whole repository.",
+    ),
+}
+
+clippy = bxl_main(
+    doc = "Emit clippy diagnostic JSON for every first-party rust target.",
+    impl = _clippy_impl,
+    cli_args = _TARGET_ARG,
+)
+
+rustfmt = bxl_main(
+    doc = "List the Rust sources of every first-party rust target, for rustfmt.",
+    impl = _rustfmt_impl,
+    cli_args = _TARGET_ARG,
+)
