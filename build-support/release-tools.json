@@ -1,0 +1,24 @@
+{
+  "_comment": [
+    "The CLI tools shipped in wows_toolkit_tools_<tag>_<platform>.zip, and the",
+    "name each one carries inside the archive.",
+    "",
+    "Buck names a rust_binary's output after its crate, and a crate name cannot",
+    "contain a hyphen, so the built filename is not always the name the tool has",
+    "shipped under. Keeping the mapping here rather than letting the archive",
+    "inherit whatever Buck emitted is what stops a rename going out unnoticed:",
+    "package-tools.* fails if a build produces anything this file does not list."
+  ],
+  "tools": [
+    { "target": "//:wowsunpack", "ship": "wowsunpack" },
+    { "target": "//:wows_data_mgr", "ship": "wows-data-mgr" },
+    { "target": "//:replayshark", "ship": "replayshark" },
+    { "target": "//:minimap_renderer", "ship": "minimap_renderer" },
+    { "target": "//:minimap_renderer_cpu", "ship": "minimap_renderer_cpu" }
+  ],
+  "_extra_files_comment": [
+    "wows_data_mgr locates its manifest by walking up from the working",
+    "directory, so game_versions.toml has to sit next to the binaries."
+  ],
+  "extra_files": ["game_versions.toml"]
+}

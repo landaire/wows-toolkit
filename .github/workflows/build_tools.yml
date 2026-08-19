@@ -10,9 +10,8 @@ on:
 permissions:
   contents: write
 
-# The tools come from the same graph as the desktop app. minimap_renderer ships
-# once: the second Cargo build here never passed --no-default-features, so the
-# _cpu binary it produced was the same build under another name.
+# The tools and the shipped name of each come from
+# build-support/release-tools.json, and the archive is checked against it.
 
 jobs:
   build-windows:
@@ -35,20 +34,8 @@ jobs:
         run: |
           $manifest = Get-Content -Raw toolchains/windows/toolchain-manifest.json | ConvertFrom-Json
           $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
-          $targets = @("//:wowsunpack", "//:wows_data_mgr", "//:replayshark", "//:minimap_renderer")
-          $out = & $buck2 build -c native_build.mode=release --target-platforms toolchains//windows:windows_x86_64_msvc --show-output @targets
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          New-Item -ItemType Directory -Force artifacts | Out-Null
-          foreach ($line in $out) {
-            $path = ($line -split " ")[-1]
-            if ($path -like "*.exe") { Copy-Item $path artifacts/ }
-          }
-          Get-ChildItem artifacts | ForEach-Object { $_.IsReadOnly = $false }
-          # wows_data_mgr locates its manifest by walking up from the working
-          # directory, so it has to sit next to the binaries to be found at all.
-          Copy-Item game_versions.toml artifacts/
           $slug = "${{ github.ref_name }}" -replace "/", "-"
-          Compress-Archive -Path artifacts/* -DestinationPath "wows_toolkit_tools_${slug}_win64.zip"
+          ./scripts/package-tools.ps1 -Buck2 $buck2 -Slug $slug -TargetPlatform toolchains//windows:windows_x86_64_msvc
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
@@ -78,24 +65,9 @@ jobs:
 
       - name: Build the tools
         run: |
-          sudo apt-get update && sudo apt-get install -y zip
-          out=$(nix develop --command buck2 build -c native_build.mode=release --show-output \
-            //:wowsunpack //:wows_data_mgr //:replayshark //:minimap_renderer)
-          echo "$out"
-          mkdir -p artifacts
-          echo "$out" | awk 'NF > 1 { print $NF }' | while read -r path; do cp "$path" artifacts/; done
-          chmod +w artifacts/*
-          # Linking through Nix records a store path as the interpreter, and that
-          # path exists only on the builder.
-          for f in artifacts/*; do
-            nix develop --command patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$f"
-          done
-          # Staged after patchelf, which only accepts ELF files. wows_data_mgr
-          # walks up from the working directory to find this manifest, so it has
-          # to sit next to the binaries.
-          cp game_versions.toml artifacts/
+          sudo apt-get update && sudo apt-get install -y zip unzip
           slug="${GITHUB_REF_NAME//\//-}"
-          zip -j "wows_toolkit_tools_${slug}_linux64.zip" artifacts/*
+          ./scripts/package-tools.sh "$slug" nix develop --command buck2
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')

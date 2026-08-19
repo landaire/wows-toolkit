@@ -33,10 +33,28 @@ def os_select(macos, linux, windows):
         "config//os/constraints:windows": windows,
     })
 
-def native_binary_alias(name, actual):
+def _native_build_mode():
     mode = read_config("native_build", "mode", "debug")
     if mode not in ["debug", "release"]:
         fail("native_build.mode must be debug or release, got {}".format(mode))
+    return mode
+
+def _profile_rustc_flags():
+    """Profile flags that apply to a final artifact rather than an rlib.
+
+    Cargo's [profile.release] carries lto = "thin". rustc only honours -Clto
+    when emitting an executable, so it cannot live in the toolchain's baseline
+    rustc_flags; and the toolchain's rustc_binary_flags would additionally
+    reach reindeer's build-script binaries, which Cargo never links with LTO.
+    Omitting it entirely is what made Buck release binaries 25 to 40 percent
+    larger than the Cargo ones they replaced.
+    """
+    if _native_build_mode() == "release":
+        return ["-Clto=thin"]
+    return []
+
+def native_binary_alias(name, actual):
+    mode = _native_build_mode()
     transition_alias(
         name = name,
         actual = actual,
@@ -100,6 +118,7 @@ def workspace_binary(name, crate, package, version, crate_root, features = [], d
     if buildscript != None:
         env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
         rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)] + rustc_flags
+    rustc_flags = rustc_flags + _profile_rustc_flags()
 
     cargo.rust_binary(
         name = name,

@@ -74,7 +74,7 @@ buck2 build //:wows_toolkit
 buck2 build -c native_build.mode=release //:wows_toolkit
 ```
 
-Aliases: `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`.
+Aliases: `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`.
 
 The host platform is selected automatically. Pass `--target-platforms` only to be explicit:
 

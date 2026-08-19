@@ -8,7 +8,7 @@ buildscript = workspace_buildscript(
     deps = ["//third-party/rust:serde", "//third-party/rust:toml"],
 )
 
-MINIMAP_DEPS = [
+MINIMAP_CPU_DEPS = [
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
@@ -35,7 +35,9 @@ MINIMAP_DEPS = [
     "//third-party/rust:tracing",
     "//third-party/rust:tracing-subscriber",
     "//third-party/rust:yuvutils-rs",
-] + os_select(
+]
+
+MINIMAP_DEPS = MINIMAP_CPU_DEPS + os_select(
     # VideoToolbox on macOS, wgpu-backed GPU encode everywhere else, matching the
     # cfg-gated dependency sections of Cargo.toml.
     macos = [
@@ -56,7 +58,12 @@ MINIMAP_DEPS = [
     ],
 )
 
-MINIMAP_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv"] + os_select(
+# The CPU encoders (openh264, rav1e) are always compiled in; the os_select
+# adds hardware encode on top. The _cpu variant below is exactly this list
+# without it.
+MINIMAP_CPU_FEATURES = ["arc", "bin", "cpu", "cpu-av1", "rendering", "rkyv"]
+
+MINIMAP_FEATURES = MINIMAP_CPU_FEATURES + os_select(
     macos = ["videotoolbox"],
     linux = ["vulkan"],
     windows = ["vulkan"],
@@ -80,4 +87,30 @@ workspace_binary(
     crate_root = "src/main.rs",
     features = MINIMAP_FEATURES,
     deps = [":wows_minimap_renderer"] + MINIMAP_DEPS,
+)
+
+# Ships alongside the default binary for hosts with no usable GPU encoder.
+# It needs its own library: the default one is compiled with vulkan, and the
+# feature is what gates the wgpu and gpu-video code paths. Both carry the same
+# crate name, so main.rs resolves `wows_minimap_renderer` either way.
+workspace_library(
+    name = "wows_minimap_renderer_cpu",
+    crate = "wows_minimap_renderer",
+    package = "wows_minimap_renderer",
+    version = "0.39.0",
+    features = MINIMAP_CPU_FEATURES,
+    deps = MINIMAP_CPU_DEPS,
+    buildscript = buildscript,
+)
+
+# The crate name is what the prelude uses for the output filename, so it is
+# what makes this land in the release zip as minimap_renderer_cpu.
+workspace_binary(
+    name = "minimap_renderer_cpu_bin",
+    crate = "minimap_renderer_cpu",
+    package = "wows_minimap_renderer",
+    version = "0.39.0",
+    crate_root = "src/main.rs",
+    features = MINIMAP_CPU_FEATURES,
+    deps = [":wows_minimap_renderer_cpu"] + MINIMAP_CPU_DEPS,
 )

@@ -11,6 +11,7 @@ def main [] {
         "wows_data_mgr"
         "replayshark"
         "minimap_renderer"
+        "minimap_renderer_cpu"
         "wgcheck"
         "dhat_load"
         "profile_replay"

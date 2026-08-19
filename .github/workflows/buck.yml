@@ -12,7 +12,8 @@ on:
 env:
   ALIASES: >-
     //:wows_toolkit //:wowsunpack //:wows_data_mgr //:replayshark
-    //:minimap_renderer //:wgcheck //:dhat_load //:profile_replay //:dhat_parse
+    //:minimap_renderer //:minimap_renderer_cpu //:wgcheck //:dhat_load
+    //:profile_replay //:dhat_parse
 
 jobs:
   linux:
