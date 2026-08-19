@@ -16,6 +16,13 @@ itself is installed:
 Windows has no shebang, so `buck2.bat` sits beside the DotSlash file and
 invokes it. `%~dpn0` strips the `.bat`, which is what makes the pair work.
 
+On Linux and macOS the shebang needs the executable bit, and this repository
+does not carry one: it is committed from Windows, where jj cannot record it,
+which is also why every tracked `.sh` here is mode 644 and CI invokes them as
+`bash scripts/...`. Either `chmod +x tools/buck2` once after cloning, or call
+`dotslash tools/buck2` directly. The Nix devShell already provides a pinned
+buck2 on those platforms, so neither is usually necessary.
+
 ## Bumping Buck2
 
 1. Replace `tools/buck2` with the DotSlash file from the new release:
