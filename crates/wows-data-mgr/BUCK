@@ -3,6 +3,7 @@ load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_
 WDM_DEPS = [
     "//crates/wowsunpack:wowsunpack",
     "//third-party/rust:clap",
+    "//third-party/rust:home",
     "//third-party/rust:http-body-util",
     "//third-party/rust:indicatif",
     "//third-party/rust:jiff",
