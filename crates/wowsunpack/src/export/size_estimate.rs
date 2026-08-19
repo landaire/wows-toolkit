@@ -36,14 +36,15 @@ const INDEX_BYTES: u64 = 4;
 /// panel-line detail, which PNG's lossless DEFLATE compresses far tighter than a
 /// photographic-texture assumption would predict.
 ///
-/// Calibrated against `size_estimate_accuracy.rs`'s five cases on
+/// Calibrated against `size_estimate_accuracy.rs`'s six cases on
 /// WSD011_Smaland_1955 (stock at full resolution, a 1024-capped export, an
-/// armor-only export, a LOD-2 export, and a baked camo), comparing
-/// `estimate().total()` to a real `export_glb` byte count: stock 1.02%, capped
-/// 3.43%, armor-only 1.79%, deep LOD 1.62%, baked 13.42% off. One ratio holds
-/// every case inside the 25% tolerance with room to spare; the baked case runs
-/// highest because `estimate` prices it identically to stock while the real bake
-/// compresses worse and loses cross-stem dedup (see `CamoSelection::Baked` in
+/// armor-only export, a LOD-2 export, a baked camo, and two selected camo
+/// variants), comparing `estimate().total()` to a real `export_glb` byte
+/// count: stock 0.94%, capped 3.40%, armor-only 1.79%, deep LOD 1.48%, baked
+/// 13.35%, two variants 10.17% off. One ratio holds every case inside the 25%
+/// tolerance with room to spare; the baked case runs highest because
+/// `estimate` prices it identically to stock while the real bake compresses
+/// worse and loses cross-stem dedup (see `CamoSelection::Baked` in
 /// `texture_bytes`), but that gap does not need a separate term to stay in
 /// tolerance.
 const PNG_RATIO: f64 = 0.2004;
@@ -122,10 +123,15 @@ pub struct ExportSizeModel {
     mesh_lods: Vec<Vec<MeshCounts>>,
     /// Armor totals. Armor has no LoD ladder.
     armor: MeshCounts,
-    /// Base albedo ladder per MFM stem.
+    /// Base albedo ladder per resolved DDS path (not per MFM stem: several
+    /// stems can resolve to the same file, e.g. a `_wire` material variant
+    /// falling back to its unsuffixed sibling's albedo, and `ImageCache`
+    /// embeds that shared file once).
     base_ladders: HashMap<String, TextureLadder>,
-    /// The distinct texture ladders each scheme reads.
-    scheme_ladders: HashMap<CamoSchemeId, Vec<TextureLadder>>,
+    /// Each scheme's `(path, ladder)` pairs, so pricing a selection can union
+    /// paths with the base set and with other selected schemes rather than
+    /// summing per-scheme subtotals that double-count a shared path.
+    scheme_ladders: HashMap<CamoSchemeId, Vec<(String, TextureLadder)>>,
 }
 
 impl ExportSizeModel {
@@ -133,11 +139,18 @@ impl ExportSizeModel {
         mesh_lods: Vec<Vec<MeshCounts>>,
         armor: MeshCounts,
         base_ladders: HashMap<String, TextureLadder>,
-        scheme_ladders: HashMap<CamoSchemeId, Vec<TextureLadder>>,
+        scheme_ladders: HashMap<CamoSchemeId, Vec<(String, TextureLadder)>>,
     ) -> Self {
         Self { mesh_lods, armor, base_ladders, scheme_ladders }
     }
 
+    /// Prices `options` against this model's gathered data. Only `lod`,
+    /// `contents`, `textures`, `texture_lod` and `camos` are repriceable this
+    /// way: `hull`, `damaged` and `module_overrides` are baked into the model
+    /// at [`ShipModelContext::size_model`] build time (they select which
+    /// geometry and render sets were gathered in the first place), so passing
+    /// an `options` with a different `hull`, `damaged` or `module_overrides`
+    /// than the model was built with silently prices the wrong ship.
     pub fn estimate(&self, options: &ShipExportOptions) -> SizeEstimate {
         let mut geometry_bytes = 0;
 
@@ -162,20 +175,26 @@ impl ExportSizeModel {
     }
 
     fn texture_bytes(&self, options: &ShipExportOptions) -> u64 {
-        let base: u64 = self.base_ladders.values().map(|l| l.raw_bytes(options.texture_lod)).sum();
-
-        let raw = match &options.camos {
+        let raw: u64 = match &options.camos {
             // A baked camo replaces each stem's base albedo at the base's own
             // resolution, so it costs what stock costs.
-            CamoSelection::BaseOnly | CamoSelection::Baked(_) => base,
+            CamoSelection::BaseOnly | CamoSelection::Baked(_) => {
+                self.base_ladders.values().map(|l| l.raw_bytes(options.texture_lod)).sum()
+            }
             CamoSelection::Variants(ids) => {
-                let variants: u64 = ids
-                    .iter()
-                    .filter_map(|id| self.scheme_ladders.get(id))
-                    .flat_map(|ladders| ladders.iter())
-                    .map(|l| l.raw_bytes(options.texture_lod))
-                    .sum();
-                base + variants
+                // `ImageCache` dedups by content across the whole file, so a path a
+                // selected scheme shares with the base set (or with another selected
+                // scheme) must be priced once, not once per set it appears in.
+                let mut by_path: HashMap<&str, u64> = HashMap::new();
+                for (path, ladder) in &self.base_ladders {
+                    by_path.insert(path.as_str(), ladder.raw_bytes(options.texture_lod));
+                }
+                for id in ids {
+                    for (path, ladder) in self.scheme_ladders.get(id).into_iter().flatten() {
+                        by_path.insert(path.as_str(), ladder.raw_bytes(options.texture_lod));
+                    }
+                }
+                by_path.values().sum()
             }
         };
         (raw as f64 * PNG_RATIO) as u64
@@ -208,8 +227,11 @@ mod tests {
         let mut base_ladders = HashMap::new();
         base_ladders.insert("HULL".to_string(), ladder());
         let mut scheme_ladders = HashMap::new();
-        scheme_ladders.insert(CamoSchemeId(0), vec![ladder()]);
-        scheme_ladders.insert(CamoSchemeId(1), vec![ladder(), ladder()]);
+        scheme_ladders.insert(CamoSchemeId(0), vec![("scheme0/tex".to_string(), ladder())]);
+        scheme_ladders.insert(
+            CamoSchemeId(1),
+            vec![("scheme1/tex_a".to_string(), ladder()), ("scheme1/tex_b".to_string(), ladder())],
+        );
         ExportSizeModel::new(mesh_lods, armor, base_ladders, scheme_ladders)
     }
 
@@ -285,5 +307,24 @@ mod tests {
         let capped =
             m.estimate(&ShipExportOptions { texture_lod: TextureLod::Capped(MaxEdge::new(1024).unwrap()), ..base });
         assert!(capped.texture_bytes * 4 < full.texture_bytes, "4096 to 1024 is a 16x area cut");
+    }
+
+    #[test]
+    fn a_scheme_texture_sharing_a_path_with_base_is_not_double_priced() {
+        let mesh_lods = vec![vec![MeshCounts { vertices: 0, indices: 0 }]];
+        let armor = MeshCounts { vertices: 0, indices: 0 };
+        let mut base_ladders = HashMap::new();
+        base_ladders.insert("shared/path.dds".to_string(), ladder());
+        let mut scheme_ladders = HashMap::new();
+        scheme_ladders.insert(CamoSchemeId(0), vec![("shared/path.dds".to_string(), ladder())]);
+        let m = ExportSizeModel::new(mesh_lods, armor, base_ladders, scheme_ladders);
+
+        let base = ShipExportOptions { textures: true, ..options() };
+        let stock = m.estimate(&ShipExportOptions { camos: CamoSelection::BaseOnly, ..base.clone() });
+        let variant = m.estimate(&ShipExportOptions { camos: CamoSelection::Variants(vec![CamoSchemeId(0)]), ..base });
+        assert_eq!(
+            variant.texture_bytes, stock.texture_bytes,
+            "ImageCache dedups by content, so a scheme reusing the base's own path costs nothing extra"
+        );
     }
 }

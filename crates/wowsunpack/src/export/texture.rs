@@ -479,33 +479,45 @@ pub fn load_texture_bytes(
     scheme: &str,
     lod: TextureLod,
 ) -> Option<(String, Vec<u8>)> {
-    let (base, path) = resolve_scheme_texture_path(vfs, mfm_stem, scheme)?;
-    load_dds_from_vfs(vfs, &path, lod).map(|data| (base, data))
-}
-
-/// The `(base_name, path)` a scheme's texture resolves to for `mfm_stem`, without
-/// reading it. Shared by [`load_texture_bytes`] and [`scheme_texture_path`] so path
-/// resolution and byte loading cannot drift apart.
-fn resolve_scheme_texture_path(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> Option<(String, String)> {
-    for base in texture_base_names(mfm_stem) {
-        // Try explicit albedo channel first ({base}_{scheme}_a), then direct ({base}_{scheme}).
-        let candidates =
-            [format!("{TEXTURE_BASE}/{base}_{scheme}_a.dds"), format!("{TEXTURE_BASE}/{base}_{scheme}.dds")];
-
-        for path in &candidates {
-            if vfs_file_exists(vfs, path) {
-                return Some((base, path.clone()));
-            }
+    // Tries every candidate for real: a resolved path that merely *exists* can
+    // still fail to load (e.g. a zero-length placeholder shadowing a later,
+    // real candidate), and the loader must not stop there.
+    for (base, path) in scheme_texture_candidates(mfm_stem, scheme) {
+        if let Some(data) = load_dds_from_vfs(vfs, &path, lod) {
+            return Some((base, data));
         }
     }
-
     None
 }
 
-/// The DDS path a scheme's texture resolves to for `mfm_stem`, without reading it.
-/// Pricing an export must not pay for a decode.
+/// Ordered `(base_name, path)` candidates a scheme's texture might resolve to
+/// for `mfm_stem`: explicit albedo channel first, then direct replacement, for
+/// every name [`texture_base_names`] yields. Shared by [`load_texture_bytes`]
+/// and [`scheme_texture_path`] so the two never drift on candidate order.
+fn scheme_texture_candidates(mfm_stem: &str, scheme: &str) -> Vec<(String, String)> {
+    let mut candidates = Vec::new();
+    for base in texture_base_names(mfm_stem) {
+        // Try explicit albedo channel first ({base}_{scheme}_a), then direct ({base}_{scheme}).
+        let albedo = format!("{TEXTURE_BASE}/{base}_{scheme}_a.dds");
+        let direct = format!("{TEXTURE_BASE}/{base}_{scheme}.dds");
+        candidates.push((base.clone(), albedo));
+        candidates.push((base, direct));
+    }
+    candidates
+}
+
+/// The DDS path a scheme's texture resolves to for `mfm_stem`, without reading
+/// it. Pricing an export must not pay for a decode, so this is a cheap
+/// existence check rather than [`load_texture_bytes`]'s "did it actually load"
+/// — a same-named zero-length file could in principle shadow a later, real
+/// candidate here and price it as absent, which is an acceptable miss for a
+/// best-effort price (see `size_model`'s "contributes zero" policy) but must
+/// never happen in [`load_texture_bytes`], which does not share this shortcut.
 pub fn scheme_texture_path(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> Option<String> {
-    resolve_scheme_texture_path(vfs, mfm_stem, scheme).map(|(_, path)| path)
+    scheme_texture_candidates(mfm_stem, scheme)
+        .into_iter()
+        .find(|(_, path)| vfs_file_exists(vfs, path))
+        .map(|(_, path)| path)
 }
 
 /// Load the base albedo texture for a hull mesh from the VFS.
@@ -521,18 +533,25 @@ pub fn scheme_texture_path(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> 
 /// `mfm_full_path` is the full VFS path to the MFM file (e.g. ending in `.mfm`).
 /// Returns DDS bytes if found.
 pub fn load_base_albedo_bytes(vfs: &vfs::VfsPath, mfm_full_path: &str, lod: TextureLod) -> Option<Vec<u8>> {
-    let path = base_albedo_path(vfs, mfm_full_path)?;
-    load_dds_from_vfs(vfs, &path, lod)
+    // Tries every candidate for real: a resolved path that merely *exists* can
+    // still fail to load (e.g. a zero-length placeholder shadowing a later,
+    // real candidate), and the loader must not stop there.
+    for path in base_albedo_candidates(mfm_full_path)? {
+        if let Some(data) = load_dds_from_vfs(vfs, &path, lod) {
+            return Some(data);
+        }
+    }
+    None
 }
 
-/// The base albedo DDS path for a hull mesh's MFM, without reading it.
-///
-/// Candidate search order mirrors [`load_base_albedo_bytes`]: the `textures/`
+/// Ordered candidate paths for a hull mesh's base albedo: the `textures/`
 /// sibling directory, the MFM's own directory, and its `TILED/` subdirectory,
-/// each tried with the `_a` then `_od` albedo suffix.
+/// each tried with the `_a` then `_od` albedo suffix, for every name
+/// [`texture_base_names`] yields. Shared by [`load_base_albedo_bytes`] and
+/// [`base_albedo_path`] so the two never drift on candidate order.
 ///
 /// `mfm_full_path` is the full VFS path to the MFM file (e.g. ending in `.mfm`).
-pub fn base_albedo_path(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option<String> {
+fn base_albedo_candidates(mfm_full_path: &str) -> Option<Vec<String>> {
     let dir = mfm_full_path.rsplit_once('/')?.0;
     let mfm_filename = mfm_full_path.rsplit_once('/')?.1;
     let stem = mfm_filename.strip_suffix(".mfm")?;
@@ -548,8 +567,8 @@ pub fn base_albedo_path(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option<Strin
     // (underwater TILEDLAND materials store textures in a TILED/ subdirectory).
     let tiled_subdir = format!("{dir}/TILED");
 
+    let mut candidates = Vec::new();
     for base in texture_base_names(stem) {
-        let mut candidates = Vec::new();
         for suffix in &albedo_suffixes {
             if let Some(tex_dir) = &tex_sibling_dir {
                 candidates.push(format!("{tex_dir}/{base}{suffix}.dds"));
@@ -557,15 +576,22 @@ pub fn base_albedo_path(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option<Strin
             candidates.push(format!("{dir}/{base}{suffix}.dds"));
             candidates.push(format!("{tiled_subdir}/{base}{suffix}.dds"));
         }
-
-        for path in &candidates {
-            if vfs_file_exists(vfs, path) {
-                return Some(path.clone());
-            }
-        }
     }
+    Some(candidates)
+}
 
-    None
+/// The base albedo DDS path for a hull mesh's MFM, without reading it.
+/// Pricing an export must not pay for a decode, so this is a cheap existence
+/// check rather than [`load_base_albedo_bytes`]'s "did it actually load" — a
+/// same-named zero-length file could in principle shadow a later, real
+/// candidate here and price it as absent, which is an acceptable miss for a
+/// best-effort price (see `size_model`'s "contributes zero" policy) but must
+/// never happen in [`load_base_albedo_bytes`], which does not share this
+/// shortcut.
+///
+/// `mfm_full_path` is the full VFS path to the MFM file (e.g. ending in `.mfm`).
+pub fn base_albedo_path(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option<String> {
+    base_albedo_candidates(mfm_full_path)?.into_iter().find(|path| vfs_file_exists(vfs, path))
 }
 
 /// Strip texture channel suffixes (`_a`, `_mg`, `_mgn`) from a raw scheme name.

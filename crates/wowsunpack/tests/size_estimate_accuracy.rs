@@ -104,3 +104,31 @@ fn a_baked_camo_export_is_close() {
 
     check("WSD011_Smaland_1955", ShipExportOptions { camos: CamoSelection::Baked(id), ..Default::default() });
 }
+
+/// `ImageCache` dedups by content across the whole file, so pricing several
+/// selected schemes must union their distinct paths with the base set rather
+/// than sum per-scheme subtotals (which would double-count any path a scheme
+/// shares with the base or with another selected scheme). This is the
+/// dialog's headline case: a user ticking more than one camo.
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn several_variants_export_is_close() {
+    let assets = ShipAssets::from_game_dir(&game_dir()).expect("assets");
+    let vehicle = assets
+        .metadata()
+        .params()
+        .iter()
+        .filter_map(|p| p.vehicle())
+        .find(|v| v.model_path().map(|mp| mp.contains("WSD011_Smaland_1955")).unwrap_or(false))
+        .cloned()
+        .unwrap_or_else(|| panic!("no vehicle for WSD011_Smaland_1955"));
+    let probe = assets
+        .load_ship_from_vehicle(&vehicle, &ShipExportOptions { textures: false, ..Default::default() })
+        .expect("ctx");
+    let infos = probe.camo_texture_source().expect("source").scheme_infos();
+    assert!(infos.len() >= 3, "Smaland should offer several schemes");
+    // Non-adjacent ids, so a shifted enumeration cannot pass by accident.
+    let picked = vec![infos[0].id, infos[2].id];
+
+    check("WSD011_Smaland_1955", ShipExportOptions { camos: CamoSelection::Variants(picked), ..Default::default() });
+}

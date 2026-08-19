@@ -1798,41 +1798,40 @@ fn collect_primitives(
     Ok(result)
 }
 
-/// Vertex and index totals for one sub-model at one LoD, using the same
-/// collection the export runs so the counts cannot drift from it.
-pub(crate) fn primitive_counts(
-    visual: &VisualPrototype,
-    geometry: &MergedGeometry,
-    db: &PrototypeDatabase<'_>,
-    self_id_index: &HashMap<u64, usize>,
-    lod: &crate::models::visual::Lod,
-    damaged: bool,
-) -> Result<super::size_estimate::MeshCounts, Report<ExportError>> {
-    let prims = collect_primitives(visual, geometry, Some(db), Some(self_id_index), lod, damaged, None)?;
-    Ok(super::size_estimate::MeshCounts {
-        vertices: prims.iter().map(|p| p.positions.len() as u64).sum(),
-        indices: prims.iter().map(|p| p.indices.len() as u64).sum(),
-    })
-}
-
-/// The distinct MFM stems primitives at this LoD actually carry, using the same
-/// render-set exclusion `collect_primitives` applies.
+/// Vertex/index totals and the distinct MFM stems reached, for one sub-model
+/// at one LoD, from a single `collect_primitives` pass that mirrors the
+/// export's own collection so neither figure can drift from it.
 ///
 /// A stem whose only render sets are excluded (e.g. `_crack_` in an intact
-/// export) never reaches [`add_primitive_to_root`], which creates a material
-/// (and pays for its texture) lazily per surviving primitive. Pricing every
-/// stem `collect_mfm_info` finds, unconditionally, charges for textures the
+/// export) is absent from `mfm_stems`: it never reaches
+/// [`add_primitive_to_root`], which creates a material (and pays for its
+/// texture) lazily per surviving primitive. Pricing every stem
+/// `collect_mfm_info` finds, unconditionally, would charge for textures the
 /// export never embeds.
-pub(crate) fn primitive_mfm_stems(
+///
+/// Counts and stems are produced together, not by two separate passes, so a
+/// caller pricing many instances of a shared model (`ShipModelContext::
+/// model_summary`) only pays for the decode once per unique model.
+pub(crate) struct PrimitiveSummary {
+    pub counts: super::size_estimate::MeshCounts,
+    pub mfm_stems: HashSet<String>,
+}
+
+pub(crate) fn primitive_summary(
     visual: &VisualPrototype,
     geometry: &MergedGeometry,
     db: &PrototypeDatabase<'_>,
     self_id_index: &HashMap<u64, usize>,
     lod: &crate::models::visual::Lod,
     damaged: bool,
-) -> Result<HashSet<String>, Report<ExportError>> {
+) -> Result<PrimitiveSummary, Report<ExportError>> {
     let prims = collect_primitives(visual, geometry, Some(db), Some(self_id_index), lod, damaged, None)?;
-    Ok(prims.into_iter().filter_map(|p| p.mfm_stem).collect())
+    let counts = super::size_estimate::MeshCounts {
+        vertices: prims.iter().map(|p| p.positions.len() as u64).sum(),
+        indices: prims.iter().map(|p| p.indices.len() as u64).sum(),
+    };
+    let mfm_stems = prims.into_iter().filter_map(|p| p.mfm_stem).collect();
+    Ok(PrimitiveSummary { counts, mfm_stems })
 }
 
 struct UnpackedVertices {

@@ -1,6 +1,7 @@
 //! Lazy camo texture support: scheme identity, metadata, and on-demand decode.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use crate::export::camouflage;
 use crate::export::camouflage::UvTransform;
@@ -272,15 +273,25 @@ impl CamoTextureSource {
             .collect()
     }
 
-    /// The distinct DDS paths one scheme reads. Pricing an export must not pay
-    /// for a decode, so this resolves paths only.
-    pub fn scheme_texture_paths(&self, id: CamoSchemeId) -> Result<Vec<String>, CamoDecodeError> {
+    /// The distinct DDS paths one scheme reads, restricted to `reachable`
+    /// MFM stems. Pricing an export must not pay for a decode, so this
+    /// resolves paths only. `reachable` excludes stems whose only render sets
+    /// are excluded for the ship's damage state (e.g. `_crack_` in an intact
+    /// export): those stems never reach a surviving primitive, so a camo
+    /// applied to them never gets embedded either, and pricing them would
+    /// charge for a texture the export does not carry.
+    pub fn scheme_texture_paths(
+        &self,
+        id: CamoSchemeId,
+        reachable: &HashSet<String>,
+    ) -> Result<Vec<String>, CamoDecodeError> {
         let kind = self.kinds.get(id.0).ok_or(CamoDecodeError::UnknownId(id))?;
         let mut paths: Vec<String> = match kind {
             CamoSchemeKind::Legacy(i) => {
                 let scheme = &self.legacy_schemes[*i];
                 self.unique_infos
                     .iter()
+                    .filter(|info| reachable.contains(&info.stem))
                     .filter_map(|info| texture::scheme_texture_path(&self.vfs, &info.stem, scheme))
                     .collect()
             }
@@ -288,6 +299,7 @@ impl CamoTextureSource {
                 let s = &self.mat_schemes[*i];
                 self.unique_stems
                     .iter()
+                    .filter(|stem| reachable.contains(*stem))
                     .filter_map(|stem| {
                         let cat = camouflage::classify_part_category(stem);
                         crate::export::ship::resolve_part_texture(&s.textures, cat, s.tiled).cloned()
