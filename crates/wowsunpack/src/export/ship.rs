@@ -1821,7 +1821,7 @@ impl ShipModelContext {
         // DDS tail plus up to three existence probes, and the dialog that drives
         // this only ever wants the ids the user has actually ticked. A scheme
         // selected later (a fresh camo pick) is priced lazily via
-        // `Self::scheme_ladders` and merged into the model with
+        // `Self::scheme_ladders_batch` and merged into the model with
         // `ExportSizeModel::insert_scheme_ladders`.
         let mut scheme_ladders: HashMap<CamoSchemeId, Vec<(String, size_estimate::TextureLadder)>> = HashMap::new();
         for id in self.options.camos.priced_scheme_ids() {
@@ -1836,20 +1836,6 @@ impl ShipModelContext {
         Ok(size_estimate::ExportSizeModel::new(mesh_lods, armor, base_ladders, scheme_ladders))
     }
 
-    /// Resolve and read one camo scheme's texture ladders, without touching
-    /// geometry. Convenience wrapper over [`Self::scheme_ladders_batch`] for a
-    /// single id; a caller resolving more than one id in the same request
-    /// (the dialog does, whenever the user has ticked several camos) should
-    /// call the batch form directly instead of looping this, since each call
-    /// independently re-parses assets.bin, rebuilds the self-id index and
-    /// re-derives the reachable-stem set.
-    ///
-    /// Reads DDS tails over the VFS, so callers must run this off the UI
-    /// thread.
-    pub fn scheme_ladders(&self, id: CamoSchemeId) -> Result<size_estimate::SchemeLadders, Report> {
-        Ok(self.scheme_ladders_batch(&[id])?.into_iter().next().map(|(_, ladders)| ladders).unwrap_or_default())
-    }
-
     /// Resolve and read several camo schemes' texture ladders in one pass,
     /// without touching geometry. `size_model` only prices the schemes
     /// `self.options.camos` selected at load time; a scheme the user selects
@@ -1858,9 +1844,8 @@ impl ShipModelContext {
     ///
     /// The assets.bin re-parse, the self-id index and the reachable-stem set
     /// (a `model_summary` pass over every unique hull/turret/misc model) are
-    /// each paid once for the whole batch, not once per id: on Smaland that
-    /// shared cost is the entire size of `Self::scheme_ladders`'s own body,
-    /// so calling it in a loop for N ids would pay it N times for no reason.
+    /// each paid once for the whole batch, not once per id: calling this once
+    /// per id in a loop would pay that shared cost N times for no reason.
     ///
     /// Reads DDS tails over the VFS, so callers must run this off the UI
     /// thread.
@@ -1889,17 +1874,6 @@ impl ShipModelContext {
                 Ok((id, ladders))
             })
             .collect()
-    }
-
-    /// Build the complete texture set the options select (base albedo plus the
-    /// selected camo schemes) for this ship. Self-contained: re-parses the
-    /// prototype DB and collects MFM infos from the hull and mounted-turret visuals.
-    ///
-    /// Independent of `options.textures` (which only controls GLB texture embedding):
-    /// callers that ask for the texture set want the selected camo schemes regardless.
-    pub fn build_full_texture_set(&self) -> Result<TextureSet, Report> {
-        let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to re-parse assets.bin")?;
-        self.selected_texture_set(&db)
     }
 
     /// Build a lazy [`camo_textures::CamoTextureSource`] for this ship: cheap scheme
@@ -1990,8 +1964,6 @@ impl ShipModelContext {
                 source.scheme_info(*id).ok_or_else(|| Report::new(camo_textures::CamoDecodeError::UnknownId(*id)))?;
             let textures = source.decode(*id)?;
             tex_set.camo_schemes.push((info.display_name.clone(), textures));
-            tex_set.camo_origins.push(info.origin);
-            tex_set.camo_use_color_scheme.push(info.use_color_scheme);
             for (stem, xform) in &info.uv_transforms {
                 tex_set
                     .tiled_uv_transforms
@@ -2598,9 +2570,9 @@ mod tests {
     /// the user selects a camo `size_model` was not built with: `size_model`
     /// itself (via `CamoSelection::priced_scheme_ids`) prices zero schemes for
     /// `ShipExportOptions::default()` (`CamoSelection::BaseOnly`), so every
-    /// scheme is initially "pending"; `scheme_ladders` must resolve one on its
-    /// own and produce ladders `ExportSizeModel::insert_scheme_ladders` can
-    /// merge in to clear that. Ignored: needs a World of Warships install.
+    /// scheme is initially "pending"; `scheme_ladders_batch` must resolve one
+    /// on its own and produce ladders `ExportSizeModel::insert_scheme_ladders`
+    /// can merge in to clear that. Ignored: needs a World of Warships install.
     #[test]
     #[ignore = "requires a World of Warships install"]
     fn scheme_ladders_prices_a_scheme_the_size_model_was_not_built_with() {
@@ -2631,7 +2603,13 @@ mod tests {
         );
         assert!(model.priced_estimate(&options).is_err(), "a pending scheme must refuse to price silently");
 
-        let ladders = ctx.scheme_ladders(id).expect("scheme_ladders");
+        let ladders = ctx
+            .scheme_ladders_batch(&[id])
+            .expect("scheme_ladders_batch")
+            .into_iter()
+            .next()
+            .map(|(_, ladders)| ladders)
+            .expect("one id requested, one result returned");
         assert!(!ladders.is_empty(), "Smaland's first scheme should resolve at least one texture path");
 
         model.insert_scheme_ladders(id, ladders);
@@ -2640,14 +2618,14 @@ mod tests {
     }
 
     /// `scheme_ladders_batch` hoists the assets.bin re-parse, self-id index
-    /// and reachable-stem pass out of the per-id loop `scheme_ladders`
-    /// (looped) would otherwise pay N times. Measures both approaches for
+    /// and reachable-stem pass out of the per-id loop that calling it once
+    /// per id would otherwise pay N times. Measures both approaches for
     /// three schemes on Smaland and reports the wall-clock, since a batch API
     /// that isn't actually cheaper would be pointless ceremony. Ignored:
     /// needs a World of Warships install.
     #[test]
     #[ignore = "requires a World of Warships install"]
-    fn scheme_ladders_batch_is_cheaper_than_looping_scheme_ladders() {
+    fn scheme_ladders_batch_beats_looping_it_per_id() {
         let game_dir = std::env::var_os("WOWS_DIR")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| std::path::PathBuf::from(r"E:\WoWs\World_of_Warships"));
@@ -2668,15 +2646,15 @@ mod tests {
 
         let looped_started = std::time::Instant::now();
         for &id in &ids {
-            ctx.scheme_ladders(id).expect("scheme_ladders");
+            ctx.scheme_ladders_batch(&[id]).expect("scheme_ladders_batch");
         }
         let looped_elapsed = looped_started.elapsed();
-        eprintln!("[measured] three schemes via scheme_ladders() looped: {looped_elapsed:?}");
+        eprintln!("[measured] three schemes via scheme_ladders_batch() looped one id at a time: {looped_elapsed:?}");
 
         let batch_started = std::time::Instant::now();
         let batch = ctx.scheme_ladders_batch(&ids).expect("scheme_ladders_batch");
         let batch_elapsed = batch_started.elapsed();
-        eprintln!("[measured] three schemes via scheme_ladders_batch(): {batch_elapsed:?}");
+        eprintln!("[measured] three schemes via scheme_ladders_batch() in one call: {batch_elapsed:?}");
 
         assert_eq!(batch.len(), 3);
         assert!(

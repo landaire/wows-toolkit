@@ -2065,11 +2065,6 @@ pub struct TextureSet {
     /// Camouflage variant PNGs: scheme name → (MFM stem → PNG bytes).
     /// Only stems that have a texture for this scheme are included.
     pub camo_schemes: Vec<(String, HashMap<String, Vec<u8>>)>,
-    /// Origin of each camo scheme, index-aligned with `camo_schemes`.
-    pub camo_origins: Vec<CamoOrigin>,
-    /// Whether each camo scheme recolors over the base (preserving ship detail) vs pasting an
-    /// opaque texture. Index-aligned with `camo_schemes`.
-    pub camo_use_color_scheme: Vec<bool>,
     /// UV scale/offset for tiled camo schemes. Key = `(scheme_index, mfm_stem)`.
     /// Only present for tiled camos; non-tiled camos use default UVs.
     pub tiled_uv_transforms: HashMap<(usize, String), [f32; 4]>,
@@ -2083,8 +2078,6 @@ impl TextureSet {
         Self {
             base: HashMap::new(),
             camo_schemes: Vec::new(),
-            camo_origins: Vec::new(),
-            camo_use_color_scheme: Vec::new(),
             tiled_uv_transforms: HashMap::new(),
             base_uv_transforms: HashMap::new(),
         }
@@ -2113,16 +2106,41 @@ impl MaterialCache {
 
 /// Deduplicates embedded images by content. The same texture path backs many
 /// parts, and every camo scheme repeats that, so without this the identical PNG
-/// is embedded once per part per scheme. Keyed by the bytes themselves rather
-/// than a hash: a false merge would silently paint the wrong texture, and the
-/// bytes are already held by the `TextureSet`.
+/// is embedded once per part per scheme. Keyed by a content hash rather than the
+/// bytes themselves: the `TextureSet` already owns the bytes for the whole export,
+/// so keying by an owned `Vec<u8>` copy would hold a second copy of every distinct
+/// PNG in RAM alongside it. `ImageContentKey` pairs a 64-bit hash with the byte
+/// length; both would have to collide for two distinct PNGs to be merged, which
+/// is not a practical risk at the few-hundred-image scale one export handles
+/// (birthday bound on a 64-bit space), and the cache does not outlive the export
+/// that built it.
 struct ImageCache {
-    images: HashMap<Vec<u8>, json::Index<json::Image>>,
+    images: HashMap<ImageContentKey, json::Index<json::Image>>,
 }
 
 impl ImageCache {
     fn new() -> Self {
         Self { images: HashMap::new() }
+    }
+}
+
+/// A cheap stand-in for a PNG's bytes, used only as an [`ImageCache`] key.
+/// `DefaultHasher` (SipHash) is not guaranteed stable across Rust releases,
+/// which is irrelevant here: the key never leaves the process and never
+/// outlives the single export that computed it.
+#[derive(PartialEq, Eq, Hash)]
+struct ImageContentKey {
+    hash: u64,
+    len: usize,
+}
+
+impl ImageContentKey {
+    fn new(bytes: &[u8]) -> Self {
+        use std::hash::Hash;
+        use std::hash::Hasher;
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        Self { hash: hasher.finish(), len: bytes.len() }
     }
 }
 
@@ -2145,7 +2163,8 @@ fn create_textured_material(
     image_name: Option<String>,
     uv_transform: Option<[f32; 4]>,
 ) -> json::Index<json::Material> {
-    let image = match image_cache.images.get(png_bytes) {
+    let key = ImageContentKey::new(png_bytes);
+    let image = match image_cache.images.get(&key) {
         Some(existing) => *existing,
         None => {
             let byte_offset = bin_data.len();
@@ -2171,7 +2190,7 @@ fn create_textured_material(
                 extensions: Default::default(),
                 extras: Default::default(),
             });
-            image_cache.images.insert(png_bytes.to_vec(), image);
+            image_cache.images.insert(key, image);
             image
         }
     };
