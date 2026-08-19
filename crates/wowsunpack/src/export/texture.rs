@@ -508,8 +508,8 @@ fn scheme_texture_candidates(mfm_stem: &str, scheme: &str) -> Vec<(String, Strin
 
 /// The DDS path a scheme's texture resolves to for `mfm_stem`, without reading
 /// it. Pricing an export must not pay for a decode, so this is a cheap
-/// existence check rather than [`load_texture_bytes`]'s "did it actually load"
-/// — a same-named zero-length file could in principle shadow a later, real
+/// existence check rather than [`load_texture_bytes`]'s "did it actually load" -
+/// a same-named zero-length file could in principle shadow a later, real
 /// candidate here and price it as absent, which is an acceptable miss for a
 /// best-effort price (see `size_model`'s "contributes zero" policy) but must
 /// never happen in [`load_texture_bytes`], which does not share this shortcut.
@@ -582,7 +582,7 @@ fn base_albedo_candidates(mfm_full_path: &str) -> Option<Vec<String>> {
 
 /// The base albedo DDS path for a hull mesh's MFM, without reading it.
 /// Pricing an export must not pay for a decode, so this is a cheap existence
-/// check rather than [`load_base_albedo_bytes`]'s "did it actually load" — a
+/// check rather than [`load_base_albedo_bytes`]'s "did it actually load" - a
 /// same-named zero-length file could in principle shadow a later, real
 /// candidate here and price it as absent, which is an acceptable miss for a
 /// best-effort price (see `size_model`'s "contributes zero" policy) but must
