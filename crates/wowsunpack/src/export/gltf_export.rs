@@ -3237,10 +3237,12 @@ fn clamped_lod(requested: usize, authored: usize) -> Option<usize> {
 /// Each sub-model becomes a separate selectable object in Blender.
 /// `texture_set` contains base albedo + camo variant PNGs for material textures.
 /// `armor_models` are added as additional untextured semi-transparent meshes.
+#[allow(clippy::too_many_arguments)]
 pub fn export_ship_glb(
     sub_models: &[SubModel<'_>],
     armor_models: &[ArmorSubModel],
     db: &PrototypeDatabase<'_>,
+    contents: super::ship::ExportContents,
     lod: usize,
     texture_set: &TextureSet,
     damaged: bool,
@@ -3264,53 +3266,61 @@ pub fn export_ship_glb(
 
     let self_id_index = db.build_self_id_index();
 
-    for sub in sub_models {
-        let Some(sub_lod) = clamped_lod(lod, sub.visual.lods.len()) else {
-            eprintln!("Warning: sub-model '{}' has no LODs, skipping", sub.name);
-            continue;
-        };
+    if contents.includes_mesh() {
+        for sub in sub_models {
+            let Some(sub_lod) = clamped_lod(lod, sub.visual.lods.len()) else {
+                eprintln!("Warning: sub-model '{}' has no LODs, skipping", sub.name);
+                continue;
+            };
 
-        let lod_entry = &sub.visual.lods[sub_lod];
-        let primitives = collect_primitives(
-            sub.visual,
-            sub.geometry,
-            Some(db),
-            Some(&self_id_index),
-            lod_entry,
-            damaged,
-            sub.barrel_pitch.as_ref(),
-        )?;
+            let lod_entry = &sub.visual.lods[sub_lod];
+            let primitives = collect_primitives(
+                sub.visual,
+                sub.geometry,
+                Some(db),
+                Some(&self_id_index),
+                lod_entry,
+                damaged,
+                sub.barrel_pitch.as_ref(),
+            )?;
 
-        if primitives.is_empty() {
-            eprintln!("Warning: sub-model '{}' has no primitives for LOD {sub_lod}", sub.name);
-            continue;
+            if primitives.is_empty() {
+                eprintln!("Warning: sub-model '{}' has no primitives for LOD {sub_lod}", sub.name);
+                continue;
+            }
+
+            let mut gltf_primitives = Vec::new();
+            for prim in &primitives {
+                let gltf_prim = add_primitive_to_root(
+                    &mut root,
+                    &mut bin_data,
+                    prim,
+                    texture_set,
+                    &mut mat_cache,
+                    &mut image_cache,
+                )?;
+                gltf_primitives.push(gltf_prim);
+            }
+
+            // Create a mesh named after the sub-model.
+            let mesh = root.push(json::Mesh {
+                primitives: gltf_primitives,
+                weights: None,
+                name: Some(sub.name.clone()),
+                extensions: Default::default(),
+                extras: Default::default(),
+            });
+
+            // Create a node named after the sub-model, referencing the mesh.
+            let node = root.push(json::Node {
+                mesh: Some(mesh),
+                name: Some(sub.name.clone()),
+                matrix: sub.transform.map(negate_z_transform),
+                ..Default::default()
+            });
+
+            grouped_nodes.entry(sub.group).or_default().push(node);
         }
-
-        let mut gltf_primitives = Vec::new();
-        for prim in &primitives {
-            let gltf_prim =
-                add_primitive_to_root(&mut root, &mut bin_data, prim, texture_set, &mut mat_cache, &mut image_cache)?;
-            gltf_primitives.push(gltf_prim);
-        }
-
-        // Create a mesh named after the sub-model.
-        let mesh = root.push(json::Mesh {
-            primitives: gltf_primitives,
-            weights: None,
-            name: Some(sub.name.clone()),
-            extensions: Default::default(),
-            extras: Default::default(),
-        });
-
-        // Create a node named after the sub-model, referencing the mesh.
-        let node = root.push(json::Node {
-            mesh: Some(mesh),
-            name: Some(sub.name.clone()),
-            matrix: sub.transform.map(negate_z_transform),
-            ..Default::default()
-        });
-
-        grouped_nodes.entry(sub.group).or_default().push(node);
     }
 
     // Add armor meshes grouped under "Armor".

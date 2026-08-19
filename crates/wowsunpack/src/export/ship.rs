@@ -53,9 +53,26 @@ use super::gltf_export::TextureSet;
 use super::part_group::PartGroup;
 use super::texture;
 
-// ---------------------------------------------------------------------------
-// Public types
-// ---------------------------------------------------------------------------
+/// What geometry the exported GLB carries. Armor is a per-zone triangle soup for
+/// the hull and every mount, so a caller who wants the visual model should not
+/// pay to tessellate and embed it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ExportContents {
+    #[default]
+    Mesh,
+    Armor,
+    MeshAndArmor,
+}
+
+impl ExportContents {
+    pub fn includes_mesh(self) -> bool {
+        matches!(self, Self::Mesh | Self::MeshAndArmor)
+    }
+
+    pub fn includes_armor(self) -> bool {
+        matches!(self, Self::Armor | Self::MeshAndArmor)
+    }
+}
 
 /// Options controlling ship model export.
 #[derive(Debug, Clone)]
@@ -72,12 +89,10 @@ pub struct ShipExportOptions {
     /// When true, crack geometry is included and patch geometry is excluded.
     /// Default: false (intact hull).
     pub damaged: bool,
-    /// Include armor plating geometry in the GLB, grouped under "Armor".
-    /// Opt-in, so callers who want only the visual model do not pay to
-    /// tessellate and embed a per-zone triangle soup for the hull and every
-    /// mount. Does not affect [`ShipModelContext::interactive_armor_meshes`],
-    /// which serves armor to viewers independently. Default: false.
-    pub armor: bool,
+    /// What geometry reaches the GLB. Default: [`ExportContents::Mesh`].
+    /// Does not affect [`ShipModelContext::interactive_armor_meshes`], which
+    /// serves armor to viewers independently.
+    pub contents: ExportContents,
     /// Detail level for textures embedded in the GLB. Default: [`TextureLod::Full`].
     pub texture_lod: texture::TextureLod,
     /// Module overrides: component type key (e.g. "artillery") to component name.
@@ -92,7 +107,7 @@ impl Default for ShipExportOptions {
             hull: None,
             textures: true,
             damaged: false,
-            armor: false,
+            contents: ExportContents::Mesh,
             texture_lod: texture::TextureLod::Full,
             module_overrides: std::collections::HashMap::new(),
         }
@@ -1582,50 +1597,52 @@ impl ShipModelContext {
         // Build SubModel list.
         let mut sub_models: Vec<SubModel<'_>> = Vec::new();
 
-        // Hull sub-models.
-        for (data, geom) in self.hull_parts.iter().zip(hull_geoms.iter()) {
-            sub_models.push(SubModel {
-                name: data.name.clone(),
-                visual: &data.visual,
-                geometry: geom,
-                transform: None,
-                group: PartGroup::Hull,
-                barrel_pitch: None,
-            });
+        if self.options.contents.includes_mesh() {
+            // Hull sub-models.
+            for (data, geom) in self.hull_parts.iter().zip(hull_geoms.iter()) {
+                sub_models.push(SubModel {
+                    name: data.name.clone(),
+                    visual: &data.visual,
+                    geometry: geom,
+                    transform: None,
+                    group: PartGroup::Hull,
+                    barrel_pitch: None,
+                });
+            }
+
+            // Mounted components.
+            for mount in &self.mounts {
+                let turret_data = &self.turret_models[mount.turret_model_index];
+                let turret_geom = &turret_geoms[mount.turret_model_index];
+
+                sub_models.push(SubModel {
+                    name: format!("{} ({})", mount.hp_name, turret_data.name),
+                    visual: &turret_data.visual,
+                    geometry: turret_geom,
+                    transform: mount.transform,
+                    group: PartGroup::from_mount_species(mount.species),
+                    barrel_pitch: mount.barrel_pitch.clone(),
+                });
+            }
+
+            // Misc parts (propellers, boats, deck fittings), instanced per placement.
+            for misc in &self.miscs {
+                let misc_data = &self.misc_models[misc.misc_model_index];
+                let misc_geom = &misc_geoms[misc.misc_model_index];
+
+                sub_models.push(SubModel {
+                    name: format!("{} ({})", misc.node_name, misc_data.name),
+                    visual: &misc_data.visual,
+                    geometry: misc_geom,
+                    transform: misc.transform,
+                    group: PartGroup::Misc,
+                    barrel_pitch: None,
+                });
+            }
         }
 
-        // Mounted components.
-        for mount in &self.mounts {
-            let turret_data = &self.turret_models[mount.turret_model_index];
-            let turret_geom = &turret_geoms[mount.turret_model_index];
-
-            sub_models.push(SubModel {
-                name: format!("{} ({})", mount.hp_name, turret_data.name),
-                visual: &turret_data.visual,
-                geometry: turret_geom,
-                transform: mount.transform,
-                group: PartGroup::from_mount_species(mount.species),
-                barrel_pitch: mount.barrel_pitch.clone(),
-            });
-        }
-
-        // Misc parts (propellers, boats, deck fittings), instanced per placement.
-        for misc in &self.miscs {
-            let misc_data = &self.misc_models[misc.misc_model_index];
-            let misc_geom = &misc_geoms[misc.misc_model_index];
-
-            sub_models.push(SubModel {
-                name: format!("{} ({})", misc.node_name, misc_data.name),
-                visual: &misc_data.visual,
-                geometry: misc_geom,
-                transform: misc.transform,
-                group: PartGroup::Misc,
-                barrel_pitch: None,
-            });
-        }
-
-        // Load textures.
-        let texture_set = if self.options.textures {
+        // Armor is untextured, so an armor-only export never reads a DDS.
+        let texture_set = if self.options.textures && self.options.contents.includes_mesh() {
             let mut all_mfm_infos = Vec::new();
             for sub in &sub_models {
                 all_mfm_infos.extend(collect_mfm_info(sub.visual, &db));
@@ -1638,7 +1655,7 @@ impl ShipModelContext {
         // Collect armor meshes from hull AND turret geometries with thickness data.
         let armor_map = self.armor_map.as_ref();
         let mut armor_meshes: Vec<gltf_export::ArmorSubModel> = Vec::new();
-        if self.options.armor {
+        if self.options.contents.includes_armor() {
             // Hull armor (already in world space, no transform needed).
             for geom in &hull_geoms {
                 for am in &geom.armor_models {
@@ -1664,6 +1681,7 @@ impl ShipModelContext {
             &sub_models,
             &armor_meshes,
             &db,
+            self.options.contents,
             self.options.lod,
             &texture_set,
             self.options.damaged,

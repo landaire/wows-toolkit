@@ -269,10 +269,9 @@ enum Commands {
         #[arg(long)]
         damaged: bool,
 
-        /// Include armor plating geometry: a per-zone triangle soup for the hull
-        /// and every mount, grouped under "Armor"
-        #[arg(long)]
-        armor: bool,
+        /// What to export: the visual mesh, the armor triangle soup, or both
+        #[arg(long, value_enum, default_value = "mesh")]
+        contents: ContentsArg,
 
         /// Maximum texture dimension (e.g. 512, 1024). Reads the smallest stored
         /// texture tier that meets the limit. Overrides the tier that --lod selects
@@ -391,6 +390,23 @@ enum MetadataFormat {
     Plain,
     Json,
     Csv,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
+enum ContentsArg {
+    Mesh,
+    Armor,
+    Both,
+}
+
+impl From<ContentsArg> for wowsunpack::export::ship::ExportContents {
+    fn from(a: ContentsArg) -> Self {
+        match a {
+            ContentsArg::Mesh => Self::Mesh,
+            ContentsArg::Armor => Self::Armor,
+            ContentsArg::Both => Self::MeshAndArmor,
+        }
+    }
 }
 
 fn load_idx_file(path: PathBuf) -> Result<idx::IdxFile, Report> {
@@ -1102,7 +1118,7 @@ fn run() -> Result<(), Report> {
             hull,
             no_textures,
             damaged,
-            armor,
+            contents,
             max_texture_size,
             list_textures,
             debug,
@@ -1122,7 +1138,7 @@ fn run() -> Result<(), Report> {
                 hull.as_deref(),
                 no_textures,
                 damaged,
-                armor,
+                contents,
                 max_texture_size,
                 list_textures,
                 debug,
@@ -1990,7 +2006,7 @@ fn run_export_ship(
     hull_selection: Option<&str>,
     no_textures: bool,
     damaged: bool,
-    armor: bool,
+    contents: ContentsArg,
     max_texture_size: Option<u32>,
     list_textures: bool,
     debug: bool,
@@ -2048,7 +2064,7 @@ fn run_export_ship(
         hull: hull_selection.map(|s| s.to_string()),
         textures: !no_textures,
         damaged,
-        armor,
+        contents: contents.into(),
         texture_lod: resolve_texture_lod(max_texture_size, lod),
         ..Default::default()
     };
@@ -2063,7 +2079,8 @@ fn run_export_ship(
         ctx.unique_misc_count()
     );
 
-    let exported_armor = armor && (ctx.armor_map().is_some() || ctx.hull_splash_bytes().is_some());
+    let exported_armor =
+        options.contents.includes_armor() && (ctx.armor_map().is_some() || ctx.hull_splash_bytes().is_some());
 
     wowsunpack::export::set_debug(debug);
     let mut file = std::fs::File::create(output).context("Failed to create output file")?;

@@ -1114,8 +1114,7 @@ impl ToolkitTabViewer<'_> {
                                             hull,
                                             textures: true,
                                             damaged: false,
-                                            // The armor viewer exports the armored model by definition.
-                                            armor: true,
+                                            contents: wowsunpack::export::ship::ExportContents::MeshAndArmor,
                                             ..Default::default()
                                         };
                                         let ctx = assets
