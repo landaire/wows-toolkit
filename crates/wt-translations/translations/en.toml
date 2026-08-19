@@ -1179,7 +1179,6 @@ reset_plates = "Reset plates"
 
 [ui.armor.export]
 hull = "Hull"
-hull_stock = "Stock"
 contents = "Contents"
 contents_mesh = "Mesh"
 contents_armor = "Armor"

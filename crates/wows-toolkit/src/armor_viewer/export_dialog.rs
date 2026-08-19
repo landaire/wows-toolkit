@@ -137,7 +137,7 @@ impl EstimateKey {
 /// Fast -- no geometry counting, no texture ladder reads -- so the LoD slider
 /// and camo list only wait on this, not on stage 2. `ctx` is kept alive so a
 /// camo the user selects afterward can be priced with `ShipModelContext::
-/// scheme_ladders` without reloading the ship.
+/// scheme_ladders_batch` without reloading the ship.
 pub struct ExportMeta {
     pub hull_lod_count: usize,
     pub camo_schemes: Vec<CamoSchemeInfo>,
@@ -188,12 +188,14 @@ enum ExportPhase {
 pub struct ExportDialog {
     pub param_index: String,
     pub display_name: String,
-    /// Resolved synchronously in `open`: it comes from
-    /// `vehicle.hull_upgrades()`, already in hand from the metadata provider
-    /// before any background work starts, so the hull combo needs no spinner.
-    /// Not recomputed by `start_load` -- the hull upgrade list does not
-    /// depend on which hull is currently selected.
-    pub hull_upgrades: Vec<String>,
+    /// `(raw upgrade key, display label)` pairs, resolved synchronously in
+    /// `open`: it comes from `vehicle.hull_upgrades()`, already in hand from
+    /// the metadata provider before any background work starts, so the hull
+    /// combo needs no spinner. Not recomputed by `start_load` -- the hull
+    /// upgrade list does not depend on which hull is currently selected.
+    /// The label is display-only; `ShipExportOptions.hull` always carries the
+    /// raw key.
+    pub hull_upgrades: Vec<(String, String)>,
     pub meta: ExportMetaState,
     size_model: SizeModelState,
     pending_scheme_fetch: Option<PendingSchemeFetch>,
@@ -370,11 +372,16 @@ impl ExportDialog {
 
 /// `vehicle.hull_upgrades()` is already resolved (no assets.bin scan, unlike
 /// `ShipAssets::list_hull_upgrades`, whose model-name-based lookup strategy
-/// never matches a param index and always runs to exhaustion). `None` from
-/// `hull_upgrades()` genuinely means this ship has no listed upgrades (older
-/// game versions offer no hull choice); a missing param or vehicle is treated
-/// the same way here since `spawn_load` reports that failure properly.
-fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index: &str) -> Vec<String> {
+/// never matches a param index and always runs to exhaustion). An empty
+/// result genuinely means this ship has no listed upgrades (older game
+/// versions offer no hull choice); a missing param or vehicle is treated the
+/// same way here since `spawn_load` reports that failure properly.
+///
+/// Delegates to [`crate::armor_viewer::common::build_hull_upgrade_names`], the
+/// same builder the armor pane's own hull picker uses, so the dialog and the
+/// pane show one hull vocabulary (letter labels with component diffs) instead
+/// of the dialog listing raw upgrade keys next to the pane's letters.
+fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index: &str) -> Vec<(String, String)> {
     use wowsunpack::game_params::types::GameParamProvider;
     let Some(param) = assets.metadata().game_param_by_index(param_index) else {
         return Vec::new();
@@ -382,14 +389,7 @@ fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index:
     let Some(vehicle) = param.vehicle() else {
         return Vec::new();
     };
-    match vehicle.hull_upgrades() {
-        Some(upgrades) => {
-            let mut names: Vec<String> = upgrades.keys().cloned().collect();
-            names.sort();
-            names
-        }
-        None => Vec::new(),
-    }
+    crate::armor_viewer::common::build_hull_upgrade_names(vehicle)
 }
 
 pub enum DialogOutcome {
@@ -537,7 +537,7 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
 fn controls(
     ui: &mut egui::Ui,
     draft: &mut ExportDraft,
-    hull_upgrades: &[String],
+    hull_upgrades: &[(String, String)],
     meta: Option<&ExportMeta>,
     size_model: &mut SizeModelState,
     pending_scheme_fetch: &mut Option<PendingSchemeFetch>,
@@ -547,12 +547,18 @@ fn controls(
     let mut outcome = DialogOutcome::Idle;
 
     if !hull_upgrades.is_empty() {
+        // `draft.hull == None` means "whatever `select_hull_mount_points`
+        // picks with no selection", which is the first sorted entry -- the
+        // same fallback the armor pane's own hull picker uses (tab.rs). No
+        // separate "Stock" row: one used to sit alongside hull A and, being
+        // resolved the same way, produced a byte-identical export.
         let selected_label = draft
             .hull
             .as_ref()
-            .and_then(|h| hull_upgrades.iter().find(|u| *u == h))
-            .cloned()
-            .unwrap_or_else(|| t!("ui.armor.export.hull_stock").to_string());
+            .and_then(|h| hull_upgrades.iter().find(|(k, _)| k == h))
+            .or_else(|| hull_upgrades.first())
+            .map(|(_, label)| label.clone())
+            .unwrap_or_default();
         // Disabled while stage 1 is loading: `ShipModelContext` (and the
         // spawn_load thread that builds it) is per hull selection, so
         // switching hulls mid-load would leave the in-flight load's result
@@ -562,16 +568,10 @@ fn controls(
             ui.horizontal(|ui| {
                 ui.label(t!("ui.armor.export.hull").as_ref());
                 egui::ComboBox::from_id_salt("export_hull_combo").selected_text(selected_label).show_ui(ui, |ui| {
-                    if ui.selectable_label(draft.hull.is_none(), t!("ui.armor.export.hull_stock").as_ref()).clicked()
-                        && draft.hull.is_some()
-                    {
-                        draft.hull = None;
-                        outcome = DialogOutcome::ReloadRequested;
-                    }
-                    for name in hull_upgrades {
-                        let is_selected = draft.hull.as_ref() == Some(name);
-                        if ui.selectable_label(is_selected, name).clicked() && !is_selected {
-                            draft.hull = Some(name.clone());
+                    for (i, (key, label)) in hull_upgrades.iter().enumerate() {
+                        let is_selected = draft.hull.as_ref() == Some(key) || (draft.hull.is_none() && i == 0);
+                        if ui.selectable_label(is_selected, label).clicked() && !is_selected {
+                            draft.hull = Some(key.clone());
                             outcome = DialogOutcome::ReloadRequested;
                         }
                     }
@@ -637,6 +637,14 @@ fn controls(
                 // ship-specific schemes it was the one uncapped contributor to the
                 // window overflowing past both screen edges.
                 egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                    // Non-interactive: `default_camo` legitimately ticks nothing on
+                    // most real ships (their schemes are never literally named
+                    // "default"), which otherwise leaves this list looking empty
+                    // with no indication the export still has a well-defined
+                    // appearance -- the stock one, same as the viewer's own picker.
+                    ui.add_enabled_ui(false, |ui| {
+                        let _ = ui.selectable_label(draft.camos.is_empty(), t!("ui.armor.camo_none").as_ref());
+                    });
                     for info in &ship_infos {
                         camo_checkbox(ui, draft, info);
                     }
@@ -819,7 +827,7 @@ fn size_line(
 /// send` on a receiver nobody is polling anymore simply fails silently.
 ///
 /// Requests `scheme_ladders_batch` once for every id in `missing` rather than
-/// looping `scheme_ladders` per id: the assets.bin re-parse, self-id index
+/// calling it once per id in a loop: the assets.bin re-parse, self-id index
 /// and reachable-stem pass that call shares across ids would otherwise be
 /// paid once per ticked camo.
 fn ensure_scheme_fetch(
