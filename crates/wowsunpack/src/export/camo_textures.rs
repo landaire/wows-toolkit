@@ -32,6 +32,9 @@ pub type SchemeTextures = HashMap<String, Vec<u8>>;
 pub struct CamoSchemeInfo {
     pub id: CamoSchemeId,
     pub display_name: String,
+    /// The camouflages.xml/legacy scheme name, untranslated. Used to spot the
+    /// "default" scheme under any locale, since `display_name` may be translated.
+    pub raw_name: String,
     pub origin: CamoOrigin,
     pub use_color_scheme: bool,
     /// mfm stem to UV scale/offset for tiled schemes; absent stem means identity.
@@ -140,6 +143,8 @@ pub struct OwnedMatScheme {
     pub color_scheme_colors: Option<[[f32; 4]; 4]>,
     pub uv_transforms: HashMap<String, UvTransform>,
     pub origin: CamoOrigin,
+    /// The camouflages.xml/legacy scheme name, untranslated.
+    pub camo_name: String,
 }
 
 impl OwnedMatScheme {
@@ -199,6 +204,7 @@ impl CamoTextureSource {
                     CamoSchemeKind::Legacy(i) => CamoSchemeInfo {
                         id,
                         display_name: self.legacy_schemes[*i].clone(),
+                        raw_name: self.legacy_schemes[*i].clone(),
                         origin: CamoOrigin::LegacyScan,
                         use_color_scheme: false,
                         uv_transforms: HashMap::new(),
@@ -208,6 +214,7 @@ impl CamoTextureSource {
                         CamoSchemeInfo {
                             id,
                             display_name: s.display_name.clone(),
+                            raw_name: s.camo_name.clone(),
                             origin: s.origin,
                             use_color_scheme: s.use_color_scheme,
                             uv_transforms: self.mat_uv_by_stem(s),

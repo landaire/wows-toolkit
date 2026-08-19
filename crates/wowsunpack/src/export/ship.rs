@@ -2109,6 +2109,7 @@ impl MatCamoScheme {
             color_scheme_colors: self.color_scheme_colors,
             uv_transforms: self.uv_transforms.clone(),
             origin: self.origin,
+            camo_name: self.camo_name.clone(),
         }
     }
 }

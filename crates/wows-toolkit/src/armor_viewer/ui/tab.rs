@@ -13,6 +13,10 @@ use egui_dock::TabViewer;
 use crate::app::ToolkitTabViewer;
 use crate::armor_viewer::common::ActiveCamo;
 use crate::armor_viewer::constants::*;
+use crate::armor_viewer::export_dialog;
+use crate::armor_viewer::export_dialog::DialogOutcome;
+use crate::armor_viewer::export_dialog::ExportDefaults;
+use crate::armor_viewer::export_dialog::ExportDialog;
 use crate::armor_viewer::penetration::ComparisonShipIndex;
 use crate::armor_viewer::penetration::Ifhe;
 use crate::armor_viewer::penetration::PlateIndex;
@@ -613,7 +617,15 @@ impl ToolkitTabViewer<'_> {
 
                 // Handle deferred export from context menu
                 if let Some(export_req) = deferred_export.take() {
-                    state.export_confirm = Some(export_req);
+                    // TODO(Task 10): source from persisted export defaults.
+                    let defaults = ExportDefaults::default();
+                    state.export_dialog = Some(ExportDialog::open(
+                        export_req.param_index,
+                        export_req.display_name,
+                        export_req.selected_hull,
+                        defaults,
+                        ship_assets.clone(),
+                    ));
                 }
             }
         }
@@ -820,7 +832,15 @@ impl ToolkitTabViewer<'_> {
 
         // Handle export signal from toolbar button
         if let Some(export_req) = export_cell.take() {
-            state.export_confirm = Some(export_req);
+            // TODO(Task 10): source from persisted export defaults.
+            let defaults = ExportDefaults::default();
+            state.export_dialog = Some(ExportDialog::open(
+                export_req.param_index,
+                export_req.display_name,
+                export_req.selected_hull,
+                defaults,
+                ship_assets.clone(),
+            ));
         }
 
         // Handle pen check toggle from toolbar button
@@ -1075,77 +1095,60 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
-        // ── Export confirmation dialog ──
-        let mut close_export_dialog = false;
-        if let Some(ref export_req) = state.export_confirm {
-            let param_index = export_req.param_index.clone();
-            let display_name = export_req.display_name.clone();
-            let selected_hull = export_req.selected_hull.clone();
-            egui::Window::new(t!("ui.armor.export_model").as_ref())
-                .collapsible(false)
-                .resizable(false)
-                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-                .show(ui.ctx(), |ui| {
-                    ui.label(t!("ui.armor.export_disclaimer").as_ref());
-                    ui.add_space(8.0);
-                    ui.horizontal(|ui| {
-                        if ui.button(t!("ui.armor.export_button").as_ref()).clicked() {
-                            let default_filename = format!("{}.glb", display_name);
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_file_name(&default_filename)
-                                .add_filter("GLB", &["glb"])
-                                .save_file()
-                            {
-                                let assets = ship_assets.clone();
-                                let toasts = self.tab_state.toasts.clone();
-                                let ship_name = display_name.clone();
-                                let param_idx = param_index.clone();
-                                let hull = selected_hull.clone();
-                                crate::util::thread::spawn_logged("load-ship-model", move || {
-                                    let result = (|| -> Result<(), String> {
-                                        use wowsunpack::game_params::types::GameParamProvider;
-                                        let param = assets.metadata().game_param_by_index(&param_idx);
-                                        let vehicle = param
-                                            .as_ref()
-                                            .and_then(|p| p.vehicle().cloned())
-                                            .ok_or_else(|| "Vehicle not found".to_string())?;
-                                        let options = wowsunpack::export::ship::ShipExportOptions {
-                                            lod: 0,
-                                            hull,
-                                            textures: true,
-                                            damaged: false,
-                                            contents: wowsunpack::export::ship::ExportContents::MeshAndArmor,
-                                            ..Default::default()
-                                        };
-                                        let ctx = assets
-                                            .load_ship_from_vehicle(&vehicle, &options)
-                                            .map_err(|e| format!("{e:?}"))?;
-                                        let mut file = std::fs::File::create(&path)
-                                            .map_err(|e| format!("Failed to create file: {e}"))?;
-                                        ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
-                                        Ok(())
-                                    })();
-                                    match result {
-                                        Ok(()) => {
-                                            toasts.lock().success(format!("Exported {}", ship_name));
-                                        }
-                                        Err(e) => {
-                                            toasts.lock().error(format!("Export failed: {e}"));
-                                        }
-                                    }
-                                });
-                            }
-                            close_export_dialog = true;
-                        }
-                        if ui.button(t!("ui.buttons.cancel").as_ref()).clicked() {
-                            close_export_dialog = true;
-                        }
-                    });
-                });
+        if let Some(dialog) = state.export_dialog.as_mut() {
+            match export_dialog::show(dialog, ui.ctx()) {
+                DialogOutcome::Idle => {}
+                DialogOutcome::ReloadRequested => dialog.start_load(ship_assets.clone()),
+                DialogOutcome::Cancelled => state.export_dialog = None,
+                DialogOutcome::Export(options) => {
+                    let display_name = dialog.display_name.clone();
+                    let param_index = dialog.param_index.clone();
+                    state.export_dialog = None;
+                    // Same save-dialog and worker shape the inline dialog used.
+                    self.spawn_ship_export(&display_name, &param_index, *options, ship_assets.clone());
+                }
+            }
         }
-        if close_export_dialog {
-            state.export_confirm = None;
-        }
+    }
+
+    /// Prompt for a save path and export the ship model in the background.
+    fn spawn_ship_export(
+        &self,
+        display_name: &str,
+        param_index: &str,
+        options: wowsunpack::export::ship::ShipExportOptions,
+        ship_assets: Arc<wowsunpack::export::ship::ShipAssets>,
+    ) {
+        let default_filename = format!("{}.glb", display_name);
+        let Some(path) =
+            rfd::FileDialog::new().set_file_name(&default_filename).add_filter("GLB", &["glb"]).save_file()
+        else {
+            return;
+        };
+        let assets = ship_assets;
+        let toasts = self.tab_state.toasts.clone();
+        let ship_name = display_name.to_string();
+        let param_idx = param_index.to_string();
+        crate::util::thread::spawn_logged("load-ship-model", move || {
+            let result = (|| -> Result<(), String> {
+                use wowsunpack::game_params::types::GameParamProvider;
+                let param = assets.metadata().game_param_by_index(&param_idx);
+                let vehicle =
+                    param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "Vehicle not found".to_string())?;
+                let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
+                let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
+                ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
+                Ok(())
+            })();
+            match result {
+                Ok(()) => {
+                    toasts.lock().success(format!("Exported {}", ship_name));
+                }
+                Err(e) => {
+                    toasts.lock().error(format!("Export failed: {e}"));
+                }
+            }
+        });
     }
 }
 

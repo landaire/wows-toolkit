@@ -5,6 +5,7 @@ pub(crate) mod camera_ellipse;
 pub(crate) mod camera_perspective;
 pub mod common;
 pub mod constants;
+pub mod export_dialog;
 pub mod penetration;
 pub mod ship_selector;
 pub mod splash;

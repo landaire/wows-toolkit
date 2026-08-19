@@ -180,7 +180,9 @@ pub struct CompareSettings {
     pub hull_visibility: HashMap<String, bool>,
 }
 
-/// A pending ship model export request.
+/// Signal set by the tree context menu or the toolbar button, drained on the
+/// next frame to open an `ExportDialog`. Both entry points still need to defer
+/// past a closure, so the dialog itself cannot be built where the signal is set.
 pub struct ExportRequest {
     /// GameParam index key for the ship.
     pub param_index: String,
@@ -205,8 +207,8 @@ pub struct ArmorViewerState {
     pub next_pane_id: u64,
     /// Cached nation flag assets (raw PNG bytes), keyed by nation name.
     pub nation_flag_textures: HashMap<String, Arc<crate::data::wows_data::GameAsset>>,
-    /// Pending export confirmation dialog.
-    pub export_confirm: Option<ExportRequest>,
+    /// The open ship model export dialog, if any.
+    pub export_dialog: Option<crate::armor_viewer::export_dialog::ExportDialog>,
     /// When true, all split panes share the same camera.
     pub mirror_cameras: bool,
     /// When true, armor/hull visibility is synced across all panes.
@@ -244,7 +246,7 @@ impl Default for ArmorViewerState {
             gpu_pipeline: None,
             next_pane_id: 1,
             nation_flag_textures: HashMap::new(),
-            export_confirm: None,
+            export_dialog: None,
             mirror_cameras: false,
             sync_options: false,
             selector_search: String::new(),
