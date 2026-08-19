@@ -631,7 +631,7 @@ fn controls(
 
                 let mut ship_infos: Vec<&CamoSchemeInfo> =
                     meta.camo_schemes.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
-                ship_infos.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+                ship_infos.sort_by_key(|a| a.display_name.to_lowercase());
                 // Capped like its sibling groups below: unlike them, this list has
                 // no collapsing header to hide behind, so on a ship with many
                 // ship-specific schemes it was the one uncapped contributor to the
@@ -660,7 +660,7 @@ fn controls(
                     if group.is_empty() {
                         continue;
                     }
-                    group.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+                    group.sort_by_key(|a| a.display_name.to_lowercase());
                     let id = ui.make_persistent_id(("export_camo_group", key));
                     egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                         .show_header(ui, |ui| {

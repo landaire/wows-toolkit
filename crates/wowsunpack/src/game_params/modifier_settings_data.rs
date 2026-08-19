@@ -95,7 +95,7 @@ struct OverrideTable {
 pub fn modifier_setting(version: Version, name: &str) -> Option<&'static ModifierSetting> {
     let mut applicable: Vec<&OverrideTable> =
         OVERRIDE_TABLES.iter().filter(|ovr| !version.is_at_least(&ovr.max_version)).collect();
-    applicable.sort_by(|a, b| a.max_version.cmp(&b.max_version));
+    applicable.sort_by_key(|a| a.max_version);
     for ovr in applicable {
         if let Some((_, s)) = ovr.entries.iter().find(|(n, _)| *n == name) {
             return Some(s);

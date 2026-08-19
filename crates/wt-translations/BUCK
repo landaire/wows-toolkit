@@ -1,8 +1,17 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
 
 workspace_library(
     name = "wt_translations",
     crate = "wt_translations",
+    package = "wt-translations",
+    version = "0.16.0",
+    deps = ["//crates/wows-core:wows_core"],
+)
+
+workspace_test(
+    name = "wt_translations_test",
+    crate = "wt_translations",
+    crate_root = "src/lib.rs",
     package = "wt-translations",
     version = "0.16.0",
     deps = ["//crates/wows-core:wows_core"],

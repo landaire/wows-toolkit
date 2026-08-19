@@ -284,10 +284,8 @@ fn unbalanced_paren(input: &str) -> Option<QueryParseError> {
         match c {
             '"' => in_quotes = !in_quotes,
             '(' if !in_quotes => opens.push(i),
-            ')' if !in_quotes => {
-                if opens.pop().is_none() {
-                    return Some(QueryParseError::new(i..i + 1, ParseErrorKind::Unbalanced));
-                }
+            ')' if !in_quotes && opens.pop().is_none() => {
+                return Some(QueryParseError::new(i..i + 1, ParseErrorKind::Unbalanced));
             }
             _ => {}
         }

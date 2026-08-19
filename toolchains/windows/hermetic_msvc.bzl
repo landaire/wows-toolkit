@@ -12,7 +12,6 @@ WindowsToolPathsInfo = provider(fields = {
     "rustc": provider_field(typing.Any),
     "rustdoc": provider_field(typing.Any),
     "clippy_driver": provider_field(typing.Any),
-    "rustfmt": provider_field(typing.Any),
     "nasm": provider_field(typing.Any),
     "wix": provider_field(typing.Any),
     "wix_ui_extension": provider_field(typing.Any),
@@ -93,7 +92,6 @@ def _msvc_tools_impl(ctx):
             rustc = ctx.attrs.rustc,
             rustdoc = ctx.attrs.rustdoc,
             clippy_driver = ctx.attrs.clippy_driver,
-            rustfmt = ctx.attrs.rustfmt,
             nasm = ctx.attrs.nasm,
             wix = wix,
             wix_ui_extension = ctx.attrs.wix_ui_extension,
@@ -101,10 +99,11 @@ def _msvc_tools_impl(ctx):
         ),
     ]
 
-# clang and llvm_ar are deliberately absent: verify-toolchain.ps1 publishes them
-# for the Cargo wasm32 build, but no Buck rule consumes them yet, and requiring
-# them here would fail package loading for everyone who does not need them.
-_TOOL_ATTRS = ["ar", "cc", "clippy_driver", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc", "rustfmt"]
+# clang, llvm_ar and rustfmt are deliberately absent: verify-toolchain.ps1
+# publishes clang and llvm_ar for the Cargo wasm32 build and rustfmt for
+# toolchains//:rustfmt, but no Windows Buck rule here consumes them, and
+# requiring them would fail package loading for everyone who does not lint.
+_TOOL_ATTRS = ["ar", "cc", "clippy_driver", "cvtres", "include", "lib_paths", "link", "midl", "ml64", "nasm", "rc", "rustc", "rustdoc"]
 
 # WiX is needed by the MSI target alone. Requiring it at package load would stop
 # every Windows target configuring on a machine that never builds an installer.

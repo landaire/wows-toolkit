@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_buildscript", "workspace_library", "workspace_test")
 
 export_file(
     name = "consumable_layouts",
@@ -108,4 +108,15 @@ workspace_binary(
     crate_root = "src/bin/dhat_parse.rs",
     features = WOWSUNPACK_FEATURES + ["dhat-heap"],
     deps = [":wowsunpack_dhat"] + WOWSUNPACK_DEPS + ["//third-party/rust:dhat"],
+)
+
+workspace_test(
+    name = "wowsunpack_test",
+    crate = "wowsunpack",
+    crate_root = "src/lib.rs",
+    package = "wowsunpack",
+    version = "0.45.0",
+    features = WOWSUNPACK_FEATURES,
+    deps = WOWSUNPACK_DEPS,
+    buildscript = buildscript,
 )

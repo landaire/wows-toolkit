@@ -31,3 +31,7 @@ workspace_library(
         "//third-party/rust:winnow",
     ],
 )
+
+# No workspace_test here: the crate's unit tests use the rust-crypto and insta
+# dev-dependencies, and reindeer vendors normal dependencies only, so neither
+# has a target under //third-party/rust. `mise run cargo-test` covers them.

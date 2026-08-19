@@ -74,7 +74,7 @@ fn facts_and_damage_golden() {
             })
         })
         .collect();
-    damage.sort_by(|a, b| (a.aggressor, a.victim, a.clock.to_bits()).cmp(&(b.aggressor, b.victim, b.clock.to_bits())));
+    damage.sort_by_key(|a| (a.aggressor, a.victim, a.clock.to_bits()));
 
     insta::assert_yaml_snapshot!(Snapshot { facts, damage });
 }

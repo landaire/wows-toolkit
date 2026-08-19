@@ -193,3 +193,7 @@ workspace_binary(
     features = TOOLKIT_FEATURES + ["profile-bins"],
     deps = [":wows_toolkit_profile"] + TOOLKIT_DEPS,
 )
+
+# No workspace_test here: the crate's unit tests use the egui_kittest
+# dev-dependency, and reindeer vendors normal dependencies only, so it has no
+# target under //third-party/rust. `mise run cargo-test` covers them.

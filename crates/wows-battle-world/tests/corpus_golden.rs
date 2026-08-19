@@ -274,7 +274,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
             }
         })
         .collect();
-    players.sort_by(|a, b| (a.account_id, a.entity_id).cmp(&(b.account_id, b.entity_id)));
+    players.sort_by_key(|a| (a.account_id, a.entity_id));
 
     let mut frags: Vec<FragEntry> = report
         .frags()
@@ -301,8 +301,7 @@ fn report_snapshot(filename: &str) -> Option<ReportSnapshot> {
             total: r3(e.total as f32),
         })
         .collect();
-    self_damage_stats
-        .sort_by(|a, b| (a.weapon.clone(), a.category.clone()).cmp(&(b.weapon.clone(), b.category.clone())));
+    self_damage_stats.sort_by_key(|a| (a.weapon.clone(), a.category.clone()));
 
     let active_consumable_total: usize = report.active_consumables().values().map(|v| v.len()).sum();
     let presence_windows: usize = report.presence().windows.values().map(|w| w.len()).sum();

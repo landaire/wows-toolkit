@@ -512,7 +512,7 @@ impl WorldScanCollector for TimelineEventsCollector<'_> {
                         (Some((old_label, _)), None) => {
                             format!("{} advantage lost", old_label)
                         }
-                        (Some((old_label, old_friendly)), Some((new_label, new_friendly)))
+                        (Some((_old_label, old_friendly)), Some((new_label, new_friendly)))
                             if old_friendly == new_friendly =>
                         {
                             let old_val = match &self.prev_advantage {
@@ -674,7 +674,7 @@ fn finish_timeline_collector(mut col: TimelineEventsCollector<'_>) -> TimelineEx
         let abs = GameClock(event.clock.seconds());
         event.clock = abs.to_elapsed(battle_start);
     }
-    col.events.sort_by(|a, b| a.clock.cmp(&b.clock));
+    col.events.sort_by_key(|a| a.clock);
     TimelineExtractionResult {
         events: col.events,
         battle_start,
@@ -757,7 +757,7 @@ pub(crate) fn merge_timelines(
         }
     }
 
-    events.sort_by(|a, b| a.clock.cmp(&b.clock));
+    events.sort_by_key(|a| a.clock);
 
     TimelineExtractionResult { events, battle_start, battle_end, viewer_team }
 }

@@ -1,4 +1,5 @@
-load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "nix_cxx_toolchain", "selected_toolchain")
+load(":hermetic_rust.bzl", "hermetic_python_bootstrap_toolchain", "hermetic_rust_toolchain", "hermetic_rustfmt", "local_remote_test_execution_toolchain", "nix_cxx_toolchain", "selected_toolchain")
+load("@prelude//tests:test_toolchain.bzl", "noop_test_toolchain")
 load(":native_build_mode.bzl", "native_build_mode_transition")
 
 nix_cxx_toolchain(
@@ -20,6 +21,18 @@ hermetic_python_bootstrap_toolchain(
 
 hermetic_rustfmt(
     name = "rustfmt",
+    visibility = ["PUBLIC"],
+)
+
+# rust_test requires it. The prelude's own no-op is right here: it exists to
+# report a sanitizer to test infra, and nothing in this repo builds sanitized.
+noop_test_toolchain(
+    name = "test",
+    visibility = ["PUBLIC"],
+)
+
+local_remote_test_execution_toolchain(
+    name = "remote_test_execution",
     visibility = ["PUBLIC"],
 )
 

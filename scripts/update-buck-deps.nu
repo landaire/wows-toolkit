@@ -1,8 +1,8 @@
 #!/usr/bin/env nu
 
-# reindeer and rustc come from PATH, which mise populates ([tools] in
-# mise.toml, plus rust-toolchain.toml). Going through `nix develop` restricted
-# this to Linux and macOS, so Windows had to run it under WSL.
+# reindeer and rustc come from PATH: reindeer from `mise run install-reindeer`,
+# rustc from the rustup shim. Going through `nix develop` restricted this to
+# Linux and macOS, so Windows had to run it under WSL.
 ^reindeer vendor
 ^reindeer buckify
 rm -r -f third-party/rust/.cargo

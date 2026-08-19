@@ -14,15 +14,15 @@
 
 use std::collections::HashMap;
 
-use cbc::cipher::block_padding::NoPadding;
 use cbc::cipher::BlockDecryptMut;
 use cbc::cipher::KeyIvInit;
+use cbc::cipher::block_padding::NoPadding;
 use des::Des;
 use flate2::read::GzDecoder;
+use rootcause::Result;
 use rootcause::bail;
 use rootcause::prelude::ResultExt;
 use rootcause::report;
-use rootcause::Result;
 use std::io::Read;
 
 type DesCbcDec = cbc::Decryptor<Des>;
@@ -77,10 +77,10 @@ pub enum Member {
 /// Normalize a C# member name. Auto-property backing fields are emitted as
 /// `<PropName>k__BackingField`; reduce them to `PropName`.
 fn member_ident(raw: &str) -> &str {
-    if let Some(rest) = raw.strip_prefix('<') {
-        if let Some(end) = rest.find('>') {
-            return &rest[..end];
-        }
+    if let Some(rest) = raw.strip_prefix('<')
+        && let Some(end) = rest.find('>')
+    {
+        return &rest[..end];
     }
     raw
 }
@@ -100,10 +100,10 @@ impl Report {
         for (label, field) in
             [("python.log", "PythonLog"), ("win32/python.log", "PythonLog32"), ("win64/python.log", "PythonLog64")]
         {
-            if let Some(s) = self.str(field) {
-                if !s.is_empty() {
-                    out.push((label, s));
-                }
+            if let Some(s) = self.str(field)
+                && !s.is_empty()
+            {
+                out.push((label, s));
             }
         }
         out

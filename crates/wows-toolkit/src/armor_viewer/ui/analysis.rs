@@ -258,7 +258,7 @@ impl AnalysisPaneViewer<'_> {
                         let label = format!(
                             "{} {}",
                             crate::armor_viewer::ship_selector::tier_roman(ship.tier),
-                            &ship.display_name
+                            ship.display_name
                         );
                         if ui.button(label).clicked() {
                             self.ships_to_add.borrow_mut().push(ship.param_index.clone());
@@ -291,7 +291,7 @@ impl AnalysisPaneViewer<'_> {
                             egui::RichText::new(format!(
                                 "{} {}",
                                 crate::armor_viewer::ship_selector::tier_roman(ship.tier),
-                                &ship.display_name
+                                ship.display_name
                             ))
                             .strong(),
                         );
@@ -511,7 +511,7 @@ impl AnalysisPaneViewer<'_> {
             // Outcome badges per shell
             for ss in shell_sims {
                 let ammo = ss.shell.ammo_type.display_name();
-                let shell_label = format!("{} {} {:.0}mm", &ss.ship_name, ammo, ss.shell.caliber.value());
+                let shell_label = format!("{} {} {:.0}mm", ss.ship_name, ammo, ss.shell.caliber.value());
                 if let Some(ref sim) = ss.sim {
                     use crate::armor_viewer::penetration::PlateOutcome;
                     let (icon, badge_color, outcome_text) = if let Some(det_plate) = sim.detonated_at {
@@ -601,7 +601,7 @@ impl AnalysisPaneViewer<'_> {
                     );
                 });
                 ui.label(
-                    egui::RichText::new(format!("  {} / {}", &hit.zone, translate_part(&hit.material)))
+                    egui::RichText::new(format!("  {} / {}", hit.zone, translate_part(&hit.material)))
                         .small()
                         .color(ui.sem().text_dim),
                 );
@@ -660,7 +660,7 @@ impl AnalysisPaneViewer<'_> {
                                     ui.label(egui::RichText::new(icon));
                                     let mut label_text = format!(
                                         "{} {} {:.0}mm",
-                                        &ss.ship_name,
+                                        ss.ship_name,
                                         ss.shell.ammo_type.display_name(),
                                         ss.shell.caliber.value(),
                                     );
@@ -700,7 +700,7 @@ impl AnalysisPaneViewer<'_> {
                                 ui.label(
                                     egui::RichText::new(format!(
                                         "{} {} {:.0}mm",
-                                        &ss.ship_name,
+                                        ss.ship_name,
                                         ss.shell.ammo_type.display_name(),
                                         ss.shell.caliber.value(),
                                     ))
@@ -737,7 +737,7 @@ impl AnalysisPaneViewer<'_> {
                             ui.label(
                                 egui::RichText::new(format!(
                                     "{} {} detonates inside {} \u{2014} {:.1}m after plate #{}",
-                                    &ss.ship_name,
+                                    ss.ship_name,
                                     ss.shell.ammo_type.display_name(),
                                     volume_desc,
                                     det.travel_distance.value(),

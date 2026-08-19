@@ -2399,7 +2399,7 @@ impl<'a> MinimapRenderer<'a> {
                 }
             }
             // Sort merged entries by game clock
-            activity_entries.sort_by(|a, b| a.clock.cmp(&b.clock));
+            activity_entries.sort_by_key(|a| a.clock);
 
             let inner_w = panel_w - 16;
             let per_row = (inner_w / STATS_RIBBON_CELL_W).max(1);

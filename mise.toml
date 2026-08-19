@@ -16,42 +16,49 @@ _.file = { path = ".tooling/dev.env", redact = false }
 # expanded from. See tools/README.md.
 [tasks.install-reindeer]
 description = "Install the reindeer used to regenerate third-party/rust/BUCK"
-# +stable, because rust-toolchain.toml pins 1.92 for this workspace and
-# reindeer's own dependencies need a newer rustc. Its repository holds several
-# packages with binaries, hence the explicit package name.
-run = "cargo +stable install --locked --git https://github.com/facebookincubator/reindeer reindeer"
+# Its repository holds several packages with binaries, hence the explicit
+# package name.
+run = "cargo install --locked --git https://github.com/facebookincubator/reindeer reindeer"
 
 [tasks.setup]
-description = "Download and locate the tools a native build needs (NASM, clang, llvm-ar)."
+description = "Download and locate the tools a native build needs (NASM, clang, llvm-ar)"
 run = "python scripts/setup.py"
 
-[tasks.fmt]
-description = "Runs rustfmt with unstable features"
-run = "cargo fmt -- --config unstable_features=true --config imports_granularity=Item --config imports_layout=Vertical"
+# Buck is the gate: CI builds every alias with it and every release ships from
+# that graph, so a change that builds under Cargo but not under Buck does not
+# land. These tasks run Buck. The cargo-* ones below are the escape hatch for
+# the things Buck cannot do here, and for fast iteration.
+#
+# `root//:` is every alias in the root BUCK file, so nothing has to repeat the
+# list when one is added.
 
-[tasks.check]
-description = "Runs cargo-check against all features and WASM target"
-run = [
-    "cargo check --all-features",
-    "cargo check -p wt-web --target wasm32-unknown-unknown",
-]
+[tasks.build]
+description = "Builds every shipped binary through Buck"
+run = "buck2 build root//:"
 
-[tasks.fix]
-description = "Runs cargo-fix against all features"
-run = "cargo fix --all-features --allow-dirty"
-depends_post = ["fmt"]
-
-[tasks.clippy-fix]
-description = "Runs cargo-clippy-fix against all features"
-run = "cargo clippy --fix --all-features --all-targets --allow-dirty"
-depends_post = ["fmt"]
+[tasks.build-release]
+description = "Builds every shipped binary through Buck in release mode"
+run = "buck2 build -c native_build.mode=release root//:"
 
 [tasks.lint]
 description = "Lints the first-party Rust graph through Buck (clippy and rustfmt)"
 run = "nu scripts/lint.nu"
 
+[tasks.fmt]
+description = "Rewrites formatting with rustfmt (Buck can only check, not write)"
+run = "cargo fmt -- --config unstable_features=true --config imports_granularity=Item --config imports_layout=Vertical"
+
+[tasks.test]
+description = "Runs the unit tests through Buck"
+# Two crates are missing here: wows-replays and wows-toolkit use the
+# rust-crypto, insta and egui_kittest dev-dependencies, and reindeer vendors
+# normal dependencies only, so none of those has a target under
+# //third-party/rust. Integration tests under crates/*/tests are not modelled
+# either. `mise run cargo-test` is the complete run.
+run = "buck2 test root//crates/..."
+
 [tasks.fix-all]
-description = "Runs clippy fix, lints through Buck, checks the WASM target, then formats"
+description = "Autofixes with Cargo, lints through Buck, checks WASM, then formats"
 run = [
     # Buck has no autofix, so this stays on Cargo. --allow-staged because jj
     # has no index of its own and anything in git's aborts the fix.
@@ -60,12 +67,47 @@ run = [
     # lints remain, so without this a warning sails through locally and fails
     # CI. Buck resolves features per target, which is what the hand-maintained
     # default-feature crate list here used to approximate: --all-features hides
-    # feature-gated dead code, and no single Cargo invocation sees both.
+    # feature-gated dead code, and no single Cargo invocation sees both. It
+    # covers the rust_test targets too, so #[cfg(test)] modules are linted;
+    # benches and examples are not modelled in the graph and only rust.yml's
+    # --all-targets pass sees them.
     "nu scripts/lint.nu clippy",
     # Still Cargo: the Buck graph has no wasm32 platform yet, and wt-web has no
     # BUCK file. Needs clang, which `mise run setup` provisions.
     "cargo check -p wt-web --target wasm32-unknown-unknown",
 ]
+depends_post = ["fmt"]
+
+# Cargo equivalents. Faster to iterate with, and the only way to reach what the
+# Buck graph does not cover: autofix, the wasm32 target, and doctests.
+
+[tasks.cargo-build]
+description = "Cargo: builds the workspace"
+run = "cargo build --workspace"
+
+[tasks.cargo-check]
+description = "Cargo: type-checks all features and the WASM target"
+run = [
+    "cargo check --all-features",
+    "cargo check -p wt-web --target wasm32-unknown-unknown",
+]
+
+[tasks.cargo-lint]
+description = "Cargo: clippy over the whole workspace, warnings denied"
+run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
+
+[tasks.cargo-test]
+description = "Cargo: runs the complete test suite, including what Buck cannot"
+run = "cargo test --workspace"
+
+[tasks.cargo-fix]
+description = "Cargo: applies rustc's own suggestions"
+run = "cargo fix --all-features --allow-dirty --allow-staged"
+depends_post = ["fmt"]
+
+[tasks.cargo-clippy-fix]
+description = "Cargo: applies clippy's machine-applicable suggestions"
+run = "cargo clippy --fix --all-features --all-targets --allow-dirty --allow-staged"
 depends_post = ["fmt"]
 
 [tasks.bump]

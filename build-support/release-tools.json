@@ -6,8 +6,13 @@
     "Buck names a rust_binary's output after its crate, and a crate name cannot",
     "contain a hyphen, so the built filename is not always the name the tool has",
     "shipped under. Keeping the mapping here rather than letting the archive",
-    "inherit whatever Buck emitted is what stops a rename going out unnoticed:",
-    "package-tools.* fails if a build produces anything this file does not list."
+    "inherit whatever Buck emitted is what stops a rename going out unnoticed.",
+    "",
+    "package-tools.* fails when a listed target produces no output, when a",
+    "listed extra file is missing, or when the finished archive does not hold",
+    "exactly these names. It cannot notice a NEW shipped binary that nobody",
+    "added here, so a target added to the root BUCK file has to be added here",
+    "too."
   ],
   "tools": [
     { "target": "//:wowsunpack", "ship": "wowsunpack" },

@@ -18,6 +18,7 @@ load("@prelude//linking:link_info.bzl", "LinkStyle")
 load("@prelude//linking:lto.bzl", "LtoMode")
 load("@prelude//python_bootstrap:python_bootstrap.bzl", "PythonBootstrapToolchainInfo")
 load("@prelude//rust:rust_toolchain.bzl", "PanicRuntime", "RustToolchainInfo")
+load("@prelude//tests:remote_test_execution_toolchain.bzl", "RemoteTestExecutionToolchainInfo")
 
 def _toolchain_root():
     root = read_root_config("nix_toolchain", "root")
@@ -116,6 +117,8 @@ hermetic_rust_toolchain = rule(
 )
 
 def _hermetic_rustfmt_impl(ctx):
+    if not ctx.attrs.rustfmt:
+        fail("Missing [hermetic_tools] rustfmt. Run the platform toolchain bootstrap (`nu scripts/refresh-buck-toolchain.nu`, or `toolchains/windows/verify-toolchain.ps1` on Windows) before linting.")
     return [DefaultInfo(), RunInfo(args = [ctx.attrs.rustfmt])]
 
 _hermetic_rustfmt_rule = rule(
@@ -126,15 +129,37 @@ _hermetic_rustfmt_rule = rule(
 def hermetic_rustfmt(name, visibility):
     """A plain runnable rustfmt.
 
-    RustToolchainInfo has no rustfmt field, so bxl/lint.bxl runs this target
-    instead. Both platform bootstraps publish the path, so one rule covers all
+    RustToolchainInfo has no rustfmt field, so bxl/lint.bxl resolves this target
+    and scripts/lint.nu runs what it points at, rather than whatever rustfmt is
+    on PATH. Both platform bootstraps publish the path, so one rule covers all
     three; read_root_config is load-time only, hence the macro.
+
+    Resolved with a default rather than a load-time fail: this package is loaded
+    by every buck2 command, and only linting needs a rustfmt.
     """
     _hermetic_rustfmt_rule(
         name = name,
-        rustfmt = _hermetic_tool("rustfmt"),
+        rustfmt = read_root_config("hermetic_tools", "rustfmt", ""),
         visibility = visibility,
     )
+
+def _local_remote_test_execution_impl(_ctx):
+    # Every action in this repo runs locally, and CI additionally runs Buck in a
+    # network namespace, so there is no remote profile to offer.
+    return [
+        DefaultInfo(),
+        RemoteTestExecutionToolchainInfo(
+            default_profile = None,
+            profiles = {},
+            default_run_as_bundle = False,
+        ),
+    ]
+
+local_remote_test_execution_toolchain = rule(
+    impl = _local_remote_test_execution_impl,
+    attrs = {},
+    is_toolchain_rule = True,
+)
 
 def _hermetic_cxx_toolchain_impl(ctx):
     linker_type = LinkerType(ctx.attrs.linker_type)

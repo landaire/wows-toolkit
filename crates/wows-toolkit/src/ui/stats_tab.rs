@@ -358,7 +358,7 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
             for (achievement, icon) in all_achievements.iter().zip(icons) {
                 let name = achievement.resolved_name(loader);
                 let desc = achievement.resolved_description(loader);
-                let tooltip = format!("{}: {}", &name, &desc);
+                let tooltip = format!("{}: {}", name, desc);
                 ui.vertical(|ui| {
                     ui.set_width(56.0);
                     if let Some(icon) = icon {

@@ -19,7 +19,7 @@ rootcause = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-# 0.18.1: highest version compatible with workspace rust-version = "1.92" (verified 2026-06-04)
+# 0.18.1: pinned deliberately; newer bevy_ecs releases are unevaluated here.
 bevy_ecs = "0.18.1"
 
 [build-dependencies]

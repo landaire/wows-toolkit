@@ -95,7 +95,7 @@ pub fn translate_module(
     let desc_id = format!("IDS_DESC_{}", game_params_name.to_uppercase());
     let description = resource_loader
         .localized_name_from_id(&TranslationKey::new(desc_id))
-        .and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) });
+        .filter(|desc| !(desc.is_empty() || desc == " "));
 
     (name, description)
 }

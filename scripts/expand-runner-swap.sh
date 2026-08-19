@@ -11,7 +11,9 @@
 # byte-for-byte what the release profile produces.
 set -euo pipefail
 
-size="${1:-16G}"
+# Gigabytes. mkswap reserves a header, and `free -g` truncates, so the check
+# below allows a gigabyte of slack rather than demanding the full request.
+size_gb="${1:-16}"
 # /mnt is the runner's large ephemeral disk; / has far less headroom.
 swapfile=/mnt/swapfile
 
@@ -20,21 +22,16 @@ free -h
 
 sudo swapoff -a
 sudo rm -f "$swapfile"
-sudo fallocate -l "$size" "$swapfile"
+sudo fallocate -l "${size_gb}G" "$swapfile"
 sudo chmod 600 "$swapfile"
 sudo mkswap "$swapfile"
 sudo swapon "$swapfile"
 
-# Default 60 evicts page cache long before anonymous pages, which is wrong when
-# one process legitimately needs more anonymous memory than RAM.
-sudo sysctl -w vm.swappiness=10
-
 echo "Memory and swap after:"
 free -h
 
-available_swap=$(free -g | awk '/^Swap:/ { print $2 }')
-want=${size%G}
-if [ "$available_swap" -lt "$((want - 1))" ]; then
-  echo "Expected roughly ${size} of swap, found ${available_swap}G." >&2
+available_gb=$(free -g | awk '/^Swap:/ { print $2 }')
+if [ "$available_gb" -lt "$((size_gb - 1))" ]; then
+  echo "Expected roughly ${size_gb}G of swap, found ${available_gb}G." >&2
   exit 1
 fi

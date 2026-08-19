@@ -2324,7 +2324,7 @@ impl CrewSkill {
             .localized_name_from_id(&TranslationKey::new(primary))
             .or_else(|| metadata.localized_name_from_id(&TranslationKey::new(fallback)));
 
-        description.and_then(|desc| if desc.is_empty() || desc == " " { None } else { Some(desc) })
+        description.filter(|desc| !(desc.is_empty() || desc == " "))
     }
 
     /// Static localized description when present, else a description generated
@@ -2359,7 +2359,7 @@ impl CrewSkill {
             let sentence = trig.trigger_type().and_then(|tt| {
                 metadata
                     .localized_name_from_id(&TranslationKey::new(format!("IDS_SKILL_TRIGGER_{}", tt.to_uppercase())))
-                    .and_then(|s| if s.is_empty() || s == " " { None } else { Some(s) })
+                    .filter(|s| !(s.is_empty() || s == " "))
             });
             let has_sentence = sentence.is_some();
             if let Some(sentence) = sentence {

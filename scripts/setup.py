@@ -163,7 +163,12 @@ def main() -> int:
         if missing:
             hint = {
                 "Linux": "sudo apt-get install nasm clang llvm   (or your distro's equivalent)",
-                "Darwin": "brew install nasm llvm",
+                # Homebrew's llvm is keg-only, so installing it is not enough:
+                # nothing lands on PATH without the second line.
+                "Darwin": (
+                    'brew install nasm llvm'
+                    ' && export PATH="$(brew --prefix llvm)/bin:$PATH"'
+                ),
             }.get(system, "install nasm and clang from your package manager")
             print(f"Missing: {', '.join(missing)}. Install with: {hint}", file=sys.stderr)
             return 1

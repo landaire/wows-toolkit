@@ -1,10 +1,31 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
 
 workspace_library(
     name = "wows_core",
     crate = "wows_core",
     package = "wows-core",
     version = "0.13.0",
+    features = [
+        "arc",
+        "default",
+        "parsing",
+        "rkyv",
+        "serde",
+    ],
+    deps = [
+        "//third-party/rust:rkyv",
+        "//third-party/rust:roxmltree",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+    ],
+)
+
+workspace_test(
+    name = "wows_core_test",
+    crate = "wows_core",
+    package = "wows-core",
+    version = "0.13.0",
+    crate_root = "src/lib.rs",
     features = [
         "arc",
         "default",

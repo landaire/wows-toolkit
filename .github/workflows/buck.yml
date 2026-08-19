@@ -9,11 +9,10 @@ on:
 # stays hermetic. Provisioning is the only step allowed to reach the network:
 # every Buck step after it runs in a network namespace of its own.
 
+# root//: is every alias declared in the root BUCK file, so adding one does not
+# mean remembering to add it here as well.
 env:
-  ALIASES: >-
-    //:wows_toolkit //:wowsunpack //:wows_data_mgr //:replayshark
-    //:minimap_renderer //:minimap_renderer_cpu //:wgcheck //:dhat_load
-    //:profile_replay //:dhat_parse
+  ALIASES: "root//:"
 
 jobs:
   linux:
@@ -50,7 +49,7 @@ jobs:
 
       - name: Check the action graph is hermetic
         run: |
-          for alias in $ALIASES; do
+          for alias in $(nix develop --command buck2 targets $ALIASES); do
             nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias"
             nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias" release
           done
@@ -61,6 +60,9 @@ jobs:
       # so the action succeeds even when compilation does not.
       - name: Lint through Buck
         run: nix develop --command bash scripts/run-offline.sh nu scripts/lint.nu
+
+      - name: Run the unit tests through Buck
+        run: nix develop --command bash scripts/run-offline.sh buck2 test root//crates/...
 
       - name: Buck build-graph tests
         run: |

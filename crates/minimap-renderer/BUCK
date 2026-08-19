@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript", "workspace_library", "workspace_test")
 
 buildscript = workspace_buildscript(
     name = "minimap-renderer-buildscript",
@@ -113,4 +113,15 @@ workspace_binary(
     crate_root = "src/main.rs",
     features = MINIMAP_CPU_FEATURES,
     deps = [":wows_minimap_renderer_cpu"] + MINIMAP_CPU_DEPS,
+)
+
+workspace_test(
+    name = "wows_minimap_renderer_test",
+    crate = "wows_minimap_renderer",
+    crate_root = "src/lib.rs",
+    package = "wows_minimap_renderer",
+    version = "0.39.0",
+    features = MINIMAP_FEATURES,
+    deps = MINIMAP_DEPS,
+    buildscript = buildscript,
 )

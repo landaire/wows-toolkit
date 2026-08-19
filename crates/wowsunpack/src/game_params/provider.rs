@@ -878,10 +878,9 @@ fn parse_pitch_dead_zones(mount_dict: &pickled::Dict) -> Vec<[f32; 4]> {
             .filter_map(|entry| {
                 let inner: Vec<f32> = if let Some(l) = entry.list_ref() {
                     l.inner().iter().filter_map(as_f32).collect()
-                } else if let Some(t) = entry.tuple_ref() {
-                    t.inner().iter().filter_map(as_f32).collect()
                 } else {
-                    return None;
+                    let t = entry.tuple_ref()?;
+                    t.inner().iter().filter_map(as_f32).collect()
                 };
                 if inner.len() == 4 { Some([inner[0], inner[1], inner[2], inner[3]]) } else { None }
             })

@@ -5,21 +5,14 @@ def main [] {
     ^nu scripts/test-buildscript-environment.nu
     ^nu scripts/test-workspace-package-metadata.nu
 
-    let aliases = [
-        "wows_toolkit"
-        "wowsunpack"
-        "wows_data_mgr"
-        "replayshark"
-        "minimap_renderer"
-        "minimap_renderer_cpu"
-        "wgcheck"
-        "dhat_load"
-        "profile_replay"
-        "dhat_parse"
-    ]
+    # Enumerated from the root BUCK file rather than repeated here, so a new
+    # alias is covered without touching this test.
+    let targets = (^buck2 targets "root//:" | lines | where {|line| ($line | str trim) != "" })
+    if ($targets | length) < 5 {
+        error make {msg: $"Expected the root package to declare the release aliases, found ($targets | length)."}
+    }
 
-    for alias in $aliases {
-        let target = $"//:($alias)"
+    for target in $targets {
         let dep_query = (["deps(" $target ", 1)"] | str join)
         let deps = (do { ^buck2 uquery $dep_query } | complete)
         if $deps.exit_code != 0 {

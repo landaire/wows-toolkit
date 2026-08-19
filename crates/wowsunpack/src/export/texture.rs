@@ -236,10 +236,12 @@ fn downsample(image: &RgbaImage, edge: MaxEdge) -> RgbaImage {
                     count += 1;
                 }
             }
-            if count > 0 {
-                let di = (dy * nw + dx) as usize * 4;
-                for (c, a) in acc.iter().enumerate() {
-                    dst[di + c] = (a / count) as u8;
+            let di = (dy * nw + dx) as usize * 4;
+            for (c, a) in acc.iter().enumerate() {
+                // count is zero only when the source rect was empty, which
+                // leaves the destination pixel at its zeroed default.
+                if let Some(mean) = a.checked_div(count) {
+                    dst[di + c] = mean as u8;
                 }
             }
         }

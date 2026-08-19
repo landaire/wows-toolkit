@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_binary", "workspace_library", "workspace_test")
 
 WDM_DEPS = [
     "//crates/wowsunpack:wowsunpack",
@@ -38,4 +38,18 @@ workspace_binary(
     crate_root = "src/main.rs",
     features = ["constants", "download"],
     deps = [":wows_data_mgr"] + WDM_DEPS,
+)
+
+workspace_test(
+    name = "wows_data_mgr_test",
+    test_deps = [
+        "//third-party/rust:futures",
+        "//third-party/rust:tempfile",
+    ],
+    crate = "wows_data_mgr",
+    crate_root = "src/lib.rs",
+    package = "wows-data-mgr",
+    version = "0.21.0",
+    features = ["constants", "download"],
+    deps = WDM_DEPS,
 )

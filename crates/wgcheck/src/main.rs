@@ -6,10 +6,10 @@ use std::path::PathBuf;
 
 use clap::Parser;
 use clap::Subcommand;
-use rootcause::prelude::ResultExt;
 use rootcause::Result;
-use wgcheck::parse_gch;
+use rootcause::prelude::ResultExt;
 use wgcheck::Member;
+use wgcheck::parse_gch;
 
 #[derive(Parser)]
 #[command(about = "Parse WGCheck (.gch) reports and extract python logs")]

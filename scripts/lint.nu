@@ -7,13 +7,18 @@
 # nothing about whether the code lints. This reads the diagnostics themselves
 # and sets the exit code from them.
 #
+# That covers a target whose own code does not compile. A dependency failing to
+# compile is different: the clippy sub-target cannot be produced at all, so the
+# BXL aborts and the buck2 error surfaces instead of a rendered diagnostic.
+#
 # Usage:
 #   nu scripts/lint.nu              # clippy and rustfmt over root//...
 #   nu scripts/lint.nu clippy
 #   nu scripts/lint.nu rustfmt --target root//crates/wowsunpack/...
 
 # Matches mise.toml's fmt task. .rustfmt.toml keeps these commented out, so the
-# two paths would otherwise drift apart silently.
+# two paths would otherwise drift apart silently. The rustfmt binary itself
+# comes from toolchains//:rustfmt via the BXL, not from PATH.
 const RUSTFMT_ARGS = [
     "--config"
     "unstable_features=true"
@@ -34,6 +39,11 @@ def run_bxl [entry: string, target: string] {
 
 def check_clippy [target: string] {
     let report = (run_bxl "clippy" $target)
+    # A pattern that matches nothing must not read as a pass: a typo, a rename,
+    # or a filter that widens would otherwise turn this into a permanent green.
+    if ($report.diagnostics | is-empty) {
+        error make {msg: $"bxl/lint.bxl:clippy matched no targets under ($target)."}
+    }
 
     mut findings = []
     for entry in ($report.diagnostics | transpose target paths) {
@@ -88,15 +98,22 @@ def check_rustfmt [target: string] {
     mut ok = true
     mut checked = 0
     for group in $groups {
-        # rustfmt parses to the edition it is told; a 2021 crate checked as
-        # 2024 reports differences that are not real.
-        let result = (do { ^rustfmt --check --edition $group.edition ...$RUSTFMT_ARGS ...$group.sources } | complete)
-        $checked = $checked + ($group.sources | length)
-        if $result.exit_code != 0 {
-            print -e $result.stdout
-            print -e $result.stderr
-            $ok = false
+        # Paths are repository-relative, so anchor them; the task must work from
+        # a subdirectory.
+        let paths = ($group.sources | each {|src| [$report.root $src] | path join })
+        # Windows caps a command line at 32767 characters and the repository is
+        # already past half that in one invocation.
+        for chunk in ($paths | chunks 100) {
+            # rustfmt parses to the edition it is told; a 2021 crate checked as
+            # 2024 reports differences that are not real.
+            let result = (do { ^$report.rustfmt --check --edition $group.edition ...$RUSTFMT_ARGS ...$chunk } | complete)
+            if $result.exit_code != 0 {
+                print -e $result.stdout
+                print -e $result.stderr
+                $ok = false
+            }
         }
+        $checked = $checked + ($group.sources | length)
     }
 
     if not $ok {

@@ -7,8 +7,13 @@
 # renamed or dropped tool fails the build instead of quietly changing the
 # release.
 #
+# patchelf is taken from PATCHELF, defaulting to the Nix devShell's, because
+# only the Linux release job links through Nix.
+#
 # Usage: package-tools.sh <slug> <buck2-command...>
 set -euo pipefail
+
+: "${PATCHELF:=nix develop --command patchelf}"
 
 slug="$1"
 shift
@@ -67,7 +72,7 @@ for f in artifacts/*; do
   if [ "$(head -c 4 "$f" | od -An -tx1 | tr -d ' \n')" != "7f454c46" ]; then
     continue
   fi
-  nix develop --command patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$f"
+  $PATCHELF --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$f"
 done
 
 zip -j "$zip_name" artifacts/*

@@ -23,9 +23,13 @@ permissions:
   pages: write
   id-token: write
 
-# One deployment at a time, queued rather than cancelled. Cancelling loses
-# the tag and release runs, which are the only ones that rebuild tactics: a
-# release tag is pushed alongside a main push, and the main run would cancel it.
+# One deployment at a time. cancel-in-progress: true cancelled the tag and
+# release runs, which are the only ones that rebuild tactics, because a release
+# tag is pushed alongside a main push. This keeps a running tactics build alive.
+# It does not make the group safe: GitHub still evicts a PENDING run when a
+# newer one arrives, so a main push landing while a tag build runs can still
+# displace a queued tag run, and the deploy then falls back to a stale
+# tactics-dist- cache with only a warning.
 concurrency:
   group: pages
   cancel-in-progress: false
@@ -44,7 +48,7 @@ jobs:
 
       - name: Expand runner swap
         if: env.BUILD_TACTICS == 'true'
-        run: bash scripts/expand-runner-swap.sh 16G
+        run: bash scripts/expand-runner-swap.sh 16
 
       - name: Install Nix
         if: env.BUILD_TACTICS == 'true'

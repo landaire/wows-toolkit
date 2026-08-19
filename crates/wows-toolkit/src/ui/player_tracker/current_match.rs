@@ -621,10 +621,10 @@ fn roster_row_style(view_mode: CurrentMatchViewMode) -> taffy::Style {
             CurrentMatchViewMode::Detailed => taffy::AlignItems::Start,
         }),
         gap: length(ROW_COLUMN_GAP),
-        size: taffy::Size { width: percent(1.0), height: auto() },
+        size: taffy::Size { width: percent(1.0_f32), height: auto() },
         grid_template_columns: vec![
             length(CLASS_COLUMN_WIDTH),
-            fr(1.0),
+            fr(1.0_f32),
             length(SHIP_COLUMN_WIDTH),
             length(WIN_RATE_COLUMN_WIDTH),
             length(PERSONAL_RATING_COLUMN_WIDTH),
@@ -649,7 +649,7 @@ fn player_column_style() -> taffy::Style {
     taffy::Style {
         flex_grow: 1.0,
         flex_shrink: 1.0,
-        min_size: taffy::Size { width: length(0.0), height: auto() },
+        min_size: taffy::Size { width: length(0.0_f32), height: auto() },
         ..Default::default()
     }
 }
@@ -1607,7 +1607,7 @@ mod tests {
     #[test]
     fn fixed_columns_keep_their_requested_width() {
         let style = fixed_column_style(48.0);
-        let width = length(48.0);
+        let width = length(48.0_f32);
 
         assert_eq!(style.flex_shrink, 0.0);
         assert_eq!(style.size.width, width);
@@ -1621,7 +1621,7 @@ mod tests {
 
         assert_eq!(style.display, taffy::Display::Grid);
         assert_eq!(style.grid_template_columns.len(), 9);
-        assert_eq!(style.size.width, percent(1.0));
+        assert_eq!(style.size.width, percent(1.0_f32));
     }
 
     #[test]
@@ -1638,7 +1638,7 @@ mod tests {
         assert_eq!(ship.max_size.width, length(SHIP_COLUMN_WIDTH));
         assert_eq!(player.flex_grow, 1.0);
         assert_eq!(player.flex_shrink, 1.0);
-        assert_eq!(player.min_size.width, length(0.0));
+        assert_eq!(player.min_size.width, length(0.0_f32));
     }
 
     #[test]

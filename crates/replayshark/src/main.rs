@@ -343,7 +343,7 @@ impl wows_replays::analyzer::Analyzer for InvestigativePrinter {
             println!("{:02}:{:02}:{:02}: {}", h, m, s, encoded);
         } else {
             let encoded = serde_json::to_string(&decoded).unwrap();
-            println!("{}", &encoded);
+            println!("{}", encoded);
         }
     }
 }
@@ -385,7 +385,7 @@ fn build_investigative_printer(
         meta: !no_meta,
     };
     if !no_meta {
-        println!("{}", &serde_json::to_string(&meta).unwrap());
+        println!("{}", serde_json::to_string(&meta).unwrap());
     }
     Box::new(decoder)
 }

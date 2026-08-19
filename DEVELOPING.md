@@ -6,7 +6,7 @@
 
 Everything runs natively; Nix and WSL are not needed. You need:
 
-- [Rust](https://rustup.rs/) (1.92+, from `rust-toolchain.toml`)
+- [Rust](https://rustup.rs/) (1.97+, from `rust-toolchain.toml`)
 - Visual Studio 2022 with the **C++ Clang Compiler for Windows** component.
   `ring` hardcodes clang when targeting wasm32 and `cc` has no MSVC fallback
   there, so `cargo check -p wt-web --target wasm32-unknown-unknown` cannot run
@@ -45,7 +45,7 @@ cargo build -p wows_toolkit --release
 
 If you prefer not to use Nix on Linux or macOS:
 
-- [Rust](https://rustup.rs/) (1.92+)
+- [Rust](https://rustup.rs/) (1.97+)
 - [DepotDownloader](https://github.com/SteamRE/DepotDownloader) (only needed for downloading game data; requires .NET)
 - `openssl` and `pkg-config` development headers
 - On Linux: X11/Wayland/Vulkan/fontconfig development libraries
@@ -97,7 +97,9 @@ buck2 build //:wows_toolkit
 buck2 build -c native_build.mode=release //:wows_toolkit
 ```
 
-Aliases: `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`.
+Aliases: `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`. `buck2 build root//:` builds all of them.
+
+The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). `build-support/release-tools.json` holds that mapping and `scripts/package-tools.*` checks the finished archive against it.
 
 The host platform is selected automatically. Pass `--target-platforms` only to be explicit:
 

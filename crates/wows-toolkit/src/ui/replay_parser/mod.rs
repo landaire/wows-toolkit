@@ -2402,7 +2402,7 @@ impl UiReport {
                                         }
 
                                         let response = if achievement.count > 1 {
-                                            ui.label(format!("{} ({}x)", &achievement.display_name, achievement.count))
+                                            ui.label(format!("{} ({}x)", achievement.display_name, achievement.count))
                                         } else {
                                             ui.label(&achievement.display_name)
                                         };
@@ -2470,7 +2470,7 @@ impl UiReport {
                                             ui.add(image).on_hover_text(&ribbon.description);
                                         }
 
-                                        ui.label(format!("{} ({}x)", &ribbon.display_name, ribbon.count))
+                                        ui.label(format!("{} ({}x)", ribbon.display_name, ribbon.count))
                                             .on_hover_text(&ribbon.description);
                                     });
                                 }
@@ -2647,11 +2647,9 @@ impl UiReport {
 
                 change_expand = true;
             }
-            (false, true) => {
-                if self.selected_row.take().filter(|prev| prev.0 == row_nr).is_none() {
-                    self.selected_row = Some((row_nr, true));
-                    ui.ctx().request_repaint();
-                }
+            (false, true) if self.selected_row.take().filter(|prev| prev.0 == row_nr).is_none() => {
+                self.selected_row = Some((row_nr, true));
+                ui.ctx().request_repaint();
             }
             _ => {
                 // both false
@@ -6136,7 +6134,7 @@ fn fire_chance_headline_lines(fire_chance: &EffectiveFireChance) -> Vec<String> 
 /// the copy-to-clipboard breakdown.
 fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance> {
     let mut ships: Vec<&PerShipFireChance> = fire_chance.per_ship.iter().collect();
-    ships.sort_by(|a, b| b.eligible_hits.cmp(&a.eligible_hits));
+    ships.sort_by_key(|s| std::cmp::Reverse(s.eligible_hits));
     ships
 }
 

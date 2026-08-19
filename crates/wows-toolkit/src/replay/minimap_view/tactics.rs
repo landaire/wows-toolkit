@@ -377,7 +377,7 @@ fn list_preset_names() -> Vec<String> {
 /// Save a preset to disk.
 fn save_preset(preset: &TacticsPreset) -> Result<(), String> {
     let dir = presets_dir().ok_or("no storage dir")?;
-    let path = dir.join(format!("{}.json", &preset.name));
+    let path = dir.join(format!("{}.json", preset.name));
     let json = serde_json::to_string_pretty(preset).map_err(|e| e.to_string())?;
     std::fs::write(path, json).map_err(|e| e.to_string())
 }

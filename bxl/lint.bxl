@@ -1,13 +1,14 @@
 """ Batch lint entry points over the whole first-party Rust graph.
 
 `clippy` builds the [clippy.json] sub-target of every first-party rust target
-in one invocation and prints where the diagnostics landed. `rustfmt` checks
-formatting for the sources of those same targets.
+in one invocation and prints where the diagnostics landed. `rustfmt` lists the
+sources of those same targets, grouped by edition, along with the pinned
+rustfmt to check them with.
 
 Neither decides pass or fail: the prelude builds clippy diagnostics with
 infallible_diagnostics = True, so the action succeeds even when compilation
-fails and BUILD SUCCEEDED proves nothing. scripts/lint-report.nu reads the JSON
-and sets the exit code.
+fails and BUILD SUCCEEDED proves nothing. scripts/lint.nu reads the JSON and
+sets the exit code.
 """
 
 _RUST_KINDS = "^rust_(binary|library|test)$"
@@ -63,9 +64,17 @@ def _rustfmt_impl(ctx):
                 continue
             by_edition.setdefault(edition, {})[package + "/" + src.short_path] = True
 
+    # The pinned rustfmt, not whatever is on PATH: the formatter decides a pass
+    # or fail verdict, so it has to be the same one everywhere. The attribute is
+    # the absolute path the platform bootstrap published.
+    rustfmt = ctx.unconfigured_targets("toolchains//:rustfmt").get_attr("rustfmt")
+    if not rustfmt:
+        fail("toolchains//:rustfmt has no path. Run the platform toolchain bootstrap first.")
+
     ctx.output.print_json({
         "kind": "rustfmt",
         "root": ctx.root(),
+        "rustfmt": rustfmt,
         # rustfmt takes many files per invocation, so the driver runs one per
         # edition rather than one per file.
         "sources_by_edition": {

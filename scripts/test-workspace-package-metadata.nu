@@ -24,8 +24,24 @@ def crate-edition [dir: path] {
 def buck-editions [buckfile: path] {
     open --raw $buckfile
     | lines
-    | where {|line| $line | str starts-with "    edition = " }
-    | each {|line| $line | str replace --all --regex '^\s+edition = "(.*)",$' '$1' }
+    | where {|line| $line | str trim | str starts-with "edition = " }
+    | each {|line| $line | str replace --all --regex '^\s*edition = "(.*)",$' '$1' }
+}
+
+# Every macro that forwards an edition to a Rust rule. A crate off the workspace
+# edition has to say so on each one, so counting them is what catches the case
+# where only some targets in a BUCK file were updated.
+def buck-target-count [buckfile: path] {
+    open --raw $buckfile
+    | lines
+    | where {|line|
+        ($line | str starts-with "workspace_library(")
+        or ($line | str starts-with "workspace_binary(")
+        or ($line | str starts-with "workspace_test(")
+        or ($line | str starts-with "workspace_buildscript(")
+        or ($line | str contains "= workspace_buildscript(")
+    }
+    | length
 }
 
 def buck-versions [buckfile: path] {
@@ -55,10 +71,14 @@ def main [] {
             }
         }
         # An omitted edition takes workspace_rules.bzl's default, so silence
-        # here is only correct when the crate is on the workspace edition.
+        # here is only correct when the crate is on the workspace edition. Every
+        # target has to carry it, not just the first one.
         let workspace_edition = (open Cargo.toml | get workspace.package.edition)
-        if ($found_editions | is-empty) and $expected_edition != $workspace_edition {
-            $failures = ($failures | append $"($dir)/BUCK omits edition, but Cargo.toml pins ($expected_edition)")
+        if $expected_edition != $workspace_edition {
+            let targets = (buck-target-count $buckfile)
+            if ($found_editions | length) != $targets {
+                $failures = ($failures | append $"($dir)/BUCK declares edition on ($found_editions | length) of ($targets) targets, but Cargo.toml pins ($expected_edition)")
+            }
         }
     }
 

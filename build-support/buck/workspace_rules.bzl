@@ -1,5 +1,4 @@
 load("@prelude//rust:cargo_buildscript.bzl", "buildscript_run")
-load("@prelude//rust:cargo_package.bzl", "cargo")
 load("@prelude//rust/buildscript:buildscript_platform.bzl", "transition_alias")
 
 # Every crate but wgcheck is on the workspace edition; a crate that pins its own
@@ -72,7 +71,9 @@ def workspace_buildscript(name, crate, package, version, edition = _DEFAULT_EDIT
 
     build_name = name + "-build"
     run_name = name + "-run"
-    cargo.rust_binary(
+    # native, not cargo.rust_binary: build.rs is first-party code, and the cargo
+    # wrapper would cap its lints to allow like a vendored crate's.
+    native.rust_binary(
         name = build_name,
         srcs = srcs,
         crate = "build_script_build",
@@ -120,6 +121,33 @@ def workspace_library(name, crate, package, version, edition = _DEFAULT_EDITION,
         resources = resources,
         visibility = ["PUBLIC"],
         deps = deps,
+    )
+
+def workspace_test(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], test_deps = [], buildscript = None, resources = []):
+    """The crate's own #[test] functions, as a Buck test target.
+
+    test_deps are Cargo's [dev-dependencies]. reindeer is configured to vendor
+    normal dependencies only, so a dev-dependency is available here only when
+    something else in the graph already pulls it in.
+    """
+    env = _cargo_env(crate, package, version)
+    rustc_flags = []
+    if buildscript != None:
+        env["OUT_DIR"] = "$(location :{}[out_dir])".format(buildscript)
+        rustc_flags = ["@$(location :{}[rustc_flags])".format(buildscript)]
+
+    native.rust_test(
+        name = name,
+        srcs = glob(["**"], exclude = ["BUCK", "Cargo.lock"]) + resources,
+        crate = crate,
+        crate_root = crate_root,
+        edition = edition,
+        env = env,
+        features = features,
+        rustc_flags = rustc_flags,
+        resources = resources,
+        visibility = ["PUBLIC"],
+        deps = deps + test_deps,
     )
 
 def workspace_binary(name, crate, package, version, crate_root, edition = _DEFAULT_EDITION, features = [], deps = [], buildscript = None, resources = [], rustc_flags = []):

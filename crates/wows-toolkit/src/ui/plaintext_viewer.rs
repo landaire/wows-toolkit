@@ -57,7 +57,7 @@ impl PlaintextFileViewer {
                     }
                     FileType::Image { contents } => {
                         let image = Image::new(ImageSource::Bytes {
-                            uri: format!("bytes://{}", &*title).into(),
+                            uri: format!("bytes://{}", *title).into(),
                             // the icon size is <1k, this clone is fairly cheap
                             bytes: contents.clone().into(),
                         });

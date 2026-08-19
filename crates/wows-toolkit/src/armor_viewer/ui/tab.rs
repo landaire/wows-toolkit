@@ -3235,7 +3235,7 @@ pub(crate) fn show_armor_tooltip(
     });
 
     // Zone and part info
-    ui.label(format!("{} / {}", &info.zone, translate(&info.material_name)));
+    ui.label(format!("{} / {}", info.zone, translate(&info.material_name)));
 
     if info.layers.len() > 1 {
         ui.separator();
@@ -3275,7 +3275,7 @@ pub(crate) fn show_armor_tooltip(
                 egui::RichText::new(format!(
                     "{} {}",
                     crate::armor_viewer::ship_selector::tier_roman(ship.tier),
-                    &ship.display_name
+                    ship.display_name
                 ))
                 .small()
                 .strong(),
@@ -3650,7 +3650,7 @@ pub(crate) fn draw_hull_visibility_popover(
         }
         let mut ship_infos: Vec<&wowsunpack::export::camo_textures::CamoSchemeInfo> =
             armor.camo_scheme_infos.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
-        ship_infos.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+        ship_infos.sort_by_key(|a| a.display_name.to_lowercase());
         for info in &ship_infos {
             let is_selected = pane.selected_camo == Some(info.id);
             if ui.selectable_label(is_selected, info.display_name.as_str()).clicked() && !is_selected {
@@ -3670,7 +3670,7 @@ pub(crate) fn draw_hull_visibility_popover(
             if group.is_empty() {
                 continue;
             }
-            group.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+            group.sort_by_key(|a| a.display_name.to_lowercase());
             let id = ui.make_persistent_id(("camo_group", pane.id, key));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
                 .show_header(ui, |ui| {
@@ -5317,7 +5317,7 @@ pub(crate) fn draw_display_settings_popover(
         let any_hull_on = pane.hull_visibility.values().any(|&v| v);
         let mut hull_checked = any_hull_on;
         if ui.checkbox(&mut hull_checked, t!("ui.armor.ship_hull").as_ref()).changed() {
-            for (_, vis) in pane.hull_visibility.iter_mut() {
+            for vis in pane.hull_visibility.values_mut() {
                 *vis = hull_checked;
             }
             zone_changed = true;

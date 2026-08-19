@@ -4,7 +4,7 @@ Guidance for agents working in the wows-toolkit repository. These rules override
 
 ## Repository
 
-Cargo workspace, edition 2024, rust 1.92. Crates under `crates/`:
+Cargo workspace, edition 2024, rust 1.97. Crates under `crates/`:
 
 - `wows-toolkit` main desktop app (egui + eframe + glow)
 - `wowsunpack` game data unpacking, models, game params

@@ -233,7 +233,7 @@ fn dump_sources_newest_first(dump_dir: Option<&std::path::Path>) -> Vec<VfsPath>
     };
     let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
     let mut entries: Vec<_> = index.builds.iter().collect();
-    entries.sort_by(|a, b| b.build.cmp(&a.build));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.build));
     entries
         .into_iter()
         .filter_map(|e| wows_data_mgr::cas_vfs::BuildCas::open(&base.join(&e.dir)).map(|cas| cas.vfs()))
@@ -2705,14 +2705,14 @@ impl ReplayRendererViewer {
                                         display: taffy::Display::Flex,
                                         flex_direction: taffy::FlexDirection::Row,
                                         align_items: Some(taffy::AlignItems::Center),
-                                        gap: length(4.0),
-                                        size: taffy::Size { width: taffy::prelude::percent(1.0), height: auto() },
+                                        gap: length(4.0_f32),
+                                        size: taffy::Size { width: taffy::prelude::percent(1.0_f32), height: auto() },
                                         ..Default::default()
                                     };
                                     let grow_style = taffy::Style {
                                         flex_grow: 1.0,
                                         flex_shrink: 1.0,
-                                        min_size: taffy::Size { width: length(60.0), height: auto() },
+                                        min_size: taffy::Size { width: length(60.0_f32), height: auto() },
                                         ..Default::default()
                                     };
                                     let fixed_style = taffy::Style { flex_shrink: 0.0, ..Default::default() };

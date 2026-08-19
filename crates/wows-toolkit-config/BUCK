@@ -1,8 +1,28 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
 
 workspace_library(
     name = "wows_toolkit_config",
     crate = "wows_toolkit_config",
+    package = "wows-toolkit-config",
+    version = "0.1.0",
+    deps = [
+        "//crates/wows-core:wows_core",
+        "//third-party/rust:home",
+        "//third-party/rust:jiff",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+        "//third-party/rust:sqlx",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tokio",
+        "//third-party/rust:tracing",
+        "//third-party/rust:winnow",
+    ],
+)
+
+workspace_test(
+    name = "wows_toolkit_config_test",
+    crate = "wows_toolkit_config",
+    crate_root = "src/lib.rs",
     package = "wows-toolkit-config",
     version = "0.1.0",
     deps = [
