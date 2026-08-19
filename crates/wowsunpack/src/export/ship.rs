@@ -44,10 +44,12 @@ use crate::models::visual;
 use crate::models::visual::VisualPrototype;
 use crate::recognized::Recognized;
 
+use super::camo_composite;
 use super::camo_textures;
 use super::camo_textures::CamoSchemeId;
 use super::camouflage;
 use super::camouflage::CamouflageDb;
+use super::camouflage::UvTransform;
 use super::gltf_export;
 use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
@@ -86,6 +88,8 @@ pub enum CamoSelection {
     BaseOnly,
     /// Base material plus one variant material set per scheme.
     Variants(Vec<CamoSchemeId>),
+    /// One scheme composited into the base material. No variants extension.
+    Baked(CamoSchemeId),
 }
 
 /// Options controlling ship model export.
@@ -1724,6 +1728,35 @@ impl ShipModelContext {
         let mut tex_set = TextureSet::empty();
         tex_set.base = source.base_albedos();
 
+        if let CamoSelection::Baked(id) = &self.options.camos {
+            let info =
+                source.scheme_info(*id).ok_or_else(|| Report::new(camo_textures::CamoDecodeError::UnknownId(*id)))?;
+            let scheme = source.decode(*id)?;
+            let bases = decode_png_map(&tex_set.base);
+            let applied = camo_composite::apply_scheme(&scheme, &info.uv_transforms, info.use_color_scheme, &bases);
+
+            for (stem, app) in applied {
+                let (image, uv) = match app {
+                    camo_composite::CamoApplication::CompositeOverBase { texture, uv } => {
+                        // No shader here, so resolve it now. A stem is only classified
+                        // this way when it has a base, so an absent one cannot happen.
+                        let Some(base) = bases.get(&stem) else {
+                            continue;
+                        };
+                        (camo_composite::flatten_over_base(&texture, &uv, base), UvTransform::default())
+                    }
+                    camo_composite::CamoApplication::Replace { texture, uv } => (texture, uv),
+                };
+                tex_set.base.insert(stem.clone(), encode_png(&image)?);
+                if uv.scale != [1.0, 1.0] || uv.offset != [0.0, 0.0] {
+                    tex_set.base_uv_transforms.insert(stem, [uv.scale[0], uv.scale[1], uv.offset[0], uv.offset[1]]);
+                }
+            }
+            // Stems the scheme does not cover keep their base albedo, which is what
+            // the game does: an uncovered part reverts to stock.
+            return Ok(tex_set);
+        }
+
         let CamoSelection::Variants(ids) = &self.options.camos else {
             return Ok(tex_set);
         };
@@ -1743,6 +1776,36 @@ impl ShipModelContext {
         }
         Ok(tex_set)
     }
+}
+
+/// Decode a stem-to-PNG map into raw RGBA. A stem whose PNG will not decode is
+/// dropped: the compositor then treats it as having no base, which is the same
+/// outcome as a part the game ships without one.
+fn decode_png_map(pngs: &HashMap<String, Vec<u8>>) -> HashMap<String, camo_composite::RgbaImageData> {
+    let mut out = HashMap::new();
+    for (stem, png) in pngs {
+        let Ok(img) = image::load_from_memory(png) else {
+            eprintln!("  Warning: failed to decode base albedo for {stem}");
+            continue;
+        };
+        let rgba = img.to_rgba8();
+        let (width, height) = (rgba.width(), rgba.height());
+        out.insert(stem.clone(), camo_composite::RgbaImageData { width, height, pixels: rgba.into_raw() });
+    }
+    out
+}
+
+fn encode_png(image: &camo_composite::RgbaImageData) -> Result<Vec<u8>, Report> {
+    let buf = image::RgbaImage::from_raw(image.width, image.height, image.pixels.clone()).ok_or_else(|| {
+        Report::new(gltf_export::ExportError::BakedCamoDimensions {
+            width: image.width,
+            height: image.height,
+            pixels: image.pixels.len(),
+        })
+    })?;
+    let mut out = std::io::Cursor::new(Vec::new());
+    buf.write_to(&mut out, image::ImageFormat::Png).context("Failed to encode baked camo")?;
+    Ok(out.into_inner())
 }
 
 // ---------------------------------------------------------------------------

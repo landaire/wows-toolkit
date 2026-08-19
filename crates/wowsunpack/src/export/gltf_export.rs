@@ -52,6 +52,8 @@ pub enum ExportError {
     Serialize(String),
     #[error("I/O error: {0}")]
     Io(String),
+    #[error("baked camo buffer is {pixels} bytes, which does not match {width}x{height}")]
+    BakedCamoDimensions { width: u32, height: u32, pixels: usize },
 }
 
 /// Decoded primitive data ready for glTF export.
@@ -1937,6 +1939,9 @@ pub struct TextureSet {
     /// UV scale/offset for tiled camo schemes. Key = `(scheme_index, mfm_stem)`.
     /// Only present for tiled camos; non-tiled camos use default UVs.
     pub tiled_uv_transforms: HashMap<(usize, String), [f32; 4]>,
+    /// UV scale/offset for a baked tiled camo, by MFM stem. A baked camo has no
+    /// variant material to carry `KHR_texture_transform`, so it rides the default.
+    pub base_uv_transforms: HashMap<String, [f32; 4]>,
 }
 
 impl TextureSet {
@@ -1947,6 +1952,7 @@ impl TextureSet {
             camo_origins: Vec::new(),
             camo_use_color_scheme: Vec::new(),
             tiled_uv_transforms: HashMap::new(),
+            base_uv_transforms: HashMap::new(),
         }
     }
 }
@@ -2267,16 +2273,19 @@ fn add_primitive_to_root(
     let cache_key = prim.mfm_stem.clone().unwrap_or_else(|| prim.material_name.clone());
 
     if !mat_cache.materials.contains_key(&cache_key) {
-        // Create the default material (base albedo or untextured).
-        let default_mat = if let Some(png_bytes) = prim.mfm_stem.as_ref().and_then(|stem| texture_set.base.get(stem)) {
+        // Create the default material (base albedo or untextured). A baked tiled camo
+        // has no variant material to carry its `KHR_texture_transform`, so it rides here.
+        let default_mat = if let Some((stem, png_bytes)) =
+            prim.mfm_stem.as_ref().and_then(|stem| texture_set.base.get(stem).map(|png| (stem, png)))
+        {
             create_textured_material(
                 root,
                 bin_data,
                 image_cache,
                 png_bytes,
                 &prim.material_name,
-                prim.mfm_stem.clone(),
-                None,
+                Some(stem.clone()),
+                texture_set.base_uv_transforms.get(stem).copied(),
             )
         } else {
             create_untextured_material(root, &prim.material_name)

@@ -283,7 +283,9 @@ enum Commands {
         list_textures: bool,
 
         /// Camouflage scheme to embed, by display name. Repeat for several.
-        /// Omit for the stock appearance. Names come from --list-textures
+        /// Omit for the stock appearance. Names come from --list-textures.
+        /// One name bakes it into the base material; several are exposed as
+        /// glTF material variants.
         #[arg(long = "camo")]
         camos: Vec<String>,
 
@@ -2081,18 +2083,20 @@ fn run_export_ship(
 
     let probe_options = ShipExportOptions { textures: false, ..options.clone() };
     let probe = assets.load_ship(name, &probe_options)?;
-    let selection = if camos.is_empty() {
-        CamoSelection::BaseOnly
-    } else {
+    let mut ids = Vec::with_capacity(camos.len());
+    if !camos.is_empty() {
         let source = probe.camo_texture_source()?;
-        let mut ids = Vec::with_capacity(camos.len());
         for camo_name in camos {
             let id = source
                 .resolve_display_name(camo_name)
                 .ok_or_else(|| Report::new(camo_textures::CamoDecodeError::UnknownName { name: camo_name.clone() }))?;
             ids.push(id);
         }
-        CamoSelection::Variants(ids)
+    }
+    let selection = match ids.len() {
+        0 => CamoSelection::BaseOnly,
+        1 => CamoSelection::Baked(ids[0]),
+        _ => CamoSelection::Variants(ids),
     };
     let options = ShipExportOptions { camos: selection, ..options };
     let ctx = assets.load_ship(name, &options)?;

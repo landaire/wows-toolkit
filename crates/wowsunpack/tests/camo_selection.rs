@@ -78,3 +78,43 @@ fn an_unknown_id_is_an_error_not_a_silent_drop() {
     let result = load(&options).export_glb(&mut out);
     assert!(result.is_err(), "an id that names no scheme is a caller bug, not a silent empty export");
 }
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn baking_emits_no_variants_and_changes_the_base() {
+    let probe = load(&ShipExportOptions { textures: false, ..Default::default() });
+    let source = probe.camo_texture_source().expect("source");
+    let id = source.scheme_infos().first().expect("at least one scheme").id;
+
+    let mut stock = Vec::new();
+    load(&ShipExportOptions { camos: CamoSelection::BaseOnly, ..Default::default() })
+        .export_glb(&mut stock)
+        .expect("stock");
+
+    let mut baked = Vec::new();
+    load(&ShipExportOptions { camos: CamoSelection::Baked(id), ..Default::default() })
+        .export_glb(&mut baked)
+        .expect("baked");
+
+    assert!(variant_names(&baked).is_empty(), "a baked camo needs no variants extension");
+    assert_ne!(baked, stock, "baking changes the base material's textures");
+}
+
+#[test]
+#[ignore = "requires a World of Warships install"]
+fn baking_one_camo_beats_carrying_it_as_a_variant() {
+    let probe = load(&ShipExportOptions { textures: false, ..Default::default() });
+    let source = probe.camo_texture_source().expect("source");
+    let id = source.scheme_infos().first().expect("at least one scheme").id;
+
+    let mut baked = Vec::new();
+    load(&ShipExportOptions { camos: CamoSelection::Baked(id), ..Default::default() })
+        .export_glb(&mut baked)
+        .expect("baked");
+    let mut variant = Vec::new();
+    load(&ShipExportOptions { camos: CamoSelection::Variants(vec![id]), ..Default::default() })
+        .export_glb(&mut variant)
+        .expect("variant");
+
+    assert!(baked.len() < variant.len(), "baking carries one texture set, a variant carries two");
+}
