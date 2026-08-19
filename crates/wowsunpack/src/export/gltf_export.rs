@@ -1612,12 +1612,12 @@ pub fn export_geometry_raw(geometry: &MergedGeometry, writer: &mut impl Write) -
 /// The `_hide` geometry is close-up detail (boats, davits, fittings) that the
 /// engine shows in the near LODs and removes when the section is destroyed, so
 /// it belongs in the intact model and is only dropped in the damaged state.
-const INTACT_EXCLUDE: &[&str] = &["_crack_"];
+pub(crate) const INTACT_EXCLUDE: &[&str] = &["_crack_"];
 
 /// Render set name substrings to exclude for damaged-state export.
 ///
 /// In the damaged state, patch geometry is hidden and crack geometry is shown.
-const DAMAGED_EXCLUDE: &[&str] = &["_patch_", "_hide"];
+pub(crate) const DAMAGED_EXCLUDE: &[&str] = &["_patch_", "_hide"];
 
 /// Collect and decode all render set primitives for a given LOD.
 ///
@@ -1799,8 +1799,10 @@ fn collect_primitives(
 }
 
 /// Vertex/index totals and the distinct MFM stems reached, for one sub-model
-/// at one LoD, from a single `collect_primitives` pass that mirrors the
-/// export's own collection so neither figure can drift from it.
+/// at one LoD. Produced by `primitive_summary_from_metadata` in production
+/// (reads mapping metadata only, no decode) and by the `#[cfg(test)]`
+/// `primitive_summary` (a `collect_primitives` decode pass), which exists
+/// solely to prove the two agree.
 ///
 /// A stem whose only render sets are excluded (e.g. `_crack_` in an intact
 /// export) is absent from `mfm_stems`: it never reaches
@@ -1811,7 +1813,7 @@ fn collect_primitives(
 ///
 /// Counts and stems are produced together, not by two separate passes, so a
 /// caller pricing many instances of a shared model (`ShipModelContext::
-/// model_summary`) only pays for the decode once per unique model.
+/// model_summary`) only pays for this once per unique model.
 pub(crate) struct PrimitiveSummary {
     pub counts: super::size_estimate::MeshCounts,
     pub mfm_stems: HashSet<String>,
@@ -1841,15 +1843,26 @@ pub(crate) fn primitive_summary(
     Ok(PrimitiveSummary { counts, mfm_stems })
 }
 
-/// Metadata-only counterpart to [`primitive_summary`]: takes vertex/index
-/// counts straight from the mapping metadata (`items_count`) and reads the
-/// vertex format by name, without decoding any buffer. Mirrors
-/// `collect_primitives`'s render-set resolution and exclusion filter exactly,
-/// including the one quirk that affects counting: `unpack_vertices` only
-/// pushes a position per vertex when the format carries a Position
-/// attribute, so a render set without one contributes zero vertices, not
-/// `items_count`. Proven to count identically to the decode-based path by
+/// Metadata-only counterpart to `primitive_summary` (the `#[cfg(test)]`
+/// decode-based path -- not an intra-doc link, since that item does not
+/// exist outside `cfg(test)` and a link to it would resolve to nothing under
+/// `cargo doc`): takes vertex/index counts straight from the mapping
+/// metadata (`items_count`) and reads the vertex format by name, without
+/// decoding any buffer. Mirrors `collect_primitives`'s render-set resolution
+/// and exclusion filter exactly, including the one quirk that affects
+/// counting: `unpack_vertices` only pushes a position per vertex when the
+/// format carries a Position attribute, so a render set without one
+/// contributes zero vertices, not `items_count`. Proven to count identically
+/// to the decode-based path by
 /// `ship::tests::metadata_counting_matches_decode_based_counting`.
+///
+/// Unlike the decode path, this cannot fail on a malformed vertex/index
+/// buffer (it never reads the buffer contents, only the mapping metadata
+/// around it), so a corrupt buffer that would make `collect_primitives`
+/// error now yields a count that includes geometry the real export will
+/// still fail on, rather than no size line at all. Acceptable for a
+/// best-effort estimate -- the export itself is the source of truth and
+/// still fails loudly -- but worth knowing.
 pub(crate) fn primitive_summary_from_metadata(
     visual: &VisualPrototype,
     geometry: &MergedGeometry,

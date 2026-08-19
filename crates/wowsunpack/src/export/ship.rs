@@ -180,7 +180,9 @@ pub struct HullUpgradeInfo {
 /// Creating this is the expensive step (~18 seconds for GameParams parsing).
 /// Reuse a single instance across multiple ship exports.
 pub struct ShipAssets {
-    assets_bin_bytes: Vec<u8>,
+    /// Shared via `Arc` so `ShipModelContext::assets_bin_bytes` (cloned once per
+    /// ship load) is a refcount bump, not a ~170 MB memcpy.
+    assets_bin_bytes: Arc<Vec<u8>>,
     vfs: VfsPath,
     metadata: Arc<GameMetadataProvider>,
     camo_db: Option<CamouflageDb>,
@@ -203,7 +205,7 @@ impl ShipAssets {
 
         let camo_db = CamouflageDb::load(vfs);
 
-        Ok(Self { assets_bin_bytes, vfs: vfs.clone(), metadata, camo_db })
+        Ok(Self { assets_bin_bytes: Arc::new(assets_bin_bytes), vfs: vfs.clone(), metadata, camo_db })
     }
 
     /// Load shared assets from the VFS, reusing an already-loaded [`GameMetadataProvider`].
@@ -220,7 +222,7 @@ impl ShipAssets {
 
         let camo_db = CamouflageDb::load(vfs);
 
-        Ok(Self { assets_bin_bytes, vfs: vfs.clone(), metadata, camo_db })
+        Ok(Self { assets_bin_bytes: Arc::new(assets_bin_bytes), vfs: vfs.clone(), metadata, camo_db })
     }
 
     /// Load shared assets directly from a World of Warships installation directory.
@@ -1241,7 +1243,10 @@ impl ShipAssets {
 /// to write the model to a file or buffer.
 pub struct ShipModelContext {
     vfs: VfsPath,
-    assets_bin_bytes: Vec<u8>,
+    /// Shared with the `ShipAssets` it was loaded from: cloning this is a
+    /// refcount bump, not a ~170 MB memcpy, so a dialog holding a context
+    /// alive costs nothing extra here.
+    assets_bin_bytes: Arc<Vec<u8>>,
     hull_parts: Vec<OwnedSubModel>,
     turret_models: Vec<OwnedSubModel>,
     mounts: Vec<ResolvedMount>,
@@ -1831,14 +1836,37 @@ impl ShipModelContext {
     }
 
     /// Resolve and read one camo scheme's texture ladders, without touching
-    /// geometry. `size_model` only prices the schemes `self.options.camos`
-    /// selected at load time; a scheme the user selects afterward is priced
-    /// lazily here and merged into the model with
-    /// [`size_estimate::ExportSizeModel::insert_scheme_ladders`].
+    /// geometry. Convenience wrapper over [`Self::scheme_ladders_batch`] for a
+    /// single id; a caller resolving more than one id in the same request
+    /// (the dialog does, whenever the user has ticked several camos) should
+    /// call the batch form directly instead of looping this, since each call
+    /// independently re-parses assets.bin, rebuilds the self-id index and
+    /// re-derives the reachable-stem set.
     ///
     /// Reads DDS tails over the VFS, so callers must run this off the UI
     /// thread.
-    pub fn scheme_ladders(&self, id: CamoSchemeId) -> Result<Vec<(String, size_estimate::TextureLadder)>, Report> {
+    pub fn scheme_ladders(&self, id: CamoSchemeId) -> Result<size_estimate::SchemeLadders, Report> {
+        Ok(self.scheme_ladders_batch(&[id])?.into_iter().next().map(|(_, ladders)| ladders).unwrap_or_default())
+    }
+
+    /// Resolve and read several camo schemes' texture ladders in one pass,
+    /// without touching geometry. `size_model` only prices the schemes
+    /// `self.options.camos` selected at load time; a scheme the user selects
+    /// afterward is priced lazily here and merged into the model with
+    /// [`size_estimate::ExportSizeModel::insert_scheme_ladders`].
+    ///
+    /// The assets.bin re-parse, the self-id index and the reachable-stem set
+    /// (a `model_summary` pass over every unique hull/turret/misc model) are
+    /// each paid once for the whole batch, not once per id: on Smaland that
+    /// shared cost is the entire size of `Self::scheme_ladders`'s own body,
+    /// so calling it in a loop for N ids would pay it N times for no reason.
+    ///
+    /// Reads DDS tails over the VFS, so callers must run this off the UI
+    /// thread.
+    pub fn scheme_ladders_batch(
+        &self,
+        ids: &[CamoSchemeId],
+    ) -> Result<Vec<(CamoSchemeId, size_estimate::SchemeLadders)>, Report> {
         let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to parse assets.bin")?;
         let self_id_index = db.build_self_id_index();
 
@@ -1849,11 +1877,17 @@ impl ShipModelContext {
 
         let source = self.camo_texture_source_from_db(&db)?;
         let ladder_for = |path: &str| texture::texture_ladder(&self.vfs, path).map(size_estimate::TextureLadder::new);
-        Ok(source
-            .scheme_texture_paths(id, &reachable)?
-            .into_iter()
-            .filter_map(|path| ladder_for(&path).map(|l| (path, l)))
-            .collect())
+
+        ids.iter()
+            .map(|&id| {
+                let ladders: size_estimate::SchemeLadders = source
+                    .scheme_texture_paths(id, &reachable)?
+                    .into_iter()
+                    .filter_map(|path| ladder_for(&path).map(|l| (path, l)))
+                    .collect();
+                Ok((id, ladders))
+            })
+            .collect()
     }
 
     /// Build the complete texture set the options select (base albedo plus the
@@ -2471,8 +2505,13 @@ mod tests {
     /// `gltf_export::primitive_summary_from_metadata` (what `model_summary`
     /// calls) must count and reach exactly the same MFM stems as
     /// `gltf_export::primitive_summary` (the decode-based path it replaced),
-    /// for every unique model at every LoD. Ignored: needs a World of
-    /// Warships install.
+    /// for every unique model at every LoD, under both damage states. Damage
+    /// state matters because it changes which exclusion list
+    /// (`INTACT_EXCLUDE`/`DAMAGED_EXCLUDE`) applies, and this test also
+    /// confirms the filter is not a no-op it happens to agree on: it counts
+    /// how many render sets each pass actually excludes and requires at
+    /// least one under `damaged = true`, where `_hide` render sets are common
+    /// on ship hulls. Ignored: needs a World of Warships install.
     #[test]
     #[ignore = "requires a World of Warships install"]
     fn metadata_counting_matches_decode_based_counting() {
@@ -2494,33 +2533,61 @@ mod tests {
         let self_id_index = db.build_self_id_index();
 
         let mut compared = 0usize;
-        for part in ctx.hull_parts.iter().chain(ctx.turret_models.iter()).chain(ctx.misc_models.iter()) {
-            let geom = geometry::parse_geometry(&part.geom_bytes).expect("geometry");
-            for (lod_idx, lod) in part.visual.lods.iter().enumerate() {
-                let decoded =
-                    gltf_export::primitive_summary(&part.visual, &geom, &db, &self_id_index, lod, ctx.options.damaged)
-                        .unwrap_or_else(|e| panic!("decode-based summary failed for {} lod {lod_idx}: {e}", part.name));
-                let metadata = gltf_export::primitive_summary_from_metadata(
-                    &part.visual,
-                    &geom,
-                    &db,
-                    &self_id_index,
-                    lod,
-                    ctx.options.damaged,
-                )
-                .unwrap_or_else(|e| panic!("metadata summary failed for {} lod {lod_idx}: {e}", part.name));
+        for damaged in [false, true] {
+            let exclude_list = if damaged { gltf_export::DAMAGED_EXCLUDE } else { gltf_export::INTACT_EXCLUDE };
+            let mut excluded_count = 0usize;
 
-                assert_eq!(
-                    decoded.counts, metadata.counts,
-                    "{} lod {lod_idx}: metadata counting diverged from decode-based counting",
-                    part.name
+            for part in ctx.hull_parts.iter().chain(ctx.turret_models.iter()).chain(ctx.misc_models.iter()) {
+                let geom = geometry::parse_geometry(&part.geom_bytes).expect("geometry");
+                for (lod_idx, lod) in part.visual.lods.iter().enumerate() {
+                    for &rs_name_id in &lod.render_set_names {
+                        if let Some(rs_name) = db.strings.get_string_by_id(rs_name_id)
+                            && exclude_list.iter().any(|sub| rs_name.contains(sub))
+                        {
+                            excluded_count += 1;
+                        }
+                    }
+
+                    let decoded =
+                        gltf_export::primitive_summary(&part.visual, &geom, &db, &self_id_index, lod, damaged)
+                            .unwrap_or_else(|e| {
+                                panic!(
+                                    "decode-based summary failed for {} lod {lod_idx} damaged={damaged}: {e}",
+                                    part.name
+                                )
+                            });
+                    let metadata = gltf_export::primitive_summary_from_metadata(
+                        &part.visual,
+                        &geom,
+                        &db,
+                        &self_id_index,
+                        lod,
+                        damaged,
+                    )
+                    .unwrap_or_else(|e| {
+                        panic!("metadata summary failed for {} lod {lod_idx} damaged={damaged}: {e}", part.name)
+                    });
+
+                    assert_eq!(
+                        decoded.counts, metadata.counts,
+                        "{} lod {lod_idx} damaged={damaged}: metadata counting diverged from decode-based counting",
+                        part.name
+                    );
+                    assert_eq!(
+                        decoded.mfm_stems, metadata.mfm_stems,
+                        "{} lod {lod_idx} damaged={damaged}: reachable stems diverged between the two paths",
+                        part.name
+                    );
+                    compared += 1;
+                }
+            }
+
+            eprintln!("damaged={damaged}: {excluded_count} render sets excluded");
+            if damaged {
+                assert!(
+                    excluded_count > 0,
+                    "expected at least one _hide/_patch_ render set to be excluded under damaged=true on Smaland;                      an always-zero exclusion count would mean the filter equivalence is untested"
                 );
-                assert_eq!(
-                    decoded.mfm_stems, metadata.mfm_stems,
-                    "{} lod {lod_idx}: reachable stems diverged between the two paths",
-                    part.name
-                );
-                compared += 1;
             }
         }
         assert!(compared > 50, "expected many (part, lod) pairs on Smaland, got {compared}");
@@ -2530,7 +2597,7 @@ mod tests {
     /// the user selects a camo `size_model` was not built with: `size_model`
     /// itself (via `CamoSelection::priced_scheme_ids`) prices zero schemes for
     /// `ShipExportOptions::default()` (`CamoSelection::BaseOnly`), so every
-    /// scheme is initially "missing"; `scheme_ladders` must resolve one on its
+    /// scheme is initially "pending"; `scheme_ladders` must resolve one on its
     /// own and produce ladders `ExportSizeModel::insert_scheme_ladders` can
     /// merge in to clear that. Ignored: needs a World of Warships install.
     #[test]
@@ -2557,16 +2624,122 @@ mod tests {
         let options =
             ShipExportOptions { camos: CamoSelection::Variants(vec![id]), textures: true, ..Default::default() };
         assert_eq!(
-            model.missing_scheme_ladders(&options),
-            vec![id],
+            model.unpriced_scheme_ladders(&options),
+            vec![(id, size_estimate::SchemeLadderStatus::Pending)],
             "size_model built from BaseOnly options prices no schemes up front"
         );
+        assert!(model.priced_estimate(&options).is_err(), "a pending scheme must refuse to price silently");
 
         let ladders = ctx.scheme_ladders(id).expect("scheme_ladders");
         assert!(!ladders.is_empty(), "Smaland's first scheme should resolve at least one texture path");
 
         model.insert_scheme_ladders(id, ladders);
-        assert!(model.missing_scheme_ladders(&options).is_empty(), "inserting the fetched ladders clears the gap");
-        assert!(model.estimate(&options).texture_bytes > 0, "the newly priced scheme must add texture bytes");
+        assert!(model.unpriced_scheme_ladders(&options).is_empty(), "inserting the fetched ladders clears the gap");
+        assert!(model.priced_estimate(&options).unwrap().texture_bytes > 0, "the newly priced scheme must add bytes");
+    }
+
+    /// `scheme_ladders_batch` hoists the assets.bin re-parse, self-id index
+    /// and reachable-stem pass out of the per-id loop `scheme_ladders`
+    /// (looped) would otherwise pay N times. Measures both approaches for
+    /// three schemes on Smaland and reports the wall-clock, since a batch API
+    /// that isn't actually cheaper would be pointless ceremony. Ignored:
+    /// needs a World of Warships install.
+    #[test]
+    #[ignore = "requires a World of Warships install"]
+    fn scheme_ladders_batch_is_cheaper_than_looping_scheme_ladders() {
+        let game_dir = std::env::var_os("WOWS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"E:\WoWs\World_of_Warships"));
+        let assets = ShipAssets::from_game_dir(&game_dir).expect("assets");
+        let vehicle = assets
+            .metadata()
+            .params()
+            .iter()
+            .filter_map(|p| p.vehicle())
+            .find(|v| v.model_path().map(|mp| mp.contains("WSD011_Smaland_1955")).unwrap_or(false))
+            .cloned()
+            .expect("Smaland vehicle");
+        let ctx = assets.load_ship_from_vehicle(&vehicle, &ShipExportOptions::default()).expect("ctx");
+
+        let source = ctx.camo_texture_source().expect("camo source");
+        let ids: Vec<CamoSchemeId> = source.scheme_infos().iter().take(3).map(|i| i.id).collect();
+        assert_eq!(ids.len(), 3, "Smaland should offer at least three schemes");
+
+        let looped_started = std::time::Instant::now();
+        for &id in &ids {
+            ctx.scheme_ladders(id).expect("scheme_ladders");
+        }
+        let looped_elapsed = looped_started.elapsed();
+        eprintln!("[measured] three schemes via scheme_ladders() looped: {looped_elapsed:?}");
+
+        let batch_started = std::time::Instant::now();
+        let batch = ctx.scheme_ladders_batch(&ids).expect("scheme_ladders_batch");
+        let batch_elapsed = batch_started.elapsed();
+        eprintln!("[measured] three schemes via scheme_ladders_batch(): {batch_elapsed:?}");
+
+        assert_eq!(batch.len(), 3);
+        assert!(
+            batch_elapsed < looped_elapsed,
+            "batching should avoid paying the shared assets.bin/reachable-stem cost three times              (looped {looped_elapsed:?}, batch {batch_elapsed:?})"
+        );
+    }
+
+    /// Finding 4's fix: `ShipModelContext::assets_bin_bytes` shares its
+    /// `Arc<Vec<u8>>` with `ShipAssets` instead of cloning a fresh ~170 MB
+    /// buffer per ship load. Loads the same ship several times over one
+    /// `ShipAssets` and reports the average -- there is no "before" to
+    /// compare against in this binary (the field type itself changed), so
+    /// this is paired with a standalone `Vec`- vs `Arc`-clone microbenchmark
+    /// at a realistic size to make the eliminated cost concrete. Ignored:
+    /// needs a World of Warships install.
+    #[test]
+    #[ignore = "requires a World of Warships install"]
+    fn repeated_ship_loads_do_not_pay_a_redundant_assets_bin_clone() {
+        let game_dir = std::env::var_os("WOWS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"E:\WoWs\World_of_Warships"));
+        let assets = ShipAssets::from_game_dir(&game_dir).expect("assets");
+        let vehicle = assets
+            .metadata()
+            .params()
+            .iter()
+            .filter_map(|p| p.vehicle())
+            .find(|v| v.model_path().map(|mp| mp.contains("WSD011_Smaland_1955")).unwrap_or(false))
+            .cloned()
+            .expect("Smaland vehicle");
+
+        const ITERS: u32 = 3;
+        let mut total = std::time::Duration::ZERO;
+        for i in 0..ITERS {
+            let started = std::time::Instant::now();
+            let ctx = assets.load_ship_from_vehicle(&vehicle, &ShipExportOptions::default()).expect("ctx");
+            let elapsed = started.elapsed();
+            eprintln!("[measured] load_ship_from_vehicle call {i}: {elapsed:?}");
+            total += elapsed;
+            drop(ctx);
+        }
+        eprintln!("[measured] average over {ITERS} calls: {:?}", total / ITERS);
+
+        // Standalone microbenchmark: what a Vec<u8> clone at
+        // assets.bin's real size (170,699,420 bytes, per the review that
+        // raised this finding) used to cost per call, against what an
+        // Arc<Vec<u8>> clone (what it costs now) costs.
+        const REAL_SIZE: usize = 170_699_420;
+        let source: Vec<u8> = vec![0u8; REAL_SIZE];
+        let vec_clone_started = std::time::Instant::now();
+        let _cloned = std::hint::black_box(source.clone());
+        let vec_clone_elapsed = vec_clone_started.elapsed();
+        eprintln!("[measured] Vec<u8> clone at {REAL_SIZE} bytes: {vec_clone_elapsed:?}");
+
+        let arc_source = std::sync::Arc::new(source);
+        let arc_clone_started = std::time::Instant::now();
+        let _arc_cloned = std::hint::black_box(arc_source.clone());
+        let arc_clone_elapsed = arc_clone_started.elapsed();
+        eprintln!("[measured] Arc<Vec<u8>> clone at {REAL_SIZE} bytes: {arc_clone_elapsed:?}");
+
+        assert!(
+            arc_clone_elapsed < vec_clone_elapsed,
+            "an Arc clone must be a refcount bump, not a memcpy of the buffer it points to"
+        );
     }
 }

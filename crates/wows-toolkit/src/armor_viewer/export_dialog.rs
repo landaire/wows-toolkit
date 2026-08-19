@@ -12,8 +12,8 @@ use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::size_estimate::ExportSizeModel;
+use wowsunpack::export::size_estimate::SchemeLadderStatus;
 use wowsunpack::export::size_estimate::SizeEstimate;
-use wowsunpack::export::size_estimate::TextureLadder;
 use wowsunpack::export::texture::MaxEdge;
 use wowsunpack::export::texture::TextureLod;
 
@@ -161,12 +161,11 @@ enum SizeModelState {
     Loaded(Option<ExportSizeModel>),
 }
 
-/// One camo scheme's resolved `(path, ladder)` pairs, as
-/// `ExportSizeModel::insert_scheme_ladders` takes them.
-type SchemeLadders = Vec<(String, TextureLadder)>;
-
 /// A background scheme-ladder fetch's result: one entry per requested id.
-type SchemeLadderBatch = Vec<(CamoSchemeId, SchemeLadders)>;
+/// `None` means the fetch failed for that id -- distinct from a legitimately
+/// empty ladder list (`Some(Vec::new())`), so a failure is never merged in a
+/// way that reads as "this scheme costs nothing".
+type SchemeLadderBatch = Vec<(CamoSchemeId, Option<wowsunpack::export::size_estimate::SchemeLadders>)>;
 
 /// A background request for one or more camo schemes' texture ladders,
 /// spawned when the draft selects a scheme `size_model` was not built with
@@ -189,9 +188,11 @@ enum ExportPhase {
 pub struct ExportDialog {
     pub param_index: String,
     pub display_name: String,
-    /// Resolved synchronously in `open`/`start_load`: it comes from
+    /// Resolved synchronously in `open`: it comes from
     /// `vehicle.hull_upgrades()`, already in hand from the metadata provider
     /// before any background work starts, so the hull combo needs no spinner.
+    /// Not recomputed by `start_load` -- the hull upgrade list does not
+    /// depend on which hull is currently selected.
     pub hull_upgrades: Vec<String>,
     pub meta: ExportMetaState,
     size_model: SizeModelState,
@@ -522,22 +523,29 @@ fn controls(
             .and_then(|h| hull_upgrades.iter().find(|u| *u == h))
             .cloned()
             .unwrap_or_else(|| t!("ui.armor.export.hull_stock").to_string());
-        ui.horizontal(|ui| {
-            ui.label(t!("ui.armor.export.hull").as_ref());
-            egui::ComboBox::from_id_salt("export_hull_combo").selected_text(selected_label).show_ui(ui, |ui| {
-                if ui.selectable_label(draft.hull.is_none(), t!("ui.armor.export.hull_stock").as_ref()).clicked()
-                    && draft.hull.is_some()
-                {
-                    draft.hull = None;
-                    outcome = DialogOutcome::ReloadRequested;
-                }
-                for name in hull_upgrades {
-                    let is_selected = draft.hull.as_ref() == Some(name);
-                    if ui.selectable_label(is_selected, name).clicked() && !is_selected {
-                        draft.hull = Some(name.clone());
+        // Disabled while stage 1 is loading: `ShipModelContext` (and the
+        // spawn_load thread that builds it) is per hull selection, so
+        // switching hulls mid-load would leave the in-flight load's result
+        // discarded but its full ship-load cost (and the ~163 MiB context it
+        // builds) spent for nothing, once per stray click.
+        ui.add_enabled_ui(meta.is_some(), |ui| {
+            ui.horizontal(|ui| {
+                ui.label(t!("ui.armor.export.hull").as_ref());
+                egui::ComboBox::from_id_salt("export_hull_combo").selected_text(selected_label).show_ui(ui, |ui| {
+                    if ui.selectable_label(draft.hull.is_none(), t!("ui.armor.export.hull_stock").as_ref()).clicked()
+                        && draft.hull.is_some()
+                    {
+                        draft.hull = None;
                         outcome = DialogOutcome::ReloadRequested;
                     }
-                }
+                    for name in hull_upgrades {
+                        let is_selected = draft.hull.as_ref() == Some(name);
+                        if ui.selectable_label(is_selected, name).clicked() && !is_selected {
+                            draft.hull = Some(name.clone());
+                            outcome = DialogOutcome::ReloadRequested;
+                        }
+                    }
+                });
             });
         });
     }
@@ -653,11 +661,16 @@ fn loading_placeholder(ui: &mut egui::Ui) {
     });
 }
 
-/// Renders the size estimate, or a spinner while it is unavailable. The size
-/// model prices only the schemes it was built with (typically none); when the
-/// draft selects one it lacks, this requests that scheme's ladders in the
-/// background (never on this thread -- a ladder read is VFS IO) and shows a
-/// spinner instead of a number computed as if that scheme cost nothing.
+/// Renders the size estimate, a spinner while it is unavailable, or an
+/// incomplete-size marker with a retry button when a scheme's ladders could
+/// not be fetched at all. The size model prices only the schemes it was
+/// built with (typically none); when the draft selects one it lacks, this
+/// requests that scheme's ladders in the background (never on this thread --
+/// a ladder read is VFS IO). `ExportSizeModel::priced_estimate` is the single
+/// gate here: it is impossible to read a confident number for a scheme that
+/// is still pending or that failed to fetch, because the value itself
+/// carries that state (`Err` lists exactly which ids and why) rather than
+/// `estimate` silently pricing an unknown scheme as free.
 #[allow(clippy::too_many_arguments)]
 fn size_line(
     ui: &mut egui::Ui,
@@ -681,42 +694,85 @@ fn size_line(
     if let Some(fetch) = pending_scheme_fetch
         && let Some(results) = fetch.inbox.read(ui).last()
     {
-        for (id, ladders) in results {
-            model.insert_scheme_ladders(id, ladders);
+        for (id, outcome) in results {
+            match outcome {
+                Some(ladders) => model.insert_scheme_ladders(id, ladders),
+                None => model.mark_scheme_ladders_failed(id),
+            }
         }
         *estimate_cache = None;
         *pending_scheme_fetch = None;
     }
 
     let options = draft_to_options(draft);
-    let missing = model.missing_scheme_ladders(&options);
-    if !missing.is_empty() {
-        if let Some(meta) = meta {
-            ensure_scheme_fetch(pending_scheme_fetch, &meta.ctx, &missing);
-        }
-        loading_placeholder(ui);
+    let key = EstimateKey::from_draft(load_generation, draft);
+    if let Some((cached_key, cached)) = estimate_cache
+        && *cached_key == key
+    {
+        let size = humansize::format_size(cached.total(), humansize::BINARY);
+        ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
         return;
     }
 
-    let key = EstimateKey::from_draft(load_generation, draft);
-    let estimate = match estimate_cache {
-        Some((cached_key, cached)) if *cached_key == key => *cached,
-        _ => {
-            let e = model.estimate(&options);
-            *estimate_cache = Some((key, e));
-            e
+    match model.priced_estimate(&options) {
+        Ok(estimate) => {
+            *estimate_cache = Some((key, estimate));
+            let size = humansize::format_size(estimate.total(), humansize::BINARY);
+            ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
         }
-    };
-    let size = humansize::format_size(estimate.total(), humansize::BINARY);
-    ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
+        Err(unpriced) => {
+            let pending_ids: Vec<CamoSchemeId> = unpriced
+                .iter()
+                .filter(|(_, status)| *status == SchemeLadderStatus::Pending)
+                .map(|(id, _)| *id)
+                .collect();
+            let failed_ids: Vec<CamoSchemeId> = unpriced
+                .iter()
+                .filter(|(_, status)| *status == SchemeLadderStatus::Failed)
+                .map(|(id, _)| *id)
+                .collect();
+
+            if !pending_ids.is_empty()
+                && let Some(meta) = meta
+            {
+                ensure_scheme_fetch(pending_scheme_fetch, &meta.ctx, &pending_ids);
+            }
+
+            if failed_ids.is_empty() {
+                loading_placeholder(ui);
+            } else {
+                // A failed fetch never auto-retries (`ensure_scheme_fetch` is
+                // only ever asked to fetch `pending_ids`), so without this the
+                // spinner would be replaced by nothing at all and the size
+                // line would silently vanish forever.
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        t!("ui.armor.export.size_incomplete", count = failed_ids.len()).as_ref(),
+                    );
+                    if ui.button(t!("ui.buttons.retry").as_ref()).clicked() {
+                        for id in &failed_ids {
+                            model.clear_failed_scheme_ladders(*id);
+                        }
+                        *estimate_cache = None;
+                    }
+                });
+            }
+        }
+    }
 }
 
 /// Spawns a background fetch for `missing`'s ladders, unless one already in
 /// flight covers exactly this set. A different set (the user changed the
 /// selection again before the first fetch landed) replaces it; the replaced
-/// fetch's result, if it still lands, merges harmlessly (`insert_scheme_ladders`
-/// is idempotent per id) and is simply ignored by `size_line` on arrival since
-/// `pending_scheme_fetch` no longer points at its inbox.
+/// fetch's own result, if it still lands, has nowhere to go, since
+/// `pending_scheme_fetch` no longer points at its inbox and `UiInboxSender::
+/// send` on a receiver nobody is polling anymore simply fails silently.
+///
+/// Requests `scheme_ladders_batch` once for every id in `missing` rather than
+/// looping `scheme_ladders` per id: the assets.bin re-parse, self-id index
+/// and reachable-stem pass that call shares across ids would otherwise be
+/// paid once per ticked camo.
 fn ensure_scheme_fetch(
     pending: &mut Option<PendingSchemeFetch>,
     ctx: &Arc<ShipModelContext>,
@@ -731,21 +787,16 @@ fn ensure_scheme_fetch(
     let ctx = ctx.clone();
     let ids: Vec<CamoSchemeId> = missing_ids.iter().copied().collect();
     crate::util::thread::spawn_logged("export-dialog-scheme-ladders", move || {
-        let mut results = Vec::with_capacity(ids.len());
-        for id in ids {
-            let ladders = match ctx.scheme_ladders(id) {
-                Ok(l) => l,
-                // Best-effort, like the rest of the size model: one scheme that
-                // cannot be priced must not deny the user a number for the
-                // others, so it prices as zero extra bytes rather than staying
-                // pending forever.
-                Err(e) => {
-                    tracing::warn!("could not price camo scheme {id:?}: {e:?}");
-                    Vec::new()
-                }
-            };
-            results.push((id, ladders));
-        }
+        let results: SchemeLadderBatch = match ctx.scheme_ladders_batch(&ids) {
+            Ok(batch) => batch.into_iter().map(|(id, ladders)| (id, Some(ladders))).collect(),
+            // Best-effort like the rest of the size model, but a failure here
+            // is reported as its own state (`mark_scheme_ladders_failed`) --
+            // never merged in as if the scheme legitimately cost nothing.
+            Err(e) => {
+                tracing::warn!("could not price {} camo scheme(s): {e:?}", ids.len());
+                ids.into_iter().map(|id| (id, None)).collect()
+            }
+        };
         let _ = sender.send(results);
     });
     *pending = Some(PendingSchemeFetch { ids: missing_ids, inbox });
@@ -940,7 +991,7 @@ mod tests {
                     camos: BTreeSet::new(),
                 };
                 let options = draft_to_options(&draft);
-                assert!(model.missing_scheme_ladders(&options).is_empty(), "no camo selected needs no scheme ladders");
+                assert!(model.priced_estimate(&options).is_ok(), "no camo selected needs no scheme ladders");
                 // Warm up (page faults, branch predictor) before timing.
                 for _ in 0..10 {
                     std::hint::black_box(model.estimate(&options));
@@ -1036,7 +1087,7 @@ mod tests {
                 };
                 let options = draft_to_options(&draft);
                 assert!(
-                    model.missing_scheme_ladders(&options).is_empty(),
+                    model.priced_estimate(&options).is_ok(),
                     "no camo selected on open needs no scheme ladders, even with ~100 on offer"
                 );
             }

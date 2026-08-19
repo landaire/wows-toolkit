@@ -117,6 +117,44 @@ impl SizeEstimate {
     }
 }
 
+/// One scheme's resolved `(path, ladder)` pairs, as
+/// `ExportSizeModel::insert_scheme_ladders` and `ShipModelContext::
+/// scheme_ladders`/`scheme_ladders_batch` take and return them.
+pub type SchemeLadders = Vec<(String, TextureLadder)>;
+
+/// One scheme's ladder-fetch outcome, once attempted. Distinct from absence
+/// (never attempted -- see `ExportSizeModel::unpriced_scheme_ladders`) so a
+/// scheme with genuinely zero reachable textures prices as zero without
+/// being confused with a fetch that failed outright and also has nothing to
+/// show for it.
+#[derive(Debug, Clone)]
+enum SchemeLadderOutcome {
+    /// Resolved successfully; possibly empty (the scheme legitimately covers
+    /// no reachable part).
+    Ladders(Vec<(String, TextureLadder)>),
+    /// The fetch itself failed (e.g. assets.bin could not be re-parsed).
+    FetchFailed,
+}
+
+impl SchemeLadderOutcome {
+    fn ladders(&self) -> &[(String, TextureLadder)] {
+        match self {
+            SchemeLadderOutcome::Ladders(l) => l,
+            SchemeLadderOutcome::FetchFailed => &[],
+        }
+    }
+}
+
+/// Why a scheme `options.camos` selects is not yet reflected in `estimate`'s
+/// number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SchemeLadderStatus {
+    /// Never requested, or requested and still in flight.
+    Pending,
+    /// Requested and the fetch failed outright.
+    Failed,
+}
+
 /// Everything needed to price any option combination for one loaded ship.
 pub struct ExportSizeModel {
     /// Per sub-model, its counts at every LoD it authors.
@@ -131,7 +169,7 @@ pub struct ExportSizeModel {
     /// Each scheme's `(path, ladder)` pairs, so pricing a selection can union
     /// paths with the base set and with other selected schemes rather than
     /// summing per-scheme subtotals that double-count a shared path.
-    scheme_ladders: HashMap<CamoSchemeId, Vec<(String, TextureLadder)>>,
+    scheme_ladders: HashMap<CamoSchemeId, SchemeLadderOutcome>,
 }
 
 impl ExportSizeModel {
@@ -141,6 +179,8 @@ impl ExportSizeModel {
         base_ladders: HashMap<String, TextureLadder>,
         scheme_ladders: HashMap<CamoSchemeId, Vec<(String, TextureLadder)>>,
     ) -> Self {
+        let scheme_ladders =
+            scheme_ladders.into_iter().map(|(id, ladders)| (id, SchemeLadderOutcome::Ladders(ladders))).collect();
         Self { mesh_lods, armor, base_ladders, scheme_ladders }
     }
 
@@ -174,14 +214,36 @@ impl ExportSizeModel {
         SizeEstimate { geometry_bytes, texture_bytes }
     }
 
-    /// Ids `options.camos` selects that this model has no ladders for yet.
-    /// `estimate` prices a missing scheme's textures as zero rather than
-    /// erroring -- correct once its ladders arrive, but indistinguishable
-    /// from "genuinely free" until then. Callers must check this before
-    /// trusting `estimate`'s number for `options`; an empty result means the
-    /// number is final.
-    pub fn missing_scheme_ladders(&self, options: &ShipExportOptions) -> Vec<CamoSchemeId> {
-        options.camos.priced_scheme_ids().into_iter().filter(|id| !self.scheme_ladders.contains_key(id)).collect()
+    /// Ids `options.camos` selects that `estimate` cannot yet confidently
+    /// price, with why (never requested vs. requested-and-failed). Empty
+    /// means `estimate`'s number for `options` is final. Prefer
+    /// `priced_estimate`, which bundles this check with the number itself so
+    /// a caller cannot forget to make it.
+    pub fn unpriced_scheme_ladders(&self, options: &ShipExportOptions) -> Vec<(CamoSchemeId, SchemeLadderStatus)> {
+        options
+            .camos
+            .priced_scheme_ids()
+            .into_iter()
+            .filter_map(|id| match self.scheme_ladders.get(&id) {
+                None => Some((id, SchemeLadderStatus::Pending)),
+                Some(SchemeLadderOutcome::FetchFailed) => Some((id, SchemeLadderStatus::Failed)),
+                Some(SchemeLadderOutcome::Ladders(_)) => None,
+            })
+            .collect()
+    }
+
+    /// `estimate`, but refusing to guess: `Err` lists exactly which selected
+    /// schemes are not priced yet instead of silently pricing them as zero
+    /// bytes. This is the entry point a live UI must use; `estimate` itself
+    /// stays infallible for callers that already know every selected scheme
+    /// is priced (this model was built with exactly that selection, or the
+    /// caller already checked `unpriced_scheme_ladders` itself).
+    pub fn priced_estimate(
+        &self,
+        options: &ShipExportOptions,
+    ) -> Result<SizeEstimate, Vec<(CamoSchemeId, SchemeLadderStatus)>> {
+        let unpriced = self.unpriced_scheme_ladders(options);
+        if unpriced.is_empty() { Ok(self.estimate(options)) } else { Err(unpriced) }
     }
 
     /// Adds one scheme's resolved ladders, computed lazily (e.g. by a
@@ -189,7 +251,25 @@ impl ExportSizeModel {
     /// built with), so a later `estimate` against options selecting it prices
     /// it instead of silently treating it as zero bytes.
     pub fn insert_scheme_ladders(&mut self, id: CamoSchemeId, ladders: Vec<(String, TextureLadder)>) {
-        self.scheme_ladders.insert(id, ladders);
+        self.scheme_ladders.insert(id, SchemeLadderOutcome::Ladders(ladders));
+    }
+
+    /// Records that fetching `id`'s ladders failed outright (the fetch
+    /// itself errored, not "this scheme has no textures"). Distinct from
+    /// both "never requested" and a legitimate empty result, so
+    /// `unpriced_scheme_ladders`/`priced_estimate` report it as incomplete
+    /// rather than silently pricing it as free.
+    pub fn mark_scheme_ladders_failed(&mut self, id: CamoSchemeId) {
+        self.scheme_ladders.insert(id, SchemeLadderOutcome::FetchFailed);
+    }
+
+    /// Clears a failed fetch's marker so `unpriced_scheme_ladders` reports it
+    /// as pending again, letting a caller retry it. No-op for an id that was
+    /// never marked failed (including one that already has real ladders).
+    pub fn clear_failed_scheme_ladders(&mut self, id: CamoSchemeId) {
+        if matches!(self.scheme_ladders.get(&id), Some(SchemeLadderOutcome::FetchFailed)) {
+            self.scheme_ladders.remove(&id);
+        }
     }
 
     fn texture_bytes(&self, options: &ShipExportOptions) -> u64 {
@@ -208,7 +288,8 @@ impl ExportSizeModel {
                     by_path.insert(path.as_str(), ladder.raw_bytes(options.texture_lod));
                 }
                 for id in ids {
-                    for (path, ladder) in self.scheme_ladders.get(id).into_iter().flatten() {
+                    let ladders = self.scheme_ladders.get(id).map(SchemeLadderOutcome::ladders).unwrap_or_default();
+                    for (path, ladder) in ladders {
                         by_path.insert(path.as_str(), ladder.raw_bytes(options.texture_lod));
                     }
                 }
@@ -351,36 +432,65 @@ mod tests {
         let m = model();
         let base = ShipExportOptions { textures: true, ..options() };
         assert!(
-            m.missing_scheme_ladders(&ShipExportOptions { camos: CamoSelection::BaseOnly, ..base.clone() }).is_empty()
+            m.unpriced_scheme_ladders(&ShipExportOptions { camos: CamoSelection::BaseOnly, ..base.clone() }).is_empty()
         );
         assert!(
-            m.missing_scheme_ladders(&ShipExportOptions { camos: CamoSelection::Baked(CamoSchemeId(0)), ..base })
+            m.unpriced_scheme_ladders(&ShipExportOptions { camos: CamoSelection::Baked(CamoSchemeId(0)), ..base })
                 .is_empty(),
             "Baked prices from base_ladders alone"
         );
+        assert!(m.priced_estimate(&ShipExportOptions { camos: CamoSelection::BaseOnly, ..options() }).is_ok());
     }
 
     #[test]
-    fn an_unpriced_variant_id_is_reported_missing() {
+    fn an_unpriced_variant_id_is_reported_pending() {
         let m = model();
         let base = ShipExportOptions { textures: true, ..options() };
         // CamoSchemeId(0) has ladders in `model()`; CamoSchemeId(2) does not.
-        let missing = m.missing_scheme_ladders(&ShipExportOptions {
-            camos: CamoSelection::Variants(vec![CamoSchemeId(0), CamoSchemeId(2)]),
-            ..base
-        });
-        assert_eq!(missing, vec![CamoSchemeId(2)]);
+        let opts = ShipExportOptions { camos: CamoSelection::Variants(vec![CamoSchemeId(0), CamoSchemeId(2)]), ..base };
+        assert_eq!(m.unpriced_scheme_ladders(&opts), vec![(CamoSchemeId(2), SchemeLadderStatus::Pending)]);
+        assert_eq!(m.priced_estimate(&opts), Err(vec![(CamoSchemeId(2), SchemeLadderStatus::Pending)]));
     }
 
     #[test]
-    fn inserting_ladders_clears_the_missing_report() {
+    fn inserting_ladders_clears_the_pending_report() {
         let mut m = model();
         let base = ShipExportOptions { textures: true, ..options() };
         let opts = ShipExportOptions { camos: CamoSelection::Variants(vec![CamoSchemeId(2)]), ..base };
-        assert_eq!(m.missing_scheme_ladders(&opts), vec![CamoSchemeId(2)]);
+        assert_eq!(m.unpriced_scheme_ladders(&opts), vec![(CamoSchemeId(2), SchemeLadderStatus::Pending)]);
 
         m.insert_scheme_ladders(CamoSchemeId(2), vec![("scheme2/tex".to_string(), ladder())]);
-        assert!(m.missing_scheme_ladders(&opts).is_empty());
-        assert!(m.estimate(&opts).texture_bytes > 0);
+        assert!(m.unpriced_scheme_ladders(&opts).is_empty());
+        assert!(m.priced_estimate(&opts).unwrap().texture_bytes > 0);
+    }
+
+    #[test]
+    fn a_legitimately_empty_scheme_is_priced_not_pending() {
+        // A scheme that resolves successfully but covers no reachable part
+        // (an empty ladder list) must not read as "still loading".
+        let mut m = model();
+        let opts =
+            ShipExportOptions { textures: true, camos: CamoSelection::Variants(vec![CamoSchemeId(2)]), ..options() };
+        m.insert_scheme_ladders(CamoSchemeId(2), Vec::new());
+        assert!(m.unpriced_scheme_ladders(&opts).is_empty(), "an empty-but-fetched result is not pending");
+        assert!(m.priced_estimate(&opts).is_ok());
+    }
+
+    #[test]
+    fn a_failed_fetch_is_reported_distinctly_from_pending_and_never_prices_silently() {
+        let mut m = model();
+        let opts =
+            ShipExportOptions { textures: true, camos: CamoSelection::Variants(vec![CamoSchemeId(2)]), ..options() };
+        m.mark_scheme_ladders_failed(CamoSchemeId(2));
+        assert_eq!(m.unpriced_scheme_ladders(&opts), vec![(CamoSchemeId(2), SchemeLadderStatus::Failed)]);
+        assert_eq!(m.priced_estimate(&opts), Err(vec![(CamoSchemeId(2), SchemeLadderStatus::Failed)]));
+
+        // A retry clears the marker and the id goes back to pending -- not
+        // straight to "priced at zero".
+        m.clear_failed_scheme_ladders(CamoSchemeId(2));
+        assert_eq!(m.unpriced_scheme_ladders(&opts), vec![(CamoSchemeId(2), SchemeLadderStatus::Pending)]);
+
+        m.insert_scheme_ladders(CamoSchemeId(2), vec![("scheme2/tex".to_string(), ladder())]);
+        assert!(m.priced_estimate(&opts).is_ok());
     }
 }

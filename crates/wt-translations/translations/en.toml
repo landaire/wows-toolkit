@@ -1196,6 +1196,7 @@ camo_select_none = "Select none"
 camo_reset = "Reset to default"
 loading_details = "Loading..."
 size_estimate = "Estimated file size: %{size}"
+size_incomplete = "Could not price %{count} camo(s); size may be incomplete"
 exporting = "Exporting %{ship}..."
 close_button = "Close"
 
