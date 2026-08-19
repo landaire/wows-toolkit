@@ -8,7 +8,14 @@
 
 use std::path::Path;
 
+use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::export::ship::ShipAssets;
+use wowsunpack::export::ship::ShipExportOptions;
+
+// Model directory name (assets.bin path component), not a GameParams index.
+// Confirmed against the current install: `export-ship "PJSB018_Yamato_1944"` no
+// longer resolves there ("No ship found..."), but this model dir does.
+const SHIP: &str = "JSB039_Yamato_1945";
 
 fn load_test_ship_assets() -> ShipAssets {
     let wows_dir = std::env::var("WOWS_DIR").unwrap_or_else(|_| r"E:\WoWs\World_of_Warships".to_string());
@@ -24,14 +31,23 @@ fn load_test_ship_assets() -> ShipAssets {
 #[ignore = "requires a real game install; run with --ignored"]
 fn universal_camos_use_mskin_tileflage() {
     let assets = load_test_ship_assets();
-    let schemes = assets.list_texture_schemes("PJSB018_Yamato_1944").expect("Yamato schemes");
-    eprintln!("Yamato schemes ({}):", schemes.len());
-    for s in &schemes {
-        eprintln!("  {s}");
+    let options = ShipExportOptions { textures: false, ..Default::default() };
+    let ctx = assets.load_ship(SHIP, &options).expect("load ship");
+    let infos = ctx.camo_texture_source().expect("camo source").scheme_infos();
+
+    assert!(!infos.is_empty(), "Yamato should offer camo schemes");
+    eprintln!("Yamato schemes ({}):", infos.len());
+    for i in &infos {
+        eprintln!("  {} ({:?})", i.display_name, i.origin);
     }
+
     assert!(
-        schemes.iter().any(|s| s.contains("universal")),
-        "expected at least one universal scheme, got: {schemes:?}"
+        infos.iter().any(|i| i.origin == CamoOrigin::Universal),
+        "expected at least one universal (MSkin + isTileflage) scheme, got: {:?}",
+        infos.iter().map(|i| (&i.display_name, i.origin)).collect::<Vec<_>>()
     );
-    assert!(!schemes.iter().any(|s| s.contains("ShipDestruction")), "death skins must not be listed as camos");
+    assert!(
+        !infos.iter().any(|i| i.display_name.contains("ShipDestruction")),
+        "death skins must not be listed as camos"
+    );
 }
