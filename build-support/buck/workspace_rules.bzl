@@ -3,7 +3,10 @@ load("@prelude//rust:cargo_package.bzl", "cargo")
 load("@prelude//rust/buildscript:buildscript_platform.bzl", "transition_alias")
 
 def _cargo_env(crate, package, version):
-    version_parts = version.split(".")
+    # A pre-release suffix belongs to _PRE, not to _PATCH, which is what a
+    # plain split on "." would produce for 1.0.2-beta1.
+    core, _, pre = version.partition("-")
+    version_parts = core.split(".")
     return {
         "CARGO_CRATE_NAME": crate,
         "CARGO_MANIFEST_DIR": ".",
@@ -14,7 +17,7 @@ def _cargo_env(crate, package, version):
         "CARGO_PKG_VERSION_MAJOR": version_parts[0],
         "CARGO_PKG_VERSION_MINOR": version_parts[1],
         "CARGO_PKG_VERSION_PATCH": version_parts[2],
-        "CARGO_PKG_VERSION_PRE": "",
+        "CARGO_PKG_VERSION_PRE": pre,
     }
 
 def os_select(macos, linux, windows):

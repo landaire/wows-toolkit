@@ -49,7 +49,10 @@ wix_msi(
     ],
     binaries = {"wows_toolkit.exe": "root//crates/wows-toolkit:wows_toolkit_bin"},
     pdbs = {},
-    version = "1.0.1",
+    # MSI ProductVersion is numeric only, so a pre-release tag ships under its
+    # release version. scripts/test-workspace-package-metadata.nu holds this to
+    # the numeric core of the workspace version.
+    version = "1.0.2",
     out = "wows-toolkit-windows-x86_64-unsigned.msi",
     visibility = ["PUBLIC"],
 )

@@ -3,15 +3,15 @@
 // with the rc.exe pinned in toolchains/windows/toolchain-manifest.json instead.
 //
 // Keep FILEVERSION, PRODUCTVERSION and the two version strings in step with the
-// wows_toolkit package version and wix/version.wxi.
+// wows_toolkit package version; scripts/test-workspace-package-metadata.nu checks it.
 
 #include <winver.h>
 
 1 ICON "wows_toolkit.ico"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION 1,0,1,0
-PRODUCTVERSION 1,0,1,0
+FILEVERSION 1,0,2,0
+PRODUCTVERSION 1,0,2,0
 FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
 FILEFLAGS 0x0L
 FILEOS VOS_NT_WINDOWS32
@@ -24,11 +24,11 @@ BEGIN
         BEGIN
             VALUE "CompanyName", "landaire"
             VALUE "FileDescription", "WoWs Toolkit"
-            VALUE "FileVersion", "1.0.1"
+            VALUE "FileVersion", "1.0.2-beta1"
             VALUE "InternalName", "wows_toolkit.exe"
             VALUE "OriginalFilename", "wows_toolkit.exe"
             VALUE "ProductName", "WoWs Toolkit"
-            VALUE "ProductVersion", "1.0.1"
+            VALUE "ProductVersion", "1.0.2-beta1"
         END
     END
     BLOCK "VarFileInfo"

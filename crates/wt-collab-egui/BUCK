@@ -4,7 +4,7 @@ workspace_library(
     name = "wt_collab_egui",
     crate = "wt_collab_egui",
     package = "wt-collab-egui",
-    version = "1.0.1",
+    version = "1.0.2-beta1",
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
         "//crates/wows-replays:wows_replays",
