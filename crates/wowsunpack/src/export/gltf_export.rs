@@ -1798,6 +1798,43 @@ fn collect_primitives(
     Ok(result)
 }
 
+/// Vertex and index totals for one sub-model at one LoD, using the same
+/// collection the export runs so the counts cannot drift from it.
+pub(crate) fn primitive_counts(
+    visual: &VisualPrototype,
+    geometry: &MergedGeometry,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    lod: &crate::models::visual::Lod,
+    damaged: bool,
+) -> Result<super::size_estimate::MeshCounts, Report<ExportError>> {
+    let prims = collect_primitives(visual, geometry, Some(db), Some(self_id_index), lod, damaged, None)?;
+    Ok(super::size_estimate::MeshCounts {
+        vertices: prims.iter().map(|p| p.positions.len() as u64).sum(),
+        indices: prims.iter().map(|p| p.indices.len() as u64).sum(),
+    })
+}
+
+/// The distinct MFM stems primitives at this LoD actually carry, using the same
+/// render-set exclusion `collect_primitives` applies.
+///
+/// A stem whose only render sets are excluded (e.g. `_crack_` in an intact
+/// export) never reaches [`add_primitive_to_root`], which creates a material
+/// (and pays for its texture) lazily per surviving primitive. Pricing every
+/// stem `collect_mfm_info` finds, unconditionally, charges for textures the
+/// export never embeds.
+pub(crate) fn primitive_mfm_stems(
+    visual: &VisualPrototype,
+    geometry: &MergedGeometry,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    lod: &crate::models::visual::Lod,
+    damaged: bool,
+) -> Result<HashSet<String>, Report<ExportError>> {
+    let prims = collect_primitives(visual, geometry, Some(db), Some(self_id_index), lod, damaged, None)?;
+    Ok(prims.into_iter().filter_map(|p| p.mfm_stem).collect())
+}
+
 struct UnpackedVertices {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,

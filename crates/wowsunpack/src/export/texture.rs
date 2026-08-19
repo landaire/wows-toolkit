@@ -124,10 +124,35 @@ fn vfs_file_exists(vfs: &vfs::VfsPath, path: &str) -> bool {
     vfs.join(path).and_then(|p| p.exists()).unwrap_or(false)
 }
 
-/// Top-mip dimensions of a DDS buffer, without decoding any pixels.
-fn dds_top_edge(dds_bytes: &[u8]) -> Option<u32> {
+/// Top-mip dimensions of a DDS, without decoding any pixels.
+fn dds_top_dims(dds_bytes: &[u8]) -> Option<(u32, u32)> {
     let dds = image_dds::ddsfile::Dds::read(&mut Cursor::new(dds_bytes)).ok()?;
-    Some(dds.get_width().max(dds.get_height()))
+    Some((dds.get_width(), dds.get_height()))
+}
+
+/// Top-mip longest edge of a DDS buffer, without decoding any pixels.
+fn dds_top_edge(dds_bytes: &[u8]) -> Option<u32> {
+    let (w, h) = dds_top_dims(dds_bytes)?;
+    Some(w.max(h))
+}
+
+/// The authored resolution ladder for a `.dds` path, largest tier first.
+///
+/// Reads only the tail (the cheapest file) plus one existence check per tier:
+/// tiers double going up, so the tail's top mip sizes the whole ladder with no
+/// decode and no read of the large files.
+pub fn texture_ladder(vfs: &vfs::VfsPath, path: &str) -> Option<Vec<(u32, u32)>> {
+    let stem = path.strip_suffix(".dds")?;
+    let tail = read_vfs_file(vfs, path)?;
+    let (tw, th) = dds_top_dims(&tail)?;
+    let present = DDS_TIER_SUFFIXES.into_iter().filter(|s| vfs_file_exists(vfs, &format!("{stem}.{s}"))).count();
+
+    let mut tiers = Vec::with_capacity(present + 1);
+    for doublings in (1..=present as u32).rev() {
+        tiers.push((tw.checked_shl(doublings).unwrap_or(u32::MAX), th.checked_shl(doublings).unwrap_or(u32::MAX)));
+    }
+    tiers.push((tw, th));
+    Some(tiers)
 }
 
 /// Read the highest-resolution tier available for `stem`, falling back down the
@@ -454,19 +479,33 @@ pub fn load_texture_bytes(
     scheme: &str,
     lod: TextureLod,
 ) -> Option<(String, Vec<u8>)> {
+    let (base, path) = resolve_scheme_texture_path(vfs, mfm_stem, scheme)?;
+    load_dds_from_vfs(vfs, &path, lod).map(|data| (base, data))
+}
+
+/// The `(base_name, path)` a scheme's texture resolves to for `mfm_stem`, without
+/// reading it. Shared by [`load_texture_bytes`] and [`scheme_texture_path`] so path
+/// resolution and byte loading cannot drift apart.
+fn resolve_scheme_texture_path(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> Option<(String, String)> {
     for base in texture_base_names(mfm_stem) {
         // Try explicit albedo channel first ({base}_{scheme}_a), then direct ({base}_{scheme}).
         let candidates =
             [format!("{TEXTURE_BASE}/{base}_{scheme}_a.dds"), format!("{TEXTURE_BASE}/{base}_{scheme}.dds")];
 
         for path in &candidates {
-            if let Some(data) = load_dds_from_vfs(vfs, path, lod) {
-                return Some((base, data));
+            if vfs_file_exists(vfs, path) {
+                return Some((base, path.clone()));
             }
         }
     }
 
     None
+}
+
+/// The DDS path a scheme's texture resolves to for `mfm_stem`, without reading it.
+/// Pricing an export must not pay for a decode.
+pub fn scheme_texture_path(vfs: &vfs::VfsPath, mfm_stem: &str, scheme: &str) -> Option<String> {
+    resolve_scheme_texture_path(vfs, mfm_stem, scheme).map(|(_, path)| path)
 }
 
 /// Load the base albedo texture for a hull mesh from the VFS.
@@ -482,6 +521,18 @@ pub fn load_texture_bytes(
 /// `mfm_full_path` is the full VFS path to the MFM file (e.g. ending in `.mfm`).
 /// Returns DDS bytes if found.
 pub fn load_base_albedo_bytes(vfs: &vfs::VfsPath, mfm_full_path: &str, lod: TextureLod) -> Option<Vec<u8>> {
+    let path = base_albedo_path(vfs, mfm_full_path)?;
+    load_dds_from_vfs(vfs, &path, lod)
+}
+
+/// The base albedo DDS path for a hull mesh's MFM, without reading it.
+///
+/// Candidate search order mirrors [`load_base_albedo_bytes`]: the `textures/`
+/// sibling directory, the MFM's own directory, and its `TILED/` subdirectory,
+/// each tried with the `_a` then `_od` albedo suffix.
+///
+/// `mfm_full_path` is the full VFS path to the MFM file (e.g. ending in `.mfm`).
+pub fn base_albedo_path(vfs: &vfs::VfsPath, mfm_full_path: &str) -> Option<String> {
     let dir = mfm_full_path.rsplit_once('/')?.0;
     let mfm_filename = mfm_full_path.rsplit_once('/')?.1;
     let stem = mfm_filename.strip_suffix(".mfm")?;
@@ -508,8 +559,8 @@ pub fn load_base_albedo_bytes(vfs: &vfs::VfsPath, mfm_full_path: &str, lod: Text
         }
 
         for path in &candidates {
-            if let Some(data) = load_dds_from_vfs(vfs, path, lod) {
-                return Some(data);
+            if vfs_file_exists(vfs, path) {
+                return Some(path.clone());
             }
         }
     }

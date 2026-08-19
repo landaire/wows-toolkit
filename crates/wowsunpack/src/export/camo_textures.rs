@@ -264,6 +264,42 @@ impl CamoTextureSource {
         out
     }
 
+    /// The base albedo DDS path per stem, without reading it.
+    pub fn base_albedo_paths(&self) -> HashMap<String, String> {
+        self.unique_infos
+            .iter()
+            .filter_map(|i| texture::base_albedo_path(&self.vfs, &i.full_path).map(|p| (i.stem.clone(), p)))
+            .collect()
+    }
+
+    /// The distinct DDS paths one scheme reads. Pricing an export must not pay
+    /// for a decode, so this resolves paths only.
+    pub fn scheme_texture_paths(&self, id: CamoSchemeId) -> Result<Vec<String>, CamoDecodeError> {
+        let kind = self.kinds.get(id.0).ok_or(CamoDecodeError::UnknownId(id))?;
+        let mut paths: Vec<String> = match kind {
+            CamoSchemeKind::Legacy(i) => {
+                let scheme = &self.legacy_schemes[*i];
+                self.unique_infos
+                    .iter()
+                    .filter_map(|info| texture::scheme_texture_path(&self.vfs, &info.stem, scheme))
+                    .collect()
+            }
+            CamoSchemeKind::Mat(i) => {
+                let s = &self.mat_schemes[*i];
+                self.unique_stems
+                    .iter()
+                    .filter_map(|stem| {
+                        let cat = camouflage::classify_part_category(stem);
+                        crate::export::ship::resolve_part_texture(&s.textures, cat, s.tiled).cloned()
+                    })
+                    .collect()
+            }
+        };
+        paths.sort();
+        paths.dedup();
+        Ok(paths)
+    }
+
     /// Metadata for one id.
     pub fn scheme_info(&self, id: CamoSchemeId) -> Option<CamoSchemeInfo> {
         self.scheme_infos().into_iter().find(|i| i.id == id)

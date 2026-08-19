@@ -14,6 +14,8 @@ pub mod part_group;
 #[cfg(feature = "models")]
 pub mod ship;
 #[cfg(feature = "models")]
+pub mod size_estimate;
+#[cfg(feature = "models")]
 pub mod texture;
 
 /// When true, export functions emit verbose diagnostic output to stderr

@@ -55,6 +55,7 @@ use super::gltf_export::InteractiveArmorMesh;
 use super::gltf_export::SubModel;
 use super::gltf_export::TextureSet;
 use super::part_group::PartGroup;
+use super::size_estimate;
 use super::texture;
 
 /// What geometry the exported GLB carries. Armor is a per-zone triangle soup for
@@ -1665,6 +1666,128 @@ impl ShipModelContext {
         .context("Failed to export ship GLB")?;
 
         Ok(())
+    }
+
+    /// Every visual + geometry `export_glb` builds a `SubModel` from, instanced
+    /// exactly as it instances them: every hull part once, one entry per mount
+    /// (through `turret_model_index`), then one entry per misc placement (through
+    /// `misc_model_index`). Two mounts sharing a turret model are two meshes in
+    /// the export, so this counts instances, not unique models.
+    ///
+    /// The `bool` is whether the entry's armor reaches the export: hulls and
+    /// mounts do (`export_glb`'s armor collection covers both), miscs do not.
+    fn sub_model_visuals(&self) -> Vec<(&VisualPrototype, &[u8], bool)> {
+        let mut out = Vec::with_capacity(self.hull_parts.len() + self.mounts.len() + self.miscs.len());
+
+        for part in &self.hull_parts {
+            out.push((&part.visual, part.geom_bytes.as_slice(), true));
+        }
+        for mount in &self.mounts {
+            let turret = &self.turret_models[mount.turret_model_index];
+            out.push((&turret.visual, turret.geom_bytes.as_slice(), true));
+        }
+        for misc in &self.miscs {
+            let part = &self.misc_models[misc.misc_model_index];
+            out.push((&part.visual, part.geom_bytes.as_slice(), false));
+        }
+
+        out
+    }
+
+    /// The MFM stems that reach at least one surviving primitive at some LoD,
+    /// respecting the same render-set exclusion `export_glb` applies for the
+    /// ship's damage state. `collect_mfm_info` (which [`camo_texture_source`]
+    /// draws its stems from) enumerates every render set unconditionally, so a
+    /// stem whose only render set is excluded (e.g. `_crack_` in an intact
+    /// export) would otherwise get priced for a texture the export never embeds.
+    ///
+    /// Computed over unique models, not per-mount/per-misc placements: stem
+    /// membership does not depend on how many times a model is instanced.
+    fn reachable_mfm_stems(
+        &self,
+        db: &PrototypeDatabase<'_>,
+        self_id_index: &HashMap<u64, usize>,
+    ) -> Result<HashSet<String>, Report> {
+        let mut stems = HashSet::new();
+        for part in self.hull_parts.iter().chain(self.turret_models.iter()).chain(self.misc_models.iter()) {
+            let geom = geometry::parse_geometry(&part.geom_bytes).context("Failed to parse geometry for stems")?;
+            for lod in &part.visual.lods {
+                stems.extend(gltf_export::primitive_mfm_stems(
+                    &part.visual,
+                    &geom,
+                    db,
+                    self_id_index,
+                    lod,
+                    self.options.damaged,
+                )?);
+            }
+        }
+        Ok(stems)
+    }
+
+    /// Gather everything that prices an export, once. The caller can then price
+    /// any option combination without re-reading geometry or textures.
+    pub fn size_model(&self) -> Result<size_estimate::ExportSizeModel, Report> {
+        let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to parse assets.bin")?;
+        let self_id_index = db.build_self_id_index();
+
+        let mut mesh_lods = Vec::new();
+        let mut armor = size_estimate::MeshCounts { vertices: 0, indices: 0 };
+
+        for (visual, geom_bytes, carries_armor) in self.sub_model_visuals() {
+            let geom = geometry::parse_geometry(geom_bytes).context("Failed to parse geometry")?;
+            let mut per_lod = Vec::with_capacity(visual.lods.len());
+            for lod in &visual.lods {
+                per_lod.push(gltf_export::primitive_counts(
+                    visual,
+                    &geom,
+                    &db,
+                    &self_id_index,
+                    lod,
+                    self.options.damaged,
+                )?);
+            }
+            mesh_lods.push(per_lod);
+
+            // Miscs contribute no armor to the export, so they must contribute
+            // none here either.
+            if !carries_armor {
+                continue;
+            }
+            for am in &geom.armor_models {
+                for sub in gltf_export::armor_sub_models_by_zone(am, self.armor_map.as_ref(), None) {
+                    armor.vertices += sub.positions.len() as u64;
+                    armor.indices += sub.indices.len() as u64;
+                }
+            }
+        }
+
+        let source = self.camo_texture_source()?;
+        let reachable = self.reachable_mfm_stems(&db, &self_id_index)?;
+        // A texture whose ladder cannot be read (missing/corrupt tail) contributes
+        // zero rather than failing the whole model: this is a best-effort price, and
+        // one bad texture must not deny the user a number.
+        let ladder_for = |path: &str| texture::texture_ladder(&self.vfs, path).map(size_estimate::TextureLadder::new);
+
+        // Filtered to reachable stems (see `reachable_mfm_stems`), then keyed by
+        // resolved path rather than by stem: a "_wire"-suffixed material stem
+        // falls back to its unsuffixed sibling's albedo (and other stems can
+        // coincide too), and `ImageCache` embeds that shared file once. A
+        // stem-keyed map would price every stem that shares a texture as its
+        // own copy and badly overcount.
+        let base_ladders: HashMap<String, size_estimate::TextureLadder> = source
+            .base_albedo_paths()
+            .into_iter()
+            .filter(|(stem, _)| reachable.contains(stem))
+            .filter_map(|(_, path)| ladder_for(&path).map(|l| (path, l)))
+            .collect();
+        let mut scheme_ladders = HashMap::new();
+        for info in source.scheme_infos() {
+            let ladders: Vec<_> = source.scheme_texture_paths(info.id)?.iter().filter_map(|p| ladder_for(p)).collect();
+            scheme_ladders.insert(info.id, ladders);
+        }
+
+        Ok(size_estimate::ExportSizeModel::new(mesh_lods, armor, base_ladders, scheme_ladders))
     }
 
     /// Build the complete texture set the options select (base albedo plus the
