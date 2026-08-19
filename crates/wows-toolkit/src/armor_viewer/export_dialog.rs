@@ -427,6 +427,11 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
         .collapsible(false)
         .resizable(true)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        // A ship with many camo schemes (Yamato: 193) can push the controls
+        // well past window height. Capped rather than left to grow unbounded,
+        // since the window is centre-anchored and cannot be dragged to reveal
+        // content clipped past either edge.
+        .max_height(ctx.content_rect().height() * 0.8)
         .show(ctx, |ui| {
             if let ExportMetaState::Loading(inbox) = &mut dialog.meta
                 && let Some(result) = inbox.read(ui).last()
@@ -456,31 +461,37 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
 
             let exporting = matches!(dialog.phase, ExportPhase::Exporting(_));
 
-            // The hull combo, contents radios and texture-resolution combo
-            // need nothing loaded, so `controls` renders on every frame this
-            // dialog is open -- including while stage 1 is still loading, in
-            // which case it shows its own small spinners for the LoD slider
-            // and camo list instead of gating the whole panel on them.
-            if let ExportMetaState::Failed(e) = &dialog.meta {
-                ui.colored_label(ui.visuals().error_fg_color, t!("ui.armor.load_failed", error = e).as_ref());
-            } else {
-                let meta = match &dialog.meta {
-                    ExportMetaState::Loaded(meta) => Some(meta),
-                    _ => None,
-                };
-                ui.add_enabled_ui(!exporting, |ui| {
-                    outcome = controls(
-                        ui,
-                        &mut dialog.draft,
-                        &dialog.hull_upgrades,
-                        meta,
-                        &mut dialog.size_model,
-                        &mut dialog.pending_scheme_fetch,
-                        dialog.load_generation,
-                        &mut dialog.estimate_cache,
-                    );
-                });
-            }
+            // Only the controls (hull/contents/LoD/resolution/camo lists) scroll;
+            // the exporting spinner, disclaimer and button row are pinned below
+            // so Export/Cancel stay reachable no matter how tall the camo lists
+            // get (a ship with many schemes, all groups expanded).
+            egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
+                // The hull combo, contents radios and texture-resolution combo
+                // need nothing loaded, so `controls` renders on every frame this
+                // dialog is open -- including while stage 1 is still loading, in
+                // which case it shows its own small spinners for the LoD slider
+                // and camo list instead of gating the whole panel on them.
+                if let ExportMetaState::Failed(e) = &dialog.meta {
+                    ui.colored_label(ui.visuals().error_fg_color, t!("ui.armor.load_failed", error = e).as_ref());
+                } else {
+                    let meta = match &dialog.meta {
+                        ExportMetaState::Loaded(meta) => Some(meta),
+                        _ => None,
+                    };
+                    ui.add_enabled_ui(!exporting, |ui| {
+                        outcome = controls(
+                            ui,
+                            &mut dialog.draft,
+                            &dialog.hull_upgrades,
+                            meta,
+                            &mut dialog.size_model,
+                            &mut dialog.pending_scheme_fetch,
+                            dialog.load_generation,
+                            &mut dialog.estimate_cache,
+                        );
+                    });
+                }
+            });
 
             if exporting {
                 ui.add_space(8.0);
@@ -621,9 +632,15 @@ fn controls(
                 let mut ship_infos: Vec<&CamoSchemeInfo> =
                     meta.camo_schemes.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
                 ship_infos.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-                for info in &ship_infos {
-                    camo_checkbox(ui, draft, info);
-                }
+                // Capped like its sibling groups below: unlike them, this list has
+                // no collapsing header to hide behind, so on a ship with many
+                // ship-specific schemes it was the one uncapped contributor to the
+                // window overflowing past both screen edges.
+                egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                    for info in &ship_infos {
+                        camo_checkbox(ui, draft, info);
+                    }
+                });
 
                 for (origin, key) in [
                     (CamoOrigin::Universal, "ui.armor.camo_group_universal"),

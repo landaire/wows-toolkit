@@ -2081,10 +2081,10 @@ fn run_export_ship(
         ..Default::default()
     };
 
-    let probe_options = ShipExportOptions { textures: false, ..options.clone() };
-    let probe = assets.load_ship(name, &probe_options)?;
     let mut ids = Vec::with_capacity(camos.len());
     if !camos.is_empty() {
+        let probe_options = ShipExportOptions { textures: false, ..options.clone() };
+        let probe = assets.load_ship(name, &probe_options)?;
         let source = probe.camo_texture_source()?;
         for camo_name in camos {
             let id = source
