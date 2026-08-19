@@ -10,8 +10,10 @@ use wowsunpack::export::gltf_export::CamoOrigin;
 use wowsunpack::export::ship::CamoSelection;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipExportOptions;
+use wowsunpack::export::ship::ShipModelContext;
 use wowsunpack::export::size_estimate::ExportSizeModel;
 use wowsunpack::export::size_estimate::SizeEstimate;
+use wowsunpack::export::size_estimate::TextureLadder;
 use wowsunpack::export::texture::MaxEdge;
 use wowsunpack::export::texture::TextureLod;
 
@@ -131,20 +133,47 @@ impl EstimateKey {
     }
 }
 
-/// Everything the dialog needs about one ship at one hull selection.
+/// Stage 1 of a background load: the ship itself and its camo scheme list.
+/// Fast -- no geometry counting, no texture ladder reads -- so the LoD slider
+/// and camo list only wait on this, not on stage 2. `ctx` is kept alive so a
+/// camo the user selects afterward can be priced with `ShipModelContext::
+/// scheme_ladders` without reloading the ship.
 pub struct ExportMeta {
-    pub hull_upgrades: Vec<String>,
     pub hull_lod_count: usize,
     pub camo_schemes: Vec<CamoSchemeInfo>,
-    /// `None` when the model could not be built. The dialog then shows no size
-    /// line rather than a fabricated number, and the export still works.
-    pub size_model: Option<Arc<ExportSizeModel>>,
+    ctx: Arc<ShipModelContext>,
 }
 
 pub enum ExportMetaState {
     Loading(egui_inbox::UiInbox<Result<ExportMeta, String>>),
     Loaded(ExportMeta),
     Failed(String),
+}
+
+/// Stage 2 of a background load: the size model. Slower than stage 1 (it
+/// still reads the base albedo ladders), so it is tracked independently and
+/// must never gate the hull/contents/resolution/LoD/camo controls -- only the
+/// size line itself waits on it.
+enum SizeModelState {
+    Loading(egui_inbox::UiInbox<Option<ExportSizeModel>>),
+    /// `None` means the model could not be built: the dialog shows no size
+    /// line rather than a fabricated number, and the export still works.
+    Loaded(Option<ExportSizeModel>),
+}
+
+/// One camo scheme's resolved `(path, ladder)` pairs, as
+/// `ExportSizeModel::insert_scheme_ladders` takes them.
+type SchemeLadders = Vec<(String, TextureLadder)>;
+
+/// A background scheme-ladder fetch's result: one entry per requested id.
+type SchemeLadderBatch = Vec<(CamoSchemeId, SchemeLadders)>;
+
+/// A background request for one or more camo schemes' texture ladders,
+/// spawned when the draft selects a scheme `size_model` was not built with
+/// (it only prices the schemes selected at load time, typically none).
+struct PendingSchemeFetch {
+    ids: BTreeSet<CamoSchemeId>,
+    inbox: egui_inbox::UiInbox<SchemeLadderBatch>,
 }
 
 /// Whether the dialog is being edited or is waiting on a background export.
@@ -160,7 +189,13 @@ enum ExportPhase {
 pub struct ExportDialog {
     pub param_index: String,
     pub display_name: String,
+    /// Resolved synchronously in `open`/`start_load`: it comes from
+    /// `vehicle.hull_upgrades()`, already in hand from the metadata provider
+    /// before any background work starts, so the hull combo needs no spinner.
+    pub hull_upgrades: Vec<String>,
     pub meta: ExportMetaState,
+    size_model: SizeModelState,
+    pending_scheme_fetch: Option<PendingSchemeFetch>,
     pub draft: ExportDraft,
     phase: ExportPhase,
     /// Bumped on every `spawn_load`, so a `SizeEstimate` cached against the
@@ -204,42 +239,61 @@ impl ExportDialog {
             texture_res: defaults.texture_res,
             camos: BTreeSet::new(),
         };
-        // `start_load` sets `meta`, so it is built here rather than seeded with a
-        // placeholder state that would never be observed.
-        let (sender, inbox) = egui_inbox::UiInbox::channel();
+        // Already resolved in `assets`'s metadata provider (no assets.bin scan,
+        // no VFS read), so this needs no background thread: the hull combo can
+        // render on the very first frame.
+        let hull_upgrades = hull_upgrades_for(&assets, &param_index);
+        // `start_load` sets `meta`/`size_model`, so they are built here rather
+        // than seeded with a placeholder state that would never be observed.
+        let (stage1_sender, stage1_inbox) = egui_inbox::UiInbox::channel();
+        let (stage2_sender, stage2_inbox) = egui_inbox::UiInbox::channel();
         let dialog = Self {
             param_index,
             display_name,
-            meta: ExportMetaState::Loading(inbox),
+            hull_upgrades,
+            meta: ExportMetaState::Loading(stage1_inbox),
+            size_model: SizeModelState::Loading(stage2_inbox),
+            pending_scheme_fetch: None,
             draft,
             phase: ExportPhase::Editing,
             load_generation: 0,
             estimate_cache: None,
         };
-        dialog.spawn_load(assets, sender);
+        dialog.spawn_load(assets, stage1_sender, stage2_sender);
         dialog
     }
 
     /// Reload after a hull change: the hull decides which parts exist, and so the
-    /// camo list, the LoD depth and the size model.
+    /// camo list, the LoD depth and the size model. `hull_upgrades` itself does
+    /// not depend on the hull selection, so it is left as-is.
     pub fn start_load(&mut self, assets: Arc<wowsunpack::export::ship::ShipAssets>) {
-        let (sender, inbox) = egui_inbox::UiInbox::channel();
-        self.meta = ExportMetaState::Loading(inbox);
+        let (stage1_sender, stage1_inbox) = egui_inbox::UiInbox::channel();
+        let (stage2_sender, stage2_inbox) = egui_inbox::UiInbox::channel();
+        self.meta = ExportMetaState::Loading(stage1_inbox);
+        self.size_model = SizeModelState::Loading(stage2_inbox);
+        // Tied to the model this generation is about to replace; any fetch
+        // still in flight against the old one would merge into a size model
+        // that no longer describes the current hull.
+        self.pending_scheme_fetch = None;
+        self.estimate_cache = None;
         self.load_generation += 1;
-        self.spawn_load(assets, sender);
+        self.spawn_load(assets, stage1_sender, stage2_sender);
     }
 
-    /// Load the ship's geometry only: the controls need the hull list, the LoD
-    /// depth, the camo list and the size model, none of which need textures.
+    /// Loads the ship in two stages on one background thread. Stage 1 (the ship
+    /// load and its camo scheme list) unblocks the LoD slider and camo list;
+    /// stage 2 (the size model) is sent afterward, on the same thread, so it can
+    /// never land before stage 1 does. Neither stage embeds textures.
     fn spawn_load(
         &self,
         assets: Arc<wowsunpack::export::ship::ShipAssets>,
-        sender: egui_inbox::UiInboxSender<Result<ExportMeta, String>>,
+        stage1_sender: egui_inbox::UiInboxSender<Result<ExportMeta, String>>,
+        stage2_sender: egui_inbox::UiInboxSender<Option<ExportSizeModel>>,
     ) {
         let param_index = self.param_index.clone();
         let hull = self.draft.hull.clone();
         crate::util::thread::spawn_logged("export-dialog-load", move || {
-            let result = (|| -> Result<ExportMeta, String> {
+            let stage1 = (|| -> Result<(ExportMeta, Arc<ShipModelContext>), String> {
                 use wowsunpack::game_params::types::GameParamProvider;
                 let param = assets.metadata().game_param_by_index(&param_index);
                 let vehicle =
@@ -251,37 +305,37 @@ impl ExportDialog {
                     ..Default::default()
                 };
                 let ctx = assets.load_ship_from_vehicle(&vehicle, &probe).map_err(|e| format!("{e:?}"))?;
+                let ctx = Arc::new(ctx);
                 let source = ctx.camo_texture_source().map_err(|e| format!("{e:?}"))?;
-                // A ship that cannot be priced can still be exported, so a failed
-                // model costs the estimate line and nothing else.
-                let size_model = match ctx.size_model() {
-                    Ok(m) => Some(Arc::new(m)),
-                    Err(e) => {
-                        tracing::warn!("could not build the export size model for {param_index}: {e:?}");
-                        None
-                    }
-                };
-                // `vehicle.hull_upgrades()` is already resolved (no assets.bin scan,
-                // unlike `ShipAssets::list_hull_upgrades`, whose model-name-based lookup
-                // strategy never matches a param index and always runs to exhaustion).
-                // `None` genuinely means this ship has no listed upgrades (older game
-                // versions offer no hull choice), not a failure to look one up.
-                let hull_upgrades: Vec<String> = match vehicle.hull_upgrades() {
-                    Some(upgrades) => {
-                        let mut names: Vec<String> = upgrades.keys().cloned().collect();
-                        names.sort();
-                        names
-                    }
-                    None => Vec::new(),
-                };
-                Ok(ExportMeta {
-                    hull_upgrades,
+                let meta = ExportMeta {
                     hull_lod_count: ctx.hull_lod_count(),
                     camo_schemes: source.scheme_infos(),
-                    size_model,
-                })
+                    ctx: ctx.clone(),
+                };
+                Ok((meta, ctx))
             })();
-            let _ = sender.send(result);
+
+            let ctx = match stage1 {
+                Ok((meta, ctx)) => {
+                    let _ = stage1_sender.send(Ok(meta));
+                    ctx
+                }
+                Err(e) => {
+                    let _ = stage1_sender.send(Err(e));
+                    return;
+                }
+            };
+
+            // A ship that cannot be priced can still be exported, so a failed
+            // model costs the estimate line and nothing else.
+            let size_model = match ctx.size_model() {
+                Ok(m) => Some(m),
+                Err(e) => {
+                    tracing::warn!("could not build the export size model for {param_index}: {e:?}");
+                    None
+                }
+            };
+            let _ = stage2_sender.send(size_model);
         });
     }
 
@@ -291,6 +345,30 @@ impl ExportDialog {
     /// stray click can never happen while this one is still running.
     pub fn is_exporting(&self) -> bool {
         matches!(self.phase, ExportPhase::Exporting(_))
+    }
+}
+
+/// `vehicle.hull_upgrades()` is already resolved (no assets.bin scan, unlike
+/// `ShipAssets::list_hull_upgrades`, whose model-name-based lookup strategy
+/// never matches a param index and always runs to exhaustion). `None` from
+/// `hull_upgrades()` genuinely means this ship has no listed upgrades (older
+/// game versions offer no hull choice); a missing param or vehicle is treated
+/// the same way here since `spawn_load` reports that failure properly.
+fn hull_upgrades_for(assets: &wowsunpack::export::ship::ShipAssets, param_index: &str) -> Vec<String> {
+    use wowsunpack::game_params::types::GameParamProvider;
+    let Some(param) = assets.metadata().game_param_by_index(param_index) else {
+        return Vec::new();
+    };
+    let Some(vehicle) = param.vehicle() else {
+        return Vec::new();
+    };
+    match vehicle.hull_upgrades() {
+        Some(upgrades) => {
+            let mut names: Vec<String> = upgrades.keys().cloned().collect();
+            names.sort();
+            names
+        }
+        None => Vec::new(),
     }
 }
 
@@ -346,24 +424,42 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 };
             }
 
+            if let SizeModelState::Loading(inbox) = &mut dialog.size_model
+                && let Some(result) = inbox.read(ui).last()
+            {
+                dialog.size_model = SizeModelState::Loaded(result);
+                // The number, if any, cached against the loading model would
+                // have been priced with zero schemes -- stale the moment a
+                // real model (or its absence) lands.
+                dialog.estimate_cache = None;
+            }
+
             let exporting = matches!(dialog.phase, ExportPhase::Exporting(_));
 
-            match &dialog.meta {
-                ExportMetaState::Loading(_) => {
-                    ui.horizontal(|ui| {
-                        ui.add(egui::Spinner::new().size(14.0));
-                        ui.label(t!("ui.armor.loading_ship").as_ref());
-                    });
-                }
-                ExportMetaState::Failed(e) => {
-                    ui.colored_label(ui.visuals().error_fg_color, t!("ui.armor.load_failed", error = e).as_ref());
-                }
-                ExportMetaState::Loaded(meta) => {
-                    ui.add_enabled_ui(!exporting, |ui| {
-                        outcome =
-                            controls(ui, &mut dialog.draft, meta, dialog.load_generation, &mut dialog.estimate_cache);
-                    });
-                }
+            // The hull combo, contents radios and texture-resolution combo
+            // need nothing loaded, so `controls` renders on every frame this
+            // dialog is open -- including while stage 1 is still loading, in
+            // which case it shows its own small spinners for the LoD slider
+            // and camo list instead of gating the whole panel on them.
+            if let ExportMetaState::Failed(e) = &dialog.meta {
+                ui.colored_label(ui.visuals().error_fg_color, t!("ui.armor.load_failed", error = e).as_ref());
+            } else {
+                let meta = match &dialog.meta {
+                    ExportMetaState::Loaded(meta) => Some(meta),
+                    _ => None,
+                };
+                ui.add_enabled_ui(!exporting, |ui| {
+                    outcome = controls(
+                        ui,
+                        &mut dialog.draft,
+                        &dialog.hull_upgrades,
+                        meta,
+                        &mut dialog.size_model,
+                        &mut dialog.pending_scheme_fetch,
+                        dialog.load_generation,
+                        &mut dialog.estimate_cache,
+                    );
+                });
             }
 
             if exporting {
@@ -397,23 +493,33 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
     outcome
 }
 
-/// Renders hull, contents, LoD, texture resolution and camo controls. Returns
-/// `ReloadRequested` when the hull selection changed, since the hull decides
-/// which parts, camos and LoDs even exist.
+/// Renders hull, contents, LoD, texture resolution and camo controls, plus the
+/// size line. Returns `ReloadRequested` when the hull selection changed, since
+/// the hull decides which parts, camos and LoDs even exist.
+///
+/// `meta` is `None` while stage 1 is still loading: the hull combo, contents
+/// radios and texture-resolution combo render regardless (they need nothing
+/// from it), while the LoD slider and camo list each show a small spinner in
+/// its place. The size line is driven by `size_model` independently, and
+/// never waits on `meta` either.
+#[allow(clippy::too_many_arguments)]
 fn controls(
     ui: &mut egui::Ui,
     draft: &mut ExportDraft,
-    meta: &ExportMeta,
+    hull_upgrades: &[String],
+    meta: Option<&ExportMeta>,
+    size_model: &mut SizeModelState,
+    pending_scheme_fetch: &mut Option<PendingSchemeFetch>,
     load_generation: u64,
     estimate_cache: &mut Option<(EstimateKey, SizeEstimate)>,
 ) -> DialogOutcome {
     let mut outcome = DialogOutcome::Idle;
 
-    if !meta.hull_upgrades.is_empty() {
+    if !hull_upgrades.is_empty() {
         let selected_label = draft
             .hull
             .as_ref()
-            .and_then(|h| meta.hull_upgrades.iter().find(|u| *u == h))
+            .and_then(|h| hull_upgrades.iter().find(|u| *u == h))
             .cloned()
             .unwrap_or_else(|| t!("ui.armor.export.hull_stock").to_string());
         ui.horizontal(|ui| {
@@ -425,7 +531,7 @@ fn controls(
                     draft.hull = None;
                     outcome = DialogOutcome::ReloadRequested;
                 }
-                for name in &meta.hull_upgrades {
+                for name in hull_upgrades {
                     let is_selected = draft.hull.as_ref() == Some(name);
                     if ui.selectable_label(is_selected, name).clicked() && !is_selected {
                         draft.hull = Some(name.clone());
@@ -443,13 +549,17 @@ fn controls(
         }
     });
 
-    if meta.hull_lod_count > 1 {
-        ui.add_enabled(
-            draft.contents.includes_mesh(),
-            egui::Slider::new(&mut draft.lod, 0..=meta.hull_lod_count.saturating_sub(1))
-                .text(t!("ui.armor.export.lod")),
-        )
-        .on_hover_text(t!("ui.armor.export.lod_tooltip").as_ref());
+    match meta {
+        Some(meta) if meta.hull_lod_count > 1 => {
+            ui.add_enabled(
+                draft.contents.includes_mesh(),
+                egui::Slider::new(&mut draft.lod, 0..=meta.hull_lod_count.saturating_sub(1))
+                    .text(t!("ui.armor.export.lod")),
+            )
+            .on_hover_text(t!("ui.armor.export.lod_tooltip").as_ref());
+        }
+        Some(_) => {}
+        None => loading_placeholder(ui),
     }
 
     ui.add_enabled_ui(draft.contents.includes_mesh(), |ui| {
@@ -465,67 +575,60 @@ fn controls(
         });
     });
 
-    if !meta.camo_schemes.is_empty() {
-        ui.add_enabled_ui(draft.contents.includes_mesh(), |ui| {
-            ui.label(t!("ui.armor.export.camos").as_ref());
-            ui.horizontal(|ui| {
-                if ui.button(t!("ui.armor.export.camo_select_none").as_ref()).clicked() {
-                    draft.camos.clear();
-                }
-                if ui.button(t!("ui.armor.export.camo_reset").as_ref()).clicked() {
-                    draft.camos.clear();
-                    if let Some(id) = default_camo(&meta.camo_schemes) {
-                        draft.camos.insert(id);
+    match meta {
+        Some(meta) if !meta.camo_schemes.is_empty() => {
+            ui.add_enabled_ui(draft.contents.includes_mesh(), |ui| {
+                ui.label(t!("ui.armor.export.camos").as_ref());
+                ui.horizontal(|ui| {
+                    if ui.button(t!("ui.armor.export.camo_select_none").as_ref()).clicked() {
+                        draft.camos.clear();
                     }
+                    if ui.button(t!("ui.armor.export.camo_reset").as_ref()).clicked() {
+                        draft.camos.clear();
+                        if let Some(id) = default_camo(&meta.camo_schemes) {
+                            draft.camos.insert(id);
+                        }
+                    }
+                });
+
+                let mut ship_infos: Vec<&CamoSchemeInfo> =
+                    meta.camo_schemes.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
+                ship_infos.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+                for info in &ship_infos {
+                    camo_checkbox(ui, draft, info);
+                }
+
+                for (origin, key) in [
+                    (CamoOrigin::Universal, "ui.armor.camo_group_universal"),
+                    (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
+                    (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
+                ] {
+                    let mut group: Vec<&CamoSchemeInfo> =
+                        meta.camo_schemes.iter().filter(|i| i.origin == origin).collect();
+                    if group.is_empty() {
+                        continue;
+                    }
+                    group.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+                    let id = ui.make_persistent_id(("export_camo_group", key));
+                    egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
+                        .show_header(ui, |ui| {
+                            ui.label(t!(key).as_ref());
+                        })
+                        .body(|ui| {
+                            egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
+                                for info in &group {
+                                    camo_checkbox(ui, draft, info);
+                                }
+                            });
+                        });
                 }
             });
-
-            let mut ship_infos: Vec<&CamoSchemeInfo> =
-                meta.camo_schemes.iter().filter(|i| i.origin == CamoOrigin::ShipSpecific).collect();
-            ship_infos.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-            for info in &ship_infos {
-                camo_checkbox(ui, draft, info);
-            }
-
-            for (origin, key) in [
-                (CamoOrigin::Universal, "ui.armor.camo_group_universal"),
-                (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
-                (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
-            ] {
-                let mut group: Vec<&CamoSchemeInfo> = meta.camo_schemes.iter().filter(|i| i.origin == origin).collect();
-                if group.is_empty() {
-                    continue;
-                }
-                group.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-                let id = ui.make_persistent_id(("export_camo_group", key));
-                egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, false)
-                    .show_header(ui, |ui| {
-                        ui.label(t!(key).as_ref());
-                    })
-                    .body(|ui| {
-                        egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| {
-                            for info in &group {
-                                camo_checkbox(ui, draft, info);
-                            }
-                        });
-                    });
-            }
-        });
+        }
+        Some(_) => {}
+        None => loading_placeholder(ui),
     }
 
-    if let Some(model) = &meta.size_model {
-        let key = EstimateKey::from_draft(load_generation, draft);
-        let estimate = match estimate_cache {
-            Some((cached_key, cached)) if *cached_key == key => *cached,
-            _ => {
-                let e = model.estimate(&draft_to_options(draft));
-                *estimate_cache = Some((key, e));
-                e
-            }
-        };
-        let size = humansize::format_size(estimate.total(), humansize::BINARY);
-        ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
-    }
+    size_line(ui, draft, meta, size_model, pending_scheme_fetch, load_generation, estimate_cache);
 
     outcome
 }
@@ -539,6 +642,113 @@ fn camo_checkbox(ui: &mut egui::Ui, draft: &mut ExportDraft, info: &CamoSchemeIn
             draft.camos.remove(&info.id);
         }
     }
+}
+
+/// A small inline spinner for a control section still waiting on a
+/// background stage. Never blocks the rest of the dialog.
+fn loading_placeholder(ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        ui.add(egui::Spinner::new().size(12.0));
+        ui.label(t!("ui.armor.export.loading_details").as_ref());
+    });
+}
+
+/// Renders the size estimate, or a spinner while it is unavailable. The size
+/// model prices only the schemes it was built with (typically none); when the
+/// draft selects one it lacks, this requests that scheme's ladders in the
+/// background (never on this thread -- a ladder read is VFS IO) and shows a
+/// spinner instead of a number computed as if that scheme cost nothing.
+#[allow(clippy::too_many_arguments)]
+fn size_line(
+    ui: &mut egui::Ui,
+    draft: &ExportDraft,
+    meta: Option<&ExportMeta>,
+    size_model: &mut SizeModelState,
+    pending_scheme_fetch: &mut Option<PendingSchemeFetch>,
+    load_generation: u64,
+    estimate_cache: &mut Option<(EstimateKey, SizeEstimate)>,
+) {
+    let SizeModelState::Loaded(model) = size_model else {
+        loading_placeholder(ui);
+        return;
+    };
+    let Some(model) = model else {
+        // The ship could not be priced; the estimate line is the only thing
+        // this costs, and the export itself still works.
+        return;
+    };
+
+    if let Some(fetch) = pending_scheme_fetch
+        && let Some(results) = fetch.inbox.read(ui).last()
+    {
+        for (id, ladders) in results {
+            model.insert_scheme_ladders(id, ladders);
+        }
+        *estimate_cache = None;
+        *pending_scheme_fetch = None;
+    }
+
+    let options = draft_to_options(draft);
+    let missing = model.missing_scheme_ladders(&options);
+    if !missing.is_empty() {
+        if let Some(meta) = meta {
+            ensure_scheme_fetch(pending_scheme_fetch, &meta.ctx, &missing);
+        }
+        loading_placeholder(ui);
+        return;
+    }
+
+    let key = EstimateKey::from_draft(load_generation, draft);
+    let estimate = match estimate_cache {
+        Some((cached_key, cached)) if *cached_key == key => *cached,
+        _ => {
+            let e = model.estimate(&options);
+            *estimate_cache = Some((key, e));
+            e
+        }
+    };
+    let size = humansize::format_size(estimate.total(), humansize::BINARY);
+    ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
+}
+
+/// Spawns a background fetch for `missing`'s ladders, unless one already in
+/// flight covers exactly this set. A different set (the user changed the
+/// selection again before the first fetch landed) replaces it; the replaced
+/// fetch's result, if it still lands, merges harmlessly (`insert_scheme_ladders`
+/// is idempotent per id) and is simply ignored by `size_line` on arrival since
+/// `pending_scheme_fetch` no longer points at its inbox.
+fn ensure_scheme_fetch(
+    pending: &mut Option<PendingSchemeFetch>,
+    ctx: &Arc<ShipModelContext>,
+    missing: &[CamoSchemeId],
+) {
+    let missing_ids: BTreeSet<CamoSchemeId> = missing.iter().copied().collect();
+    if pending.as_ref().is_some_and(|p| p.ids == missing_ids) {
+        return;
+    }
+
+    let (sender, inbox) = egui_inbox::UiInbox::channel();
+    let ctx = ctx.clone();
+    let ids: Vec<CamoSchemeId> = missing_ids.iter().copied().collect();
+    crate::util::thread::spawn_logged("export-dialog-scheme-ladders", move || {
+        let mut results = Vec::with_capacity(ids.len());
+        for id in ids {
+            let ladders = match ctx.scheme_ladders(id) {
+                Ok(l) => l,
+                // Best-effort, like the rest of the size model: one scheme that
+                // cannot be priced must not deny the user a number for the
+                // others, so it prices as zero extra bytes rather than staying
+                // pending forever.
+                Err(e) => {
+                    tracing::warn!("could not price camo scheme {id:?}: {e:?}");
+                    Vec::new()
+                }
+            };
+            results.push((id, ladders));
+        }
+        let _ = sender.send(results);
+    });
+    *pending = Some(PendingSchemeFetch { ids: missing_ids, inbox });
 }
 
 #[cfg(test)]
@@ -640,9 +850,12 @@ mod tests {
     }
 
     /// Exercises the tree context menu's exact call shape (`seed_hull: None`)
-    /// against real game data, standing in for the interactive check that a
-    /// dialog with no loaded pane still reaches `Loaded`. Requires a game
-    /// install; point `WOWS_DIR` at one to run it.
+    /// against real game data, and measures the three numbers Task 11 asks
+    /// for: `open`'s own wall-clock (the controls are interactive the instant
+    /// it returns, since it does only synchronous, already-resolved metadata
+    /// lookups), stage 1's wall-clock (LoD slider + camo list), and stage 2's
+    /// wall-clock (the size line). Requires a game install; point `WOWS_DIR`
+    /// at one to run it.
     #[test]
     #[ignore = "requires a game install"]
     fn open_with_no_seeded_hull_loads_real_metadata() {
@@ -663,13 +876,17 @@ mod tests {
         let param_index = param.index().to_string();
 
         // The tree context menu path: no loaded pane, so no seed hull.
-        // Timed separately from `ShipAssets::from_game_dir` above (~18s, not
-        // this call's cost) to isolate spawn_load's own wall-clock, per review.
-        let spawn_load_started = std::time::Instant::now();
+        let open_started = std::time::Instant::now();
         let mut dialog =
             ExportDialog::open(param_index, "Smaland".to_string(), None, ExportDefaults::default(), assets);
+        let open_elapsed = open_started.elapsed();
+        eprintln!("[measured] ExportDialog::open wall-clock (controls interactive): {open_elapsed:?}");
+        // `open` resolves this synchronously; it is the proof the hull combo
+        // needed no background work at all.
+        assert!(!dialog.hull_upgrades.is_empty(), "Smaland has hull upgrades, resolved synchronously by open()");
 
-        let deadline = spawn_load_started + std::time::Duration::from_secs(120);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+
         while let ExportMetaState::Loading(inbox) = &mut dialog.meta {
             if let Some(result) = inbox.read_without_ctx().last() {
                 dialog.meta = match result {
@@ -678,49 +895,153 @@ mod tests {
                 };
                 break;
             }
-            assert!(std::time::Instant::now() < deadline, "export metadata load did not finish in time");
-            std::thread::sleep(std::time::Duration::from_millis(20));
+            assert!(std::time::Instant::now() < deadline, "stage 1 did not finish in time");
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        eprintln!("spawn_load wall-clock: {:.2}s", spawn_load_started.elapsed().as_secs_f64());
+        eprintln!(
+            "[measured] Smaland stage 1 (ship load + camo list) wall-clock since open: {:.3}s",
+            open_started.elapsed().as_secs_f64()
+        );
 
-        match dialog.meta {
+        while let SizeModelState::Loading(inbox) = &mut dialog.size_model {
+            if let Some(result) = inbox.read_without_ctx().last() {
+                dialog.size_model = SizeModelState::Loaded(result);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "stage 2 did not finish in time");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        eprintln!(
+            "[measured] Smaland stage 2 (size model / size line) wall-clock since open: {:.3}s",
+            open_started.elapsed().as_secs_f64()
+        );
+
+        match &dialog.meta {
             ExportMetaState::Loaded(meta) => {
                 assert!(meta.hull_lod_count >= 1);
                 assert!(!meta.camo_schemes.is_empty(), "Smaland has camo schemes");
-                // Smaland has hull upgrades; this is the field the
-                // vehicle.hull_upgrades()-vs-Vec<String> naming swap could
-                // silently blank without either arm's test noticing.
-                assert!(!meta.hull_upgrades.is_empty(), "Smaland has hull upgrades");
                 // No translation catalog is loaded here, so display names come back
                 // as raw ids ("camo_permanent_1") rather than "Default"; the
                 // default-scheme match itself is covered by the unit tests above
                 // against synthetic display names.
                 eprintln!("default_camo resolved to: {:?}", default_camo(&meta.camo_schemes));
-
-                if let Some(model) = &meta.size_model {
-                    let draft = ExportDraft {
-                        contents: ExportContents::MeshAndArmor,
-                        hull: None,
-                        lod: 0,
-                        texture_res: TextureResolution::Full,
-                        camos: BTreeSet::new(),
-                    };
-                    let options = draft_to_options(&draft);
-                    // Warm up (page faults, branch predictor) before timing.
-                    for _ in 0..10 {
-                        std::hint::black_box(model.estimate(&options));
-                    }
-                    let iters = 10_000;
-                    let started = std::time::Instant::now();
-                    for _ in 0..iters {
-                        std::hint::black_box(model.estimate(&options));
-                    }
-                    let per_call = started.elapsed() / iters;
-                    eprintln!("SizeEstimate::estimate() cost: {per_call:?} per call ({iters} iterations)");
-                }
             }
             ExportMetaState::Failed(e) => panic!("metadata load failed: {e}"),
             ExportMetaState::Loading(_) => unreachable!("loop only exits once Loading is resolved"),
+        }
+
+        match &dialog.size_model {
+            SizeModelState::Loaded(Some(model)) => {
+                let draft = ExportDraft {
+                    contents: ExportContents::MeshAndArmor,
+                    hull: None,
+                    lod: 0,
+                    texture_res: TextureResolution::Full,
+                    camos: BTreeSet::new(),
+                };
+                let options = draft_to_options(&draft);
+                assert!(model.missing_scheme_ladders(&options).is_empty(), "no camo selected needs no scheme ladders");
+                // Warm up (page faults, branch predictor) before timing.
+                for _ in 0..10 {
+                    std::hint::black_box(model.estimate(&options));
+                }
+                let iters = 10_000;
+                let started = std::time::Instant::now();
+                for _ in 0..iters {
+                    std::hint::black_box(model.estimate(&options));
+                }
+                let per_call = started.elapsed() / iters;
+                eprintln!("[measured] SizeEstimate::estimate() cost: {per_call:?} per call ({iters} iterations)");
+            }
+            SizeModelState::Loaded(None) => eprintln!("size model could not be built for Smaland"),
+            SizeModelState::Loading(_) => unreachable!("loop only exits once Loading is resolved"),
+        }
+    }
+
+    /// The dialog's headline slow case: a ship with roughly 100 camo schemes
+    /// (Yamato). `size_model` now only prices the schemes selected at load
+    /// time (typically none), not every scheme the ship offers, so this
+    /// stage should land in a small fraction of the ~14s the eager path
+    /// cost. Requires a game install; point `WOWS_DIR` at one to run it.
+    #[test]
+    #[ignore = "requires a game install"]
+    fn stage_two_lands_quickly_on_a_ship_with_many_schemes() {
+        let game_dir = std::env::var_os("WOWS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"E:\WoWs\World_of_Warships"));
+        let assets = Arc::new(
+            wowsunpack::export::ship::ShipAssets::from_game_dir(&game_dir).expect("load ship assets from game dir"),
+        );
+
+        use wowsunpack::game_params::types::GameParamProvider;
+        let param = assets
+            .metadata()
+            .params()
+            .iter()
+            .find(|p| {
+                p.vehicle().and_then(|v| v.model_path()).map(|mp| mp.contains("JSB039_Yamato_1945")).unwrap_or(false)
+            })
+            .expect("Yamato present in this game data");
+        let param_index = param.index().to_string();
+
+        let open_started = std::time::Instant::now();
+        let mut dialog = ExportDialog::open(param_index, "Yamato".to_string(), None, ExportDefaults::default(), assets);
+        eprintln!("[measured] ExportDialog::open wall-clock (controls interactive): {:?}", open_started.elapsed());
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(180);
+
+        while let ExportMetaState::Loading(inbox) = &mut dialog.meta {
+            if let Some(result) = inbox.read_without_ctx().last() {
+                dialog.meta = match result {
+                    Ok(meta) => ExportMetaState::Loaded(meta),
+                    Err(e) => ExportMetaState::Failed(e),
+                };
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "stage 1 did not finish in time");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let scheme_count = match &dialog.meta {
+            ExportMetaState::Loaded(meta) => meta.camo_schemes.len(),
+            ExportMetaState::Failed(e) => panic!("stage 1 failed for Yamato: {e}"),
+            ExportMetaState::Loading(_) => unreachable!("loop only exits once Loading is resolved"),
+        };
+        eprintln!(
+            "[measured] Yamato stage 1 wall-clock since open: {:.3}s ({scheme_count} camo schemes)",
+            open_started.elapsed().as_secs_f64()
+        );
+        assert!(scheme_count > 50, "Yamato should offer roughly 100 schemes, got {scheme_count}");
+
+        while let SizeModelState::Loading(inbox) = &mut dialog.size_model {
+            if let Some(result) = inbox.read_without_ctx().last() {
+                dialog.size_model = SizeModelState::Loaded(result);
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "stage 2 did not finish in time");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        eprintln!(
+            "[measured] Yamato stage 2 (size model / size line) wall-clock since open: {:.3}s",
+            open_started.elapsed().as_secs_f64()
+        );
+
+        match &dialog.size_model {
+            SizeModelState::Loaded(Some(model)) => {
+                let draft = ExportDraft {
+                    contents: ExportContents::MeshAndArmor,
+                    hull: None,
+                    lod: 0,
+                    texture_res: TextureResolution::Full,
+                    camos: BTreeSet::new(),
+                };
+                let options = draft_to_options(&draft);
+                assert!(
+                    model.missing_scheme_ladders(&options).is_empty(),
+                    "no camo selected on open needs no scheme ladders, even with ~100 on offer"
+                );
+            }
+            SizeModelState::Loaded(None) => eprintln!("size model could not be built for Yamato"),
+            SizeModelState::Loading(_) => unreachable!("loop only exits once Loading is resolved"),
         }
     }
 }

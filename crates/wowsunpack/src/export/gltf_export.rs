@@ -1817,6 +1817,13 @@ pub(crate) struct PrimitiveSummary {
     pub mfm_stems: HashSet<String>,
 }
 
+/// Decode-based counterpart to [`primitive_summary_from_metadata`], kept only
+/// to prove the metadata path counts identically (see
+/// `ship::tests::metadata_counting_matches_decode_based_counting`).
+/// `ShipModelContext::model_summary` no longer calls this in production: it
+/// paid for a meshopt decode of every vertex/index buffer purely to take
+/// `.len()`, when the mapping metadata already carries the counts.
+#[cfg(test)]
 pub(crate) fn primitive_summary(
     visual: &VisualPrototype,
     geometry: &MergedGeometry,
@@ -1831,6 +1838,84 @@ pub(crate) fn primitive_summary(
         indices: prims.iter().map(|p| p.indices.len() as u64).sum(),
     };
     let mfm_stems = prims.into_iter().filter_map(|p| p.mfm_stem).collect();
+    Ok(PrimitiveSummary { counts, mfm_stems })
+}
+
+/// Metadata-only counterpart to [`primitive_summary`]: takes vertex/index
+/// counts straight from the mapping metadata (`items_count`) and reads the
+/// vertex format by name, without decoding any buffer. Mirrors
+/// `collect_primitives`'s render-set resolution and exclusion filter exactly,
+/// including the one quirk that affects counting: `unpack_vertices` only
+/// pushes a position per vertex when the format carries a Position
+/// attribute, so a render set without one contributes zero vertices, not
+/// `items_count`. Proven to count identically to the decode-based path by
+/// `ship::tests::metadata_counting_matches_decode_based_counting`.
+pub(crate) fn primitive_summary_from_metadata(
+    visual: &VisualPrototype,
+    geometry: &MergedGeometry,
+    db: &PrototypeDatabase<'_>,
+    self_id_index: &HashMap<u64, usize>,
+    lod: &crate::models::visual::Lod,
+    damaged: bool,
+) -> Result<PrimitiveSummary, Report<ExportError>> {
+    let mut counts = super::size_estimate::MeshCounts { vertices: 0, indices: 0 };
+    let mut mfm_stems = HashSet::new();
+    let exclude = if damaged { DAMAGED_EXCLUDE } else { INTACT_EXCLUDE };
+
+    for &rs_name_id in &lod.render_set_names {
+        let rs = visual
+            .render_sets
+            .iter()
+            .find(|rs| rs.name_id == rs_name_id)
+            .ok_or_else(|| Report::new(ExportError::RenderSetNotFound(rs_name_id)))?;
+
+        if let Some(rs_name) = db.strings.get_string_by_id(rs_name_id)
+            && exclude.iter().any(|sub| rs_name.contains(sub))
+        {
+            continue;
+        }
+
+        let vert_mapping = geometry
+            .vertices_mapping
+            .iter()
+            .find(|m| m.mapping_id == rs.vertices_mapping_id)
+            .ok_or_else(|| Report::new(ExportError::VerticesMappingNotFound { id: rs.vertices_mapping_id }))?;
+        let idx_mapping = geometry
+            .indices_mapping
+            .iter()
+            .find(|m| m.mapping_id == rs.indices_mapping_id)
+            .ok_or_else(|| Report::new(ExportError::IndicesMappingNotFound { id: rs.indices_mapping_id }))?;
+
+        let vbuf_idx = vert_mapping.merged_buffer_index as usize;
+        let vert_proto = geometry.merged_vertices.get(vbuf_idx).ok_or_else(|| {
+            Report::new(ExportError::BufferIndexOutOfRange { index: vbuf_idx, count: geometry.merged_vertices.len() })
+        })?;
+        let ibuf_idx = idx_mapping.merged_buffer_index as usize;
+        if ibuf_idx >= geometry.merged_indices.len() {
+            return Err(Report::new(ExportError::BufferIndexOutOfRange {
+                index: ibuf_idx,
+                count: geometry.merged_indices.len(),
+            }));
+        }
+
+        // `unpack_vertices` only pushes a position when the format carries
+        // one, so a Position-less render set contributes zero vertices to
+        // `positions.len()` on the decode path even though `items_count` is
+        // nonzero. Mirror that here or the counts can diverge.
+        let format = vertex_format::parse_vertex_format(&vert_proto.format_name);
+        if format.attributes.iter().any(|a| a.semantic == AttributeSemantic::Position) {
+            counts.vertices += vert_mapping.items_count as u64;
+        }
+        counts.indices += idx_mapping.items_count as u64;
+
+        if rs.material_mfm_path_id != 0
+            && let Some(&idx) = self_id_index.get(&rs.material_mfm_path_id)
+        {
+            let leaf = &db.paths_storage[idx].name;
+            mfm_stems.insert(leaf.strip_suffix(".mfm").unwrap_or(leaf).to_string());
+        }
+    }
+
     Ok(PrimitiveSummary { counts, mfm_stems })
 }
 

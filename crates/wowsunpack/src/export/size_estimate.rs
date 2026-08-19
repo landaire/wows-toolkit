@@ -174,6 +174,24 @@ impl ExportSizeModel {
         SizeEstimate { geometry_bytes, texture_bytes }
     }
 
+    /// Ids `options.camos` selects that this model has no ladders for yet.
+    /// `estimate` prices a missing scheme's textures as zero rather than
+    /// erroring -- correct once its ladders arrive, but indistinguishable
+    /// from "genuinely free" until then. Callers must check this before
+    /// trusting `estimate`'s number for `options`; an empty result means the
+    /// number is final.
+    pub fn missing_scheme_ladders(&self, options: &ShipExportOptions) -> Vec<CamoSchemeId> {
+        options.camos.priced_scheme_ids().into_iter().filter(|id| !self.scheme_ladders.contains_key(id)).collect()
+    }
+
+    /// Adds one scheme's resolved ladders, computed lazily (e.g. by a
+    /// background fetch after the user selects a scheme this model was not
+    /// built with), so a later `estimate` against options selecting it prices
+    /// it instead of silently treating it as zero bytes.
+    pub fn insert_scheme_ladders(&mut self, id: CamoSchemeId, ladders: Vec<(String, TextureLadder)>) {
+        self.scheme_ladders.insert(id, ladders);
+    }
+
     fn texture_bytes(&self, options: &ShipExportOptions) -> u64 {
         let raw: u64 = match &options.camos {
             // A baked camo replaces each stem's base albedo at the base's own
@@ -326,5 +344,43 @@ mod tests {
             variant.texture_bytes, stock.texture_bytes,
             "ImageCache dedups by content, so a scheme reusing the base's own path costs nothing extra"
         );
+    }
+
+    #[test]
+    fn base_only_and_baked_need_no_scheme_ladders() {
+        let m = model();
+        let base = ShipExportOptions { textures: true, ..options() };
+        assert!(
+            m.missing_scheme_ladders(&ShipExportOptions { camos: CamoSelection::BaseOnly, ..base.clone() }).is_empty()
+        );
+        assert!(
+            m.missing_scheme_ladders(&ShipExportOptions { camos: CamoSelection::Baked(CamoSchemeId(0)), ..base })
+                .is_empty(),
+            "Baked prices from base_ladders alone"
+        );
+    }
+
+    #[test]
+    fn an_unpriced_variant_id_is_reported_missing() {
+        let m = model();
+        let base = ShipExportOptions { textures: true, ..options() };
+        // CamoSchemeId(0) has ladders in `model()`; CamoSchemeId(2) does not.
+        let missing = m.missing_scheme_ladders(&ShipExportOptions {
+            camos: CamoSelection::Variants(vec![CamoSchemeId(0), CamoSchemeId(2)]),
+            ..base
+        });
+        assert_eq!(missing, vec![CamoSchemeId(2)]);
+    }
+
+    #[test]
+    fn inserting_ladders_clears_the_missing_report() {
+        let mut m = model();
+        let base = ShipExportOptions { textures: true, ..options() };
+        let opts = ShipExportOptions { camos: CamoSelection::Variants(vec![CamoSchemeId(2)]), ..base };
+        assert_eq!(m.missing_scheme_ladders(&opts), vec![CamoSchemeId(2)]);
+
+        m.insert_scheme_ladders(CamoSchemeId(2), vec![("scheme2/tex".to_string(), ladder())]);
+        assert!(m.missing_scheme_ladders(&opts).is_empty());
+        assert!(m.estimate(&opts).texture_bytes > 0);
     }
 }

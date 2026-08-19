@@ -93,6 +93,21 @@ pub enum CamoSelection {
     Baked(CamoSchemeId),
 }
 
+impl CamoSelection {
+    /// Scheme ids [`size_estimate::ExportSizeModel`] must have ladders for to
+    /// price this selection. `Baked` prices from the model's `base_ladders`
+    /// alone (a baked camo replaces each stem's base albedo at the base's own
+    /// resolution, so it costs what stock costs -- see
+    /// `ExportSizeModel::texture_bytes`), so despite carrying an id it needs
+    /// nothing here.
+    pub(crate) fn priced_scheme_ids(&self) -> Vec<CamoSchemeId> {
+        match self {
+            CamoSelection::BaseOnly | CamoSelection::Baked(_) => Vec::new(),
+            CamoSelection::Variants(ids) => ids.clone(),
+        }
+    }
+}
+
 /// Options controlling ship model export.
 #[derive(Debug, Clone)]
 pub struct ShipExportOptions {
@@ -1677,12 +1692,14 @@ impl ShipModelContext {
         Ok(())
     }
 
-    /// Decode one unique model's geometry once and derive everything pricing
-    /// needs from it: per-LoD mesh counts, armor totals, and the MFM stems at
-    /// least one surviving primitive carries. A single `collect_primitives`
-    /// pass per LoD (via `gltf_export::primitive_summary`) yields both the
-    /// counts and the stems, instead of two independent passes redecoding the
-    /// same vertex/index buffers.
+    /// Derive everything pricing needs from one unique model's geometry
+    /// metadata: per-LoD mesh counts, armor totals, and the MFM stems at
+    /// least one surviving primitive carries. `gltf_export::
+    /// primitive_summary_from_metadata` reads `items_count` straight out of
+    /// the mapping metadata instead of meshopt-decoding every vertex/index
+    /// buffer just to take `.len()`; it is proven to count identically to
+    /// the decode-based path by
+    /// `tests::metadata_counting_matches_decode_based_counting`.
     fn model_summary(
         &self,
         part: &OwnedSubModel,
@@ -1694,8 +1711,14 @@ impl ShipModelContext {
         let mut mesh_lods = Vec::with_capacity(part.visual.lods.len());
         let mut stems = HashSet::new();
         for lod in &part.visual.lods {
-            let summary =
-                gltf_export::primitive_summary(&part.visual, &geom, db, self_id_index, lod, self.options.damaged)?;
+            let summary = gltf_export::primitive_summary_from_metadata(
+                &part.visual,
+                &geom,
+                db,
+                self_id_index,
+                lod,
+                self.options.damaged,
+            )?;
             mesh_lods.push(summary.counts);
             stems.extend(summary.mfm_stems);
         }
@@ -1787,17 +1810,50 @@ impl ShipModelContext {
             .filter_map(|(_, path)| ladder_for(&path).map(|l| (path, l)))
             .collect();
 
+        // Only the schemes this ship's own options select, not every scheme the
+        // ship offers (roughly 100 on Yamato): each one costs a VFS read of the
+        // DDS tail plus up to three existence probes, and the dialog that drives
+        // this only ever wants the ids the user has actually ticked. A scheme
+        // selected later (a fresh camo pick) is priced lazily via
+        // `Self::scheme_ladders` and merged into the model with
+        // `ExportSizeModel::insert_scheme_ladders`.
         let mut scheme_ladders: HashMap<CamoSchemeId, Vec<(String, size_estimate::TextureLadder)>> = HashMap::new();
-        for info in source.scheme_infos() {
+        for id in self.options.camos.priced_scheme_ids() {
             let ladders: Vec<(String, size_estimate::TextureLadder)> = source
-                .scheme_texture_paths(info.id, &reachable)?
+                .scheme_texture_paths(id, &reachable)?
                 .into_iter()
                 .filter_map(|path| ladder_for(&path).map(|l| (path, l)))
                 .collect();
-            scheme_ladders.insert(info.id, ladders);
+            scheme_ladders.insert(id, ladders);
         }
 
         Ok(size_estimate::ExportSizeModel::new(mesh_lods, armor, base_ladders, scheme_ladders))
+    }
+
+    /// Resolve and read one camo scheme's texture ladders, without touching
+    /// geometry. `size_model` only prices the schemes `self.options.camos`
+    /// selected at load time; a scheme the user selects afterward is priced
+    /// lazily here and merged into the model with
+    /// [`size_estimate::ExportSizeModel::insert_scheme_ladders`].
+    ///
+    /// Reads DDS tails over the VFS, so callers must run this off the UI
+    /// thread.
+    pub fn scheme_ladders(&self, id: CamoSchemeId) -> Result<Vec<(String, size_estimate::TextureLadder)>, Report> {
+        let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to parse assets.bin")?;
+        let self_id_index = db.build_self_id_index();
+
+        let mut reachable = HashSet::new();
+        for part in self.hull_parts.iter().chain(self.turret_models.iter()).chain(self.misc_models.iter()) {
+            reachable.extend(self.model_summary(part, &db, &self_id_index)?.stems);
+        }
+
+        let source = self.camo_texture_source_from_db(&db)?;
+        let ladder_for = |path: &str| texture::texture_ladder(&self.vfs, path).map(size_estimate::TextureLadder::new);
+        Ok(source
+            .scheme_texture_paths(id, &reachable)?
+            .into_iter()
+            .filter_map(|path| ladder_for(&path).map(|l| (path, l)))
+            .collect())
     }
 
     /// Build the complete texture set the options select (base albedo plus the
@@ -2409,5 +2465,108 @@ mod tests {
         assert!(contains_dot_three_digits("Foo.0012")); // >=3 digits after the dot
         assert!(!contains_dot_three_digits("Foo.01"));
         assert!(!contains_dot_three_digits("Foo_1"));
+    }
+
+    /// The whole correctness argument for skipping the meshopt decode:
+    /// `gltf_export::primitive_summary_from_metadata` (what `model_summary`
+    /// calls) must count and reach exactly the same MFM stems as
+    /// `gltf_export::primitive_summary` (the decode-based path it replaced),
+    /// for every unique model at every LoD. Ignored: needs a World of
+    /// Warships install.
+    #[test]
+    #[ignore = "requires a World of Warships install"]
+    fn metadata_counting_matches_decode_based_counting() {
+        let game_dir = std::env::var_os("WOWS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"E:\WoWs\World_of_Warships"));
+        let assets = ShipAssets::from_game_dir(&game_dir).expect("assets");
+        let vehicle = assets
+            .metadata()
+            .params()
+            .iter()
+            .filter_map(|p| p.vehicle())
+            .find(|v| v.model_path().map(|mp| mp.contains("WSD011_Smaland_1955")).unwrap_or(false))
+            .cloned()
+            .expect("Smaland vehicle");
+        let ctx = assets.load_ship_from_vehicle(&vehicle, &ShipExportOptions::default()).expect("ctx");
+
+        let db = assets_bin::parse_assets_bin(&ctx.assets_bin_bytes).expect("parse assets.bin");
+        let self_id_index = db.build_self_id_index();
+
+        let mut compared = 0usize;
+        for part in ctx.hull_parts.iter().chain(ctx.turret_models.iter()).chain(ctx.misc_models.iter()) {
+            let geom = geometry::parse_geometry(&part.geom_bytes).expect("geometry");
+            for (lod_idx, lod) in part.visual.lods.iter().enumerate() {
+                let decoded =
+                    gltf_export::primitive_summary(&part.visual, &geom, &db, &self_id_index, lod, ctx.options.damaged)
+                        .unwrap_or_else(|e| panic!("decode-based summary failed for {} lod {lod_idx}: {e}", part.name));
+                let metadata = gltf_export::primitive_summary_from_metadata(
+                    &part.visual,
+                    &geom,
+                    &db,
+                    &self_id_index,
+                    lod,
+                    ctx.options.damaged,
+                )
+                .unwrap_or_else(|e| panic!("metadata summary failed for {} lod {lod_idx}: {e}", part.name));
+
+                assert_eq!(
+                    decoded.counts, metadata.counts,
+                    "{} lod {lod_idx}: metadata counting diverged from decode-based counting",
+                    part.name
+                );
+                assert_eq!(
+                    decoded.mfm_stems, metadata.mfm_stems,
+                    "{} lod {lod_idx}: reachable stems diverged between the two paths",
+                    part.name
+                );
+                compared += 1;
+            }
+        }
+        assert!(compared > 50, "expected many (part, lod) pairs on Smaland, got {compared}");
+    }
+
+    /// The lazy scheme-pricing path the dialog calls in the background after
+    /// the user selects a camo `size_model` was not built with: `size_model`
+    /// itself (via `CamoSelection::priced_scheme_ids`) prices zero schemes for
+    /// `ShipExportOptions::default()` (`CamoSelection::BaseOnly`), so every
+    /// scheme is initially "missing"; `scheme_ladders` must resolve one on its
+    /// own and produce ladders `ExportSizeModel::insert_scheme_ladders` can
+    /// merge in to clear that. Ignored: needs a World of Warships install.
+    #[test]
+    #[ignore = "requires a World of Warships install"]
+    fn scheme_ladders_prices_a_scheme_the_size_model_was_not_built_with() {
+        let game_dir = std::env::var_os("WOWS_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| std::path::PathBuf::from(r"E:\WoWs\World_of_Warships"));
+        let assets = ShipAssets::from_game_dir(&game_dir).expect("assets");
+        let vehicle = assets
+            .metadata()
+            .params()
+            .iter()
+            .filter_map(|p| p.vehicle())
+            .find(|v| v.model_path().map(|mp| mp.contains("WSD011_Smaland_1955")).unwrap_or(false))
+            .cloned()
+            .expect("Smaland vehicle");
+        let ctx = assets.load_ship_from_vehicle(&vehicle, &ShipExportOptions::default()).expect("ctx");
+
+        let mut model = ctx.size_model().expect("size model");
+        let source = ctx.camo_texture_source().expect("camo source");
+        let id = source.scheme_infos().first().expect("Smaland has at least one scheme").id;
+
+        let options =
+            ShipExportOptions { camos: CamoSelection::Variants(vec![id]), textures: true, ..Default::default() };
+        assert_eq!(
+            model.missing_scheme_ladders(&options),
+            vec![id],
+            "size_model built from BaseOnly options prices no schemes up front"
+        );
+
+        let ladders = ctx.scheme_ladders(id).expect("scheme_ladders");
+        assert!(!ladders.is_empty(), "Smaland's first scheme should resolve at least one texture path");
+
+        model.insert_scheme_ladders(id, ladders);
+        assert!(model.missing_scheme_ladders(&options).is_empty(), "inserting the fetched ladders clears the gap");
+        assert!(model.estimate(&options).texture_bytes > 0, "the newly priced scheme must add texture bytes");
     }
 }
