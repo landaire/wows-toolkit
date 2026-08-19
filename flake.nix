@@ -23,10 +23,27 @@
       rustToolchainToml = fromTOML (builtins.readFile ./rust-toolchain.toml);
       inherit (rustToolchainToml.toolchain) channel components targets;
 
+      # rust-toolchain.toml names a patchless channel, because a patch-pinned
+      # one fails to resolve cargo on some hosts (see the comment there).
+      # rust-overlay is keyed by exact version, so take the newest matching
+      # point release, which is the one rustup installs for that channel.
+      resolvedChannel =
+        if pkgs.rust-bin.stable ? ${channel}
+        then channel
+        else let
+          matching =
+            builtins.filter
+            (version: pkgs.lib.hasPrefix "${channel}." version)
+            (builtins.attrNames pkgs.rust-bin.stable);
+        in
+          if matching == []
+          then throw "rust-overlay has no ${channel}.x release; update the rust-overlay input."
+          else pkgs.lib.last (builtins.sort pkgs.lib.versionOlder matching);
+
       # minimal (rustc + cargo + rust-std) keeps CI lean — the default profile
       # pulls rust-docs (~140 MiB) on every fresh runner. The `components` list
       # from rust-toolchain.toml (rustfmt, clippy) is added as extensions.
-      rustToolchain = pkgs.rust-bin.stable.${channel}.minimal.override {
+      rustToolchain = pkgs.rust-bin.stable.${resolvedChannel}.minimal.override {
         extensions = components;
         inherit targets;
       };
