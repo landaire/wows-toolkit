@@ -1,6 +1,9 @@
 on:
   push:
-    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-(alpha|beta|test)[0-9]+"]
+    # Glob filters, not regexes: alternation is unsupported, so a pre-release
+    # suffix is matched with a trailing *. Kept in step with build.yml so the
+    # tools and the app attach to the same release.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
     branches: ["ci/**"]
   workflow_dispatch:
 

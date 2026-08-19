@@ -1,8 +1,9 @@
 on:
   push:
-    # A -test tag builds and publishes exactly like a release, but lands as a
-    # prerelease so a cutover can be exercised without pretending to ship.
-    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-(alpha|beta|test)[0-9]+"]
+    # These are glob filters, not regexes: [0-9] and + are honoured, but
+    # alternation is not, so a pre-release suffix is matched with a trailing *.
+    # Any vX.Y.Z-<suffix> tag publishes as a GitHub prerelease.
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
     # A ci/** branch rehearses the whole pipeline and publishes nothing, so the
     # release path can be exercised without notifying anyone watching releases.
     branches: ["ci/**"]
@@ -26,19 +27,23 @@ jobs:
         # up to the next ## heading) and use it as the release body. Fall back
         # to auto-generated notes if the tag has no release-notes entry.
         run: |
-          if [[ "$GITHUB_REF_NAME" == *-test.* ]]; then
-            echo "Testing buck2 cutover" > release_notes.md
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
           version="${GITHUB_REF_NAME#v}"
-          # Match "## <version> " by prefix (trailing space disambiguates
-          # 0.1.6 from 0.1.69); stop at the next "## " section heading.
-          awk -v ver="$version" '
-            index($0, "## " ver " ") == 1 { flag = 1; next }
-            flag && index($0, "## ") == 1 { exit }
-            flag { print }
-          ' RELEASE_NOTES.md | sed -e '/./,$!d' > release_notes.md
+          # A heading is "## <version>" alone or followed by a date. Requiring
+          # the line to end there, or to continue with a space, is what keeps
+          # 0.1.6 from matching 0.1.69. Stop at the next "## " heading.
+          extract() {
+            awk -v ver="$1" '
+              $0 == "## " ver || index($0, "## " ver " ") == 1 { flag = 1; next }
+              flag && index($0, "## ") == 1 { exit }
+              flag { print }
+            ' RELEASE_NOTES.md | sed -e '/./,$!d'
+          }
+          extract "$version" > release_notes.md
+          # A pre-release ships the notes of the version it is a candidate for,
+          # which is the section that exists while the suffixed one does not.
+          if ! grep -q '[^[:space:]]' release_notes.md; then
+            extract "${version%%-*}" > release_notes.md
+          fi
           if grep -q '[^[:space:]]' release_notes.md; then
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
@@ -50,9 +55,11 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           body_path: release_notes.md
-          generate_release_notes: ${{ steps.notes.outputs.found == 'false' && !contains(github.ref_name, '-test') }}
-          prerelease: ${{ contains(github.ref_name, '-test') }}
-          name: ${{ contains(github.ref_name, '-test') && 'Testing buck2 cutover' || '' }}
+          generate_release_notes: ${{ steps.notes.outputs.found == 'false' }}
+          # A suffixed tag (vX.Y.Z-beta1) must not become the latest release:
+          # the in-app updater reads /releases/latest, which skips prereleases,
+          # and would otherwise pull a beta onto every install.
+          prerelease: ${{ contains(github.ref_name, '-') }}
 
   # ── Windows (Buck, signed) ────────────────────────────
   windows:
@@ -112,20 +119,26 @@ jobs:
           $buck2 = Join-Path "C:/bt" $manifest.tools.buck2.path
           $common = @("-c", "native_build.mode=release", "--target-platforms", "toolchains//windows:windows_x86_64_msvc")
 
-          $exeOut = & $buck2 build @common --show-output //:wows_toolkit
+          $slug = "${{ github.ref_name }}" -replace "/", "-"
+          $msiName = "wows-toolkit-$slug-windows-x86_64.msi"
+
+          $exeOut = & $buck2 build @common --show-output //:wows_toolkit "//:wows_toolkit[pdb]"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $msiOut = & $buck2 build @common --show-output toolchains//windows:wows_toolkit_msi
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
           $exe = ($exeOut | Select-String -Pattern 'wows_toolkit\.exe$' | Select-Object -Last 1).ToString().Split(" ")[-1]
+          $pdb = ($exeOut | Select-String -Pattern 'wows_toolkit\.pdb$' | Select-Object -Last 1).ToString().Split(" ")[-1]
           $msi = ($msiOut | Select-String -Pattern '\.msi$' | Select-Object -Last 1).ToString().Split(" ")[-1]
 
           # Buck outputs are read-only, and signing rewrites in place.
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item $exe dist/wows_toolkit.exe
-          Copy-Item $msi "dist/wows-toolkit-windows-x86_64.msi"
+          Copy-Item $pdb dist/wows_toolkit.pdb
+          Copy-Item $msi "dist/$msiName"
           Get-ChildItem dist | ForEach-Object { $_.IsReadOnly = $false }
-          "msi=C:\w\dist\wows-toolkit-windows-x86_64.msi" >> $env:GITHUB_OUTPUT
+          "msi=C:\w\dist\$msiName" >> $env:GITHUB_OUTPUT
+          "slug=$slug" >> $env:GITHUB_OUTPUT
 
       - name: Azure login
         uses: azure/login@v2
@@ -157,9 +170,9 @@ jobs:
       - name: Create zip archive
         shell: pwsh
         run: |
-          $slug = "${{ github.ref_name }}" -replace "/", "-"
+          $slug = "${{ steps.buck.outputs.slug }}"
           Copy-Item -Recurse "crates/wt-translations/translations" "translations" -Force
-          Compress-Archive -Path "dist/wows_toolkit.exe","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
+          Compress-Archive -Path "dist/wows_toolkit.exe","dist/wows_toolkit.pdb","README.md","translations" -DestinationPath "dist/wows_toolkit_${slug}_windows.zip" -Force
 
       - name: Upload release asset
         if: startsWith(github.ref, 'refs/tags/')
@@ -168,6 +181,7 @@ jobs:
           files: |
             C:\w\dist\*.zip
             C:\w\dist\*.msi
+            C:\w\dist\wows_toolkit.pdb
 
   # ── Linux (Buck, Flatpak) ─────────────────────────────
   linux:
