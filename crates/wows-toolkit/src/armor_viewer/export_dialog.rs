@@ -153,16 +153,7 @@ pub enum ExportMetaState {
 /// the write takes -- minutes, on a full-resolution ship.
 enum ExportPhase {
     Editing,
-    Exporting(egui_inbox::UiInbox<ExportResult>),
-}
-
-/// What the background export worker reports back through the dialog's own
-/// inbox. Cancelling the native save-path picker is not a failure: the
-/// dialog returns to editing silently, with nothing to close or toast.
-pub enum ExportResult {
-    Written,
-    Cancelled,
-    Failed(String),
+    Exporting(egui_inbox::UiInbox<()>),
 }
 
 /// A pending ship model export.
@@ -293,6 +284,14 @@ impl ExportDialog {
             let _ = sender.send(result);
         });
     }
+
+    /// Whether a background export is in flight for this dialog. The entry
+    /// points that would replace this dialog with a fresh one for a
+    /// different ship check this first, so starting a second export from a
+    /// stray click can never happen while this one is still running.
+    pub fn is_exporting(&self) -> bool {
+        matches!(self.phase, ExportPhase::Exporting(_))
+    }
 }
 
 pub enum DialogOutcome {
@@ -301,15 +300,14 @@ pub enum DialogOutcome {
     /// The hull changed; reload the metadata.
     ReloadRequested,
     /// The user confirmed. The dialog has already moved itself into
-    /// `ExportPhase::Exporting`; the caller spawns the worker with `sender`
-    /// and must not close the dialog until an `ExportFinished` arrives.
-    Export {
-        options: Box<ShipExportOptions>,
-        sender: egui_inbox::UiInboxSender<ExportResult>,
-    },
-    /// The background export finished (successfully or not). The dialog has
-    /// already left `Exporting`; the caller raises a toast and closes it.
-    ExportFinished(Result<(), String>),
+    /// `ExportPhase::Exporting`; the caller spawns the worker with `sender`.
+    /// The worker owns reporting the result (toast, from any thread) --
+    /// `sender` only tells this dialog, if it is still open to hear it, to
+    /// leave the exporting phase.
+    Export { options: Box<ShipExportOptions>, sender: egui_inbox::UiInboxSender<()> },
+    /// The user dismissed the dialog. A worker started by `Export` keeps
+    /// running and reports its own result independently of this dialog's
+    /// lifetime.
     Cancelled,
 }
 
@@ -317,16 +315,14 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
     let mut outcome = DialogOutcome::Idle;
 
     // Polled here, ahead of the window body, since it decides this frame's
-    // enabled/disabled state for everything the window renders below.
+    // enabled/disabled state for everything the window renders below. The
+    // signal carries no payload: the worker reports its own result (toast)
+    // independently, from any thread, regardless of whether this dialog is
+    // even still open to see it. This is purely "stop showing the spinner."
     if let ExportPhase::Exporting(inbox) = &mut dialog.phase
-        && let Some(result) = inbox.read(ctx).last()
+        && inbox.read(ctx).last().is_some()
     {
         dialog.phase = ExportPhase::Editing;
-        outcome = match result {
-            ExportResult::Written => DialogOutcome::ExportFinished(Ok(())),
-            ExportResult::Cancelled => DialogOutcome::Idle,
-            ExportResult::Failed(e) => DialogOutcome::ExportFinished(Err(e)),
-        };
     }
 
     egui::Window::new(t!("ui.armor.export_model").as_ref())
@@ -350,8 +346,6 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 };
             }
 
-            // Computed after the phase poll above, so the same frame a result
-            // arrives already shows controls re-enabled.
             let exporting = matches!(dialog.phase, ExportPhase::Exporting(_));
 
             match &dialog.meta {
@@ -366,13 +360,8 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 }
                 ExportMetaState::Loaded(meta) => {
                     ui.add_enabled_ui(!exporting, |ui| {
-                        let controls_outcome =
+                        outcome =
                             controls(ui, &mut dialog.draft, meta, dialog.load_generation, &mut dialog.estimate_cache);
-                        // Never clobber an ExportFinished the phase poll above
-                        // already produced this frame.
-                        if matches!(outcome, DialogOutcome::Idle) {
-                            outcome = controls_outcome;
-                        }
                     });
                 }
             }
@@ -390,16 +379,17 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 let ready = matches!(dialog.meta, ExportMetaState::Loaded(_)) && !exporting;
-                if ui.add_enabled(ready, egui::Button::new(t!("ui.armor.export_button").as_ref())).clicked()
-                    && matches!(outcome, DialogOutcome::Idle)
-                {
+                if ui.add_enabled(ready, egui::Button::new(t!("ui.armor.export_button").as_ref())).clicked() {
                     let (sender, inbox) = egui_inbox::UiInbox::channel();
                     dialog.phase = ExportPhase::Exporting(inbox);
                     outcome = DialogOutcome::Export { options: Box::new(draft_to_options(&dialog.draft)), sender };
                 }
-                if ui.add_enabled(!exporting, egui::Button::new(t!("ui.buttons.cancel").as_ref())).clicked()
-                    && matches!(outcome, DialogOutcome::Idle)
-                {
+                // Always enabled, even mid-export: the worker is detached and
+                // reports its own result, so dismissing the dialog here costs
+                // nothing and is the only way to get rid of one whose worker
+                // panicked (which sends nothing back, ever).
+                let close_label = if exporting { t!("ui.armor.export.close_button") } else { t!("ui.buttons.cancel") };
+                if ui.button(close_label.as_ref()).clicked() {
                     outcome = DialogOutcome::Cancelled;
                 }
             });

@@ -617,15 +617,19 @@ impl ToolkitTabViewer<'_> {
 
                 // Handle deferred export from context menu
                 if let Some(export_req) = deferred_export.take() {
-                    // TODO(Task 10): source from persisted export defaults.
-                    let defaults = ExportDefaults::default();
-                    state.export_dialog = Some(ExportDialog::open(
-                        export_req.param_index,
-                        export_req.display_name,
-                        export_req.selected_hull,
-                        defaults,
-                        ship_assets.clone(),
-                    ));
+                    if state.export_dialog.as_ref().is_some_and(export_dialog::ExportDialog::is_exporting) {
+                        self.tab_state.toasts.lock().info("An export is already running");
+                    } else {
+                        // TODO(Task 10): source from persisted export defaults.
+                        let defaults = ExportDefaults::default();
+                        state.export_dialog = Some(ExportDialog::open(
+                            export_req.param_index,
+                            export_req.display_name,
+                            export_req.selected_hull,
+                            defaults,
+                            ship_assets.clone(),
+                        ));
+                    }
                 }
             }
         }
@@ -832,15 +836,19 @@ impl ToolkitTabViewer<'_> {
 
         // Handle export signal from toolbar button
         if let Some(export_req) = export_cell.take() {
-            // TODO(Task 10): source from persisted export defaults.
-            let defaults = ExportDefaults::default();
-            state.export_dialog = Some(ExportDialog::open(
-                export_req.param_index,
-                export_req.display_name,
-                export_req.selected_hull,
-                defaults,
-                ship_assets.clone(),
-            ));
+            if state.export_dialog.as_ref().is_some_and(export_dialog::ExportDialog::is_exporting) {
+                self.tab_state.toasts.lock().info("An export is already running");
+            } else {
+                // TODO(Task 10): source from persisted export defaults.
+                let defaults = ExportDefaults::default();
+                state.export_dialog = Some(ExportDialog::open(
+                    export_req.param_index,
+                    export_req.display_name,
+                    export_req.selected_hull,
+                    defaults,
+                    ship_assets.clone(),
+                ));
+            }
         }
 
         // Handle pen check toggle from toolbar button
@@ -1095,36 +1103,22 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
-        // Deferred: raising the toast and clearing `state.export_dialog` needs
-        // `self.tab_state.toasts`, which conflicts with `state`'s still-live
-        // borrow of `self.tab_state.armor_viewer` if done inline below.
-        let mut export_finished: Option<(String, Result<(), String>)> = None;
         if let Some(dialog) = state.export_dialog.as_mut() {
             match export_dialog::show(dialog, ui.ctx()) {
                 DialogOutcome::Idle => {}
                 DialogOutcome::ReloadRequested => dialog.start_load(ship_assets.clone()),
                 DialogOutcome::Cancelled => state.export_dialog = None,
                 DialogOutcome::Export { options, sender } => {
-                    // The dialog stays open (it already moved itself into its
-                    // own exporting phase); it closes and toasts only once
-                    // `sender` reports back, below.
                     let display_name = dialog.display_name.clone();
                     let param_index = dialog.param_index.clone();
-                    spawn_ship_export(&display_name, &param_index, *options, ship_assets.clone(), sender);
-                }
-                DialogOutcome::ExportFinished(result) => {
-                    export_finished = Some((dialog.display_name.clone(), result));
-                }
-            }
-        }
-        if let Some((display_name, result)) = export_finished {
-            state.export_dialog = None;
-            match result {
-                Ok(()) => {
-                    self.tab_state.toasts.lock().success(format!("Exported {}", display_name));
-                }
-                Err(e) => {
-                    self.tab_state.toasts.lock().error(format!("Export failed: {e}"));
+                    spawn_ship_export(
+                        &display_name,
+                        &param_index,
+                        *options,
+                        ship_assets.clone(),
+                        self.tab_state.toasts.clone(),
+                        sender,
+                    );
                 }
             }
         }
@@ -1137,24 +1131,37 @@ impl ToolkitTabViewer<'_> {
 /// the frame closure (where the old inline dialog called it) is what keeps
 /// the picker from freezing the app -- the same pattern `rfd`'s own
 /// `AsyncFileDialog` backend uses internally on Windows (a dedicated
-/// `std::thread::spawn` running the synchronous, COM-initializing call).
-/// Reports back through `result_sender` instead of raising a toast directly,
-/// so the dialog can decide whether to close (a real result) or quietly
-/// return to editing (the user cancelled the picker).
+/// `std::thread::spawn` running the synchronous, COM-initializing call). That
+/// thread is also always freshly spawned here, never pooled, which is what
+/// makes calling the COM-initializing picker off the UI thread sound: a
+/// pooled thread could already sit in an incompatible COM apartment and hit
+/// `RPC_E_CHANGED_MODE`.
+///
+/// Raises the toast itself, from this thread, rather than reporting through
+/// `finished_sender`: that keeps the result visible even if the dialog was
+/// dismissed, or the Armor Viewer tab is no longer active, by the time this
+/// finishes. It also means a worker panic (caught by `spawn_logged`, which
+/// drops `finished_sender` without sending) only leaves the dialog's spinner
+/// running -- recoverable by closing the dialog -- rather than losing the
+/// outcome entirely. `finished_sender` carries no payload: it exists only so
+/// the dialog can leave its exporting phase while it is still open to see it.
 fn spawn_ship_export(
     display_name: &str,
     param_index: &str,
     options: wowsunpack::export::ship::ShipExportOptions,
     ship_assets: Arc<wowsunpack::export::ship::ShipAssets>,
-    result_sender: egui_inbox::UiInboxSender<export_dialog::ExportResult>,
+    toasts: crate::tab_state::SharedToasts,
+    finished_sender: egui_inbox::UiInboxSender<()>,
 ) {
     let default_filename = format!("{}.glb", display_name);
+    let ship_name = display_name.to_string();
     let param_idx = param_index.to_string();
     crate::util::thread::spawn_logged("export-ship-model", move || {
         let Some(path) =
             rfd::FileDialog::new().set_file_name(&default_filename).add_filter("GLB", &["glb"]).save_file()
         else {
-            let _ = result_sender.send(export_dialog::ExportResult::Cancelled);
+            tracing::warn!("save-file picker returned no path for {ship_name} (cancelled, or the picker failed)");
+            let _ = finished_sender.send(());
             return;
         };
         let result = (|| -> Result<(), String> {
@@ -1167,11 +1174,15 @@ fn spawn_ship_export(
             ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
             Ok(())
         })();
-        let outcome = match result {
-            Ok(()) => export_dialog::ExportResult::Written,
-            Err(e) => export_dialog::ExportResult::Failed(e),
-        };
-        let _ = result_sender.send(outcome);
+        match result {
+            Ok(()) => {
+                toasts.lock().success(format!("Exported {}", ship_name));
+            }
+            Err(e) => {
+                toasts.lock().error(format!("Export failed: {e}"));
+            }
+        }
+        let _ = finished_sender.send(());
     });
 }
 
