@@ -1095,61 +1095,84 @@ impl ToolkitTabViewer<'_> {
             }
         }
 
+        // Deferred: raising the toast and clearing `state.export_dialog` needs
+        // `self.tab_state.toasts`, which conflicts with `state`'s still-live
+        // borrow of `self.tab_state.armor_viewer` if done inline below.
+        let mut export_finished: Option<(String, Result<(), String>)> = None;
         if let Some(dialog) = state.export_dialog.as_mut() {
             match export_dialog::show(dialog, ui.ctx()) {
                 DialogOutcome::Idle => {}
                 DialogOutcome::ReloadRequested => dialog.start_load(ship_assets.clone()),
                 DialogOutcome::Cancelled => state.export_dialog = None,
-                DialogOutcome::Export(options) => {
+                DialogOutcome::Export { options, sender } => {
+                    // The dialog stays open (it already moved itself into its
+                    // own exporting phase); it closes and toasts only once
+                    // `sender` reports back, below.
                     let display_name = dialog.display_name.clone();
                     let param_index = dialog.param_index.clone();
-                    state.export_dialog = None;
-                    // Same save-dialog and worker shape the inline dialog used.
-                    self.spawn_ship_export(&display_name, &param_index, *options, ship_assets.clone());
+                    spawn_ship_export(&display_name, &param_index, *options, ship_assets.clone(), sender);
+                }
+                DialogOutcome::ExportFinished(result) => {
+                    export_finished = Some((dialog.display_name.clone(), result));
+                }
+            }
+        }
+        if let Some((display_name, result)) = export_finished {
+            state.export_dialog = None;
+            match result {
+                Ok(()) => {
+                    self.tab_state.toasts.lock().success(format!("Exported {}", display_name));
+                }
+                Err(e) => {
+                    self.tab_state.toasts.lock().error(format!("Export failed: {e}"));
                 }
             }
         }
     }
+}
 
-    /// Prompt for a save path and export the ship model in the background.
-    fn spawn_ship_export(
-        &self,
-        display_name: &str,
-        param_index: &str,
-        options: wowsunpack::export::ship::ShipExportOptions,
-        ship_assets: Arc<wowsunpack::export::ship::ShipAssets>,
-    ) {
-        let default_filename = format!("{}.glb", display_name);
+/// Prompt for a save path and export the ship model, entirely off the UI
+/// thread: `rfd::FileDialog::save_file` blocks whatever thread calls it while
+/// the native picker is open. Calling it inside this worker rather than in
+/// the frame closure (where the old inline dialog called it) is what keeps
+/// the picker from freezing the app -- the same pattern `rfd`'s own
+/// `AsyncFileDialog` backend uses internally on Windows (a dedicated
+/// `std::thread::spawn` running the synchronous, COM-initializing call).
+/// Reports back through `result_sender` instead of raising a toast directly,
+/// so the dialog can decide whether to close (a real result) or quietly
+/// return to editing (the user cancelled the picker).
+fn spawn_ship_export(
+    display_name: &str,
+    param_index: &str,
+    options: wowsunpack::export::ship::ShipExportOptions,
+    ship_assets: Arc<wowsunpack::export::ship::ShipAssets>,
+    result_sender: egui_inbox::UiInboxSender<export_dialog::ExportResult>,
+) {
+    let default_filename = format!("{}.glb", display_name);
+    let param_idx = param_index.to_string();
+    crate::util::thread::spawn_logged("export-ship-model", move || {
         let Some(path) =
             rfd::FileDialog::new().set_file_name(&default_filename).add_filter("GLB", &["glb"]).save_file()
         else {
+            let _ = result_sender.send(export_dialog::ExportResult::Cancelled);
             return;
         };
-        let assets = ship_assets;
-        let toasts = self.tab_state.toasts.clone();
-        let ship_name = display_name.to_string();
-        let param_idx = param_index.to_string();
-        crate::util::thread::spawn_logged("load-ship-model", move || {
-            let result = (|| -> Result<(), String> {
-                use wowsunpack::game_params::types::GameParamProvider;
-                let param = assets.metadata().game_param_by_index(&param_idx);
-                let vehicle =
-                    param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "Vehicle not found".to_string())?;
-                let ctx = assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
-                let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
-                ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
-                Ok(())
-            })();
-            match result {
-                Ok(()) => {
-                    toasts.lock().success(format!("Exported {}", ship_name));
-                }
-                Err(e) => {
-                    toasts.lock().error(format!("Export failed: {e}"));
-                }
-            }
-        });
-    }
+        let result = (|| -> Result<(), String> {
+            use wowsunpack::game_params::types::GameParamProvider;
+            let param = ship_assets.metadata().game_param_by_index(&param_idx);
+            let vehicle =
+                param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "Vehicle not found".to_string())?;
+            let ctx = ship_assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
+            let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
+            ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
+            Ok(())
+        })();
+        let outcome = match result {
+            Ok(()) => export_dialog::ExportResult::Written,
+            Err(e) => export_dialog::ExportResult::Failed(e),
+        };
+        let _ = result_sender.send(outcome);
+    });
 }
 
 /// Poll all panes for completed ship loads.

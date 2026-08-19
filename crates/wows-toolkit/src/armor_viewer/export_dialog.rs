@@ -11,6 +11,7 @@ use wowsunpack::export::ship::CamoSelection;
 use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::export::size_estimate::ExportSizeModel;
+use wowsunpack::export::size_estimate::SizeEstimate;
 use wowsunpack::export::texture::MaxEdge;
 use wowsunpack::export::texture::TextureLod;
 
@@ -102,6 +103,34 @@ pub fn default_camo(schemes: &[CamoSchemeInfo]) -> Option<CamoSchemeId> {
         .map(|s| s.id)
 }
 
+/// The subset of `ExportDraft` that changes `SizeEstimate`, plus the
+/// `ExportDialog::load_generation` a `size_model` belongs to (a fresh load
+/// invalidates any estimate computed against the previous one, even if every
+/// draft field happens to still match). `estimate()` measures in the low
+/// microseconds (~5us on Smaland, measured against real game data), but
+/// recomputing it every frame regardless of whether anything changed is still
+/// wasted UI-thread work for no visible benefit.
+#[derive(Clone, PartialEq, Eq)]
+struct EstimateKey {
+    load_generation: u64,
+    contents: ExportContents,
+    lod: usize,
+    texture_res: TextureResolution,
+    camos: BTreeSet<CamoSchemeId>,
+}
+
+impl EstimateKey {
+    fn from_draft(load_generation: u64, draft: &ExportDraft) -> Self {
+        Self {
+            load_generation,
+            contents: draft.contents,
+            lod: draft.lod,
+            texture_res: draft.texture_res,
+            camos: draft.camos.clone(),
+        }
+    }
+}
+
 /// Everything the dialog needs about one ship at one hull selection.
 pub struct ExportMeta {
     pub hull_upgrades: Vec<String>,
@@ -118,12 +147,35 @@ pub enum ExportMetaState {
     Failed(String),
 }
 
+/// Whether the dialog is being edited or is waiting on a background export.
+/// Exporting keeps the dialog open (with a spinner and disabled controls)
+/// rather than closing it and leaving the app looking idle for however long
+/// the write takes -- minutes, on a full-resolution ship.
+enum ExportPhase {
+    Editing,
+    Exporting(egui_inbox::UiInbox<ExportResult>),
+}
+
+/// What the background export worker reports back through the dialog's own
+/// inbox. Cancelling the native save-path picker is not a failure: the
+/// dialog returns to editing silently, with nothing to close or toast.
+pub enum ExportResult {
+    Written,
+    Cancelled,
+    Failed(String),
+}
+
 /// A pending ship model export.
 pub struct ExportDialog {
     pub param_index: String,
     pub display_name: String,
     pub meta: ExportMetaState,
     pub draft: ExportDraft,
+    phase: ExportPhase,
+    /// Bumped on every `spawn_load`, so a `SizeEstimate` cached against the
+    /// model one load produced is never mistaken for one that matches the next.
+    load_generation: u64,
+    estimate_cache: Option<(EstimateKey, SizeEstimate)>,
 }
 
 /// The export choices that carry across ships. A `CamoSchemeId` indexes one
@@ -164,7 +216,15 @@ impl ExportDialog {
         // `start_load` sets `meta`, so it is built here rather than seeded with a
         // placeholder state that would never be observed.
         let (sender, inbox) = egui_inbox::UiInbox::channel();
-        let dialog = Self { param_index, display_name, meta: ExportMetaState::Loading(inbox), draft };
+        let dialog = Self {
+            param_index,
+            display_name,
+            meta: ExportMetaState::Loading(inbox),
+            draft,
+            phase: ExportPhase::Editing,
+            load_generation: 0,
+            estimate_cache: None,
+        };
         dialog.spawn_load(assets, sender);
         dialog
     }
@@ -174,6 +234,7 @@ impl ExportDialog {
     pub fn start_load(&mut self, assets: Arc<wowsunpack::export::ship::ShipAssets>) {
         let (sender, inbox) = egui_inbox::UiInbox::channel();
         self.meta = ExportMetaState::Loading(inbox);
+        self.load_generation += 1;
         self.spawn_load(assets, sender);
     }
 
@@ -209,12 +270,19 @@ impl ExportDialog {
                         None
                     }
                 };
-                // A ship with no listed upgrades (older game versions) simply
-                // offers no hull choice.
-                let hull_upgrades = assets
-                    .list_hull_upgrades(&param_index)
-                    .map(|ups| ups.into_iter().map(|u| u.name).collect())
-                    .unwrap_or_default();
+                // `vehicle.hull_upgrades()` is already resolved (no assets.bin scan,
+                // unlike `ShipAssets::list_hull_upgrades`, whose model-name-based lookup
+                // strategy never matches a param index and always runs to exhaustion).
+                // `None` genuinely means this ship has no listed upgrades (older game
+                // versions offer no hull choice), not a failure to look one up.
+                let hull_upgrades: Vec<String> = match vehicle.hull_upgrades() {
+                    Some(upgrades) => {
+                        let mut names: Vec<String> = upgrades.keys().cloned().collect();
+                        names.sort();
+                        names
+                    }
+                    None => Vec::new(),
+                };
                 Ok(ExportMeta {
                     hull_upgrades,
                     hull_lod_count: ctx.hull_lod_count(),
@@ -232,13 +300,35 @@ pub enum DialogOutcome {
     Idle,
     /// The hull changed; reload the metadata.
     ReloadRequested,
-    /// The user confirmed. Carries the resolved options.
-    Export(Box<ShipExportOptions>),
+    /// The user confirmed. The dialog has already moved itself into
+    /// `ExportPhase::Exporting`; the caller spawns the worker with `sender`
+    /// and must not close the dialog until an `ExportFinished` arrives.
+    Export {
+        options: Box<ShipExportOptions>,
+        sender: egui_inbox::UiInboxSender<ExportResult>,
+    },
+    /// The background export finished (successfully or not). The dialog has
+    /// already left `Exporting`; the caller raises a toast and closes it.
+    ExportFinished(Result<(), String>),
     Cancelled,
 }
 
 pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
     let mut outcome = DialogOutcome::Idle;
+
+    // Polled here, ahead of the window body, since it decides this frame's
+    // enabled/disabled state for everything the window renders below.
+    if let ExportPhase::Exporting(inbox) = &mut dialog.phase
+        && let Some(result) = inbox.read(ctx).last()
+    {
+        dialog.phase = ExportPhase::Editing;
+        outcome = match result {
+            ExportResult::Written => DialogOutcome::ExportFinished(Ok(())),
+            ExportResult::Cancelled => DialogOutcome::Idle,
+            ExportResult::Failed(e) => DialogOutcome::ExportFinished(Err(e)),
+        };
+    }
+
     egui::Window::new(t!("ui.armor.export_model").as_ref())
         .collapsible(false)
         .resizable(true)
@@ -260,6 +350,10 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                 };
             }
 
+            // Computed after the phase poll above, so the same frame a result
+            // arrives already shows controls re-enabled.
+            let exporting = matches!(dialog.phase, ExportPhase::Exporting(_));
+
             match &dialog.meta {
                 ExportMetaState::Loading(_) => {
                     ui.horizontal(|ui| {
@@ -271,19 +365,41 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
                     ui.colored_label(ui.visuals().error_fg_color, t!("ui.armor.load_failed", error = e).as_ref());
                 }
                 ExportMetaState::Loaded(meta) => {
-                    outcome = controls(ui, &mut dialog.draft, meta);
+                    ui.add_enabled_ui(!exporting, |ui| {
+                        let controls_outcome =
+                            controls(ui, &mut dialog.draft, meta, dialog.load_generation, &mut dialog.estimate_cache);
+                        // Never clobber an ExportFinished the phase poll above
+                        // already produced this frame.
+                        if matches!(outcome, DialogOutcome::Idle) {
+                            outcome = controls_outcome;
+                        }
+                    });
                 }
+            }
+
+            if exporting {
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.add(egui::Spinner::new().size(14.0));
+                    ui.label(t!("ui.armor.export.exporting", ship = dialog.display_name.as_str()).as_ref());
+                });
             }
 
             ui.add_space(8.0);
             ui.label(t!("ui.armor.export_disclaimer").as_ref());
             ui.add_space(8.0);
             ui.horizontal(|ui| {
-                let ready = matches!(dialog.meta, ExportMetaState::Loaded(_));
-                if ui.add_enabled(ready, egui::Button::new(t!("ui.armor.export_button").as_ref())).clicked() {
-                    outcome = DialogOutcome::Export(Box::new(draft_to_options(&dialog.draft)));
+                let ready = matches!(dialog.meta, ExportMetaState::Loaded(_)) && !exporting;
+                if ui.add_enabled(ready, egui::Button::new(t!("ui.armor.export_button").as_ref())).clicked()
+                    && matches!(outcome, DialogOutcome::Idle)
+                {
+                    let (sender, inbox) = egui_inbox::UiInbox::channel();
+                    dialog.phase = ExportPhase::Exporting(inbox);
+                    outcome = DialogOutcome::Export { options: Box::new(draft_to_options(&dialog.draft)), sender };
                 }
-                if ui.button(t!("ui.buttons.cancel").as_ref()).clicked() {
+                if ui.add_enabled(!exporting, egui::Button::new(t!("ui.buttons.cancel").as_ref())).clicked()
+                    && matches!(outcome, DialogOutcome::Idle)
+                {
                     outcome = DialogOutcome::Cancelled;
                 }
             });
@@ -294,7 +410,13 @@ pub fn show(dialog: &mut ExportDialog, ctx: &egui::Context) -> DialogOutcome {
 /// Renders hull, contents, LoD, texture resolution and camo controls. Returns
 /// `ReloadRequested` when the hull selection changed, since the hull decides
 /// which parts, camos and LoDs even exist.
-fn controls(ui: &mut egui::Ui, draft: &mut ExportDraft, meta: &ExportMeta) -> DialogOutcome {
+fn controls(
+    ui: &mut egui::Ui,
+    draft: &mut ExportDraft,
+    meta: &ExportMeta,
+    load_generation: u64,
+    estimate_cache: &mut Option<(EstimateKey, SizeEstimate)>,
+) -> DialogOutcome {
     let mut outcome = DialogOutcome::Idle;
 
     if !meta.hull_upgrades.is_empty() {
@@ -401,10 +523,16 @@ fn controls(ui: &mut egui::Ui, draft: &mut ExportDraft, meta: &ExportMeta) -> Di
         });
     }
 
-    // Recomputed from the live draft on every frame: cheap arithmetic over
-    // metadata already loaded, not a re-decode.
     if let Some(model) = &meta.size_model {
-        let estimate = model.estimate(&draft_to_options(draft));
+        let key = EstimateKey::from_draft(load_generation, draft);
+        let estimate = match estimate_cache {
+            Some((cached_key, cached)) if *cached_key == key => *cached,
+            _ => {
+                let e = model.estimate(&draft_to_options(draft));
+                *estimate_cache = Some((key, e));
+                e
+            }
+        };
         let size = humansize::format_size(estimate.total(), humansize::BINARY);
         ui.label(t!("ui.armor.export.size_estimate", size = size).as_ref());
     }
@@ -501,6 +629,15 @@ mod tests {
     }
 
     #[test]
+    fn a_scheme_named_default_only_in_its_display_name_still_matches() {
+        // raw_name is deliberately not "default" here, so this guards the
+        // display_name arm on its own: deleting that arm would fail this test
+        // even though it would not fail `the_default_camo_is_the_one_named_default`.
+        let schemes = vec![scheme(0, "Default", "PCEC001")];
+        assert_eq!(default_camo(&schemes), Some(CamoSchemeId(0)));
+    }
+
+    #[test]
     fn a_translated_label_does_not_hide_the_default_scheme() {
         let schemes = vec![scheme(0, "Standard", "default")];
         assert_eq!(default_camo(&schemes), Some(CamoSchemeId(0)), "the raw name still names it");
@@ -536,12 +673,13 @@ mod tests {
         let param_index = param.index().to_string();
 
         // The tree context menu path: no loaded pane, so no seed hull.
+        // Timed separately from `ShipAssets::from_game_dir` above (~18s, not
+        // this call's cost) to isolate spawn_load's own wall-clock, per review.
+        let spawn_load_started = std::time::Instant::now();
         let mut dialog =
             ExportDialog::open(param_index, "Smaland".to_string(), None, ExportDefaults::default(), assets);
 
-        // spawn_load's own metadata load re-parses assets.bin more than once
-        // (camo source, size model, hull upgrades); generous on a cold cache.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(120);
+        let deadline = spawn_load_started + std::time::Duration::from_secs(120);
         while let ExportMetaState::Loading(inbox) = &mut dialog.meta {
             if let Some(result) = inbox.read_without_ctx().last() {
                 dialog.meta = match result {
@@ -553,16 +691,43 @@ mod tests {
             assert!(std::time::Instant::now() < deadline, "export metadata load did not finish in time");
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
+        eprintln!("spawn_load wall-clock: {:.2}s", spawn_load_started.elapsed().as_secs_f64());
 
         match dialog.meta {
             ExportMetaState::Loaded(meta) => {
                 assert!(meta.hull_lod_count >= 1);
                 assert!(!meta.camo_schemes.is_empty(), "Smaland has camo schemes");
+                // Smaland has hull upgrades; this is the field the
+                // vehicle.hull_upgrades()-vs-Vec<String> naming swap could
+                // silently blank without either arm's test noticing.
+                assert!(!meta.hull_upgrades.is_empty(), "Smaland has hull upgrades");
                 // No translation catalog is loaded here, so display names come back
                 // as raw ids ("camo_permanent_1") rather than "Default"; the
                 // default-scheme match itself is covered by the unit tests above
                 // against synthetic display names.
                 eprintln!("default_camo resolved to: {:?}", default_camo(&meta.camo_schemes));
+
+                if let Some(model) = &meta.size_model {
+                    let draft = ExportDraft {
+                        contents: ExportContents::MeshAndArmor,
+                        hull: None,
+                        lod: 0,
+                        texture_res: TextureResolution::Full,
+                        camos: BTreeSet::new(),
+                    };
+                    let options = draft_to_options(&draft);
+                    // Warm up (page faults, branch predictor) before timing.
+                    for _ in 0..10 {
+                        std::hint::black_box(model.estimate(&options));
+                    }
+                    let iters = 10_000;
+                    let started = std::time::Instant::now();
+                    for _ in 0..iters {
+                        std::hint::black_box(model.estimate(&options));
+                    }
+                    let per_call = started.elapsed() / iters;
+                    eprintln!("SizeEstimate::estimate() cost: {per_call:?} per call ({iters} iterations)");
+                }
             }
             ExportMetaState::Failed(e) => panic!("metadata load failed: {e}"),
             ExportMetaState::Loading(_) => unreachable!("loop only exits once Loading is resolved"),

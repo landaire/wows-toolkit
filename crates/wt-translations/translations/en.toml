@@ -1195,6 +1195,7 @@ camos = "Camouflages"
 camo_select_none = "Select none"
 camo_reset = "Reset to default"
 size_estimate = "Estimated file size: %{size}"
+exporting = "Exporting %{ship}..."
 
 [ui.armor.realtime]
 loading = "Loading ship armor..."

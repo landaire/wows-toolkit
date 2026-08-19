@@ -1766,7 +1766,9 @@ impl ShipModelContext {
             reachable.extend(summary.stems.iter().cloned());
         }
 
-        let source = self.camo_texture_source()?;
+        // Reuses the db already parsed above instead of paying for a second
+        // assets.bin parse just to enumerate camo schemes.
+        let source = self.camo_texture_source_from_db(&db)?;
         // A texture whose ladder cannot be read (missing/corrupt tail) contributes
         // zero rather than failing the whole model: this is a best-effort price, and
         // one bad texture must not deny the user a number.
