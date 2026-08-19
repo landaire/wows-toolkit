@@ -44,6 +44,8 @@ use crate::models::visual;
 use crate::models::visual::VisualPrototype;
 use crate::recognized::Recognized;
 
+use super::camo_textures;
+use super::camo_textures::CamoSchemeId;
 use super::camouflage;
 use super::camouflage::CamouflageDb;
 use super::gltf_export;
@@ -74,6 +76,18 @@ impl ExportContents {
     }
 }
 
+/// Which camouflage schemes reach the GLB. Ids index the ordered list
+/// [`ShipModelContext::camo_texture_source`] enumerates, which is the same list
+/// the viewer's picker reads.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CamoSelection {
+    /// Base albedo only. No `KHR_materials_variants` extension is emitted.
+    #[default]
+    BaseOnly,
+    /// Base material plus one variant material set per scheme.
+    Variants(Vec<CamoSchemeId>),
+}
+
 /// Options controlling ship model export.
 #[derive(Debug, Clone)]
 pub struct ShipExportOptions {
@@ -98,6 +112,8 @@ pub struct ShipExportOptions {
     /// Module overrides: component type key (e.g. "artillery") to component name.
     /// Overrides the default component for specific types.
     pub module_overrides: std::collections::HashMap<crate::game_params::keys::ComponentType, String>,
+    /// Which camouflage schemes to embed. Default: [`CamoSelection::BaseOnly`].
+    pub camos: CamoSelection,
 }
 
 impl Default for ShipExportOptions {
@@ -110,6 +126,7 @@ impl Default for ShipExportOptions {
             contents: ExportContents::Mesh,
             texture_lod: texture::TextureLod::Full,
             module_overrides: std::collections::HashMap::new(),
+            camos: CamoSelection::BaseOnly,
         }
     }
 }
@@ -342,53 +359,11 @@ impl ShipAssets {
         Ok(result)
     }
 
-    /// List available camouflage texture schemes for a ship.
+    /// Camouflage scheme names for a ship, as `--camo` accepts them.
     pub fn list_texture_schemes(&self, name: &str) -> Result<Vec<String>, Report> {
-        let info = self.find_ship(name)?;
-        let db = self.db()?;
-        let self_id_index = db.build_self_id_index();
-
-        // Collect visuals for the ship model dir.
-        let visual_paths = self.find_visual_paths(&db, &self_id_index, &info.model_dir);
-        let sub_models = self.load_sub_models(&db, &self_id_index, &visual_paths)?;
-
-        // Also load turret models to include their stems.
-        let vehicle = self.find_vehicle(&info.model_dir).ok();
-        let mount_points = vehicle
-            .and_then(|v| self.select_hull_mount_points(v, None, &std::collections::HashMap::new()))
-            .unwrap_or_default();
-        let turret_data = self.load_turret_models(&db, &self_id_index, &mount_points)?;
-
-        let mut all_stems = Vec::new();
-        for smd in &sub_models {
-            for mfm in collect_mfm_info(&smd.visual, &db) {
-                all_stems.push(mfm.stem);
-            }
-        }
-        for tmd in &turret_data {
-            for mfm in collect_mfm_info(&tmd.visual, &db) {
-                all_stems.push(mfm.stem);
-            }
-        }
-
-        let mut schemes = texture::discover_texture_schemes(&self.vfs, &all_stems, &HashSet::new());
-
-        // Also include material-based camo scheme display names.
-        let ship_index = self.find_ship_index(&info.model_dir);
-        let ship_idx = ship_index.as_deref();
-        let mut mat_camos = self.discover_mat_camo_schemes(&info.model_dir, ship_idx);
-        mat_camos.extend(self.discover_universal_camo_schemes(ship_idx));
-        mat_camos.extend(self.discover_expendable_camo_schemes(ship_idx));
-        {
-            let mut seen = HashSet::new();
-            mat_camos.retain(|s| seen.insert(s.camo_name.clone()));
-        }
-        for scheme in &mat_camos {
-            let tag = if scheme.tiled { "tiled" } else { "mat_camo" };
-            schemes.push(format!("{} ({})", scheme.display_name, tag));
-        }
-
-        Ok(schemes)
+        let options = ShipExportOptions { textures: false, ..Default::default() };
+        let ctx = self.load_ship(name, &options)?;
+        Ok(ctx.camo_texture_source()?.scheme_infos().into_iter().map(|i| i.display_name).collect())
     }
 
     /// Load a complete ship model, ready for export.
@@ -1643,11 +1618,7 @@ impl ShipModelContext {
 
         // Armor is untextured, so an armor-only export never reads a DDS.
         let texture_set = if self.options.textures && self.options.contents.includes_mesh() {
-            let mut all_mfm_infos = Vec::new();
-            for sub in &sub_models {
-                all_mfm_infos.extend(collect_mfm_info(sub.visual, &db));
-            }
-            self.texture_set_from_mfm_infos(&all_mfm_infos)
+            self.selected_texture_set(&db)?
         } else {
             TextureSet::empty()
         };
@@ -1692,45 +1663,41 @@ impl ShipModelContext {
         Ok(())
     }
 
-    /// Build the complete texture set (base albedo + per-ship, material, and universal
-    /// camo schemes, with tiled UV transforms) for this ship. Self-contained: re-parses
-    /// the prototype DB and collects MFM infos from the hull and mounted-turret visuals.
+    /// Build the complete texture set the options select (base albedo plus the
+    /// selected camo schemes) for this ship. Self-contained: re-parses the
+    /// prototype DB and collects MFM infos from the hull and mounted-turret visuals.
     ///
     /// Independent of `options.textures` (which only controls GLB texture embedding):
-    /// callers that ask for the texture set want the camo schemes regardless.
+    /// callers that ask for the texture set want the selected camo schemes regardless.
     pub fn build_full_texture_set(&self) -> Result<TextureSet, Report> {
         let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes).context("Failed to re-parse assets.bin")?;
-        let mut all_mfm_infos = Vec::new();
-        for d in &self.hull_parts {
-            all_mfm_infos.extend(collect_mfm_info(&d.visual, &db));
-        }
-        for mount in &self.mounts {
-            let turret = &self.turret_models[mount.turret_model_index];
-            all_mfm_infos.extend(collect_mfm_info(&turret.visual, &db));
-        }
-        for misc in &self.misc_models {
-            all_mfm_infos.extend(collect_mfm_info(&misc.visual, &db));
-        }
-        Ok(self.texture_set_from_mfm_infos(&all_mfm_infos))
+        self.selected_texture_set(&db)
     }
 
     /// Build a lazy [`camo_textures::CamoTextureSource`] for this ship: cheap scheme
-    /// metadata enumeration plus on-demand single-scheme decode. Reuses the same
-    /// assets.bin parse and mfm collection `build_full_texture_set` does, plus the
-    /// already-populated `mat_camo_schemes`.
-    pub fn camo_texture_source(&self) -> Result<crate::export::camo_textures::CamoTextureSource, Report> {
+    /// metadata enumeration plus on-demand single-scheme decode.
+    pub fn camo_texture_source(&self) -> Result<camo_textures::CamoTextureSource, Report> {
         let db = assets_bin::parse_assets_bin(&self.assets_bin_bytes)
             .context("Failed to parse assets.bin for camo source")?;
+        self.camo_texture_source_from_db(&db)
+    }
+
+    /// [`Self::camo_texture_source`], reusing a `PrototypeDatabase` the caller already
+    /// parsed instead of paying for a second assets.bin parse.
+    fn camo_texture_source_from_db(
+        &self,
+        db: &PrototypeDatabase<'_>,
+    ) -> Result<camo_textures::CamoTextureSource, Report> {
         let mut all_mfm_infos = Vec::new();
         for d in &self.hull_parts {
-            all_mfm_infos.extend(collect_mfm_info(&d.visual, &db));
+            all_mfm_infos.extend(collect_mfm_info(&d.visual, db));
         }
         for mount in &self.mounts {
             let turret = &self.turret_models[mount.turret_model_index];
-            all_mfm_infos.extend(collect_mfm_info(&turret.visual, &db));
+            all_mfm_infos.extend(collect_mfm_info(&turret.visual, db));
         }
         for misc in &self.misc_models {
-            all_mfm_infos.extend(collect_mfm_info(&misc.visual, &db));
+            all_mfm_infos.extend(collect_mfm_info(&misc.visual, db));
         }
         let mut seen = HashSet::new();
         let unique_infos: Vec<MfmInfo> = all_mfm_infos.into_iter().filter(|i| seen.insert(i.stem.clone())).collect();
@@ -1741,7 +1708,7 @@ impl ShipModelContext {
         let legacy_schemes = texture::discover_texture_schemes(&self.vfs, &stems, &camo_texture_paths);
         let mat_schemes = self.mat_camo_schemes.iter().map(|s| s.to_owned_scheme()).collect();
 
-        Ok(crate::export::camo_textures::CamoTextureSource::new(
+        Ok(camo_textures::CamoTextureSource::new(
             self.vfs.clone(),
             unique_infos,
             legacy_schemes,
@@ -1750,65 +1717,31 @@ impl ShipModelContext {
         ))
     }
 
-    /// Build base albedo plus all camo schemes from pre-collected MFM infos.
-    fn texture_set_from_mfm_infos(&self, all_mfm_infos: &[MfmInfo]) -> TextureSet {
-        // Exclude camo zone-mask files (referenced by camouflages.xml) from the raw VFS scan;
-        // the mat-camo path below surfaces those colorized.
-        let camo_texture_paths: HashSet<String> =
-            self.mat_camo_schemes.iter().flat_map(|s| s.textures.values().cloned()).collect();
-        let mut tex_set = build_texture_set(all_mfm_infos, &self.vfs, &camo_texture_paths, self.options.texture_lod);
-        let per_ship_count = tex_set.camo_schemes.len();
+    /// Base albedo plus exactly the selected camo schemes, enumerated by the same
+    /// source the picker reads so a `CamoSchemeId` means one thing everywhere.
+    fn selected_texture_set(&self, db: &PrototypeDatabase<'_>) -> Result<TextureSet, Report> {
+        let source = self.camo_texture_source_from_db(db)?;
+        let mut tex_set = TextureSet::empty();
+        tex_set.base = source.base_albedos();
 
-        if !self.mat_camo_schemes.is_empty() {
-            let stems: Vec<String> = {
-                let mut s = HashSet::new();
-                for info in all_mfm_infos {
-                    s.insert(info.stem.clone());
-                }
-                s.into_iter().collect()
-            };
+        let CamoSelection::Variants(ids) = &self.options.camos else {
+            return Ok(tex_set);
+        };
 
-            for scheme in &self.mat_camo_schemes {
-                let view = crate::export::camo_textures::MatCamoSchemeView {
-                    textures: &scheme.textures,
-                    tiled: scheme.tiled,
-                    color_scheme_colors: scheme.color_scheme_colors.as_ref(),
-                    uv_transforms: &scheme.uv_transforms,
-                };
-                let scheme_textures =
-                    crate::export::camo_textures::decode_mat_scheme(&self.vfs, &view, &stems, self.options.texture_lod);
-
-                if scheme_textures.is_empty() {
-                    continue;
-                }
-                let scheme_idx = tex_set.camo_schemes.len();
-                tex_set.camo_schemes.push((scheme.display_name.clone(), scheme_textures));
-                tex_set.camo_origins.push(scheme.origin);
-                tex_set.camo_use_color_scheme.push(scheme.use_color_scheme);
-                for stem in &stems {
-                    let cat = camouflage::classify_part_category(stem);
-                    // Tiled camos tile every part; a reclassified fitting that samples the tile
-                    // via the resolve fallback must also inherit the tile's UV transform.
-                    let xform = scheme
-                        .uv_transforms
-                        .get(cat)
-                        .or_else(|| if scheme.tiled { scheme.uv_transforms.get("tile") } else { None });
-                    if let Some(xform) = xform
-                        && (xform.scale != [1.0, 1.0] || xform.offset != [0.0, 0.0])
-                    {
-                        tex_set.tiled_uv_transforms.insert(
-                            (scheme_idx, stem.clone()),
-                            [xform.scale[0], xform.scale[1], xform.offset[0], xform.offset[1]],
-                        );
-                    }
-                }
+        for (slot, id) in ids.iter().enumerate() {
+            let info =
+                source.scheme_info(*id).ok_or_else(|| Report::new(camo_textures::CamoDecodeError::UnknownId(*id)))?;
+            let textures = source.decode(*id)?;
+            tex_set.camo_schemes.push((info.display_name.clone(), textures));
+            tex_set.camo_origins.push(info.origin);
+            tex_set.camo_use_color_scheme.push(info.use_color_scheme);
+            for (stem, xform) in &info.uv_transforms {
+                tex_set
+                    .tiled_uv_transforms
+                    .insert((slot, stem.clone()), [xform.scale[0], xform.scale[1], xform.offset[0], xform.offset[1]]);
             }
-
-            let mat_count = tex_set.camo_schemes.len() - per_ship_count;
-            eprintln!("  Texture variants: {} per-ship, {} material-based", per_ship_count, mat_count);
         }
-
-        tex_set
+        Ok(tex_set)
     }
 }
 
@@ -2049,13 +1982,9 @@ pub fn collect_mfm_info(visual: &VisualPrototype, db: &PrototypeDatabase<'_>) ->
     result
 }
 
-/// Build a `TextureSet` from MFM infos: base albedo + all camo schemes.
-pub fn build_texture_set(
-    mfm_infos: &[MfmInfo],
-    vfs: &VfsPath,
-    exclude_paths: &HashSet<String>,
-    lod: texture::TextureLod,
-) -> TextureSet {
+/// Base albedo PNGs for a set of MFM infos. Camo schemes come from
+/// `CamoTextureSource`, which is the single enumeration ids are defined against.
+pub fn build_texture_set(mfm_infos: &[MfmInfo], vfs: &VfsPath, lod: texture::TextureLod) -> TextureSet {
     let mut base = HashMap::new();
 
     let mut seen_stems = HashSet::new();
@@ -2080,24 +2009,7 @@ pub fn build_texture_set(
         }
     }
 
-    // Discover camo schemes.
-    let stems: Vec<String> = unique_infos.iter().map(|i| i.stem.clone()).collect();
-    let schemes = texture::discover_texture_schemes(vfs, &stems, exclude_paths);
-
-    let mut camo_schemes = Vec::new();
-    let mut camo_origins = Vec::new();
-    let mut camo_use_color_scheme = Vec::new();
-    for scheme in &schemes {
-        let scheme_textures = crate::export::camo_textures::decode_legacy_scheme(vfs, &unique_infos, scheme, lod);
-        if !scheme_textures.is_empty() {
-            camo_schemes.push((scheme.clone(), scheme_textures));
-            camo_origins.push(gltf_export::CamoOrigin::LegacyScan);
-            // Filename-scanned schemes are pre-colored textures with no color-scheme recolor.
-            camo_use_color_scheme.push(false);
-        }
-    }
-
-    TextureSet { base, camo_schemes, camo_origins, camo_use_color_scheme, tiled_uv_transforms: HashMap::new() }
+    TextureSet { base, ..TextureSet::empty() }
 }
 
 /// Resolve a compound hardpoint (e.g. `HP_AGM_3_HP_AGA_1`) by finding the

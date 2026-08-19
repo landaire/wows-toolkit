@@ -17,6 +17,8 @@ pub struct CamoSchemeId(pub usize);
 pub enum CamoDecodeError {
     #[error("no camo scheme with id {0:?}")]
     UnknownId(CamoSchemeId),
+    #[error("no camo scheme named {name}")]
+    UnknownName { name: String },
 }
 
 /// Decoded textures for one scheme: mfm stem to PNG bytes. Empty is a valid,
@@ -242,5 +244,34 @@ impl CamoTextureSource {
                 decode_mat_scheme(&self.vfs, &self.mat_schemes[*i].view(), &self.unique_stems, self.lod)
             }
         })
+    }
+
+    /// Base albedo PNGs by MFM stem: the stock appearance every export carries,
+    /// under any camo variants.
+    pub fn base_albedos(&self) -> HashMap<String, Vec<u8>> {
+        let mut out = HashMap::new();
+        for info in &self.unique_infos {
+            let Some(dds) = texture::load_base_albedo_bytes(&self.vfs, &info.full_path, self.lod) else {
+                continue;
+            };
+            match texture::dds_to_png(&dds, self.lod) {
+                Ok(png) => {
+                    out.insert(info.stem.clone(), png);
+                }
+                Err(e) => eprintln!("  Warning: failed to decode base texture for {}: {e}", info.stem),
+            }
+        }
+        out
+    }
+
+    /// Metadata for one id.
+    pub fn scheme_info(&self, id: CamoSchemeId) -> Option<CamoSchemeInfo> {
+        self.scheme_infos().into_iter().find(|i| i.id == id)
+    }
+
+    /// The id whose display name matches, for callers that name a scheme rather
+    /// than index it (the CLI). Case-insensitive; first match wins.
+    pub fn resolve_display_name(&self, name: &str) -> Option<CamoSchemeId> {
+        self.scheme_infos().into_iter().find(|i| i.display_name.eq_ignore_ascii_case(name)).map(|i| i.id)
     }
 }

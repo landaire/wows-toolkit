@@ -282,6 +282,11 @@ enum Commands {
         #[arg(long)]
         list_textures: bool,
 
+        /// Camouflage scheme to embed, by display name. Repeat for several.
+        /// Omit for the stock appearance. Names come from --list-textures
+        #[arg(long = "camo")]
+        camos: Vec<String>,
+
         /// Enable verbose debug output (UV decoding details, etc.)
         #[arg(long)]
         debug: bool,
@@ -1121,6 +1126,7 @@ fn run() -> Result<(), Report> {
             contents,
             max_texture_size,
             list_textures,
+            camos,
             debug,
         } => {
             let Some(vfs) = &vfs else {
@@ -1141,6 +1147,7 @@ fn run() -> Result<(), Report> {
                 contents,
                 max_texture_size,
                 list_textures,
+                &camos,
                 debug,
             )?;
         }
@@ -1642,7 +1649,7 @@ fn run_export_model(params: &ExportModelParams<'_>) -> Result<(), Report> {
             gltf_export::TextureSet::empty()
         } else {
             let mfm_infos = collect_mfm_info(vp, db);
-            build_texture_set(&mfm_infos, vfs, &HashSet::new(), texture_lod)
+            build_texture_set(&mfm_infos, vfs, texture_lod)
         };
 
         let mut out_file = std::fs::File::create(output).context("Failed to create output file")?;
@@ -2009,8 +2016,11 @@ fn run_export_ship(
     contents: ContentsArg,
     max_texture_size: Option<u32>,
     list_textures: bool,
+    camos: &[String],
     debug: bool,
 ) -> Result<(), Report> {
+    use wowsunpack::export::camo_textures;
+    use wowsunpack::export::ship::CamoSelection;
     use wowsunpack::export::ship::ShipAssets;
     use wowsunpack::export::ship::ShipExportOptions;
 
@@ -2068,6 +2078,23 @@ fn run_export_ship(
         texture_lod: resolve_texture_lod(max_texture_size, lod),
         ..Default::default()
     };
+
+    let probe_options = ShipExportOptions { textures: false, ..options.clone() };
+    let probe = assets.load_ship(name, &probe_options)?;
+    let selection = if camos.is_empty() {
+        CamoSelection::BaseOnly
+    } else {
+        let source = probe.camo_texture_source()?;
+        let mut ids = Vec::with_capacity(camos.len());
+        for camo_name in camos {
+            let id = source
+                .resolve_display_name(camo_name)
+                .ok_or_else(|| Report::new(camo_textures::CamoDecodeError::UnknownName { name: camo_name.clone() }))?;
+            ids.push(id);
+        }
+        CamoSelection::Variants(ids)
+    };
+    let options = ShipExportOptions { camos: selection, ..options };
     let ctx = assets.load_ship(name, &options)?;
 
     println!(
