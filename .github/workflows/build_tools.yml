@@ -20,17 +20,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # buck2 canonicalises its project root, so a junction resolves back to
-      # the long workspace path and link.exe still hits MAX_PATH. Copy instead.
       - name: Copy the checkout to a short path
         shell: pwsh
-        run: |
-          # Defender holds freshly written artifacts long enough that buck2's
-          # materialiser fails to replace them ("Binary being executed").
-          Add-MpPreference -ExclusionPath "C:\w", "C:\bt", "$env:RUNNER_TEMP" -ErrorAction SilentlyContinue
-          robocopy $env:GITHUB_WORKSPACE C:\w /E /NFL /NDL /NJH /NJS /NP | Out-Null
-          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with $LASTEXITCODE" }
-          $LASTEXITCODE = 0
+        run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
 
       - name: Provision the Buck toolchain
         shell: pwsh
@@ -62,7 +54,10 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: wows_toolkit_tools_*_win64.zip
+          # The build runs in C:\w, but this glob resolves against
+          # github.workspace, so it has to be absolute.
+          files: C:\w\wows_toolkit_tools_*_win64.zip
+          fail_on_unmatched_files: true
 
   build-linux:
     runs-on: ubuntu-latest
@@ -107,3 +102,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: wows_toolkit_tools_*_linux64.zip
+          fail_on_unmatched_files: true

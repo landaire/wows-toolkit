@@ -6,11 +6,11 @@ on:
   # GITHUB_TOKEN, which suppresses the release event, so we key off the tag.
   push:
     branches: [main]
-    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+", "v[0-9]+.[0-9]+.[0-9]+-*"]
   # Also rebuild tactics for a manually published release.
   release:
     types: [published]
-  # Manual trigger — optionally skip tactics rebuild.
+  # Manual trigger, optionally skipping the tactics rebuild.
   workflow_dispatch:
     inputs:
       build_tactics:
@@ -23,10 +23,12 @@ permissions:
   pages: write
   id-token: write
 
-# Only allow one deployment at a time
+# One deployment at a time, queued rather than cancelled. Cancelling loses
+# the tag and release runs, which are the only ones that rebuild tactics: a
+# release tag is pushed alongside a main push, and the main run would cancel it.
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   BUILD_TACTICS: ${{ github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.build_tactics) }}
@@ -40,7 +42,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # --- Tactics WASM build ---
+      - name: Expand runner swap
+        if: env.BUILD_TACTICS == 'true'
+        run: ./scripts/expand-runner-swap.sh 16G
+
       - name: Install Nix
         if: env.BUILD_TACTICS == 'true'
         uses: cachix/install-nix-action@v30
@@ -92,7 +97,6 @@ jobs:
           path: crates/wt-web/dist
           key: tactics-dist-${{ github.sha }}
 
-      # --- Restore cached tactics when not building fresh ---
       - name: Restore tactics build from cache
         if: env.BUILD_TACTICS != 'true'
         uses: actions/cache/restore@v4
@@ -101,13 +105,15 @@ jobs:
           key: tactics-dist-will-not-match
           restore-keys: tactics-dist-
 
-      # --- Assemble and deploy ---
       - name: Assemble deploy directory
         run: |
           mkdir -p _deploy/tactics
           cp -r site/* _deploy/
           if [ -d crates/wt-web/dist ] && [ "$(ls -A crates/wt-web/dist)" ]; then
             cp -r crates/wt-web/dist/* _deploy/tactics/
+          elif [ "$BUILD_TACTICS" = "true" ]; then
+            echo "::error::The tactics build ran but produced no output in crates/wt-web/dist."
+            exit 1
           else
             echo "::warning::No tactics build found in cache. Deploying site without tactics."
           fi

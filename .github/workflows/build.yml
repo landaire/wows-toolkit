@@ -14,7 +14,6 @@ permissions:
   contents: write
 
 jobs:
-  # ── Create the release the build jobs attach to ───────────────────────
   create-release:
     name: Create release
     runs-on: ubuntu-latest
@@ -61,7 +60,6 @@ jobs:
           # and would otherwise pull a beta onto every install.
           prerelease: ${{ contains(github.ref_name, '-') }}
 
-  # ── Windows (Buck, signed) ────────────────────────────
   windows:
     name: Windows
     needs: create-release
@@ -73,22 +71,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # buck-out paths carry a configuration hash, a doubled target name and a
-      # content hash: 234 characters before any prefix. The runner workspace
-      # adds 31, which puts link.exe past MAX_PATH. A junction does not help,
-      # because buck2 canonicalises its project root back to the real path, so
-      # the tree is copied somewhere genuinely short.
       - name: Copy the checkout to a short path
         shell: pwsh
         working-directory: ${{ github.workspace }}
-        run: |
-          # Defender holds freshly written artifacts long enough that buck2's
-          # materialiser fails to replace them ("Binary being executed").
-          Add-MpPreference -ExclusionPath "C:\w", "C:\bt", "$env:RUNNER_TEMP" -ErrorAction SilentlyContinue
-          robocopy $env:GITHUB_WORKSPACE C:\w /E /NFL /NDL /NJH /NJS /NP | Out-Null
-          if ($LASTEXITCODE -ge 8) { throw "robocopy failed with $LASTEXITCODE" }
-          $LASTEXITCODE = 0
-          Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name LongPathsEnabled -Value 1
+        run: ./scripts/prepare-windows-runner.ps1 -Source $env:GITHUB_WORKSPACE -Destination C:\w -AlsoExclude C:\bt
 
       # Visual Studio caps the length of its install root too, hence C:\bt.
       - name: Provision the Buck toolchain
@@ -182,8 +168,8 @@ jobs:
             C:\w\dist\*.zip
             C:\w\dist\*.msi
             C:\w\dist\wows_toolkit.pdb
+          fail_on_unmatched_files: true
 
-  # ── Linux (Buck, Flatpak) ─────────────────────────────
   linux:
     name: Linux Flatpak
     needs: create-release
@@ -260,8 +246,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: WoWs_Toolkit-x86_64.flatpak
+          fail_on_unmatched_files: true
 
-  # ── macOS (Apple Silicon .app in .dmg) ────────────────────────────
   macos:
     name: macOS
     needs: create-release
@@ -369,3 +355,4 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: wows_toolkit_${{ steps.name.outputs.slug }}_macos.dmg
+          fail_on_unmatched_files: true
