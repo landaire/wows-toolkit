@@ -62,6 +62,7 @@ use super::texture;
 /// the hull and every mount, so a caller who wants the visual model should not
 /// pay to tessellate and embed it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum ExportContents {
     #[default]
     Mesh,

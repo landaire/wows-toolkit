@@ -207,9 +207,8 @@ pub struct ExportDialog {
 
 /// The export choices that carry across ships. A `CamoSchemeId` indexes one
 /// ship's ordered scheme list and a hull names one ship's upgrade, so neither is
-/// meaningful for the next ship and neither belongs here. Task 10 adds the
-/// persistence; this task needs the type because `open` takes it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// meaningful for the next ship and neither belongs here.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ExportDefaults {
     pub contents: ExportContents,
     pub lod: usize,
@@ -220,6 +219,26 @@ impl Default for ExportDefaults {
     fn default() -> Self {
         // What the armor viewer's export button produced before the dialog existed.
         Self { contents: ExportContents::MeshAndArmor, lod: 0, texture_res: TextureResolution::Full }
+    }
+}
+
+impl ExportDefaults {
+    const SETTING_KEY: &'static str = "model_export_defaults";
+
+    /// The subset of a confirmed draft worth remembering for the next ship:
+    /// `hull` and `camos` are deliberately excluded, since both name data
+    /// specific to the ship just exported.
+    pub fn from_draft(draft: &ExportDraft) -> Self {
+        Self { contents: draft.contents, lod: draft.lod, texture_res: draft.texture_res }
+    }
+
+    /// Missing state is expected before the first export.
+    pub async fn load(pool: &sqlx::SqlitePool) -> Self {
+        crate::db::queries::get_setting(pool, Self::SETTING_KEY).await.unwrap_or_default()
+    }
+
+    pub async fn save(&self, pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
+        crate::db::queries::set_setting(pool, Self::SETTING_KEY, self).await
     }
 }
 
@@ -920,6 +939,32 @@ mod tests {
     fn a_ship_with_no_default_scheme_starts_with_nothing_ticked() {
         let schemes = vec![scheme(0, "Ocean Soul", "PCEC001")];
         assert_eq!(default_camo(&schemes), None);
+    }
+
+    #[test]
+    fn the_defaults_start_at_what_the_old_export_button_produced() {
+        let d = ExportDefaults::default();
+        assert_eq!(d.contents, ExportContents::MeshAndArmor);
+        assert_eq!(d.lod, 0);
+        assert_eq!(d.texture_res, TextureResolution::Full);
+    }
+
+    #[test]
+    fn only_the_ship_independent_choices_are_remembered() {
+        let mut draft = draft();
+        draft.contents = ExportContents::Mesh;
+        draft.lod = 2;
+        draft.texture_res = TextureResolution::Px1024;
+        draft.hull = Some("PJUH911_Yamato_1944".to_string());
+        draft.camos.insert(CamoSchemeId(3));
+
+        let saved = ExportDefaults::from_draft(&draft);
+
+        assert_eq!(saved.contents, ExportContents::Mesh);
+        assert_eq!(saved.lod, 2);
+        assert_eq!(saved.texture_res, TextureResolution::Px1024);
+        // A CamoSchemeId indexes one ship's scheme list and a hull names one
+        // ship's upgrade; carrying either to the next ship selects something else.
     }
 
     /// Exercises the tree context menu's exact call shape (`seed_hull: None`)

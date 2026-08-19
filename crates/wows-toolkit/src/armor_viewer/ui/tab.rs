@@ -620,8 +620,12 @@ impl ToolkitTabViewer<'_> {
                     if state.export_dialog.as_ref().is_some_and(export_dialog::ExportDialog::is_exporting) {
                         self.tab_state.toasts.lock().info(t!("ui.armor.export.already_running").to_string());
                     } else {
-                        // TODO(Task 10): source from persisted export defaults.
-                        let defaults = ExportDefaults::default();
+                        let defaults = match (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_ref()) {
+                            (Some(pool), Some(rt)) => rt.block_on(ExportDefaults::load(pool)),
+                            // No pool means no stored preferences yet, which is the same
+                            // starting point as a first run.
+                            _ => ExportDefaults::default(),
+                        };
                         state.export_dialog = Some(ExportDialog::open(
                             export_req.param_index,
                             export_req.display_name,
@@ -839,8 +843,12 @@ impl ToolkitTabViewer<'_> {
             if state.export_dialog.as_ref().is_some_and(export_dialog::ExportDialog::is_exporting) {
                 self.tab_state.toasts.lock().info(t!("ui.armor.export.already_running").to_string());
             } else {
-                // TODO(Task 10): source from persisted export defaults.
-                let defaults = ExportDefaults::default();
+                let defaults = match (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_ref()) {
+                    (Some(pool), Some(rt)) => rt.block_on(ExportDefaults::load(pool)),
+                    // No pool means no stored preferences yet, which is the same
+                    // starting point as a first run.
+                    _ => ExportDefaults::default(),
+                };
                 state.export_dialog = Some(ExportDialog::open(
                     export_req.param_index,
                     export_req.display_name,
@@ -1109,6 +1117,20 @@ impl ToolkitTabViewer<'_> {
                 DialogOutcome::ReloadRequested => dialog.start_load(ship_assets.clone()),
                 DialogOutcome::Cancelled => state.export_dialog = None,
                 DialogOutcome::Export { options, sender } => {
+                    if let (Some(pool), Some(rt)) =
+                        (self.tab_state.db_pool.as_ref(), self.tab_state.tokio_runtime.as_ref())
+                    {
+                        // Fire-and-forget: losing a remembered preference is not
+                        // worth blocking the frame on a database write, or
+                        // interrupting the user with a modal over it.
+                        let defaults = ExportDefaults::from_draft(&dialog.draft);
+                        let pool = pool.clone();
+                        rt.spawn(async move {
+                            if let Err(e) = defaults.save(&pool).await {
+                                tracing::warn!("failed to save export defaults: {e}");
+                            }
+                        });
+                    }
                     let display_name = dialog.display_name.clone();
                     let param_index = dialog.param_index.clone();
                     spawn_ship_export(
