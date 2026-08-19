@@ -263,14 +263,32 @@ fn run_entry(entry: &Entry) {
     }
 }
 
-/// Sort the `players` array by each element's canonical serialization. The
-/// builder's player order comes from a hash map and is not stable run-to-run;
-/// each player object's content is stable, so sorting by its full serialization
-/// yields a deterministic order for the golden compare.
+/// Sort the `players` array by each player's identity, so both sides of the
+/// compare are in the same order.
+///
+/// Not by serialized text: object key order depends on serde_json's
+/// `preserve_order`, which Cargo unifies on for the whole workspace because
+/// `wows-toolkit` enables it. `cargo test -p wows-replay-insights` therefore
+/// serialized keys alphabetically while `cargo test --workspace` serialized
+/// them in declaration order, giving the two runs different sort keys for the
+/// same players and misaligning the arrays. Identity is also immune to the
+/// float drift `approx_eq` tolerates, which a content sort is not.
+///
+/// `db_id` alone is not enough: bots commonly share `AccountId(0)`.
 fn sort_players(value: &mut serde_json::Value) {
     if let Some(players) = value.get_mut("players").and_then(|p| p.as_array_mut()) {
-        players.sort_by_cached_key(|p| serde_json::to_string(p).unwrap_or_default());
+        players.sort_by_cached_key(player_identity);
     }
+}
+
+fn player_identity(player: &serde_json::Value) -> (i64, String, String, u64) {
+    let text = |field: &str| player.get(field).and_then(|v| v.as_str()).unwrap_or_default().to_owned();
+    (
+        player.get("db_id").and_then(|v| v.as_i64()).unwrap_or_default(),
+        text("name"),
+        text("ship_index"),
+        player.get("team_id").and_then(|v| v.as_u64()).unwrap_or_default(),
+    )
 }
 
 /// Deep structural compare of two JSON values, order-insensitive for objects and
