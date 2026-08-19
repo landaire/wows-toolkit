@@ -43,8 +43,23 @@ fn variant_names(glb: &[u8]) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Reads a `[f64; 2]` out of a JSON array pointer, or `default` when the key
+/// is absent. `KHR_texture_transform` omits `scale`/`offset` at their identity
+/// values (glTF's default-omission convention), so an absent key IS the
+/// identity transform here, not a parse failure.
+fn vec2_or(v: &serde_json::Value, pointer: &str, default: [f64; 2]) -> [f64; 2] {
+    let Some(arr) = v.pointer(pointer).and_then(|v| v.as_array()) else {
+        return default;
+    };
+    let got: Vec<f64> = arr.iter().filter_map(|x| x.as_f64()).collect();
+    if got.len() == 2 { [got[0], got[1]] } else { default }
+}
+
 /// Whether any material's base color texture carries a `KHR_texture_transform`
-/// with a non-identity scale.
+/// with a non-identity scale OR a non-identity offset. A pure translation with
+/// identity scale is still a real transform that must survive baking, so this
+/// matches `first_scheme_baking_to_a_tiled_replace`'s selection criteria
+/// (scale OR offset) rather than narrowing to scale alone.
 fn any_material_has_non_identity_texture_transform(glb: &[u8]) -> bool {
     let g = gltf::Gltf::from_slice(glb).expect("parse glb");
     let json = g.document.into_json();
@@ -53,14 +68,11 @@ fn any_material_has_non_identity_texture_transform(glb: &[u8]) -> bool {
         return false;
     };
     materials.iter().any(|m| {
-        let Some(scale) = m
-            .pointer("/pbrMetallicRoughness/baseColorTexture/extensions/KHR_texture_transform/scale")
-            .and_then(|v| v.as_array())
-        else {
-            return false;
-        };
-        let scale: Vec<f64> = scale.iter().filter_map(|v| v.as_f64()).collect();
-        scale.len() == 2 && (scale[0] != 1.0 || scale[1] != 1.0)
+        let scale =
+            vec2_or(m, "/pbrMetallicRoughness/baseColorTexture/extensions/KHR_texture_transform/scale", [1.0, 1.0]);
+        let offset =
+            vec2_or(m, "/pbrMetallicRoughness/baseColorTexture/extensions/KHR_texture_transform/offset", [0.0, 0.0]);
+        scale != [1.0, 1.0] || offset != [0.0, 0.0]
     })
 }
 
