@@ -4,7 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>WoWs Toolkit - Tactics Board</title>
-    <link data-trunk rel="rust" data-wasm-opt="2" />
+    <!-- wasm-bindgen drops the target_features section, so wasm-opt cannot see
+         which proposals the module uses and its validator rejects them. These
+         are exactly the six that rustc enables by default for
+         wasm32-unknown-unknown (rustc --print cfg --target
+         wasm32-unknown-unknown), not a blanket --all-features. -->
+    <link data-trunk rel="rust" data-wasm-opt="2"
+          data-wasm-opt-params="--enable-bulk-memory --enable-multivalue --enable-mutable-globals --enable-nontrapping-float-to-int --enable-reference-types --enable-sign-ext" />
     <style>
         html, body {
             margin: 0;

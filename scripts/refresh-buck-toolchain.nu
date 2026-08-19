@@ -45,7 +45,8 @@ for tool in $required {
     $"cxx = ($toolchain_root)/bin/clang++"
     $"nasm = ($toolchain_root)/bin/nasm"
     $"python = ($toolchain_root)/bin/python3"
-    # The prelude has no rustfmt support; bxl/lint.bxl runs it directly.
+    # The prelude has no rustfmt support, so toolchains//:rustfmt carries it
+    # and scripts/lint.nu runs the path bxl/lint.bxl reports.
     $"rustfmt = ($toolchain_root)/bin/rustfmt"
     ""
 ] | str join "\n" | save -f .buckconfig.local
