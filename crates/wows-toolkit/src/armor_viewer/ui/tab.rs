@@ -1193,11 +1193,15 @@ fn spawn_ship_export(
         let result = (|| -> Result<Option<u64>, String> {
             use wowsunpack::game_params::types::GameParamProvider;
             let param = ship_assets.metadata().game_param_by_index(&param_idx);
-            let vehicle =
-                param.as_ref().and_then(|p| p.vehicle().cloned()).ok_or_else(|| "Vehicle not found".to_string())?;
+            let vehicle = param
+                .as_ref()
+                .and_then(|p| p.vehicle().cloned())
+                .ok_or_else(|| t!("ui.armor.export.vehicle_not_found").to_string())?;
             let ctx = ship_assets.load_ship_from_vehicle(&vehicle, &options).map_err(|e| format!("{e:?}"))?;
-            let mut file = std::fs::File::create(&path).map_err(|e| format!("Failed to create file: {e}"))?;
-            ctx.export_glb(&mut file).map_err(|e| format!("Export failed: {e:?}"))?;
+            let mut file = std::fs::File::create(&path)
+                .map_err(|e| t!("ui.armor.export.create_file_failed", error = e).to_string())?;
+            ctx.export_glb(&mut file)
+                .map_err(|e| t!("ui.armor.export.export_failed", error = format!("{e:?}")).to_string())?;
             Ok(file.metadata().ok().map(|m| m.len()))
         })();
         match result {
@@ -1212,7 +1216,7 @@ fn spawn_ship_export(
                 toasts.lock().success(message);
             }
             Err(e) => {
-                toasts.lock().error(format!("Export failed: {e}"));
+                toasts.lock().error(t!("ui.armor.export.export_failed", error = e).to_string());
             }
         }
         let _ = finished_sender.send(());

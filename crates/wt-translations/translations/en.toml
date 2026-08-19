@@ -1202,6 +1202,9 @@ close_button = "Close"
 already_running = "An export is already running"
 exported = "Exported %{ship}"
 exported_with_size = "Exported %{ship} (%{size})"
+vehicle_not_found = "Vehicle not found"
+create_file_failed = "Failed to create file: %{error}"
+export_failed = "Export failed: %{error}"
 
 [ui.armor.realtime]
 loading = "Loading ship armor..."
