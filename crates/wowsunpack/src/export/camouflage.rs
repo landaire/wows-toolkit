@@ -22,7 +22,7 @@ pub struct ColorScheme {
 }
 
 /// UV scale/offset transform for a part category in a tiled camo.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UvTransform {
     pub scale: [f32; 2],
     pub offset: [f32; 2],
