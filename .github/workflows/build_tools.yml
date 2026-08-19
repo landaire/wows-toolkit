@@ -52,8 +52,11 @@ jobs:
             if ($path -like "*.exe") { Copy-Item $path artifacts/ }
           }
           Get-ChildItem artifacts | ForEach-Object { $_.IsReadOnly = $false }
+          # wows_data_mgr locates its manifest by walking up from the working
+          # directory, so it has to sit next to the binaries to be found at all.
+          Copy-Item game_versions.toml artifacts/
           $slug = "${{ github.ref_name }}" -replace "/", "-"
-          Compress-Archive -Path artifacts/*.exe -DestinationPath "wows_toolkit_tools_${slug}_win64.zip"
+          Compress-Archive -Path artifacts/* -DestinationPath "wows_toolkit_tools_${slug}_win64.zip"
 
       - name: Attach to release
         if: startsWith(github.ref, 'refs/tags/')
@@ -92,6 +95,10 @@ jobs:
           for f in artifacts/*; do
             nix develop --command patchelf --set-interpreter /lib64/ld-linux-x86-64.so.2 --remove-rpath "$f"
           done
+          # Staged after patchelf, which only accepts ELF files. wows_data_mgr
+          # walks up from the working directory to find this manifest, so it has
+          # to sit next to the binaries.
+          cp game_versions.toml artifacts/
           slug="${GITHUB_REF_NAME//\//-}"
           zip -j "wows_toolkit_tools_${slug}_linux64.zip" artifacts/*
 
@@ -99,6 +106,4 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            wows_toolkit_tools_*_linux64.zip
-            game_versions.toml
+          files: wows_toolkit_tools_*_linux64.zip
