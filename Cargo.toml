@@ -22,6 +22,7 @@ members = [
     "crates/wgc-core",
     "crates/wgc-install",
     "crates/wgc-catalog",
+    "crates/wgc-download",
     "crates/wgc-launch",
     "crates/wows-battle-world",
     "build-support/buck/reindeer-features",
@@ -55,6 +56,7 @@ wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
 wgc-core = { version = "0.1.0", path = "crates/wgc-core", default-features = false }
 wgc-install = { version = "0.1.0", path = "crates/wgc-install", default-features = false }
 wgc-catalog = { version = "0.1.0", path = "crates/wgc-catalog", default-features = false }
+wgc-download = { version = "0.1.0", path = "crates/wgc-download", default-features = false }
 wgc-launch = { version = "0.1.0", path = "crates/wgc-launch", default-features = false }
 steamroom = "0.3"
 steamroom-client = "0.3"

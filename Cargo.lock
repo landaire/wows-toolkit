@@ -11161,6 +11161,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bencode"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a70dfc7b7438b99896e7f8992363ab8e2c4ba26aa5ec675d32d1c3c2c33d413e"
+dependencies = [
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "serde_bytes"
 version = "0.11.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13974,6 +13984,20 @@ version = "0.1.0"
 dependencies = [
  "serde",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "wgc-download"
+version = "0.1.0"
+dependencies = [
+ "data-encoding",
+ "rootcause",
+ "serde",
+ "serde_bencode",
+ "serde_bytes",
+ "serde_json",
+ "thiserror 2.0.20",
+ "wgc-core",
 ]
 
 [[package]]

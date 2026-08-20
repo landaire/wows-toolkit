@@ -1,0 +1,24 @@
+[package]
+name = "wgc-download"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Parses WG .torrent (bencode) manifests and (later) downloads WGC-managed game builds over HTTP webseeds"
+
+[dependencies]
+# Unused by the bencode parser in this crate. Kept as a workspace dep for the
+# webseed-HTTP downloader (P2-2), which will consume wgc-catalog's
+# PartDownload / InfoHash types built on wgc-core.
+wgc-core = { workspace = true }
+thiserror = "2"
+rootcause = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+# Pure-Rust bencode decoder (no C deps); serde-backed, so the wire structs
+# below are plain #[derive(Deserialize)] structs like the rest of this repo's
+# XML/JSON parsers.
+serde_bencode = "0.2"
+# Lets bencode byte-string fields (pieces, the WG per-file sha1 extension)
+# deserialize as raw Vec<u8> instead of requiring valid UTF-8.
+serde_bytes = "0.11"
+data-encoding = { workspace = true }
