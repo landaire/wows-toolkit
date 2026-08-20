@@ -4,7 +4,7 @@ workspace_library(
     name = "wt_collab_protocol",
     crate = "wt_collab_protocol",
     package = "wt-collab-protocol",
-    version = "1.0.2-beta1",
+    version = "1.0.2-beta2",
     features = ["egui"],
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
@@ -26,7 +26,7 @@ workspace_test(
     crate = "wt_collab_protocol",
     crate_root = "src/lib.rs",
     package = "wt-collab-protocol",
-    version = "1.0.2-beta1",
+    version = "1.0.2-beta2",
     features = ["egui"],
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
