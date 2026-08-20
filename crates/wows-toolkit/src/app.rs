@@ -360,6 +360,9 @@ impl TabViewer for ToolkitTabViewer<'_> {
 pub struct WowsToolkitApp {
     #[serde(skip)]
     checked_for_updates: bool,
+    #[cfg(feature = "launcher")]
+    #[serde(skip)]
+    started_install_discovery: bool,
     #[serde(skip)]
     manual_update_requested: bool,
     #[serde(skip)]
@@ -986,6 +989,8 @@ impl Default for WowsToolkitApp {
     fn default() -> Self {
         Self {
             checked_for_updates: false,
+            #[cfg(feature = "launcher")]
+            started_install_discovery: false,
             manual_update_requested: false,
             update_window_open: false,
             panic_info: None,
@@ -3126,6 +3131,14 @@ impl WowsToolkitApp {
         {
             self.tab_state.discovered_installs = installs;
             self.tab_state.discovering_installs = false;
+        }
+
+        // Kick off install discovery once, on first show of the app, rather
+        // than re-triggering every frame while no installs are found yet.
+        #[cfg(feature = "launcher")]
+        if !self.started_install_discovery {
+            self.started_install_discovery = true;
+            self.tab_state.start_install_discovery();
         }
 
         // Pick up "Add to Session Stats" requests (no confirmation needed).

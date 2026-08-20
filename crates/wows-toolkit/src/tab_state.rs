@@ -1678,7 +1678,7 @@ impl TabState {
         self.install_discovery = Some(inbox);
         self.discovering_installs = true;
         let ctx = self.egui_ctx.clone();
-        std::thread::spawn(move || {
+        let _join_handle = crate::util::thread::spawn_logged("install-discovery", move || {
             let installs =
                 wgc_install::discover_all(settings.wgc_data_dir_override.as_deref(), &settings.manual_installs);
             let _ = sender.send(installs);
