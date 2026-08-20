@@ -42188,6 +42188,12 @@ cargo.rust_library(
     visibility = [],
 )
 
+alias(
+    name = "url",
+    actual = ":url-2",
+    visibility = ["PUBLIC"],
+)
+
 extract_archive(
     name = "url-2.5.8.crate",
     src = "vendor/url-2.5.8.crate",
