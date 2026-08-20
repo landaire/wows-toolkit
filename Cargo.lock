@@ -10305,12 +10305,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower 0.5.3",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams 0.4.2",
  "web-sys",
 ]
 
@@ -13991,12 +13993,17 @@ name = "wgc-download"
 version = "0.1.0"
 dependencies = [
  "data-encoding",
+ "futures",
+ "hex",
+ "reqwest 0.12.28",
  "rootcause",
  "serde",
  "serde_bencode",
  "serde_bytes",
  "serde_json",
+ "sha1 0.10.7",
  "thiserror 2.0.20",
+ "tokio",
  "wgc-core",
 ]
 

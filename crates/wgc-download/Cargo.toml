@@ -3,12 +3,12 @@ name = "wgc-download"
 version = "0.1.0"
 edition.workspace = true
 publish = false
-description = "Parses WG .torrent (bencode) manifests and (later) downloads WGC-managed game builds over HTTP webseeds"
+description = "Parses WG .torrent (bencode) manifests and downloads WGC-managed game builds over HTTP webseeds"
 
 [dependencies]
-# Unused by the bencode parser in this crate. Kept as a workspace dep for the
-# webseed-HTTP downloader (P2-2), which will consume wgc-catalog's
-# PartDownload / InfoHash types built on wgc-core.
+# Unused by the bencode parser and webseed downloader in this crate. Kept as
+# a workspace dep for a future consumer of wgc-catalog's PartDownload /
+# InfoHash types built on wgc-core.
 wgc-core = { workspace = true }
 thiserror = "2"
 rootcause = { workspace = true }
@@ -22,3 +22,11 @@ serde_bencode = "0.2"
 # deserialize as raw Vec<u8> instead of requiring valid UTF-8.
 serde_bytes = "0.11"
 data-encoding = { workspace = true }
+# TLS features mirror crates/wows-toolkit/Cargo.toml's reqwest line: rustls
+# with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
+# "stream" enables Response::bytes_stream() for the webseed downloader.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "stream", "gzip"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-util", "fs"] }
+sha1 = "0.10"
+futures = "0.3"
+hex = "0.4"
