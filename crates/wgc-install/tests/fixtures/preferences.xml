@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<protocol name="preferences" version="3.33">
+  <application>
+    <games_manager>
+      <games>
+        <game>
+          <working_dir>E:\WoWs\World_of_Warships</working_dir>
+          <auto_update>true</auto_update>
+        </game>
+        <game>
+          <working_dir>G:\WoWsPT\World_of_Warships_PT</working_dir>
+          <auto_update>false</auto_update>
+        </game>
+      </games>
+    </games_manager>
+  </application>
+</protocol>

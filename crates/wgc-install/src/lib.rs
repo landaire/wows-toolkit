@@ -59,6 +59,8 @@ pub enum InstallError {
     Io { detail: String },
 }
 
+pub mod wgc;
+
 #[cfg(test)]
 mod tests {
     use super::*;
