@@ -1,5 +1,6 @@
 //! Parse WGC on-disk state (preferences.xml, apps map, data dir).
 
+use std::path::Path;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -57,4 +58,45 @@ pub fn parse_preferences(xml: &str) -> Result<Vec<GameInstall>, InstallError> {
             }
         })
         .collect())
+}
+
+/// The default WGC data directory, when one is knowable for this OS.
+pub fn default_data_dir() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        let program_data = std::env::var_os("ProgramData")?;
+        Some(PathBuf::from(program_data).join("Wargaming.net").join("GameCenter"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Discover WGC installs from the resolved data directory.
+///
+/// An absent default dir yields an empty list (WGC simply is not installed).
+/// An explicit override that does not exist is an error, because the caller
+/// asserted it should be there.
+pub fn discover_wgc_installs(data_dir_override: Option<&Path>) -> Result<Vec<GameInstall>, InstallError> {
+    let data_dir = match data_dir_override {
+        Some(dir) => {
+            if !dir.exists() {
+                return Err(InstallError::WgcDataDirMissing);
+            }
+            dir.to_path_buf()
+        }
+        None => match default_data_dir() {
+            Some(dir) if dir.exists() => dir,
+            _ => return Ok(Vec::new()),
+        },
+    };
+
+    let prefs_path = data_dir.join("preferences.xml");
+    let xml = match std::fs::read_to_string(&prefs_path) {
+        Ok(xml) => xml,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(InstallError::Io { detail: e.to_string() }),
+    };
+    parse_preferences(&xml)
 }
