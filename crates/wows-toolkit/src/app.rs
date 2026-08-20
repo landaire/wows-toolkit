@@ -4007,6 +4007,29 @@ impl WowsToolkitApp {
 
     fn execute_confirmed_action(&mut self, action: crate::tab_state::ConfirmableAction, ctx: &egui::Context) {
         match action {
+            #[cfg(feature = "launcher")]
+            crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
+                let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
+                let install = wgc_install::GameInstall::manual(std::path::PathBuf::from(wows_dir));
+                let mode = wgc_launch::LaunchMode::Replay { path: replay_path };
+                match wgc_launch::resolve(&install, mode, &wgc_launch::LaunchArgs::default()) {
+                    Ok(resolved) => {
+                        // Replay playback is offline and never gated; native spawn
+                        // with the toolkit's process hardening, as before.
+                        let mut command = resolved.native_command();
+                        let _ = crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn();
+                    }
+                    Err(e) => {
+                        self.tab_state.toasts.lock().error(format!("Cannot open in game: {e}"));
+                    }
+                }
+                // Signal the replay parser to open the controls window.
+                // App-wide: opens the single reference window regardless of workspace.
+                ctx.data_mut(|data| {
+                    data.insert_temp(egui::Id::new("open_replay_controls_window"), true);
+                });
+            }
+            #[cfg(not(feature = "launcher"))]
             crate::tab_state::ConfirmableAction::OpenInGame { replay_path } => {
                 let wows_dir = self.tab_state.persisted.read().settings.game.wows_dir.clone();
                 let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
