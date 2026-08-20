@@ -39,6 +39,7 @@ pub struct AppSettings {
     pub integrations: IntegrationSettings,
     pub collab: CollabSettings,
     pub search: SearchSettings,
+    pub launcher: LauncherSettings,
 }
 
 /// What the Search tab keeps across restarts.
@@ -198,6 +199,30 @@ impl SearchSettings {
 /// Newest match first, which is the order the index query itself returns.
 fn default_result_sort() -> (ResultColumn, SortDir) {
     (ResultColumn::Date, SortDir::Descending)
+}
+
+/// Persisted state for the Launcher tab.
+#[derive(Default, Clone, Debug, Serialize, Deserialize)]
+pub struct LauncherSettings {
+    #[serde(default)]
+    pub manual_installs: Vec<PathBuf>,
+    #[serde(default)]
+    pub wgc_data_dir_override: Option<PathBuf>,
+    #[serde(default)]
+    pub proton_prefix: Option<PathBuf>,
+    #[serde(default)]
+    pub proton_binary: Option<PathBuf>,
+    /// User-supplied extra command-line args applied to every launch.
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+    /// User-supplied environment variables applied to every launch.
+    #[serde(default)]
+    pub env_vars: Vec<(String, String)>,
+    /// Args appended when Safe Mode is toggled. The exact payload that makes
+    /// WoWs skip res_mods is confirmed during the launch-handshake capture; kept
+    /// a setting so it is a one-line correction, not a code change.
+    #[serde(default)]
+    pub safe_mode_args: Vec<String>,
 }
 
 /// General application preferences.
@@ -429,5 +454,23 @@ mod search_sort_tests {
             Some(Op::Le),
             "the entry beside the unknown one must survive"
         );
+    }
+}
+
+#[cfg(test)]
+mod launcher_settings_tests {
+    use super::*;
+
+    #[test]
+    fn launcher_settings_default_is_empty() {
+        let s = LauncherSettings::default();
+        assert!(s.manual_installs.is_empty());
+        assert!(s.proton_prefix.is_none());
+    }
+
+    #[test]
+    fn app_settings_has_launcher_field() {
+        let s = AppSettings::default();
+        assert!(s.launcher.manual_installs.is_empty());
     }
 }

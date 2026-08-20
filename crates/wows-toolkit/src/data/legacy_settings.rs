@@ -254,6 +254,8 @@ impl LegacyWowsToolkitApp {
             // Not present in the legacy `app.ron` format; the Search tab opens
             // with an empty bar.
             search: Default::default(),
+            // Not present in the legacy `app.ron` format.
+            launcher: Default::default(),
         };
 
         let persisted = PersistedState {
