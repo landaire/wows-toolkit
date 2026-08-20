@@ -1,0 +1,19 @@
+[package]
+name = "wgc-catalog"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Typed models and parsers for the WGC update-service (WGUS) XML protocol"
+
+[dependencies]
+# Unused by the parsers in this crate today; the update-detection logic
+# planned for the client module (report A sec 3.2) will need wgc-core's
+# ProductId/Realm types.
+wgc-core = { workspace = true }
+quick-xml = { version = "0.36", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+url = "2"
+rootcause = { workspace = true }
+
+[dev-dependencies]

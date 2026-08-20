@@ -1,0 +1,224 @@
+<protocol name="app_metadata" version="7.0">
+    <version>20251118145622</version>
+    <predefined_section>
+		<app_id public="true">WOWS.PT.PRODUCTION</app_id>
+		<chain_id>f21</chain_id>
+		<supported_languages>RU,EN,DE,PL,FR,ES,CS,IT,TR,NL,JA,ZH_TW,TH,PT_BR,ES_MX,UK,ZH_SG</supported_languages>
+		<default_language>EN</default_language>
+		<name>World of Warships</name>
+		<fs_name>World_of_Warships_PT</fs_name>
+		<executables>
+			<executable args="--safe">WorldOfWarships.exe</executable>
+		</executables>
+		<launch_options>
+			<option id="RESET_ALL">--ra</option>
+			<option id="WGCHECK">--wgcheck</option>
+		</launch_options>
+		<environment_name>PT</environment_name>
+		<keep_patches_interval>0</keep_patches_interval>
+		<max_unpacking_threads_ssd>4</max_unpacking_threads_ssd>
+		<max_unpacking_threads_hdd>4</max_unpacking_threads_hdd>
+		<multiplier_unpacking_threads_ssd>0.5</multiplier_unpacking_threads_ssd>
+		<multiplier_unpacking_threads_hdd>0.5</multiplier_unpacking_threads_hdd>
+		<client_types default="high">
+			<client_type aliases="full" arch="x64" id="high">
+				<initial_app_type>incomplete</initial_app_type>
+				<final_app_type>high</final_app_type>
+				<min_supported_os>Win7</min_supported_os>
+				<required_redistributables>
+					<value elevation_required="true">vc2019</value>
+					<value elevation_required="true">vc2019_x64</value>
+				</required_redistributables>
+				<client_parts>
+					<client_part id="client" integrity="true" />
+					<client_part id="locale" integrity="true" />
+					<client_part id="sdcontent" integrity="true" />
+					<client_part app_type="high" id="hotfix" integrity="true" />
+				</client_parts>
+			</client_type>
+		</client_types>
+		<login_enabled>true</login_enabled>
+		<realms_settings>
+			<instances>
+				<instance default="true" id="wows_pt_eu">
+					<platform_realm_id>eu</platform_realm_id>
+					<game_id>wowsnppt</game_id>
+					<title_id>wowsnppt</title_id>
+					<options>
+						<option key="build_type">test</option>
+						<option key="client_realm">pt</option>
+					</options>
+					<content_service_url>https://wguscs-wgie.wargaming.net/</content_service_url>
+					<common_agreements>
+						<agreement id="eu_eula" />
+					</common_agreements>
+					<features>
+						<feature enabled="false" id="game_pages_targeting" />
+					</features>
+				</instance>
+				<instance id="wows_pt_na">
+					<platform_realm_id>na</platform_realm_id>
+					<game_id>wowsnppt</game_id>
+					<title_id>wowsnppt</title_id>
+					<options>
+						<option key="build_type">test</option>
+						<option key="client_realm">pt</option>
+					</options>
+					<content_service_url>https://wguscs-wgie.wargaming.net/</content_service_url>
+					<common_agreements>
+						<agreement id="na_eula" />
+					</common_agreements>
+					<features>
+						<feature enabled="false" id="game_pages_targeting" />
+					</features>
+				</instance>
+				<instance id="wows_pt_asia">
+					<platform_realm_id>asia</platform_realm_id>
+					<game_id>wowsnppt</game_id>
+					<title_id>wowsnppt</title_id>
+					<options>
+						<option key="build_type">test</option>
+						<option key="client_realm">pt</option>
+					</options>
+					<content_service_url>https://wguscs-wgie.wargaming.net/</content_service_url>
+					<common_agreements>
+						<agreement id="asia_eula" />
+					</common_agreements>
+					<features>
+						<feature enabled="false" id="game_pages_targeting" />
+					</features>
+				</instance>
+			</instances>
+		</realms_settings>
+		<localization>
+			<item id="ENVIRONMENT_NAME__PT">
+				<text xml:lang="ru">Общий тест</text>
+				<text xml:lang="en">Public Test</text>
+				<text xml:lang="de">Public Test</text>
+				<text xml:lang="pl">Public Test</text>
+				<text xml:lang="fr">Public Test</text>
+				<text xml:lang="es">Public Test</text>
+				<text xml:lang="cs">Public Test</text>
+				<text xml:lang="it">Public Test</text>
+				<text xml:lang="tr">Public Test</text>
+				<text xml:lang="nl">Public Test</text>
+				<text xml:lang="ja">Public Test</text>
+				<text xml:lang="ko">Public Test</text>
+				<text xml:lang="zh-SG">Public Test</text>
+				<text xml:lang="zh-TW">Public Test</text>
+				<text xml:lang="th">Public Test</text>
+				<text xml:lang="pt-BR">Public Test</text>
+				<text xml:lang="es-MX">Public Test</text>
+				<text xml:lang="uk">Public Test</text>
+			</item>
+			<item id="HIGH__NAME">
+				<text xml:lang="ru">Клиент с высоким качеством звука.</text>
+				<text xml:lang="en">Game client with high-quality sound.</text>
+				<text xml:lang="de">Spielclient mit qualitativ hochwertigem Ton.</text>
+				<text xml:lang="pl">Klient gry z wysoką jakością dźwięku.</text>
+				<text xml:lang="fr">Client du jeu avec une qualité audio élevée.</text>
+				<text xml:lang="es">Cliente del juego con sonido de alta calidad.</text>
+				<text xml:lang="cs">Herní klient s vysoce kvalitním zvukem.</text>
+				<text xml:lang="it">Il client di gioco con audio in alta qualità.</text>
+				<text xml:lang="tr">Yüksek kaliteli sese sahip oyun istemcisi.</text>
+				<text xml:lang="nl">De spelclient met hoogkwaliteit geluid.</text>
+				<text xml:lang="ja">高品質サウンドのゲームクライアント</text>
+				<text xml:lang="ko">고품질 사운드 클라이언트입니다.</text>
+				<text xml:lang="zh-SG">高音质游戏客户端。</text>
+				<text xml:lang="zh-TW">高音質的遊戲客戶端</text>
+				<text xml:lang="th">โปรแกรมลูกข่ายเกมที่มีเสียงคุณภาพสูง</text>
+				<text xml:lang="pt-BR">Cliente do jogo com qualidade alta de som.</text>
+				<text xml:lang="es-MX">Cliente del juego con sonido de alta calidad.</text>
+				<text xml:lang="uk">Клієнт гри з високою якістю звуку.</text>
+			</item>
+			<item id="LAUNCH_OPTION_TITLE__RESET_ALL">
+				<text xml:lang="ru">Запуск игры со сбросом настроек</text>
+				<text xml:lang="en">Launch the game with settings reset</text>
+				<text xml:lang="de">Spiel mit Standardeinstellungen starten</text>
+				<text xml:lang="pl">Włącz grę ze zresetowanymi ustawieniami</text>
+				<text xml:lang="fr">Lancer le jeu avec remise à zéro des paramètres</text>
+				<text xml:lang="es">Ejecuta el juego con los ajustes reiniciados</text>
+				<text xml:lang="cs">Spustit hru s vynulovaným nastavením</text>
+				<text xml:lang="it">Avvia il gioco ripristinando le impostazioni</text>
+				<text xml:lang="tr">Oyunu ayarlar sıfırlanmış olarak başlat</text>
+				<text xml:lang="nl">Het spel met geresette instellingen starten</text>
+				<text xml:lang="ja">設定をリセットしてゲームを起動</text>
+				<text xml:lang="ko">설정 초기화하여 게임 실행</text>
+				<text xml:lang="zh-SG">以重置设定启动游戏</text>
+				<text xml:lang="zh-TW">啟動遊戲並重置設定</text>
+				<text xml:lang="th">เปิดเกมพร้อมกับปรับการตั้งค่าใหม่</text>
+				<text xml:lang="pt-BR">Executar o jogo com configurações restauradas</text>
+				<text xml:lang="es-MX">Abrir el juego reiniciando las opciones</text>
+				<text xml:lang="uk">Запустити гру зі скиданням налаштувань</text>
+			</item>
+			<item id="LAUNCH_OPTION_DESCRIPTION__RESET_ALL">
+				<text xml:lang="ru">Игра запустится со стандартными настройками, без модификаций. Все ваши настройки будут сброшены.</text>
+				<text xml:lang="en">The game will be launched with default settings, without any modifications. All your settings will be reset.</text>
+				<text xml:lang="de">Das Spiel wird mit Standardeinstellungen gestartet, ohne jegliche Modifikationen. Ihre Einstellungen werden zurückgesetzt.</text>
+				<text xml:lang="pl">Gra zostanie uruchomiona z domyślnymi ustawieniami, bez żadnych modyfikacji. Wszystkie ustawienia zostaną zresetowane.</text>
+				<text xml:lang="fr">Le jeu sera lancé avec les paramètres par défaut et sans aucune modification. Tous vos paramètres seront remis à zéro.</text>
+				<text xml:lang="es">El juego se ejecutará con los ajustes por defecto, sin ninguna modificación. Se reiniciarán todos tus ajustes.</text>
+				<text xml:lang="cs">Hra bude spuštěna s výchozím nastavením, bez jakýchkoliv modifikací. Všechna vaše nastavení budou vynulována.</text>
+				<text xml:lang="it">Il gioco sarà avviato con le impostazioni predefinite, senza alcuna modifica. Tutte le tue impostazioni saranno azzerate.</text>
+				<text xml:lang="tr">Oyun varsayılan ayarlarla, herhangi bir değişiklik olmadan başlatılacak. Tüm ayarlarınız sıfırlanacak.</text>
+				<text xml:lang="nl">Het spel zal gestart worden met standaard instellingen, zonder enige aanpassingen. Al je instellingen zullen gereset worden.</text>
+				<text xml:lang="ja">ゲームを初期設定かつ Mod なしの状態で起動します。全ての設定がリセットされます。</text>
+				<text xml:lang="ko">변경 사항이 적용되지 않은 기본 설정으로 게임이 실행됩니다. 모든 설정이 초기화됩니다.</text>
+				<text xml:lang="zh-SG">游戏将以修改前的默认设定启动。您的所有设定改动都将被重置。</text>
+				<text xml:lang="zh-TW">將會以預設的設定來啟動遊戲，不會有任何模組。您所有的設定都會被重置。</text>
+				<text xml:lang="th">เกมจะถูกเปิดโดยใช้การตั้งค่ามาตรฐานและไม่มีตัวดัดแปลงใดๆ การตั้งค่าของคุณทั้งหมดที่ทำไว้จะถูกตั้งใหม่</text>
+				<text xml:lang="pt-BR">O jogo será executado com as configurações padrão, sem quaisquer modificações. Todas as suas configurações serão restauradas.</text>
+				<text xml:lang="es-MX">El juego se abrirá con las opciones por defecto, sin ninguna modificación. Todos tus ajustes serán reiniciados.</text>
+				<text xml:lang="uk">Гра запуститься зі стандартними налаштуваннями, без модифікацій. Всі ваші налаштування буде скинуто.</text>
+			</item>
+			<item id="LAUNCH_OPTION_TITLE__WGCHECK">
+				<text xml:lang="ru">Собрать отчет WGCheck</text>
+				<text xml:lang="en">Generate WGCheck report</text>
+				<text xml:lang="de">WGCheck-Bericht erstellen</text>
+				<text xml:lang="pl">Wygeneruj raport WGCheck</text>
+				<text xml:lang="fr">Générer un rapport WGCheck</text>
+				<text xml:lang="es">Generar informe de WGCheck</text>
+				<text xml:lang="cs">Vygenerovat report WGCheck</text>
+				<text xml:lang="it">Genera rapporto WGCheck</text>
+				<text xml:lang="tr">WGCheck raporu oluştur</text>
+				<text xml:lang="nl">Genereer een WGCheck-rapport</text>
+				<text xml:lang="ja">WGCheck レポート生成</text>
+				<text xml:lang="ko">WGCheck 보고서 생성</text>
+				<text xml:lang="zh-SG">生成WGCheck报告</text>
+				<text xml:lang="zh-TW">生成WGCheck報告</text>
+				<text xml:lang="th">สร้างรายงาน WGCheck</text>
+				<text xml:lang="pt-BR">Gerar relatório WGCheck</text>
+				<text xml:lang="es-MX">Generar reporte WGCheck</text>
+				<text xml:lang="uk">Сформувати звіт WGCheck</text>
+			</item>
+			<item id="LAUNCH_OPTION_DESCRIPTION__WGCHECK">
+				<text xml:lang="ru">Собрать отчет WGCheck</text>
+				<text xml:lang="en">Generate WGCheck report</text>
+				<text xml:lang="de">WGCheck-Bericht erstellen</text>
+				<text xml:lang="pl">Wygeneruj raport WGCheck</text>
+				<text xml:lang="fr">Générer un rapport WGCheck</text>
+				<text xml:lang="es">Generar informe de WGCheck</text>
+				<text xml:lang="cs">Vygenerovat report WGCheck</text>
+				<text xml:lang="it">Genera rapporto WGCheck</text>
+				<text xml:lang="tr">WGCheck raporu oluştur</text>
+				<text xml:lang="nl">Genereer een WGCheck-rapport</text>
+				<text xml:lang="ja">WGCheck レポート生成</text>
+				<text xml:lang="ko">WGCheck 보고서 생성</text>
+				<text xml:lang="zh-SG">生成WGCheck报告</text>
+				<text xml:lang="zh-TW">生成WGCheck報告</text>
+				<text xml:lang="th">สร้างรายงาน WGCheck</text>
+				<text xml:lang="pt-BR">Gerar relatório WGCheck</text>
+				<text xml:lang="es-MX">Generar reporte WGCheck</text>
+				<text xml:lang="uk">Сформувати звіт WGCheck</text>
+			</item>
+		</localization>
+	</predefined_section>
+
+    <generated_section>
+        
+            <launch_forbidden>False</launch_forbidden>
+        
+            <stop_supporting>False</stop_supporting>
+        
+    </generated_section>
+</protocol>

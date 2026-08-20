@@ -1,0 +1,16 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wgc-catalog",
+    crate = "wgc_catalog",
+    package = "wgc-catalog",
+    version = "0.1.0",
+    deps = [
+        "//crates/wgc-core:wgc-core",
+        "//third-party/rust:quick-xml",
+        "//third-party/rust:serde",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:url",
+        "//third-party/rust:rootcause",
+    ],
+)

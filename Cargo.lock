@@ -13949,6 +13949,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 
 [[package]]
+name = "wgc-catalog"
+version = "0.1.0"
+dependencies = [
+ "quick-xml 0.36.2",
+ "rootcause",
+ "serde",
+ "thiserror 2.0.20",
+ "url",
+ "wgc-core",
+]
+
+[[package]]
 name = "wgc-core"
 version = "0.1.0"
 dependencies = [

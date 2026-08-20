@@ -1,0 +1,16 @@
+<protocol name="game_info" version="2.16" wgc_publisher_id="wargaming">
+  <id>WOWS.PT.PRODUCTION</id>
+  <localization>EN</localization>
+  <content_localizations>
+            <content_localization realm="eu">en</content_localization>
+        </content_localizations>
+  <update_urls>
+            <value>https://wgus-wowspt.worldofwarships.eu</value>
+        </update_urls>
+  <part_versions>
+            <version name="client" installed="14.9.0.0.10609091" available="14.9.0.0.10609091"/>
+            <version name="hotfix" installed="14.9.0.0.10609091" available="14.9.0.0.10609091"/>
+            <version name="locale" installed="14.9.0.0.10614298" available="14.9.0.0.10618320"/>
+            <version name="sdcontent" installed="14.9.0.0.10609091" available="14.9.0.0.10609091"/>
+        </part_versions>
+</protocol>
