@@ -1,0 +1,12 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wgc-core",
+    crate = "wgc_core",
+    package = "wgc-core",
+    version = "0.1.0",
+    deps = [
+        "//third-party/rust:serde",
+        "//third-party/rust:thiserror",
+    ],
+)

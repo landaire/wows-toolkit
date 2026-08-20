@@ -1,0 +1,12 @@
+[package]
+name = "wgc-core"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Shared domain types for the WoWs Toolkit launcher (WGC product ids, device ids, realms)"
+
+[dependencies]
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]

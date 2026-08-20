@@ -19,6 +19,7 @@ members = [
     "crates/wt-translations",
     "crates/wows-replay-insights",
     "crates/wgcheck",
+    "crates/wgc-core",
     "crates/wows-battle-world",
     "build-support/buck/reindeer-features",
 ]
@@ -48,6 +49,7 @@ wt-translations = { version = "0.17.0", path = "crates/wt-translations" }
 wows-toolkit-config = { path = "crates/wows-toolkit-config" }
 wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
 wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
+wgc-core = { version = "0.1.0", path = "crates/wgc-core", default-features = false }
 # Shared UI dependencies
 egui = "0.35"
 egui-phosphor = "0.13"
