@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use thiserror::Error;
 use wgc_install::GameInstall;
 
+pub mod proton;
+
+use crate::proton::ProtonConfig;
+
 /// Whether this launch is normal online play or offline replay playback.
 #[derive(Debug, Clone)]
 pub enum LaunchMode {
@@ -85,6 +89,18 @@ pub fn resolve<'a>(
     Ok(ResolvedLaunch { install, exe, mode, args: rendered, env: args.env.clone() })
 }
 
+/// Online launches require a valid or not-yet-configured session; replay
+/// launches are never gated.
+pub fn gate(mode: &LaunchMode, status: TokenStatus) -> Result<(), LaunchError> {
+    match mode {
+        LaunchMode::Replay { .. } => Ok(()),
+        LaunchMode::Online => match status {
+            TokenStatus::Valid { .. } | TokenStatus::NotConfigured => Ok(()),
+            TokenStatus::Expired | TokenStatus::Missing => Err(LaunchError::AuthenticationRequired),
+        },
+    }
+}
+
 impl<'a> ResolvedLaunch<'a> {
     /// An un-spawned native command (Windows, or the fallback path), cwd set to
     /// the install dir, user env applied. The caller decorates (e.g. process
@@ -95,6 +111,64 @@ impl<'a> ResolvedLaunch<'a> {
         cmd.current_dir(&self.install.path);
         cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
         cmd
+    }
+
+    /// Spawn the game. Online launches are gated on `status` first. On Linux a
+    /// non-Steam install needs `proton`; a Steam install launches through Steam.
+    pub fn spawn(
+        &self,
+        proton: Option<&ProtonConfig>,
+        status: TokenStatus,
+    ) -> Result<Option<std::process::Child>, LaunchError> {
+        gate(&self.mode, status)?;
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = proton;
+            tracing::info!("Launching {} {}", self.exe.display(), self.args.join(" "));
+            return self
+                .native_command()
+                .spawn()
+                .map(Some)
+                .map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() });
+        }
+        #[cfg(target_os = "linux")]
+        {
+            use wgc_install::InstallSource;
+            if matches!(self.install.source, InstallSource::Steam { .. }) {
+                tracing::info!("Launching via Steam: -applaunch 552990 {}", self.args.join(" "));
+                let mut cmd = std::process::Command::new("steam");
+                cmd.arg("-applaunch").arg("552990");
+                cmd.args(&self.args);
+                cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+                return cmd.spawn().map(Some).map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() });
+            }
+            let proton = proton.ok_or(LaunchError::ProtonPrefixNotConfigured)?;
+            if !proton.proton_binary.exists() {
+                return Err(LaunchError::ProtonNotFound);
+            }
+            tracing::info!(
+                "Launching via Proton: {} run {} {}",
+                proton.proton_binary.display(),
+                self.exe.display(),
+                self.args.join(" ")
+            );
+            let mut cmd = std::process::Command::new(&proton.proton_binary);
+            cmd.arg("run").arg(&self.exe).args(&self.args);
+            cmd.current_dir(&self.install.path);
+            // User env first, then the required compat vars, so a user override
+            // cannot break the Proton runtime.
+            cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+            cmd.env("STEAM_COMPAT_DATA_PATH", &proton.compat_prefix);
+            if let Some(parent) = proton.compat_prefix.parent().and_then(|p| p.parent()) {
+                cmd.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", parent);
+            } else {
+                tracing::warn!(
+                    "compat_prefix {} has no grandparent; STEAM_COMPAT_CLIENT_INSTALL_PATH not set",
+                    proton.compat_prefix.display()
+                );
+            }
+            cmd.spawn().map(Some).map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() })
+        }
     }
 }
 
@@ -146,5 +220,24 @@ mod tests {
         );
         let args: Vec<_> = cmd.get_args().collect();
         assert!(args.iter().any(|a| *a == std::ffi::OsStr::new("--safe")));
+    }
+
+    #[test]
+    fn replay_launch_is_never_gated() {
+        let mode = LaunchMode::Replay { path: PathBuf::from("/r/a.wowsreplay") };
+        assert!(gate(&mode, TokenStatus::Expired).is_ok());
+        assert!(gate(&mode, TokenStatus::Missing).is_ok());
+    }
+
+    #[test]
+    fn online_launch_refused_when_expired_or_missing() {
+        assert!(matches!(gate(&LaunchMode::Online, TokenStatus::Expired), Err(LaunchError::AuthenticationRequired)));
+        assert!(matches!(gate(&LaunchMode::Online, TokenStatus::Missing), Err(LaunchError::AuthenticationRequired)));
+    }
+
+    #[test]
+    fn online_launch_allowed_when_valid_or_not_configured() {
+        assert!(gate(&LaunchMode::Online, TokenStatus::Valid { expires_at: 0 }).is_ok());
+        assert!(gate(&LaunchMode::Online, TokenStatus::NotConfigured).is_ok());
     }
 }
