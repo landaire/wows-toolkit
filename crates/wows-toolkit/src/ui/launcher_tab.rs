@@ -1,6 +1,7 @@
 //! The Launcher tab: discover, launch, and manage WoWs installs.
 
 use crate::app::ToolkitTabViewer;
+use crate::update_background_task;
 
 impl ToolkitTabViewer<'_> {
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
@@ -81,7 +82,11 @@ impl ToolkitTabViewer<'_> {
 
         if let Some(path) = to_activate {
             self.tab_state.persisted.write().settings.game.wows_dir = path.display().to_string();
-            self.tab_state.wows_dir_invalid = false;
+            self.tab_state.revalidate_wows_dir();
+            if !self.tab_state.wows_dir_invalid {
+                self.tab_state.prevent_changing_wows_dir();
+                update_background_task!(self.tab_state.background_tasks, Some(self.tab_state.load_game_data(path)));
+            }
         }
 
         if let Some(i) = to_launch {

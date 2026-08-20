@@ -125,6 +125,8 @@ impl<'a> ResolvedLaunch<'a> {
         {
             let _ = proton;
             tracing::info!("Launching {} {}", self.exe.display(), self.args.join(" "));
+            // TODO: a Steam-source install here still goes through native spawn instead of
+            // `steam -applaunch 552990`; the Steam-through-Steam guarantee only holds on Linux.
             return self
                 .native_command()
                 .spawn()
