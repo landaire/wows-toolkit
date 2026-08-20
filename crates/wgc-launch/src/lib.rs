@@ -159,13 +159,21 @@ impl<'a> ResolvedLaunch<'a> {
             // cannot break the Proton runtime.
             cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
             cmd.env("STEAM_COMPAT_DATA_PATH", &proton.compat_prefix);
-            if let Some(parent) = proton.compat_prefix.parent().and_then(|p| p.parent()) {
-                cmd.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", parent);
-            } else {
-                tracing::warn!(
-                    "compat_prefix {} has no grandparent; STEAM_COMPAT_CLIENT_INSTALL_PATH not set",
-                    proton.compat_prefix.display()
-                );
+            // The compatdata prefix may live in a secondary Steam library, so its
+            // grandparent isn't reliably the Steam client root; prefer the real
+            // Steam install and only fall back to the heuristic if it's not found.
+            match crate::proton::find_steam_root()
+                .or_else(|| proton.compat_prefix.parent().and_then(|p| p.parent()).map(|p| p.to_path_buf()))
+            {
+                Some(client_install_path) => {
+                    cmd.env("STEAM_COMPAT_CLIENT_INSTALL_PATH", client_install_path);
+                }
+                None => {
+                    tracing::warn!(
+                        "could not determine Steam client install path from compat_prefix {}; STEAM_COMPAT_CLIENT_INSTALL_PATH not set",
+                        proton.compat_prefix.display()
+                    );
+                }
             }
             cmd.spawn().map(Some).map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() })
         }
