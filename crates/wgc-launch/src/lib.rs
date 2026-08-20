@@ -3,6 +3,7 @@
 use std::path::PathBuf;
 
 use thiserror::Error;
+use wgc_install::GameInstall;
 
 /// Whether this launch is normal online play or offline replay playback.
 #[derive(Debug, Clone)]
@@ -54,6 +55,49 @@ pub enum LaunchError {
     SpawnFailed { detail: String },
 }
 
+/// The WoWs executable inside an install directory.
+pub fn game_exe(install: &GameInstall) -> PathBuf {
+    install.path.join("WorldOfWarships.exe")
+}
+
+#[derive(Debug)]
+pub struct ResolvedLaunch<'a> {
+    pub install: &'a GameInstall,
+    exe: PathBuf,
+    mode: LaunchMode,
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+/// Validate the exe exists and precompute args. The online-launch gate and
+/// Proton availability (Linux) are checked at spawn time, not here, because they
+/// depend on runtime session state and settings.
+pub fn resolve<'a>(
+    install: &'a GameInstall,
+    mode: LaunchMode,
+    args: &LaunchArgs,
+) -> Result<ResolvedLaunch<'a>, LaunchError> {
+    let exe = game_exe(install);
+    if !exe.exists() {
+        return Err(LaunchError::ExeNotFound { path: exe.display().to_string() });
+    }
+    let rendered = build_args(&mode, args);
+    Ok(ResolvedLaunch { install, exe, mode, args: rendered, env: args.env.clone() })
+}
+
+impl<'a> ResolvedLaunch<'a> {
+    /// An un-spawned native command (Windows, or the fallback path), cwd set to
+    /// the install dir, user env applied. The caller decorates (e.g. process
+    /// hardening) then spawns.
+    pub fn native_command(&self) -> std::process::Command {
+        let mut cmd = std::process::Command::new(&self.exe);
+        cmd.args(&self.args);
+        cmd.current_dir(&self.install.path);
+        cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+        cmd
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -69,5 +113,38 @@ mod tests {
     #[test]
     fn build_args_online_is_extra_only() {
         assert!(build_args(&LaunchMode::Online, &LaunchArgs::default()).is_empty());
+    }
+
+    #[test]
+    fn resolve_errors_when_exe_missing() {
+        let install = GameInstall::manual(PathBuf::from("/no/such/dir"));
+        let err = resolve(&install, LaunchMode::Online, &LaunchArgs::default()).unwrap_err();
+        assert!(matches!(err, LaunchError::ExeNotFound { .. }));
+    }
+
+    #[test]
+    fn resolve_succeeds_when_exe_present() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("WorldOfWarships.exe"), b"stub").unwrap();
+        let install = GameInstall::manual(dir.path().to_path_buf());
+        let resolved = resolve(&install, LaunchMode::Online, &LaunchArgs::default()).expect("resolved");
+        let cmd = resolved.native_command();
+        assert_eq!(cmd.get_current_dir(), Some(dir.path()));
+    }
+
+    #[test]
+    fn native_command_applies_user_env_and_args() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("WorldOfWarships.exe"), b"stub").unwrap();
+        let install = GameInstall::manual(dir.path().to_path_buf());
+        let args = LaunchArgs { extra: vec!["--safe".into()], env: vec![("WOWS_SAFE".into(), "1".into())] };
+        let resolved = resolve(&install, LaunchMode::Online, &args).expect("resolved");
+        let cmd = resolved.native_command();
+        let envs: Vec<_> = cmd.get_envs().collect();
+        assert!(
+            envs.iter().any(|(k, v)| *k == std::ffi::OsStr::new("WOWS_SAFE") && *v == Some(std::ffi::OsStr::new("1")))
+        );
+        let args: Vec<_> = cmd.get_args().collect();
+        assert!(args.iter().any(|a| *a == std::ffi::OsStr::new("--safe")));
     }
 }
