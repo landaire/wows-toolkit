@@ -59,6 +59,7 @@ pub enum InstallError {
     Io { detail: String },
 }
 
+pub mod steam;
 pub mod wgc;
 
 #[cfg(test)]
