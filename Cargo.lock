@@ -11951,7 +11951,8 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 [[package]]
 name = "steamroom"
 version = "0.3.0"
-source = "git+https://github.com/landaire/steamroom?rev=c8d41e45089a36b06509032272d63f26981af9a1#c8d41e45089a36b06509032272d63f26981af9a1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3178d02f1314ade09ff79fa39fd34cf1d18691c6baf6e5c187cc0804d4d167bc"
 dependencies = [
  "adler",
  "aes 0.9.4",
@@ -11991,7 +11992,8 @@ dependencies = [
 [[package]]
 name = "steamroom-client"
 version = "0.3.0"
-source = "git+https://github.com/landaire/steamroom?rev=c8d41e45089a36b06509032272d63f26981af9a1#c8d41e45089a36b06509032272d63f26981af9a1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5e092d8a6cf2af2f1d4b00732cb58ef98172509cd092fecd39155bca759ff2a2"
 dependencies = [
  "base64 0.22.1",
  "bytes",
