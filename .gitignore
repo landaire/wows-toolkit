@@ -29,6 +29,7 @@ strings.csv
 # Superpowers planning docs and scratch (local only, not source-controlled)
 docs/superpowers/
 .superpowers/
+.direnv/
 
 dhat-heap.json
 dhat-markers.log
