@@ -12,6 +12,9 @@ buildscript = workspace_buildscript(
 
 TOOLKIT_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wgc-core:wgc-core",
+    "//crates/wgc-install:wgc-install",
+    "//crates/wgc-launch:wgc-launch",
     "//crates/wows-battle-world:wows_battle_world",
     "//crates/wows-data-mgr:wows_data_mgr",
     "//crates/wows-replay-insights:wows_replay_insights",
@@ -111,7 +114,7 @@ TOOLKIT_DEPS = [
     ],
 )
 
-TOOLKIT_FEATURES = ["logging"]
+TOOLKIT_FEATURES = ["logging", "launcher"]
 
 workspace_library(
     name = "wows_toolkit",

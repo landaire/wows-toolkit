@@ -1003,7 +1003,6 @@ impl Default for WowsToolkitApp {
             show_about_window: false,
             tab_state: Default::default(),
             dock_state: DockState::new({
-                #[allow(unused_mut)]
                 let mut tabs = Vec::new();
                 #[cfg(feature = "launcher")]
                 tabs.push(Tab::Launcher);
