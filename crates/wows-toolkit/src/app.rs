@@ -3120,6 +3120,14 @@ impl WowsToolkitApp {
 
         self.tab_state.try_update_replays();
 
+        #[cfg(feature = "launcher")]
+        if let Some(inbox) = self.tab_state.install_discovery.as_ref()
+            && let Some(installs) = inbox.read(&self.tab_state.egui_ctx).last()
+        {
+            self.tab_state.discovered_installs = installs;
+            self.tab_state.discovering_installs = false;
+        }
+
         // Pick up "Add to Session Stats" requests (no confirmation needed).
         // App-wide: feeds the one global session-stats total, not a per-workspace one.
         if let Some(replays) =

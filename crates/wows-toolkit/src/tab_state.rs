@@ -636,6 +636,20 @@ pub struct TabState {
 
     /// Notify handle to wake the background save task when settings change.
     pub save_notify: Arc<tokio::sync::Notify>,
+
+    // ─── Launcher ───────────────────────────────────────────────────────────
+    /// Game installs found by the last completed discovery run.
+    #[cfg(feature = "launcher")]
+    pub discovered_installs: Vec<wgc_install::GameInstall>,
+    /// Inbox for the background discovery thread started by [`Self::start_install_discovery`].
+    #[cfg(feature = "launcher")]
+    pub install_discovery: Option<egui_inbox::UiInbox<Vec<wgc_install::GameInstall>>>,
+    /// Whether a discovery run is currently in flight.
+    #[cfg(feature = "launcher")]
+    pub discovering_installs: bool,
+    /// Transient Safe Mode toggle for the next launch.
+    #[cfg(feature = "launcher")]
+    pub launch_safe_mode: bool,
 }
 
 impl Default for TabState {
@@ -733,6 +747,14 @@ impl Default for TabState {
             window_settings: Default::default(),
             active_viewports: Arc::new(parking_lot::Mutex::new(Vec::new())),
             save_notify: Arc::new(tokio::sync::Notify::new()),
+            #[cfg(feature = "launcher")]
+            discovered_installs: Vec::new(),
+            #[cfg(feature = "launcher")]
+            install_discovery: None,
+            #[cfg(feature = "launcher")]
+            discovering_installs: false,
+            #[cfg(feature = "launcher")]
+            launch_safe_mode: false,
         }
     }
 }
@@ -1642,6 +1664,26 @@ impl TabState {
         });
 
         BackgroundTask { receiver: Some(rx), kind: BackgroundTaskKind::LoadingData }
+    }
+
+    /// Kick off a background scan for game installs. A no-op while a scan is
+    /// already running; `app.rs` drains the result each frame.
+    #[cfg(feature = "launcher")]
+    pub fn start_install_discovery(&mut self) {
+        if self.discovering_installs {
+            return;
+        }
+        let settings = self.persisted.read().settings.launcher.clone();
+        let (sender, inbox) = egui_inbox::UiInbox::channel();
+        self.install_discovery = Some(inbox);
+        self.discovering_installs = true;
+        let ctx = self.egui_ctx.clone();
+        std::thread::spawn(move || {
+            let installs =
+                wgc_install::discover_all(settings.wgc_data_dir_override.as_deref(), &settings.manual_installs);
+            let _ = sender.send(installs);
+            ctx.request_repaint();
+        });
     }
 }
 
