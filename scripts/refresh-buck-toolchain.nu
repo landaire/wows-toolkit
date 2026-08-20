@@ -1,5 +1,10 @@
 #!/usr/bin/env nu
 
+# The devShell appends the host's graphics driver directory (e.g. /usr/lib64) to
+# LD_LIBRARY_PATH for the GUI, and a nix binary loading host libraries from there
+# crashes. Nothing below needs it.
+hide-env -i LD_LIBRARY_PATH
+
 if $nu.os-info.name == "macos" {
     let macos_sdk = (^nix build --no-link --print-out-paths .#macos-sdk | str trim)
     nu build-support/check-macos-sdk.nu $macos_sdk
