@@ -135,6 +135,8 @@ pub enum Tab {
     ArmorViewer,
     Stats,
     Search,
+    #[cfg(feature = "launcher")]
+    Launcher,
 }
 
 pub struct ToolkitTabViewer<'a> {
@@ -232,6 +234,8 @@ impl ToolkitTabViewer<'_> {
             Tab::ArmorViewer => (icons::SHIELD, "ui.tabs.armor_viewer"),
             Tab::Stats => (icons::CHART_BAR, "ui.tabs.stats"),
             Tab::Search => (icons::MAGNIFYING_GLASS, "ui.tabs.search"),
+            #[cfg(feature = "launcher")]
+            Tab::Launcher => (icons::ROCKET_LAUNCH, "ui.tabs.launcher"),
         };
         wt_translations::icon_t(icon, &t!(key))
     }
@@ -282,6 +286,8 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::ArmorViewer => self.build_armor_viewer_tab(ui),
             Tab::Stats => self.build_stats_tab(ui),
             Tab::Search => self.build_search_tab(ui),
+            #[cfg(feature = "launcher")]
+            Tab::Launcher => self.build_launcher_tab(ui),
         }
     }
 
@@ -316,6 +322,8 @@ impl TabViewer for ToolkitTabViewer<'_> {
             Tab::Unpacker | Tab::Settings | Tab::PlayerTracker | Tab::ModManager | Tab::ArmorViewer | Tab::Stats => {
                 false
             }
+            #[cfg(feature = "launcher")]
+            Tab::Launcher => false,
         }
     }
 
@@ -989,8 +997,12 @@ impl Default for WowsToolkitApp {
             latest_release: None,
             show_about_window: false,
             tab_state: Default::default(),
-            dock_state: DockState::new(
-                [
+            dock_state: DockState::new({
+                #[allow(unused_mut)]
+                let mut tabs = Vec::new();
+                #[cfg(feature = "launcher")]
+                tabs.push(Tab::Launcher);
+                tabs.extend([
                     Tab::Replays(WorkspaceId::LIVE),
                     Tab::Stats,
                     Tab::PlayerTracker,
@@ -998,9 +1010,9 @@ impl Default for WowsToolkitApp {
                     Tab::ArmorViewer,
                     Tab::Unpacker,
                     Tab::Settings,
-                ]
-                .to_vec(),
-            ),
+                ]);
+                tabs
+            }),
             show_error_window: false,
             error_to_show: None,
             constants_version_mismatch: false,

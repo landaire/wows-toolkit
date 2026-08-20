@@ -15,6 +15,7 @@ machine_translation_warning = "Most translations were machine-generated and may 
 # -- Tab titles --
 
 [ui.tabs]
+launcher = "Launcher"
 unpacker = "Resource Unpacker"
 settings = "Settings"
 replay_parser = "Replay Inspector"
