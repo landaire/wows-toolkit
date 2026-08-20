@@ -5,10 +5,10 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
-mod detect;
 mod download;
 mod steam;
 
+use wows_data_mgr::detect;
 use wows_data_mgr::dump;
 use wows_data_mgr::manifest;
 use wows_data_mgr::registry;

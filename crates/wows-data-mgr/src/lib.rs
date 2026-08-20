@@ -34,6 +34,7 @@ pub mod cas;
 pub mod cas_vfs;
 #[cfg(feature = "constants")]
 pub mod constants;
+pub mod detect;
 #[cfg(feature = "download")]
 pub mod download_repo;
 pub mod dump;
