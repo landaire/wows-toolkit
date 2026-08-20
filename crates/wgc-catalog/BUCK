@@ -12,5 +12,6 @@ workspace_library(
         "//third-party/rust:thiserror",
         "//third-party/rust:url",
         "//third-party/rust:rootcause",
+        "//third-party/rust:reqwest",
     ],
 )

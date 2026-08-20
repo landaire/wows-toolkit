@@ -1,3 +1,4 @@
+use wgc_catalog::models::ChainType;
 use wgc_catalog::models::PartName;
 use wgc_catalog::models::parse_metadata;
 use wgc_catalog::models::parse_patches_chain;
@@ -24,7 +25,8 @@ fn parses_real_metadata_fixture() {
 fn parses_real_patches_chain_fixture() {
     let chain = parse_patches_chain(PATCHES_CHAIN_XML).expect("patches_chain.xml should parse");
 
-    let install = chain.patches_chain.iter().find(|c| c.chain_type == "install").expect("install chain present");
+    let install =
+        chain.patches_chain.iter().find(|c| c.chain_type == ChainType::Install).expect("install chain present");
     assert_eq!(install.patch.len(), 4);
 
     let parts: Vec<&PartName> = install.patch.iter().map(|p| &p.part).collect();

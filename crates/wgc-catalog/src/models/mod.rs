@@ -15,6 +15,7 @@ pub use metadata::MetadataResponse;
 pub use metadata::PredefinedSection;
 pub use metadata::parse_metadata;
 pub use newtypes::BuildVersion;
+pub use newtypes::ChainType;
 pub use newtypes::InfoHash;
 pub use newtypes::PartName;
 pub use patches_chain::File;

@@ -6,14 +6,20 @@ publish = false
 description = "Typed models and parsers for the WGC update-service (WGUS) XML protocol"
 
 [dependencies]
-# Unused by the parsers in this crate today; the update-detection logic
-# planned for the client module (report A sec 3.2) will need wgc-core's
-# ProductId/Realm types.
+# Unused by any parser or client code in this crate. game_info.rs documents
+# why GameInfo.game_id stays a raw String instead of wgc_core::ProductId
+# (Realm is scoped to WW; real installs report other realms). Kept as a
+# workspace dep in case a future consumer here needs ProductId/Realm anyway.
 wgc-core = { workspace = true }
 quick-xml = { version = "0.36", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
 thiserror = "2"
 url = "2"
 rootcause = { workspace = true }
+# TLS features mirror crates/wows-toolkit/Cargo.toml's reqwest line: rustls
+# with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
+# No "json" feature: this crate speaks XML only.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "gzip"] }
 
 [dev-dependencies]
+tokio = { version = "1", features = ["rt", "macros", "rt-multi-thread"] }

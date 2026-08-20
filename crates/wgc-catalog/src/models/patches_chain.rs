@@ -4,6 +4,7 @@ use serde::Deserialize;
 
 use crate::error::CatalogError;
 use crate::models::newtypes::BuildVersion;
+use crate::models::newtypes::ChainType;
 use crate::models::newtypes::InfoHash;
 use crate::models::newtypes::PartName;
 
@@ -38,7 +39,7 @@ pub struct PartInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct PatchesChain {
     #[serde(rename = "@type")]
-    pub chain_type: String,
+    pub chain_type: ChainType,
     #[serde(default, rename = "patch")]
     pub patch: Vec<Patch>,
 }

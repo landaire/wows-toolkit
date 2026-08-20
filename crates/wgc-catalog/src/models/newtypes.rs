@@ -116,3 +116,44 @@ impl<'de> Deserialize<'de> for PartName {
         Ok(PartName::parse(&s))
     }
 }
+
+/// A `patches_chain/@type` value (report A sec 3-4: observed values
+/// `install`, `preinstall`). `Other` preserves any value this crate does not
+/// yet special-case rather than failing to parse.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ChainType {
+    Install,
+    Preinstall,
+    Other(String),
+}
+
+impl ChainType {
+    pub fn parse(s: &str) -> ChainType {
+        match s {
+            "install" => ChainType::Install,
+            "preinstall" => ChainType::Preinstall,
+            other => ChainType::Other(other.to_string()),
+        }
+    }
+}
+
+impl fmt::Display for ChainType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            ChainType::Install => "install",
+            ChainType::Preinstall => "preinstall",
+            ChainType::Other(s) => s,
+        };
+        f.write_str(s)
+    }
+}
+
+impl<'de> Deserialize<'de> for ChainType {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        Ok(ChainType::parse(&s))
+    }
+}
