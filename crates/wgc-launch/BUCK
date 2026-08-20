@@ -1,0 +1,14 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wgc-launch",
+    crate = "wgc_launch",
+    package = "wgc-launch",
+    version = "0.1.0",
+    deps = [
+        "//crates/wgc-core:wgc-core",
+        "//crates/wgc-install:wgc-install",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tracing",
+    ],
+)
