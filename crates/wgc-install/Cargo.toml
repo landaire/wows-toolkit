@@ -1,0 +1,21 @@
+[package]
+name = "wgc-install"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "Discover and model on-disk World of Warships installs (WGC, Steam, manual)"
+
+[dependencies]
+wgc-core = { workspace = true }
+wowsunpack = { workspace = true }
+wows-data-mgr = { workspace = true }
+steamroom = { workspace = true }
+steamroom-client = { workspace = true }
+quick-xml = { version = "0.36", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+rootcause = { workspace = true }
+tracing = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

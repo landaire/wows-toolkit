@@ -1,0 +1,20 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wgc-install",
+    crate = "wgc_install",
+    package = "wgc-install",
+    version = "0.1.0",
+    deps = [
+        "//crates/wgc-core:wgc-core",
+        "//crates/wowsunpack:wowsunpack",
+        "//crates/wows-data-mgr:wows-data-mgr",
+        "//third-party/rust:steamroom",
+        "//third-party/rust:steamroom-client",
+        "//third-party/rust:quick-xml",
+        "//third-party/rust:serde",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:rootcause",
+        "//third-party/rust:tracing",
+    ],
+)

@@ -20,6 +20,7 @@ members = [
     "crates/wows-replay-insights",
     "crates/wgcheck",
     "crates/wgc-core",
+    "crates/wgc-install",
     "crates/wows-battle-world",
     "build-support/buck/reindeer-features",
 ]
@@ -50,6 +51,9 @@ wows-toolkit-config = { path = "crates/wows-toolkit-config" }
 wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
 wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
 wgc-core = { version = "0.1.0", path = "crates/wgc-core", default-features = false }
+wgc-install = { version = "0.1.0", path = "crates/wgc-install", default-features = false }
+steamroom = { git = "https://github.com/landaire/steamroom", rev = "c8d41e45089a36b06509032272d63f26981af9a1" }
+steamroom-client = { git = "https://github.com/landaire/steamroom", rev = "c8d41e45089a36b06509032272d63f26981af9a1" }
 # Shared UI dependencies
 egui = "0.35"
 egui-phosphor = "0.13"
