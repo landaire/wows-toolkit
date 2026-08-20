@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library")
 
 workspace_library(
     name = "wgc-install",
@@ -8,7 +8,7 @@ workspace_library(
     deps = [
         "//crates/wgc-core:wgc-core",
         "//crates/wowsunpack:wowsunpack",
-        "//crates/wows-data-mgr:wows-data-mgr",
+        "//crates/wows-data-mgr:wows_data_mgr",
         "//third-party/rust:steamroom",
         "//third-party/rust:steamroom-client",
         "//third-party/rust:quick-xml",
@@ -16,5 +16,10 @@ workspace_library(
         "//third-party/rust:thiserror",
         "//third-party/rust:rootcause",
         "//third-party/rust:tracing",
-    ],
+    ] + os_select(
+        macos = [],
+        linux = [],
+        # The cfg(windows) dependency section of Cargo.toml.
+        windows = ["//third-party/rust:windows-registry"],
+    ),
 )

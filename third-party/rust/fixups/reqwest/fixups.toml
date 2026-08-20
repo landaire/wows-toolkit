@@ -1,0 +1,9 @@
+# reqwest 0.13.4 is feature-unioned across iroh (rustls-no-provider) and
+# steamroom (default features -> default-tls -> __rustls-aws-lc-rs). This repo's
+# rustls fixup omits aws_lc_rs (we use the ring provider), so the aws-lc-rs code
+# path in reqwest fails to compile. Omit the features that pull it in; the
+# remaining union (iroh's rustls-no-provider) compiles. Any app code that makes
+# https requests must install a ring CryptoProvider as process default at runtime
+# (slice 1 does not exercise steamroom's http).
+['cfg(version = "0.13")']
+omit_features = ["default-tls", "__rustls-aws-lc-rs"]

@@ -1,0 +1,5 @@
+# steamroom's build.rs compiles vendored .proto files (proto/steam/*.proto, shipped
+# in the crate tarball) via protox (pure Rust, no protoc binary) + prost-build into
+# the `generated` module the crate source includes from OUT_DIR. Without running the
+# build script, `generated::*` is empty and the crate fails to compile.
+buildscript.run = true

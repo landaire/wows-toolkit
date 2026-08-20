@@ -18,7 +18,7 @@ rootcause = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(windows)'.dependencies]
-winreg = "0.52"
+windows-registry = "0.6"
 
 [dev-dependencies]
 tempfile = "3"

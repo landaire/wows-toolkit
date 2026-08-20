@@ -7,23 +7,21 @@ pub fn discover_registry_installs() -> Vec<GameInstall> {
     // Wargaming writes an uninstall entry with an InstallLocation value.
     // Read the HKLM uninstall keys and keep any whose install dir looks like
     // a WoWs install.
-    use winreg::RegKey;
-    use winreg::enums::HKEY_LOCAL_MACHINE;
-    use winreg::enums::KEY_READ;
-
     let mut out = Vec::new();
-    let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let uninstall = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall";
-    let Ok(root) = hklm.open_subkey_with_flags(uninstall, KEY_READ) else {
+    let Ok(root) = windows_registry::LOCAL_MACHINE.open(uninstall) else {
         return out;
     };
-    for name in root.enum_keys().flatten() {
-        let Ok(sub) = root.open_subkey_with_flags(&name, KEY_READ) else { continue };
-        let display: String = sub.get_value("DisplayName").unwrap_or_default();
+    let Ok(names) = root.keys() else {
+        return out;
+    };
+    for name in names {
+        let Ok(sub) = root.open(&name) else { continue };
+        let Ok(display) = sub.get_string("DisplayName") else { continue };
         if !display.contains("World of Warships") {
             continue;
         }
-        let location: String = sub.get_value("InstallLocation").unwrap_or_default();
+        let Ok(location) = sub.get_string("InstallLocation") else { continue };
         if location.is_empty() {
             continue;
         }
