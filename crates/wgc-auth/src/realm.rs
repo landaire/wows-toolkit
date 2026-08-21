@@ -1,9 +1,10 @@
-//! WGNI account realm -> host/client_id map (WGNI-protocol.md section 5).
+//! WGNI account realm -> host/client_id map.
 //!
 //! This is a distinct concept from `wgc_core::Realm` (the *product* realm
 //! literal embedded in a `ProductId`, e.g. `WOWS.WW.PRODUCTION`). An
 //! account's WGNI realm and the product realm of a locally installed game
-//! are independent axes (protocol report section 4's mixed-realm example).
+//! are independent axes (a WGC client provisioned for one region can hold an
+//! account whose data lives in another).
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -19,8 +20,8 @@ pub enum AccountRealm {
     Eu,
     Na,
     Asia,
-    /// UNCONFIRMED post-2022 Lesta split; may be dead - see WGNI-protocol.md
-    /// open question 5.
+    /// Unverified post-2022 Lesta split; this host may no longer serve WoWs
+    /// accounts.
     Ru,
 }
 
@@ -31,7 +32,7 @@ pub struct RealmConfig {
     pub client_id: ClientId,
 }
 
-/// The realm-specific WGC OAuth `client_id` (WGNI-protocol.md section 5).
+/// The realm-specific WGC OAuth `client_id`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ClientId(String);
 
@@ -48,9 +49,10 @@ impl ClientId {
 impl AccountRealm {
     /// Returns this realm's WGNI auth host and OAuth client id.
     ///
-    /// Table source: WGNI-protocol.md section 5, `Mixaill/galaxy-integration-wargaming`
-    /// `wgc_constants.py` (`WGCRealms`/`WGCIds`), INFERRED from a third-party
-    /// OSS constant table, not independently re-derived from a live capture.
+    /// The client_id is the WGC desktop client's own per-realm OAuth
+    /// identifier. Hosts are confirmed against the live endpoints; the
+    /// client_ids and the RU realm's post-2022 status are not yet re-verified
+    /// by a completed live login.
     pub fn config(self) -> RealmConfig {
         let (host, client_id) = match self {
             AccountRealm::Eu => ("eu.wargaming.net", "JJ5yuABVKqZekaktUR8cejMzxbbHAtUVmY2eamsS"),
@@ -65,9 +67,9 @@ impl AccountRealm {
     }
 
     /// Sanity-check heuristic mapping a numeric SPA account id to a probable
-    /// realm via `SPAIDRealms` (WGNI-protocol.md section 5). This is NOT the
-    /// primary realm selector -- the authoritative realm is whichever
-    /// `domain_wgnet` a login succeeded against (protocol report section 4).
+    /// realm by its id range. This is NOT the primary realm selector -- the
+    /// authoritative realm is whichever `domain_wgnet` a login succeeded
+    /// against.
     pub fn from_account_id(id: AccountId) -> Option<AccountRealm> {
         let id = id.get();
         match id {
@@ -104,7 +106,7 @@ mod tests {
     fn from_account_id_maps_boundary_values() {
         assert_eq!(AccountRealm::from_account_id(AccountId::new(499_999_999)), Some(AccountRealm::Ru));
         assert_eq!(AccountRealm::from_account_id(AccountId::new(500_000_000)), Some(AccountRealm::Eu));
-        // Live example from WGNI-protocol.md section 4.
+        // An observed EU account id falls in the EU range.
         assert_eq!(AccountRealm::from_account_id(AccountId::new(697_769_785)), Some(AccountRealm::Eu));
         assert_eq!(AccountRealm::from_account_id(AccountId::new(1_000_000_000)), Some(AccountRealm::Na));
         assert_eq!(AccountRealm::from_account_id(AccountId::new(2_000_000_000)), Some(AccountRealm::Asia));

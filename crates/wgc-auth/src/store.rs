@@ -1,4 +1,4 @@
-//! Keyring-backed persistence for `StoredSession` (design-draft.md section 7).
+//! Keyring-backed persistence for `StoredSession`.
 //!
 //! `SessionStore` is the only place in this crate that touches the
 //! `keyring` crate; `AuthClient` never persists anything itself.

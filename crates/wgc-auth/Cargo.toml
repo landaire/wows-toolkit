@@ -15,11 +15,12 @@ zeroize = { version = "1", features = ["derive"] }
 sha3 = "0.10"
 url = "2"
 rand = "0.10"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros", "time"] }
 # TLS features mirror crates/wgc-catalog/Cargo.toml's reqwest line: rustls
 # with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
-# Adds "json": WGNI speaks JSON, unlike wgc-catalog's XML-only need.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "gzip"] }
+# "json": WGNI speaks JSON. "cookies": the challenge sets a session cookie the
+# token POST must carry back to correlate the solved PoW to its challenge.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "gzip", "cookies"] }
 # "crypto-rust" keeps the Linux Secret Service backend pure-Rust and
 # aws-lc-rs/openssl-free; apple-native/windows-native cover macOS Keychain
 # and Windows Credential Manager.

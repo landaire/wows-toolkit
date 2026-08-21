@@ -1,5 +1,5 @@
 //! Account identity: the numeric SPA account id and display nickname
-//! (WGNI-protocol.md section 4).
+//!.
 
 use serde::Deserialize;
 use serde::Serialize;

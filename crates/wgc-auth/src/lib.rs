@@ -1,8 +1,8 @@
 //! WGNI account authentication: secret-bearing newtypes, the account-realm
 //! map, the Keccak-512 hashcash proof-of-work solver, the async WGNI HTTP
 //! client, the keyring-backed session store, and the `wgc-launch`
-//! launch-gate adapter -- see `.superpowers/sdd/launcher-auth-discovery/`
-//! for the protocol report and design draft this crate implements against.
+//! launch-gate adapter. The protocol is reverse-engineered from the WGC
+//! client and its live endpoints.
 
 pub mod client;
 pub mod error;

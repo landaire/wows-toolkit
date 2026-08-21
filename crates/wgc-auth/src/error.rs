@@ -1,5 +1,4 @@
-//! Errors from WGNI authentication (WGNI-protocol.md section 8,
-//! design-draft.md section 4).
+//! Errors from WGNI authentication.
 //!
 //! `Rejected` is the only variant that carries a raw string: it is the
 //! catch-all for an upstream `error_description` this crate does not
@@ -43,6 +42,11 @@ pub enum AuthError {
 
     #[error("this login requires solving a CAPTCHA, which wgc-auth does not support")]
     CaptchaRequired,
+
+    #[error(
+        "login is awaiting a second factor; approve it in Wargaming Auth or via the emailed code, then sign in again"
+    )]
+    VerificationPending,
 
     #[error("proof-of-work challenge could not be solved before timeout")]
     ProofOfWorkTimeout,

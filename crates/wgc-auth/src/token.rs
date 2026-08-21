@@ -31,7 +31,7 @@ impl fmt::Debug for SecretPassword {
     }
 }
 
-/// The WGNI account-session bearer token (WGNI-protocol.md section 2.4).
+/// The WGNI account-session bearer token.
 #[derive(Zeroize, ZeroizeOnDrop)]
 pub struct AccessToken(String);
 
@@ -52,8 +52,7 @@ impl fmt::Debug for AccessToken {
 }
 
 /// Client-generated nonce paired with an `AccessToken` for the
-/// `Bearer <access_token>:<exchange_code>` header (WGNI-protocol.md
-/// section 2.5). Not secret-strength (it never authenticates on its own),
+/// `Bearer <access_token>:<exchange_code>` header. Not secret-strength (it never authenticates on its own),
 /// so a plain `Debug` is fine.
 ///
 /// Generation (32 chars from `[0-9A-F]`) belongs to the client phase, which
@@ -72,9 +71,9 @@ impl ExchangeCode {
     }
 }
 
-/// The `AccessToken`/`ExchangeCode` pair the `Bearer` header (protocol
-/// section 2.5) requires together -- makes "have a token but forgot the
-/// exchange code" unrepresentable.
+/// The `AccessToken`/`ExchangeCode` pair the `Bearer` header requires
+/// together -- makes "have a token but forgot the exchange code"
+/// unrepresentable.
 #[derive(Debug)]
 pub struct TokenPair {
     pub access_token: AccessToken,
@@ -83,7 +82,7 @@ pub struct TokenPair {
 
 /// Whether a stored `AccessToken` is known to still be valid.
 ///
-/// WGNI has no refresh-token grant (WGNI-protocol.md section 3): expiry is
+/// WGNI has no refresh-token grant: expiry is
 /// otherwise only detectable via a failing authenticated call. `Unknown`
 /// models "no `expires_in` observed yet / not verified this run" -- never a
 /// sentinel timestamp like zero.

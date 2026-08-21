@@ -1,5 +1,5 @@
-//! `StoredSession` (design-draft.md section 3) and the adapter that maps it
-//! to `wgc_launch::TokenStatus` (design-draft.md section 6).
+//! `StoredSession` and the adapter that maps it
+//! to `wgc_launch::TokenStatus`.
 
 use std::time::SystemTime;
 
@@ -45,7 +45,7 @@ pub fn launch_token_status(session: Option<&StoredSession>, now: SystemTime) -> 
         }
         // DECISION (a) optimistic-valid: WGNI has no refresh_token, so real
         // expiry is only detectable via a failing authenticated call
-        // (WGNI-protocol.md section 3). A freshly-loaded, not-yet-verified
+        //. A freshly-loaded, not-yet-verified
         // session is therefore treated as launchable; a dead token surfaces
         // as a LaunchError from the actual launch attempt instead. The
         // `expires_at` field carries `now`, meaning "assumed valid as of

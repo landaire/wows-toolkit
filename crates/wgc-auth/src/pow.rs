@@ -1,4 +1,4 @@
-//! Keccak-512 hashcash proof-of-work solver (WGNI-protocol.md section 2.3).
+//! Keccak-512 hashcash proof-of-work solver.
 
 use std::time::Duration;
 use std::time::Instant;
@@ -10,8 +10,8 @@ use thiserror::Error;
 /// A WGNI PoW challenge, parsed into its clean form.
 ///
 /// The wire field for `resource` is literally spelled "resourse" (a WG
-/// typo, WGNI-protocol.md section 2.2); the serde rename for that wire
-/// shape belongs to the client phase, not this struct.
+/// typo); the serde rename for that wire shape lives on the client's wire
+/// model, not this struct.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PowChallenge {
     pub algorithm_version: String,
@@ -67,12 +67,11 @@ fn leading_zero_hex_chars(digest: &[u8]) -> u8 {
 }
 
 /// Brute-forces `pow_number` from 0 until the Keccak-512 hex digest of the
-/// candidate string (protocol section 2.3) has at least `complexity`
+/// candidate string's Keccak-512 hex digest has at least `complexity`
 /// leading zero hex characters, or `timeout` elapses.
 ///
 /// Single-threaded for this phase; multi-worker search is a documented
-/// follow-up (WGNI-protocol.md section 2.3 notes the live client
-/// parallelizes across threads).
+/// follow-up.
 pub fn solve(challenge: &PowChallenge, timeout: Duration) -> Result<PowSolution, PowError> {
     let deadline = Instant::now() + timeout;
     let mut pow_number: u64 = 0;

@@ -38,7 +38,10 @@ async fn live_login_returns_nickname_and_account_id() {
         "ru" => AccountRealm::Ru,
         other => panic!("unknown WGC_TEST_REALM {other:?}, expected eu/na/asia/ru"),
     };
-    let tracking_id = TrackingId::parse("wgc-auth-live-test").expect("static tracking id is non-empty");
+    // WGNI requires a numeric tid (WGC uses a nanosecond unix timestamp);
+    // override with WGC_TEST_TID to reuse a specific device id.
+    let tid = std::env::var("WGC_TEST_TID").unwrap_or_else(|_| "1700000000000000000".to_string());
+    let tracking_id = TrackingId::parse(&tid).expect("tracking id is non-empty");
     let client = AuthClient::new(realm, tracking_id);
     let credentials = AccountCredentials { username, password: SecretPassword::new(password) };
 

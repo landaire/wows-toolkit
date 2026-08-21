@@ -2093,7 +2093,11 @@ impl TabState {
     #[cfg(feature = "launcher")]
     fn ensure_tracking_id(&mut self) -> wgc_core::TrackingId {
         let existing = self.persisted.read().settings.launcher.tracking_id.clone();
+        // WGNI only accepts a numeric tid; drop any legacy non-numeric value
+        // and mint a fresh one.
         if let Some(raw) = existing
+            && !raw.is_empty()
+            && raw.bytes().all(|b| b.is_ascii_digit())
             && let Ok(id) = wgc_core::TrackingId::parse(&raw)
         {
             return id;
@@ -2212,13 +2216,18 @@ impl TabState {
     }
 }
 
-/// Generates a 40-char lowercase-hex WGNI tracking id (`tid`). WGC itself
-/// reads this from a device file; the toolkit has no such file, so it mints
-/// and persists a stable one on first login instead.
+/// Mints a WGNI tracking id (`tid`). WGC stores this as a nanosecond unix
+/// timestamp -- a 19-digit numeric string -- and WGNI only accepts a numeric
+/// tid. The toolkit has no device file, so it generates one from the current
+/// time and persists it as this install's stable device id.
 #[cfg(feature = "launcher")]
 fn generate_tracking_id() -> String {
-    const HEX: &[u8] = b"0123456789abcdef";
-    (0..40).map(|_| HEX[rand::random_range(0..HEX.len())] as char).collect()
+    match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(since_epoch) => since_epoch.as_nanos().to_string(),
+        // A pre-epoch clock is not realistic; fall back to a random 19-digit
+        // numeric so the tid stays WGNI-valid.
+        Err(_) => rand::random_range(1_000_000_000_000_000_000u64..10_000_000_000_000_000_000u64).to_string(),
+    }
 }
 
 /// Turns a login/two-factor `AuthClient` result into `LoginMsg`(s) and sends

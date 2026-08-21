@@ -1,4 +1,4 @@
-//! Async HTTP client for the WGNI login flow (WGNI-protocol.md section 2).
+//! Async HTTP client for the WGNI login flow.
 
 use std::time::Duration;
 use std::time::SystemTime;
@@ -25,25 +25,10 @@ use crate::token::TokenPair;
 
 /// WGNI API path version.
 ///
-/// v3 is the current WGC client's version (CONFIRMED via path strings in
-/// `game_center.dll`, WGNI-protocol.md 2.1) but its exact JSON field names
-/// and body shapes are UNVERIFIED -- no live capture exists yet. v2 is the
-/// only source with a runnable reference implementation
-/// (`Mixaill/galaxy-integration-wargaming`), so this crate speaks v2 until a
-/// live v3 capture confirms the field names match. Switch by changing this
-/// constant once that capture exists.
-///
-/// Confirmed v3 paths (WGNI-protocol.md 2.1, from `game_center.dll` strings;
-/// note `challenge/create/` and the trailing `create/` suffix, and the
-/// separate `idtoken`/`revoke` endpoints, which have no v2 equivalent seen
-/// in the OSS source):
-///   account/credentials/create/oauth/token/challenge/create/
-///   account/credentials/create/oauth/token/
-///   account/credentials/create/oauth/token/tfa/email/
-///   account/credentials/create/token1/
-///   account/credentials/create/idtoken/
-///   account/credentials/revoke/oauth/token/
-///   account/info/
+/// The live EU endpoint answers the v2 challenge path with a valid PoW
+/// challenge (HTTP 200); the v3 challenge path returns HTTP 403 (CSRF, browser
+/// Referer required) to a non-browser client, so this crate speaks v2. Switch
+/// this constant if a future capture shows v3 usable headlessly.
 const WGNI_API_VERSION: &str = "v2";
 
 /// WGC's own user-agent string, matching the convention already established
@@ -51,8 +36,14 @@ const WGNI_API_VERSION: &str = "v2";
 /// Game Center install would send.
 const USER_AGENT: &str = "WargamingGameCenter/26.04.01.3190";
 
-/// Wall-clock budget for the proof-of-work search (WGNI-protocol.md 2.3).
+/// Wall-clock budget for the proof-of-work search.
 const POW_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// The token endpoint hands back a 202 + Location that resolves to the real
+/// token; poll that Location this many times, this far apart, before treating
+/// a still-pending login as awaiting an out-of-band second factor.
+const ASYNC_TOKEN_POLLS: usize = 15;
+const ASYNC_TOKEN_POLL_INTERVAL: Duration = Duration::from_secs(2);
 
 const EXCHANGE_CODE_LEN: usize = 32;
 const EXCHANGE_CODE_ALPHABET: &[u8] = b"0123456789ABCDEF";
@@ -64,8 +55,7 @@ pub struct AccountCredentials {
     pub password: SecretPassword,
 }
 
-/// A 2FA retry submits exactly one of these, never both/neither
-/// (WGNI-protocol.md 2.7).
+/// A 2FA retry submits exactly one of these, never both or neither.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TwoFactorCode {
     Otp(String),
@@ -82,6 +72,10 @@ impl AuthClient {
     pub fn new(realm: AccountRealm, tracking_id: TrackingId) -> AuthClient {
         let http = reqwest::Client::builder()
             .user_agent(USER_AGENT)
+            // The challenge response sets a short-lived session cookie
+            // (npprod_wgni_sessionid); the token POST must carry it back so the
+            // server ties the solved PoW to the challenge it issued.
+            .cookie_store(true)
             .build()
             // Static builder config (fixed UA, default TLS backend); a
             // failure here means the platform's TLS/root-cert setup is
@@ -118,15 +112,18 @@ impl AuthClient {
         let challenge = to_pow_challenge(&challenge_wire);
         let solution = solve_pow(challenge).await?;
         let success = self.request_token_by_password(credentials, solution, twofactor.as_ref()).await?;
-        let user_id = success
-            .user
-            .ok_or_else(|| AuthError::BadResponse { detail: "token response missing user field".to_string() })?;
+        // The password-grant success body carries no `user` field; identity
+        // comes from the account/info call below. When `user` is present
+        // (older/other shapes), cross-check it as a consistency guard.
+        let user_id = success.user;
         let access_token = AccessToken::new(success.access_token);
         let expiry = expiry_from(success.expires_in);
         let exchange_code = self.request_token_exchange(&access_token).await?;
         let tokens = TokenPair { access_token, exchange_code };
         let (account_id, nickname) = self.request_account_info(&tokens).await?;
-        if account_id.get() != user_id {
+        if let Some(user_id) = user_id
+            && account_id.get() != user_id
+        {
             return Err(AuthError::BadResponse {
                 detail: format!("account/info sub {} does not match token user {}", account_id.get(), user_id),
             });
@@ -140,11 +137,10 @@ impl AuthClient {
         self.request_account_info(tokens).await
     }
 
-    /// Best-effort server-side revoke
-    /// (`account/credentials/revoke/oauth/token/`, CONFIRMED path for v3
-    /// only, WGNI-protocol.md 2.1 -- under `WGNI_API_VERSION` v2 this call
-    /// may simply 404). Callers must proceed to delete the local keyring
-    /// entry regardless of whether this returns `Err`.
+    /// Best-effort server-side revoke of `account/credentials/revoke/oauth/token/`.
+    /// Under the current `WGNI_API_VERSION` this call may simply 404; callers
+    /// must delete the local keyring entry regardless of whether it returns
+    /// `Err`.
     pub async fn logout(&self, tokens: &TokenPair) -> Result<(), AuthError> {
         let url = self.endpoint("account/credentials/revoke/oauth/token/");
         let bearer = bearer_header(tokens);
@@ -171,7 +167,7 @@ impl AuthClient {
             self.http.post(&url).send().await.map_err(|source| AuthError::Request { url: url.clone(), source })?;
         let status = response.status();
         // HTTP 409 on the challenge endpoint means banned, not a generic
-        // failure (WGNI-protocol.md 2.2).
+        // failure.
         if status.as_u16() == 409 {
             return Err(AuthError::AccountBanned);
         }
@@ -190,9 +186,9 @@ impl AuthClient {
         let pow = body
             .pow
             .ok_or_else(|| AuthError::BadResponse { detail: "challenge response missing pow object".to_string() })?;
-        // pow::solve only implements the hashcash/Keccak-512 algorithm
-        // (WGNI-protocol.md 2.3); a different algorithm here would silently
-        // compute a doomed solution instead of failing clearly.
+        // pow::solve only implements the hashcash/Keccak-512 algorithm; a
+        // different algorithm here would silently compute a doomed solution
+        // instead of failing clearly.
         if pow.algorithm.name != "hashcash" {
             return Err(AuthError::BadResponse {
                 detail: format!("unsupported proof-of-work algorithm {:?}", pow.algorithm.name),
@@ -255,11 +251,10 @@ impl AuthClient {
             .send()
             .await
             .map_err(|source| AuthError::Request { url: url.clone(), source })?;
-        let status = response.status();
+        let (status, body_text) = self.resolve_async(response, &url).await?;
         if status == reqwest::StatusCode::UNAUTHORIZED {
             return Err(AuthError::SessionExpired);
         }
-        let body_text = response.text().await.map_err(|source| AuthError::Request { url: url.clone(), source })?;
         if !status.is_success() {
             return Err(AuthError::BadResponse {
                 detail: format!("account/info returned HTTP {}: {}", status.as_u16(), body_text),
@@ -285,8 +280,7 @@ impl AuthClient {
             .send()
             .await
             .map_err(|source| AuthError::Request { url: url.to_string(), source })?;
-        let status = response.status();
-        let body_text = response.text().await.map_err(|source| AuthError::Request { url: url.to_string(), source })?;
+        let (status, body_text) = self.resolve_async(response, url).await?;
         if status.is_success() {
             return serde_json::from_str(&body_text).map_err(|source| AuthError::BadResponse {
                 detail: format!("could not parse token response: {source}"),
@@ -301,9 +295,55 @@ impl AuthClient {
         Err(classify_token_error(status.as_u16(), description.as_deref(), twofactor_token))
     }
 
+    /// WGNI answers a token grant and account/info with `202 Accepted` plus a
+    /// `Location` that materializes the real result; follow it until it settles
+    /// to a final status. A `Location`-chained 202 that never settles within
+    /// the budget means the login is waiting on an out-of-band second factor
+    /// (an authenticator approval or emailed code). `context_url` names the
+    /// originating request for error reporting.
+    async fn resolve_async(
+        &self,
+        response: reqwest::Response,
+        context_url: &str,
+    ) -> Result<(reqwest::StatusCode, String), AuthError> {
+        let mut status = response.status();
+        let mut next = location_of(&response);
+        let mut body =
+            response.text().await.map_err(|source| AuthError::Request { url: context_url.to_string(), source })?;
+        if status.as_u16() != 202 {
+            return Ok((status, body));
+        }
+        let mut location = next.take().ok_or_else(|| AuthError::BadResponse {
+            detail: format!("{context_url} returned 202 without a Location"),
+        })?;
+        for _ in 0..ASYNC_TOKEN_POLLS {
+            let polled = self
+                .http
+                .get(&location)
+                .send()
+                .await
+                .map_err(|source| AuthError::Request { url: location.clone(), source })?;
+            status = polled.status();
+            let chained = location_of(&polled);
+            body = polled.text().await.map_err(|source| AuthError::Request { url: location.clone(), source })?;
+            if status.as_u16() != 202 {
+                return Ok((status, body));
+            }
+            if let Some(chained) = chained {
+                location = chained;
+            }
+            tokio::time::sleep(ASYNC_TOKEN_POLL_INTERVAL).await;
+        }
+        Err(AuthError::VerificationPending)
+    }
+
     fn endpoint(&self, path: &str) -> String {
         format!("https://{}/id/api/{}/{}", self.realm.config().domain_wgnet, WGNI_API_VERSION, path)
     }
+}
+
+fn location_of(response: &reqwest::Response) -> Option<String> {
+    response.headers().get(reqwest::header::LOCATION).and_then(|v| v.to_str().ok()).map(|s| s.to_string())
 }
 
 fn bearer_header(tokens: &TokenPair) -> String {
@@ -338,7 +378,7 @@ async fn solve_pow(challenge: PowChallenge) -> Result<PowSolution, AuthError> {
     result.map_err(|PowError::Timeout| AuthError::ProofOfWorkTimeout)
 }
 
-/// Client-minted 32-char hex-ish nonce (WGNI-protocol.md 2.5): 32 characters
+/// Client-minted 32-char hex-ish nonce: 32 characters
 /// drawn from `[0-9A-F]`, not server-issued.
 fn generate_exchange_code() -> String {
     (0..EXCHANGE_CODE_LEN)
@@ -372,11 +412,9 @@ fn classify_token_error(
         | "Invalid otp_code parameter value."
         | "Invalid twofactor token."
         | "Invalid backup_code parameter value." => AuthError::TwoFactorInvalidCode,
-        // Wire strings UNCONFIRMED (WGNI-protocol.md 2.7): the report only
-        // names the C++ error types `TwoFactorAuthLoginLocked` /
-        // `TwoFactorAuthBanned`, not the literal error_description; these
-        // are inferred by the snake_case `twofactor_*` naming convention of
-        // the CONFIRMED strings above, pending a live capture.
+        // These two wire strings are not yet observed; they follow the
+        // snake_case `twofactor_*` convention of the confirmed strings above
+        // and stay best-effort until a live capture confirms them.
         "twofactor_login_locked" => AuthError::TwoFactorLoginLocked,
         "twofactor_banned" => AuthError::TwoFactorBanned,
         "account_not_found" => AuthError::AccountNotFound,
