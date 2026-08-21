@@ -12,6 +12,7 @@ buildscript = workspace_buildscript(
 
 TOOLKIT_DEPS = [
     "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wgc-auth:wgc-auth",
     "//crates/wgc-catalog:wgc-catalog",
     "//crates/wgc-core:wgc-core",
     "//crates/wgc-download:wgc-download",

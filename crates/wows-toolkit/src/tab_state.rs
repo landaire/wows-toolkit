@@ -489,6 +489,93 @@ pub enum DownloadUiState {
     Cancelled,
 }
 
+/// Pending two-factor challenge, set when a login attempt returns
+/// `AuthError::TwoFactorRequired`. The plaintext password needed to retry
+/// (WGNI resubmits full credentials alongside the code) is held separately
+/// in [`LoginForm::pending_password`], not here -- this struct only mirrors
+/// what the UI shows.
+#[cfg(feature = "launcher")]
+#[derive(Debug, Clone)]
+pub struct TwoFactorPrompt {
+    pub twofactor_token: String,
+    pub code: String,
+    pub use_backup: bool,
+}
+
+/// Sign-in form state for the Launcher tab's Account section, driven by
+/// [`TabState::start_login`] / [`TabState::start_two_factor`].
+///
+/// `Debug` is hand-written (not derived) to redact `password`, the same way
+/// `wgc_auth::SecretPassword`/`AccessToken` redact themselves -- this struct
+/// holds the same class of secret in a plain field for the UI's sake, and
+/// should not leak it through a future `{:?}` dump.
+#[cfg(feature = "launcher")]
+pub struct LoginForm {
+    pub realm: wgc_auth::AccountRealm,
+    pub username: String,
+    /// Plaintext only because `egui::TextEdit` needs a `String` to bind to.
+    /// Taken (cleared) the moment a request is built; never persisted.
+    pub password: String,
+    /// Whether the sign-in fields are expanded (signed-out state only).
+    pub show: bool,
+    pub in_progress: bool,
+    pub error: Option<String>,
+    pub two_factor: Option<TwoFactorPrompt>,
+    pub captcha_blocked: bool,
+    /// The password as a zeroizing secret, held only while a two-factor
+    /// retry is pending (`two_factor.is_some()`). `app.rs` clears this on
+    /// every terminal inbox message (success, failure, or CAPTCHA block).
+    pub(crate) pending_password: Option<wgc_auth::SecretPassword>,
+}
+
+#[cfg(feature = "launcher")]
+impl std::fmt::Debug for LoginForm {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LoginForm")
+            .field("realm", &self.realm)
+            .field("username", &self.username)
+            .field("password", &"<redacted>")
+            .field("show", &self.show)
+            .field("in_progress", &self.in_progress)
+            .field("error", &self.error)
+            .field("two_factor", &self.two_factor)
+            .field("captcha_blocked", &self.captcha_blocked)
+            .field("pending_password", &self.pending_password.is_some())
+            .finish()
+    }
+}
+
+#[cfg(feature = "launcher")]
+impl Default for LoginForm {
+    fn default() -> Self {
+        LoginForm {
+            realm: wgc_auth::AccountRealm::Eu,
+            username: String::new(),
+            password: String::new(),
+            show: false,
+            in_progress: false,
+            error: None,
+            two_factor: None,
+            captcha_blocked: false,
+            pending_password: None,
+        }
+    }
+}
+
+/// Result of a background login/two-factor attempt, drained by `app.rs`
+/// into [`TabState::active_session`] / [`TabState::login_form`].
+#[cfg(feature = "launcher")]
+pub enum LoginMsg {
+    Success(Box<wgc_auth::StoredSession>),
+    /// Whether `Success`'s session was written to the OS keyring.
+    Persisted(bool),
+    TwoFactorRequired {
+        twofactor_token: String,
+    },
+    CaptchaRequired,
+    Failed(String),
+}
+
 /// Main application state container.
 ///
 /// Persisted state lives in `self.persisted` (shared with background save task).
@@ -714,6 +801,21 @@ pub struct TabState {
     /// [`Self::start_download`].
     #[cfg(feature = "launcher")]
     pub download_inbox: Option<egui_inbox::UiInbox<(PathBuf, DownloadUiState)>>,
+    /// The live in-memory account session, if any. Loaded from the OS
+    /// keyring at startup or set after a successful sign-in; consulted by
+    /// the online-launch gate.
+    #[cfg(feature = "launcher")]
+    pub active_session: Option<wgc_auth::StoredSession>,
+    /// False when the OS has no secret store and the active session is
+    /// session-only (never reached the keyring).
+    #[cfg(feature = "launcher")]
+    pub session_persisted: bool,
+    #[cfg(feature = "launcher")]
+    pub login_form: LoginForm,
+    /// Inbox for background login/two-factor tasks started by
+    /// [`Self::start_login`] / [`Self::start_two_factor`].
+    #[cfg(feature = "launcher")]
+    pub login_inbox: Option<egui_inbox::UiInbox<LoginMsg>>,
 }
 
 impl Default for TabState {
@@ -827,6 +929,14 @@ impl Default for TabState {
             download_inbox: None,
             #[cfg(feature = "launcher")]
             catalog_check_inbox: None,
+            #[cfg(feature = "launcher")]
+            active_session: None,
+            #[cfg(feature = "launcher")]
+            session_persisted: false,
+            #[cfg(feature = "launcher")]
+            login_form: LoginForm::default(),
+            #[cfg(feature = "launcher")]
+            login_inbox: None,
         }
     }
 }
@@ -1953,6 +2063,203 @@ impl TabState {
                 self.download_inbox = Some(inbox);
                 sender
             }
+        }
+    }
+
+    /// Lazily create (once) the shared inbox login/two-factor tasks send
+    /// their results over. Mirrors [`Self::catalog_check_sender`].
+    #[cfg(feature = "launcher")]
+    fn login_sender(&mut self) -> egui_inbox::UiInboxSender<LoginMsg> {
+        match &self.login_inbox {
+            Some(inbox) => inbox.sender(),
+            None => {
+                let (sender, inbox) = egui_inbox::UiInbox::channel();
+                self.login_inbox = Some(inbox);
+                sender
+            }
+        }
+    }
+
+    /// Returns the persisted WGNI tracking id (`tid`), generating and
+    /// persisting a fresh one (40 lowercase hex chars) the first time this
+    /// is called. `TrackingId::parse` only rejects an empty string, so the
+    /// only way it fails here is a hand-edited config; that is treated the
+    /// same as absent -- regenerate rather than propagate an error the user
+    /// cannot act on.
+    #[cfg(feature = "launcher")]
+    fn ensure_tracking_id(&mut self) -> wgc_core::TrackingId {
+        let existing = self.persisted.read().settings.launcher.tracking_id.clone();
+        if let Some(raw) = existing
+            && let Ok(id) = wgc_core::TrackingId::parse(&raw)
+        {
+            return id;
+        }
+        let generated = generate_tracking_id();
+        self.persisted.write().settings.launcher.tracking_id = Some(generated.clone());
+        self.request_save();
+        wgc_core::TrackingId::parse(&generated).expect("freshly generated tracking id is non-empty")
+    }
+
+    /// Kick off a background sign-in attempt using the current
+    /// [`Self::login_form`] contents. `app.rs` drains the result each frame
+    /// via `login_inbox`. The password buffer is taken (cleared) here,
+    /// before the request is even built, so it never lingers in the form
+    /// longer than the click that submitted it.
+    #[cfg(feature = "launcher")]
+    pub fn start_login(&mut self) {
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot sign in: tokio runtime is not available");
+            return;
+        };
+        let realm = self.login_form.realm;
+        let username = self.login_form.username.clone();
+        let password = wgc_auth::SecretPassword::new(std::mem::take(&mut self.login_form.password));
+        let tracking_id = self.ensure_tracking_id();
+
+        self.login_form.in_progress = true;
+        self.login_form.error = None;
+        self.login_form.captcha_blocked = false;
+        self.login_form.two_factor = None;
+
+        let sender = self.login_sender();
+        let ctx = self.egui_ctx.clone();
+        // A retry (start_two_factor) needs the same username/password again
+        // (WGNI resubmits full credentials alongside the code), so the
+        // secret is kept here rather than being fully consumed. A fresh
+        // `SecretPassword` is minted from it for each request.
+        self.login_form.pending_password = Some(wgc_auth::SecretPassword::new(password.expose_secret().to_string()));
+        runtime.spawn(async move {
+            let client = wgc_auth::AuthClient::new(realm, tracking_id);
+            let credentials = wgc_auth::AccountCredentials { username, password };
+            let result = client.login(credentials).await;
+            send_login_result(result, &sender).await;
+            ctx.request_repaint();
+        });
+    }
+
+    /// Resubmit the pending login with a two-factor code, after a prior
+    /// [`Self::start_login`] returned `TwoFactorRequired`. A no-op if there
+    /// is no pending challenge.
+    #[cfg(feature = "launcher")]
+    pub fn start_two_factor(&mut self, code: wgc_auth::TwoFactorCode) {
+        let Some(prompt) = self.login_form.two_factor.clone() else {
+            return;
+        };
+        let Some(pending) = self.login_form.pending_password.as_ref() else {
+            return;
+        };
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot submit two-factor code: tokio runtime is not available");
+            return;
+        };
+        let realm = self.login_form.realm;
+        let username = self.login_form.username.clone();
+        let password = wgc_auth::SecretPassword::new(pending.expose_secret().to_string());
+        let tracking_id = self.ensure_tracking_id();
+
+        self.login_form.in_progress = true;
+        self.login_form.error = None;
+
+        let sender = self.login_sender();
+        let ctx = self.egui_ctx.clone();
+        runtime.spawn(async move {
+            let client = wgc_auth::AuthClient::new(realm, tracking_id);
+            let credentials = wgc_auth::AccountCredentials { username, password };
+            let result = client.login_with_two_factor(credentials, prompt.twofactor_token, code).await;
+            send_login_result(result, &sender).await;
+            ctx.request_repaint();
+        });
+    }
+
+    /// Best-effort server-side revoke, then clear the active session and its
+    /// keyring entry. The server call proceeds even if it fails; the local
+    /// state is cleared regardless.
+    #[cfg(feature = "launcher")]
+    pub fn sign_out(&mut self) {
+        let Some(session) = self.active_session.take() else {
+            return;
+        };
+        self.session_persisted = false;
+        self.persisted.write().settings.launcher.active_account = None;
+        self.request_save();
+
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            // No runtime to run the revoke/delete on; local state is already
+            // cleared above, so the stale keyring entry (if any) just
+            // outlives this run and gets overwritten on the next sign-in.
+            return;
+        };
+        let tracking_id = self.ensure_tracking_id();
+        let realm = session.realm;
+        let account_id = session.account_id;
+        runtime.spawn(async move {
+            let client = wgc_auth::AuthClient::new(realm, tracking_id);
+            // Best-effort: the local keyring entry is deleted below
+            // regardless of whether the server-side revoke succeeds.
+            if let Err(e) = client.logout(&session.tokens).await {
+                warn!("server-side session revoke failed (signing out locally anyway): {e}");
+            }
+            drop(session);
+            let _ = tokio::task::spawn_blocking(move || wgc_auth::SessionStore::new().delete(realm, account_id)).await;
+        });
+    }
+}
+
+/// Generates a 40-char lowercase-hex WGNI tracking id (`tid`). WGC itself
+/// reads this from a device file; the toolkit has no such file, so it mints
+/// and persists a stable one on first login instead.
+#[cfg(feature = "launcher")]
+fn generate_tracking_id() -> String {
+    const HEX: &[u8] = b"0123456789abcdef";
+    (0..40).map(|_| HEX[rand::random_range(0..HEX.len())] as char).collect()
+}
+
+/// Turns a login/two-factor `AuthClient` result into `LoginMsg`(s) and sends
+/// them over `sender`. On success, also attempts to persist the session to
+/// the OS keyring (sync, so it runs on a blocking-pool thread) before
+/// reporting success, so `Persisted` always follows `Success`.
+#[cfg(feature = "launcher")]
+async fn send_login_result(
+    result: Result<wgc_auth::StoredSession, wgc_auth::AuthError>,
+    sender: &egui_inbox::UiInboxSender<LoginMsg>,
+) {
+    match result {
+        Ok(session) => {
+            let saved = tokio::task::spawn_blocking(move || {
+                let persisted = wgc_auth::SessionStore::new().save(&session);
+                (session, persisted)
+            })
+            .await;
+            match saved {
+                Ok((session, Ok(()))) => {
+                    let _ = sender.send(LoginMsg::Success(Box::new(session)));
+                    let _ = sender.send(LoginMsg::Persisted(true));
+                }
+                Ok((session, Err(wgc_auth::AuthError::NoSecretStore))) => {
+                    let _ = sender.send(LoginMsg::Success(Box::new(session)));
+                    let _ = sender.send(LoginMsg::Persisted(false));
+                }
+                Ok((session, Err(e))) => {
+                    warn!("could not save session to keyring: {e}");
+                    let _ = sender.send(LoginMsg::Success(Box::new(session)));
+                    let _ = sender.send(LoginMsg::Persisted(false));
+                }
+                Err(join_err) => {
+                    warn!("keyring save task did not complete: {join_err}");
+                    let _ = sender.send(LoginMsg::Failed(
+                        "signed in, but could not save the session; sign in again next launch".to_string(),
+                    ));
+                }
+            }
+        }
+        Err(wgc_auth::AuthError::TwoFactorRequired { twofactor_token }) => {
+            let _ = sender.send(LoginMsg::TwoFactorRequired { twofactor_token });
+        }
+        Err(wgc_auth::AuthError::CaptchaRequired) => {
+            let _ = sender.send(LoginMsg::CaptchaRequired);
+        }
+        Err(e) => {
+            let _ = sender.send(LoginMsg::Failed(e.to_string()));
         }
     }
 }

@@ -1399,6 +1399,23 @@ impl WowsToolkitApp {
         state.tab_state.tokio_runtime = Some(Arc::clone(&state.runtime));
         state.tab_state.db_pool = state.db_pool.clone();
 
+        // Load a previously signed-in account's session from the OS keyring,
+        // if one was persisted. Local-only and fast (no network), so this
+        // runs synchronously rather than through the login background-task
+        // machinery. `.verify()` (a network call) is deliberately not run
+        // here -- expiry is checked lazily by the launch gate.
+        #[cfg(feature = "launcher")]
+        if let Some(account) = state.tab_state.persisted.read().settings.launcher.active_account.clone() {
+            match wgc_auth::SessionStore::new().load(account.realm, account.account_id) {
+                Ok(session) => {
+                    state.tab_state.session_persisted = true;
+                    state.tab_state.active_session = Some(session);
+                }
+                Err(wgc_auth::AuthError::NoStoredSession | wgc_auth::AuthError::NoSecretStore) => {}
+                Err(e) => tracing::warn!("could not load stored session from keyring: {e}"),
+            }
+        }
+
         // Main window geometry is now restored via the ViewportBuilder in main.rs,
         // which is the only way to set window position. Size, fullscreen, and
         // maximized state are also applied there.
@@ -3166,6 +3183,57 @@ impl WowsToolkitApp {
             let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
             for (path, state) in updates {
                 self.tab_state.download_state.insert(path, state);
+            }
+        }
+
+        // Drain background login/two-factor results. Every message is
+        // terminal for the in-flight attempt except `TwoFactorRequired`
+        // (which starts a new one) and `Persisted` (which always follows a
+        // `Success` for the same attempt), so `in_progress` and the retry
+        // secret are cleared on every variant except those two.
+        #[cfg(feature = "launcher")]
+        if let Some(inbox) = self.tab_state.login_inbox.as_ref() {
+            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
+            for msg in updates {
+                match msg {
+                    crate::tab_state::LoginMsg::Success(session) => {
+                        self.tab_state.persisted.write().settings.launcher.active_account =
+                            Some(crate::data::settings::PersistedAccount {
+                                realm: session.realm,
+                                account_id: session.account_id,
+                                nickname: session.nickname.clone(),
+                            });
+                        self.tab_state.request_save();
+                        self.tab_state.active_session = Some(*session);
+                        self.tab_state.login_form.in_progress = false;
+                        self.tab_state.login_form.pending_password = None;
+                        self.tab_state.login_form.two_factor = None;
+                        self.tab_state.login_form.show = false;
+                    }
+                    crate::tab_state::LoginMsg::Persisted(persisted) => {
+                        self.tab_state.session_persisted = persisted;
+                    }
+                    crate::tab_state::LoginMsg::TwoFactorRequired { twofactor_token } => {
+                        self.tab_state.login_form.in_progress = false;
+                        self.tab_state.login_form.two_factor = Some(crate::tab_state::TwoFactorPrompt {
+                            twofactor_token,
+                            code: String::new(),
+                            use_backup: false,
+                        });
+                    }
+                    crate::tab_state::LoginMsg::CaptchaRequired => {
+                        self.tab_state.login_form.in_progress = false;
+                        self.tab_state.login_form.captcha_blocked = true;
+                        self.tab_state.login_form.pending_password = None;
+                        self.tab_state.login_form.two_factor = None;
+                    }
+                    crate::tab_state::LoginMsg::Failed(msg) => {
+                        self.tab_state.login_form.in_progress = false;
+                        self.tab_state.login_form.error = Some(msg);
+                        self.tab_state.login_form.pending_password = None;
+                        self.tab_state.login_form.two_factor = None;
+                    }
+                }
             }
         }
 

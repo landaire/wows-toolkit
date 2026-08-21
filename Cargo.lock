@@ -15607,6 +15607,7 @@ dependencies = [
  "unidecode",
  "walkdir",
  "web-time",
+ "wgc-auth",
  "wgc-catalog",
  "wgc-core",
  "wgc-download",

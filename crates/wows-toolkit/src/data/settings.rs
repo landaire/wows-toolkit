@@ -223,6 +223,36 @@ pub struct LauncherSettings {
     /// a setting so it is a one-line correction, not a code change.
     #[serde(default)]
     pub safe_mode_args: Vec<String>,
+    /// WGNI tracking id (`tid`), generated once on first sign-in and reused
+    /// after. Not secret -- just a stable per-install identifier WGC itself
+    /// keeps in a device file.
+    ///
+    /// Stored as a raw `String`, not `wgc_core::TrackingId`, on purpose:
+    /// that newtype's derived `Deserialize` accepts an empty string (its
+    /// `parse` validation is a constructor-only check), so a hand-edited or
+    /// corrupted config could smuggle an invalid value straight past it.
+    /// Keeping the field a bare `String` here means `TabState::ensure_tracking_id`
+    /// (in `tab_state.rs`) is the one place that validates and regenerates,
+    /// rather than that check being silently skipped on load.
+    #[cfg(feature = "launcher")]
+    #[serde(default)]
+    pub tracking_id: Option<String>,
+    /// Which signed-in account (if any) to load a session for from the OS
+    /// keyring at startup. No secret material lives here -- the token pair
+    /// itself is only ever in the keyring.
+    #[cfg(feature = "launcher")]
+    #[serde(default)]
+    pub active_account: Option<PersistedAccount>,
+}
+
+/// Non-secret index of a signed-in account, persisted so startup knows which
+/// keyring entry to load. See [`LauncherSettings::active_account`].
+#[cfg(feature = "launcher")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PersistedAccount {
+    pub realm: wgc_auth::AccountRealm,
+    pub account_id: wgc_auth::AccountId,
+    pub nickname: wgc_auth::Nickname,
 }
 
 /// General application preferences.
