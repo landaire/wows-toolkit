@@ -128,6 +128,40 @@ fn show_download_status(
     to_cancel
 }
 
+/// Render one known game's installable version, derived from a fresh
+/// catalog check (every part reports `NotInstalled` -- there is nothing
+/// installed yet to diff against). The client part's version is the
+/// headline: WGUS serves one current build per product, so this is "the"
+/// version a fresh install of this game gets, not a choice among several.
+fn show_available_game_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
+    match state {
+        Some(CatalogCheckState::Checking) => {
+            ui.spinner();
+            ui.label("checking available version");
+        }
+        Some(CatalogCheckState::Ready(build)) => {
+            let client_version = build.parts.iter().find_map(|(part, status)| {
+                if *part != wgc_catalog::models::PartName::Client {
+                    return None;
+                }
+                match status {
+                    wgc_catalog::update::PartStatus::NotInstalled { to } => Some(to.to_string()),
+                    wgc_catalog::update::PartStatus::UpToDate
+                    | wgc_catalog::update::PartStatus::UpdateAvailable { .. } => None,
+                }
+            });
+            match client_version {
+                Some(v) => ui.label(format!("version {v}")),
+                None => ui.weak("client version not reported"),
+            };
+        }
+        Some(CatalogCheckState::Error(detail)) => {
+            ui.weak(format!("unavailable: {detail}"));
+        }
+        Some(CatalogCheckState::NoUpdateHost) | None => {}
+    }
+}
+
 impl ToolkitTabViewer<'_> {
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
         self.build_account_section(ui);
@@ -277,6 +311,74 @@ impl ToolkitTabViewer<'_> {
         {
             self.tab_state.start_download(install_path, dest_dir);
         }
+
+        ui.separator();
+        self.build_install_game_section(ui);
+    }
+
+    /// "Install a game" section: lets a user with zero (or more) discovered
+    /// installs download and install one of the built-in known games
+    /// (`wgc_catalog::known_games`) from scratch. Each entry is the current
+    /// build WGUS serves for that product (live WoWs vs Public Test) -- WGUS
+    /// has no history of older builds to offer, so there is no version
+    /// dropdown here, only a choice of product.
+    fn build_install_game_section(&mut self, ui: &mut egui::Ui) {
+        // Guarded by "no results yet" rather than a one-shot flag: once every
+        // known game has an entry (Checking, Ready, or Error) this is
+        // permanently false, so the check fires exactly once per first
+        // render of this section (this fn only runs while the Launcher tab
+        // is visible), same effect `start_catalog_check`'s own per-install
+        // guard achieves for discovered installs.
+        if self.tab_state.available_games.is_empty() {
+            self.tab_state.start_available_games_check();
+        }
+
+        ui.collapsing("Install a game", |ui| {
+            ui.weak("A fresh install is tens of GB.");
+
+            // Collect the install intent (and any cancel click) first so we
+            // do not borrow-conflict with `available_games`/`download_state`
+            // while iterating -- same pattern as `to_download`/`to_launch`
+            // above.
+            let mut to_install: Option<(String, std::path::PathBuf)> = None;
+            let mut to_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> = None;
+
+            for known in wgc_catalog::known_games::known_games() {
+                ui.group(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.strong(known.display_name);
+                        show_available_game_status(ui, self.tab_state.available_games.get(known.game_id));
+                    });
+
+                    let dest = self.tab_state.installing_games.get(known.game_id).cloned();
+                    let download_state = dest.as_ref().and_then(|d| self.tab_state.download_state.get(d));
+                    let is_running = matches!(download_state, Some(DownloadUiState::Running { .. }));
+                    if let Some(cancel) = show_download_status(ui, download_state) {
+                        to_cancel = Some(cancel);
+                    }
+
+                    let is_ready = matches!(
+                        self.tab_state.available_games.get(known.game_id),
+                        Some(CatalogCheckState::Ready(build)) if !build.downloads.is_empty()
+                    );
+                    ui.add_enabled_ui(is_ready && !is_running, |ui| {
+                        if ui.button("Install...").clicked()
+                            && let Some(dest_dir) =
+                                rfd::FileDialog::new().set_directory(wgc_download::default_install_dir()).pick_folder()
+                        {
+                            to_install = Some((known.game_id.to_string(), dest_dir));
+                        }
+                    });
+                });
+            }
+
+            if let Some(cancel) = to_cancel {
+                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some((game_id, dest_dir)) = to_install {
+                self.tab_state.install_known_game(game_id, dest_dir);
+            }
+        });
     }
 
     /// Sign-in / signed-in summary. Renders from `tab_state`, then applies

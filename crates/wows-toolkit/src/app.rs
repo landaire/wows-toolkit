@@ -3189,7 +3189,30 @@ impl WowsToolkitApp {
         if let Some(inbox) = self.tab_state.download_inbox.as_ref() {
             let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
             for (path, state) in updates {
-                self.tab_state.download_state.insert(path, state);
+                let is_fresh_install_done = matches!(state, crate::tab_state::DownloadUiState::Done { .. })
+                    && self.tab_state.installing_games.values().any(|dest| dest == &path);
+                self.tab_state.download_state.insert(path.clone(), state);
+                if is_fresh_install_done {
+                    let mut persisted = self.tab_state.persisted.write();
+                    if !persisted.settings.launcher.manual_installs.contains(&path) {
+                        persisted.settings.launcher.manual_installs.push(path);
+                    }
+                    drop(persisted);
+                    self.tab_state.request_save();
+                    self.tab_state.start_install_discovery();
+                }
+            }
+        }
+
+        // Drain background "available games" catalog-check results (the
+        // Launcher tab's "Install a game" section). Mirrors the
+        // `catalog_check_inbox` drain above, keyed by game id instead of
+        // install path.
+        #[cfg(feature = "launcher")]
+        if let Some(inbox) = self.tab_state.available_games_inbox.as_ref() {
+            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
+            for (game_id, state) in updates {
+                self.tab_state.available_games.insert(game_id, state);
             }
         }
 

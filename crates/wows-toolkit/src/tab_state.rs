@@ -805,6 +805,24 @@ pub struct TabState {
     /// [`Self::start_download`].
     #[cfg(feature = "launcher")]
     pub download_inbox: Option<egui_inbox::UiInbox<(PathBuf, DownloadUiState)>>,
+    /// Last known catalog-check result per known-game id (not per install
+    /// path -- there is no install yet), driven by
+    /// [`Self::start_available_games_check`]. Powers the Launcher tab's
+    /// "Install a game" section.
+    #[cfg(feature = "launcher")]
+    pub available_games: std::collections::HashMap<String, CatalogCheckState>,
+    /// Inbox for background catalog-check tasks started by
+    /// [`Self::start_available_games_check`].
+    #[cfg(feature = "launcher")]
+    pub available_games_inbox: Option<egui_inbox::UiInbox<(String, CatalogCheckState)>>,
+    /// Game id -> chosen destination directory for a fresh install kicked
+    /// off by [`Self::install_known_game`], still in flight or just
+    /// finished. Lets the Launcher tab find that download's
+    /// `download_state[dest]` entry to show progress, and lets `app.rs`
+    /// tell a fresh install apart from an ordinary update when a download
+    /// completes.
+    #[cfg(feature = "launcher")]
+    pub installing_games: std::collections::HashMap<String, PathBuf>,
     /// The live in-memory account session, if any. Loaded from the OS
     /// keyring at startup or set after a successful sign-in; consulted by
     /// the online-launch gate.
@@ -933,6 +951,12 @@ impl Default for TabState {
             download_inbox: None,
             #[cfg(feature = "launcher")]
             catalog_check_inbox: None,
+            #[cfg(feature = "launcher")]
+            available_games: HashMap::new(),
+            #[cfg(feature = "launcher")]
+            available_games_inbox: None,
+            #[cfg(feature = "launcher")]
+            installing_games: HashMap::new(),
             #[cfg(feature = "launcher")]
             active_session: None,
             #[cfg(feature = "launcher")]
@@ -1966,6 +1990,18 @@ impl TabState {
             self.toasts.lock().error("No update check result for this install yet.");
             return;
         };
+        let latest = latest.clone();
+        self.start_download_build(latest, install_path, dest_dir);
+    }
+
+    /// Kick off a background download+install run of `latest` into
+    /// `dest_dir`, tracked under `dest_dir` in `download_state`. Shared by
+    /// [`Self::start_download`] (in-place update/reinstall of a discovered
+    /// install, `dest_dir` is usually the install's own path) and
+    /// [`Self::install_known_game`] (fresh install of a known game into a
+    /// user-chosen empty directory).
+    #[cfg(feature = "launcher")]
+    fn start_download_build(&mut self, latest: wgc_catalog::update::LatestBuild, dest_key: PathBuf, dest_dir: PathBuf) {
         if latest.downloads.is_empty() {
             self.toasts.lock().error("Nothing to download: the catalog reports no parts to fetch.");
             return;
@@ -2007,7 +2043,7 @@ impl TabState {
 
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
         self.download_state.insert(
-            install_path.clone(),
+            dest_key.clone(),
             DownloadUiState::Running {
                 phase: "Starting".to_string(),
                 done_bytes: 0,
@@ -2023,7 +2059,7 @@ impl TabState {
         // resumed run (matching sha1, see `wgc_download::webseed`) finds
         // its own previous partial files rather than starting cold.
         let staging_dir = dest_dir.join(".wows-toolkit-download-staging");
-        let install_path_for_task = install_path.clone();
+        let dest_key_for_task = dest_key.clone();
 
         // `spawn_blocking` + `Handle::block_on`, not `runtime.spawn`: the
         // download chain nests several async fns that each take borrowed
@@ -2045,13 +2081,102 @@ impl TabState {
                 &dest_dir,
                 &cancel,
                 |update| {
-                    let _ = sender.send((install_path_for_task.clone(), update));
+                    let _ = sender.send((dest_key_for_task.clone(), update));
                     ctx.request_repaint();
                 },
             ));
-            let _ = sender.send((install_path_for_task, final_state));
+            let _ = sender.send((dest_key_for_task, final_state));
             ctx.request_repaint();
         });
+    }
+
+    /// Kick off background catalog checks for every built-in known game
+    /// (`wgc_catalog::known_games::known_games`), so the Launcher tab's
+    /// "Install a game" section can show each one's current installable
+    /// version. Per-game a no-op if the cached state is already `Checking`
+    /// or `Ready`, mirroring [`Self::spawn_catalog_check`]'s guard.
+    ///
+    /// All known games are EU-hosted WGUS descriptors today (see
+    /// `known_games`'s own doc); shown regardless of the signed-in account's
+    /// realm for now. A future wgcps product-discovery step is expected to
+    /// populate other realms' entries instead of this hand-seeded list.
+    #[cfg(feature = "launcher")]
+    pub fn start_available_games_check(&mut self) {
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot check available games: tokio runtime is not available");
+            return;
+        };
+        let proxy_url = self.proxy.as_ref().map(|p| p.url.clone());
+
+        for known in wgc_catalog::known_games::known_games() {
+            if matches!(
+                self.available_games.get(known.game_id),
+                Some(CatalogCheckState::Checking) | Some(CatalogCheckState::Ready(_))
+            ) {
+                continue;
+            }
+            let game_info = match known.to_fresh_game_info() {
+                Ok(info) => info,
+                Err(e) => {
+                    self.available_games.insert(known.game_id.to_string(), CatalogCheckState::Error(e.to_string()));
+                    continue;
+                }
+            };
+
+            let sender = self.available_games_sender();
+            self.available_games.insert(known.game_id.to_string(), CatalogCheckState::Checking);
+
+            let game_id = known.game_id.to_string();
+            let proxy_url = proxy_url.clone();
+            let ctx = self.egui_ctx.clone();
+            let runtime = Arc::clone(&runtime);
+            runtime.spawn(async move {
+                let state = match wgc_catalog::CatalogClient::with_proxy(proxy_url.as_deref()) {
+                    Ok(client) => match client.check_updates(&game_info).await {
+                        Ok(build) => CatalogCheckState::Ready(build),
+                        Err(e) => CatalogCheckState::Error(e.to_string()),
+                    },
+                    Err(e) => CatalogCheckState::Error(e.to_string()),
+                };
+                let _ = sender.send((game_id, state));
+                ctx.request_repaint();
+            });
+        }
+    }
+
+    /// Lazily create (once) the shared inbox available-games checks send
+    /// their results over. Mirrors [`Self::catalog_check_sender`].
+    #[cfg(feature = "launcher")]
+    fn available_games_sender(&mut self) -> egui_inbox::UiInboxSender<(String, CatalogCheckState)> {
+        match &self.available_games_inbox {
+            Some(inbox) => inbox.sender(),
+            None => {
+                let (sender, inbox) = egui_inbox::UiInbox::channel();
+                self.available_games_inbox = Some(inbox);
+                sender
+            }
+        }
+    }
+
+    /// Start a fresh install of `game_id` into `dest_dir`. Requires a
+    /// completed, non-empty catalog check (`available_games[game_id]` must
+    /// already be `Ready` with at least one `downloads` entry). Records
+    /// `dest_dir` in `installing_games` so the Launcher tab can find this
+    /// download's progress and `app.rs` can tell a fresh install apart from
+    /// an ordinary update once it completes.
+    #[cfg(feature = "launcher")]
+    pub fn install_known_game(&mut self, game_id: String, dest_dir: PathBuf) {
+        let Some(CatalogCheckState::Ready(latest)) = self.available_games.get(&game_id) else {
+            self.toasts.lock().error("No version check result for this game yet.");
+            return;
+        };
+        if latest.downloads.is_empty() {
+            self.toasts.lock().error("Nothing to download: the catalog reports no parts to fetch.");
+            return;
+        }
+        let latest = latest.clone();
+        self.installing_games.insert(game_id, dest_dir.clone());
+        self.start_download_build(latest, dest_dir.clone(), dest_dir);
     }
 
     /// Lazily create (once) the shared inbox download tasks send their
