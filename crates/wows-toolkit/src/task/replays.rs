@@ -55,19 +55,34 @@ use super::IndexProgress;
 
 use crate::task::networking::load_versioned_constants_from_disk;
 
+/// Timestamp used to order replays newest-first. Creation time is preferred
+/// but not exposed on every filesystem (NTFS mounted on Linux returns
+/// `Unsupported`), so fall back to modified time, then to `UNIX_EPOCH` for an
+/// entry whose metadata cannot be read at all -- that entry then sorts last,
+/// which is a fine home for a file we could not stat.
+fn replay_sort_time(path: &Path) -> std::time::SystemTime {
+    let Ok(meta) = path.metadata() else {
+        return std::time::SystemTime::UNIX_EPOCH;
+    };
+    meta.created().or_else(|_| meta.modified()).unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+}
+
 pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
     let mut files = Vec::new();
 
-    if replays_dir.exists() {
-        for file in std::fs::read_dir(replays_dir).expect("failed to read replay dir").flatten() {
-            if !file.file_type().expect("failed to get file type").is_file() {
+    // An unreadable directory or a single unstattable entry yields "no
+    // listing" / skips that entry rather than panicking: NTFS and other
+    // non-native mounts can fail these per-entry syscalls, and one bad entry
+    // must not lose the whole list. Same tolerance as `walk_replay_files`.
+    if let Ok(entries) = std::fs::read_dir(replays_dir) {
+        for file in entries.flatten() {
+            if !file.file_type().map(|t| t.is_file()).unwrap_or(false) {
                 continue;
             }
 
             let file_path = file.path();
 
-            if let Some("wowsreplay") =
-                file_path.extension().map(|s| s.to_str().expect("failed to convert extension to str"))
+            if file_path.extension().and_then(|s| s.to_str()) == Some("wowsreplay")
                 && file.file_name() != "temp.wowsreplay"
             {
                 files.push(file_path);
@@ -75,7 +90,7 @@ pub fn replay_filepaths(replays_dir: &Path) -> Option<Vec<PathBuf>> {
         }
     }
     if !files.is_empty() {
-        files.sort_by_key(|a| a.metadata().unwrap().created().unwrap());
+        files.sort_by_key(|a| replay_sort_time(a));
         files.reverse();
 
         Some(files)
@@ -2140,6 +2155,32 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::*;
+
+    /// `replay_filepaths` lists `.wowsreplay` files, excludes `temp.wowsreplay`
+    /// and non-replays, and never panics on the sort key -- the regression is a
+    /// filesystem (NTFS on Linux) with no creation time, where the old
+    /// `created().unwrap()` blew up. This exercises the listing/sort path; the
+    /// no-creation-time branch is covered by `replay_sort_time`'s fallback.
+    #[test]
+    fn replay_filepaths_lists_replays_and_excludes_temp_without_panicking() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.wowsreplay"), b"a").unwrap();
+        std::fs::write(dir.path().join("b.wowsreplay"), b"b").unwrap();
+        std::fs::write(dir.path().join("temp.wowsreplay"), b"live").unwrap();
+        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
+
+        let found = replay_filepaths(dir.path()).expect("two real replays are present");
+
+        let names: BTreeSet<_> = found.iter().map(|p| p.file_name().unwrap().to_str().unwrap().to_string()).collect();
+        assert_eq!(names, BTreeSet::from(["a.wowsreplay".to_string(), "b.wowsreplay".to_string()]));
+    }
+
+    /// A directory that does not exist lists nothing instead of panicking.
+    #[test]
+    fn replay_filepaths_on_a_missing_dir_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(replay_filepaths(&dir.path().join("does-not-exist")).is_none());
+    }
 
     mod send_all {
         use std::collections::HashSet;
