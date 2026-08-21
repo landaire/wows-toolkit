@@ -55,8 +55,8 @@ pub enum LaunchError {
     ProtonNotFound,
     #[error("a valid session is required to launch online; please re-authenticate")]
     AuthenticationRequired,
-    #[error("failed to spawn game process: {detail}")]
-    SpawnFailed { detail: String },
+    #[error("failed to spawn game process: {0}")]
+    SpawnFailed(#[from] std::io::Error),
 }
 
 /// The WoWs executable inside an install directory.
@@ -127,11 +127,7 @@ impl<'a> ResolvedLaunch<'a> {
             tracing::info!("Launching {} {}", self.exe.display(), self.args.join(" "));
             // TODO: a Steam-source install here still goes through native spawn instead of
             // `steam -applaunch 552990`; the Steam-through-Steam guarantee only holds on Linux.
-            return self
-                .native_command()
-                .spawn()
-                .map(Some)
-                .map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() });
+            return self.native_command().spawn().map(Some).map_err(LaunchError::SpawnFailed);
         }
         #[cfg(target_os = "linux")]
         {
@@ -142,7 +138,7 @@ impl<'a> ResolvedLaunch<'a> {
                 cmd.arg("-applaunch").arg("552990");
                 cmd.args(&self.args);
                 cmd.envs(self.env.iter().map(|(k, v)| (k.clone(), v.clone())));
-                return cmd.spawn().map(Some).map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() });
+                return cmd.spawn().map(Some).map_err(LaunchError::SpawnFailed);
             }
             let proton = proton.ok_or(LaunchError::ProtonPrefixNotConfigured)?;
             if !proton.proton_binary.exists() {
@@ -177,7 +173,7 @@ impl<'a> ResolvedLaunch<'a> {
                     );
                 }
             }
-            cmd.spawn().map(Some).map_err(|e| LaunchError::SpawnFailed { detail: e.to_string() })
+            cmd.spawn().map(Some).map_err(LaunchError::SpawnFailed)
         }
     }
 }

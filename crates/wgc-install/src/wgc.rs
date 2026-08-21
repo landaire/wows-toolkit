@@ -39,7 +39,7 @@ struct Game {
 
 /// Parse a WGC `preferences.xml` into one install per configured game.
 pub fn parse_preferences(xml: &str) -> Result<Vec<GameInstall>, InstallError> {
-    let prefs: Preferences = quick_xml::de::from_str(xml).map_err(|e| InstallError::Xml { detail: e.to_string() })?;
+    let prefs: Preferences = quick_xml::de::from_str(xml)?;
     Ok(prefs
         .application
         .games_manager
@@ -96,7 +96,7 @@ pub fn discover_wgc_installs(data_dir_override: Option<&Path>) -> Result<Vec<Gam
     let xml = match std::fs::read_to_string(&prefs_path) {
         Ok(xml) => xml,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(e) => return Err(InstallError::Io { detail: e.to_string() }),
+        Err(source) => return Err(InstallError::Io { path: prefs_path.clone(), source }),
     };
     parse_preferences(&xml)
 }

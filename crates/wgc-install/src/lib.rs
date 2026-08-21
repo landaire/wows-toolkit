@@ -53,10 +53,14 @@ impl GameInstall {
 pub enum InstallError {
     #[error("WGC data directory not found")]
     WgcDataDirMissing,
-    #[error("failed to parse WGC xml: {detail}")]
-    Xml { detail: String },
-    #[error("io error: {detail}")]
-    Io { detail: String },
+    #[error("failed to parse WGC xml: {0}")]
+    Xml(#[from] quick_xml::DeError),
+    #[error("io error reading {path}: {source}")]
+    Io {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 pub mod registry;

@@ -89,9 +89,8 @@ impl CatalogClient {
         game_id: &str,
         chain_id: &str,
     ) -> Result<MetadataResponse, CatalogError> {
-        let url = base
-            .join("api/v1/metadata/")
-            .map_err(|e| CatalogError::BadUrl { base: base.to_string(), detail: e.to_string() })?;
+        let url =
+            base.join("api/v1/metadata/").map_err(|e| CatalogError::BadUrl { base: base.to_string(), source: e })?;
         let query = [("guid", game_id), ("chain_id", chain_id), ("protocol_version", METADATA_PROTOCOL_VERSION)];
         let body = self.get_body(url, &query).await?;
         parse_metadata(&body)
@@ -113,7 +112,7 @@ impl CatalogClient {
     ) -> Result<PatchesChainResponse, CatalogError> {
         let url = base
             .join("api/v1/patches_chain/")
-            .map_err(|e| CatalogError::BadUrl { base: base.to_string(), detail: e.to_string() })?;
+            .map_err(|e| CatalogError::BadUrl { base: base.to_string(), source: e })?;
         let query = [
             ("protocol_version", PROTOCOL_VERSION),
             ("metadata_protocol_version", METADATA_PROTOCOL_VERSION),

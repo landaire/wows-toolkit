@@ -193,10 +193,9 @@ async fn unpack_full_packages(
 
         let staged_path = webseed::safe_join(&req.staging_dir, &file.path)?;
         let install_dir = req.install_dir.clone();
-        let extracted =
-            tokio::task::spawn_blocking(move || unpack_dspkg(&staged_path, &install_dir)).await.map_err(|e| {
-                DownloadError::Unpack { file: relative_path.clone(), detail: format!("unpack task panicked: {e}") }
-            })??;
+        let extracted = tokio::task::spawn_blocking(move || unpack_dspkg(&staged_path, &install_dir))
+            .await
+            .map_err(|source| DownloadError::UnpackTaskPanicked { file: relative_path.clone(), source })??;
 
         progress(InstallProgress::Unpacked { file: relative_path.clone(), extracted_files: extracted.len() });
         outcome.extracted_files.extend(extracted);

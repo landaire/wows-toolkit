@@ -220,9 +220,11 @@ async fn download_one<P: Fn(DownloadProgress)>(
 
     let dest = safe_join(staging_dir, &file.path)?;
     if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent)
-            .await
-            .map_err(|e| DownloadError::Io { detail: format!("creating directory {}: {e}", parent.display()) })?;
+        tokio::fs::create_dir_all(parent).await.map_err(|source| DownloadError::Io {
+            operation: "creating directory",
+            path: parent.to_path_buf(),
+            source,
+        })?;
     }
 
     if already_verified(&dest, expected_sha1).await? {
@@ -239,20 +241,19 @@ async fn download_one<P: Fn(DownloadProgress)>(
     }
 
     let url = build_url(web_seed_base, torrent_name, &relative_path);
-    let response = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| DownloadError::Request { url: url.clone(), detail: e.to_string() })?;
+    let response =
+        client.get(&url).send().await.map_err(|source| DownloadError::Request { url: url.clone(), source })?;
 
     let status = response.status();
     if !status.is_success() {
         return Err(DownloadError::Http { url, status });
     }
 
-    let mut out = tokio::fs::File::create(&dest)
-        .await
-        .map_err(|e| DownloadError::Io { detail: format!("creating {}: {e}", dest.display()) })?;
+    let mut out = tokio::fs::File::create(&dest).await.map_err(|source| DownloadError::Io {
+        operation: "creating",
+        path: dest.clone(),
+        source,
+    })?;
     let mut hasher = Sha1::new();
     let mut downloaded: u64 = 0;
     let mut body = response.bytes_stream();
@@ -264,11 +265,13 @@ async fn download_one<P: Fn(DownloadProgress)>(
         if ctx.control.pause.load(Ordering::SeqCst) {
             return Err(DownloadError::Paused);
         }
-        let chunk = chunk.map_err(|e| DownloadError::Request { url: url.clone(), detail: e.to_string() })?;
+        let chunk = chunk.map_err(|source| DownloadError::Request { url: url.clone(), source })?;
         hasher.update(&chunk);
-        out.write_all(&chunk)
-            .await
-            .map_err(|e| DownloadError::Io { detail: format!("writing {}: {e}", dest.display()) })?;
+        out.write_all(&chunk).await.map_err(|source| DownloadError::Io {
+            operation: "writing",
+            path: dest.clone(),
+            source,
+        })?;
         downloaded += chunk.len() as u64;
         let cumulative = ctx.downloaded_total.fetch_add(chunk.len() as u64, Ordering::SeqCst) + chunk.len() as u64;
         (ctx.progress)(DownloadProgress {
@@ -279,7 +282,7 @@ async fn download_one<P: Fn(DownloadProgress)>(
             files_total: ctx.files_total,
         });
     }
-    out.flush().await.map_err(|e| DownloadError::Io { detail: format!("flushing {}: {e}", dest.display()) })?;
+    out.flush().await.map_err(|source| DownloadError::Io { operation: "flushing", path: dest.clone(), source })?;
     drop(out);
 
     if downloaded != file.length {
@@ -317,23 +320,26 @@ async fn already_verified(dest: &Path, expected_sha1: &str) -> Result<bool, Down
     match tokio::fs::metadata(dest).await {
         Ok(_) => {}
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-        Err(e) => return Err(DownloadError::Io { detail: format!("checking {}: {e}", dest.display()) }),
+        Err(source) => return Err(DownloadError::Io { operation: "checking", path: dest.to_path_buf(), source }),
     }
     let actual = sha1_hex_of_file(dest).await?;
     Ok(actual == expected_sha1)
 }
 
 async fn sha1_hex_of_file(path: &Path) -> Result<String, DownloadError> {
-    let mut file = tokio::fs::File::open(path)
-        .await
-        .map_err(|e| DownloadError::Io { detail: format!("opening {}: {e}", path.display()) })?;
+    let mut file = tokio::fs::File::open(path).await.map_err(|source| DownloadError::Io {
+        operation: "opening",
+        path: path.to_path_buf(),
+        source,
+    })?;
     let mut hasher = Sha1::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
-        let n = file
-            .read(&mut buf)
-            .await
-            .map_err(|e| DownloadError::Io { detail: format!("reading {}: {e}", path.display()) })?;
+        let n = file.read(&mut buf).await.map_err(|source| DownloadError::Io {
+            operation: "reading",
+            path: path.to_path_buf(),
+            source,
+        })?;
         if n == 0 {
             break;
         }

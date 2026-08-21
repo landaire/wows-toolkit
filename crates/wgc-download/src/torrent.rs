@@ -90,16 +90,14 @@ struct CommentJson {
 
 /// Parse a `.torrent` file's raw bytes into a [`TorrentMeta`].
 pub fn parse_torrent(bytes: &[u8]) -> Result<TorrentMeta, DownloadError> {
-    let wire: TorrentWire =
-        serde_bencode::from_bytes(bytes).map_err(|e| DownloadError::Bencode { detail: e.to_string() })?;
+    let wire: TorrentWire = serde_bencode::from_bytes(bytes)?;
 
     let unpacked_sizes = match wire.comment {
         // Genuinely absent, not malformed: not every torrent carries this
         // WG extension, and callers can proceed with no size hints.
         None => BTreeMap::new(),
         Some(comment) => {
-            let parsed: CommentJson =
-                serde_json::from_str(&comment).map_err(|e| DownloadError::Json { detail: e.to_string() })?;
+            let parsed: CommentJson = serde_json::from_str(&comment)?;
             parsed.unpacked_patches_size
         }
     };

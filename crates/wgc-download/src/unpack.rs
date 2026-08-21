@@ -50,21 +50,21 @@ pub fn unpack_dspkg(dspkg_path: &Path, dest_dir: &Path) -> Result<Vec<PathBuf>, 
     let file_name = dspkg_path
         .file_name()
         .and_then(|name| name.to_str())
-        .ok_or_else(|| DownloadError::Unpack {
-            file: dspkg_path.display().to_string(),
-            detail: "path has no valid UTF-8 file name".to_string(),
-        })?
+        .ok_or_else(|| DownloadError::InvalidDspkgFileName { path: dspkg_path.to_path_buf() })?
         .to_string();
 
     if is_delta_package(&file_name) {
         return Err(DownloadError::DeltaUnsupported { file: file_name });
     }
 
-    std::fs::create_dir_all(dest_dir)
-        .map_err(|e| DownloadError::Io { detail: format!("creating {}: {e}", dest_dir.display()) })?;
+    std::fs::create_dir_all(dest_dir).map_err(|source| DownloadError::Io {
+        operation: "creating",
+        path: dest_dir.to_path_buf(),
+        source,
+    })?;
 
     let mut archive = ArchiveReader::open(dspkg_path, Password::empty())
-        .map_err(|e| DownloadError::Unpack { file: file_name.clone(), detail: e.to_string() })?;
+        .map_err(|source| DownloadError::Unpack { file: file_name.clone(), source })?;
 
     let mut extracted = Vec::new();
     // Recorded separately from the closure's return type (sevenz_rust2::Error
@@ -101,7 +101,7 @@ pub fn unpack_dspkg(dspkg_path: &Path, dest_dir: &Path) -> Result<Vec<PathBuf>, 
     if let Some(err) = unsafe_path {
         return Err(err);
     }
-    result.map_err(|e| DownloadError::Unpack { file: file_name.clone(), detail: e.to_string() })?;
+    result.map_err(|source| DownloadError::Unpack { file: file_name.clone(), source })?;
 
     Ok(extracted)
 }

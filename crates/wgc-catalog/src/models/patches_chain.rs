@@ -98,5 +98,5 @@ pub struct WebSeedUrl {
 
 /// Parse an `api/v1/patches_chain/` XML response body.
 pub fn parse_patches_chain(xml: &str) -> Result<PatchesChainResponse, CatalogError> {
-    quick_xml::de::from_str(xml).map_err(|e| CatalogError::PatchesChain { detail: e.to_string() })
+    quick_xml::de::from_str(xml).map_err(|source| CatalogError::PatchesChain { source })
 }

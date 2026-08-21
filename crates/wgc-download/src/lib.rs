@@ -41,17 +41,13 @@ use std::path::PathBuf;
 /// entry) and parse it. Separate from [`parse_torrent`] so callers that
 /// already have the bytes (tests, cached fixtures) skip the network call.
 pub async fn fetch_torrent(client: &reqwest::Client, url: &str) -> Result<TorrentMeta, DownloadError> {
-    let response = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| DownloadError::Request { url: url.to_string(), detail: e.to_string() })?;
+    let response =
+        client.get(url).send().await.map_err(|source| DownloadError::Request { url: url.to_string(), source })?;
     let status = response.status();
     if !status.is_success() {
         return Err(DownloadError::Http { url: url.to_string(), status });
     }
-    let bytes =
-        response.bytes().await.map_err(|e| DownloadError::Request { url: url.to_string(), detail: e.to_string() })?;
+    let bytes = response.bytes().await.map_err(|source| DownloadError::Request { url: url.to_string(), source })?;
     parse_torrent(&bytes)
 }
 

@@ -39,10 +39,8 @@ impl KnownGame {
     /// Build a fresh [`GameInfo`] (empty `installed_parts`) for this game,
     /// ready to pass to `CatalogClient::check_updates`.
     pub fn to_fresh_game_info(&self) -> Result<GameInfo, CatalogError> {
-        let update_base_url = url::Url::parse(self.update_base_url).map_err(|e| CatalogError::GameInfoUrl {
-            value: self.update_base_url.to_string(),
-            detail: e.to_string(),
-        })?;
+        let update_base_url = url::Url::parse(self.update_base_url)
+            .map_err(|source| CatalogError::GameInfoUrl { value: self.update_base_url.to_string(), source })?;
         Ok(GameInfo::for_fresh_install(self.game_id.to_string(), update_base_url, self.localization.to_string()))
     }
 }

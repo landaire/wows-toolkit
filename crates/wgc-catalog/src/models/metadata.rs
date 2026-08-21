@@ -142,5 +142,5 @@ pub struct ClientType {
 
 /// Parse an `api/v1/metadata/` XML response body.
 pub fn parse_metadata(xml: &str) -> Result<MetadataResponse, CatalogError> {
-    quick_xml::de::from_str(xml).map_err(|e| CatalogError::Metadata { detail: e.to_string() })
+    quick_xml::de::from_str(xml).map_err(|source| CatalogError::Metadata { source })
 }

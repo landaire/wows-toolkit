@@ -83,12 +83,11 @@ impl GameInfo {
 
 /// Parse a `game_info.xml` document into a [`GameInfo`].
 pub fn parse_game_info(xml: &str) -> Result<GameInfo, CatalogError> {
-    let parsed: ProtocolXml =
-        quick_xml::de::from_str(xml).map_err(|e| CatalogError::GameInfo { detail: e.to_string() })?;
+    let parsed: ProtocolXml = quick_xml::de::from_str(xml).map_err(|source| CatalogError::GameInfo { source })?;
 
     let game = parsed.game;
     let update_base_url = url::Url::parse(&game.update_urls.value)
-        .map_err(|e| CatalogError::GameInfoUrl { value: game.update_urls.value.clone(), detail: e.to_string() })?;
+        .map_err(|source| CatalogError::GameInfoUrl { value: game.update_urls.value.clone(), source })?;
 
     Ok(GameInfo {
         game_id: game.id,
