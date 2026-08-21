@@ -60,6 +60,60 @@ fn format_duration(d: std::time::Duration) -> String {
     }
 }
 
+/// Outcome of a Proton auto-detect attempt, so the settings panel and the
+/// per-install "Set up Proton" prompt report it identically.
+enum ProtonSetup {
+    /// Binary set, and (because it was unset) a prefix was chosen. `detail`
+    /// names which prefix.
+    Ready { detail: &'static str },
+    /// Binary set; an existing user-chosen prefix was left alone.
+    BinaryOnly,
+    /// A Proton binary was found but no app data dir exists for a managed prefix.
+    NoManagedPrefixDir,
+    /// Steam is installed but carries no Proton under its libraries.
+    NoProton,
+    /// No Steam installation was found.
+    NoSteam,
+}
+
+impl ProtonSetup {
+    /// Whether `launcher` was mutated (so the caller knows to persist).
+    fn changed(&self) -> bool {
+        matches!(self, ProtonSetup::Ready { .. } | ProtonSetup::BinaryOnly)
+    }
+}
+
+/// Fill in `launcher.proton_binary` and, when unset, `launcher.proton_prefix`
+/// from the local Steam/Proton install. A non-Steam (WGC-style) install has no
+/// Steam prefix to reuse, so it falls back to a toolkit-managed prefix Proton
+/// initializes on first launch.
+fn autodetect_proton(launcher: &mut crate::data::settings::LauncherSettings) -> ProtonSetup {
+    let Some(steam_root) = wgc_launch::proton::find_steam_root() else {
+        return ProtonSetup::NoSteam;
+    };
+    // With no prefix chosen yet there is no `config_info` to read, so
+    // `find_proton_in_library` falls back to the newest Proton in the library.
+    let compat_data = launcher.proton_prefix.clone().unwrap_or_else(|| steam_root.clone());
+    let Some(binary) = wgc_launch::proton::find_proton_in_library(&steam_root, &compat_data) else {
+        return ProtonSetup::NoProton;
+    };
+    launcher.proton_binary = Some(binary);
+    if launcher.proton_prefix.is_some() {
+        return ProtonSetup::BinaryOnly;
+    }
+    if let Some(existing) = wgc_launch::proton::steam_wows_prefix() {
+        launcher.proton_prefix = Some(existing);
+        return ProtonSetup::Ready { detail: "Reusing your Steam WoWs prefix." };
+    }
+    match crate::storage_dir() {
+        Some(base) => {
+            launcher.proton_prefix = Some(wgc_launch::proton::managed_prefix(&base));
+            ProtonSetup::Ready { detail: "Using a toolkit-managed prefix (created on first launch)." }
+        }
+        None => ProtonSetup::NoManagedPrefixDir,
+    }
+}
+
 /// Render one install's catalog-check status (checking/up to date/update
 /// available/error), skipping Steam installs entirely -- they are never
 /// checked, and the row already says "managed by Steam" above.
@@ -217,6 +271,46 @@ fn show_available_game_status(ui: &mut egui::Ui, state: Option<&CatalogCheckStat
 }
 
 impl ToolkitTabViewer<'_> {
+    /// Toast the outcome of a Proton auto-detect attempt.
+    fn toast_proton_setup(&self, result: &ProtonSetup) {
+        let mut toasts = self.tab_state.toasts.lock();
+        match result {
+            ProtonSetup::Ready { detail } => {
+                toasts.success(format!("Proton detected. {detail}"));
+            }
+            ProtonSetup::BinaryOnly => {
+                toasts.success("Proton binary detected.");
+            }
+            ProtonSetup::NoManagedPrefixDir => {
+                toasts.warning(
+                    "Found a Proton binary, but could not determine a data directory for a managed prefix -- set the prefix manually.",
+                );
+            }
+            ProtonSetup::NoProton => {
+                toasts.warning(
+                    "Found a Steam installation, but no Proton install under its library -- install Proton via Steam, then try again.",
+                );
+            }
+            ProtonSetup::NoSteam => {
+                toasts.error("Could not find a Steam installation. Proton needs Steam installed.");
+            }
+        }
+    }
+
+    /// Run Proton auto-detect against the persisted launcher settings and save.
+    /// Used by the per-install "Set up Proton" prompt (Linux only; other
+    /// platforms launch non-Steam installs natively).
+    #[cfg(target_os = "linux")]
+    fn apply_proton_autodetect(&mut self) {
+        let mut launcher = self.tab_state.persisted.read().settings.launcher.clone();
+        let result = autodetect_proton(&mut launcher);
+        if result.changed() {
+            self.tab_state.persisted.write().settings.launcher = launcher;
+            self.tab_state.request_save();
+        }
+        self.toast_proton_setup(&result);
+    }
+
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
         self.build_account_section(ui);
         ui.separator();
@@ -302,51 +396,9 @@ impl ToolkitTabViewer<'_> {
                 }
             });
             if ui.button("Auto-detect").clicked() {
-                match wgc_launch::proton::find_steam_root() {
-                    Some(steam_root) => {
-                        // With no prefix chosen yet there is no `config_info`
-                        // to read, so `find_proton_in_library` falls back to
-                        // scanning this library's `steamapps/common` for the
-                        // newest installed Proton -- a reasonable default,
-                        // not necessarily the exact version this install's
-                        // (unknown) Steam-shortcut prefix was created with.
-                        let compat_data = launcher.proton_prefix.clone().unwrap_or_else(|| steam_root.clone());
-                        match wgc_launch::proton::find_proton_in_library(&steam_root, &compat_data) {
-                            Some(binary) => {
-                                launcher.proton_binary = Some(binary);
-                                changed = true;
-                                // Fill in a prefix too, so a non-Steam (WGC-style)
-                                // install is launchable with no further steps:
-                                // reuse the Steam WoWs prefix if the user has that
-                                // copy, otherwise a toolkit-managed prefix Proton
-                                // initializes on first launch.
-                                if launcher.proton_prefix.is_some() {
-                                    self.tab_state.toasts.lock().success("Proton binary detected.");
-                                } else if let Some(existing) = wgc_launch::proton::steam_wows_prefix() {
-                                    launcher.proton_prefix = Some(existing);
-                                    self.tab_state.toasts.lock().success("Proton detected. Reusing your Steam WoWs prefix.");
-                                } else if let Some(base) = crate::storage_dir() {
-                                    launcher.proton_prefix = Some(wgc_launch::proton::managed_prefix(&base));
-                                    self.tab_state.toasts.lock().success(
-                                        "Proton detected. Using a toolkit-managed prefix (created on first launch).",
-                                    );
-                                } else {
-                                    self.tab_state.toasts.lock().warning(
-                                        "Found a Proton binary, but could not determine a data directory for a managed prefix -- set the prefix manually.",
-                                    );
-                                }
-                            }
-                            None => {
-                                self.tab_state.toasts.lock().warning(
-                                    "Found a Steam installation, but no Proton install under its library -- install Proton via Steam, then try again.",
-                                );
-                            }
-                        }
-                    }
-                    None => {
-                        self.tab_state.toasts.lock().error("Could not find a Steam installation.");
-                    }
-                }
+                let result = autodetect_proton(&mut launcher);
+                changed |= result.changed();
+                self.toast_proton_setup(&result);
             }
 
             if changed {
@@ -367,6 +419,16 @@ impl ToolkitTabViewer<'_> {
         let mut to_cancel_download: Option<Arc<AtomicBool>> = None;
         let mut to_pause_download: Option<Arc<AtomicBool>> = None;
         let mut to_resume_download: Option<std::path::PathBuf> = None;
+        // Linux non-Steam installs launch through Proton; if it is not
+        // configured yet, offer one-click setup right at the install.
+        #[cfg(target_os = "linux")]
+        let mut to_setup_proton = false;
+        #[cfg(target_os = "linux")]
+        let proton_configured = {
+            let guard = self.tab_state.persisted.read();
+            let l = &guard.settings.launcher;
+            l.proton_binary.is_some() && l.proton_prefix.is_some()
+        };
 
         for (i, install) in self.tab_state.discovered_installs.iter().enumerate() {
             ui.group(|ui| {
@@ -422,6 +484,16 @@ impl ToolkitTabViewer<'_> {
                         });
                     }
                 }
+                #[cfg(target_os = "linux")]
+                if !install.source.is_read_only_content() && !proton_configured {
+                    ui.horizontal(|ui| {
+                        let warn = ui.visuals().warn_fg_color;
+                        ui.colored_label(warn, "Needs Proton to launch on Linux.");
+                        if ui.button("Set up Proton").clicked() {
+                            to_setup_proton = true;
+                        }
+                    });
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Launch").clicked() {
                         to_launch = Some(i);
@@ -431,6 +503,11 @@ impl ToolkitTabViewer<'_> {
                     }
                 });
             });
+        }
+
+        #[cfg(target_os = "linux")]
+        if to_setup_proton {
+            self.apply_proton_autodetect();
         }
 
         if let Some(path) = to_recheck {
