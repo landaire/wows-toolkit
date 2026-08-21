@@ -1,0 +1,16 @@
+[package]
+name = "wgc-auth"
+version = "0.1.0"
+edition.workspace = true
+publish = false
+description = "WGNI account authentication: secret-bearing newtypes, realm map, and proof-of-work solver"
+
+[dependencies]
+wgc-core = { workspace = true }
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+zeroize = { version = "1", features = ["derive"] }
+sha3 = "0.10"
+url = "2"
+
+[dev-dependencies]

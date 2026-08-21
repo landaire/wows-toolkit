@@ -1,0 +1,16 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library")
+
+workspace_library(
+    name = "wgc-auth",
+    crate = "wgc_auth",
+    package = "wgc-auth",
+    version = "0.1.0",
+    deps = [
+        "//crates/wgc-core:wgc-core",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:serde",
+        "//third-party/rust:zeroize",
+        "//third-party/rust:sha3",
+        "//third-party/rust:url",
+    ],
+)
