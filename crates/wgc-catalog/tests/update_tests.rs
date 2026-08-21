@@ -112,10 +112,12 @@ fn a_matching_installed_version_is_up_to_date() {
 }
 
 const MINIMAL_GAME_INFO_XML: &str = r#"<protocol name="game_info" version="2.16">
-  <id>TEST.GAME</id>
-  <localization>EN</localization>
-  <update_urls><value>https://example.test</value></update_urls>
-  <part_versions></part_versions>
+  <game>
+    <id>TEST.GAME</id>
+    <localization>EN</localization>
+    <update_urls><value>https://example.test</value></update_urls>
+    <part_versions></part_versions>
+  </game>
 </protocol>"#;
 
 /// A part with two patches: report A's algorithm (sec 3-4) picks by
