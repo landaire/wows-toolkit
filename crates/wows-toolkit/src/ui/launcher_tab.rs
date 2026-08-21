@@ -2,6 +2,7 @@
 
 use crate::app::ToolkitTabViewer;
 use crate::tab_state::CatalogCheckState;
+use crate::tab_state::DownloadUiState;
 use crate::update_background_task;
 
 /// Render one install's catalog-check status (checking/up to date/update
@@ -44,6 +45,57 @@ fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
         }
         Some(CatalogCheckState::NoUpdateHost) | None => {}
     }
+}
+
+/// Render one install's download/install run status, if any. Returns the
+/// download's `cancel` flag (the same `Arc` the background task checks) if
+/// the user clicked "Cancel" this frame, so the caller can flip it after
+/// the row loop (same borrow-collection pattern as
+/// `to_launch`/`to_activate`/`to_recheck`).
+fn show_download_status(
+    ui: &mut egui::Ui,
+    state: Option<&DownloadUiState>,
+) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+    let mut to_cancel = None;
+    match state {
+        Some(DownloadUiState::Running { phase, done_bytes, total_bytes, current, cancel }) => {
+            ui.horizontal(|ui| {
+                if *total_bytes > 0 {
+                    let frac = (*done_bytes as f32 / *total_bytes as f32).clamp(0.0, 1.0);
+                    ui.add(egui::ProgressBar::new(frac).show_percentage().desired_width(200.0));
+                    ui.label(format!(
+                        "{} / {}",
+                        humansize::format_size(*done_bytes, humansize::BINARY),
+                        humansize::format_size(*total_bytes, humansize::BINARY)
+                    ));
+                } else {
+                    ui.spinner();
+                }
+                if ui.small_button("Cancel").clicked() {
+                    to_cancel = Some(std::sync::Arc::clone(cancel));
+                }
+            });
+            ui.weak(format!("{phase}: {current}"));
+        }
+        Some(DownloadUiState::Done { skipped_deltas }) => {
+            if *skipped_deltas > 0 {
+                ui.colored_label(
+                    egui::Color32::from_rgb(230, 180, 40),
+                    format!("Installed ({skipped_deltas} delta part(s) skipped -- not yet supported, downloaded but not applied)"),
+                );
+            } else {
+                ui.colored_label(egui::Color32::from_rgb(120, 200, 120), "Installed");
+            }
+        }
+        Some(DownloadUiState::Failed(detail)) => {
+            ui.colored_label(egui::Color32::from_rgb(230, 80, 80), format!("Download failed: {detail}"));
+        }
+        Some(DownloadUiState::Cancelled) => {
+            ui.weak("Download cancelled.");
+        }
+        None => {}
+    }
+    to_cancel
 }
 
 impl ToolkitTabViewer<'_> {
@@ -101,6 +153,9 @@ impl ToolkitTabViewer<'_> {
         let mut to_launch: Option<usize> = None;
         let mut to_activate: Option<std::path::PathBuf> = None;
         let mut to_recheck: Option<std::path::PathBuf> = None;
+        // (install_path, folder-picker default dir).
+        let mut to_download: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
+        let mut to_cancel_download: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> = None;
 
         for (i, install) in self.tab_state.discovered_installs.iter().enumerate() {
             ui.group(|ui| {
@@ -120,6 +175,37 @@ impl ToolkitTabViewer<'_> {
                             to_recheck = Some(install.path.clone());
                         }
                     });
+
+                    let download_state = self.tab_state.download_state.get(&install.path);
+                    let is_running = matches!(download_state, Some(DownloadUiState::Running { .. }));
+                    if let Some(cancel) = show_download_status(ui, download_state) {
+                        to_cancel_download = Some(cancel);
+                    }
+
+                    let has_downloads = matches!(
+                        self.tab_state.catalog_status.get(&install.path),
+                        Some(CatalogCheckState::Ready(build)) if !build.downloads.is_empty()
+                    );
+                    if has_downloads && !is_running {
+                        ui.horizontal(|ui| {
+                            if ui.button("Download / Update...").clicked() {
+                                // A discovered install with no detected version has
+                                // no real content on disk yet (e.g. a manually added
+                                // empty target directory), so default the folder
+                                // picker to the platform-standard suggestion instead
+                                // of that empty directory.
+                                let default_dir = if install.version.is_some() {
+                                    install.path.clone()
+                                } else {
+                                    wgc_download::default_install_dir()
+                                };
+                                to_download = Some((install.path.clone(), default_dir));
+                            }
+                            ui.weak(
+                                "A fresh install is tens of GB; delta updates are not supported yet, so a changed part re-downloads in full.",
+                            );
+                        });
+                    }
                 }
                 ui.horizontal(|ui| {
                     if ui.button("Launch").clicked() {
@@ -147,6 +233,16 @@ impl ToolkitTabViewer<'_> {
 
         if let Some(i) = to_launch {
             self.launch_install(i);
+        }
+
+        if let Some(cancel) = to_cancel_download {
+            cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        if let Some((install_path, default_dir)) = to_download
+            && let Some(dest_dir) = rfd::FileDialog::new().set_directory(&default_dir).pick_folder()
+        {
+            self.tab_state.start_download(install_path, dest_dir);
         }
     }
 

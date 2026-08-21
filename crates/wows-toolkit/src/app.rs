@@ -3157,6 +3157,18 @@ impl WowsToolkitApp {
             }
         }
 
+        // Drain background download/install progress. Every pending message
+        // is applied, same reasoning as the catalog-check drain above: each
+        // carries one install's own status and a later message for a
+        // different install must not shadow an earlier one still queued.
+        #[cfg(feature = "launcher")]
+        if let Some(inbox) = self.tab_state.download_inbox.as_ref() {
+            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
+            for (path, state) in updates {
+                self.tab_state.download_state.insert(path, state);
+            }
+        }
+
         // Pick up "Add to Session Stats" requests (no confirmation needed).
         // App-wide: feeds the one global session-stats total, not a per-workspace one.
         if let Some(replays) =

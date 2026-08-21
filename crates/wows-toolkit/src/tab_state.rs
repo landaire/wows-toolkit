@@ -460,6 +460,35 @@ pub enum CatalogCheckState {
     NoUpdateHost,
 }
 
+/// UI-facing status of an in-progress or finished download/install run,
+/// driven by [`TabState::start_download`] and drained by `app.rs` into
+/// [`TabState::download_state`].
+#[cfg(feature = "launcher")]
+#[derive(Debug, Clone)]
+pub enum DownloadUiState {
+    /// A run is in flight. `cancel` is the same `Arc` across every
+    /// `Running` update for one run, so the UI's "Cancel" button always
+    /// flips the flag the background task is actually checking.
+    Running {
+        phase: String,
+        done_bytes: u64,
+        total_bytes: u64,
+        current: String,
+        cancel: Arc<std::sync::atomic::AtomicBool>,
+    },
+    /// Every torrent's FULL packages were downloaded and extracted.
+    /// `skipped_deltas` is the total count of DELTA packages downloaded but
+    /// left un-extracted (not yet supported; see `wgc_download`).
+    Done { skipped_deltas: usize },
+    /// The run failed (network, hash mismatch, unpack error, ...). Carries
+    /// the error's `Display` text -- the crate's own error type stays
+    /// structured (`wgc_download::DownloadError`), this is only what the
+    /// UI shows.
+    Failed(String),
+    /// The user cancelled via `Running::cancel` before the run finished.
+    Cancelled,
+}
+
 /// Main application state container.
 ///
 /// Persisted state lives in `self.persisted` (shared with background save task).
@@ -677,6 +706,14 @@ pub struct TabState {
     /// [`Self::start_catalog_check`].
     #[cfg(feature = "launcher")]
     pub catalog_check_inbox: Option<egui_inbox::UiInbox<(PathBuf, CatalogCheckState)>>,
+    /// Last known download/install run status per install path, driven by
+    /// [`Self::start_download`].
+    #[cfg(feature = "launcher")]
+    pub download_state: std::collections::HashMap<PathBuf, DownloadUiState>,
+    /// Inbox for background download tasks started by
+    /// [`Self::start_download`].
+    #[cfg(feature = "launcher")]
+    pub download_inbox: Option<egui_inbox::UiInbox<(PathBuf, DownloadUiState)>>,
 }
 
 impl Default for TabState {
@@ -784,6 +821,10 @@ impl Default for TabState {
             launch_safe_mode: false,
             #[cfg(feature = "launcher")]
             catalog_status: HashMap::new(),
+            #[cfg(feature = "launcher")]
+            download_state: HashMap::new(),
+            #[cfg(feature = "launcher")]
+            download_inbox: None,
             #[cfg(feature = "launcher")]
             catalog_check_inbox: None,
         }
@@ -1798,6 +1839,122 @@ impl TabState {
             ctx.request_repaint();
         });
     }
+
+    /// Kick off a background download+install run of `install_path`'s
+    /// newest catalog build into `dest_dir`. Requires a completed, non-empty
+    /// catalog check (`catalog_status[install_path]` must already be
+    /// `Ready` with at least one `downloads` entry) -- there is nothing to
+    /// fetch otherwise. `app.rs` drains progress each frame via
+    /// `download_inbox`.
+    #[cfg(feature = "launcher")]
+    pub fn start_download(&mut self, install_path: PathBuf, dest_dir: PathBuf) {
+        let Some(CatalogCheckState::Ready(latest)) = self.catalog_status.get(&install_path) else {
+            self.toasts.lock().error("No update check result for this install yet.");
+            return;
+        };
+        if latest.downloads.is_empty() {
+            self.toasts.lock().error("Nothing to download: the catalog reports no parts to fetch.");
+            return;
+        }
+        // WGUS advertises one web seed base per response, shared by every
+        // part (see `wgc_catalog::update::build_downloads`), so any part's
+        // value is the same base.
+        let Some(web_seed_base) = latest.downloads.iter().find_map(|d| d.web_seed_base.clone()) else {
+            self.toasts.lock().error("Catalog response has no web seed base to download from.");
+            return;
+        };
+        // Multiple parts can point at the same torrent (e.g. client and
+        // hotfix packaged together); download each distinct torrent once.
+        let mut torrent_urls: Vec<String> = Vec::new();
+        for download in &latest.downloads {
+            for url in &download.torrent_urls {
+                if !torrent_urls.contains(url) {
+                    torrent_urls.push(url.clone());
+                }
+            }
+        }
+        if torrent_urls.is_empty() {
+            self.toasts.lock().error("Catalog response has no torrent URLs to download from.");
+            return;
+        }
+
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot start download: tokio runtime is not available");
+            return;
+        };
+        let proxy_url = self.proxy.as_ref().map(|p| p.url.clone());
+        let client = match build_download_http_client(proxy_url.as_deref()) {
+            Ok(client) => client,
+            Err(e) => {
+                self.toasts.lock().error(format!("Cannot build download client: {e}"));
+                return;
+            }
+        };
+
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.download_state.insert(
+            install_path.clone(),
+            DownloadUiState::Running {
+                phase: "Starting".to_string(),
+                done_bytes: 0,
+                total_bytes: 0,
+                current: String::new(),
+                cancel: Arc::clone(&cancel),
+            },
+        );
+
+        let sender = self.download_sender();
+        let ctx = self.egui_ctx.clone();
+        // Staged downloads live under the destination directory so a
+        // resumed run (matching sha1, see `wgc_download::webseed`) finds
+        // its own previous partial files rather than starting cold.
+        let staging_dir = dest_dir.join(".wows-toolkit-download-staging");
+        let install_path_for_task = install_path.clone();
+
+        // `spawn_blocking` + `Handle::block_on`, not `runtime.spawn`: the
+        // download chain nests several async fns that each take borrowed
+        // parameters (`wgc_download::download`/`download_and_install`,
+        // internally fanning a progress closure out through
+        // `stream::iter().map().buffer_unordered()`). Driving that chain
+        // through `spawn`'s `Send + 'static` future hits a known rustc
+        // higher-ranked-lifetime inference bug ("implementation of Send is
+        // not general enough"). `block_on` has no Send requirement, so
+        // running it on one of the runtime's blocking-pool threads (never
+        // the UI thread) sidesteps the bug entirely.
+        runtime.spawn_blocking(move || {
+            let handle = tokio::runtime::Handle::current();
+            let final_state = handle.block_on(run_download(
+                &client,
+                &torrent_urls,
+                &web_seed_base,
+                &staging_dir,
+                &dest_dir,
+                &cancel,
+                |update| {
+                    let _ = sender.send((install_path_for_task.clone(), update));
+                    ctx.request_repaint();
+                },
+            ));
+            let _ = sender.send((install_path_for_task, final_state));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Lazily create (once) the shared inbox download tasks send their
+    /// results over, and return a sender into it. Mirrors
+    /// [`Self::catalog_check_sender`]: many independent per-install runs can
+    /// be in flight, so the inbox must survive across `start_download` calls.
+    #[cfg(feature = "launcher")]
+    fn download_sender(&mut self) -> egui_inbox::UiInboxSender<(PathBuf, DownloadUiState)> {
+        match &self.download_inbox {
+            Some(inbox) => inbox.sender(),
+            None => {
+                let (sender, inbox) = egui_inbox::UiInbox::channel();
+                self.download_inbox = Some(inbox);
+                sender
+            }
+        }
+    }
 }
 
 /// Read and parse `game_info_path`, then fetch and diff the newest catalog
@@ -1822,6 +1979,113 @@ async fn check_install_catalog(game_info_path: &Path, proxy_url: Option<&str>) -
         Ok(build) => CatalogCheckState::Ready(build),
         Err(e) => CatalogCheckState::Error(e.to_string()),
     }
+}
+
+/// Build a plain `reqwest::Client` for `wgc_download` calls, honoring the
+/// toolkit's resolved proxy the same way `wgc_catalog::CatalogClient::with_proxy`
+/// does. `wgc_download`'s functions take a bare `&reqwest::Client` (not a
+/// wrapper type), so this stays a free function rather than living on a
+/// download-specific client type.
+#[cfg(feature = "launcher")]
+fn build_download_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client, reqwest::Error> {
+    let mut builder = reqwest::Client::builder();
+    if let Some(proxy_url) = proxy_url {
+        builder = builder.proxy(reqwest::Proxy::all(proxy_url)?);
+    }
+    builder.build()
+}
+
+/// Fetch every unique torrent's manifest up front (so the overall progress
+/// bar can be sized correctly from the start), then download+install each
+/// in turn into `install_dir`. `cancel` is checked between torrents only --
+/// a torrent already in flight always finishes or fails on its own, it is
+/// never aborted mid-file. `progress` is called for every `Running` update;
+/// the final state (`Done`/`Failed`/`Cancelled`) is the return value.
+///
+/// Called via `Handle::block_on` from a blocking-pool thread (see
+/// `TabState::start_download`), not `tokio::spawn`, so nothing here needs
+/// to be `Send`.
+#[cfg(feature = "launcher")]
+async fn run_download(
+    client: &reqwest::Client,
+    torrent_urls: &[String],
+    web_seed_base: &str,
+    staging_dir: &Path,
+    install_dir: &Path,
+    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    progress: impl Fn(DownloadUiState),
+) -> DownloadUiState {
+    use std::sync::atomic::Ordering;
+
+    progress(DownloadUiState::Running {
+        phase: "Fetching torrent manifests".to_string(),
+        done_bytes: 0,
+        total_bytes: 0,
+        current: String::new(),
+        cancel: Arc::clone(cancel),
+    });
+
+    let mut torrents = Vec::with_capacity(torrent_urls.len());
+    for url in torrent_urls {
+        if cancel.load(Ordering::SeqCst) {
+            return DownloadUiState::Cancelled;
+        }
+        match wgc_download::fetch_torrent(client, url).await {
+            Ok(meta) => torrents.push(meta),
+            Err(e) => return DownloadUiState::Failed(format!("fetching torrent manifest {url}: {e}")),
+        }
+    }
+
+    let total_bytes: u64 = torrents.iter().map(|t| t.total_length).sum();
+    let mut done_bytes: u64 = 0;
+    let mut skipped_deltas = 0usize;
+
+    for torrent in torrents {
+        if cancel.load(Ordering::SeqCst) {
+            return DownloadUiState::Cancelled;
+        }
+        let torrent_total = torrent.total_length;
+        let req = wgc_download::InstallRequest {
+            staging_dir: staging_dir.to_path_buf(),
+            install_dir: install_dir.to_path_buf(),
+            torrent,
+            web_seed_base: web_seed_base.to_string(),
+            is_steam_install: false,
+        };
+
+        let base_done = done_bytes;
+        let result = wgc_download::download_and_install(client, &req, |update| {
+            let (phase, current, in_flight_bytes) = match &update {
+                wgc_download::InstallProgress::Downloading(dp) => (
+                    "Downloading".to_string(),
+                    format!("{} (file {}/{})", dp.file, dp.files_done + 1, dp.files_total),
+                    dp.downloaded_bytes,
+                ),
+                wgc_download::InstallProgress::Unpacking { file } => ("Unpacking".to_string(), file.clone(), 0),
+                wgc_download::InstallProgress::Unpacked { file, .. } => ("Unpacking".to_string(), file.clone(), 0),
+            };
+            progress(DownloadUiState::Running {
+                phase,
+                done_bytes: base_done + in_flight_bytes,
+                total_bytes,
+                current,
+                cancel: Arc::clone(cancel),
+            });
+        })
+        .await;
+
+        match result {
+            Ok(outcome) => skipped_deltas += outcome.skipped_deltas.len(),
+            Err(e) => return DownloadUiState::Failed(e.to_string()),
+        }
+        // Advance to this torrent's full size once it completes: unpack
+        // progress carries no byte count, so mid-torrent `done_bytes` only
+        // reflects the currently-downloading file, not files already
+        // finished within this same torrent.
+        done_bytes = base_done + torrent_total;
+    }
+
+    DownloadUiState::Done { skipped_deltas }
 }
 
 #[cfg(test)]

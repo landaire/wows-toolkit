@@ -15473,6 +15473,7 @@ dependencies = [
  "web-time",
  "wgc-catalog",
  "wgc-core",
+ "wgc-download",
  "wgc-install",
  "wgc-launch",
  "wgpu",
