@@ -121,6 +121,10 @@
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
             pkgs.vulkan-loader
+            # keyring's Linux Secret Service backend (dbus-secret-service ->
+            # libdbus-sys) pkg-config-probes dbus-1 at build. Buck vendors
+            # libdbus's C sources; the cargo/crane path needs the dev package.
+            pkgs.dbus
           ];
       };
 
@@ -143,7 +147,8 @@
         checks.prelude-version = preludeVersionMatch;
 
         packages = let
-          # Runtime libraries needed by the GUI (X11, Wayland, GL, Vulkan)
+          # Runtime libraries needed by the GUI (X11, Wayland, GL, Vulkan) plus
+          # libdbus for the keyring Secret Service backend.
           guiRuntimeLibs = lib.optionals stdenv.hostPlatform.isLinux [
             libxkbcommon
             libGL
@@ -154,6 +159,7 @@
             libxrandr
             libxi
             libx11
+            dbus
           ];
 
           guiBuildInputs =
@@ -290,6 +296,9 @@
               libxkbcommon
               libGL
               fontconfig
+
+              # keyring Secret Service backend (wgc-auth): dbus-1.pc + libdbus
+              dbus
 
               # wayland libraries
               wayland
