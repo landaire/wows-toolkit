@@ -1,18 +1,29 @@
-//! Parses WG `.torrent` (bencode) manifests for WGC-managed game builds
-//! and downloads them over HTTP webseeds (BEP-19, no tracker/DHT/peers).
+//! Parses WG `.torrent` (bencode) manifests for WGC-managed game builds,
+//! downloads them over HTTP webseeds (BEP-19, no tracker/DHT/peers), and
+//! 7z-extracts each downloaded FULL `.dspkg` into an install directory.
 //!
 //! `torrent` turns a `.torrent` byte slice into a typed [`TorrentMeta`].
 //! `webseed` fetches each real file it describes from a webseed base URL,
-//! verifying sha1 as it streams.
+//! verifying sha1 as it streams. `unpack` 7z-extracts a downloaded FULL
+//! `.dspkg` (DELTA packages are rsync diffs, not yet supported). `install`
+//! drives both phases together for one torrent's build.
 
 pub mod error;
+pub mod install;
 pub mod torrent;
+pub mod unpack;
 pub mod webseed;
 
 pub use error::DownloadError;
+pub use install::InstallOutcome;
+pub use install::InstallProgress;
+pub use install::InstallRequest;
+pub use install::download_and_install;
 pub use torrent::TorrentFile;
 pub use torrent::TorrentMeta;
 pub use torrent::parse_torrent;
+pub use unpack::is_delta_package;
+pub use unpack::unpack_dspkg;
 pub use webseed::DownloadProgress;
 pub use webseed::DownloadRequest;
 pub use webseed::download;

@@ -43,4 +43,16 @@ pub enum DownloadError {
     /// before any filesystem write is attempted.
     #[error("unsafe path in torrent manifest: {path}")]
     UnsafePath { path: String },
+    /// A `.dspkg` failed to 7z-extract: corrupt archive, unsupported codec,
+    /// or an I/O failure while writing an entry. Never silently ignored -
+    /// the caller must see this so the run is not reported as successful
+    /// while a package sits unextracted.
+    #[error("failed to unpack {file}: {detail}")]
+    Unpack { file: String, detail: String },
+    /// `file`'s name has the delta-package shape (two WG version tokens
+    /// before the part segment). Delta packages are rsync-based diffs, not
+    /// directly 7z-extractable to real files; we only install FULL
+    /// packages for now.
+    #[error("delta package unpacking is not supported yet: {file}")]
+    DeltaUnsupported { file: String },
 }

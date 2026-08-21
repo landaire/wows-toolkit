@@ -35,7 +35,7 @@ const CONCURRENT_FILES: usize = 4;
 /// the BEP47 `attr=p` flag, which `torrent::parse_torrent` already filters
 /// before a [`TorrentFile`] exists). Neither is real WG content, so both
 /// are skipped defensively.
-const PADDING_FILE_PREFIX: &str = ".____padding_file";
+pub(crate) const PADDING_FILE_PREFIX: &str = ".____padding_file";
 
 /// A request to fetch every real file of one torrent's build into
 /// `staging_dir` over HTTP webseeds.
@@ -248,7 +248,10 @@ async fn sha1_hex_of_file(path: &Path) -> Result<String, DownloadError> {
 /// each segment must be exactly one `Component::Normal` - not empty, not
 /// `.` or `..`, not an absolute-path root, and not a Windows drive/UNC
 /// prefix - before it is trusted as a path component to join.
-fn safe_join(base: &Path, segments: &[String]) -> Result<PathBuf, DownloadError> {
+///
+/// Reused by [`crate::unpack`] to guard 7z archive entry names, which are
+/// just as untrusted as a torrent manifest's file paths.
+pub(crate) fn safe_join(base: &Path, segments: &[String]) -> Result<PathBuf, DownloadError> {
     let mut dest = base.to_path_buf();
     for segment in segments {
         let mut components = Path::new(segment).components();
