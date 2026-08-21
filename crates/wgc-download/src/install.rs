@@ -11,6 +11,7 @@ use crate::torrent::TorrentFile;
 use crate::torrent::TorrentMeta;
 use crate::unpack::is_delta_package;
 use crate::unpack::unpack_dspkg;
+use crate::webseed::DownloadControl;
 use crate::webseed::DownloadProgress;
 use crate::webseed::DownloadRequest;
 use crate::webseed::{
@@ -70,6 +71,7 @@ pub struct InstallOutcome {
 pub async fn download_and_install(
     client: &reqwest::Client,
     req: &InstallRequest,
+    control: &DownloadControl,
     progress: impl Fn(InstallProgress),
 ) -> Result<InstallOutcome, DownloadError> {
     if req.is_steam_install {
@@ -82,7 +84,7 @@ pub async fn download_and_install(
         web_seed_base: req.web_seed_base.clone(),
         is_steam_install: false,
     };
-    webseed::download(client, &download_req, |p| progress(InstallProgress::Downloading(p))).await?;
+    webseed::download(client, &download_req, control, |p| progress(InstallProgress::Downloading(p))).await?;
 
     let mut outcome = InstallOutcome::default();
     let real_files: Vec<&TorrentFile> =

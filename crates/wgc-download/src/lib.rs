@@ -24,6 +24,7 @@ pub use torrent::TorrentMeta;
 pub use torrent::parse_torrent;
 pub use unpack::is_delta_package;
 pub use unpack::unpack_dspkg;
+pub use webseed::DownloadControl;
 pub use webseed::DownloadProgress;
 pub use webseed::DownloadRequest;
 pub use webseed::download;

@@ -12,6 +12,7 @@ use sha1::Digest;
 use sha1::Sha1;
 use wgc_download::torrent::TorrentMeta;
 use wgc_download::torrent::parse_torrent;
+use wgc_download::webseed::DownloadControl;
 use wgc_download::webseed::DownloadRequest;
 use wgc_download::webseed::download;
 
@@ -52,8 +53,14 @@ async fn downloads_and_verifies_the_real_hotfix_file() {
         is_steam_install: false,
     };
     let client = reqwest::Client::new();
+    let control = DownloadControl {
+        cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        pause: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
 
-    download(&client, &req, |_| {}).await.expect("live download of the hotfix file should succeed and verify");
+    download(&client, &req, &control, |_| {})
+        .await
+        .expect("live download of the hotfix file should succeed and verify");
 
     let dest = hotfix.path.iter().fold(staging_dir.clone(), |acc, segment| acc.join(segment));
     let bytes = std::fs::read(&dest).expect("downloaded hotfix file should exist");

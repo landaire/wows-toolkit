@@ -466,15 +466,16 @@ pub enum CatalogCheckState {
 #[cfg(feature = "launcher")]
 #[derive(Debug, Clone)]
 pub enum DownloadUiState {
-    /// A run is in flight. `cancel` is the same `Arc` across every
-    /// `Running` update for one run, so the UI's "Cancel" button always
-    /// flips the flag the background task is actually checking.
+    /// A run is in flight. `cancel`/`pause` are the same `Arc`s across every
+    /// `Running` update for one run, so the UI's "Cancel"/"Pause" buttons
+    /// always flip the flags the background task is actually checking.
     Running {
         phase: String,
         done_bytes: u64,
         total_bytes: u64,
         current: String,
         cancel: Arc<std::sync::atomic::AtomicBool>,
+        pause: Arc<std::sync::atomic::AtomicBool>,
     },
     /// Every torrent's FULL packages were downloaded and extracted.
     /// `skipped_deltas` is the total count of DELTA packages downloaded but
@@ -487,6 +488,25 @@ pub enum DownloadUiState {
     Failed(String),
     /// The user cancelled via `Running::cancel` before the run finished.
     Cancelled,
+    /// The user paused via `Running::pause` before the run finished.
+    /// Sha1-verified staged files remain on disk; [`TabState::resume_download`]
+    /// re-dispatches the same run (see [`TabState::download_resume`]), which
+    /// skips them via `wgc_download`'s resume check and continues.
+    Paused,
+}
+
+/// How to re-dispatch a paused download when the user clicks Resume: the
+/// task that was running it has already exited (see [`DownloadUiState::Paused`]),
+/// so resuming means starting a fresh run rather than un-pausing the old one.
+#[cfg(feature = "launcher")]
+#[derive(Debug, Clone)]
+pub enum DownloadResumeSource {
+    /// Fresh install of a known game, re-dispatched via
+    /// [`TabState::install_known_game`].
+    KnownGame { game_id: String, dest_dir: PathBuf },
+    /// In-place update/reinstall of a discovered install, re-dispatched via
+    /// [`TabState::start_download`].
+    Update { install_path: PathBuf, dest_dir: PathBuf },
 }
 
 /// Pending two-factor challenge, set when a login attempt returns
@@ -805,6 +825,11 @@ pub struct TabState {
     /// [`Self::start_download`].
     #[cfg(feature = "launcher")]
     pub download_inbox: Option<egui_inbox::UiInbox<(PathBuf, DownloadUiState)>>,
+    /// How to re-dispatch each `download_state` entry if the user pauses and
+    /// later clicks Resume. Populated alongside every `download_state`
+    /// insert in [`Self::start_download_build`].
+    #[cfg(feature = "launcher")]
+    pub download_resume: std::collections::HashMap<PathBuf, DownloadResumeSource>,
     /// Last known catalog-check result per known-game id (not per install
     /// path -- there is no install yet), driven by
     /// [`Self::start_available_games_check`]. Powers the Launcher tab's
@@ -949,6 +974,8 @@ impl Default for TabState {
             download_state: HashMap::new(),
             #[cfg(feature = "launcher")]
             download_inbox: None,
+            #[cfg(feature = "launcher")]
+            download_resume: HashMap::new(),
             #[cfg(feature = "launcher")]
             catalog_check_inbox: None,
             #[cfg(feature = "launcher")]
@@ -1991,17 +2018,44 @@ impl TabState {
             return;
         };
         let latest = latest.clone();
-        self.start_download_build(latest, install_path, dest_dir);
+        let resume_source =
+            DownloadResumeSource::Update { install_path: install_path.clone(), dest_dir: dest_dir.clone() };
+        self.start_download_build(latest, install_path, dest_dir, resume_source);
+    }
+
+    /// Re-dispatch a paused download under `dest_key` (see
+    /// [`DownloadUiState::Paused`]), using the resume info
+    /// [`Self::start_download_build`] recorded in `download_resume` when the
+    /// run first started. A no-op with a toast if there is nothing recorded
+    /// (e.g. `dest_key` was never a download at all).
+    #[cfg(feature = "launcher")]
+    pub fn resume_download(&mut self, dest_key: &Path) {
+        let Some(source) = self.download_resume.get(dest_key).cloned() else {
+            self.toasts.lock().error("Nothing to resume for this download.");
+            return;
+        };
+        match source {
+            DownloadResumeSource::KnownGame { game_id, dest_dir } => self.install_known_game(game_id, dest_dir),
+            DownloadResumeSource::Update { install_path, dest_dir } => self.start_download(install_path, dest_dir),
+        }
     }
 
     /// Kick off a background download+install run of `latest` into
-    /// `dest_dir`, tracked under `dest_dir` in `download_state`. Shared by
+    /// `dest_dir`, tracked under `dest_key` in `download_state`. Shared by
     /// [`Self::start_download`] (in-place update/reinstall of a discovered
     /// install, `dest_dir` is usually the install's own path) and
     /// [`Self::install_known_game`] (fresh install of a known game into a
-    /// user-chosen empty directory).
+    /// user-chosen empty directory). `resume_source` is recorded in
+    /// `download_resume` so [`Self::resume_download`] can re-dispatch this
+    /// same run if the user pauses it.
     #[cfg(feature = "launcher")]
-    fn start_download_build(&mut self, latest: wgc_catalog::update::LatestBuild, dest_key: PathBuf, dest_dir: PathBuf) {
+    fn start_download_build(
+        &mut self,
+        latest: wgc_catalog::update::LatestBuild,
+        dest_key: PathBuf,
+        dest_dir: PathBuf,
+        resume_source: DownloadResumeSource,
+    ) {
         if latest.downloads.is_empty() {
             self.toasts.lock().error("Nothing to download: the catalog reports no parts to fetch.");
             return;
@@ -2042,6 +2096,8 @@ impl TabState {
         };
 
         let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let pause = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        self.download_resume.insert(dest_key.clone(), resume_source);
         self.download_state.insert(
             dest_key.clone(),
             DownloadUiState::Running {
@@ -2050,6 +2106,7 @@ impl TabState {
                 total_bytes: 0,
                 current: String::new(),
                 cancel: Arc::clone(&cancel),
+                pause: Arc::clone(&pause),
             },
         );
 
@@ -2060,6 +2117,7 @@ impl TabState {
         // its own previous partial files rather than starting cold.
         let staging_dir = dest_dir.join(".wows-toolkit-download-staging");
         let dest_key_for_task = dest_key.clone();
+        let control = wgc_download::DownloadControl { cancel, pause };
 
         // `spawn_blocking` + `Handle::block_on`, not `runtime.spawn`: the
         // download chain nests several async fns that each take borrowed
@@ -2079,7 +2137,7 @@ impl TabState {
                 &web_seed_base,
                 &staging_dir,
                 &dest_dir,
-                &cancel,
+                &control,
                 |update| {
                     let _ = sender.send((dest_key_for_task.clone(), update));
                     ctx.request_repaint();
@@ -2175,8 +2233,9 @@ impl TabState {
             return;
         }
         let latest = latest.clone();
-        self.installing_games.insert(game_id, dest_dir.clone());
-        self.start_download_build(latest, dest_dir.clone(), dest_dir);
+        self.installing_games.insert(game_id.clone(), dest_dir.clone());
+        let resume_source = DownloadResumeSource::KnownGame { game_id, dest_dir: dest_dir.clone() };
+        self.start_download_build(latest, dest_dir.clone(), dest_dir, resume_source);
     }
 
     /// Lazily create (once) the shared inbox download tasks send their
@@ -2459,10 +2518,21 @@ fn build_download_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client
 
 /// Fetch every unique torrent's manifest up front (so the overall progress
 /// bar can be sized correctly from the start), then download+install each
-/// in turn into `install_dir`. `cancel` is checked between torrents only --
-/// a torrent already in flight always finishes or fails on its own, it is
-/// never aborted mid-file. `progress` is called for every `Running` update;
-/// the final state (`Done`/`Failed`/`Cancelled`) is the return value.
+/// in turn into `install_dir`. `control`'s flags are checked between
+/// torrents and threaded into each torrent's `download_and_install` call,
+/// which checks them again inside the byte-streaming loop (see
+/// `wgc_download::webseed::DownloadControl`) so a multi-GB file in flight
+/// stops promptly rather than only between torrents. `progress` is called
+/// for every `Running` update; the final state
+/// (`Done`/`Failed`/`Cancelled`/`Paused`) is the return value.
+///
+/// `done_bytes` only ever increases across the whole run: within a torrent
+/// it mirrors `InstallProgress::Downloading`'s now-cumulative
+/// `downloaded_bytes` (see `wgc_download::webseed::DownloadProgress`), and
+/// once a torrent's download phase is behind it (including through its
+/// `Unpacking`/`Unpacked` events, which carry no byte count of their own)
+/// `done_bytes` is pinned to that torrent's full size rather than dropping
+/// back to 0.
 ///
 /// Called via `Handle::block_on` from a blocking-pool thread (see
 /// `TabState::start_download`), not `tokio::spawn`, so nothing here needs
@@ -2474,7 +2544,7 @@ async fn run_download(
     web_seed_base: &str,
     staging_dir: &Path,
     install_dir: &Path,
-    cancel: &Arc<std::sync::atomic::AtomicBool>,
+    control: &wgc_download::DownloadControl,
     progress: impl Fn(DownloadUiState),
 ) -> DownloadUiState {
     use std::sync::atomic::Ordering;
@@ -2484,13 +2554,17 @@ async fn run_download(
         done_bytes: 0,
         total_bytes: 0,
         current: String::new(),
-        cancel: Arc::clone(cancel),
+        cancel: Arc::clone(&control.cancel),
+        pause: Arc::clone(&control.pause),
     });
 
     let mut torrents = Vec::with_capacity(torrent_urls.len());
     for url in torrent_urls {
-        if cancel.load(Ordering::SeqCst) {
+        if control.cancel.load(Ordering::SeqCst) {
             return DownloadUiState::Cancelled;
+        }
+        if control.pause.load(Ordering::SeqCst) {
+            return DownloadUiState::Paused;
         }
         match wgc_download::fetch_torrent(client, url).await {
             Ok(meta) => torrents.push(meta),
@@ -2503,8 +2577,11 @@ async fn run_download(
     let mut skipped_deltas = 0usize;
 
     for torrent in torrents {
-        if cancel.load(Ordering::SeqCst) {
+        if control.cancel.load(Ordering::SeqCst) {
             return DownloadUiState::Cancelled;
+        }
+        if control.pause.load(Ordering::SeqCst) {
+            return DownloadUiState::Paused;
         }
         let torrent_total = torrent.total_length;
         let req = wgc_download::InstallRequest {
@@ -2516,28 +2593,40 @@ async fn run_download(
         };
 
         let base_done = done_bytes;
-        let result = wgc_download::download_and_install(client, &req, |update| {
-            let (phase, current, in_flight_bytes) = match &update {
+        let result = wgc_download::download_and_install(client, &req, control, |update| {
+            // `dp.downloaded_bytes` is now cumulative across the torrent
+            // (see `wgc_download::webseed::DownloadProgress`), and unpacking
+            // starts only once the whole torrent finished downloading, so
+            // both branches read as "this torrent's bytes so far" and
+            // `base_done + torrent_bytes` never decreases within a torrent.
+            let (phase, current, torrent_bytes) = match &update {
                 wgc_download::InstallProgress::Downloading(dp) => (
                     "Downloading".to_string(),
                     format!("{} (file {}/{})", dp.file, dp.files_done + 1, dp.files_total),
                     dp.downloaded_bytes,
                 ),
-                wgc_download::InstallProgress::Unpacking { file } => ("Unpacking".to_string(), file.clone(), 0),
-                wgc_download::InstallProgress::Unpacked { file, .. } => ("Unpacking".to_string(), file.clone(), 0),
+                wgc_download::InstallProgress::Unpacking { file } => {
+                    ("Unpacking".to_string(), file.clone(), torrent_total)
+                }
+                wgc_download::InstallProgress::Unpacked { file, .. } => {
+                    ("Unpacking".to_string(), file.clone(), torrent_total)
+                }
             };
             progress(DownloadUiState::Running {
                 phase,
-                done_bytes: base_done + in_flight_bytes,
+                done_bytes: base_done + torrent_bytes,
                 total_bytes,
                 current,
-                cancel: Arc::clone(cancel),
+                cancel: Arc::clone(&control.cancel),
+                pause: Arc::clone(&control.pause),
             });
         })
         .await;
 
         match result {
             Ok(outcome) => skipped_deltas += outcome.skipped_deltas.len(),
+            Err(wgc_download::DownloadError::Cancelled) => return DownloadUiState::Cancelled,
+            Err(wgc_download::DownloadError::Paused) => return DownloadUiState::Paused,
             Err(e) => return DownloadUiState::Failed(e.to_string()),
         }
         // Advance to this torrent's full size once it completes: unpack

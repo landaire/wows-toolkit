@@ -17,6 +17,7 @@ use wgc_download::install::InstallRequest;
 use wgc_download::install::download_and_install;
 use wgc_download::torrent::TorrentMeta;
 use wgc_download::torrent::parse_torrent;
+use wgc_download::webseed::DownloadControl;
 
 const BUILD_TORRENT: &[u8] = include_bytes!("fixtures/build.torrent");
 const WEB_SEED_BASE: &str = "http://dl-wows-gc.wargaming.net/projects/PT/ru/patches/";
@@ -57,9 +58,13 @@ async fn downloads_and_installs_the_real_locale_package() {
         is_steam_install: false,
     };
     let client = reqwest::Client::new();
+    let control = DownloadControl {
+        cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        pause: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
 
     let unpacked_events = AtomicUsize::new(0);
-    let outcome = download_and_install(&client, &req, |p| {
+    let outcome = download_and_install(&client, &req, &control, |p| {
         if matches!(p, InstallProgress::Unpacked { .. }) {
             unpacked_events.fetch_add(1, Ordering::SeqCst);
         }

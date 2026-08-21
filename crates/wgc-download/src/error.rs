@@ -55,4 +55,15 @@ pub enum DownloadError {
     /// packages for now.
     #[error("delta package unpacking is not supported yet: {file}")]
     DeltaUnsupported { file: String },
+    /// The caller's `DownloadControl::cancel` flag was set while a file was
+    /// in flight. Checked at the start of `download_one` and inside its
+    /// chunk loop, so a multi-GB torrent aborts promptly rather than only
+    /// between files.
+    #[error("download cancelled")]
+    Cancelled,
+    /// The caller's `DownloadControl::pause` flag was set while a file was
+    /// in flight. Unlike `Cancelled`, any file already sha1-verified stays
+    /// staged on disk, so a resumed run skips it.
+    #[error("download paused")]
+    Paused,
 }

@@ -12,6 +12,9 @@
 use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
@@ -50,8 +53,13 @@ pub struct DownloadRequest {
     pub is_steam_install: bool,
 }
 
-/// Progress for one file, reported as bytes stream in and once more on
-/// completion (including a resumed/already-verified skip).
+/// Progress reported repeatedly while streaming one file's bytes and once
+/// more on that file's completion (including a resumed/already-verified
+/// skip). `downloaded_bytes`/`total_bytes` are cumulative across the whole
+/// torrent, not per-file: `downloaded_bytes` only ever increases across one
+/// `download()` call, and `total_bytes` is that torrent's fixed total (sum
+/// of its real files' `length`). `file`/`files_done`/`files_total` still
+/// describe the in-flight file, for a "file X/Y" label.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DownloadProgress {
     pub file: String,
@@ -60,6 +68,17 @@ pub struct DownloadProgress {
     /// Files fully verified so far, not counting the in-flight `file`.
     pub files_done: usize,
     pub files_total: usize,
+}
+
+/// Cooperative stop signals checked while streaming a file's bytes, so a
+/// multi-GB in-flight download responds to Cancel/Pause promptly rather
+/// than only between files or between torrents. Cancel discards the run;
+/// Pause also stops it, but staged (sha1-verified) files stay on disk so a
+/// resumed run skips them via [`already_verified`].
+#[derive(Clone)]
+pub struct DownloadControl {
+    pub cancel: Arc<AtomicBool>,
+    pub pause: Arc<AtomicBool>,
 }
 
 /// Download every real file of `req.torrent` from `req.web_seed_base` into
@@ -74,6 +93,7 @@ pub struct DownloadProgress {
 pub async fn download(
     client: &reqwest::Client,
     req: &DownloadRequest,
+    control: &DownloadControl,
     progress: impl Fn(DownloadProgress),
 ) -> Result<(), DownloadError> {
     if req.is_steam_install {
@@ -82,12 +102,16 @@ pub async fn download(
 
     let real_files: Vec<&TorrentFile> =
         req.torrent.files.iter().filter(|f| !f.relative_path().starts_with(PADDING_FILE_PREFIX)).collect();
+    let torrent_total: u64 = real_files.iter().map(|f| f.length).sum();
     let ctx = DownloadContext {
         web_seed_base: &req.web_seed_base,
         torrent_name: &req.torrent.name,
         staging_dir: &req.staging_dir,
         files_total: real_files.len(),
         files_done: AtomicUsize::new(0),
+        downloaded_total: AtomicU64::new(0),
+        torrent_total,
+        control,
         progress: &progress,
     };
     let ctx = &ctx;
@@ -115,6 +139,14 @@ struct DownloadContext<'a, P: Fn(DownloadProgress)> {
     staging_dir: &'a Path,
     files_total: usize,
     files_done: AtomicUsize,
+    /// Bytes streamed in so far across every file of this torrent (real
+    /// files only). Shared by every concurrent `download_one` call so
+    /// `DownloadProgress::downloaded_bytes` is cumulative, not per-file.
+    downloaded_total: AtomicU64,
+    /// Sum of every real file's `length`; the torrent-wide denominator
+    /// reported alongside `downloaded_total`.
+    torrent_total: u64,
+    control: &'a DownloadControl,
     progress: &'a P,
 }
 
@@ -124,6 +156,13 @@ async fn download_one<P: Fn(DownloadProgress)>(
     ctx: &DownloadContext<'_, P>,
     file: &TorrentFile,
 ) -> Result<(), DownloadError> {
+    if ctx.control.cancel.load(Ordering::SeqCst) {
+        return Err(DownloadError::Cancelled);
+    }
+    if ctx.control.pause.load(Ordering::SeqCst) {
+        return Err(DownloadError::Paused);
+    }
+
     let relative_path = file.relative_path();
     let expected_sha1 =
         file.sha1.as_deref().ok_or_else(|| DownloadError::MissingSha1 { file: relative_path.clone() })?;
@@ -137,10 +176,11 @@ async fn download_one<P: Fn(DownloadProgress)>(
 
     if already_verified(&dest, expected_sha1).await? {
         let done = ctx.files_done.fetch_add(1, Ordering::SeqCst) + 1;
+        let cumulative = ctx.downloaded_total.fetch_add(file.length, Ordering::SeqCst) + file.length;
         (ctx.progress)(DownloadProgress {
             file: relative_path,
-            downloaded_bytes: file.length,
-            total_bytes: file.length,
+            downloaded_bytes: cumulative,
+            total_bytes: ctx.torrent_total,
             files_done: done,
             files_total: ctx.files_total,
         });
@@ -167,16 +207,23 @@ async fn download_one<P: Fn(DownloadProgress)>(
     let mut body = response.bytes_stream();
 
     while let Some(chunk) = body.next().await {
+        if ctx.control.cancel.load(Ordering::SeqCst) {
+            return Err(DownloadError::Cancelled);
+        }
+        if ctx.control.pause.load(Ordering::SeqCst) {
+            return Err(DownloadError::Paused);
+        }
         let chunk = chunk.map_err(|e| DownloadError::Request { url: url.clone(), detail: e.to_string() })?;
         hasher.update(&chunk);
         out.write_all(&chunk)
             .await
             .map_err(|e| DownloadError::Io { detail: format!("writing {}: {e}", dest.display()) })?;
         downloaded += chunk.len() as u64;
+        let cumulative = ctx.downloaded_total.fetch_add(chunk.len() as u64, Ordering::SeqCst) + chunk.len() as u64;
         (ctx.progress)(DownloadProgress {
             file: relative_path.clone(),
-            downloaded_bytes: downloaded,
-            total_bytes: file.length,
+            downloaded_bytes: cumulative,
+            total_bytes: ctx.torrent_total,
             files_done: ctx.files_done.load(Ordering::SeqCst),
             files_total: ctx.files_total,
         });
@@ -198,10 +245,12 @@ async fn download_one<P: Fn(DownloadProgress)>(
     }
 
     let done = ctx.files_done.fetch_add(1, Ordering::SeqCst) + 1;
+    // Chunks already accumulated this file's bytes into `downloaded_total`
+    // above; load rather than add again here.
     (ctx.progress)(DownloadProgress {
         file: relative_path,
-        downloaded_bytes: downloaded,
-        total_bytes: file.length,
+        downloaded_bytes: ctx.downloaded_total.load(Ordering::SeqCst),
+        total_bytes: ctx.torrent_total,
         files_done: done,
         files_total: ctx.files_total,
     });
@@ -335,6 +384,12 @@ mod tests {
         std::env::temp_dir().join(format!("wgc-download-test-{name}-{}-{nanos}", std::process::id()))
     }
 
+    /// A control with both flags clear, for tests that don't exercise
+    /// cancel/pause.
+    fn no_control() -> DownloadControl {
+        DownloadControl { cancel: Arc::new(AtomicBool::new(false)), pause: Arc::new(AtomicBool::new(false)) }
+    }
+
     fn traversal_torrent(file_path: Vec<String>) -> TorrentMeta {
         TorrentMeta {
             name: "wows_test".to_string(),
@@ -357,7 +412,7 @@ mod tests {
             is_steam_install: false,
         };
         let client = reqwest::Client::new();
-        let result = download(&client, &req, |_| {}).await;
+        let result = download(&client, &req, &no_control(), |_| {}).await;
         assert!(matches!(result, Err(DownloadError::UnsafePath { .. })), "expected UnsafePath, got {result:?}");
 
         // The traversal target would land next to staging_dir itself, one
@@ -380,11 +435,163 @@ mod tests {
             is_steam_install: false,
         };
         let client = reqwest::Client::new();
-        let result = download(&client, &req, |_| {}).await;
+        let result = download(&client, &req, &no_control(), |_| {}).await;
         assert!(matches!(result, Err(DownloadError::UnsafePath { .. })), "expected UnsafePath, got {result:?}");
 
         let traversal_target = Path::new("/abs-evil.txt");
         assert!(!traversal_target.exists(), "traversal target must not be written: {}", traversal_target.display());
+
+        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+    }
+
+    /// A pre-set cancel flag must abort before any request is made -- the
+    /// same "checked at the very top of `download_one`" guarantee the
+    /// `SteamInstallRefused` test above exercises for that refusal.
+    #[tokio::test]
+    async fn cancel_flag_set_before_start_aborts_without_any_request() {
+        let staging_dir = unique_temp_dir("cancel-preset");
+        tokio::fs::create_dir_all(&staging_dir).await.unwrap();
+
+        let req = DownloadRequest {
+            staging_dir: staging_dir.clone(),
+            torrent: traversal_torrent(vec!["file.dspkg".to_string()]),
+            web_seed_base: "http://127.0.0.1:1/unused/".to_string(),
+            is_steam_install: false,
+        };
+        let control =
+            DownloadControl { cancel: Arc::new(AtomicBool::new(true)), pause: Arc::new(AtomicBool::new(false)) };
+        let client = reqwest::Client::new();
+
+        let result = download(&client, &req, &control, |_| {}).await;
+        assert!(matches!(result, Err(DownloadError::Cancelled)), "expected Cancelled, got {result:?}");
+
+        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+    }
+
+    /// Mirrors `cancel_flag_set_before_start_aborts_without_any_request`,
+    /// but for the pause flag returning `Paused` instead of `Cancelled`.
+    #[tokio::test]
+    async fn pause_flag_set_before_start_aborts_without_any_request() {
+        let staging_dir = unique_temp_dir("pause-preset");
+        tokio::fs::create_dir_all(&staging_dir).await.unwrap();
+
+        let req = DownloadRequest {
+            staging_dir: staging_dir.clone(),
+            torrent: traversal_torrent(vec!["file.dspkg".to_string()]),
+            web_seed_base: "http://127.0.0.1:1/unused/".to_string(),
+            is_steam_install: false,
+        };
+        let control =
+            DownloadControl { cancel: Arc::new(AtomicBool::new(false)), pause: Arc::new(AtomicBool::new(true)) };
+        let client = reqwest::Client::new();
+
+        let result = download(&client, &req, &control, |_| {}).await;
+        assert!(matches!(result, Err(DownloadError::Paused)), "expected Paused, got {result:?}");
+
+        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+    }
+
+    /// `downloaded_bytes` reported for a multi-file torrent must accumulate
+    /// across files (the bug this fix corrects: it used to reset to 0 at the
+    /// start of each new file), and must never decrease between successive
+    /// progress calls.
+    #[tokio::test]
+    async fn downloaded_bytes_accumulate_across_files_and_never_decrease() {
+        use std::io::BufRead;
+        use std::io::BufReader;
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        fn sha1_hex(body: &[u8]) -> String {
+            let mut hasher = Sha1::new();
+            hasher.update(body);
+            hex::encode(hasher.finalize())
+        }
+
+        // Answers one request with the body whose file name ends the request
+        // path. Downloads run concurrently, so accept order is not file order.
+        fn serve_once(listener: &TcpListener, bodies: &[(&str, Vec<u8>)]) {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            let mut line = String::new();
+            let _ = reader.read_line(&mut line);
+            let path = line.split_whitespace().nth(1).expect("request line has a path");
+            let body = &bodies.iter().find(|(name, _)| path.ends_with(&format!("/{name}"))).expect("known file").1;
+            loop {
+                let mut header = String::new();
+                match reader.read_line(&mut header) {
+                    Ok(0) => break,
+                    Ok(_) if header == "\r\n" || header == "\n" => break,
+                    Ok(_) => continue,
+                    Err(_) => break,
+                }
+            }
+            let mut head =
+                format!("HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", body.len()).into_bytes();
+            head.extend_from_slice(body);
+            let _ = stream.write_all(&head);
+            let _ = stream.flush();
+        }
+
+        let body_a = b"first file body, some bytes".to_vec();
+        let body_b = b"second file body, a few more bytes than the first".to_vec();
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let bodies = vec![("a.dspkg", body_a.clone()), ("b.dspkg", body_b.clone())];
+        let handle = std::thread::spawn(move || {
+            for _ in 0..bodies.len() {
+                serve_once(&listener, &bodies);
+            }
+        });
+
+        let staging_dir = unique_temp_dir("accumulate");
+        tokio::fs::create_dir_all(&staging_dir).await.unwrap();
+        let torrent = TorrentMeta {
+            name: "acc_test".to_string(),
+            piece_length: 1 << 20,
+            total_length: (body_a.len() + body_b.len()) as u64,
+            files: vec![
+                TorrentFile {
+                    path: vec!["a.dspkg".to_string()],
+                    length: body_a.len() as u64,
+                    sha1: Some(sha1_hex(&body_a)),
+                },
+                TorrentFile {
+                    path: vec!["b.dspkg".to_string()],
+                    length: body_b.len() as u64,
+                    sha1: Some(sha1_hex(&body_b)),
+                },
+            ],
+            unpacked_sizes: BTreeMap::new(),
+        };
+        let req = DownloadRequest {
+            staging_dir: staging_dir.clone(),
+            torrent,
+            web_seed_base: format!("http://{addr}/"),
+            is_steam_install: false,
+        };
+
+        let progress: Arc<std::sync::Mutex<Vec<DownloadProgress>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let progress_cb = Arc::clone(&progress);
+        let client = reqwest::Client::new();
+        // buffer_unordered(4) runs both files at once; the server answers
+        // each by path, so the assertion does not depend on scheduling order.
+        download(&client, &req, &no_control(), move |p| progress_cb.lock().expect("progress lock").push(p))
+            .await
+            .expect("download should succeed");
+        handle.join().expect("server thread should not panic");
+
+        let calls = progress.lock().expect("progress lock").clone();
+        assert!(!calls.is_empty(), "expected at least one progress call");
+        let expected_total = (body_a.len() + body_b.len()) as u64;
+        let mut last = 0u64;
+        for call in &calls {
+            assert!(call.downloaded_bytes >= last, "downloaded_bytes must never decrease: {calls:?}");
+            assert_eq!(call.total_bytes, expected_total, "total_bytes must stay the torrent's fixed total");
+            last = call.downloaded_bytes;
+        }
+        assert_eq!(last, expected_total, "final progress call should reach the torrent's full size");
 
         let _ = tokio::fs::remove_dir_all(&staging_dir).await;
     }

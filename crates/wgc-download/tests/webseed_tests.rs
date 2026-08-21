@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::net::TcpListener;
 use std::net::TcpStream;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -19,9 +20,16 @@ use sha1::Sha1;
 use wgc_download::error::DownloadError;
 use wgc_download::torrent::TorrentFile;
 use wgc_download::torrent::TorrentMeta;
+use wgc_download::webseed::DownloadControl;
 use wgc_download::webseed::DownloadProgress;
 use wgc_download::webseed::DownloadRequest;
 use wgc_download::webseed::download;
+
+/// A control with both flags clear, for tests that don't exercise
+/// cancel/pause.
+fn no_control() -> DownloadControl {
+    DownloadControl { cancel: Arc::new(AtomicBool::new(false)), pause: Arc::new(AtomicBool::new(false)) }
+}
 
 struct TestServer {
     addr: SocketAddr,
@@ -133,7 +141,7 @@ async fn downloads_and_verifies_a_file() {
 
     let progress_calls: Arc<std::sync::Mutex<Vec<DownloadProgress>>> = Arc::new(std::sync::Mutex::new(Vec::new()));
     let progress_calls_cb = Arc::clone(&progress_calls);
-    download(&client, &req, move |p| progress_calls_cb.lock().expect("progress lock").push(p))
+    download(&client, &req, &no_control(), move |p| progress_calls_cb.lock().expect("progress lock").push(p))
         .await
         .expect("download should succeed");
 
@@ -167,7 +175,7 @@ async fn wrong_expected_sha1_yields_hash_mismatch() {
         is_steam_install: false,
     };
 
-    let err = download(&client, &req, |_| {}).await.expect_err("mismatched sha1 should error");
+    let err = download(&client, &req, &no_control(), |_| {}).await.expect_err("mismatched sha1 should error");
     match err {
         DownloadError::HashMismatch { expected, .. } => assert_eq!(expected, "0".repeat(40)),
         other => panic!("expected HashMismatch, got {other:?}"),
@@ -192,7 +200,7 @@ async fn steam_install_is_refused_before_any_request() {
     };
     let client = reqwest::Client::new();
 
-    let err = download(&client, &req, |_| {}).await.expect_err("steam install should be refused");
+    let err = download(&client, &req, &no_control(), |_| {}).await.expect_err("steam install should be refused");
     assert!(matches!(err, DownloadError::SteamInstallRefused));
 
     cleanup(&req.staging_dir);
@@ -215,11 +223,11 @@ async fn rerun_skips_an_already_verified_file() {
         is_steam_install: false,
     };
 
-    download(&client, &req, |_| {}).await.expect("first download should succeed");
+    download(&client, &req, &no_control(), |_| {}).await.expect("first download should succeed");
     let count_after_first = server.request_count();
     assert_eq!(count_after_first, 1);
 
-    download(&client, &req, |_| {}).await.expect("rerun should succeed by skipping");
+    download(&client, &req, &no_control(), |_| {}).await.expect("rerun should succeed by skipping");
     assert_eq!(server.request_count(), count_after_first, "rerun should not have re-requested the file");
 
     cleanup(&staging_dir);

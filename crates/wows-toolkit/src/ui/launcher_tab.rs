@@ -1,9 +1,34 @@
 //! The Launcher tab: discover, launch, and manage WoWs installs.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use crate::app::ToolkitTabViewer;
 use crate::tab_state::CatalogCheckState;
 use crate::tab_state::DownloadUiState;
 use crate::update_background_task;
+
+/// Fixed width of the whole download-progress block (progress bar + byte
+/// label + phase/file line), so the row's size stays constant frame to
+/// frame instead of jumping as the byte count and in-flight file name
+/// change width. See `show_download_status`.
+const PROGRESS_AREA_WIDTH: f32 = 380.0;
+/// Fixed width of the "X / Y" byte label within the progress area.
+const BYTE_LABEL_WIDTH: f32 = 150.0;
+
+/// One row's download-status action the user triggered this frame (if
+/// any), collected by `show_download_status` and applied by the caller
+/// after the row loop -- same borrow-collection pattern as
+/// `to_launch`/`to_activate`/`to_recheck`.
+enum DownloadRowAction {
+    None,
+    Cancel(Arc<AtomicBool>),
+    Pause(Arc<AtomicBool>),
+    /// Resume a paused download tracked under this `dest_key` in
+    /// `download_state`/`download_resume`.
+    Resume(PathBuf),
+}
 
 /// Display label for a WGNI account realm. Ru is flagged experimental
 /// everywhere it appears -- see `wgc_auth::AccountRealm::Ru`'s own doc.
@@ -77,35 +102,64 @@ fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
     }
 }
 
-/// Render one install's download/install run status, if any. Returns the
-/// download's `cancel` flag (the same `Arc` the background task checks) if
-/// the user clicked "Cancel" this frame, so the caller can flip it after
-/// the row loop (same borrow-collection pattern as
-/// `to_launch`/`to_activate`/`to_recheck`).
+/// Render one install's download/install run status, if any, in a
+/// fixed-width block so the row's size stays constant frame to frame as
+/// byte counts and the in-flight file name change (long names truncate
+/// rather than growing the row). Returns whatever action the user
+/// triggered this frame, so the caller can apply it after the row loop
+/// (same borrow-collection pattern as `to_launch`/`to_activate`/`to_recheck`).
 fn show_download_status(
     ui: &mut egui::Ui,
+    dest_key: Option<&std::path::Path>,
     state: Option<&DownloadUiState>,
-) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
-    let mut to_cancel = None;
+) -> DownloadRowAction {
+    let mut action = DownloadRowAction::None;
     match state {
-        Some(DownloadUiState::Running { phase, done_bytes, total_bytes, current, cancel }) => {
+        Some(DownloadUiState::Running { phase, done_bytes, total_bytes, current, cancel, pause }) => {
+            ui.allocate_ui_with_layout(
+                egui::vec2(PROGRESS_AREA_WIDTH, ui.spacing().interact_size.y * 2.0 + ui.spacing().item_spacing.y),
+                egui::Layout::top_down(egui::Align::LEFT),
+                |ui| {
+                    ui.set_width(PROGRESS_AREA_WIDTH);
+                    ui.horizontal(|ui| {
+                        if *total_bytes > 0 {
+                            let frac = (*done_bytes as f32 / *total_bytes as f32).clamp(0.0, 1.0);
+                            ui.add(egui::ProgressBar::new(frac).show_percentage().desired_width(200.0));
+                            let bytes_text = format!(
+                                "{} / {}",
+                                humansize::format_size(*done_bytes, humansize::BINARY),
+                                humansize::format_size(*total_bytes, humansize::BINARY)
+                            );
+                            ui.add_sized(
+                                egui::vec2(BYTE_LABEL_WIDTH, ui.spacing().interact_size.y),
+                                egui::Label::new(bytes_text).truncate(),
+                            );
+                        } else {
+                            ui.spinner();
+                        }
+                        if ui.small_button("Pause").clicked() {
+                            action = DownloadRowAction::Pause(Arc::clone(pause));
+                        }
+                        if ui.small_button("Cancel").clicked() {
+                            action = DownloadRowAction::Cancel(Arc::clone(cancel));
+                        }
+                    });
+                    ui.add(egui::Label::new(format!("{phase}: {current}")).truncate());
+                },
+            );
+        }
+        Some(DownloadUiState::Paused) => {
             ui.horizontal(|ui| {
-                if *total_bytes > 0 {
-                    let frac = (*done_bytes as f32 / *total_bytes as f32).clamp(0.0, 1.0);
-                    ui.add(egui::ProgressBar::new(frac).show_percentage().desired_width(200.0));
-                    ui.label(format!(
-                        "{} / {}",
-                        humansize::format_size(*done_bytes, humansize::BINARY),
-                        humansize::format_size(*total_bytes, humansize::BINARY)
-                    ));
-                } else {
-                    ui.spinner();
-                }
-                if ui.small_button("Cancel").clicked() {
-                    to_cancel = Some(std::sync::Arc::clone(cancel));
+                ui.weak("Download paused; staged files are kept.");
+                // `dest_key` is only absent for a row that never started a
+                // download at all, which can't be in `Paused`; the guard is
+                // defensive, not expected to trip.
+                if let Some(dest_key) = dest_key
+                    && ui.small_button("Resume").clicked()
+                {
+                    action = DownloadRowAction::Resume(dest_key.to_path_buf());
                 }
             });
-            ui.weak(format!("{phase}: {current}"));
         }
         Some(DownloadUiState::Done { skipped_deltas }) => {
             if *skipped_deltas > 0 {
@@ -125,7 +179,7 @@ fn show_download_status(
         }
         None => {}
     }
-    to_cancel
+    action
 }
 
 /// Render one known game's installable version, derived from a fresh
@@ -207,6 +261,81 @@ impl ToolkitTabViewer<'_> {
                 changed = true;
             }
 
+            ui.separator();
+            ui.strong("Proton (Linux)");
+            ui.weak(
+                "A non-Steam install launches through this Proton binary and prefix. Steam installs launch through Steam and ignore these.",
+            );
+
+            ui.horizontal(|ui| {
+                ui.label("Binary:");
+                match &launcher.proton_binary {
+                    Some(path) => {
+                        ui.add(egui::Label::new(path.display().to_string()).truncate());
+                    }
+                    None => {
+                        ui.weak("not set");
+                    }
+                }
+                if ui.small_button("Browse...").clicked()
+                    && let Some(path) = rfd::FileDialog::new().pick_file()
+                {
+                    launcher.proton_binary = Some(path);
+                    changed = true;
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label("Prefix:");
+                match &launcher.proton_prefix {
+                    Some(path) => {
+                        ui.add(egui::Label::new(path.display().to_string()).truncate());
+                    }
+                    None => {
+                        ui.weak("not set");
+                    }
+                }
+                if ui.small_button("Browse...").clicked()
+                    && let Some(path) = rfd::FileDialog::new().pick_folder()
+                {
+                    launcher.proton_prefix = Some(path);
+                    changed = true;
+                }
+            });
+            if ui.button("Auto-detect").clicked() {
+                match wgc_launch::proton::find_steam_root() {
+                    Some(steam_root) => {
+                        // With no prefix chosen yet there is no `config_info`
+                        // to read, so `find_proton_in_library` falls back to
+                        // scanning this library's `steamapps/common` for the
+                        // newest installed Proton -- a reasonable default,
+                        // not necessarily the exact version this install's
+                        // (unknown) Steam-shortcut prefix was created with.
+                        let compat_data = launcher.proton_prefix.clone().unwrap_or_else(|| steam_root.clone());
+                        match wgc_launch::proton::find_proton_in_library(&steam_root, &compat_data) {
+                            Some(binary) => {
+                                launcher.proton_binary = Some(binary);
+                                changed = true;
+                                if launcher.proton_prefix.is_none() {
+                                    self.tab_state.toasts.lock().warning(
+                                        "Found a Proton binary. Its compat data prefix could not be auto-detected -- browse to your WoWs Steam-shortcut prefix (steamapps/compatdata/<id>/pfx) manually.",
+                                    );
+                                } else {
+                                    self.tab_state.toasts.lock().success("Proton binary detected.");
+                                }
+                            }
+                            None => {
+                                self.tab_state.toasts.lock().warning(
+                                    "Found a Steam installation, but no Proton install under its library -- set the binary manually.",
+                                );
+                            }
+                        }
+                    }
+                    None => {
+                        self.tab_state.toasts.lock().error("Could not find a Steam installation.");
+                    }
+                }
+            }
+
             if changed {
                 self.tab_state.persisted.write().settings.launcher = launcher;
                 self.tab_state.request_save();
@@ -222,7 +351,9 @@ impl ToolkitTabViewer<'_> {
         let mut to_recheck: Option<std::path::PathBuf> = None;
         // (install_path, folder-picker default dir).
         let mut to_download: Option<(std::path::PathBuf, std::path::PathBuf)> = None;
-        let mut to_cancel_download: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> = None;
+        let mut to_cancel_download: Option<Arc<AtomicBool>> = None;
+        let mut to_pause_download: Option<Arc<AtomicBool>> = None;
+        let mut to_resume_download: Option<std::path::PathBuf> = None;
 
         for (i, install) in self.tab_state.discovered_installs.iter().enumerate() {
             ui.group(|ui| {
@@ -244,16 +375,20 @@ impl ToolkitTabViewer<'_> {
                     });
 
                     let download_state = self.tab_state.download_state.get(&install.path);
-                    let is_running = matches!(download_state, Some(DownloadUiState::Running { .. }));
-                    if let Some(cancel) = show_download_status(ui, download_state) {
-                        to_cancel_download = Some(cancel);
+                    let is_active =
+                        matches!(download_state, Some(DownloadUiState::Running { .. } | DownloadUiState::Paused));
+                    match show_download_status(ui, Some(&install.path), download_state) {
+                        DownloadRowAction::Cancel(cancel) => to_cancel_download = Some(cancel),
+                        DownloadRowAction::Pause(pause) => to_pause_download = Some(pause),
+                        DownloadRowAction::Resume(dest_key) => to_resume_download = Some(dest_key),
+                        DownloadRowAction::None => {}
                     }
 
                     let has_downloads = matches!(
                         self.tab_state.catalog_status.get(&install.path),
                         Some(CatalogCheckState::Ready(build)) if !build.downloads.is_empty()
                     );
-                    if has_downloads && !is_running {
+                    if has_downloads && !is_active {
                         ui.horizontal(|ui| {
                             if ui.button("Download / Update...").clicked() {
                                 // A discovered install with no detected version has
@@ -305,6 +440,12 @@ impl ToolkitTabViewer<'_> {
         if let Some(cancel) = to_cancel_download {
             cancel.store(true, std::sync::atomic::Ordering::SeqCst);
         }
+        if let Some(pause) = to_pause_download {
+            pause.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(dest_key) = to_resume_download {
+            self.tab_state.resume_download(&dest_key);
+        }
 
         if let Some((install_path, default_dir)) = to_download
             && let Some(dest_dir) = rfd::FileDialog::new().set_directory(&default_dir).pick_folder()
@@ -336,12 +477,14 @@ impl ToolkitTabViewer<'_> {
         ui.collapsing("Install a game", |ui| {
             ui.weak("A fresh install is tens of GB.");
 
-            // Collect the install intent (and any cancel click) first so we
+            // Collect the install intent (and any row action) first so we
             // do not borrow-conflict with `available_games`/`download_state`
             // while iterating -- same pattern as `to_download`/`to_launch`
             // above.
             let mut to_install: Option<(String, std::path::PathBuf)> = None;
-            let mut to_cancel: Option<std::sync::Arc<std::sync::atomic::AtomicBool>> = None;
+            let mut to_cancel: Option<Arc<AtomicBool>> = None;
+            let mut to_pause: Option<Arc<AtomicBool>> = None;
+            let mut to_resume: Option<std::path::PathBuf> = None;
 
             for known in wgc_catalog::known_games::known_games() {
                 ui.group(|ui| {
@@ -352,16 +495,20 @@ impl ToolkitTabViewer<'_> {
 
                     let dest = self.tab_state.installing_games.get(known.game_id).cloned();
                     let download_state = dest.as_ref().and_then(|d| self.tab_state.download_state.get(d));
-                    let is_running = matches!(download_state, Some(DownloadUiState::Running { .. }));
-                    if let Some(cancel) = show_download_status(ui, download_state) {
-                        to_cancel = Some(cancel);
+                    let is_active =
+                        matches!(download_state, Some(DownloadUiState::Running { .. } | DownloadUiState::Paused));
+                    match show_download_status(ui, dest.as_deref(), download_state) {
+                        DownloadRowAction::Cancel(cancel) => to_cancel = Some(cancel),
+                        DownloadRowAction::Pause(pause) => to_pause = Some(pause),
+                        DownloadRowAction::Resume(dest_key) => to_resume = Some(dest_key),
+                        DownloadRowAction::None => {}
                     }
 
                     let is_ready = matches!(
                         self.tab_state.available_games.get(known.game_id),
                         Some(CatalogCheckState::Ready(build)) if !build.downloads.is_empty()
                     );
-                    ui.add_enabled_ui(is_ready && !is_running, |ui| {
+                    ui.add_enabled_ui(is_ready && !is_active, |ui| {
                         if ui.button("Install...").clicked()
                             && let Some(dest_dir) =
                                 rfd::FileDialog::new().set_directory(wgc_download::default_install_dir()).pick_folder()
@@ -374,6 +521,12 @@ impl ToolkitTabViewer<'_> {
 
             if let Some(cancel) = to_cancel {
                 cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some(pause) = to_pause {
+                pause.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            if let Some(dest_key) = to_resume {
+                self.tab_state.resume_download(&dest_key);
             }
             if let Some((game_id, dest_dir)) = to_install {
                 self.tab_state.install_known_game(game_id, dest_dir);
