@@ -9,6 +9,7 @@ use std::time::UNIX_EPOCH;
 use serde::Deserialize;
 use serde::Serialize;
 use zeroize::Zeroize;
+use zeroize::ZeroizeOnDrop;
 
 use crate::error::AuthError;
 use crate::identity::AccountId;
@@ -35,15 +36,13 @@ impl SessionStore {
     /// file fallback).
     pub fn save(&self, session: &StoredSession) -> Result<(), AuthError> {
         let entry = self.entry(session.realm, session.account_id)?;
-        let mut blob = StoredSessionBlob::from_session(session);
+        // `blob` is ZeroizeOnDrop, so its transient plaintext token copies are
+        // wiped when it drops -- including on the serialize `?` early return.
+        let blob = StoredSessionBlob::from_session(session);
         let mut json = serde_json::to_string(&blob)
             .map_err(|source| AuthError::BadResponse { detail: format!("could not serialize session: {source}") })?;
         let result = entry.set_password(&json).map_err(map_keyring_error);
         json.zeroize();
-        // `blob` is a second transient plaintext copy of the token strings
-        // (StoredSessionBlob has no Serialize->zeroize path of its own).
-        blob.access_token.zeroize();
-        blob.exchange_code.zeroize();
         result
     }
 
@@ -106,11 +105,13 @@ fn map_keyring_error(source: keyring::Error) -> AuthError {
 /// Separate serializable copy of `StoredSession`'s secret fields: A1's
 /// `AccessToken` deliberately has no `Serialize` (it zeroizes on drop). This
 /// blob is the JSON value stored as the keyring secret.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Zeroize, ZeroizeOnDrop)]
 struct StoredSessionBlob {
     access_token: String,
     exchange_code: String,
+    #[zeroize(skip)]
     nickname: String,
+    #[zeroize(skip)]
     expiry: BlobExpiry,
 }
 
@@ -133,18 +134,22 @@ impl StoredSessionBlob {
         }
     }
 
-    fn into_session(self, realm: AccountRealm, account_id: AccountId) -> StoredSession {
-        let expiry = match self.expiry {
+    // `mut self` + take/replace rather than field moves: StoredSessionBlob is
+    // ZeroizeOnDrop (has a Drop impl), so its fields cannot be moved out. The
+    // token strings move into the zeroizing AccessToken/ExchangeCode; the now
+    // empty blob drops harmlessly.
+    fn into_session(mut self, realm: AccountRealm, account_id: AccountId) -> StoredSession {
+        let expiry = match std::mem::replace(&mut self.expiry, BlobExpiry::Unknown) {
             BlobExpiry::Unknown => TokenExpiry::Unknown,
             BlobExpiry::KnownAt { unix_secs } => TokenExpiry::KnownAt(UNIX_EPOCH + Duration::from_secs(unix_secs)),
         };
         StoredSession {
             realm,
             account_id,
-            nickname: Nickname::new(self.nickname),
+            nickname: Nickname::new(std::mem::take(&mut self.nickname)),
             tokens: TokenPair {
-                access_token: AccessToken::new(self.access_token),
-                exchange_code: ExchangeCode::from_raw(self.exchange_code),
+                access_token: AccessToken::new(std::mem::take(&mut self.access_token)),
+                exchange_code: ExchangeCode::from_raw(std::mem::take(&mut self.exchange_code)),
             },
             expiry,
         }

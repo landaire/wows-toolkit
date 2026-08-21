@@ -572,6 +572,10 @@ pub enum LoginMsg {
     TwoFactorRequired {
         twofactor_token: String,
     },
+    /// The code was rejected but the challenge is still open: keep the prompt
+    /// and the pending password so the user retries the code, not the whole
+    /// login. Carries the inline error to show.
+    TwoFactorRetry(String),
     CaptchaRequired,
     Failed(String),
 }
@@ -2107,13 +2111,16 @@ impl TabState {
     /// longer than the click that submitted it.
     #[cfg(feature = "launcher")]
     pub fn start_login(&mut self) {
+        // Clear the plaintext buffer first: even the no-runtime early return
+        // must not leave the password lingering in the (non-zeroizing) form
+        // String. The taken `SecretPassword` drops (zeroized) if we bail.
+        let password = wgc_auth::SecretPassword::new(std::mem::take(&mut self.login_form.password));
         let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
             warn!("cannot sign in: tokio runtime is not available");
             return;
         };
         let realm = self.login_form.realm;
         let username = self.login_form.username.clone();
-        let password = wgc_auth::SecretPassword::new(std::mem::take(&mut self.login_form.password));
         let tracking_id = self.ensure_tracking_id();
 
         self.login_form.in_progress = true;
@@ -2257,6 +2264,11 @@ async fn send_login_result(
         }
         Err(wgc_auth::AuthError::CaptchaRequired) => {
             let _ = sender.send(LoginMsg::CaptchaRequired);
+        }
+        // A wrong code keeps the challenge open; a lockout/ban does not, so
+        // only the invalid-code case is a retry.
+        Err(e @ wgc_auth::AuthError::TwoFactorInvalidCode) => {
+            let _ = sender.send(LoginMsg::TwoFactorRetry(e.to_string()));
         }
         Err(e) => {
             let _ = sender.send(LoginMsg::Failed(e.to_string()));

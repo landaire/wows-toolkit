@@ -1411,7 +1411,14 @@ impl WowsToolkitApp {
                     state.tab_state.session_persisted = true;
                     state.tab_state.active_session = Some(session);
                 }
-                Err(wgc_auth::AuthError::NoStoredSession | wgc_auth::AuthError::NoSecretStore) => {}
+                // No entry is the normal "nothing persisted" case. NoSecretStore
+                // covers both a genuinely-absent store and a locked/erroring one
+                // (the keyring error taxonomy does not distinguish them), so log
+                // it rather than dropping a possibly-signed-in user silently.
+                Err(wgc_auth::AuthError::NoStoredSession) => {}
+                Err(wgc_auth::AuthError::NoSecretStore) => {
+                    tracing::debug!("no accessible OS secret store; starting signed out (session not restored)");
+                }
                 Err(e) => tracing::warn!("could not load stored session from keyring: {e}"),
             }
         }
@@ -3220,6 +3227,16 @@ impl WowsToolkitApp {
                             code: String::new(),
                             use_backup: false,
                         });
+                    }
+                    crate::tab_state::LoginMsg::TwoFactorRetry(msg) => {
+                        // Keep the challenge (two_factor) and pending_password
+                        // so the user retries just the code; clear the rejected
+                        // code and show the error inline.
+                        self.tab_state.login_form.in_progress = false;
+                        self.tab_state.login_form.error = Some(msg);
+                        if let Some(prompt) = self.tab_state.login_form.two_factor.as_mut() {
+                            prompt.code.clear();
+                        }
                     }
                     crate::tab_state::LoginMsg::CaptchaRequired => {
                         self.tab_state.login_form.in_progress = false;
