@@ -61,6 +61,18 @@ struct PartVersionXml {
     available: String,
 }
 
+impl GameInfo {
+    /// A game with nothing installed yet: `installed_parts` is empty, so
+    /// `check_updates` will report every part `NotInstalled` and populate
+    /// `downloads` for a full install. `check_updates` always asks WGUS for
+    /// the full newest chain (`CurrentPartVersions::full`, every part's
+    /// current version sent as `"0"`) regardless of what is installed, so no
+    /// extra signaling is needed here beyond an empty `installed_parts`.
+    pub fn for_fresh_install(game_id: String, update_base_url: url::Url, localization: String) -> GameInfo {
+        GameInfo { game_id, update_base_url, localization, installed_parts: Vec::new() }
+    }
+}
+
 /// Parse a `game_info.xml` document into a [`GameInfo`].
 pub fn parse_game_info(xml: &str) -> Result<GameInfo, CatalogError> {
     let parsed: ProtocolXml =

@@ -47,14 +47,16 @@ impl MetadataResponse {
 
     /// Whitespace-split `--safe`-style args from the first `<executable>`.
     ///
-    /// An empty result means no executable element was present, which is a
-    /// legitimate (if unusual) server response, not a parse failure.
+    /// An empty result means either no executable element was present, or
+    /// its `@args` attribute was absent; both are legitimate server
+    /// responses, not parse failures.
     pub fn safe_mode_args(&self) -> Vec<&str> {
         self.predefined_section
             .executables
             .executable
             .first()
-            .map(|e| e.args.split_whitespace().collect())
+            .and_then(|e| e.args.as_deref())
+            .map(|args| args.split_whitespace().collect())
             .unwrap_or_default()
     }
 
@@ -75,7 +77,10 @@ pub struct PredefinedSection {
     pub executables: Executables,
     #[serde(default)]
     pub launch_options: LaunchOptions,
-    pub environment_name: String,
+    /// Present on test environments (e.g. PT's `"PT"`); absent on live
+    /// production (observed on `WOWS.WW.PRODUCTION`), not malformed data.
+    #[serde(default)]
+    pub environment_name: Option<String>,
     pub client_types: ClientTypes,
 }
 
@@ -95,8 +100,10 @@ pub struct Executables {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Executable {
-    #[serde(rename = "@args")]
-    pub args: String,
+    /// Absent on some real responses (observed live on `WOWS.WW.PRODUCTION`):
+    /// legitimately "no launch args for this executable", not malformed data.
+    #[serde(default, rename = "@args")]
+    pub args: Option<String>,
     #[serde(rename = "$text")]
     pub name: String,
 }
