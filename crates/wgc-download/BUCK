@@ -19,5 +19,6 @@ workspace_library(
         "//third-party/rust:sha1",
         "//third-party/rust:futures",
         "//third-party/rust:hex",
+        "//third-party/rust:sevenz-rust2",
     ],
 )
