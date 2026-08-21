@@ -3971,6 +3971,11 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PATCH": "3",
         "CARGO_PKG_VERSION_PRE": "",
     },
+    platform = {
+        "linux-x86_64": dict(
+            features = ["std"],
+        ),
+    },
     visibility = [],
     deps = [":generic-array-0.14"],
 )
@@ -4749,7 +4754,10 @@ cargo.rust_library(
     ],
     platform = {
         "linux-x86_64": dict(
-            features = ["zeroize"],
+            features = [
+                "alloc",
+                "zeroize",
+            ],
         ),
     },
     visibility = [],
@@ -5203,7 +5211,10 @@ cargo.rust_library(
     features = ["block-padding"],
     platform = {
         "linux-x86_64": dict(
-            features = ["zeroize"],
+            features = [
+                "alloc",
+                "zeroize",
+            ],
             deps = [":zeroize-1"],
         ),
     },
@@ -7911,6 +7922,81 @@ cargo.rust_library(
         "std",
     ],
     visibility = [],
+)
+
+extract_archive(
+    name = "dbus-0.9.12.crate",
+    src = "vendor/dbus-0.9.12.crate",
+    strip_prefix = "dbus-0.9.12",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "dbus-0.9",
+    srcs = [":dbus-0.9.12.crate"],
+    crate = "dbus",
+    crate_root = "dbus-0.9.12.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "dbus",
+        "CARGO_MANIFEST_DIR": "dbus-0.9.12.crate",
+        "CARGO_PKG_AUTHORS": "David Henningsson <diwic@ubuntu.com>",
+        "CARGO_PKG_DESCRIPTION": "Bindings to D-Bus, which is a bus commonly used on Linux for inter-process communication.",
+        "CARGO_PKG_NAME": "dbus",
+        "CARGO_PKG_REPOSITORY": "https://github.com/diwic/dbus-rs",
+        "CARGO_PKG_VERSION": "0.9.12",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "9",
+        "CARGO_PKG_VERSION_PATCH": "12",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":libc-0.2",
+        ":libdbus-sys-0.2",
+    ],
+)
+
+extract_archive(
+    name = "dbus-secret-service-4.1.0.crate",
+    src = "vendor/dbus-secret-service-4.1.0.crate",
+    strip_prefix = "dbus-secret-service-4.1.0",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "dbus-secret-service-4",
+    srcs = [":dbus-secret-service-4.1.0.crate"],
+    crate = "dbus_secret_service",
+    crate_root = "dbus-secret-service-4.1.0.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "dbus_secret_service",
+        "CARGO_MANIFEST_DIR": "dbus-secret-service-4.1.0.crate",
+        "CARGO_PKG_AUTHORS": "Daniel Brotsky <dev@brotsky.com>",
+        "CARGO_PKG_DESCRIPTION": "Library to interface with Secret Service API over DBUS",
+        "CARGO_PKG_NAME": "dbus-secret-service",
+        "CARGO_PKG_REPOSITORY": "https://github.com/brotskydotcom/dbus-secret-service.git",
+        "CARGO_PKG_VERSION": "4.1.0",
+        "CARGO_PKG_VERSION_MAJOR": "4",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["crypto-rust"],
+    visibility = [],
+    deps = [
+        ":aes-0.8",
+        ":block-padding-0.3",
+        ":cbc-0.1",
+        ":dbus-0.9",
+        ":fastrand-2",
+        ":hkdf-0.12",
+        ":num-0.4",
+        ":once_cell-1",
+        ":sha2-0.10",
+        ":zeroize-1",
+    ],
 )
 
 extract_archive(
@@ -19404,6 +19490,97 @@ cargo.rust_library(
 )
 
 extract_archive(
+    name = "keccak-0.1.6.crate",
+    src = "vendor/keccak-0.1.6.crate",
+    strip_prefix = "keccak-0.1.6",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "keccak-0.1",
+    srcs = [":keccak-0.1.6.crate"],
+    crate = "keccak",
+    crate_root = "keccak-0.1.6.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "keccak",
+        "CARGO_MANIFEST_DIR": "keccak-0.1.6.crate",
+        "CARGO_PKG_AUTHORS": "RustCrypto Developers",
+        "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of the Keccak sponge function including the keccak-f and keccak-p variants ",
+        "CARGO_PKG_NAME": "keccak",
+        "CARGO_PKG_REPOSITORY": "https://github.com/RustCrypto/sponges/tree/master/keccak",
+        "CARGO_PKG_VERSION": "0.1.6",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "1",
+        "CARGO_PKG_VERSION_PATCH": "6",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    platform = {
+        "macos-arm64": dict(
+            deps = [":cpufeatures-0.2"],
+        ),
+    },
+    visibility = [],
+)
+
+alias(
+    name = "keyring",
+    actual = ":keyring-3",
+    visibility = ["PUBLIC"],
+)
+
+extract_archive(
+    name = "keyring-3.6.3.crate",
+    src = "vendor/keyring-3.6.3.crate",
+    strip_prefix = "keyring-3.6.3",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "keyring-3",
+    srcs = [":keyring-3.6.3.crate"],
+    crate = "keyring",
+    crate_root = "keyring-3.6.3.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "keyring",
+        "CARGO_MANIFEST_DIR": "keyring-3.6.3.crate",
+        "CARGO_PKG_AUTHORS": "Walther Chen <walther.chen@gmail.com>:Daniel Brotsky <dev@brotsky.com>",
+        "CARGO_PKG_DESCRIPTION": "Cross-platform library for managing passwords/credentials",
+        "CARGO_PKG_NAME": "keyring",
+        "CARGO_PKG_REPOSITORY": "https://github.com/hwchen/keyring-rs.git",
+        "CARGO_PKG_VERSION": "3.6.3",
+        "CARGO_PKG_VERSION_MAJOR": "3",
+        "CARGO_PKG_VERSION_MINOR": "6",
+        "CARGO_PKG_VERSION_PATCH": "3",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "apple-native",
+        "crypto-rust",
+        "sync-secret-service",
+        "windows-native",
+    ],
+    platform = {
+        "linux-x86_64": dict(
+            deps = [":dbus-secret-service-4"],
+        ),
+        "macos-arm64": dict(
+            deps = [":security-framework-3"],
+        ),
+        "windows-msvc": dict(
+            deps = [
+                ":byteorder-1",
+                ":windows-sys-0.60",
+                ":zeroize-1",
+            ],
+        ),
+    },
+    visibility = [],
+    deps = [":log-0.4"],
+)
+
+extract_archive(
     name = "khronos-egl-6.0.0.crate",
     src = "vendor/khronos-egl-6.0.0.crate",
     strip_prefix = "khronos-egl-6.0.0",
@@ -19979,6 +20156,96 @@ buildscript_run(
         ),
     },
     version = "0.2.189",
+)
+
+extract_archive(
+    name = "libdbus-sys-0.2.7.crate",
+    src = "vendor/libdbus-sys-0.2.7.crate",
+    strip_prefix = "libdbus-sys-0.2.7",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "libdbus-sys-0.2",
+    srcs = [":libdbus-sys-0.2.7.crate"],
+    crate = "libdbus_sys",
+    crate_root = "libdbus-sys-0.2.7.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "libdbus_sys",
+        "CARGO_MANIFEST_DIR": "libdbus-sys-0.2.7.crate",
+        "CARGO_PKG_AUTHORS": "David Henningsson <diwic@ubuntu.com>",
+        "CARGO_PKG_DESCRIPTION": "FFI bindings to libdbus.",
+        "CARGO_PKG_NAME": "libdbus-sys",
+        "CARGO_PKG_REPOSITORY": "https://github.com/diwic/dbus-rs",
+        "CARGO_PKG_VERSION": "0.2.7",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "7",
+        "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :libdbus-sys-0.2-build-script-run[out_dir])",
+    },
+    features = [
+        "default",
+        "pkg-config",
+        "vendored",
+    ],
+    rustc_flags = ["@$(location :libdbus-sys-0.2-build-script-run[rustc_flags])"],
+    visibility = [],
+)
+
+cargo.rust_binary(
+    name = "libdbus-sys-0.2-build-script-build",
+    srcs = [":libdbus-sys-0.2.7.crate"],
+    crate = "build_script_build",
+    crate_root = "libdbus-sys-0.2.7.crate/build.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "libdbus-sys-0.2.7.crate",
+        "CARGO_PKG_AUTHORS": "David Henningsson <diwic@ubuntu.com>",
+        "CARGO_PKG_DESCRIPTION": "FFI bindings to libdbus.",
+        "CARGO_PKG_NAME": "libdbus-sys",
+        "CARGO_PKG_REPOSITORY": "https://github.com/diwic/dbus-rs",
+        "CARGO_PKG_VERSION": "0.2.7",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "7",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "pkg-config",
+        "vendored",
+    ],
+    visibility = [],
+    deps = [
+        ":pkg-config-0.3",
+        "//third-party/rust:cc-1",
+    ],
+)
+
+buildscript_run(
+    name = "libdbus-sys-0.2-build-script-run",
+    package_name = "libdbus-sys",
+    buildscript_rule = ":libdbus-sys-0.2-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "David Henningsson <diwic@ubuntu.com>",
+        "CARGO_PKG_DESCRIPTION": "FFI bindings to libdbus.",
+        "CARGO_PKG_REPOSITORY": "https://github.com/diwic/dbus-rs",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "7",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "pkg-config",
+        "vendored",
+    ],
+    rustc_link_lib = True,
+    rustc_link_search = True,
+    version = "0.2.7",
 )
 
 extract_archive(
@@ -36302,6 +36569,49 @@ cargo.rust_library(
     ],
 )
 
+alias(
+    name = "sha3",
+    actual = ":sha3-0.10",
+    visibility = ["PUBLIC"],
+)
+
+extract_archive(
+    name = "sha3-0.10.9.crate",
+    src = "vendor/sha3-0.10.9.crate",
+    strip_prefix = "sha3-0.10.9",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "sha3-0.10",
+    srcs = [":sha3-0.10.9.crate"],
+    crate = "sha3",
+    crate_root = "sha3-0.10.9.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "sha3",
+        "CARGO_MANIFEST_DIR": "sha3-0.10.9.crate",
+        "CARGO_PKG_AUTHORS": "RustCrypto Developers",
+        "CARGO_PKG_DESCRIPTION": "Pure Rust implementation of SHA-3, a family of Keccak-based hash functions including the SHAKE family of eXtendable-Output Functions (XOFs), as well as the accelerated variant TurboSHAKE ",
+        "CARGO_PKG_NAME": "sha3",
+        "CARGO_PKG_REPOSITORY": "https://github.com/RustCrypto/hashes",
+        "CARGO_PKG_VERSION": "0.10.9",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "10",
+        "CARGO_PKG_VERSION_PATCH": "9",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "std",
+    ],
+    visibility = [],
+    deps = [
+        ":digest-0.10",
+        ":keccak-0.1",
+    ],
+)
+
 extract_archive(
     name = "sharded-slab-0.1.7.crate",
     src = "vendor/sharded-slab-0.1.7.crate",
@@ -45699,6 +46009,7 @@ cargo.rust_library(
         "Win32_Graphics",
         "Win32_Graphics_Gdi",
         "Win32_Security",
+        "Win32_Security_Credentials",
         "Win32_Storage",
         "Win32_Storage_FileSystem",
         "Win32_System",
@@ -47518,6 +47829,12 @@ cargo.rust_library(
         ":syn-3",
         ":synstructure-0.14",
     ],
+)
+
+alias(
+    name = "zeroize",
+    actual = ":zeroize-1",
+    visibility = ["PUBLIC"],
 )
 
 extract_archive(
