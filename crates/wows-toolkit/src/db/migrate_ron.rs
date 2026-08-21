@@ -104,6 +104,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
         code_integrity,
         replay_settings_json,
         search_json,
+        launcher_json,
         output_dir,
         auto_load,
         next_chart_id,
@@ -142,6 +143,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
             s.app.code_integrity,
             serde_json::to_string(&s.replay).unwrap_or_default(),
             serde_json::to_string(&s.search).unwrap_or_default(),
+            serde_json::to_string(&s.launcher).unwrap_or_default(),
             p.output_dir.clone(),
             p.auto_load_latest_replay,
             p.next_chart_tab_id,
@@ -182,6 +184,10 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, crate::CODE_INTEGRITY_SETTING, &code_integrity).await?;
     queries::set_setting_raw(pool, "replay_settings", &replay_settings_json).await?;
     queries::set_setting_raw(pool, "search", &search_json).await?;
+    // The whole launcher subtree (active account index, tracking id, Proton
+    // config, manual installs, launch args) as one blob; the OS keyring holds
+    // the actual token, this only records which account to restore it for.
+    queries::set_setting_raw(pool, "launcher", &launcher_json).await?;
     queries::set_setting(pool, "output_dir", &output_dir).await?;
     queries::set_setting(pool, "auto_load_latest_replay", &auto_load).await?;
     let replay_sort = *ctx.replay_sort.lock();
@@ -477,6 +483,58 @@ mod tests {
     use sqlx::sqlite::SqlitePoolOptions;
 
     use super::*;
+
+    /// Regression guard: the launcher subtree must survive a save -> load
+    /// round trip through the k/v settings table. Before it was wired,
+    /// `launcher` lived only in the in-memory struct, so `active_account`
+    /// (which drives keyring session restore at startup) was always `None`
+    /// on the next launch and the user re-authenticated every time. Proton
+    /// paths were lost the same way.
+    #[cfg(feature = "launcher")]
+    #[test]
+    fn launcher_settings_survive_a_db_roundtrip() {
+        use std::path::PathBuf;
+
+        use crate::data::settings::LauncherSettings;
+        use crate::data::settings::PersistedAccount;
+
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let pool = runtime.block_on(SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:")).unwrap();
+        runtime.block_on(sqlx::migrate!("../wows-toolkit-config/migrations").run(&pool)).unwrap();
+
+        let saved = LauncherSettings {
+            manual_installs: vec![PathBuf::from("/games/WoWs/World_of_Warships")],
+            proton_binary: Some(PathBuf::from("/steam/steamapps/common/Proton 10.0/proton")),
+            proton_prefix: Some(PathBuf::from("/steam/steamapps/compatdata/552990")),
+            extra_args: vec!["--foo".to_string()],
+            tracking_id: Some("1755792000000000000".to_string()),
+            active_account: Some(PersistedAccount {
+                realm: wgc_auth::AccountRealm::Eu,
+                account_id: wgc_auth::AccountId::new(697_769_785),
+                nickname: wgc_auth::Nickname::new("gapedd"),
+            }),
+            ..Default::default()
+        };
+
+        // The exact call path save_settings uses: one JSON blob under "launcher".
+        let json = serde_json::to_string(&saved).unwrap();
+        runtime.block_on(queries::set_setting_raw(&pool, "launcher", &json)).unwrap();
+
+        // The exact call path load_settings uses.
+        let loaded: LauncherSettings =
+            runtime.block_on(queries::get_setting(&pool, "launcher")).expect("launcher settings load back");
+
+        assert_eq!(loaded.manual_installs, saved.manual_installs);
+        assert_eq!(loaded.proton_binary, saved.proton_binary);
+        assert_eq!(loaded.proton_prefix, saved.proton_prefix);
+        assert_eq!(loaded.extra_args, saved.extra_args);
+        assert_eq!(loaded.tracking_id, saved.tracking_id);
+
+        let account = loaded.active_account.expect("active_account round-trips");
+        assert_eq!(account.realm, wgc_auth::AccountRealm::Eu);
+        assert_eq!(account.account_id.get(), 697_769_785);
+        assert_eq!(account.nickname.as_str(), "gapedd");
+    }
 
     #[test]
     fn a_concurrent_upload_insert_survives_a_full_ledger_save() {
