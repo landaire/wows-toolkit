@@ -441,6 +441,25 @@ pub enum SearchOpenTarget {
     Opened { id: WorkspaceId, root: PathBuf },
 }
 
+/// Result of a per-install catalog update check, driven by
+/// [`TabState::start_catalog_check`] and drained by `app.rs` into
+/// [`TabState::catalog_status`].
+#[cfg(feature = "launcher")]
+#[derive(Debug, Clone)]
+pub enum CatalogCheckState {
+    /// A check is currently in flight.
+    Checking,
+    /// The check completed; per-part status is in the build.
+    Ready(wgc_catalog::update::LatestBuild),
+    /// The check failed (network, parse, or protocol error). Carries the
+    /// error's `Display` text -- the crate's own error type stays structured
+    /// (`wgc_catalog::CatalogError`), this is only what the UI shows.
+    Error(String),
+    /// The install has no `game_info.xml`, so there is no WGUS base URL to
+    /// check against (e.g. a manually added install WGC never touched).
+    NoUpdateHost,
+}
+
 /// Main application state container.
 ///
 /// Persisted state lives in `self.persisted` (shared with background save task).
@@ -650,6 +669,14 @@ pub struct TabState {
     /// Transient Safe Mode toggle for the next launch.
     #[cfg(feature = "launcher")]
     pub launch_safe_mode: bool,
+    /// Last known catalog-update-check result per install path. Steam
+    /// installs never get an entry (they are never checked).
+    #[cfg(feature = "launcher")]
+    pub catalog_status: std::collections::HashMap<PathBuf, CatalogCheckState>,
+    /// Inbox for background catalog-check tasks started by
+    /// [`Self::start_catalog_check`].
+    #[cfg(feature = "launcher")]
+    pub catalog_check_inbox: Option<egui_inbox::UiInbox<(PathBuf, CatalogCheckState)>>,
 }
 
 impl Default for TabState {
@@ -755,6 +782,10 @@ impl Default for TabState {
             discovering_installs: false,
             #[cfg(feature = "launcher")]
             launch_safe_mode: false,
+            #[cfg(feature = "launcher")]
+            catalog_status: HashMap::new(),
+            #[cfg(feature = "launcher")]
+            catalog_check_inbox: None,
         }
     }
 }
@@ -1684,6 +1715,112 @@ impl TabState {
             let _ = sender.send(installs);
             ctx.request_repaint();
         });
+    }
+
+    /// Kick off background catalog-update checks for every discovered
+    /// install that WGC (not Steam) manages. Per-install a no-op if the
+    /// cached state is already `Checking` or `Ready`; call
+    /// [`Self::recheck_catalog`] to force a fresh check for one install.
+    /// `app.rs` drains results each frame via `catalog_check_inbox`.
+    #[cfg(feature = "launcher")]
+    pub fn start_catalog_check(&mut self) {
+        let installs = self.discovered_installs.clone();
+        for install in &installs {
+            self.spawn_catalog_check(install, false);
+        }
+    }
+
+    /// Force a fresh catalog check for one install, bypassing the
+    /// in-flight/Ready guard [`Self::start_catalog_check`] applies. Used by
+    /// the Launcher tab's "Recheck" button.
+    #[cfg(feature = "launcher")]
+    pub fn recheck_catalog(&mut self, path: &Path) {
+        let Some(install) = self.discovered_installs.iter().find(|i| i.path == path).cloned() else {
+            return;
+        };
+        self.spawn_catalog_check(&install, true);
+    }
+
+    /// Lazily create (once) the shared inbox catalog-check tasks send their
+    /// results over, and return a sender into it. Unlike install discovery,
+    /// which reruns as one scan producing one message, catalog checks are
+    /// many independent per-install tasks whose results trickle in over the
+    /// tab's lifetime, so the inbox must survive across calls rather than
+    /// being replaced per check.
+    #[cfg(feature = "launcher")]
+    fn catalog_check_sender(&mut self) -> egui_inbox::UiInboxSender<(PathBuf, CatalogCheckState)> {
+        match &self.catalog_check_inbox {
+            Some(inbox) => inbox.sender(),
+            None => {
+                let (sender, inbox) = egui_inbox::UiInbox::channel();
+                self.catalog_check_inbox = Some(inbox);
+                sender
+            }
+        }
+    }
+
+    /// Spawn one install's catalog check on the shared tokio runtime,
+    /// sending the result back over `catalog_check_inbox`. Skips Steam
+    /// installs (never patched by this app, so never checked) and, unless
+    /// `force`, installs whose cached state is already `Checking` or `Ready`.
+    #[cfg(feature = "launcher")]
+    fn spawn_catalog_check(&mut self, install: &wgc_install::GameInstall, force: bool) {
+        if install.source.is_read_only_content() {
+            return;
+        }
+        if !force
+            && matches!(
+                self.catalog_status.get(&install.path),
+                Some(CatalogCheckState::Checking) | Some(CatalogCheckState::Ready(_))
+            )
+        {
+            return;
+        }
+        let Some(runtime) = self.tokio_runtime.as_ref().map(Arc::clone) else {
+            warn!("cannot check for catalog updates: tokio runtime is not available");
+            return;
+        };
+
+        let sender = self.catalog_check_sender();
+        self.catalog_status.insert(install.path.clone(), CatalogCheckState::Checking);
+
+        let install_path = install.path.clone();
+        let game_info_path = install_path.join("game_info.xml");
+        // The toolkit resolves its proxy once at startup into a plain URL
+        // string; `CatalogClient` takes that shape directly rather than
+        // depending back on the toolkit's `ProxyConfig` type.
+        let proxy_url = self.proxy.as_ref().map(|p| p.url.clone());
+        let ctx = self.egui_ctx.clone();
+
+        runtime.spawn(async move {
+            let state = check_install_catalog(&game_info_path, proxy_url.as_deref()).await;
+            let _ = sender.send((install_path, state));
+            ctx.request_repaint();
+        });
+    }
+}
+
+/// Read and parse `game_info_path`, then fetch and diff the newest catalog
+/// chain against it. `game_info.xml` is a small file WGC writes once per
+/// install, so a synchronous read here (this runs on a tokio task, not the
+/// UI thread) is not worth pulling in tokio's `fs` feature for.
+#[cfg(feature = "launcher")]
+async fn check_install_catalog(game_info_path: &Path, proxy_url: Option<&str>) -> CatalogCheckState {
+    let xml = match std::fs::read_to_string(game_info_path) {
+        Ok(xml) => xml,
+        Err(_) => return CatalogCheckState::NoUpdateHost,
+    };
+    let game_info = match wgc_catalog::game_info::parse_game_info(&xml) {
+        Ok(info) => info,
+        Err(e) => return CatalogCheckState::Error(e.to_string()),
+    };
+    let client = match wgc_catalog::CatalogClient::with_proxy(proxy_url) {
+        Ok(client) => client,
+        Err(e) => return CatalogCheckState::Error(e.to_string()),
+    };
+    match client.check_updates(&game_info).await {
+        Ok(build) => CatalogCheckState::Ready(build),
+        Err(e) => CatalogCheckState::Error(e.to_string()),
     }
 }
 

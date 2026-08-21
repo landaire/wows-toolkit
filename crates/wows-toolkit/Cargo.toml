@@ -123,6 +123,7 @@ mimalloc = { version = "0.1.52", optional = true }
 wgc-core = { workspace = true, optional = true }
 wgc-install = { workspace = true, optional = true }
 wgc-launch = { workspace = true, optional = true }
+wgc-catalog = { workspace = true, optional = true }
 
 [dev-dependencies]
 egui_kittest = { version = "0.35.0", features = ["snapshot", "wgpu"] }
@@ -201,4 +202,4 @@ av1-asm = ["wows_minimap_renderer/cpu-av1-asm"]
 # shows up heavily in profiles of the replay load; this measures what a
 # different allocator is worth before committing the app to one.
 mimalloc = ["dep:mimalloc"]
-launcher = ["dep:wgc-core", "dep:wgc-install", "dep:wgc-launch"]
+launcher = ["dep:wgc-core", "dep:wgc-install", "dep:wgc-launch", "dep:wgc-catalog"]

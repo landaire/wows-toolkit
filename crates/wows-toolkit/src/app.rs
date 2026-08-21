@@ -3130,6 +3130,11 @@ impl WowsToolkitApp {
         {
             self.tab_state.discovered_installs = installs;
             self.tab_state.discovering_installs = false;
+            // Runs exactly when a discovery round actually delivers a
+            // result (initial scan, rescan, or "Add install"), never every
+            // frame; start_catalog_check's own per-install guard skips
+            // installs it has already checked or is still checking.
+            self.tab_state.start_catalog_check();
         }
 
         // Kick off install discovery once, on first show of the app, rather
@@ -3138,6 +3143,18 @@ impl WowsToolkitApp {
         if !self.started_install_discovery {
             self.started_install_discovery = true;
             self.tab_state.start_install_discovery();
+        }
+
+        // Drain background catalog-update-check results. Every pending
+        // message is applied (not just the last), since each carries one
+        // install's own result and a later message for a different install
+        // must not shadow an earlier one still in the inbox.
+        #[cfg(feature = "launcher")]
+        if let Some(inbox) = self.tab_state.catalog_check_inbox.as_ref() {
+            let updates: Vec<_> = inbox.read(&self.tab_state.egui_ctx).collect();
+            for (path, state) in updates {
+                self.tab_state.catalog_status.insert(path, state);
+            }
         }
 
         // Pick up "Add to Session Stats" requests (no confirmation needed).

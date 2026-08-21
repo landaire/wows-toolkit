@@ -1,7 +1,50 @@
 //! The Launcher tab: discover, launch, and manage WoWs installs.
 
 use crate::app::ToolkitTabViewer;
+use crate::tab_state::CatalogCheckState;
 use crate::update_background_task;
+
+/// Render one install's catalog-check status (checking/up to date/update
+/// available/error), skipping Steam installs entirely -- they are never
+/// checked, and the row already says "managed by Steam" above.
+fn show_catalog_status(ui: &mut egui::Ui, state: Option<&CatalogCheckState>) {
+    match state {
+        Some(CatalogCheckState::Checking) => {
+            ui.spinner();
+            ui.label("checking updates");
+        }
+        Some(CatalogCheckState::Ready(build)) => {
+            let mut changed = Vec::new();
+            let mut not_installed = Vec::new();
+            for (part, status) in &build.parts {
+                match status {
+                    wgc_catalog::update::PartStatus::UpdateAvailable { from, to } => {
+                        changed.push(format!("{part} {from} -> {to}"))
+                    }
+                    wgc_catalog::update::PartStatus::NotInstalled { to } => {
+                        not_installed.push(format!("{part} ({to})"))
+                    }
+                    wgc_catalog::update::PartStatus::UpToDate => {}
+                }
+            }
+            if changed.is_empty() {
+                ui.label("Up to date");
+            } else {
+                ui.colored_label(
+                    egui::Color32::from_rgb(230, 180, 40),
+                    format!("Update available: {}", changed.join(", ")),
+                );
+            }
+            if !not_installed.is_empty() {
+                ui.weak(format!("not installed: {}", not_installed.join(", ")));
+            }
+        }
+        Some(CatalogCheckState::Error(detail)) => {
+            ui.weak(format!("update check failed: {detail}"));
+        }
+        Some(CatalogCheckState::NoUpdateHost) | None => {}
+    }
+}
 
 impl ToolkitTabViewer<'_> {
     pub fn build_launcher_tab(&mut self, ui: &mut egui::Ui) {
@@ -57,6 +100,7 @@ impl ToolkitTabViewer<'_> {
         // the install list while iterating it.
         let mut to_launch: Option<usize> = None;
         let mut to_activate: Option<std::path::PathBuf> = None;
+        let mut to_recheck: Option<std::path::PathBuf> = None;
 
         for (i, install) in self.tab_state.discovered_installs.iter().enumerate() {
             ui.group(|ui| {
@@ -69,6 +113,14 @@ impl ToolkitTabViewer<'_> {
                         ui.label("managed by Steam");
                     }
                 });
+                if !install.source.is_read_only_content() {
+                    ui.horizontal(|ui| {
+                        show_catalog_status(ui, self.tab_state.catalog_status.get(&install.path));
+                        if ui.small_button("Recheck").clicked() {
+                            to_recheck = Some(install.path.clone());
+                        }
+                    });
+                }
                 ui.horizontal(|ui| {
                     if ui.button("Launch").clicked() {
                         to_launch = Some(i);
@@ -78,6 +130,10 @@ impl ToolkitTabViewer<'_> {
                     }
                 });
             });
+        }
+
+        if let Some(path) = to_recheck {
+            self.tab_state.recheck_catalog(&path);
         }
 
         if let Some(path) = to_activate {
