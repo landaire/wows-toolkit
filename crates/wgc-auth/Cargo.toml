@@ -8,6 +8,7 @@ description = "WGNI account authentication: async client, keyring session store,
 [dependencies]
 wgc-core = { workspace = true }
 wgc-launch = { workspace = true }
+rootcause = { workspace = true }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }

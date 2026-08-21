@@ -39,8 +39,7 @@ impl SessionStore {
         // `blob` is ZeroizeOnDrop, so its transient plaintext token copies are
         // wiped when it drops -- including on the serialize `?` early return.
         let blob = StoredSessionBlob::from_session(session);
-        let mut json = serde_json::to_string(&blob)
-            .map_err(|source| AuthError::BadResponse { detail: format!("could not serialize session: {source}") })?;
+        let mut json = serde_json::to_string(&blob).map_err(|source| AuthError::SerializeSession { source })?;
         let result = entry.set_password(&json).map_err(map_keyring_error);
         json.zeroize();
         result
@@ -56,8 +55,7 @@ impl SessionStore {
         };
         let blob: Result<StoredSessionBlob, _> = serde_json::from_str(&json);
         json.zeroize();
-        let blob = blob
-            .map_err(|source| AuthError::BadResponse { detail: format!("could not parse stored session: {source}") })?;
+        let blob = blob.map_err(|source| AuthError::DeserializeSession { source })?;
         Ok(blob.into_session(realm, account_id))
     }
 

@@ -85,7 +85,8 @@ pub(crate) struct TokenSuccessResponse {
 /// `.../oauth/token/` error response.
 #[derive(Debug, Deserialize)]
 pub(crate) struct TokenErrorResponse {
-    #[allow(dead_code)] // classification uses error_description; error is diagnostic only
+    /// WG's OAuth machine code; classification tries this first (see
+    /// `client.rs::classify_token_error`).
     pub error: Option<String>,
     pub error_description: Option<String>,
     pub twofactor_token: Option<String>,

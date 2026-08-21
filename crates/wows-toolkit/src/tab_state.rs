@@ -2236,7 +2236,7 @@ fn generate_tracking_id() -> String {
 /// reporting success, so `Persisted` always follows `Success`.
 #[cfg(feature = "launcher")]
 async fn send_login_result(
-    result: Result<wgc_auth::StoredSession, wgc_auth::AuthError>,
+    result: rootcause::Result<wgc_auth::StoredSession, wgc_auth::AuthError>,
     sender: &egui_inbox::UiInboxSender<LoginMsg>,
 ) {
     match result {
@@ -2268,19 +2268,28 @@ async fn send_login_result(
                 }
             }
         }
-        Err(wgc_auth::AuthError::TwoFactorRequired { twofactor_token }) => {
-            let _ = sender.send(LoginMsg::TwoFactorRequired { twofactor_token });
-        }
-        Err(wgc_auth::AuthError::CaptchaRequired) => {
-            let _ = sender.send(LoginMsg::CaptchaRequired);
-        }
-        // A wrong code keeps the challenge open; a lockout/ban does not, so
-        // only the invalid-code case is a retry.
-        Err(e @ wgc_auth::AuthError::TwoFactorInvalidCode) => {
-            let _ = sender.send(LoginMsg::TwoFactorRetry(e.to_string()));
-        }
-        Err(e) => {
-            let _ = sender.send(LoginMsg::Failed(e.to_string()));
+        Err(report) => {
+            let context = report.current_context();
+            match context {
+                wgc_auth::AuthError::TwoFactorRequired { twofactor_token } => {
+                    let twofactor_token = twofactor_token.clone();
+                    let _ = sender.send(LoginMsg::TwoFactorRequired { twofactor_token });
+                }
+                wgc_auth::AuthError::CaptchaRequired => {
+                    let _ = sender.send(LoginMsg::CaptchaRequired);
+                }
+                // A wrong code keeps the challenge open; a lockout/ban does not, so
+                // only the invalid-code case is a retry.
+                wgc_auth::AuthError::TwoFactorInvalidCode => {
+                    let _ = sender.send(LoginMsg::TwoFactorRetry(context.to_string()));
+                }
+                // Full report Display (includes any attached diagnostic context,
+                // e.g. the raw WGNI TokenRejection) so structured detail reaches
+                // the log; never a password/token, none of these error paths carry one.
+                _ => {
+                    let _ = sender.send(LoginMsg::Failed(report.to_string()));
+                }
+            }
         }
     }
 }

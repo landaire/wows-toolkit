@@ -14156,6 +14156,7 @@ dependencies = [
  "keyring",
  "rand 0.10.3",
  "reqwest 0.12.28",
+ "rootcause",
  "serde",
  "serde_json",
  "sha3",

@@ -8,6 +8,7 @@ workspace_library(
     deps = [
         "//crates/wgc-core:wgc-core",
         "//crates/wgc-launch:wgc-launch",
+        "//third-party/rust:rootcause",
         "//third-party/rust:thiserror",
         "//third-party/rust:serde",
         "//third-party/rust:serde_json",
