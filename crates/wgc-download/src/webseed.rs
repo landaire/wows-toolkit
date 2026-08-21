@@ -9,6 +9,7 @@
 //! manifest gives the same integrity guarantee with far less surface
 //! area and no peer-to-peer exposure.
 
+use std::path::Component;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicUsize;
@@ -127,7 +128,7 @@ async fn download_one<P: Fn(DownloadProgress)>(
     let expected_sha1 =
         file.sha1.as_deref().ok_or_else(|| DownloadError::MissingSha1 { file: relative_path.clone() })?;
 
-    let dest = file.path.iter().fold(ctx.staging_dir.to_path_buf(), |acc, segment| acc.join(segment));
+    let dest = safe_join(ctx.staging_dir, &file.path)?;
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -241,6 +242,24 @@ async fn sha1_hex_of_file(path: &Path) -> Result<String, DownloadError> {
     Ok(hex::encode(hasher.finalize()))
 }
 
+/// Join `base` with each of `segments`, rejecting any segment that could
+/// escape `base` (path traversal). A torrent's file path segments come
+/// from a `.torrent` manifest, which may be malicious or corrupted, so
+/// each segment must be exactly one `Component::Normal` - not empty, not
+/// `.` or `..`, not an absolute-path root, and not a Windows drive/UNC
+/// prefix - before it is trusted as a path component to join.
+fn safe_join(base: &Path, segments: &[String]) -> Result<PathBuf, DownloadError> {
+    let mut dest = base.to_path_buf();
+    for segment in segments {
+        let mut components = Path::new(segment).components();
+        match (components.next(), components.next()) {
+            (Some(Component::Normal(name)), None) => dest.push(name),
+            _ => return Err(DownloadError::UnsafePath { path: segments.join("/") }),
+        }
+    }
+    Ok(dest)
+}
+
 /// Join `web_seed_base` (expected to end with `/`), `torrent_name`, and
 /// `relative_path` with exactly one `/` at each boundary, regardless of
 /// stray slashes on either side of the join.
@@ -253,6 +272,8 @@ fn build_url(web_seed_base: &str, torrent_name: &str, relative_path: &str) -> St
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use super::*;
 
     #[test]
@@ -266,5 +287,102 @@ mod tests {
             build_url("http://example.com/patches//", "/wows_1_na/", "/build/client.dspkg"),
             "http://example.com/patches/wows_1_na/build/client.dspkg"
         );
+    }
+
+    #[test]
+    fn safe_join_accepts_nested_normal_segments() {
+        let base = Path::new("/staging");
+        let segments = vec!["sub".to_string(), "dir".to_string(), "file.dspkg".to_string()];
+        assert_eq!(safe_join(base, &segments).unwrap(), Path::new("/staging/sub/dir/file.dspkg"));
+    }
+
+    #[test]
+    fn safe_join_rejects_parent_dir_segment() {
+        let base = Path::new("/staging");
+        let segments = vec!["..".to_string(), "evil.txt".to_string()];
+        assert!(matches!(safe_join(base, &segments), Err(DownloadError::UnsafePath { .. })));
+    }
+
+    #[test]
+    fn safe_join_rejects_parent_dir_in_middle_segment() {
+        let base = Path::new("/staging");
+        let segments = vec!["a".to_string(), "..".to_string(), "b".to_string()];
+        assert!(matches!(safe_join(base, &segments), Err(DownloadError::UnsafePath { .. })));
+    }
+
+    #[test]
+    fn safe_join_rejects_absolute_segment() {
+        let base = Path::new("/staging");
+        let segments = vec!["/abs".to_string()];
+        assert!(matches!(safe_join(base, &segments), Err(DownloadError::UnsafePath { .. })));
+    }
+
+    #[test]
+    fn safe_join_rejects_empty_and_current_dir_segments() {
+        let base = Path::new("/staging");
+        assert!(matches!(safe_join(base, &["".to_string()]), Err(DownloadError::UnsafePath { .. })));
+        assert!(matches!(safe_join(base, &[".".to_string()]), Err(DownloadError::UnsafePath { .. })));
+    }
+
+    /// Unique per-test directory under the OS temp dir; not removed on
+    /// success since these are single-use scratch dirs, and leaving them
+    /// makes a failed assertion's on-disk state easy to inspect.
+    fn unique_temp_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        std::env::temp_dir().join(format!("wgc-download-test-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    fn traversal_torrent(file_path: Vec<String>) -> TorrentMeta {
+        TorrentMeta {
+            name: "wows_test".to_string(),
+            piece_length: 1 << 20,
+            total_length: 5,
+            files: vec![TorrentFile { path: file_path, length: 5, sha1: Some("0".repeat(40)) }],
+            unpacked_sizes: BTreeMap::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn download_rejects_parent_dir_traversal_and_writes_nothing_outside_staging() {
+        let staging_dir = unique_temp_dir("traversal-parent");
+        tokio::fs::create_dir_all(&staging_dir).await.unwrap();
+
+        let req = DownloadRequest {
+            staging_dir: staging_dir.clone(),
+            torrent: traversal_torrent(vec!["..".to_string(), "evil.txt".to_string()]),
+            web_seed_base: "http://127.0.0.1:1/unused/".to_string(),
+            is_steam_install: false,
+        };
+        let client = reqwest::Client::new();
+        let result = download(&client, &req, |_| {}).await;
+        assert!(matches!(result, Err(DownloadError::UnsafePath { .. })), "expected UnsafePath, got {result:?}");
+
+        // The traversal target would land next to staging_dir itself, one
+        // level up from where the (rejected) file path points.
+        let traversal_target = staging_dir.parent().unwrap().join("evil.txt");
+        assert!(!traversal_target.exists(), "traversal target must not be written: {}", traversal_target.display());
+
+        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
+    }
+
+    #[tokio::test]
+    async fn download_rejects_absolute_path_traversal_and_writes_nothing_outside_staging() {
+        let staging_dir = unique_temp_dir("traversal-abs");
+        tokio::fs::create_dir_all(&staging_dir).await.unwrap();
+
+        let req = DownloadRequest {
+            staging_dir: staging_dir.clone(),
+            torrent: traversal_torrent(vec!["/abs-evil.txt".to_string()]),
+            web_seed_base: "http://127.0.0.1:1/unused/".to_string(),
+            is_steam_install: false,
+        };
+        let client = reqwest::Client::new();
+        let result = download(&client, &req, |_| {}).await;
+        assert!(matches!(result, Err(DownloadError::UnsafePath { .. })), "expected UnsafePath, got {result:?}");
+
+        let traversal_target = Path::new("/abs-evil.txt");
+        assert!(!traversal_target.exists(), "traversal target must not be written: {}", traversal_target.display());
+
+        let _ = tokio::fs::remove_dir_all(&staging_dir).await;
     }
 }

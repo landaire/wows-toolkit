@@ -37,4 +37,10 @@ pub enum DownloadError {
     MissingSha1 { file: String },
     #[error("short read downloading {file}: expected {expected} bytes, got {got} bytes")]
     ShortRead { file: String, expected: u64, got: u64 },
+    /// A torrent file entry's path contains a segment that could escape
+    /// `staging_dir` (empty, `.`, `..`, an absolute-path indicator, a
+    /// Windows drive/prefix, or any multi-component segment). Refused
+    /// before any filesystem write is attempted.
+    #[error("unsafe path in torrent manifest: {path}")]
+    UnsafePath { path: String },
 }
