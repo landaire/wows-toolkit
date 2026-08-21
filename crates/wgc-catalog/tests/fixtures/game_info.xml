@@ -1,16 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
 <protocol name="game_info" version="2.16" wgc_publisher_id="wargaming">
-  <id>WOWS.PT.PRODUCTION</id>
-  <localization>EN</localization>
-  <content_localizations>
+    <game>
+        <id>WOWS.PT.PRODUCTION</id>
+        <index>0</index>
+        <installed>true</installed>
+        <localization>EN</localization>
+        <content_localizations>
             <content_localization realm="eu">en</content_localization>
         </content_localizations>
-  <update_urls>
+        <client_type>high</client_type>
+        <show_guide>false</show_guide>
+        <update_urls>
             <value>https://wgus-wowspt.worldofwarships.eu</value>
         </update_urls>
-  <part_versions>
+        <corrupt_parts/>
+        <part_versions>
             <version name="client" installed="14.9.0.0.10609091" available="14.9.0.0.10609091"/>
             <version name="hotfix" installed="14.9.0.0.10609091" available="14.9.0.0.10609091"/>
             <version name="locale" installed="14.9.0.0.10614298" available="14.9.0.0.10618320"/>
             <version name="sdcontent" installed="14.9.0.0.10609091" available="14.9.0.0.10609091"/>
         </part_versions>
+        <parameters>
+            <value name="preinstall_balloon_shown">false</value>
+        </parameters>
+        <dlc/>
+        <in_game_overlay>true</in_game_overlay>
+        <accepted_preinstalls/>
+        <available_content_languages>
+            <language_id>en</language_id>
+            <language_id>ru</language_id>
+        </available_content_languages>
+    </game>
 </protocol>

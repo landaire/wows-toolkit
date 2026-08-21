@@ -31,12 +31,20 @@ pub struct PartVersion {
     pub available: BuildVersion,
 }
 
+// Real on-disk game_info.xml nests everything under a `<game>` element inside
+// `<protocol>`; the fields are not direct children of `<protocol>`.
 #[derive(Debug, Deserialize)]
 #[serde(rename = "protocol")]
 struct ProtocolXml {
+    game: GameXml,
+}
+
+#[derive(Debug, Deserialize)]
+struct GameXml {
     id: String,
     localization: String,
     update_urls: UpdateUrlsXml,
+    #[serde(default)]
     part_versions: PartVersionsXml,
 }
 
@@ -78,14 +86,15 @@ pub fn parse_game_info(xml: &str) -> Result<GameInfo, CatalogError> {
     let parsed: ProtocolXml =
         quick_xml::de::from_str(xml).map_err(|e| CatalogError::GameInfo { detail: e.to_string() })?;
 
-    let update_base_url = url::Url::parse(&parsed.update_urls.value)
-        .map_err(|e| CatalogError::GameInfoUrl { value: parsed.update_urls.value.clone(), detail: e.to_string() })?;
+    let game = parsed.game;
+    let update_base_url = url::Url::parse(&game.update_urls.value)
+        .map_err(|e| CatalogError::GameInfoUrl { value: game.update_urls.value.clone(), detail: e.to_string() })?;
 
     Ok(GameInfo {
-        game_id: parsed.id,
+        game_id: game.id,
         update_base_url,
-        localization: parsed.localization,
-        installed_parts: parsed
+        localization: game.localization,
+        installed_parts: game
             .part_versions
             .version
             .into_iter()
