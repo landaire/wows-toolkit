@@ -6129,6 +6129,90 @@ cargo.rust_library(
 )
 
 extract_archive(
+    name = "cookie-0.18.2.crate",
+    src = "vendor/cookie-0.18.2.crate",
+    strip_prefix = "cookie-0.18.2",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "cookie-0.18",
+    srcs = [":cookie-0.18.2.crate"],
+    crate = "cookie",
+    crate_root = "cookie-0.18.2.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "cookie",
+        "CARGO_MANIFEST_DIR": "cookie-0.18.2.crate",
+        "CARGO_PKG_AUTHORS": "Sergio Benitez <sb@sergio.bz>:Alex Crichton <alex@alexcrichton.com>",
+        "CARGO_PKG_DESCRIPTION": "HTTP cookie parsing and cookie jar management. Supports signed and private (encrypted, authenticated) jars. ",
+        "CARGO_PKG_NAME": "cookie",
+        "CARGO_PKG_REPOSITORY": "https://github.com/SergioBenitez/cookie-rs",
+        "CARGO_PKG_VERSION": "0.18.2",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "18",
+        "CARGO_PKG_VERSION_PATCH": "2",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "percent-encode",
+        "percent-encoding",
+    ],
+    visibility = [],
+    deps = [
+        ":percent-encoding-2",
+        ":time-0.3",
+    ],
+)
+
+extract_archive(
+    name = "cookie_store-0.22.1.crate",
+    src = "vendor/cookie_store-0.22.1.crate",
+    strip_prefix = "cookie_store-0.22.1",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "cookie_store-0.22",
+    srcs = [":cookie_store-0.22.1.crate"],
+    crate = "cookie_store",
+    crate_root = "cookie_store-0.22.1.crate/src/lib.rs",
+    edition = "2021",
+    env = {
+        "CARGO_CRATE_NAME": "cookie_store",
+        "CARGO_MANIFEST_DIR": "cookie_store-0.22.1.crate",
+        "CARGO_PKG_AUTHORS": "Patrick Fernie <patrick.fernie@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "Implementation of Cookie storage and retrieval",
+        "CARGO_PKG_NAME": "cookie_store",
+        "CARGO_PKG_REPOSITORY": "https://github.com/pfernie/cookie_store",
+        "CARGO_PKG_VERSION": "0.22.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "22",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "public_suffix",
+        "serde",
+        "serde_json",
+    ],
+    visibility = [],
+    deps = [
+        ":cookie-0.18",
+        ":document-features-0.2",
+        ":idna-1",
+        ":log-0.4",
+        ":publicsuffix-2",
+        ":serde-1",
+        ":serde_derive-1",
+        ":serde_json-1",
+        ":time-0.3",
+        ":url-2",
+    ],
+)
+
+extract_archive(
     name = "cordyceps-0.3.5.crate",
     src = "vendor/cordyceps-0.3.5.crate",
     strip_prefix = "cordyceps-0.3.5",
@@ -17599,6 +17683,7 @@ cargo.rust_library(
     features = [
         "alloc",
         "compiled_data",
+        "default",
         "std",
     ],
     visibility = [],
@@ -30774,6 +30859,35 @@ cargo.rust_library(
 )
 
 extract_archive(
+    name = "psl-types-2.0.11.crate",
+    src = "vendor/psl-types-2.0.11.crate",
+    strip_prefix = "psl-types-2.0.11",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "psl-types-2",
+    srcs = [":psl-types-2.0.11.crate"],
+    crate = "psl_types",
+    crate_root = "psl-types-2.0.11.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "psl_types",
+        "CARGO_MANIFEST_DIR": "psl-types-2.0.11.crate",
+        "CARGO_PKG_AUTHORS": "rushmorem <rushmore@webenchanter.com>",
+        "CARGO_PKG_DESCRIPTION": "Common types for the public suffix implementation crates",
+        "CARGO_PKG_NAME": "psl-types",
+        "CARGO_PKG_REPOSITORY": "https://github.com/addr-rs/psl-types",
+        "CARGO_PKG_VERSION": "2.0.11",
+        "CARGO_PKG_VERSION_MAJOR": "2",
+        "CARGO_PKG_VERSION_MINOR": "0",
+        "CARGO_PKG_VERSION_PATCH": "11",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+)
+
+extract_archive(
     name = "ptr_meta-0.3.2.crate",
     src = "vendor/ptr_meta-0.3.2.crate",
     strip_prefix = "ptr_meta-0.3.2",
@@ -30840,6 +30954,44 @@ cargo.rust_library(
         ":proc-macro2-1",
         ":quote-1",
         ":syn-3",
+    ],
+)
+
+extract_archive(
+    name = "publicsuffix-2.3.0.crate",
+    src = "vendor/publicsuffix-2.3.0.crate",
+    strip_prefix = "publicsuffix-2.3.0",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "publicsuffix-2",
+    srcs = [":publicsuffix-2.3.0.crate"],
+    crate = "publicsuffix",
+    crate_root = "publicsuffix-2.3.0.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "publicsuffix",
+        "CARGO_MANIFEST_DIR": "publicsuffix-2.3.0.crate",
+        "CARGO_PKG_AUTHORS": "rushmorem <rushmore@webenchanter.com>",
+        "CARGO_PKG_DESCRIPTION": "Extract root domain and suffix from a domain name",
+        "CARGO_PKG_NAME": "publicsuffix",
+        "CARGO_PKG_REPOSITORY": "https://github.com/rushmorem/publicsuffix",
+        "CARGO_PKG_VERSION": "2.3.0",
+        "CARGO_PKG_VERSION_MAJOR": "2",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "idna",
+        "punycode",
+    ],
+    visibility = [],
+    deps = [
+        ":idna-1",
+        ":psl-types-2",
     ],
 )
 
@@ -32543,16 +32695,21 @@ cargo.rust_library(
         "__rustls-ring",
         "__tls",
         "blocking",
+        "cookies",
         "gzip",
         "json",
         "rustls-tls-native-roots",
         "rustls-tls-native-roots-no-provider",
         "stream",
     ],
+    named_deps = {
+        "cookie_crate": ":cookie-0.18",
+    },
     visibility = [],
     deps = [
         ":base64-0.22",
         ":bytes-1",
+        ":cookie_store-0.22",
         ":futures-channel-0.3",
         ":futures-core-0.3",
         ":futures-util-0.3",
