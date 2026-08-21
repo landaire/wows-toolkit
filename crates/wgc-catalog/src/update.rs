@@ -60,6 +60,11 @@ pub struct LatestBuild {
     pub chain_type: ChainType,
     pub parts: Vec<(PartName, PartStatus)>,
     pub downloads: Vec<PartDownload>,
+    /// WGUS's suggested webseed concurrency (`web_seeds/url/@threads`), if
+    /// the response carried a `web_seeds` advisory at all. The downloader
+    /// uses this (clamped to a sane range) as its download parallelism,
+    /// same as WGC's own client would.
+    pub web_seed_threads: Option<u32>,
 }
 
 /// Part names in first-seen order from `chain`'s patch list, deduplicated.
@@ -184,6 +189,7 @@ pub fn latest_build_from_responses(
         chain_type: chosen.chain_type.clone(),
         parts,
         downloads: build_downloads(&terminal, &patches.web_seeds),
+        web_seed_threads: patches.web_seeds.url.first().map(|w| w.threads),
     })
 }
 

@@ -72,6 +72,9 @@ fn detects_updates_from_real_fixtures() {
         client_download.web_seed_base.as_deref(),
         Some("http://dl-wows-gc.wargaming.net/projects/PT/ru/patches/")
     );
+
+    // fixtures/patches_chain.xml's web_seeds/url carries threads="3".
+    assert_eq!(build.web_seed_threads, Some(3));
 }
 
 /// A part with no matching entry in `game_info.installed_parts` is

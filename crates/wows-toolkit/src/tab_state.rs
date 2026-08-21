@@ -2118,10 +2118,15 @@ impl TabState {
         let staging_dir = dest_dir.join(".wows-toolkit-download-staging");
         let dest_key_for_task = dest_key.clone();
         let control = wgc_download::DownloadControl { cancel, pause };
+        // WGUS advertises a suggested per-response concurrency
+        // (`web_seeds/url/@threads`); clamped so a full install's files -
+        // across every part, not just one at a time - saturate a fast link
+        // without opening an unreasonable number of sockets.
+        let concurrency = wgc_download::download_concurrency(latest.web_seed_threads);
 
         // `spawn_blocking` + `Handle::block_on`, not `runtime.spawn`: the
         // download chain nests several async fns that each take borrowed
-        // parameters (`wgc_download::download`/`download_and_install`,
+        // parameters (`wgc_download::download_all`/`download_and_install_all`,
         // internally fanning a progress closure out through
         // `stream::iter().map().buffer_unordered()`). Driving that chain
         // through `spawn`'s `Send + 'static` future hits a known rustc
@@ -2131,18 +2136,17 @@ impl TabState {
         // the UI thread) sidesteps the bug entirely.
         runtime.spawn_blocking(move || {
             let handle = tokio::runtime::Handle::current();
-            let final_state = handle.block_on(run_download(
-                &client,
-                &torrent_urls,
-                &web_seed_base,
-                &staging_dir,
-                &dest_dir,
-                &control,
-                |update| {
-                    let _ = sender.send((dest_key_for_task.clone(), update));
-                    ctx.request_repaint();
-                },
-            ));
+            let config = DownloadRunConfig {
+                torrent_urls: &torrent_urls,
+                web_seed_base: &web_seed_base,
+                staging_dir: &staging_dir,
+                install_dir: &dest_dir,
+                concurrency,
+            };
+            let final_state = handle.block_on(run_download(&client, &config, &control, |update| {
+                let _ = sender.send((dest_key_for_task.clone(), update));
+                ctx.request_repaint();
+            }));
             let _ = sender.send((dest_key_for_task, final_state));
             ctx.request_repaint();
         });
@@ -2516,23 +2520,39 @@ fn build_download_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client
     builder.build()
 }
 
+/// Everything [`run_download`] needs about the run besides `control` and
+/// `progress` - grouped so the function stays under clippy's argument-count
+/// lint instead of taking each field as its own parameter.
+#[cfg(feature = "launcher")]
+struct DownloadRunConfig<'a> {
+    torrent_urls: &'a [String],
+    web_seed_base: &'a str,
+    staging_dir: &'a Path,
+    install_dir: &'a Path,
+    /// File-download concurrency across every torrent, from
+    /// `wgc_download::download_concurrency(latest.web_seed_threads)`.
+    concurrency: usize,
+}
+
 /// Fetch every unique torrent's manifest up front (so the overall progress
-/// bar can be sized correctly from the start), then download+install each
-/// in turn into `install_dir`. `control`'s flags are checked between
-/// torrents and threaded into each torrent's `download_and_install` call,
-/// which checks them again inside the byte-streaming loop (see
+/// bar can be sized correctly from the start), then download every real
+/// file of every torrent together (see `wgc_download::download_and_install_all`)
+/// and 7z-extract each torrent's FULL packages into `install_dir`.
+/// `control`'s flags are checked between manifest fetches, and inside the
+/// download/unpack calls themselves (down to the byte-streaming loop; see
 /// `wgc_download::webseed::DownloadControl`) so a multi-GB file in flight
 /// stops promptly rather than only between torrents. `progress` is called
 /// for every `Running` update; the final state
 /// (`Done`/`Failed`/`Cancelled`/`Paused`) is the return value.
 ///
-/// `done_bytes` only ever increases across the whole run: within a torrent
-/// it mirrors `InstallProgress::Downloading`'s now-cumulative
-/// `downloaded_bytes` (see `wgc_download::webseed::DownloadProgress`), and
-/// once a torrent's download phase is behind it (including through its
-/// `Unpacking`/`Unpacked` events, which carry no byte count of their own)
-/// `done_bytes` is pinned to that torrent's full size rather than dropping
-/// back to 0.
+/// `done_bytes` only ever increases across the whole run: it is backed by a
+/// single counter shared across every torrent's files (see
+/// `wgc_download::webseed::download_all`), so it stays monotonic even
+/// though files from different torrents can finish out of order while
+/// downloading concurrently. Downloading fully completes before any
+/// unpacking starts (two-phase), so by the time `Unpacking`/`Unpacked`
+/// events arrive (which carry no byte count of their own) `done_bytes` is
+/// already at `total_bytes` and stays pinned there rather than dropping.
 ///
 /// Called via `Handle::block_on` from a blocking-pool thread (see
 /// `TabState::start_download`), not `tokio::spawn`, so nothing here needs
@@ -2540,14 +2560,13 @@ fn build_download_http_client(proxy_url: Option<&str>) -> Result<reqwest::Client
 #[cfg(feature = "launcher")]
 async fn run_download(
     client: &reqwest::Client,
-    torrent_urls: &[String],
-    web_seed_base: &str,
-    staging_dir: &Path,
-    install_dir: &Path,
+    config: &DownloadRunConfig<'_>,
     control: &wgc_download::DownloadControl,
     progress: impl Fn(DownloadUiState),
 ) -> DownloadUiState {
     use std::sync::atomic::Ordering;
+
+    let DownloadRunConfig { torrent_urls, web_seed_base, staging_dir, install_dir, concurrency } = *config;
 
     progress(DownloadUiState::Running {
         phase: "Fetching torrent manifests".to_string(),
@@ -2573,70 +2592,53 @@ async fn run_download(
     }
 
     let total_bytes: u64 = torrents.iter().map(|t| t.total_length).sum();
-    let mut done_bytes: u64 = 0;
-    let mut skipped_deltas = 0usize;
-
-    for torrent in torrents {
-        if control.cancel.load(Ordering::SeqCst) {
-            return DownloadUiState::Cancelled;
-        }
-        if control.pause.load(Ordering::SeqCst) {
-            return DownloadUiState::Paused;
-        }
-        let torrent_total = torrent.total_length;
-        let req = wgc_download::InstallRequest {
+    let reqs: Vec<wgc_download::InstallRequest> = torrents
+        .into_iter()
+        .map(|torrent| wgc_download::InstallRequest {
             staging_dir: staging_dir.to_path_buf(),
             install_dir: install_dir.to_path_buf(),
             torrent,
             web_seed_base: web_seed_base.to_string(),
             is_steam_install: false,
-        };
-
-        let base_done = done_bytes;
-        let result = wgc_download::download_and_install(client, &req, control, |update| {
-            // `dp.downloaded_bytes` is now cumulative across the torrent
-            // (see `wgc_download::webseed::DownloadProgress`), and unpacking
-            // starts only once the whole torrent finished downloading, so
-            // both branches read as "this torrent's bytes so far" and
-            // `base_done + torrent_bytes` never decreases within a torrent.
-            let (phase, current, torrent_bytes) = match &update {
-                wgc_download::InstallProgress::Downloading(dp) => (
-                    "Downloading".to_string(),
-                    format!("{} (file {}/{})", dp.file, dp.files_done + 1, dp.files_total),
-                    dp.downloaded_bytes,
-                ),
-                wgc_download::InstallProgress::Unpacking { file } => {
-                    ("Unpacking".to_string(), file.clone(), torrent_total)
-                }
-                wgc_download::InstallProgress::Unpacked { file, .. } => {
-                    ("Unpacking".to_string(), file.clone(), torrent_total)
-                }
-            };
-            progress(DownloadUiState::Running {
-                phase,
-                done_bytes: base_done + torrent_bytes,
-                total_bytes,
-                current,
-                cancel: Arc::clone(&control.cancel),
-                pause: Arc::clone(&control.pause),
-            });
         })
-        .await;
+        .collect();
 
-        match result {
-            Ok(outcome) => skipped_deltas += outcome.skipped_deltas.len(),
-            Err(wgc_download::DownloadError::Cancelled) => return DownloadUiState::Cancelled,
-            Err(wgc_download::DownloadError::Paused) => return DownloadUiState::Paused,
-            Err(e) => return DownloadUiState::Failed(e.to_string()),
+    let result = wgc_download::download_and_install_all(client, &reqs, control, concurrency, |update| {
+        // `dp.downloaded_bytes` is cumulative across every torrent's files
+        // (see `wgc_download::webseed::download_all`), and unpacking starts
+        // only once every torrent finished downloading, so `done_bytes`
+        // never decreases across the whole run.
+        let (phase, current, done_bytes) = match &update {
+            wgc_download::InstallProgress::Downloading(dp) => (
+                "Downloading".to_string(),
+                format!("{} (file {}/{})", dp.file, dp.files_done + 1, dp.files_total),
+                dp.downloaded_bytes,
+            ),
+            wgc_download::InstallProgress::Unpacking { file } => ("Unpacking".to_string(), file.clone(), total_bytes),
+            wgc_download::InstallProgress::Unpacked { file, .. } => {
+                ("Unpacking".to_string(), file.clone(), total_bytes)
+            }
+        };
+        progress(DownloadUiState::Running {
+            phase,
+            done_bytes,
+            total_bytes,
+            current,
+            cancel: Arc::clone(&control.cancel),
+            pause: Arc::clone(&control.pause),
+        });
+    })
+    .await;
+
+    match result {
+        Ok(outcomes) => {
+            let skipped_deltas = outcomes.iter().map(|o| o.skipped_deltas.len()).sum();
+            DownloadUiState::Done { skipped_deltas }
         }
-        // Advance to this torrent's full size once it completes: unpack
-        // progress carries no byte count, so mid-torrent `done_bytes` only
-        // reflects the currently-downloading file, not files already
-        // finished within this same torrent.
-        done_bytes = base_done + torrent_total;
+        Err(wgc_download::DownloadError::Cancelled) => DownloadUiState::Cancelled,
+        Err(wgc_download::DownloadError::Paused) => DownloadUiState::Paused,
+        Err(e) => DownloadUiState::Failed(e.to_string()),
     }
-
-    DownloadUiState::Done { skipped_deltas }
 }
 
 #[cfg(test)]

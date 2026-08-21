@@ -15,10 +15,15 @@ pub mod unpack;
 pub mod webseed;
 
 pub use error::DownloadError;
+pub use install::DEFAULT_DOWNLOAD_CONCURRENCY;
 pub use install::InstallOutcome;
 pub use install::InstallProgress;
 pub use install::InstallRequest;
+pub use install::MAX_DOWNLOAD_CONCURRENCY;
+pub use install::MIN_DOWNLOAD_CONCURRENCY;
 pub use install::download_and_install;
+pub use install::download_and_install_all;
+pub use install::download_concurrency;
 pub use torrent::TorrentFile;
 pub use torrent::TorrentMeta;
 pub use torrent::parse_torrent;
@@ -28,6 +33,7 @@ pub use webseed::DownloadControl;
 pub use webseed::DownloadProgress;
 pub use webseed::DownloadRequest;
 pub use webseed::download;
+pub use webseed::download_all;
 
 use std::path::PathBuf;
 
