@@ -53,6 +53,12 @@ pub enum LaunchError {
     ProtonPrefixNotConfigured,
     #[error("no Proton installation found")]
     ProtonNotFound,
+    #[error("could not create the Proton prefix directory at {path}")]
+    ProtonPrefixCreateFailed {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
     #[error("a valid session is required to launch online; please re-authenticate")]
     AuthenticationRequired,
     #[error("failed to spawn game process: {0}")]
@@ -144,6 +150,13 @@ impl<'a> ResolvedLaunch<'a> {
             if !proton.proton_binary.exists() {
                 return Err(LaunchError::ProtonNotFound);
             }
+            // A toolkit-managed prefix starts out as an empty (or absent) dir;
+            // Proton bootstraps the Wine prefix inside it on first launch, but
+            // requires STEAM_COMPAT_DATA_PATH to be an existing directory.
+            std::fs::create_dir_all(&proton.compat_prefix).map_err(|source| LaunchError::ProtonPrefixCreateFailed {
+                path: proton.compat_prefix.display().to_string(),
+                source,
+            })?;
             tracing::info!(
                 "Launching via Proton: {} run {} {}",
                 proton.proton_binary.display(),

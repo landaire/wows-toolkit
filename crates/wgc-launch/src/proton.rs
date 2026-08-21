@@ -77,3 +77,47 @@ pub fn find_steam_root() -> Option<PathBuf> {
     candidates.push(PathBuf::from(&home).join(".steam/steam"));
     candidates.into_iter().find(|p| p.join("steamapps").is_dir())
 }
+
+/// An existing Proton prefix (`STEAM_COMPAT_DATA_PATH`) for WoWs installed
+/// through Steam, if one exists in any Steam library. Only useful when the
+/// user has the Steam copy of WoWs; a WGC-style install has no Steam
+/// compatdata prefix and must use a managed one (see `managed_prefix`).
+pub fn steam_wows_prefix() -> Option<PathBuf> {
+    let steam_root = find_steam_root()?;
+    let app_id = wgc_install::steam::WOWS_STEAM_APP_ID.0;
+    // The client root is itself a library; scan it and every extra library.
+    std::iter::once(steam_root.clone())
+        .chain(wgc_install::steam::libraries_from_root(&steam_root))
+        .map(|lib| lib.join("steamapps").join("compatdata").join(app_id.to_string()))
+        .find(|prefix| prefix.is_dir())
+}
+
+/// The toolkit-managed Proton prefix under `base` (the app data dir). WoWs
+/// installs that did not come from Steam have no prefix to reuse, so the
+/// toolkit owns one: a single shared Wine prefix Proton initializes on first
+/// launch. Shared across non-Steam installs on purpose -- a prefix is Windows
+/// userspace (registry, redistributables), not the game, so one is enough.
+pub fn managed_prefix(base: &Path) -> PathBuf {
+    base.join("proton").join("prefix")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn managed_prefix_is_under_the_data_dir_and_stable() {
+        let base = Path::new("/home/u/.local/share/wowstoolkit");
+        assert_eq!(managed_prefix(base), base.join("proton").join("prefix"));
+        // Deterministic: the same base always yields the same prefix, so a
+        // launch reuses the Wine prefix Proton set up on the first launch.
+        assert_eq!(managed_prefix(base), managed_prefix(base));
+    }
+
+    #[test]
+    fn parse_proton_version_reads_major_minor_and_ignores_suffixes() {
+        assert_eq!(parse_proton_version("Proton 10.0"), Some((10, 0)));
+        assert_eq!(parse_proton_version("Proton 9.0-GE"), Some((9, 0)));
+        assert_eq!(parse_proton_version("Proton Experimental"), None);
+    }
+}
