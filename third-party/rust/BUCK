@@ -1842,6 +1842,7 @@ cargo.rust_library(
         "bzip2",
         "futures-io",
         "gzip",
+        "tokio",
     ],
     visibility = [],
     deps = [
@@ -1849,6 +1850,7 @@ cargo.rust_library(
         ":compression-core-0.4",
         ":futures-io-0.3",
         ":pin-project-lite-0.2",
+        ":tokio-1",
     ],
 )
 
@@ -16222,6 +16224,12 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     visibility = [],
+)
+
+alias(
+    name = "hex",
+    actual = ":hex-0.4",
+    visibility = ["PUBLIC"],
 )
 
 extract_archive(
@@ -32235,9 +32243,11 @@ cargo.rust_library(
         "__rustls-ring",
         "__tls",
         "blocking",
+        "gzip",
         "json",
         "rustls-tls-native-roots",
         "rustls-tls-native-roots-no-provider",
+        "stream",
     ],
     visibility = [],
     deps = [
@@ -32264,6 +32274,7 @@ cargo.rust_library(
         ":sync_wrapper-1",
         ":tokio-1",
         ":tokio-rustls-0.26",
+        ":tokio-util-0.7",
         ":tower-0.5",
         ":tower-http-0.6",
         ":tower-service-0.3",
@@ -35430,6 +35441,51 @@ cargo.rust_library(
     ],
 )
 
+alias(
+    name = "serde_bencode",
+    actual = ":serde_bencode-0.2",
+    visibility = ["PUBLIC"],
+)
+
+extract_archive(
+    name = "serde_bencode-0.2.4.crate",
+    src = "vendor/serde_bencode-0.2.4.crate",
+    strip_prefix = "serde_bencode-0.2.4",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "serde_bencode-0.2",
+    srcs = [":serde_bencode-0.2.4.crate"],
+    crate = "serde_bencode",
+    crate_root = "serde_bencode-0.2.4.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "serde_bencode",
+        "CARGO_MANIFEST_DIR": "serde_bencode-0.2.4.crate",
+        "CARGO_PKG_AUTHORS": "Toby Padilla <tobypadilla@gmail.com>:Nautilus Cyberneering <info@nautilus-cyberneering.de>",
+        "CARGO_PKG_DESCRIPTION": "A Serde backed Bencode encoding/decoding library for Rust.",
+        "CARGO_PKG_NAME": "serde_bencode",
+        "CARGO_PKG_REPOSITORY": "https://github.com/toby/serde-bencode",
+        "CARGO_PKG_VERSION": "0.2.4",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "2",
+        "CARGO_PKG_VERSION_PATCH": "4",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":serde-1",
+        ":serde_bytes-0.11",
+    ],
+)
+
+alias(
+    name = "serde_bytes",
+    actual = ":serde_bytes-0.11",
+    visibility = ["PUBLIC"],
+)
+
 extract_archive(
     name = "serde_bytes-0.11.19.crate",
     src = "vendor/serde_bytes-0.11.19.crate",
@@ -35973,6 +36029,12 @@ cargo.rust_library(
         ":base16ct-1",
         ":serde-1",
     ],
+)
+
+alias(
+    name = "sha1",
+    actual = ":sha1-0.10",
+    visibility = ["PUBLIC"],
 )
 
 extract_archive(
@@ -40715,22 +40777,30 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "decompression-gzip",
         "default",
         "follow-redirect",
+        "futures-core",
         "futures-util",
         "map-response-body",
+        "tokio-util",
         "tower",
         "trace",
         "tracing",
     ],
     visibility = [],
     deps = [
+        ":async-compression-0.4",
         ":bitflags-2",
         ":bytes-1",
+        ":futures-core-0.3",
         ":futures-util-0.3",
         ":http-1",
         ":http-body-1",
+        ":http-body-util-0.1",
         ":pin-project-lite-0.2",
+        ":tokio-1",
+        ":tokio-util-0.7",
         ":tower-0.5",
         ":tower-layer-0.3",
         ":tower-service-0.3",

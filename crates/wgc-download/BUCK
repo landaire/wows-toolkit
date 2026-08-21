@@ -14,5 +14,10 @@ workspace_library(
         "//third-party/rust:serde_bencode",
         "//third-party/rust:serde_bytes",
         "//third-party/rust:data-encoding",
+        "//third-party/rust:reqwest",
+        "//third-party/rust:tokio",
+        "//third-party/rust:sha1",
+        "//third-party/rust:futures",
+        "//third-party/rust:hex",
     ],
 )
