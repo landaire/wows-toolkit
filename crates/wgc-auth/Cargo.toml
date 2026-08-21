@@ -3,14 +3,26 @@ name = "wgc-auth"
 version = "0.1.0"
 edition.workspace = true
 publish = false
-description = "WGNI account authentication: secret-bearing newtypes, realm map, and proof-of-work solver"
+description = "WGNI account authentication: async client, keyring session store, and launch-gate adapter"
 
 [dependencies]
 wgc-core = { workspace = true }
+wgc-launch = { workspace = true }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }
 zeroize = { version = "1", features = ["derive"] }
 sha3 = "0.10"
 url = "2"
+rand = "0.10"
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+# TLS features mirror crates/wgc-catalog/Cargo.toml's reqwest line: rustls
+# with the OS native root store, never default-tls (OpenSSL) or aws-lc-rs.
+# Adds "json": WGNI speaks JSON, unlike wgc-catalog's XML-only need.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "json", "gzip"] }
+# "crypto-rust" keeps the Linux Secret Service backend pure-Rust and
+# aws-lc-rs/openssl-free; apple-native/windows-native cover macOS Keychain
+# and Windows Credential Manager.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [dev-dependencies]
