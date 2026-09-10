@@ -1,11 +1,13 @@
 use clap::Parser;
 use clap::Subcommand;
 use rootcause::prelude::*;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::path::PathBuf;
 
 mod detect;
 mod download;
+mod steam;
 
 use wows_data_mgr::dump;
 use wows_data_mgr::manifest;
@@ -36,7 +38,7 @@ struct Args {
 enum Commands {
     /// Download game data for a specific version via DepotDownloader
     Download {
-        /// Download the latest known version
+        /// Download the newest build listed in game_versions.toml
         #[arg(long, conflicts_with_all = &["build", "version"])]
         latest: bool,
 
@@ -68,7 +70,8 @@ enum Commands {
 
     /// Dump renderer-required game data to a directory for offline use
     DumpRendererData {
-        /// Dump for the latest available build
+        /// Dump the newest build available locally, which need not be one
+        /// game_versions.toml already lists
         #[arg(long, conflicts_with_all = &["build", "version"])]
         latest: bool,
 
@@ -87,6 +90,11 @@ enum Commands {
         /// Overwrite existing dump for this build
         #[arg(long)]
         force: bool,
+
+        /// Skip refreshing this build's depot pins in game_versions.toml from
+        /// the Steam public branch after the dump.
+        #[arg(long)]
+        no_manifest_update: bool,
 
         /// Override the game data source with this game install directory.
         /// May be combined with any selector.
@@ -253,6 +261,29 @@ enum Commands {
         force: bool,
     },
 
+    /// Refresh game_versions.toml with the depot manifests the Steam public
+    /// branch currently publishes.
+    ///
+    /// The build number is read back out of the client depot's file listing, so
+    /// an entry is only written for the build those manifests provably
+    /// introduce. Listing a depot needs a Steam account that owns the game.
+    UpdateVersions {
+        /// Game version the published build is (e.g. 15.7.0). Defaults to what
+        /// the local registry records for that build.
+        #[arg(long)]
+        version: Option<String>,
+
+        /// Re-pin a build game_versions.toml already records. Entries name the
+        /// manifest a build was first introduced under, so this replaces that
+        /// record with whatever the branch publishes now.
+        #[arg(long)]
+        force: bool,
+
+        /// Steam username to query as (otherwise reads from .steam-user)
+        #[arg(long)]
+        steam_user: Option<String>,
+    },
+
     /// Register an existing WoWs installation without downloading
     Register {
         /// Register as the "latest" path — always use whatever builds exist here
@@ -333,29 +364,61 @@ struct DumpRendererPlan {
     existing_dump: ExistingDumpPolicy,
 }
 
+/// Which build a dump was asked for. The three selectors are mutually
+/// exclusive at the CLI, so they are one choice rather than three flags that
+/// could all be set at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DumpSelector<'a> {
+    /// The newest build the source holds.
+    Latest,
+    Build(u32),
+    Version(&'a str),
+}
+
+impl<'a> DumpSelector<'a> {
+    fn from_args(latest: bool, build: Option<u32>, version: Option<&'a str>) -> Result<Self, Report> {
+        match (latest, build, version) {
+            (true, _, _) => Ok(Self::Latest),
+            (false, Some(build), _) => Ok(Self::Build(build)),
+            (false, None, Some(version)) => Ok(Self::Version(version)),
+            (false, None, None) => bail!("Specify --latest, --build, or --version"),
+        }
+    }
+}
+
+/// What a dump was asked to produce, before anything is resolved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DumpRequest<'a> {
+    selector: DumpSelector<'a>,
+    game_dir: Option<&'a Path>,
+    output: &'a Path,
+    force: bool,
+}
+
 fn resolve_dump_renderer_plan(
     manifest: &manifest::GameVersionManifest,
-    latest: bool,
-    build: Option<u32>,
-    version: Option<&str>,
-    game_dir: Option<&Path>,
-    output: &Path,
-    force: bool,
+    request: &DumpRequest<'_>,
+    local_builds: &[u32],
 ) -> Result<DumpRendererPlan, Report> {
-    let target = if latest {
-        manifest.latest_build().ok_or_else(|| rootcause::report!("No versions in game_versions.toml"))?
-    } else if let Some(build) = build {
-        build
-    } else if let Some(version) = version {
-        manifest
+    let target = match request.selector {
+        // The newest build present, not the newest the manifest knows: a dump
+        // reads local data, and a build too new to be pinned yet is exactly the
+        // one worth dumping. Resolving through the manifest instead only ever
+        // named builds this then failed to find locally.
+        DumpSelector::Latest => local_builds.iter().copied().max().ok_or_else(|| {
+            rootcause::report!(
+                "No game builds available locally. Pass --game-dir <install>, or register one with \
+                 `register --latest <path>`."
+            )
+        })?,
+        DumpSelector::Build(build) => build,
+        DumpSelector::Version(version) => manifest
             .find_by_version(version)
-            .ok_or_else(|| rootcause::report!("No build found matching version '{version}'"))?
-    } else {
-        bail!("Specify --latest, --build, or --version");
+            .ok_or_else(|| rootcause::report!("No build found matching version '{version}'"))?,
     };
 
     let manifest_version = manifest.get(target).map(|entry| entry.version.clone());
-    let version = match (manifest_version, force) {
+    let version = match (manifest_version, request.force) {
         (Some(version), true) => DumpVersionPlan::ValidateSourceThenUseManifest(version),
         (Some(version), false) => DumpVersionPlan::UseManifest(version),
         (None, _) => DumpVersionPlan::DetectFromSource,
@@ -364,9 +427,9 @@ fn resolve_dump_renderer_plan(
     Ok(DumpRendererPlan {
         target,
         version,
-        source: game_dir.map_or(DumpDataSource::Registry, |path| DumpDataSource::Supplied(path.to_path_buf())),
-        output: output.to_path_buf(),
-        existing_dump: if force { ExistingDumpPolicy::Replace } else { ExistingDumpPolicy::Preserve },
+        source: request.game_dir.map_or(DumpDataSource::Registry, |path| DumpDataSource::Supplied(path.to_path_buf())),
+        output: request.output.to_path_buf(),
+        existing_dump: if request.force { ExistingDumpPolicy::Replace } else { ExistingDumpPolicy::Preserve },
     })
 }
 
@@ -378,7 +441,38 @@ impl DumpRendererPlan {
     }
 }
 
-fn execute_dump_renderer_plan(plan: DumpRendererPlan, data_dir: &Path) -> Result<(), Report> {
+/// The builds a dump could read, which is what `--latest` picks from.
+fn local_builds_for_dump(game_dir: Option<&Path>, data_dir: &Path) -> Result<Vec<u32>, Report> {
+    if let Some(dir) = game_dir {
+        return Ok(wowsunpack::game_data::list_available_builds(dir)
+            .attach_with(|| format!("No valid game builds found at {}", dir.display()))?);
+    }
+
+    let mut builds = registry::load_registry(&data_dir.join("versions.toml")).available_builds();
+    // `game_dir_for_build` falls back to this directory for a build with no
+    // registry entry, so a build downloaded before a lost registry write is
+    // dumpable by number. `--latest` has to see the same set or it would not
+    // offer one it can already dump.
+    builds.extend(downloaded_build_dirs(&data_dir.join("builds")));
+    builds.sort_unstable();
+    builds.dedup();
+    Ok(builds)
+}
+
+/// Build numbers named by a directory under `builds/`.
+fn downloaded_build_dirs(builds_dir: &Path) -> Vec<u32> {
+    let Ok(entries) = std::fs::read_dir(builds_dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .filter_map(|entry| entry.file_name().to_str()?.parse::<u32>().ok())
+        .collect()
+}
+
+/// Returns the version the dump was written under.
+fn execute_dump_renderer_plan(plan: DumpRendererPlan, data_dir: &Path) -> Result<String, Report> {
     let game_dir = match plan.source {
         DumpDataSource::Supplied(path) => path,
         DumpDataSource::Registry => {
@@ -405,7 +499,7 @@ fn execute_dump_renderer_plan(plan: DumpRendererPlan, data_dir: &Path) -> Result
     let progress = dump::create_progress_bar(&game_dir);
     dump::dump_renderer_data(&game_dir, plan.target, &version, &plan.output, progress.as_ref(), false)?;
     println!("Dumped renderer data to {}", dump::dump_dir(&plan.output, &version, plan.target).display());
-    Ok(())
+    Ok(version)
 }
 
 fn detect_source_version(game_dir: &Path, target: u32) -> Result<String, Report> {
@@ -432,6 +526,154 @@ fn remove_existing_dump(output: &Path, target: u32, version: &str) -> Result<(),
         std::fs::remove_dir_all(&existing_dir)?;
     }
     Ok(())
+}
+
+/// Where a refresh's version label comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum VersionSource {
+    /// Read out of the game data that was just dumped.
+    Detected(String),
+    /// Typed on the command line, so it is a claim to check rather than a fact.
+    Asserted(String),
+    /// Whatever the local registry records for the build.
+    Registry,
+}
+
+/// What a manifest refresh needs that the caller already knows.
+struct ManifestRefresh<'a> {
+    repo_root: &'a Path,
+    login: steam::SteamLogin,
+    prompt: steam::LoginPrompt,
+    /// The build the caller already dumped. Steam must agree its manifests
+    /// introduce that build, or nothing is written.
+    expected_build: Option<u32>,
+    version: VersionSource,
+    /// Re-pin a build the manifest already records. Entries name the manifest a
+    /// build was first introduced under, and a depot re-push moves the current
+    /// pins without moving the build, so refreshing one by default would
+    /// overwrite that record with a later manifest.
+    overwrite: ExistingPinPolicy,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExistingPinPolicy {
+    Keep,
+    Replace,
+}
+
+/// What a refresh did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RefreshOutcome {
+    Pinned { build: u32, version: String },
+    AlreadyPinned { build: u32, version: String },
+}
+
+impl RefreshOutcome {
+    fn report(&self) -> String {
+        match self {
+            Self::Pinned { build, version } => format!("Pinned build {build} ({version}) in game_versions.toml"),
+            Self::AlreadyPinned { build, version } => {
+                format!("Build {build} ({version}) is already pinned in game_versions.toml")
+            }
+        }
+    }
+}
+
+/// Settle the version label for a build, rejecting a claim the registry
+/// contradicts. Nothing else checks a typed `--version`, and it is written
+/// verbatim.
+fn resolve_refresh_version(
+    source: &VersionSource,
+    build: u32,
+    reg: &registry::LocalRegistry,
+) -> Result<String, Report> {
+    let known = reg.get(build).map(|entry| entry.version.as_str());
+    match source {
+        VersionSource::Detected(version) => Ok(version.clone()),
+        VersionSource::Asserted(version) => match known {
+            Some(known) if known != version => bail!(
+                "build {build} is version {known} locally, not {version}; pass the version that build actually is"
+            ),
+            _ => Ok(version.clone()),
+        },
+        VersionSource::Registry => known.map(str::to_string).ok_or_else(|| {
+            rootcause::report!(
+                "Build {build} is not in the local registry; pass --version to say which game version it is"
+            )
+        }),
+    }
+}
+
+/// Reconcile the build Steam publishes with the one the caller expected.
+///
+/// The client depot ships more than one `bin/<build>`: the live build plus the
+/// one it replaced, which the game retains. Only the newest is the build that
+/// manifest introduces, which is what an entry here records, so membership is
+/// not enough. Pinning a retained older build would file the current release's
+/// manifest IDs under the previous release's number.
+fn resolve_published_build(published: &BTreeSet<u32>, expected: Option<u32>) -> Result<u32, Report> {
+    let newest = *published
+        .iter()
+        .next_back()
+        .ok_or_else(|| rootcause::report!("the Steam public branch client depot holds no build directory"))?;
+
+    match expected {
+        Some(build) if build == newest => Ok(build),
+        Some(build) => bail!(
+            "the Steam public branch introduces build {newest}, not {build} (its client depot holds {}). Its \
+             manifests pin {newest}, so recording them under {build} would misattribute them.",
+            published.iter().map(u32::to_string).collect::<Vec<_>>().join(", ")
+        ),
+        None => Ok(newest),
+    }
+}
+
+/// A build the manifest already pins, when the caller named one up front.
+///
+/// Checking before any Steam query is what keeps an archival dump of an old
+/// build from paying for an app-info call and a full client depot listing only
+/// to be told its build is not the one being published.
+fn already_pinned(refresh: &ManifestRefresh<'_>, pinned: &manifest::GameVersionManifest) -> Option<RefreshOutcome> {
+    if refresh.overwrite == ExistingPinPolicy::Replace {
+        return None;
+    }
+    let build = refresh.expected_build?;
+    let entry = pinned.get(build)?;
+    Some(RefreshOutcome::AlreadyPinned { build, version: entry.version.clone() })
+}
+
+/// Pin a build's depot manifests in `game_versions.toml` from the public branch.
+fn refresh_manifest_entry(
+    refresh: &ManifestRefresh<'_>,
+    pinned: &manifest::GameVersionManifest,
+    reg: &registry::LocalRegistry,
+) -> Result<RefreshOutcome, Report> {
+    if let Some(outcome) = already_pinned(refresh, pinned) {
+        return Ok(outcome);
+    }
+
+    let steamroom = steam::find_steamroom()?;
+    let depots = steam::fetch_public_manifests(steamroom, manifest::WOWS_APP_ID)?;
+    let client = depots
+        .get(&manifest::CLIENT_DEPOT_ID)
+        .map(|id| manifest::DepotManifest::new(manifest::CLIENT_DEPOT_ID, id.clone()))
+        .ok_or_else(|| {
+            rootcause::report!("The Steam public branch publishes no client depot for app {}", manifest::WOWS_APP_ID.0)
+        })?;
+
+    let published = steam::discover_builds(steamroom, manifest::WOWS_APP_ID, &client, &refresh.login, refresh.prompt)?;
+    let build = resolve_published_build(&published, refresh.expected_build)?;
+
+    let version = resolve_refresh_version(&refresh.version, build, reg)?;
+    if refresh.overwrite == ExistingPinPolicy::Keep
+        && let Some(entry) = pinned.get(build)
+    {
+        return Ok(RefreshOutcome::AlreadyPinned { build, version: entry.version.clone() });
+    }
+
+    let entry = steam::entry_from_public_manifests(manifest::WOWS_APP_ID, &version, &depots)?;
+    manifest::save_entry(&refresh.repo_root.join("game_versions.toml"), build, &entry)?;
+    Ok(RefreshOutcome::Pinned { build, version })
 }
 
 fn unknown_build_manifest_entry(build: u32, version: &str) -> String {
@@ -652,18 +894,40 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
     }
 
     let manifest = manifest::load_manifest(&repo_root.join("game_versions.toml"))?;
-    if let Commands::DumpRendererData { latest, build, version, output, force, game_dir } = &args.command {
-        let plan = resolve_dump_renderer_plan(
-            &manifest,
-            *latest,
-            *build,
-            version.as_deref(),
-            game_dir.as_deref(),
+    if let Commands::DumpRendererData { latest, build, version, output, force, game_dir, no_manifest_update } =
+        &args.command
+    {
+        let local_builds = local_builds_for_dump(game_dir.as_deref(), data_dir)?;
+        let request = DumpRequest {
+            selector: DumpSelector::from_args(*latest, *build, version.as_deref())?,
+            game_dir: game_dir.as_deref(),
             output,
-            *force,
-        )?;
+            force: *force,
+        };
+        let plan = resolve_dump_renderer_plan(&manifest, &request, &local_builds)?;
         let target = plan.link_target();
-        execute_dump_renderer_plan(plan, data_dir)?;
+        let dumped_version = execute_dump_renderer_plan(plan, data_dir)?;
+
+        if !*no_manifest_update {
+            let refresh = ManifestRefresh {
+                repo_root,
+                login: steam::resolve_login(repo_root, None),
+                // A password prompt here would stall a dump that has already
+                // done its work.
+                prompt: steam::LoginPrompt::Deny,
+                expected_build: Some(target.build),
+                version: VersionSource::Detected(dumped_version),
+                overwrite: ExistingPinPolicy::Keep,
+            };
+            let reg = registry::load_registry(&data_dir.join("versions.toml"));
+            match refresh_manifest_entry(&refresh, &manifest, &reg) {
+                Ok(outcome) => println!("{}", outcome.report()),
+                Err(e) => eprintln!(
+                    "Warning: left game_versions.toml unchanged, could not verify the Steam pins for build {}: {e}",
+                    target.build
+                ),
+            }
+        }
         return Ok(Some(target));
     }
 
@@ -749,6 +1013,19 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
                     println!("{:<12} {:<10} {:<24} {}", build_str, local.version, "-", status);
                 }
             }
+        }
+
+        Commands::UpdateVersions { version, steam_user, force } => {
+            let refresh = ManifestRefresh {
+                repo_root,
+                login: steam::resolve_login(repo_root, steam_user.as_deref()),
+                // Run on purpose, so logging in is part of the job.
+                prompt: steam::LoginPrompt::Allow,
+                expected_build: None,
+                version: version.map_or(VersionSource::Registry, VersionSource::Asserted),
+                overwrite: if force { ExistingPinPolicy::Replace } else { ExistingPinPolicy::Keep },
+            };
+            println!("{}", refresh_manifest_entry(&refresh, &manifest, &reg)?.report());
         }
 
         Commands::Detect { path } => {
@@ -874,11 +1151,24 @@ fn run(args: &Args, repo_root: &Path, data_dir: &Path) -> Result<Option<LinkTarg
 mod tests {
     use super::Args;
     use super::DumpDataSource;
+    use super::DumpRequest;
+    use super::DumpSelector;
     use super::DumpVersionPlan;
     use super::ExistingDumpPolicy;
+    use super::ExistingPinPolicy;
+    use super::ManifestRefresh;
+    use super::RefreshOutcome;
+    use super::VersionSource;
+    use super::already_pinned;
+    use super::local_builds_for_dump;
+    use super::registry;
     use super::resolve_dump_renderer_plan;
+    use super::resolve_published_build;
+    use super::resolve_refresh_version;
+    use super::steam;
     use super::unknown_build_manifest_entry;
     use clap::Parser;
+    use std::collections::BTreeSet;
     use std::path::Path;
     use wows_data_mgr::manifest::DepotId;
     use wows_data_mgr::manifest::GameVersionManifest;
@@ -909,21 +1199,12 @@ mod tests {
     fn game_dir_plan_resolves_each_selector_from_the_manifest() {
         let manifest = manifest_fixture();
 
-        for (latest, build, version, expected_build, expected_version) in [
-            (true, None, None, 13_100_000, "15.8.0"),
-            (false, Some(13_015_711), None, 13_015_711, "15.7.0"),
-            (false, None, Some("15.7"), 13_015_712, "15.7.1"),
+        for (selector, expected_build, expected_version) in [
+            (DumpSelector::Latest, 13_100_000, "15.8.0"),
+            (DumpSelector::Build(13_015_711), 13_015_711, "15.7.0"),
+            (DumpSelector::Version("15.7"), 13_015_712, "15.7.1"),
         ] {
-            let plan = resolve_dump_renderer_plan(
-                &manifest,
-                latest,
-                build,
-                version,
-                Some(Path::new("supplied-game")),
-                Path::new("dump-output"),
-                false,
-            )
-            .unwrap();
+            let plan = resolve_dump_renderer_plan(&manifest, &request(selector, true, false), &LOCAL_BUILDS).unwrap();
 
             assert_eq!(plan.target, expected_build);
             assert_eq!(plan.version, DumpVersionPlan::UseManifest(expected_version.to_string()));
@@ -933,18 +1214,11 @@ mod tests {
     #[test]
     fn game_dir_plan_bypasses_registry_and_keeps_the_shared_cleanup_policy() {
         let manifest = manifest_fixture();
-        let override_plan = resolve_dump_renderer_plan(
-            &manifest,
-            false,
-            None,
-            Some("15.7"),
-            Some(Path::new("supplied-game")),
-            Path::new("dump-output"),
-            true,
-        )
-        .unwrap();
+        let override_plan =
+            resolve_dump_renderer_plan(&manifest, &request(DumpSelector::Version("15.7"), true, true), &LOCAL_BUILDS)
+                .unwrap();
         let registry_plan =
-            resolve_dump_renderer_plan(&manifest, false, None, Some("15.7"), None, Path::new("dump-output"), true)
+            resolve_dump_renderer_plan(&manifest, &request(DumpSelector::Version("15.7"), false, true), &LOCAL_BUILDS)
                 .unwrap();
 
         assert_eq!(override_plan.source, DumpDataSource::Supplied(Path::new("supplied-game").to_path_buf()));
@@ -959,16 +1233,9 @@ mod tests {
     fn forced_game_dir_plan_validates_source_before_using_the_manifest_version() {
         let manifest = manifest_fixture();
 
-        let plan = resolve_dump_renderer_plan(
-            &manifest,
-            false,
-            None,
-            Some("15.7"),
-            Some(Path::new("supplied-game")),
-            Path::new("dump-output"),
-            true,
-        )
-        .unwrap();
+        let plan =
+            resolve_dump_renderer_plan(&manifest, &request(DumpSelector::Version("15.7"), true, true), &LOCAL_BUILDS)
+                .unwrap();
 
         assert_eq!(plan.version, DumpVersionPlan::ValidateSourceThenUseManifest("15.7.1".to_string()));
     }
@@ -984,6 +1251,178 @@ mod tests {
         assert_eq!(entry.client.manifest_id, ManifestId("<look up on SteamDB>".to_string()));
         assert_eq!(entry.content, None);
         assert_eq!(entry.localization, None);
+    }
+
+    /// The request a test resolves, varying only what it is asserting about.
+    pub(super) fn request(selector: DumpSelector<'_>, supplied_game_dir: bool, force: bool) -> DumpRequest<'_> {
+        DumpRequest {
+            selector,
+            game_dir: supplied_game_dir.then(|| Path::new("supplied-game")),
+            output: Path::new("dump-output"),
+            force,
+        }
+    }
+
+    /// Builds a dump could read. Its newest matches the manifest's newest, so
+    /// tests that predate local-build resolution keep asserting the same thing.
+    pub(super) const LOCAL_BUILDS: [u32; 4] = [12_830_008, 13_015_711, 13_015_712, 13_100_000];
+
+    /// A build too new to be pinned yet is the one worth dumping, and is what
+    /// forced `--latest` off the manifest. Resolving through the manifest named
+    /// 13_100_000, which the dump would then have to find locally anyway.
+    #[test]
+    fn latest_dumps_the_newest_build_present_locally_not_the_newest_pinned() {
+        let manifest = manifest_fixture();
+        let local = [13_015_711, 13_200_000];
+
+        let plan = resolve_dump_renderer_plan(&manifest, &request(DumpSelector::Latest, true, false), &local).unwrap();
+
+        assert_eq!(plan.target, 13_200_000);
+        assert_eq!(plan.version, DumpVersionPlan::DetectFromSource);
+    }
+
+    /// Every `--latest` dump already had to find its build locally, so an empty
+    /// source is the one case this can fail on, and it must say what to do.
+    #[test]
+    fn latest_without_a_local_build_says_how_to_supply_one() {
+        let manifest = manifest_fixture();
+
+        let err = resolve_dump_renderer_plan(&manifest, &request(DumpSelector::Latest, false, false), &[]).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("--game-dir"), "{message}");
+        assert!(message.contains("register --latest"), "{message}");
+    }
+
+    /// The live client depot ships the current build and the one it replaced
+    /// (measured: 13015811 and 13187581 on the public branch in September 2026),
+    /// so requiring a single build directory would never resolve.
+    #[test]
+    fn an_unqualified_refresh_pins_the_newest_build_the_depot_ships() {
+        assert_eq!(resolve_published_build(&BTreeSet::from([13_100_000]), None).unwrap(), 13_100_000);
+        assert_eq!(resolve_published_build(&BTreeSet::from([13_015_811, 13_187_581]), None).unwrap(), 13_187_581);
+    }
+
+    /// A dump pins the build it dumped or nothing.
+    #[test]
+    fn a_dump_pins_only_the_build_the_branch_currently_introduces() {
+        assert_eq!(resolve_published_build(&BTreeSet::from([13_187_581]), Some(13_187_581)).unwrap(), 13_187_581);
+
+        let err = resolve_published_build(&BTreeSet::from([13_187_581]), Some(13_100_000)).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("13187581") && message.contains("13100000"), "{message}");
+    }
+
+    /// Dumping the previous release must not file the current release's
+    /// manifests under it. The depot retains that build's directory, so
+    /// membership alone would have accepted it.
+    #[test]
+    fn a_build_the_depot_merely_retains_is_not_pinnable() {
+        let published = BTreeSet::from([13_015_811, 13_187_581]);
+
+        let err = resolve_published_build(&published, Some(13_015_811)).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("introduces build 13187581"), "{message}");
+        assert!(message.contains("misattribute"), "{message}");
+    }
+
+    /// Discovery guarantees a non-empty set, but the rule must not depend on it.
+    #[test]
+    fn an_empty_listing_pins_nothing() {
+        assert!(resolve_published_build(&BTreeSet::new(), None).is_err());
+        assert!(resolve_published_build(&BTreeSet::new(), Some(13_187_581)).is_err());
+    }
+
+    /// An entry records the manifest a build was first introduced under. A
+    /// depot re-push moves the branch's current pins without moving the build,
+    /// so re-running a dump days after release must not overwrite that record.
+    #[test]
+    fn a_build_already_pinned_is_left_alone() {
+        let refresh = refresh_fixture(Some(13_015_711), ExistingPinPolicy::Keep);
+
+        let outcome = already_pinned(&refresh, &manifest_fixture());
+
+        assert_eq!(outcome, Some(RefreshOutcome::AlreadyPinned { build: 13_015_711, version: "15.7.0".to_string() }));
+    }
+
+    /// The short circuit runs before any Steam query, so an archival dump of an
+    /// old build costs neither an app-info call nor a client depot listing.
+    #[test]
+    fn an_unpinned_build_and_a_forced_refresh_both_reach_steam() {
+        assert_eq!(
+            already_pinned(&refresh_fixture(Some(13_200_000), ExistingPinPolicy::Keep), &manifest_fixture()),
+            None
+        );
+        assert_eq!(
+            already_pinned(&refresh_fixture(Some(13_015_711), ExistingPinPolicy::Replace), &manifest_fixture()),
+            None
+        );
+        // Without a build named up front there is nothing to check yet.
+        assert_eq!(already_pinned(&refresh_fixture(None, ExistingPinPolicy::Keep), &manifest_fixture()), None);
+    }
+
+    /// A typed --version is written verbatim and nothing else checks it, so a
+    /// stale one would label whichever build the branch happens to publish.
+    #[test]
+    fn an_asserted_version_the_registry_contradicts_is_rejected() {
+        let mut reg = registry::LocalRegistry::default();
+        reg.set_downloaded(13_015_711, "15.7.0");
+
+        let err =
+            resolve_refresh_version(&VersionSource::Asserted("15.6.0".to_string()), 13_015_711, &reg).unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("15.7.0") && message.contains("15.6.0"), "{message}");
+
+        // Agreeing, or a build the registry has never seen, both pass.
+        assert_eq!(
+            resolve_refresh_version(&VersionSource::Asserted("15.7.0".to_string()), 13_015_711, &reg).unwrap(),
+            "15.7.0"
+        );
+        assert_eq!(
+            resolve_refresh_version(&VersionSource::Asserted("15.8.0".to_string()), 13_200_000, &reg).unwrap(),
+            "15.8.0"
+        );
+    }
+
+    /// A version read out of the dumped game data outranks the registry.
+    #[test]
+    fn a_detected_version_is_taken_as_given() {
+        let mut reg = registry::LocalRegistry::default();
+        reg.set_downloaded(13_015_711, "stale");
+
+        assert_eq!(
+            resolve_refresh_version(&VersionSource::Detected("15.7.0".to_string()), 13_015_711, &reg).unwrap(),
+            "15.7.0"
+        );
+        assert_eq!(resolve_refresh_version(&VersionSource::Registry, 13_015_711, &reg).unwrap(), "stale");
+        assert!(resolve_refresh_version(&VersionSource::Registry, 13_200_000, &reg).is_err());
+    }
+
+    /// `game_dir_for_build` falls back to `builds/<n>` for a build with no
+    /// registry entry, so `--latest` must offer one it can already dump.
+    #[test]
+    fn latest_sees_a_downloaded_build_the_registry_never_recorded() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("builds/13200000")).unwrap();
+        std::fs::create_dir_all(dir.path().join("builds/not-a-build")).unwrap();
+        std::fs::write(dir.path().join("builds/13300000"), b"a file, not a build").unwrap();
+
+        let builds = local_builds_for_dump(None, dir.path()).unwrap();
+
+        assert_eq!(builds, vec![13_200_000]);
+    }
+
+    fn refresh_fixture(expected_build: Option<u32>, overwrite: ExistingPinPolicy) -> ManifestRefresh<'static> {
+        ManifestRefresh {
+            repo_root: Path::new("repo"),
+            login: steam::SteamLogin::SteamClientToken,
+            prompt: steam::LoginPrompt::Deny,
+            expected_build,
+            version: VersionSource::Registry,
+            overwrite,
+        }
     }
 
     pub(super) fn manifest_fixture() -> GameVersionManifest {
@@ -1011,8 +1450,11 @@ mod tests {
 
 #[cfg(test)]
 mod link_flag_tests {
+    use super::DumpRequest;
+    use super::DumpSelector;
     use super::LinkTarget;
     use super::resolve_dump_renderer_plan;
+    use super::tests::LOCAL_BUILDS;
     use super::tests::manifest_fixture;
     use std::path::Path;
     use std::path::PathBuf;
@@ -1024,13 +1466,17 @@ mod link_flag_tests {
     fn a_dump_links_the_build_its_selector_resolved_to() {
         let manifest = manifest_fixture();
 
-        for (latest, build, version, expected) in [
-            (true, None, None, 13_100_000),
-            (false, Some(13_015_711), None, 13_015_711),
-            (false, None, Some("15.7"), 13_015_712),
+        for (selector, expected) in [
+            (DumpSelector::Latest, 13_100_000),
+            (DumpSelector::Build(13_015_711), 13_015_711),
+            (DumpSelector::Version("15.7"), 13_015_712),
         ] {
-            let plan =
-                resolve_dump_renderer_plan(&manifest, latest, build, version, None, Path::new("out"), false).unwrap();
+            let plan = resolve_dump_renderer_plan(
+                &manifest,
+                &DumpRequest { selector, game_dir: None, output: Path::new("out"), force: false },
+                &LOCAL_BUILDS,
+            )
+            .unwrap();
 
             assert_eq!(plan.link_target(), LinkTarget { output: PathBuf::from("out"), build: expected });
         }

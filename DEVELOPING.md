@@ -247,7 +247,23 @@ The tool saves your Steam username to `.steam-user` (gitignored) and uses DepotD
 
 #### Known versions
 
-The `game_versions.toml` file at the repo root tracks known game versions and their Steam depot manifest IDs. When a new game version ships, add an entry with the manifest ID from [SteamDB](https://steamdb.info/app/552990/depots/).
+The `game_versions.toml` file at the repo root tracks known game versions and their Steam depot manifest IDs. When a new game version ships, `update-versions` pins it from the Steam public branch:
+
+```bash
+cargo run -p wows-data-mgr -- update-versions
+```
+
+`dump-renderer-data` runs the same refresh for the build it dumped, so dumping a new build from a local install also records its pins. Pass `--no-manifest-update` to skip it.
+
+Both need the [`steamroom`](https://github.com/landaire/steamroom) CLI on PATH:
+
+```bash
+cargo install steamroom-cli
+```
+
+The depot manifest IDs come from public app info, but reading the build number back out of the client depot needs a Steam account that owns the game. It reuses the account in `.steam-user`. Without that verification nothing is written, since the client depot also retains the previous build's directory and pinning that one would file the current release's manifest IDs under the previous release's build number.
+
+Failing that, entries can still be written by hand from [SteamDB](https://steamdb.info/app/552990/depots/).
 
 #### Environment variable
 

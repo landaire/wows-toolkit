@@ -7,8 +7,7 @@ use rootcause::prelude::*;
 
 use crate::manifest::DepotManifest;
 use crate::manifest::GameVersionEntry;
-
-const APP_ID: u32 = 552990;
+use crate::manifest::WOWS_APP_ID;
 
 /// Download game data for a specific build via DepotDownloader.
 /// If `entry` is Some, downloads each pinned depot.
@@ -87,7 +86,7 @@ fn depot_downloader_args(
     filelist: &Path,
     username: &str,
 ) -> Vec<OsString> {
-    let mut args = vec![OsString::from("-app"), OsString::from(APP_ID.to_string())];
+    let mut args = vec![OsString::from("-app"), OsString::from(WOWS_APP_ID.0.to_string())];
     if let Some(depot) = request {
         args.extend([
             OsString::from("-depot"),
