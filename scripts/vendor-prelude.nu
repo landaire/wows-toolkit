@@ -68,8 +68,11 @@ patch "prelude/rust/build.bzl" ("        else:
             rustc_cmd.add(cmd_args(linker_argsfile, format = \"-Clink-arg=@{}\"))
             linker = compile_ctx.linker_with_pre_args")
 
-# Archive extraction shells out to bare mkdir/tar/unzip, which resolve through
-# PATH. Route the POSIX branch through the pinned toolchain instead.
+# Archive extraction invokes mkdir, tar and unzip by bare name, which resolves
+# them through PATH. Direct the POSIX branch to the pinned toolchain and the
+# Windows branch to the System32 bsdtar that the zip and zstd branches name
+# explicitly. A .crate file is a tar.gz, so this branch extracts every vendored
+# crate.
 let unarchive = "prelude/http_archive/unarchive.bzl"
 patch $unarchive "def _unarchive_cmd(" ('def _nix_tool(name):
     root = read_root_config("nix_toolchain", "root")
@@ -78,7 +81,7 @@ patch $unarchive "def _unarchive_cmd(" ('def _nix_tool(name):
     return root + "/bin/" + name
 
 def _unarchive_cmd(')
-patch $unarchive '            "tar",' '            "tar" if exec_is_windows else _nix_tool("tar"),'
+patch $unarchive '            "tar",' '            "%WINDIR%\\System32\\tar.exe" if exec_is_windows else _nix_tool("tar"),'
 patch $unarchive "            _TAR_FLAGS[ext_type],\n" "            _TAR_FLAGS[ext_type] if exec_is_windows else _nix_tar_flags(ext_type),\n"
 patch $unarchive "def _unarchive_cmd(" ('# GNU tar spawns its decompressor through PATH, which the actions clear.
 _NIX_TAR_DECOMPRESSORS = {
