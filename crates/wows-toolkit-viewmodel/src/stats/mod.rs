@@ -12,6 +12,10 @@ pub mod chart;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::types::GameParamId;
+
+use crate::personal_rating::PersonalRatingData;
+use crate::personal_rating::PersonalRatingResult;
+use crate::personal_rating::ShipBattleStats;
 use wows_toolkit_config::queries::SessionStatRow;
 
 /// One achievement earned, as the session rows store it.
@@ -92,6 +96,22 @@ pub struct PerGameStat {
 }
 
 impl PerGameStat {
+    /// This game's personal rating, against the expected-values table.
+    ///
+    /// `None` without a table, rather than zero, so a chart or a badge shows
+    /// nothing instead of a rating the data cannot support.
+    pub fn personal_rating(&self, table: Option<&PersonalRatingData>) -> Option<f64> {
+        let table = table?;
+        let stats = ShipBattleStats {
+            ship_id: self.ship_id,
+            battles: 1,
+            damage: self.damage,
+            wins: u32::from(self.is_win),
+            frags: self.frags,
+        };
+        table.calculate_pr(&[stats]).map(|result| result.pr)
+    }
+
     /// Adopts a stored row.
     ///
     /// A row whose achievement blob will not parse contributes no
@@ -422,6 +442,36 @@ impl PerformanceInfo {
     }
 }
 
+/// The session's rating across every ship played.
+///
+/// Each ship contributes its own aggregate, which is what the rating formula
+/// expects: it weights a ship against that ship's expected values, not against
+/// a pooled average.
+pub fn session_personal_rating(
+    games: &[&PerGameStat],
+    table: Option<&PersonalRatingData>,
+) -> Option<PersonalRatingResult> {
+    let table = table?;
+
+    let mut per_ship: std::collections::HashMap<GameParamId, ShipBattleStats> = std::collections::HashMap::new();
+    for game in games {
+        let entry = per_ship.entry(game.ship_id).or_insert(ShipBattleStats {
+            ship_id: game.ship_id,
+            battles: 0,
+            damage: 0,
+            wins: 0,
+            frags: 0,
+        });
+        entry.battles += 1;
+        entry.damage += game.damage;
+        entry.wins += u32::from(game.is_win);
+        entry.frags += game.frags;
+    }
+
+    let stats: Vec<ShipBattleStats> = per_ship.into_values().collect();
+    table.calculate_pr(&stats)
+}
+
 /// Groups filtered games by ship, newest-played ship first -- the order the
 /// egui table opens in.
 pub fn per_ship_performance(games: &[&PerGameStat]) -> Vec<(String, PerformanceInfo)> {
@@ -641,5 +691,41 @@ mod tests {
         assert_eq!(totals.len(), 2);
         assert_eq!(totals[0].game_param_id, 20u64.into(), "first seen stays first");
         assert_eq!(totals[1].count, 5, "the repeated achievement accumulates");
+    }
+}
+
+#[cfg(test)]
+mod rating_tests {
+    use super::PerGameStat;
+    use super::session_personal_rating;
+
+    fn game() -> PerGameStat {
+        PerGameStat {
+            ship_name: "Yamato".into(),
+            ship_id: 1u64.into(),
+            game_time: String::new(),
+            sort_key: String::new(),
+            player_id: 1,
+            damage: 100_000,
+            spotting_damage: 0,
+            frags: 2,
+            raw_xp: 0,
+            base_xp: 0,
+            is_win: true,
+            is_loss: false,
+            is_draw: false,
+            is_div: false,
+            match_group: "pvp".into(),
+            achievements: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn without_an_expected_values_table_there_is_no_rating_rather_than_a_zero() {
+        let games = [game()];
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+
+        assert_eq!(games[0].personal_rating(None), None);
+        assert!(session_personal_rating(&refs, None).is_none());
     }
 }

@@ -58,6 +58,8 @@ pub struct StatsView {
     /// Ids are never reused, so a closed chart's element ids cannot collide
     /// with a later one's.
     next_chart_id: usize,
+    /// Handed to every panel so the rating is computed against one table.
+    personal_rating: Option<std::sync::Arc<wows_toolkit_viewmodel::personal_rating::PersonalRatingData>>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -94,6 +96,7 @@ impl StatsView {
             overview,
             charts: vec![first_chart],
             next_chart_id: 1,
+            personal_rating: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -104,6 +107,13 @@ impl StatsView {
         self.available_modes = all_match_groups(&data.games).into_iter().collect();
         self.games = data.games;
         self.filters = data.filters;
+        self.personal_rating = data.personal_rating;
+
+        let table = self.personal_rating.clone();
+        self.overview.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
+        for chart in &self.charts {
+            chart.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
+        }
 
         if let GameLimit::Recent(count) = self.filters.limit {
             self.limit_input.update(cx, |state, cx| state.set_value(count.to_string(), window, cx));
@@ -128,7 +138,11 @@ impl StatsView {
 
         let chart = cx.new(|cx| StatsChartPanel::new(id, cx));
         let filtered = filter_games(&self.games, &self.filters);
-        chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+        let table = self.personal_rating.clone();
+        chart.update(cx, |panel, cx| {
+            panel.set_personal_rating(table, cx);
+            panel.set_games(&filtered, cx);
+        });
 
         self.dock_area.update(cx, |dock, cx| {
             dock.add_panel(chart.clone(), DockPlacement::Center, None, window, cx);

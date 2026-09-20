@@ -91,8 +91,7 @@ pub enum GameParamsDumpError {
 /// Reads the whole file: it is one archive and the decoder wants it entire.
 /// Callers run this off the UI thread.
 pub fn load_pickled(package_vfs: &VfsPath) -> Result<pickled::Value, GameParamsDumpError> {
-    let archive =
-        package_vfs.join(GAME_PARAMS_PATH).map_err(|source| GameParamsDumpError::NotFound { source })?;
+    let archive = package_vfs.join(GAME_PARAMS_PATH).map_err(|source| GameParamsDumpError::NotFound { source })?;
 
     let mut bytes = Vec::new();
     archive
@@ -129,11 +128,7 @@ pub fn base_parameters(root: pickled::Value) -> Result<pickled::Value, GameParam
 }
 
 /// Writes `value` to `path` in `format`.
-pub fn write_value<T: Serialize>(
-    value: &T,
-    path: &Path,
-    format: GameParamsFormat,
-) -> Result<(), GameParamsDumpError> {
+pub fn write_value<T: Serialize>(value: &T, path: &Path, format: GameParamsFormat) -> Result<(), GameParamsDumpError> {
     let file = BufWriter::new(
         File::create(path).map_err(|source| GameParamsDumpError::Create { path: path.to_path_buf(), source })?,
     );
@@ -206,10 +201,7 @@ mod tests {
 
     #[test]
     fn a_root_with_no_base_entry_is_reported_rather_than_panicking() {
-        assert!(matches!(
-            base_parameters(pickled::Value::I64(3)),
-            Err(GameParamsDumpError::NoBaseParameters)
-        ));
+        assert!(matches!(base_parameters(pickled::Value::I64(3)), Err(GameParamsDumpError::NoBaseParameters)));
         assert!(matches!(
             base_parameters(pickled::Value::List(pickled::value::Shared::new(Vec::new()))),
             Err(GameParamsDumpError::NoBaseParameters)
@@ -238,8 +230,8 @@ mod tests {
         std::fs::write(&blocker, b"x").unwrap();
         let path = blocker.join("nested.json");
 
-        let error = write_value(&pickled::Value::I64(1), &path, GameParamsFormat::Json)
-            .expect_err("the parent is a file");
+        let error =
+            write_value(&pickled::Value::I64(1), &path, GameParamsFormat::Json).expect_err("the parent is a file");
         assert!(matches!(error, GameParamsDumpError::Create { .. }));
         let _ = std::fs::remove_file(&blocker);
     }

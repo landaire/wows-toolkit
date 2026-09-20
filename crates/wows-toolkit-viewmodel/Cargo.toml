@@ -21,6 +21,7 @@ serde_json.workspace = true
 thiserror.workspace = true
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
+wows-replay-insights = { workspace = true, features = ["arc", "battle-report"] }
 wows-toolkit-config = { workspace = true }
 
 [dev-dependencies]

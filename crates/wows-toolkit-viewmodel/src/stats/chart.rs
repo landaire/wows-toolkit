@@ -124,9 +124,7 @@ pub struct SeriesPoint {
 pub fn line_series(games: &[&PerGameStat], stat: ChartableStat) -> Vec<SeriesPoint> {
     games
         .iter()
-        .filter_map(|game| {
-            stat.of_game(game).map(|value| SeriesPoint { label: game.game_time.clone(), value })
-        })
+        .filter_map(|game| stat.of_game(game).map(|value| SeriesPoint { label: game.game_time.clone(), value }))
         .collect()
 }
 
@@ -265,7 +263,8 @@ mod tests {
 
     #[test]
     fn a_rolling_window_of_one_or_wider_than_the_series_changes_nothing_structural() {
-        let points = vec![SeriesPoint { label: "t1".into(), value: 4.0 }, SeriesPoint { label: "t2".into(), value: 8.0 }];
+        let points =
+            vec![SeriesPoint { label: "t1".into(), value: 4.0 }, SeriesPoint { label: "t2".into(), value: 8.0 }];
 
         assert_eq!(rolling_average(&points, 1), points);
         assert_eq!(rolling_average(&points, 0), points, "a zero window is treated as one");
