@@ -10219,6 +10219,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "wows-replay-insights",
  "wows-toolkit-config",
  "wows_replays",
  "wowsunpack",

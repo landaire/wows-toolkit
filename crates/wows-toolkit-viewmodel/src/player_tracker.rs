@@ -24,14 +24,8 @@ pub enum TimePeriod {
 }
 
 impl TimePeriod {
-    pub const ALL: [TimePeriod; 6] = [
-        Self::LastHour,
-        Self::LastSixHours,
-        Self::LastDay,
-        Self::LastWeek,
-        Self::LastMonth,
-        Self::AllTime,
-    ];
+    pub const ALL: [TimePeriod; 6] =
+        [Self::LastHour, Self::LastSixHours, Self::LastDay, Self::LastWeek, Self::LastMonth, Self::AllTime];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -159,8 +153,7 @@ pub fn matches_filter(player: &PlayerFacet, needle: &str) -> bool {
 /// Ties break on the account id so the order is stable between refreshes
 /// rather than reshuffling players with the same count.
 pub fn visible_players(players: &[PlayerFacet], needle: &str, sort: Sort) -> Vec<PlayerFacet> {
-    let mut rows: Vec<PlayerFacet> =
-        players.iter().filter(|player| matches_filter(player, needle)).cloned().collect();
+    let mut rows: Vec<PlayerFacet> = players.iter().filter(|player| matches_filter(player, needle)).cloned().collect();
 
     rows.sort_by(|a, b| {
         let ordering = match sort.column {
@@ -187,11 +180,7 @@ mod tests {
     }
 
     fn sample() -> Vec<PlayerFacet> {
-        vec![
-            player(1, "Zeta", "ALPHA", 2),
-            player(2, "alpha", "ZULU", 9),
-            player(3, "Mike", "", 9),
-        ]
+        vec![player(1, "Zeta", "ALPHA", 2), player(2, "alpha", "ZULU", 9), player(3, "Mike", "", 9)]
     }
 
     #[test]
@@ -204,8 +193,7 @@ mod tests {
     #[test]
     fn each_period_reaches_further_back_than_the_one_before_it() {
         let now = Timestamp::now();
-        let bounded: Vec<Timestamp> =
-            TimePeriod::ALL.iter().filter_map(|period| period.earliest(now)).collect();
+        let bounded: Vec<Timestamp> = TimePeriod::ALL.iter().filter_map(|period| period.earliest(now)).collect();
 
         assert_eq!(bounded.len(), 5, "every period but all-time is bounded");
         for pair in bounded.windows(2) {
@@ -239,8 +227,7 @@ mod tests {
     #[test]
     fn ties_break_on_the_account_so_the_order_does_not_reshuffle() {
         let rows = visible_players(&sample(), "", Sort::default());
-        let tied: Vec<i64> =
-            rows.iter().filter(|row| row.match_count == 9).map(|row| row.account_id.raw()).collect();
+        let tied: Vec<i64> = rows.iter().filter(|row| row.match_count == 9).map(|row| row.account_id.raw()).collect();
         assert_eq!(tied, vec![2, 3], "the two nine-encounter players keep account order");
     }
 
@@ -349,10 +336,8 @@ pub fn clan_rows(players: &[PlayerFacet], needle: &str, sort: ClanSort) -> Vec<C
     }
 
     let needle = needle.to_lowercase();
-    let mut rows: Vec<ClanRow> = by_clan
-        .into_values()
-        .filter(|row| needle.is_empty() || row.clan.to_lowercase().contains(&needle))
-        .collect();
+    let mut rows: Vec<ClanRow> =
+        by_clan.into_values().filter(|row| needle.is_empty() || row.clan.to_lowercase().contains(&needle)).collect();
 
     rows.sort_by(|a, b| {
         let ordering = match sort.column {

@@ -3,8 +3,12 @@
 //! The rows and the filter settings are the same ones the egui app writes, so
 //! the two apps show the same session without a migration between them.
 
+use std::sync::Arc;
+
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::queries;
+use wows_toolkit_viewmodel::personal_rating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::GameLimit;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -12,12 +16,16 @@ use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::setting_keys;
 
 /// Everything the Stats tab needs at startup.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SessionData {
     /// In `sort_key` order, oldest first, which is how the recency limit
     /// expects them.
     pub games: Vec<PerGameStat>,
     pub filters: StatsFilters,
+    /// The expected-values table personal rating is computed against.
+    /// Absent until the egui app has downloaded it; the port reads that same
+    /// cache rather than fetching a second copy.
+    pub personal_rating: Option<Arc<PersonalRatingData>>,
 }
 
 impl SessionData {
@@ -30,7 +38,15 @@ impl SessionData {
             }
         };
 
-        Self { games, filters: load_filters(pool).await }
+        let personal_rating = match personal_rating::load_cached() {
+            Ok(table) => Some(Arc::new(table)),
+            Err(err) => {
+                tracing::info!("stats: personal rating is unavailable: {err}");
+                None
+            }
+        };
+
+        Self { games, filters: load_filters(pool).await, personal_rating }
     }
 }
 

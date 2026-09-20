@@ -16,12 +16,17 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use std::sync::Arc;
+
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
 use wows_toolkit_viewmodel::stats::SessionSummary;
 use wows_toolkit_viewmodel::stats::aggregate_achievements;
 use wows_toolkit_viewmodel::stats::per_ship_performance;
+use wows_toolkit_viewmodel::stats::session_personal_rating;
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
@@ -34,10 +39,13 @@ struct Computed {
     summary: SessionSummary,
     ships: Vec<(String, PerformanceInfo)>,
     achievements: Vec<SerializableAchievement>,
+    /// Absent without an expected-values table, or when no game rated.
+    personal_rating: Option<PersonalRatingResult>,
 }
 
 pub struct StatsOverviewPanel {
     computed: Computed,
+    personal_rating: Option<Arc<PersonalRatingData>>,
     list_state: ListState,
     scroll: ScrollHandle,
     focus_handle: FocusHandle,
@@ -49,6 +57,7 @@ impl StatsOverviewPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             computed: Computed::default(),
+            personal_rating: None,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
@@ -57,11 +66,17 @@ impl StatsOverviewPanel {
 
     /// Adopts the games the filter bar has already selected. Filtering happens
     /// once in the tab rather than per panel, so every panel sees the same set.
+    pub fn set_personal_rating(&mut self, table: Option<Arc<PersonalRatingData>>, cx: &mut Context<Self>) {
+        self.personal_rating = table;
+        cx.notify();
+    }
+
     pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
         self.computed = Computed {
             summary: SessionSummary::from_games(games),
             ships: per_ship_performance(games),
             achievements: aggregate_achievements(games),
+            personal_rating: session_personal_rating(games, self.personal_rating.as_deref()),
         };
         self.list_state.reset(self.computed.ships.len());
         cx.notify();
@@ -121,6 +136,13 @@ impl Render for StatsOverviewPanel {
             .border_b_1()
             .border_color(border)
             .child(div().text_sm().font_weight(FontWeight::BOLD).child(record))
+            .when_some(self.computed.personal_rating.as_ref(), |this, rating| {
+                this.child(div().text_sm().opacity(0.8).child(format!(
+                    "PR {:.0} ({})",
+                    rating.pr,
+                    rating.category.name()
+                )))
+            })
             .child(div().text_sm().opacity(0.8).child(format!("{} frags", summary.total_frags)))
             .when_some(summary.best_frags, |this, (_, frags)| {
                 this.child(div().text_sm().opacity(0.8).child(format!("Best frags: {frags}")))

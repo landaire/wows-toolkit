@@ -17,6 +17,9 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use std::sync::Arc;
+
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
@@ -42,6 +45,9 @@ pub struct StatsChartPanel {
     rolling: bool,
     games: Vec<PerGameStat>,
     ships: Vec<(String, PerformanceInfo)>,
+    /// Absent until the expected values are cached, which is what decides
+    /// whether personal rating is offered at all.
+    personal_rating: Option<Arc<PersonalRatingData>>,
     focus_handle: FocusHandle,
 }
 
@@ -56,12 +62,25 @@ impl StatsChartPanel {
             rolling: false,
             games: Vec::new(),
             ships: Vec::new(),
+            personal_rating: None,
             focus_handle: cx.focus_handle(),
         }
     }
 
     /// Adopts the games the filter bar selected. Both shapes are kept so
     /// switching mode does not need the tab to push the data again.
+    pub fn set_personal_rating(&mut self, table: Option<Arc<PersonalRatingData>>, cx: &mut Context<Self>) {
+        self.personal_rating = table;
+        if self.stat.requires_personal_rating() && !self.can_plot_personal_rating() {
+            self.stat = ChartableStat::Damage;
+        }
+        cx.notify();
+    }
+
+    fn can_plot_personal_rating(&self) -> bool {
+        self.personal_rating.is_some()
+    }
+
     pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
         self.ships = per_ship_performance(games);
         self.games = games.iter().map(|game| (*game).clone()).collect();
@@ -70,21 +89,34 @@ impl StatsChartPanel {
 
     /// Statistics this pane can plot.
     ///
-    /// Personal rating needs the expected-values table, which this port does
-    /// not load yet, so it is left out rather than offered and plotted flat.
+    /// Personal rating is offered only once the expected-values table is
+    /// cached; without it there is nothing to rate against, and plotting it
+    /// flat would read as a run of zero ratings.
     fn selectable_stats(&self) -> Vec<ChartableStat> {
         ChartableStat::ALL
             .into_iter()
-            .filter(|stat| !stat.requires_personal_rating())
-            .filter(|stat| self.mode == ChartMode::Bar || stat.is_per_game())
+            .filter(|stat| !stat.requires_personal_rating() || self.can_plot_personal_rating())
+            .filter(|stat| self.mode == ChartMode::Bar || stat.is_per_game() || stat.requires_personal_rating())
             .collect()
     }
 
     fn points(&self) -> Vec<SeriesPoint> {
         match self.mode {
             ChartMode::Line => {
-                let refs: Vec<&PerGameStat> = self.games.iter().collect();
-                let series = line_series(&refs, self.stat);
+                let series = if self.stat.requires_personal_rating() {
+                    // The rating is per game, but computed against a table the
+                    // series builder does not hold.
+                    self.games
+                        .iter()
+                        .filter_map(|game| {
+                            game.personal_rating(self.personal_rating.as_deref())
+                                .map(|value| SeriesPoint { label: game.game_time.clone(), value })
+                        })
+                        .collect()
+                } else {
+                    let refs: Vec<&PerGameStat> = self.games.iter().collect();
+                    line_series(&refs, self.stat)
+                };
                 if self.rolling { rolling_average(&series, ROLLING_WINDOW) } else { series }
             }
             ChartMode::Bar => bar_series(&self.ships, self.stat),
