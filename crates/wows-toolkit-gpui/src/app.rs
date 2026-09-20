@@ -14,12 +14,15 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
+use crate::stats::load::SessionData;
+use crate::stats::view::StatsView;
 use crate::theme;
 use crate::unpacker::view::UnpackerView;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
     ReplayInspector,
+    Stats,
     ArmorViewer,
     Unpacker,
     Settings,
@@ -28,13 +31,15 @@ pub enum AppTab {
 impl AppTab {
     /// Left-to-right order, following the egui app's own dock order
     /// (`app.rs`'s `DockState::new`): replays first, settings last. The tabs
-    /// that order interleaves -- Stats, Player Tracker, Search -- are not
-    /// ported yet, so this is that sequence with the gaps closed.
-    pub const ALL: [AppTab; 4] = [AppTab::ReplayInspector, AppTab::ArmorViewer, AppTab::Unpacker, AppTab::Settings];
+    /// tabs that order also carries -- Player Tracker and Search -- are not
+    /// ported yet, so this is that sequence with those gaps closed.
+    pub const ALL: [AppTab; 5] =
+        [AppTab::ReplayInspector, AppTab::Stats, AppTab::ArmorViewer, AppTab::Unpacker, AppTab::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
             AppTab::ReplayInspector => "Replay Inspector",
+            AppTab::Stats => "Stats",
             AppTab::ArmorViewer => "Armor Viewer",
             AppTab::Unpacker => "Unpacker",
             AppTab::Settings => "Settings",
@@ -86,6 +91,8 @@ pub struct App {
     /// queue. Runs its own VFS load per build, independent of the replay
     /// inspector's game-data cache, since it needs only the package tree.
     unpacker: Entity<UnpackerView>,
+    /// The Stats tab: session filters over the per-ship aggregate.
+    stats: Entity<StatsView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -96,6 +103,7 @@ impl App {
         let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
         let armor_pane = cx.new(|cx| ArmorViewerPane::new(window, cx));
         let unpacker = cx.new(|cx| UnpackerView::new(window, cx));
+        let stats = cx.new(|cx| StatsView::new(window, cx));
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
 
@@ -119,6 +127,7 @@ impl App {
             armor_pane,
             armor_game_data_requested: false,
             unpacker,
+            stats,
             _subscriptions: vec![subscription],
         }
     }
@@ -161,6 +170,12 @@ impl App {
     #[cfg(test)]
     pub(crate) fn replay_inspector(&self) -> &Entity<ReplayInspectorView> {
         &self.replay_inspector
+    }
+
+    /// Adopts the session statistics read from the config database.
+    pub fn apply_session_stats(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
+        self.stats.update(cx, |stats, cx| stats.apply_session(data, window, cx));
+        cx.notify();
     }
 
     pub fn apply_settings(&mut self, settings: GpuiSettings, window: &mut Window, cx: &mut Context<Self>) {
@@ -361,6 +376,7 @@ impl Render for App {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
+            AppTab::Stats => self.stats.clone().into_any_element(),
             AppTab::Unpacker => self.unpacker.clone().into_any_element(),
         };
 

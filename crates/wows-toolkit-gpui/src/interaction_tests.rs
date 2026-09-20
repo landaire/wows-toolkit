@@ -50,6 +50,10 @@ const CANCEL: &str = "unpacker-cancel";
 const CLEAR_QUEUE: &str = "unpacker-clear-queue";
 const PKG_FILTER: &str = "unpacker-pkg-filter";
 
+/// Stats tab filter bar (`stats::view`).
+const STATS_LIMIT_ENABLED: &str = "stats-limit-enabled";
+const STATS_LIMIT_COUNT: &str = "stats-limit-count";
+
 /// Opens the real root view in a headless window sized like the app's own
 /// default, with the component layer initialized.
 fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
@@ -379,6 +383,59 @@ fn the_unpacker_browsers_say_there_is_no_game_data_when_the_directory_is_unset(c
         show_tab(window, AppTab::Unpacker, cx);
         // With no VFS the panes show a status line instead of a filter box.
         assert!(window.try_find(PKG_FILTER).is_none(), "the filter appears only once a VFS is loaded");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_stats_tab_reports_an_empty_session_when_no_games_are_loaded(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+        // Nothing loaded, so the recency limit is off and its count is refused.
+        assert_eq!(window.find(STATS_LIMIT_ENABLED).checked(), Some(false));
+        assert!(window.try_find(STATS_LIMIT_COUNT).is_some(), "the count box is present but disabled");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_stats_division_filter_is_single_select(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+
+        let all = ("stats-division", 0usize);
+        let solo = ("stats-division", 1usize);
+        let division = ("stats-division", 2usize);
+
+        assert_eq!(window.find(all).selected(), Some(true), "All is the default division filter");
+
+        window.click(solo, cx);
+        assert_eq!(window.find(solo).selected(), Some(true));
+        assert_eq!(window.find(all).selected(), Some(false), "the filter is single-select");
+
+        window.click(division, cx);
+        assert_eq!(window.find(division).selected(), Some(true));
+        assert_eq!(window.find(solo).selected(), Some(false));
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_recent_games_limit_can_be_switched_on_and_off(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+
+        window.click(STATS_LIMIT_ENABLED, cx);
+        assert_eq!(window.find(STATS_LIMIT_ENABLED).checked(), Some(true));
+
+        window.click(STATS_LIMIT_ENABLED, cx);
+        assert_eq!(window.find(STATS_LIMIT_ENABLED).checked(), Some(false), "the limit toggles back off");
     })
     .expect("the test window stays open");
 }
