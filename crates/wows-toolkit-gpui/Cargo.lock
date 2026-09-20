@@ -10185,6 +10185,7 @@ name = "wows-toolkit-viewmodel"
 version = "0.1.0"
 dependencies = [
  "glob",
+ "jiff",
  "regex",
  "serde",
  "serde_json",

@@ -16,6 +16,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use crate::armor_viewer::ArmorViewerPane;
+use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
@@ -33,6 +34,7 @@ use wows_toolkit_viewmodel::settings::keys;
 pub enum AppTab {
     ReplayInspector,
     Stats,
+    PlayerTracker,
     ArmorViewer,
     Unpacker,
     Settings,
@@ -43,13 +45,20 @@ impl AppTab {
     /// (`app.rs`'s `DockState::new`): replays first, settings last. The tabs
     /// tabs that order also carries -- Player Tracker and Search -- are not
     /// ported yet, so this is that sequence with those gaps closed.
-    pub const ALL: [AppTab; 5] =
-        [AppTab::ReplayInspector, AppTab::Stats, AppTab::ArmorViewer, AppTab::Unpacker, AppTab::Settings];
+    pub const ALL: [AppTab; 6] = [
+        AppTab::ReplayInspector,
+        AppTab::Stats,
+        AppTab::PlayerTracker,
+        AppTab::ArmorViewer,
+        AppTab::Unpacker,
+        AppTab::Settings,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             AppTab::ReplayInspector => "Replay Inspector",
             AppTab::Stats => "Stats",
+            AppTab::PlayerTracker => "Player Tracker",
             AppTab::ArmorViewer => "Armor Viewer",
             AppTab::Unpacker => "Unpacker",
             AppTab::Settings => "Settings",
@@ -103,6 +112,8 @@ pub struct App {
     unpacker: Entity<UnpackerView>,
     /// The Stats tab: session filters over the per-ship aggregate.
     stats: Entity<StatsView>,
+    /// The Player Tracker tab: everyone met, from the replay index.
+    player_tracker: Entity<PlayerTrackerView>,
     /// Settings tab text fields. Held so an edit can be read back and the
     /// saved value can be shown when the tab first renders.
     wows_dir_input: Entity<InputState>,
@@ -119,6 +130,7 @@ impl App {
         let armor_pane = cx.new(|cx| ArmorViewerPane::new(window, cx));
         let unpacker = cx.new(|cx| UnpackerView::new(window, cx));
         let stats = cx.new(|cx| StatsView::new(window, cx));
+        let player_tracker = cx.new(|cx| PlayerTrackerView::new(window, cx));
         let wows_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("World of Warships directory"));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
         let focus_handle = cx.focus_handle();
@@ -147,6 +159,7 @@ impl App {
             armor_game_data_requested: false,
             unpacker,
             stats,
+            player_tracker,
             wows_dir_input,
             proxy_input,
             settings_scroll: ScrollHandle::new(),
@@ -192,6 +205,12 @@ impl App {
     #[cfg(test)]
     pub(crate) fn replay_inspector(&self) -> &Entity<ReplayInspectorView> {
         &self.replay_inspector
+    }
+
+    /// Starts the Player Tracker's first index query, once the config
+    /// database is open.
+    pub fn start_player_tracker(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {
+        self.player_tracker.update(cx, |tracker, cx| tracker.refresh(pool, cx));
     }
 
     /// Adopts the session statistics read from the config database.
@@ -573,6 +592,7 @@ impl Render for App {
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
             AppTab::Stats => self.stats.clone().into_any_element(),
+            AppTab::PlayerTracker => self.player_tracker.clone().into_any_element(),
             AppTab::Unpacker => self.unpacker.clone().into_any_element(),
         };
 

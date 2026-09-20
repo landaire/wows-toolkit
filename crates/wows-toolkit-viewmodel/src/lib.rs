@@ -5,6 +5,7 @@
 //! about what to list, filter, sort or queue has one implementation rather
 //! than one per front end that can drift apart.
 
+pub mod player_tracker;
 pub mod settings;
 pub mod stats;
 pub mod unpacker;

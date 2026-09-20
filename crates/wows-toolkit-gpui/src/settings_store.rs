@@ -21,6 +21,14 @@ pub fn init(pool: SqlitePool, cx: &mut App) {
     cx.set_global(SettingsPool(pool));
 }
 
+/// The open config pool, for the tabs that query it directly.
+///
+/// `None` before the startup read has installed it, which is a real state:
+/// the tabs render an appropriate status rather than assuming a database.
+pub fn pool(cx: &App) -> Option<SqlitePool> {
+    cx.try_global::<SettingsPool>().map(|held| held.0.clone())
+}
+
 /// Persists one setting.
 ///
 /// Fire and forget: the control has already moved, and a failed write is

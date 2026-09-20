@@ -828,6 +828,12 @@ pub async fn matches_with_ship(
 
 /// Distinct non-bot players across the index, most-encountered first.
 /// `filter.source_ids` scopes to groups; other filter fields are ignored here.
+/// Distinct players across the index, with how often each was met.
+///
+/// Honours `source_ids` and the `date_from`/`date_to` range; the remaining
+/// filter fields are ignored here. The date range matters: without one this
+/// walks every indexed battle, which on a large index is seconds of work and
+/// hundreds of thousands of rows.
 pub async fn distinct_players(pool: &SqlitePool, filter: &MatchFilter) -> Result<Vec<PlayerFacet>, IndexError> {
     // latest name = name from the vehicle row in the most recent match for that account.
     let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
@@ -846,6 +852,16 @@ pub async fn distinct_players(pool: &SqlitePool, filter: &MatchFilter) -> Result
             sep.push_bind(s.0);
         }
         qb.push("))");
+    }
+    if filter.date_from.is_some() || filter.date_to.is_some() {
+        qb.push(" AND v.arena_id IN (SELECT arena_id FROM indexed_match WHERE 1=1");
+        if let Some(from) = filter.date_from {
+            qb.push(" AND timestamp >= ").push_bind(from.as_second());
+        }
+        if let Some(to) = filter.date_to {
+            qb.push(" AND timestamp <= ").push_bind(to.as_second());
+        }
+        qb.push(")");
     }
     qb.push(" GROUP BY v.account_id ORDER BY match_count DESC");
 
