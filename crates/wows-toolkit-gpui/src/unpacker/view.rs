@@ -27,12 +27,14 @@ use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use wowsunpack::vfs::VfsPath;
 
 use super::browser::BrowserEvent;
 use super::browser::BrowserPanel;
 use super::browser::BrowserSource;
 use super::search_panel::SearchPanel;
 use super::search_panel::SearchPanelEvent;
+use super::viewer_panel::FileViewerPanel;
 use wows_toolkit_viewmodel::unpacker::assets_bin;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractOutcome;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractProgress;
@@ -45,6 +47,7 @@ use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
 use wows_toolkit_viewmodel::unpacker::search::compile_query;
 use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
 use wows_toolkit_viewmodel::unpacker::search::scan;
+use wows_toolkit_viewmodel::unpacker::viewer;
 
 /// One message from a running scan.
 enum SearchUpdate {
@@ -294,10 +297,7 @@ impl UnpackerView {
             BrowserEvent::Search { source, query, path_filter, files } => {
                 self.open_search(*source, query.clone(), path_filter.clone(), files.clone(), _window, cx);
             }
-            BrowserEvent::View { path, kind } => {
-                // The in-app file viewers are a separate piece of the tab.
-                tracing::debug!("unpacker: view requested for {} ({kind:?})", path.as_str());
-            }
+            BrowserEvent::View { path } => self.open_viewer(path.clone(), _window, cx),
         }
     }
 
@@ -380,10 +380,31 @@ impl UnpackerView {
         _panel: &Entity<SearchPanel>,
         event: &SearchPanelEvent,
         _window: &mut Window,
-        _cx: &mut Context<Self>,
+        cx: &mut Context<Self>,
     ) {
-        let SearchPanelEvent::View { path, kind } = event;
-        tracing::debug!("unpacker: view requested for {} ({kind:?})", path.as_str());
+        let SearchPanelEvent::View { path } = event;
+        self.open_viewer(path.clone(), _window, cx);
+    }
+
+    /// Opens a file in its viewer, or logs why it has none.
+    ///
+    /// Reading happens on the UI thread: the viewable files are the small text
+    /// and image ones, and the egui viewer reads them inline too.
+    fn open_viewer(&mut self, path: VfsPath, window: &mut Window, cx: &mut Context<Self>) {
+        let content = match viewer::load(&path) {
+            Ok(content) => content,
+            Err(err) => {
+                tracing::warn!("unpacker: {err}");
+                return;
+            }
+        };
+
+        let title = SharedString::from(path.as_str().trim_start_matches('/').to_string());
+        let panel = cx.new(|cx| FileViewerPanel::new(title, content, cx));
+        self.dock_area.update(cx, |dock, cx| {
+            dock.add_panel(panel, DockPlacement::Center, None, window, cx);
+        });
+        cx.notify();
     }
 
     fn clear_queue(&mut self, cx: &mut Context<Self>) {

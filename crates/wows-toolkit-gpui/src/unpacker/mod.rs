@@ -7,3 +7,4 @@
 pub mod browser;
 pub mod search_panel;
 pub mod view;
+pub mod viewer_panel;
