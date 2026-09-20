@@ -6,3 +6,4 @@ pub mod extract;
 pub mod listing;
 pub mod queue;
 pub mod search;
+pub mod viewer;

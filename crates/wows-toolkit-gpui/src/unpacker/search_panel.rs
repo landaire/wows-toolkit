@@ -22,7 +22,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use super::browser::BrowserSource;
-use wows_toolkit_viewmodel::unpacker::listing::FileKind;
 use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
 use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
 
@@ -30,7 +29,7 @@ use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
 #[derive(Clone, Debug)]
 pub enum SearchPanelEvent {
     /// Open the file a hit points at.
-    View { path: wowsunpack::vfs::VfsPath, kind: FileKind },
+    View { path: wowsunpack::vfs::VfsPath },
 }
 
 impl EventEmitter<SearchPanelEvent> for SearchPanel {}
@@ -161,7 +160,6 @@ impl Render for SearchPanel {
             };
             let entity = entity.clone();
             let path = hit.vfs_path.clone();
-            let kind = FileKind::of(&hit.path);
             v_flex()
                 .id(ix)
                 .w_full()
@@ -176,7 +174,7 @@ impl Render for SearchPanel {
                         return;
                     }
                     entity.update(cx, |_this, cx| {
-                        cx.emit(SearchPanelEvent::View { path: path.clone(), kind });
+                        cx.emit(SearchPanelEvent::View { path: path.clone() });
                     });
                 })
                 .into_any_element()

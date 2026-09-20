@@ -36,7 +36,6 @@ use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use wowsunpack::vfs::VfsPath;
 
-use wows_toolkit_viewmodel::unpacker::listing::FileKind;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry;
@@ -99,8 +98,8 @@ pub enum BrowserEvent {
     Extract(Vec<ListingEntry>),
     /// Run a content search over this pane's files.
     Search { source: BrowserSource, query: String, path_filter: String, files: Arc<FileList> },
-    /// Open this file in the in-app viewer that suits its kind.
-    View { path: VfsPath, kind: FileKind },
+    /// Open this file in the viewer its name calls for.
+    View { path: VfsPath },
 }
 
 impl EventEmitter<BrowserEvent> for BrowserPanel {}
@@ -409,7 +408,6 @@ impl Render for BrowserPanel {
                 let entity = listing_entity.clone();
                 let path = row.path.clone();
                 let is_dir = row.is_dir;
-                let kind = row.kind();
                 let size = row.size.map(format_size).unwrap_or_default();
                 h_flex()
                     .id(ix)
@@ -433,7 +431,7 @@ impl Render for BrowserPanel {
                                 // absolute path the tree selects by.
                                 this.select_dir(path.as_str().to_string(), cx);
                             } else {
-                                cx.emit(BrowserEvent::View { path: path.clone(), kind });
+                                cx.emit(BrowserEvent::View { path: path.clone() });
                             }
                         });
                     })
