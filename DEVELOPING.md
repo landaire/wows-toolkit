@@ -189,15 +189,25 @@ Expect the prelude to have renamed things. Rebuild everything on every platform 
 
 ### Troubleshooting
 
-**`Access is denied (os error 5)` on Windows, reported as `Binary being executed, please close the process first`.** Antivirus holding a lock on a file Buck just wrote. It hits a different file each time, usually in the first second of a cold build, and the file is unlocked again moments later. Nothing is executing. Exclude the build output, from an elevated shell:
+**`Access is denied (os error 5)` on Windows, reported as `Binary being executed, please close the process first`.** Antivirus software interfering with a file Buck has newly written. A different file is affected on each run, usually within the first second of a cold build and often several files in one run, and each is an ordinary writable file again shortly afterward. No process is executing the file: the message is a fixed string Buck attaches to any permission error, and the file named is normally a `.json` or `.bat`. Exclude the build output directory, from an elevated shell:
 
 ```powershell
 Add-MpPreference -ExclusionPath 'G:\dev\wows-toolkit\buck-out'
 ```
 
-Retrying also works, since everything already built is cached, but a cold build will keep tripping it.
+A scanner rather than an ordinary lock is indicated: `DeleteFileW` reports a file that another process holds open as `os error 32`, and deletes a memory-mapped file without error. A filesystem filter driver is not subject to either rule and can reject the deletion directly.
+
+Repeating the build also succeeds, because everything already built is cached, but a cold build continues to encounter the error.
 
 **`Missing [hermetic_tools] <name>`** or **`Missing [nix_toolchain] root`.** `.buckconfig.local` is absent or stale. Re-run the bootstrap.
+
+**`NASM build failed`, or `Unable to run <path>\nasm.exe: The system cannot find the file specified`, from rav1e's build script.** The `[hermetic_tools] nasm` entry names a file that is absent, usually because it referred to a location under `%TEMP%` that Windows has since deleted. Re-running the bootstrap corrects it, or on Windows repair that single entry:
+
+```powershell
+.\toolchains\windows\install-nasm.ps1
+```
+
+That installs the NASM pinned by the manifest to `.tooling\nasm`, which neither `buck2 clean` nor temporary-file cleanup removes, and rewrites the entry accordingly. It requires a `.buckconfig.local` produced by the bootstrap and terminates with an error without one. Specify `-Force` to reinstall.
 
 **`buck2 daemon constraint mismatch`.** The Buck2 binary changed. It restarts itself; no action needed.
 
