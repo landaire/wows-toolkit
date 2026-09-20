@@ -10,19 +10,26 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::IconName;
-use gpui_kit::component::Selectable;
+use gpui_kit::component::IndexPath;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
+use gpui_kit::component::searchable_list::SearchableListItem;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::select::SelectEvent;
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 
@@ -38,6 +45,31 @@ use super::panel::ReplayPanel;
 const BROWSER_WIDTH: Pixels = px(280.);
 const BROWSER_MIN_WIDTH: Pixels = px(180.);
 const BROWSER_MAX_WIDTH: Pixels = px(520.);
+
+/// One entry in the grouping combo box. A local newtype because both
+/// `ReplayGrouping` and `SearchableListItem` are foreign, and because
+/// carrying the enum keeps the confirm handler off a string round trip.
+#[derive(Clone)]
+struct GroupingItem(ReplayGrouping);
+
+impl SearchableListItem for GroupingItem {
+    type Value = ReplayGrouping;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(self.0.label())
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.0
+    }
+}
+
+/// Combo-box order, matching the egui app's `selectable_value` order.
+const GROUPINGS: [ReplayGrouping; 3] = [ReplayGrouping::Date, ReplayGrouping::Ship, ReplayGrouping::None];
+
+fn grouping_index(grouping: ReplayGrouping) -> usize {
+    GROUPINGS.iter().position(|g| *g == grouping).expect("GROUPINGS lists every ReplayGrouping variant")
+}
 
 pub struct ReplayInspectorView {
     browser: Entity<ReplayBrowser>,
@@ -89,6 +121,10 @@ pub struct ReplayInspectorView {
     /// has no replays-directory watcher yet, so toggling it does not
     /// currently start or stop an auto-load; wiring that up is a follow-up.
     auto_load_latest_replay: bool,
+    /// Backing state for the header's grouping combo box. The live grouping
+    /// lives on `browser`; this mirrors it so the closed combo shows the
+    /// current value.
+    grouping_select: Entity<SelectState<SearchableVec<GroupingItem>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -97,6 +133,20 @@ impl ReplayInspectorView {
         let browser = cx.new(ReplayBrowser::new);
         let dock_area = cx.new(|cx| DockArea::new("replay-inspector-dock", None, window, cx));
         let subscription = cx.subscribe_in(&browser, window, Self::on_browser_event);
+
+        let items = SearchableVec::new(GROUPINGS.map(GroupingItem).to_vec());
+        let grouping_select = cx.new(|cx| {
+            SelectState::new(items, Some(IndexPath::new(grouping_index(ReplayGrouping::default()))), window, cx)
+                .searchable(false)
+        });
+        // `Confirm(None)` is the cleared-selection case, which this combo
+        // cannot produce: it is not `.cleanable()` and always holds a value.
+        let grouping_subscription = cx.subscribe_in(&grouping_select, window, |this, _state, event, window, cx| {
+            let SelectEvent::Confirm(Some(grouping)) = event else {
+                return;
+            };
+            this.set_grouping(*grouping, window, cx);
+        });
 
         Self {
             browser,
@@ -108,7 +158,8 @@ impl ReplayInspectorView {
             debug_mode: false,
             replay_settings: ReplaySettings::default(),
             auto_load_latest_replay: true,
-            _subscriptions: vec![subscription],
+            grouping_select,
+            _subscriptions: vec![subscription, grouping_subscription],
         }
     }
 
@@ -120,21 +171,22 @@ impl ReplayInspectorView {
     /// startup preload of the current installed build through that same cache
     /// -- so a later `spawn_parse` for a replay on that build (see
     /// `panel.rs`) finds the slot already warm instead of reloading it.
-    /// Called from `App::apply_settings`, which itself runs without a
-    /// `Window` (see `main.rs`), so this cannot take one either.
+    /// Called from `App::apply_settings`, which `main.rs` runs inside a
+    /// `window.update`, so a `Window` is available for the grouping combo.
     pub fn apply_settings(
         &mut self,
         wows_dir: String,
         debug_mode: bool,
         replay_settings: ReplaySettings,
         auto_load_latest_replay: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         self.debug_mode = debug_mode;
         self.auto_load_latest_replay = auto_load_latest_replay;
         let grouping = replay_settings.grouping;
         self.replay_settings = replay_settings;
-        self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+        self.set_grouping(grouping, window, cx);
 
         if wows_dir.is_empty() {
             self.game_data = None;
@@ -195,7 +247,7 @@ impl ReplayInspectorView {
     /// before creating a new one.
     ///
     /// This does not re-focus the existing tab on a repeat open --
-    /// gpui_kit-component's `TabPanel::add_panel` only dedups new-panel adds by
+    /// gpui-component's `TabPanel::add_panel` only dedups new-panel adds by
     /// entity id (so re-adding the same entity is already a no-op) and
     /// exposes no public API to change which tab is active from outside the
     /// crate (`TabPanel::set_active_ix` is private). Skipping the duplicate
@@ -264,11 +316,21 @@ impl ReplayInspectorView {
         cx.notify();
     }
 
+    /// The browser's current grouping strategy. The browser is the single
+    /// source of truth for it; the header combo only mirrors it.
+    pub(crate) fn grouping(&self, cx: &App) -> ReplayGrouping {
+        self.browser.read(cx).grouping()
+    }
+
     /// Switches the browser's grouping strategy. The header toolbar owns this
     /// control (matching the egui app's header placement); `browser` itself
     /// just applies it and rebuilds its tree (`ReplayBrowser::set_grouping`).
-    fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
+    ///
+    /// The only writer, so the combo mirror cannot drift from the browser: a
+    /// caller that reaches the browser directly would desync the two.
+    fn set_grouping(&mut self, grouping: ReplayGrouping, window: &mut Window, cx: &mut Context<Self>) {
         self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
+        self.grouping_select.update(cx, |state, cx| state.set_selected_value(&grouping, window, cx));
         cx.notify();
     }
 
@@ -290,28 +352,10 @@ impl ReplayInspectorView {
     }
 }
 
-/// One grouping-selector button in the header toolbar: `.selected()` while
-/// `grouping` is the browser's current grouping, clicking applies it via
-/// `ReplayInspectorView::set_grouping`. A free function (rather than inline in
-/// `render`) since it is built three times, once per `ReplayGrouping` variant.
-fn grouping_button(
-    entity: Entity<ReplayInspectorView>,
-    grouping: ReplayGrouping,
-    current: ReplayGrouping,
-) -> impl IntoElement {
-    Button::new(("replay-header-grouping", grouping as usize))
-        .label(grouping.label())
-        .compact()
-        .selected(grouping == current)
-        .on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
-            entity.update(cx, |view, cx| view.set_grouping(grouping, cx));
-        })
-}
-
 /// One column-filter checkbox in the header toolbar: `checked` reflects
 /// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
 /// and recomputes the visible columns. A free function for the same reason as
-/// `grouping_button` -- built three times, once per optional column the egui
+/// `column_filters_popover` -- built three times, once per optional column the egui
 /// app's `build_replay_header` (`ui/replay_parser/mod.rs:3697-3711`) exposes a
 /// toggle for and that has a live column in this port: Raw XP, Observed
 /// Damage, Heals. Received Damage and Distance Traveled are not exposed here
@@ -328,6 +372,45 @@ fn column_filter_checkbox(
         let checked = *checked;
         entity.update(cx, |view, cx| view.set_column_filter(move |settings| apply(settings, checked), cx));
     })
+}
+
+/// The column-filter dropdown, matching the egui app's "Column Filters"
+/// `ComboBox` (`ui/replay_parser/mod.rs:4609`) rather than showing the
+/// checkboxes inline. `settings` is a snapshot: the `.content()` closure
+/// re-runs on every open-render, so it always reflects the latest state.
+///
+/// The egui popup carries a fourth toggle, Entity ID, which neither app has a
+/// column for; it is left out here rather than drawn as a control that does
+/// nothing.
+fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplaySettings) -> impl IntoElement {
+    Popover::new("replay-header-column-filters")
+        .trigger(Button::new("replay-header-column-filters-trigger").label("Column Filters").compact())
+        .content(move |_state, _window, _cx| {
+            v_flex()
+                .gap_1()
+                .p_1()
+                .child(column_filter_checkbox(
+                    entity.clone(),
+                    "replay-header-filter-raw-xp",
+                    "Raw XP",
+                    settings.show_raw_xp,
+                    |settings, value| settings.show_raw_xp = value,
+                ))
+                .child(column_filter_checkbox(
+                    entity.clone(),
+                    "replay-header-filter-observed-damage",
+                    "Observed Damage",
+                    settings.show_observed_damage,
+                    |settings, value| settings.show_observed_damage = value,
+                ))
+                .child(column_filter_checkbox(
+                    entity.clone(),
+                    "replay-header-filter-heals",
+                    "Heals",
+                    settings.show_heals,
+                    |settings, value| settings.show_heals = value,
+                ))
+        })
 }
 
 impl Render for ReplayInspectorView {
@@ -354,7 +437,6 @@ impl Render for ReplayInspectorView {
         };
 
         let entity = cx.entity();
-        let grouping = self.browser.read(cx).grouping();
 
         // Header toolbar: mirrors the egui app's `build_replay_header`
         // (`ui/replay_parser/mod.rs:3657`) -- manual file open, autoload
@@ -387,41 +469,14 @@ impl Render for ReplayInspectorView {
                     ),
             )
             .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(div().text_xs().opacity(0.6).child("Group:"))
-                    .child(grouping_button(entity.clone(), ReplayGrouping::Date, grouping))
-                    .child(grouping_button(entity.clone(), ReplayGrouping::Ship, grouping))
-                    .child(grouping_button(entity.clone(), ReplayGrouping::None, grouping)),
+                Select::new(&self.grouping_select)
+                    .id("replay-header-grouping")
+                    .title_prefix("Group: ")
+                    .accessibility_label("Replay grouping")
+                    .small()
+                    .w(px(160.)),
             )
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(div().text_xs().opacity(0.6).child("Columns:"))
-                    .child(column_filter_checkbox(
-                        entity.clone(),
-                        "replay-header-filter-raw-xp",
-                        "Raw XP",
-                        self.replay_settings.show_raw_xp,
-                        |settings, value| settings.show_raw_xp = value,
-                    ))
-                    .child(column_filter_checkbox(
-                        entity.clone(),
-                        "replay-header-filter-observed-damage",
-                        "Observed Damage",
-                        self.replay_settings.show_observed_damage,
-                        |settings, value| settings.show_observed_damage = value,
-                    ))
-                    .child(column_filter_checkbox(
-                        entity.clone(),
-                        "replay-header-filter-heals",
-                        "Heals",
-                        self.replay_settings.show_heals,
-                        |settings, value| settings.show_heals = value,
-                    )),
-            );
+            .child(column_filters_popover(entity.clone(), self.replay_settings.clone()));
 
         v_flex()
             .size_full()

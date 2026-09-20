@@ -20,12 +20,12 @@
 //! currently returns `None` and falls back to a text label, matching the
 //! egui app's own icon-texture-missing fallback branches.
 
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
+use gpui_kit::*;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;

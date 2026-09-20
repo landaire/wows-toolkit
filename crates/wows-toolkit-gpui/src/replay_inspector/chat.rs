@@ -8,8 +8,6 @@
 //! toggle and only constructs a `ChatPanel` when the replay's chat log is
 //! non-empty, matching the egui app disabling its chat toggle in that case.
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
@@ -18,6 +16,8 @@ use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 

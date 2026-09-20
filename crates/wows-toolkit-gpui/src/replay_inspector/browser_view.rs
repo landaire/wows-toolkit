@@ -46,8 +46,6 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
@@ -59,6 +57,8 @@ use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
 use gpui_kit::component::tree::tree;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
@@ -184,9 +184,8 @@ impl ReplayBrowser {
         self.open_requested.as_deref()
     }
 
-    /// The currently active grouping strategy, read by `view.rs`'s header
-    /// toolbar (which owns the grouping control -- see `set_grouping`) to
-    /// highlight the selected option.
+    /// The currently active grouping strategy. The browser is the single
+    /// source of truth for it; `view.rs`'s header combo mirrors this.
     pub fn grouping(&self) -> ReplayGrouping {
         self.grouping
     }
@@ -242,10 +241,10 @@ impl ReplayBrowser {
         .detach();
     }
 
-    /// Switches the grouping strategy and rebuilds the tree. Called from the
-    /// header toolbar's grouping buttons (`view.rs`), which own the control
-    /// itself -- matching the egui app's header placement -- and only reach
-    /// in here to apply it.
+    /// Switches the grouping strategy and rebuilds the tree. Called only from
+    /// `ReplayInspectorView::set_grouping`, which owns the header control --
+    /// matching the egui app's header placement -- and reaches in here to
+    /// apply it.
     pub(crate) fn set_grouping(&mut self, grouping: ReplayGrouping, cx: &mut Context<Self>) {
         if self.grouping == grouping {
             return;
@@ -546,7 +545,7 @@ mod tests {
 
     #[test]
     fn resolve_replays_dir_falls_back_to_the_default_when_no_preferences_file_exists() {
-        let dir = std::env::temp_dir().join("wtk-gpui_kit-browser-view-test-no-prefs");
+        let dir = std::env::temp_dir().join("wtk-gpui-browser-view-test-no-prefs");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
 
@@ -557,7 +556,7 @@ mod tests {
 
     #[test]
     fn resolve_replays_dir_prefers_the_versioned_subdir_when_it_exists() {
-        let dir = std::env::temp_dir().join("wtk-gpui_kit-browser-view-test-versioned");
+        let dir = std::env::temp_dir().join("wtk-gpui-browser-view-test-versioned");
         let _ = std::fs::remove_dir_all(&dir);
         let versioned = dir.join("replays").join("13.11.0.0");
         std::fs::create_dir_all(&versioned).unwrap();

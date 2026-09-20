@@ -1,5 +1,7 @@
 mod app;
 mod armor_viewer;
+#[cfg(test)]
+mod interaction_tests;
 mod replay_inspector;
 mod runtime;
 mod settings;
@@ -7,9 +9,9 @@ mod theme;
 mod viewport;
 
 use app::App;
-use gpui_kit::*;
-use gpui_kit::component::Root;
 use gpui_kit::assets::Assets;
+use gpui_kit::component::Root;
+use gpui_kit::*;
 use settings::GpuiSettings;
 
 const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));
@@ -103,14 +105,21 @@ fn main() {
                 }
             };
 
+            // Settings application needs a `Window` (the grouping combo syncs
+            // through one), so it runs inside this update rather than beside
+            // it. A failure here means no settings reach the app at all --
+            // no directory scan, no game-data preload -- so it is logged
+            // rather than discarded.
             let zoom = loaded.zoom;
-            let _ = window.update(cx, |_root, window, cx| {
+            if let Err(err) = window.update(cx, |_root, window, cx| {
                 theme::apply_egui_dark_theme(zoom, window, cx);
-            });
-            app_entity.update(cx, |app, cx| {
-                app.apply_settings(loaded, cx);
-                cx.notify();
-            });
+                app_entity.update(cx, |app, cx| {
+                    app.apply_settings(loaded, window, cx);
+                    cx.notify();
+                });
+            }) {
+                tracing::error!("settings could not be applied: {err}");
+            }
         })
         .detach();
     });

@@ -230,7 +230,7 @@ mod tests {
     /// ```text
     /// WOWS_ARMOR_VIEWER_TEST_GAME_DIR="E:\WoWs\World_of_Warships" \
     /// WOWS_ARMOR_VIEWER_TEST_VERSION="15, 6, 0, 12830008" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
+    /// cargo test -p wows-toolkit-gpui -- --ignored ship_catalog_build_groups_and_sorts_ships_from_a_real_provider
     /// ```
     ///
     /// Mirrors `replay_inspector::model`'s equivalent real-provider test.

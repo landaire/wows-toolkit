@@ -15,15 +15,13 @@
 //!
 //! Task 9a's original doc:
 //!
-//! This deliberately does not wire a real gpui_kit-component `dock::DockArea`/
+//! This deliberately does not wire a real gpui-component `dock::DockArea`/
 //! `TabPanel`, even though the Replay Inspector's dock (`replay_inspector::
 //! view::ReplayInspectorView`) is the reference pattern: `TabPanel::
 //! render_title_bar` always draws a 30px title bar over the active panel --
 //! even with exactly one tab and `PanelStyle::default()` -- with no way to
 //! suppress it (see that crate's `tab_panel.rs`).
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
@@ -31,6 +29,8 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 use super::viewport_view::ViewportView;
 
@@ -137,7 +137,7 @@ impl Render for ViewportDock {
                 .relative()
                 .size_full()
                 // Fires on any left-click inside the pane, including its
-                // toolbar/close buttons -- enabled `gpui_kit-component` `Button`s
+                // toolbar/close buttons -- enabled `gpui-component` `Button`s
                 // don't stop propagation, so clicking a control on an
                 // inactive pane both runs the control's own action AND
                 // activates that pane. Intended: interacting with a pane is

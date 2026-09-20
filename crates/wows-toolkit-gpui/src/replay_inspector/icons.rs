@@ -13,8 +13,8 @@
 //! [`decode_icon`] (the `image` crate). Ship-class icons are the one
 //! exception: the game ships them as SVG (`gui/fla/minimap/ship_icons`), which
 //! the `image` crate cannot decode, so [`decode_ship_class_svg`] rasterizes
-//! them through gpui_kit's own `SvgRenderer` instead -- the same renderer
-//! gpui_kit-component uses for its bundled icon SVGs -- and rotates the result 90
+//! them through gpui's own `SvgRenderer` instead -- the same renderer
+//! gpui-component uses for its bundled icon SVGs -- and rotates the result 90
 //! degrees clockwise to match the egui app's `Image::rotate` on the same
 //! asset.
 //!
@@ -41,9 +41,9 @@ use super::model::PlayerRow;
 
 /// Decodes raw image bytes (whatever format `image::load_from_memory` can
 /// sniff; every icon kind except ship-class ships as PNG) into a
-/// `RenderImage`. gpui_kit's `RenderImage` buffer is BGRA even though the `image`
+/// `RenderImage`. gpui's `RenderImage` buffer is BGRA even though the `image`
 /// crate decodes to RGBA, so this swaps the red/blue channels per pixel,
-/// matching gpui_kit's own `ClipboardItem::to_image_data` conversion
+/// matching gpui's own `ClipboardItem::to_image_data` conversion
 /// (`gpui_kit::platform`).
 pub fn decode_icon(bytes: &[u8]) -> anyhow::Result<RenderImage> {
     let mut buffer = image::load_from_memory(bytes)?.into_rgba8();
@@ -54,7 +54,7 @@ pub fn decode_icon(bytes: &[u8]) -> anyhow::Result<RenderImage> {
 }
 
 /// Rasterizes a ship-class SVG (`gui/fla/minimap/ship_icons`) into a
-/// `RenderImage` via gpui_kit's `SvgRenderer`, rotates the raster 90 degrees
+/// `RenderImage` via gpui's `SvgRenderer`, rotates the raster 90 degrees
 /// clockwise to match the egui app's `Image::rotate(90.0_f32.to_radians(),
 /// Vec2::splat(0.5))` on the same asset (`ui/replay_parser/mod.rs`'s
 /// `ReplayColumn::Name` arm), then tints every pixel's RGB channels by
@@ -132,7 +132,7 @@ impl IconCache {
 
     /// Caches an already-decoded icon under `(species, tint)`, bypassing
     /// `decode_icon` (used for ship-class icons, which `decode_ship_class_svg`
-    /// decodes -- and tints -- via gpui_kit's `SvgRenderer` rather than the
+    /// decodes -- and tints -- via gpui's `SvgRenderer` rather than the
     /// `image` crate).
     pub fn set_image(&mut self, species: Species, tint: u32, image: RenderImage) {
         self.ship_class.insert((species, tint), Arc::new(image));
@@ -380,7 +380,7 @@ mod tests {
         // species either). A `PhysicalFS` rooted at a fresh empty temp dir
         // gives a valid, asset-less `VfsPath` without touching a real game
         // install.
-        let dir = std::env::temp_dir().join("wtk-gpui_kit-icons-test-populate-noop");
+        let dir = std::env::temp_dir().join("wtk-gpui-icons-test-populate-noop");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let vfs: VfsPath = wowsunpack::vfs::PhysicalFS::new(&dir).into();
@@ -407,7 +407,7 @@ mod tests {
         use crate::replay_inspector::test_support::base_row;
         use wows_replays::types::Relation;
 
-        let dir = std::env::temp_dir().join("wtk-gpui_kit-icons-test-subribbon-prefix");
+        let dir = std::env::temp_dir().join("wtk-gpui-icons-test-subribbon-prefix");
         let _ = std::fs::remove_dir_all(&dir);
         let subribbons_dir = dir.join("gui").join("ribbons").join("subribbons");
         std::fs::create_dir_all(&subribbons_dir).unwrap();

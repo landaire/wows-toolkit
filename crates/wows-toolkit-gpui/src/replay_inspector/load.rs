@@ -477,7 +477,7 @@ mod tests {
     /// ```text
     /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
     /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_REPLAY="E:\WoWs\World_of_Warships\replays\some.wowsreplay" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored parse_replay_against_a_real_current_version_install_produces_a_sane_model
+    /// cargo test -p wows-toolkit-gpui -- --ignored parse_replay_against_a_real_current_version_install_produces_a_sane_model
     /// ```
     #[test]
     #[ignore = "needs a local game install + a replay recorded on an installed build; see the doc comment for the run command"]
@@ -513,7 +513,7 @@ mod tests {
 
     impl EmptyGameDir {
         fn new(unique: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!("wt-gpui_kit-load-test-{unique}"));
+            let dir = std::env::temp_dir().join(format!("wt-gpui-load-test-{unique}"));
             std::fs::create_dir_all(dir.join("bin")).expect("failed to create empty test bin/ dir");
             Self(dir)
         }

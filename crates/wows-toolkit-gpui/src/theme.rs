@@ -1,7 +1,7 @@
-use gpui_kit::{App, Window, px, rgb};
 use gpui_kit::component::theme::{Theme, ThemeMode, ThemeTokens};
+use gpui_kit::{App, Window, px, rgb};
 
-/// Pin gpui_kit-component's Theme to egui's stock dark palette, scaled by `zoom`.
+/// Pin gpui-component's Theme to egui's stock dark palette, scaled by `zoom`.
 ///
 /// Values are taken directly from egui's `Visuals::dark()` / `Widgets::dark()`
 /// (egui 0.34, `style.rs`):
@@ -14,7 +14,7 @@ use gpui_kit::component::theme::{Theme, ThemeMode, ThemeTokens};
 ///
 /// `list_active`/`list_active_border` (the tree's selected-row background)
 /// are pinned to the same `from_gray(60)` surface gray rather than
-/// gpui_kit-component's default bright-blue `#1e40af` list-active token, matching
+/// gpui-component's default bright-blue `#1e40af` list-active token, matching
 /// egui's `colorize_label` selection style (`ui/replay_parser/mod.rs`'s
 /// white-on-`Color32::DARK_GRAY` selected label) -- a quiet dark highlight,
 /// not an accent color.

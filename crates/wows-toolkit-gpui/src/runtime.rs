@@ -9,18 +9,21 @@ use gpui_kit::AppContext as _;
 use gpui_kit::{App, AsyncApp, Global, Task};
 use std::future::Future;
 use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::task::JoinHandle;
 
-/// Worker threads for the shared runtime. Tokio's own default of two starves
-/// the sqlx pool when the replay index and the settings load overlap.
-const WORKER_THREADS: usize = 4;
+/// Worker threads for the shared runtime. The only work submitted here is the
+/// startup settings read (`main.rs`): open the config DB, then one sequential
+/// batch of `get_setting` queries. Replay parsing, the directory scan and ship
+/// loading are CPU-bound and run on GPUI's own pool via `background_spawn`, not
+/// here. One thread would serve, and two leaves room for a concurrent sqlx
+/// query without sizing the pool for work that never arrives.
+const WORKER_THREADS: usize = 2;
 
 #[derive(Debug, thiserror::Error)]
 pub enum TokioError {
-    #[error("the tokio runtime is not initialized")]
-    NotInitialized,
-    #[error("the tokio runtime could not be built: {0}")]
-    Build(std::io::Error),
-    #[error("the tokio task did not complete: {0}")]
+    #[error("the tokio runtime could not be built")]
+    Build(#[source] std::io::Error),
+    #[error("the tokio task did not complete")]
     Join(#[from] tokio::task::JoinError),
 }
 
@@ -32,27 +35,35 @@ impl Global for TokioRuntime {}
 
 /// Installs the runtime. Call once, during app startup, before any `spawn`.
 pub fn init(cx: &mut App) -> Result<(), TokioError> {
-    let runtime = Builder::new_multi_thread()
-        .worker_threads(WORKER_THREADS)
-        .enable_all()
-        .build()
-        .map_err(TokioError::Build)?;
+    let runtime =
+        Builder::new_multi_thread().worker_threads(WORKER_THREADS).enable_all().build().map_err(TokioError::Build)?;
     cx.set_global(TokioRuntime(runtime));
     Ok(())
 }
 
-fn handle(cx: &AsyncApp) -> Option<Handle> {
-    cx.update(|cx| cx.try_global::<TokioRuntime>().map(|rt| rt.0.handle().clone()))
+/// Aborts the tokio task when the GPUI-side `Task` is dropped.
+///
+/// A bare `JoinHandle` detaches on drop, so without this a cancelled await
+/// leaves its future running against a runtime that is itself about to be
+/// dropped with the window -- for the settings read, an `SqlitePool` still
+/// working while the app quits.
+struct AbortOnDrop<T>(JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 /// Runs `future` on the tokio runtime, yielding a GPUI `Task` for its result.
+///
+/// Dropping the returned `Task` aborts `future`. Panics if `init` has not run,
+/// which is a startup-order bug rather than a runtime condition.
 pub fn spawn<R>(cx: &AsyncApp, future: impl Future<Output = R> + Send + 'static) -> Task<Result<R, TokioError>>
 where
     R: Send + 'static,
 {
-    let Some(handle) = handle(cx) else {
-        return cx.background_spawn(async move { Err(TokioError::NotInitialized) });
-    };
-    let join = handle.spawn(future);
-    cx.background_spawn(async move { join.await.map_err(TokioError::Join) })
+    let handle: Handle = cx.update(|cx| cx.global::<TokioRuntime>().0.handle().clone());
+    let mut guard = AbortOnDrop(handle.spawn(future));
+    cx.background_spawn(async move { (&mut guard.0).await.map_err(TokioError::Join) })
 }
