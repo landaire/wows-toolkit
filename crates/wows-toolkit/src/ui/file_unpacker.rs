@@ -27,6 +27,14 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use parking_lot::Mutex;
 use pickled::HashableValue;
 use serde::Serialize;
+use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
+use wows_toolkit_viewmodel::unpacker::listing::ListingEntry as FileEntry;
+use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
+use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
+use wows_toolkit_viewmodel::unpacker::listing::directory_entries as get_dir_entries;
+use wows_toolkit_viewmodel::unpacker::listing::file_type_label;
+use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
+use wows_toolkit_viewmodel::unpacker::search::context_snippet as extract_context_snippet;
 use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
 use wowsunpack::data::assets_bin_vfs::PrototypeType;
 use wowsunpack::game_params::convert::game_params_to_pickle;
@@ -77,14 +85,6 @@ pub(crate) enum ContentSearchMessage {
 pub enum BrowserSource {
     Pkg,
     AssetsBin,
-}
-
-/// Pre-computed directory tree node for the folder tree sidebar.
-/// Built once when the VFS loads, reused every frame to avoid per-frame `read_dir()` calls.
-struct FolderTreeNode {
-    name: String,
-    path: String,
-    children: Vec<FolderTreeNode>,
 }
 
 /// State for a single file browser pane (directory tree + file listing).
@@ -239,15 +239,9 @@ impl ResourceBrowserState {
 }
 
 /// A file entry displayed in the right-side file listing.
-struct FileEntry {
-    name: String,
-    is_dir: bool,
-    size: u64,
-    vfs_path: VfsPath,
-}
 /// Per-frame viewer implementing `egui_dock::TabViewer` for unpacker panes.
 struct UnpackerPaneViewer<'a> {
-    items_to_extract: &'a Mutex<Vec<VfsPath>>,
+    items_to_extract: &'a Mutex<ExtractQueue>,
     file_viewer: &'a Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
     /// Deferred navigation signal: (source, path) set by search results "Go to Directory".
     navigate_to: &'a std::cell::Cell<Option<(BrowserSource, String)>>,
@@ -459,7 +453,8 @@ impl UnpackerPaneViewer<'_> {
 
                 if let Some(filtered_files) = &browser.filtered_file_list {
                     let items_snapshot = self.items_to_extract.lock().clone();
-                    let queued_paths: HashSet<String> = items_snapshot.iter().map(|v| v.as_str().to_string()).collect();
+                    let queued_paths: HashSet<String> =
+                        items_snapshot.entries().iter().map(|v| v.as_str().to_string()).collect();
 
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(format!("{} results", filtered_files.len())).weak());
@@ -469,7 +464,7 @@ impl UnpackerPaneViewer<'_> {
                                 .clicked()
                         {
                             for file in filtered_files.iter() {
-                                queue_extract(self.items_to_extract, file.1.clone());
+                                self.items_to_extract.lock().push(file.1.clone());
                             }
                         }
                     });
@@ -525,7 +520,8 @@ impl UnpackerPaneViewer<'_> {
                     let entries = &browser.cached_dir_entries.as_ref().unwrap().1;
 
                     let items_snapshot = self.items_to_extract.lock().clone();
-                    let queued_paths: HashSet<String> = items_snapshot.iter().map(|v| v.as_str().to_string()).collect();
+                    let queued_paths: HashSet<String> =
+                        items_snapshot.entries().iter().map(|v| v.as_str().to_string()).collect();
 
                     if entries.is_empty() {
                         ui.centered_and_justified(|ui| {
@@ -544,7 +540,7 @@ impl UnpackerPaneViewer<'_> {
                                     .clicked()
                                 {
                                     for entry in &file_entries {
-                                        queue_extract(self.items_to_extract, entry.vfs_path.clone());
+                                        self.items_to_extract.lock().push(entry.path.clone());
                                     }
                                 }
                             });
@@ -619,14 +615,6 @@ impl UnpackerPaneViewer<'_> {
         }
     }
 }
-/// Push a VfsPath into the extraction queue if it's not already queued.
-fn queue_extract(items: &Mutex<Vec<VfsPath>>, path: VfsPath) {
-    let mut items = items.lock();
-    if !items.iter().any(|v| v.as_str() == path.as_str()) {
-        items.push(path);
-    }
-}
-
 /// Get a RichText icon for a file based on its name and type.
 fn file_icon_rich_text(visuals: &egui::Visuals, name: &str, is_dir: bool) -> RichText {
     if is_dir {
@@ -784,101 +772,6 @@ fn extract_single_as_json(node: &VfsPath, proto_type: PrototypeType) {
     }
 }
 
-/// Extract a UTF-8 context snippet around a byte offset in file data.
-fn extract_context_snippet(data: &[u8], match_start: usize, match_end: usize, radius: usize) -> String {
-    let text = match std::str::from_utf8(data) {
-        Ok(s) => s,
-        Err(_) => {
-            let window_start = match_start.saturating_sub(radius * 4);
-            let window_end = (match_end + radius * 4).min(data.len());
-            let lossy = String::from_utf8_lossy(&data[window_start..window_end]);
-            let matched_text = String::from_utf8_lossy(&data[match_start..match_end]);
-
-            if let Some(pos) = lossy.find(matched_text.as_ref()) {
-                let char_start = lossy[..pos].chars().count().saturating_sub(radius);
-                let chars: Vec<char> = lossy.chars().collect();
-                let char_end = (char_start + radius + matched_text.chars().count() + radius).min(chars.len());
-                let actual_start = chars.iter().take(char_start).count();
-                let snippet: String = chars[actual_start..char_end].iter().collect();
-                return snippet.replace('\n', " ").replace('\r', "");
-            }
-            return matched_text.replace('\n', " ").replace('\r', "");
-        }
-    };
-
-    let prefix = &text[..match_start];
-    let match_char_start = prefix.chars().count();
-    let match_text = &text[match_start..match_end];
-    let match_char_len = match_text.chars().count();
-
-    let chars: Vec<char> = text.chars().collect();
-    let snippet_char_start = match_char_start.saturating_sub(radius);
-    let snippet_char_end = (match_char_start + match_char_len + radius).min(chars.len());
-
-    let snippet: String = chars[snippet_char_start..snippet_char_end].iter().collect();
-    snippet.replace('\n', " ").replace('\r', "")
-}
-
-/// Get file entries for a given directory VFS path.
-fn get_dir_entries(vfs: &VfsPath, dir_path: &str) -> Vec<FileEntry> {
-    let target = if dir_path.is_empty() || dir_path == "/" {
-        vfs.clone()
-    } else {
-        match vfs.join(dir_path.trim_start_matches('/')) {
-            Ok(p) => p,
-            Err(_) => return Vec::new(),
-        }
-    };
-
-    let entries = match target.read_dir() {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-
-    let mut result: Vec<FileEntry> = entries
-        .map(|entry| {
-            let is_dir = entry.is_dir().unwrap_or(false);
-            let size = if is_dir { 0 } else { entry.metadata().map(|m| m.len).unwrap_or(0) };
-            FileEntry { name: entry.filename(), is_dir, size, vfs_path: entry }
-        })
-        .collect();
-
-    result.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase())));
-
-    result
-}
-
-/// Get a file type string from the filename extension.
-fn file_type_label(name: &str) -> &'static str {
-    if let Some(dot_pos) = name.rfind('.') {
-        match &name[dot_pos..] {
-            ".xml" => "XML",
-            ".json" => "JSON",
-            ".txt" => "Text",
-            ".png" => "PNG",
-            ".jpg" | ".jpeg" => "JPEG",
-            ".svg" => "SVG",
-            ".dds" => "DDS",
-            ".pvr" => "PVR",
-            ".model" => "Model",
-            ".visual" => "Visual",
-            ".primitives" | ".primitives_processed" => "Mesh",
-            ".wotreplay" | ".wowsreplay" => "Replay",
-            ".mp3" | ".ogg" | ".wav" | ".wem" => "Audio",
-            ".fev" | ".fsb" => "FMOD",
-            ".ttf" | ".otf" => "Font",
-            ".py" | ".pyc" => "Python",
-            ".fx" | ".hlsl" | ".glsl" => "Shader",
-            ".atlas" => "Atlas",
-            ".settings" => "Settings",
-            ".def" => "Def",
-            _ => "File",
-        }
-    } else {
-        "File"
-    }
-}
-
 /// Poll a single search tab for new results from its background thread.
 fn poll_search_tab(search: &mut ContentSearchTab) {
     let Some(rx) = &search.rx else { return };
@@ -909,7 +802,7 @@ fn render_file_listing_table(
     ui: &mut Ui,
     entries: &[FileEntry],
     queued_paths: &HashSet<String>,
-    items_to_extract: &Mutex<Vec<VfsPath>>,
+    items_to_extract: &Mutex<ExtractQueue>,
     file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
     navigate_to: &std::cell::Cell<Option<(BrowserSource, String)>>,
     source: &BrowserSource,
@@ -944,7 +837,7 @@ fn render_file_listing_table(
         .body(|body| {
             body.rows(22.0, entries.len(), |mut row| {
                 let entry = &entries[row.index()];
-                let is_queued = queued_paths.contains(entry.vfs_path.as_str());
+                let is_queued = queued_paths.contains(entry.path.as_str());
 
                 row.col(|ui| {
                     if entry.is_dir {
@@ -954,61 +847,69 @@ fn render_file_listing_table(
                                 .on_hover_text(t!("ui.unpacker.remove_from_queue"))
                                 .clicked()
                             {
-                                items_to_extract.lock().retain(|v| v.as_str() != entry.vfs_path.as_str());
+                                items_to_extract.lock().remove(&entry.path);
                             }
                         } else if ui
                             .small_button(icons::PLUS_CIRCLE)
                             .on_hover_text(t!("ui.unpacker.queue_folder"))
                             .clicked()
                         {
-                            queue_extract(items_to_extract, entry.vfs_path.clone());
+                            items_to_extract.lock().push(entry.path.clone());
                         }
                     } else {
                         let mut checked = is_queued;
                         if ui.checkbox(&mut checked, "").changed() {
                             if checked {
-                                queue_extract(items_to_extract, entry.vfs_path.clone());
+                                items_to_extract.lock().push(entry.path.clone());
                             } else {
-                                items_to_extract.lock().retain(|v| v.as_str() != entry.vfs_path.as_str());
+                                items_to_extract.lock().remove(&entry.path);
                             }
                         }
                     }
                 });
 
                 row.col(|ui| {
-                    ui.label(file_icon_rich_text(ui.visuals(), &entry.name, entry.is_dir));
+                    ui.label(file_icon_rich_text(ui.visuals(), &entry.label, entry.is_dir));
                 });
 
                 let (_, name_response, name_label_response) = {
                     let mut label_resp = None;
                     let (rect, cell_resp) = row.col(|ui| {
-                        label_resp = Some(ui.label(&entry.name));
+                        label_resp = Some(ui.label(&entry.label));
                     });
                     (rect, cell_resp, label_resp.unwrap())
                 };
 
                 row.col(|ui| {
                     if !entry.is_dir {
-                        ui.label(RichText::new(humansize::format_size(entry.size, humansize::BINARY)).weak());
+                        ui.label(
+                            RichText::new(
+                                entry
+                                    .size
+                                    .map(|size| humansize::format_size(size, humansize::BINARY))
+                                    .unwrap_or_default(),
+                            )
+                            .weak(),
+                        );
                     }
                 });
 
                 row.col(|ui| {
-                    let type_str = if entry.is_dir { "Folder" } else { file_type_label(&entry.name) };
+                    let type_str = if entry.is_dir { "Folder" } else { file_type_label(&entry.label) };
                     ui.label(RichText::new(type_str).weak());
                 });
 
                 let row_response = row.response();
                 if entry.is_dir {
                     if row_response.double_clicked() {
-                        navigate_to.set(Some((source.clone(), entry.vfs_path.as_str().to_string())));
+                        navigate_to.set(Some((source.clone(), entry.path.as_str().to_string())));
                     }
                     row_response.on_hover_text(t!("ui.unpacker.double_click_open"));
                 } else {
-                    add_view_file_context_menu(file_viewer, &name_label_response, &entry.vfs_path, source);
-                    add_view_file_context_menu(file_viewer, &name_response, &entry.vfs_path, source);
-                    add_view_file_context_menu(file_viewer, &row_response, &entry.vfs_path, source);
-                    row_response.on_hover_text(format!("res/{}", entry.vfs_path.as_str().trim_start_matches('/')));
+                    add_view_file_context_menu(file_viewer, &name_label_response, &entry.path, source);
+                    add_view_file_context_menu(file_viewer, &name_response, &entry.path, source);
+                    add_view_file_context_menu(file_viewer, &row_response, &entry.path, source);
+                    row_response.on_hover_text(format!("res/{}", entry.path.as_str().trim_start_matches('/')));
                 }
             });
         });
@@ -1020,7 +921,7 @@ fn render_filter_results_table(
     ui: &mut Ui,
     filtered_files: &[(Arc<PathBuf>, VfsPath)],
     queued_paths: &HashSet<String>,
-    items_to_extract: &Mutex<Vec<VfsPath>>,
+    items_to_extract: &Mutex<ExtractQueue>,
     file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
     navigate_to: &std::cell::Cell<Option<(BrowserSource, String)>>,
     clear_filter: &std::cell::Cell<Option<BrowserSource>>,
@@ -1063,9 +964,9 @@ fn render_filter_results_table(
                     let mut checked = is_queued;
                     if ui.checkbox(&mut checked, "").changed() {
                         if checked {
-                            queue_extract(items_to_extract, vfs_path.clone());
+                            items_to_extract.lock().push(vfs_path.clone());
                         } else {
-                            items_to_extract.lock().retain(|v| v.as_str() != vfs_path.as_str());
+                            items_to_extract.lock().remove(vfs_path);
                         }
                     }
                 });
@@ -1119,7 +1020,7 @@ fn render_filter_results_table(
 fn render_search_results_table(
     ui: &mut Ui,
     results: &[ContentSearchHit],
-    items_to_extract: &Mutex<Vec<VfsPath>>,
+    items_to_extract: &Mutex<ExtractQueue>,
     file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
     navigate_to: &std::cell::Cell<Option<(BrowserSource, String)>>,
     clear_filter: &std::cell::Cell<Option<BrowserSource>>,
@@ -1129,7 +1030,7 @@ fn render_search_results_table(
     use egui_extras::TableBuilder;
 
     let items_snapshot = items_to_extract.lock().clone();
-    let queued_paths: HashSet<String> = items_snapshot.iter().map(|v| v.as_str().to_string()).collect();
+    let queued_paths: HashSet<String> = items_snapshot.entries().iter().map(|v| v.as_str().to_string()).collect();
 
     let table = TableBuilder::new(ui)
         .striped(true)
@@ -1165,9 +1066,9 @@ fn render_search_results_table(
                     let mut checked = is_queued;
                     if ui.checkbox(&mut checked, "").changed() {
                         if checked {
-                            queue_extract(items_to_extract, hit.vfs_path.clone());
+                            items_to_extract.lock().push(hit.vfs_path.clone());
                         } else {
-                            items_to_extract.lock().retain(|v| v.as_str() != hit.vfs_path.as_str());
+                            items_to_extract.lock().remove(&hit.vfs_path);
                         }
                     }
                 });
@@ -1238,47 +1139,6 @@ fn render_search_results_table(
 }
 
 /// Build a cached folder tree structure from a VFS root (called once at load time).
-fn build_folder_tree(vfs: &VfsPath, path_prefix: &str) -> Vec<FolderTreeNode> {
-    let Ok(entries) = vfs.read_dir() else {
-        return Vec::new();
-    };
-    let mut dirs: Vec<VfsPath> = entries.filter(|e| e.is_dir().unwrap_or(false)).collect();
-    dirs.sort_by_key(|d| d.filename());
-
-    dirs.iter()
-        .map(|child_dir| {
-            let name = child_dir.filename();
-            let path = if path_prefix.is_empty() { format!("/{name}") } else { format!("{path_prefix}/{name}") };
-            let children = build_folder_tree(child_dir, &path);
-            FolderTreeNode { name, path, children }
-        })
-        .collect()
-}
-
-/// Build the flat (path, vfs_path) list the file browser renders, by walking the
-/// VFS. Done lazily on first browser open: for a full install this list is
-/// ~85 MiB / ~1.1M allocations and the file browser is its only consumer, so it
-/// is not worth holding from startup. Paths carry a leading slash to match the
-/// previous eager construction (idx::build_file_tree keys).
-fn build_file_list(vfs: &VfsPath) -> Vec<(Arc<PathBuf>, VfsPath)> {
-    fn collect(dir: &VfsPath, prefix: &str, out: &mut Vec<(Arc<PathBuf>, VfsPath)>) {
-        let Ok(entries) = dir.read_dir() else {
-            return;
-        };
-        for entry in entries {
-            let path = format!("{prefix}/{}", entry.filename());
-            match entry.is_dir() {
-                Ok(true) => collect(&entry, &path, out),
-                Ok(false) => out.push((Arc::new(PathBuf::from(&path)), entry)),
-                Err(_) => {}
-            }
-        }
-    }
-    let mut out = Vec::new();
-    collect(vfs, "", &mut out);
-    out
-}
-
 /// Render the cached folder tree into the egui tree view builder.
 fn render_folder_tree(
     builder: &mut egui_ltreeview::TreeViewBuilder<'_, egui::Id>,
@@ -1610,7 +1470,7 @@ impl ToolkitTabViewer<'_> {
         let output_dir = Path::new(self.tab_state.persisted.read().output_dir.as_str()).join("res");
         let decode_json = self.tab_state.browser_state.decode_prototypes_as_json;
 
-        self.extract_files(output_dir.as_ref(), items_to_unpack.as_slice(), decode_json);
+        self.extract_files(output_dir.as_ref(), items_to_unpack.entries(), decode_json);
     }
 
     fn dump_game_params(&mut self, file_path: PathBuf, format: GameParamsFormat, base_params: bool) {
@@ -2008,8 +1868,9 @@ impl ToolkitTabViewer<'_> {
                                         ui.separator();
                                         egui::ScrollArea::vertical().max_height(250.0).show(ui, |ui| {
                                             let mut items = self.tab_state.items_to_extract.lock();
-                                            let mut remove_idx = None;
-                                            for (i, item) in items.iter().enumerate() {
+                                            let mut remove_path = None;
+                                            for item in items.entries().to_vec() {
+                                                let item = &item;
                                                 ui.horizontal(|ui| {
                                                     let path_str = item.as_str().trim_start_matches('/');
                                                     let is_dir = item.is_dir().unwrap_or(false);
@@ -2024,14 +1885,14 @@ impl ToolkitTabViewer<'_> {
                                                         egui::Layout::right_to_left(egui::Align::Center),
                                                         |ui| {
                                                             if ui.small_button(icons::X_CIRCLE).clicked() {
-                                                                remove_idx = Some(i);
+                                                                remove_path = Some(item.clone());
                                                             }
                                                         },
                                                     );
                                                 });
                                             }
-                                            if let Some(idx) = remove_idx {
-                                                items.remove(idx);
+                                            if let Some(path) = remove_path {
+                                                items.remove(&path);
                                             }
                                         });
                                     });

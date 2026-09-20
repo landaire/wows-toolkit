@@ -10156,13 +10156,11 @@ dependencies = [
  "escaper",
  "futures",
  "gettext",
- "glob",
  "gpui-kit",
  "image",
  "jiff",
  "nalgebra",
  "pollster 0.4.0",
- "regex",
  "rfd",
  "serde",
  "serde_json",
@@ -10175,6 +10173,21 @@ dependencies = [
  "wgpu",
  "wows-battle-world",
  "wows-replay-insights",
+ "wows-toolkit-config",
+ "wows-toolkit-viewmodel",
+ "wows_replays",
+ "wowsunpack",
+]
+
+[[package]]
+name = "wows-toolkit-viewmodel"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
  "wows-toolkit-config",
  "wows_replays",
  "wowsunpack",

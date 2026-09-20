@@ -2,7 +2,6 @@
 //! virtualized list of hits. One panel per search, matching the egui app,
 //! which opens a new search tab per run rather than replacing the last.
 
-use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -23,9 +22,9 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use super::browser::BrowserSource;
-use super::model::FileKind;
-use super::search::ContentSearchHit;
-use super::search::SearchProgress;
+use wows_toolkit_viewmodel::unpacker::listing::FileKind;
+use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
+use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
 
 /// Raised for the Unpacker tab to act on.
 #[derive(Clone, Debug)]
@@ -43,10 +42,11 @@ const LIST_OVERDRAW: Pixels = px(200.);
 pub struct SearchPanel {
     query: SharedString,
     source: BrowserSource,
-    hits: Rc<Vec<ContentSearchHit>>,
+    hits: Vec<ContentSearchHit>,
     progress: SearchProgress,
     running: bool,
-    /// Set to end the scan early; the worker polls it per file.
+    /// Set to end the scan early; the worker polls it per file. Also set when
+    /// the panel is dropped, so closing the tab stops the scan behind it.
     stop_flag: Arc<AtomicBool>,
     list_state: ListState,
     focus_handle: FocusHandle,
@@ -57,7 +57,7 @@ impl SearchPanel {
         Self {
             query,
             source,
-            hits: Rc::new(Vec::new()),
+            hits: Vec::new(),
             progress: SearchProgress { scanned: 0, total: 0 },
             running: true,
             stop_flag,
@@ -66,13 +66,19 @@ impl SearchPanel {
         }
     }
 
-    /// Appends a batch of hits. Batched rather than one call per hit so a
-    /// file with many matches costs one relayout, not one per match.
+    /// Appends a batch of hits.
+    ///
+    /// The list is spliced rather than reset: `reset` clears the scroll
+    /// position and drops scroll events until the next paint, which would
+    /// make the results unscrollable for as long as the scan runs.
     pub fn extend_hits(&mut self, hits: impl IntoIterator<Item = ContentSearchHit>, cx: &mut Context<Self>) {
-        let mut owned = Rc::try_unwrap(std::mem::take(&mut self.hits)).unwrap_or_else(|shared| (*shared).clone());
-        owned.extend(hits);
-        self.hits = Rc::new(owned);
-        self.list_state.reset(self.hits.len());
+        let before = self.hits.len();
+        self.hits.extend(hits);
+        let added = self.hits.len() - before;
+        if added == 0 {
+            return;
+        }
+        self.list_state.splice(before..before, added);
         cx.notify();
     }
 
@@ -146,10 +152,11 @@ impl Render for SearchPanel {
                     .on_click(cx.listener(|this, _event, _window, cx| this.stop(cx))),
             );
 
-        let hits = self.hits.clone();
         let entity = cx.entity();
-        let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| {
-            let Some(hit) = hits.get(ix) else {
+        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| {
+            // Read the hit out of the entity rather than holding a clone of
+            // the whole result set in this closure.
+            let Some(hit) = entity.read(cx).hits.get(ix).cloned() else {
                 return div().into_any_element();
             };
             let entity = entity.clone();
@@ -192,5 +199,13 @@ impl Render for SearchPanel {
         };
 
         v_flex().size_full().child(header).child(div().flex_1().min_h(px(0.)).child(body))
+    }
+}
+
+impl Drop for SearchPanel {
+    /// Closing the results tab stops the scan feeding it; the egui pane does
+    /// the same from its own `Drop`.
+    fn drop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
     }
 }

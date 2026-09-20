@@ -11450,6 +11450,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "wows-toolkit-viewmodel"
+version = "0.1.0"
+dependencies = [
+ "glob",
+ "regex",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "wows-toolkit-config",
+ "wows_replays",
+ "wowsunpack",
+]
+
+[[package]]
 name = "wows_minimap_renderer"
 version = "0.39.0"
 dependencies = [
@@ -11607,6 +11621,7 @@ dependencies = [
  "wows-data-mgr",
  "wows-replay-insights",
  "wows-toolkit-config",
+ "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",

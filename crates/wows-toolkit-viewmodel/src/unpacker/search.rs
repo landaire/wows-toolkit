@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use wowsunpack::vfs::VfsPath;
 
-use super::model::FileList;
+use super::listing::FileList;
 
 /// One match, with enough context to show a row without re-reading the file.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,7 +153,7 @@ pub fn scan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::unpacker::model::build_file_list;
+    use crate::unpacker::listing::build_file_list;
     use std::io::Write as _;
     use std::sync::atomic::AtomicBool;
     use std::sync::atomic::Ordering;

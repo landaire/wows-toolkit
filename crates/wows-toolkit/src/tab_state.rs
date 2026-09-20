@@ -24,7 +24,6 @@ use tracing::warn;
 use wows_replays::ReplayFile;
 use wows_replays::types::GameParamId;
 use wowsunpack::data::Version;
-use wowsunpack::vfs::VfsPath;
 
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::SessionStats;
@@ -469,7 +468,7 @@ pub struct TabState {
 
     // ─── Transient / runtime-only state ──────────────────────────────────
     pub world_of_warships_data: Option<SharedBuildData>,
-    pub items_to_extract: Mutex<Vec<VfsPath>>,
+    pub items_to_extract: Mutex<wows_toolkit_viewmodel::unpacker::queue::ExtractQueue>,
     #[allow(dead_code)]
     pub translations: Option<gettext::Catalog>,
     pub unpacker_progress: Option<egui_inbox::UiInbox<crate::ui_channel::StreamEvent<UnpackerProgress>>>,

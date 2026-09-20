@@ -79,6 +79,24 @@ pub fn destination(output_dir: &Path, file: &VfsPath) -> PathBuf {
     output_dir.join(file.as_str().trim_start_matches('/'))
 }
 
+/// The outcome of a run that did not fail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExtractOutcome {
+    /// Every queued file was written.
+    Completed { written: usize },
+    /// A stop was requested partway. `written` is what actually reached disk,
+    /// which is what the UI must report rather than the queue length.
+    Stopped { written: usize },
+}
+
+impl ExtractOutcome {
+    pub fn written(self) -> usize {
+        match self {
+            Self::Completed { written } | Self::Stopped { written } => written,
+        }
+    }
+}
+
 /// Writes every file in `files` under `output_dir`, reporting progress to
 /// `on_progress` after each one. Returns early on the first IO failure.
 ///
@@ -89,13 +107,14 @@ pub fn extract_files(
     output_dir: &Path,
     mut on_progress: impl FnMut(ExtractProgress),
     should_stop: impl Fn() -> bool,
-) -> Result<(), ExtractError> {
+) -> Result<ExtractOutcome, ExtractError> {
     let total = files.len();
     let mut created: HashSet<PathBuf> = HashSet::new();
 
-    for (index, file) in files.iter().enumerate() {
+    let mut written = 0usize;
+    for file in files {
         if should_stop() {
-            break;
+            return Ok(ExtractOutcome::Stopped { written });
         }
 
         let destination = destination(output_dir, file);
@@ -111,10 +130,11 @@ pub fn extract_files(
         io::copy(&mut reader, &mut writer)
             .map_err(|source| ExtractError::Write { path: destination.clone(), source })?;
 
-        on_progress(ExtractProgress { written: index + 1, total });
+        written += 1;
+        on_progress(ExtractProgress { written, total });
     }
 
-    Ok(())
+    Ok(ExtractOutcome::Completed { written })
 }
 
 #[cfg(test)]
@@ -178,8 +198,9 @@ mod tests {
         let files = expand_to_files(&[root.join("res").unwrap()]);
 
         let mut seen = Vec::new();
-        extract_files(&files, &out, |progress| seen.push(progress), || false).unwrap();
+        let outcome = extract_files(&files, &out, |progress| seen.push(progress), || false).unwrap();
 
+        assert_eq!(outcome, ExtractOutcome::Completed { written: 3 });
         assert_eq!(fs::read_to_string(out.join("res/content/a.xml")).unwrap(), "<a/>");
         assert_eq!(fs::read_to_string(out.join("res/content/b.txt")).unwrap(), "bee");
         assert_eq!(fs::read_to_string(out.join("res/top.txt")).unwrap(), "top");
@@ -208,19 +229,20 @@ mod tests {
         let files = expand_to_files(&[root.join("res").unwrap()]);
         let stop = AtomicBool::new(false);
 
-        let mut written = 0usize;
-        extract_files(
+        let mut reported = 0usize;
+        let outcome = extract_files(
             &files,
             &out,
             |_| {
-                written += 1;
+                reported += 1;
                 stop.store(true, Ordering::Relaxed);
             },
             || stop.load(Ordering::Relaxed),
         )
         .unwrap();
 
-        assert_eq!(written, 1, "the stop is observed before the second file");
+        assert_eq!(reported, 1, "the stop is observed before the second file");
+        assert_eq!(outcome, ExtractOutcome::Stopped { written: 1 }, "a cancel reports what reached disk");
         let _ = fs::remove_dir_all(&out);
     }
 
