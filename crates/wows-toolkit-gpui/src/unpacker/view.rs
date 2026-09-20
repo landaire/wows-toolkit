@@ -33,6 +33,7 @@ use super::browser::BrowserPanel;
 use super::browser::BrowserSource;
 use super::search_panel::SearchPanel;
 use super::search_panel::SearchPanelEvent;
+use wows_toolkit_viewmodel::unpacker::assets_bin;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractOutcome;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractProgress;
 use wows_toolkit_viewmodel::unpacker::extract::expand_to_files;
@@ -230,7 +231,9 @@ impl UnpackerView {
         let generation = self.load_generation;
 
         self.pkg_browser.update(cx, |pane, cx| pane.set_loading(cx));
+        self.assets_browser.update(cx, |pane, cx| pane.set_loading(cx));
         let pkg_browser = self.pkg_browser.clone();
+        let assets_browser = self.assets_browser.clone();
         cx.spawn_in(window, async move |this, cx| {
             let loaded = cx
                 .background_spawn(async move {
@@ -243,7 +246,30 @@ impl UnpackerView {
                 return;
             }
 
-            let _ = pkg_browser.update_in(cx, |pane, window, cx| match loaded {
+            let package_vfs = match loaded {
+                Ok(vfs) => {
+                    let handed = vfs.clone();
+                    let _ = pkg_browser.update_in(cx, |pane, window, cx| pane.set_vfs(handed, window, cx));
+                    vfs
+                }
+                Err(reason) => {
+                    pkg_browser.update(cx, |pane, cx| pane.set_failed(reason.clone(), cx));
+                    assets_browser.update(cx, |pane, cx| pane.set_failed(reason, cx));
+                    return;
+                }
+            };
+
+            // assets.bin is a separate archive inside that VFS: read and parsed
+            // after the package tree, so the pane beside it is usable first.
+            let opened =
+                cx.background_spawn(async move { assets_bin::open(&package_vfs).map_err(|err| err.to_string()) }).await;
+
+            let still_current = this.update(cx, |this, _cx| this.load_generation == generation).unwrap_or(false);
+            if !still_current {
+                return;
+            }
+
+            let _ = assets_browser.update_in(cx, |pane, window, cx| match opened {
                 Ok(vfs) => pane.set_vfs(vfs, window, cx),
                 Err(reason) => pane.set_failed(reason, cx),
             });

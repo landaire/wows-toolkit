@@ -27,6 +27,7 @@ use egui_dock::tab_viewer::OnCloseResponse;
 use parking_lot::Mutex;
 use pickled::HashableValue;
 use serde::Serialize;
+use wows_toolkit_viewmodel::unpacker::assets_bin;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry as FileEntry;
 use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
@@ -35,7 +36,6 @@ use wows_toolkit_viewmodel::unpacker::listing::directory_entries as get_dir_entr
 use wows_toolkit_viewmodel::unpacker::listing::file_type_label;
 use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
 use wows_toolkit_viewmodel::unpacker::search::context_snippet as extract_context_snippet;
-use wowsunpack::data::assets_bin_vfs::AssetsBinVfs;
 use wowsunpack::data::assets_bin_vfs::PrototypeType;
 use wowsunpack::game_params::convert::game_params_to_pickle;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -1597,17 +1597,7 @@ impl ToolkitTabViewer<'_> {
 
         crate::util::thread::spawn_logged("load-assets-bin", move || {
             let result = (|| -> Result<AssetsBinLoadResult, String> {
-                let assets_bin_path = vfs.join("content/assets.bin").map_err(|e| format!("{}", e))?;
-                let mut assets_data = Vec::new();
-                assets_bin_path
-                    .open_file()
-                    .and_then(|mut f| Ok(f.read_to_end(&mut assets_data)?))
-                    .map_err(|e| format!("Failed to read assets.bin: {}", e))?;
-
-                let assets_vfs =
-                    AssetsBinVfs::new(assets_data).map_err(|e| format!("Failed to parse assets.bin: {}", e))?;
-
-                let vfs = VfsPath::new(assets_vfs);
+                let vfs = assets_bin::open(&vfs).map_err(|err| err.to_string())?;
                 let files = collect_vfs_files(&vfs, "");
                 Ok(AssetsBinLoadResult { vfs, files })
             })();
