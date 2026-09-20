@@ -32,6 +32,7 @@ use wows_toolkit_viewmodel::stats::match_group_display_name;
 
 use crate::ui::selectable;
 
+use super::chart_panel::StatsChartPanel;
 use super::load::SessionData;
 use super::overview::StatsOverviewPanel;
 
@@ -51,6 +52,12 @@ pub struct StatsView {
     limit_input: Entity<InputState>,
     dock_area: Entity<DockArea>,
     overview: Entity<StatsOverviewPanel>,
+    /// One per open chart sub-tab. The egui tab opens with a chart alongside
+    /// the overview and lets more be added.
+    charts: Vec<Entity<StatsChartPanel>>,
+    /// Ids are never reused, so a closed chart's element ids cannot collide
+    /// with a later one's.
+    next_chart_id: usize,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -61,6 +68,10 @@ impl StatsView {
         let dock_area = cx.new(|cx| DockArea::new("stats-dock", None, window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel(overview.clone(), DockPlacement::Center, None, window, cx);
+        });
+        let first_chart = cx.new(|cx| StatsChartPanel::new(0, cx));
+        dock_area.update(cx, |dock, cx| {
+            dock.add_panel(first_chart.clone(), DockPlacement::Center, None, window, cx);
         });
 
         let limit_input = cx.new(|cx| {
@@ -81,6 +92,8 @@ impl StatsView {
             limit_input,
             dock_area,
             overview,
+            charts: vec![first_chart],
+            next_chart_id: 1,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
@@ -102,6 +115,25 @@ impl StatsView {
     fn push_filtered(&mut self, cx: &mut Context<Self>) {
         let filtered = filter_games(&self.games, &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+        for chart in &self.charts {
+            chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+        }
+        cx.notify();
+    }
+
+    /// Opens another chart sub-tab, seeded with what is on screen now.
+    fn add_chart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let id = self.next_chart_id;
+        self.next_chart_id += 1;
+
+        let chart = cx.new(|cx| StatsChartPanel::new(id, cx));
+        let filtered = filter_games(&self.games, &self.filters);
+        chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+
+        self.dock_area.update(cx, |dock, cx| {
+            dock.add_panel(chart.clone(), DockPlacement::Center, None, window, cx);
+        });
+        self.charts.push(chart);
         cx.notify();
     }
 
@@ -268,7 +300,13 @@ impl Render for StatsView {
             )
             .child(div().text_xs().opacity(0.6).child("Division:"))
             .children(division_buttons)
-            .when_some(mode_row, |this, row| this.child(row));
+            .when_some(mode_row, |this, row| this.child(row))
+            .child(
+                Button::new("stats-add-chart")
+                    .label("Add chart")
+                    .compact()
+                    .on_click(cx.listener(|this, _event, window, cx| this.add_chart(window, cx))),
+            );
 
         v_flex()
             .id("stats-root")
