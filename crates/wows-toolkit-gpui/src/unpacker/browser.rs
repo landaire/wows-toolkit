@@ -3,8 +3,9 @@
 //! inputs pinned below it. Mirrors the egui app's browser pane
 //! (`ui/file_unpacker.rs`), which lays the same four controls out the same way.
 //!
-//! The pane owns no extraction or search machinery of its own; it emits
-//! [`BrowserEvent`] and the Unpacker tab acts on it.
+//! What to list, filter and search is `wows_toolkit_viewmodel::unpacker`,
+//! shared with that pane. This module is the rendering and the caching: the
+//! listing rows are rebuilt when something changes them, never per frame.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -35,12 +36,16 @@ use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use wowsunpack::vfs::VfsPath;
 
-use super::model::FileKind;
-use super::model::FileList;
-use super::model::FolderTreeNode;
-use super::model::build_file_list;
-use super::model::build_folder_tree;
-use super::model::filter_files;
+use wows_toolkit_viewmodel::unpacker::listing::FileKind;
+use wows_toolkit_viewmodel::unpacker::listing::FileList;
+use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
+use wows_toolkit_viewmodel::unpacker::listing::ListingEntry;
+use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
+use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
+use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
+use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
+use wows_toolkit_viewmodel::unpacker::listing::filtered_entries;
+use wows_toolkit_viewmodel::unpacker::listing::is_filtering;
 
 /// Which VFS a pane browses. The two sources load differently -- the package
 /// VFS arrives with the build, assets.bin is parsed in the background -- so
@@ -89,8 +94,9 @@ struct Loaded {
 /// Raised for the Unpacker tab to act on.
 #[derive(Clone, Debug)]
 pub enum BrowserEvent {
-    /// Queue these VFS entries for extraction.
-    Extract(Vec<VfsPath>),
+    /// Queue what the listing currently shows. The rows travel rather than
+    /// bare paths so the queue can apply its own files-only rule.
+    Extract(Vec<ListingEntry>),
     /// Run a content search over this pane's files.
     Search { source: BrowserSource, query: String, path_filter: String, files: Arc<FileList> },
     /// Open this file in the in-app viewer that suits its kind.
@@ -105,10 +111,8 @@ const SIDEBAR_MIN_WIDTH: Pixels = px(160.);
 const SIDEBAR_MAX_WIDTH: Pixels = px(520.);
 const ROW_HEIGHT: Pixels = px(22.);
 const LIST_OVERDRAW: Pixels = px(200.);
-
-/// The root row's id. The egui tree shows the VFS root as a node labelled
-/// "res" that is open by default; this mirrors it.
-const ROOT_PATH: &str = "/";
+const SIZE_COLUMN_WIDTH: Pixels = px(90.);
+const TYPE_COLUMN_WIDTH: Pixels = px(70.);
 
 pub struct BrowserPanel {
     source: BrowserSource,
@@ -121,9 +125,11 @@ pub struct BrowserPanel {
     row_paths: Rc<HashMap<SharedString, String>>,
     filter_state: Entity<InputState>,
     filter_text: String,
-    /// `filter_text` applied to the file list. Recomputed only when the text
-    /// changes, since a full install filters ~1.1M paths.
-    filtered: Option<Arc<FileList>>,
+    /// The rows the listing draws, rebuilt only when the VFS, the selected
+    /// directory or the filter changes. Rebuilding per frame would re-read the
+    /// directory, or re-allocate a path string per file across the whole
+    /// install, on every caret blink.
+    rows: Rc<Vec<ListingEntry>>,
     search_state: Entity<InputState>,
     path_filter_state: Entity<InputState>,
     list_state: ListState,
@@ -138,7 +144,10 @@ impl BrowserPanel {
         let search_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search in files..."));
         let path_filter_state = cx.new(|cx| InputState::new(window, cx).placeholder("Path filter (glob)"));
 
-        let filter_subscription = cx.subscribe(&filter_state, Self::on_filter_event);
+        let subscriptions = vec![
+            cx.subscribe(&filter_state, Self::on_filter_event),
+            cx.subscribe(&search_state, Self::on_search_input_event),
+        ];
 
         Self {
             source,
@@ -148,45 +157,53 @@ impl BrowserPanel {
             row_paths: Rc::new(HashMap::new()),
             filter_state,
             filter_text: String::new(),
-            filtered: None,
+            rows: Rc::new(Vec::new()),
             search_state,
             path_filter_state,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
-            _subscriptions: vec![filter_subscription],
+            _subscriptions: subscriptions,
         }
     }
 
     /// Marks the pane as waiting on a background load (assets.bin).
     pub fn set_loading(&mut self, cx: &mut Context<Self>) {
         self.state = PaneState::Loading;
-        self.sync_rows(cx);
+        self.rebuild_rows(cx);
     }
 
     pub fn set_failed(&mut self, reason: String, cx: &mut Context<Self>) {
         self.state = PaneState::Failed(reason);
-        self.sync_rows(cx);
+        self.rebuild_rows(cx);
     }
 
     /// Adopts a VFS: walks it into the folder tree and the flat file list.
     /// Both walks are O(tree) and happen once per load, never per frame.
-    pub fn set_vfs(&mut self, vfs: VfsPath, cx: &mut Context<Self>) {
+    ///
+    /// The filter is cleared with the rest: a filter typed against the old
+    /// build would otherwise silently re-apply to the new one.
+    pub fn set_vfs(&mut self, vfs: VfsPath, window: &mut Window, cx: &mut Context<Self>) {
         let folder_tree = build_folder_tree(&vfs, "");
         let files = Arc::new(build_file_list(&vfs));
         self.state = PaneState::Ready(Loaded { vfs, files, folder_tree });
         self.selected_dir = None;
-        self.filtered = None;
+        self.clear_filter(window, cx);
         self.rebuild_tree(cx);
-        self.sync_rows(cx);
+        self.rebuild_rows(cx);
     }
 
     /// Drops the loaded VFS, e.g. when the selected build changes.
-    pub fn clear(&mut self, cx: &mut Context<Self>) {
+    pub fn clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.state = PaneState::Empty;
         self.selected_dir = None;
-        self.filtered = None;
+        self.clear_filter(window, cx);
         self.rebuild_tree(cx);
-        self.sync_rows(cx);
+        self.rebuild_rows(cx);
+    }
+
+    fn clear_filter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.filter_text.clear();
+        self.filter_state.update(cx, |state, cx| state.set_value("", window, cx));
     }
 
     fn on_filter_event(&mut self, _state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
@@ -196,8 +213,14 @@ impl BrowserPanel {
             return;
         }
         self.filter_text = text;
-        self.filtered = None;
-        self.sync_rows(cx);
+        self.rebuild_rows(cx);
+    }
+
+    /// Enter in the query box runs the search, as it does in the egui pane.
+    fn on_search_input_event(&mut self, _state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if matches!(event, InputEvent::PressEnter { .. }) {
+            self.start_search(cx);
+        }
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
@@ -234,45 +257,21 @@ impl BrowserPanel {
         self.tree_state.update(cx, |state, cx| state.set_items(vec![root], cx));
     }
 
-    /// The rows the listing shows: the filtered flat list while a filter is
+    /// Recomputes the listing: filter results while a long enough filter is
     /// typed, otherwise the selected directory's own entries.
-    fn rows(&mut self) -> Vec<ListingRow> {
-        let PaneState::Ready(loaded) = &self.state else {
-            return Vec::new();
+    fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
+        let rows = match &self.state {
+            PaneState::Ready(loaded) if is_filtering(&self.filter_text) => {
+                filtered_entries(&loaded.files, &self.filter_text)
+            }
+            PaneState::Ready(loaded) => {
+                directory_entries(&loaded.vfs, self.selected_dir.as_deref().unwrap_or(ROOT_PATH))
+            }
+            _ => Vec::new(),
         };
 
-        if !self.filter_text.is_empty() {
-            let filtered =
-                self.filtered.get_or_insert_with(|| Arc::new(filter_files(&loaded.files, &self.filter_text))).clone();
-            return filtered
-                .iter()
-                .map(|(path, vfs_path)| ListingRow {
-                    label: path.to_string_lossy().into_owned(),
-                    path: vfs_path.clone(),
-                    is_dir: false,
-                })
-                .collect();
-        }
-
-        let dir = match &self.selected_dir {
-            Some(dir) if dir != ROOT_PATH => loaded.vfs.join(dir.trim_start_matches('/')).ok(),
-            _ => Some(loaded.vfs.clone()),
-        };
-        let Some(dir) = dir else { return Vec::new() };
-        let Ok(entries) = dir.read_dir() else { return Vec::new() };
-
-        let mut rows: Vec<ListingRow> = entries
-            .map(|entry| ListingRow { label: entry.filename(), is_dir: entry.is_dir().unwrap_or(false), path: entry })
-            .collect();
-        // Directories first, then files, each alphabetical -- the order the
-        // egui listing shows.
-        rows.sort_by(|a, b| b.is_dir.cmp(&a.is_dir).then_with(|| a.label.cmp(&b.label)));
-        rows
-    }
-
-    fn sync_rows(&mut self, cx: &mut Context<Self>) {
-        let len = self.rows().len();
-        self.list_state.reset(len);
+        self.list_state.reset(rows.len());
+        self.rows = Rc::new(rows);
         cx.notify();
     }
 
@@ -281,7 +280,7 @@ impl BrowserPanel {
             return;
         }
         self.selected_dir = Some(path);
-        self.sync_rows(cx);
+        self.rebuild_rows(cx);
     }
 
     fn start_search(&mut self, cx: &mut Context<Self>) {
@@ -298,14 +297,6 @@ impl BrowserPanel {
     }
 }
 
-/// One row in the file listing.
-#[derive(Clone)]
-struct ListingRow {
-    label: String,
-    is_dir: bool,
-    path: VfsPath,
-}
-
 impl Focusable for BrowserPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -315,6 +306,13 @@ impl Focusable for BrowserPanel {
 impl BasePanel for BrowserPanel {
     fn panel_name(&self) -> &'static str {
         "UnpackerBrowserPanel"
+    }
+
+    /// Not closable: nothing reopens it, so closing one would leave the
+    /// Unpacker permanently short a browser. The egui pane refuses for the
+    /// same reason.
+    fn closable(&self, _cx: &App) -> bool {
+        false
     }
 }
 
@@ -399,7 +397,7 @@ impl Render for BrowserPanel {
 
         let sidebar = v_flex().size_full().child(filter_row).child(folder_tree).child(search_box);
 
-        let rows = Rc::new(self.rows());
+        let rows = self.rows.clone();
         let listing_entity = cx.entity();
         let hover_bg = cx.theme().accent;
         let render_row = {
@@ -411,8 +409,8 @@ impl Render for BrowserPanel {
                 let entity = listing_entity.clone();
                 let path = row.path.clone();
                 let is_dir = row.is_dir;
-                let label = row.label.clone();
-                let kind = FileKind::of(&label);
+                let kind = row.kind();
+                let size = row.size.map(format_size).unwrap_or_default();
                 h_flex()
                     .id(ix)
                     .w_full()
@@ -422,19 +420,18 @@ impl Render for BrowserPanel {
                     .px_2()
                     .hover(|this| this.bg(hover_bg))
                     .child(Icon::new(if is_dir { IconName::Folder } else { IconName::FileText }))
-                    .child(div().flex_1().text_sm().child(label.clone()))
+                    .child(div().flex_1().text_sm().child(row.label.clone()))
+                    .child(div().w(TYPE_COLUMN_WIDTH).text_xs().opacity(0.6).child(row.type_label()))
+                    .child(div().w(SIZE_COLUMN_WIDTH).text_xs().opacity(0.6).child(size))
                     .on_click(move |event, _window, cx| {
                         if event.click_count() < 2 {
                             return;
                         }
                         entity.update(cx, |this, cx| {
                             if is_dir {
-                                // Double-clicking a directory navigates into it.
-                                let Some(name) = path.filename().into() else { return };
-                                let base = this.selected_dir.clone().unwrap_or_else(|| ROOT_PATH.to_string());
-                                let next =
-                                    if base == ROOT_PATH { format!("/{name}") } else { format!("{base}/{name}") };
-                                this.select_dir(next, cx);
+                                // The entry's own VFS path is already the
+                                // absolute path the tree selects by.
+                                this.select_dir(path.as_str().to_string(), cx);
                             } else {
                                 cx.emit(BrowserEvent::View { path: path.clone(), kind });
                             }
@@ -444,7 +441,7 @@ impl Render for BrowserPanel {
             }
         };
 
-        let extract_rows = rows.clone();
+        let queue_rows = rows.clone();
         let listing_header = h_flex()
             .flex_none()
             .gap_2()
@@ -457,12 +454,11 @@ impl Render for BrowserPanel {
             .child(
                 Button::new(SharedString::from(format!("unpacker-{fragment}-extract-listed")))
                     .icon(IconName::HardDrive)
-                    .label("Extract listed")
+                    .label("Queue listed files")
                     .compact()
                     .disabled(rows.is_empty())
                     .on_click(cx.listener(move |_this, _event, _window, cx| {
-                        let paths: Vec<VfsPath> = extract_rows.iter().map(|row| row.path.clone()).collect();
-                        cx.emit(BrowserEvent::Extract(paths));
+                        cx.emit(BrowserEvent::Extract(queue_rows.as_ref().clone()));
                     })),
             );
 
@@ -485,6 +481,18 @@ impl Render for BrowserPanel {
             .child(resizable_panel().child(listing))
             .into_any_element()
     }
+}
+
+/// Byte count in the largest unit that keeps it under four digits.
+fn format_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit + 1 < UNITS.len() {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
 }
 
 /// One folder row: indentation by depth, a folder glyph, the directory name.
@@ -511,5 +519,19 @@ fn render_folder_row(
             panel.update(cx, |this, cx| this.select_dir(path.clone(), cx));
         }),
         None => list_item,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::format_size;
+
+    #[test]
+    fn sizes_are_shown_in_the_largest_unit_that_keeps_them_under_four_digits() {
+        assert_eq!(format_size(0), "0 B");
+        assert_eq!(format_size(512), "512 B");
+        assert_eq!(format_size(1024), "1.0 KiB");
+        assert_eq!(format_size(1024 * 1024), "1.0 MiB");
+        assert_eq!(format_size(1536 * 1024), "1.5 MiB");
     }
 }

@@ -25,6 +25,10 @@ bytemuck = "1"
 pollster = "0.4"
 serde = { version = "1", features = ["derive"] }
 wows-toolkit-config = { path = "../wows-toolkit-config" }
+# Framework-neutral toolkit logic (listing rules, filters, queueing,
+# extraction, search), shared with the egui app so the two front ends cannot
+# drift apart on what they show.
+wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
 # vfs-mmap: load.rs builds the game VFS directly from a live install
 # (wowsunpack::game_data::build_game_vfs_for_build) to run the background
 # replay parse; implies vfs + arc + parsing. rkyv: the on-disk GameParams
@@ -47,15 +51,9 @@ rfd = "0.17"
 # ASCII-folded search names for the armor viewer's ship catalog, matching the
 # egui app's `ShipCatalog::build` and wowsunpack's own pinned version.
 unidecode = "0.3"
-# The Unpacker listing path filter is a glob whenever the text holds a star,
-# matching the egui app filter semantics.
-glob = "0.3"
 # Channels for streaming extraction progress from the background pool back to
 # the view. Already in the graph under GPUI; this names it directly.
 futures = "0.3"
-# Content search over the VFS compiles the query as a regex, falling back to
-# an escaped literal, exactly as the egui app does.
-regex = "1"
 
 [dev-dependencies]
 # Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the

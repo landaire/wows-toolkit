@@ -27,22 +27,23 @@ use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
-use wowsunpack::vfs::VfsPath;
 
 use super::browser::BrowserEvent;
 use super::browser::BrowserPanel;
 use super::browser::BrowserSource;
-use super::extract::ExtractProgress;
-use super::extract::expand_to_files;
-use super::extract::extract_files;
-use super::model::FileList;
-use super::search::ContentSearchHit;
-use super::search::SearchProgress;
-use super::search::compile_query;
-use super::search::files_to_scan;
-use super::search::scan;
 use super::search_panel::SearchPanel;
 use super::search_panel::SearchPanelEvent;
+use wows_toolkit_viewmodel::unpacker::extract::ExtractOutcome;
+use wows_toolkit_viewmodel::unpacker::extract::ExtractProgress;
+use wows_toolkit_viewmodel::unpacker::extract::expand_to_files;
+use wows_toolkit_viewmodel::unpacker::extract::extract_files;
+use wows_toolkit_viewmodel::unpacker::listing::FileList;
+use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
+use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
+use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
+use wows_toolkit_viewmodel::unpacker::search::compile_query;
+use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
+use wows_toolkit_viewmodel::unpacker::search::scan;
 
 /// One message from a running scan.
 enum SearchUpdate {
@@ -82,10 +83,13 @@ impl SearchableListItem for BuildItem {
 /// What the extraction queue is doing.
 enum ExtractState {
     Idle,
+    /// Expanding the queue's directories. The file count is not known yet, so
+    /// there is no fraction to show.
+    Counting,
     Running(ExtractProgress),
     Failed(String),
-    /// Finished, with the count written, so the tab can say so.
-    Done(usize),
+    /// Finished or cancelled, with what actually reached disk.
+    Done(ExtractOutcome),
 }
 
 pub struct UnpackerView {
@@ -93,13 +97,18 @@ pub struct UnpackerView {
     /// lists them.
     builds: Vec<BuildNumber>,
     selected_build: Option<BuildNumber>,
+    /// The directory and build whose VFS the package pane currently holds.
+    loaded_source: Option<(PathBuf, BuildNumber)>,
+    /// Bumped per build-load request so a stale result can be dropped.
+    load_generation: u64,
     build_select: Entity<SelectState<SearchableVec<BuildItem>>>,
     wows_dir: Option<PathBuf>,
     dock_area: Entity<DockArea>,
     pkg_browser: Entity<BrowserPanel>,
     assets_browser: Entity<BrowserPanel>,
-    /// Entries queued for extraction, in the order they were added.
-    queue: Vec<VfsPath>,
+    /// Entries queued for extraction. The shared queue owns the rules about
+    /// what queueing a listing means and about queueing the same entry twice.
+    queue: ExtractQueue,
     extract_state: ExtractState,
     /// Set to stop an in-flight extraction; replaced per run.
     stop_flag: Arc<AtomicBool>,
@@ -137,12 +146,14 @@ impl UnpackerView {
         Self {
             builds: Vec::new(),
             selected_build: None,
+            loaded_source: None,
+            load_generation: 0,
             build_select,
             wows_dir: None,
             dock_area,
             pkg_browser,
             assets_browser,
-            queue: Vec::new(),
+            queue: ExtractQueue::new(),
             extract_state: ExtractState::Idle,
             stop_flag: Arc::new(AtomicBool::new(false)),
             search_subscriptions: Vec::new(),
@@ -158,8 +169,9 @@ impl UnpackerView {
             self.wows_dir = None;
             self.builds.clear();
             self.selected_build = None;
-            self.pkg_browser.update(cx, |pane, cx| pane.clear(cx));
-            self.assets_browser.update(cx, |pane, cx| pane.clear(cx));
+            self.loaded_source = None;
+            self.pkg_browser.update(cx, |pane, cx| pane.clear(window, cx));
+            self.assets_browser.update(cx, |pane, cx| pane.clear(window, cx));
             cx.notify();
             return;
         }
@@ -185,8 +197,8 @@ impl UnpackerView {
             Some(newest) => self.select_build(newest, window, cx),
             None => {
                 self.selected_build = None;
-                self.pkg_browser.update(cx, |pane, cx| pane.clear(cx));
-                self.assets_browser.update(cx, |pane, cx| pane.clear(cx));
+                self.pkg_browser.update(cx, |pane, cx| pane.clear(window, cx));
+                self.assets_browser.update(cx, |pane, cx| pane.clear(window, cx));
                 cx.notify();
             }
         }
@@ -194,12 +206,17 @@ impl UnpackerView {
 
     /// Loads `build`'s package VFS in the background and hands it to the
     /// package pane. The assets.bin pane stays on its own loading path.
+    ///
+    /// The guard keys on the directory as well as the build: two installs can
+    /// carry the same build number, and comparing the build alone would leave
+    /// the previous install's VFS on screen under the new directory.
     fn select_build(&mut self, build: BuildNumber, window: &mut Window, cx: &mut Context<Self>) {
         let Some(dir) = self.wows_dir.clone() else { return };
-        if self.selected_build == Some(build) {
+        if self.loaded_source.as_ref() == Some(&(dir.clone(), build)) {
             return;
         }
         self.selected_build = Some(build);
+        self.loaded_source = Some((dir.clone(), build));
 
         if let Some(index) = self.builds.iter().position(|b| *b == build) {
             self.build_select.update(cx, |state, cx| {
@@ -207,16 +224,27 @@ impl UnpackerView {
             });
         }
 
+        // Stamps this request so a slower earlier load cannot overwrite a
+        // later one that already finished.
+        self.load_generation = self.load_generation.wrapping_add(1);
+        let generation = self.load_generation;
+
         self.pkg_browser.update(cx, |pane, cx| pane.set_loading(cx));
         let pkg_browser = self.pkg_browser.clone();
-        cx.spawn(async move |_this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let loaded = cx
                 .background_spawn(async move {
                     wowsunpack::game_data::build_game_vfs_for_build(&dir, build.0).map_err(|err| format!("{err}"))
                 })
                 .await;
-            pkg_browser.update(cx, |pane, cx| match loaded {
-                Ok(vfs) => pane.set_vfs(vfs, cx),
+
+            let still_current = this.update(cx, |this, _cx| this.load_generation == generation).unwrap_or(false);
+            if !still_current {
+                return;
+            }
+
+            let _ = pkg_browser.update_in(cx, |pane, window, cx| match loaded {
+                Ok(vfs) => pane.set_vfs(vfs, window, cx),
                 Err(reason) => pane.set_failed(reason, cx),
             });
         })
@@ -233,8 +261,8 @@ impl UnpackerView {
         cx: &mut Context<Self>,
     ) {
         match event {
-            BrowserEvent::Extract(paths) => {
-                self.queue.extend(paths.iter().cloned());
+            BrowserEvent::Extract(entries) => {
+                self.queue.push_listed_files(entries);
                 cx.notify();
             }
             BrowserEvent::Search { source, query, path_filter, files } => {
@@ -270,6 +298,9 @@ impl UnpackerView {
         });
         self.search_subscriptions.push(cx.subscribe_in(&panel, window, Self::on_search_panel_event));
 
+        // Weak, so the running scan does not keep a closed panel alive; the
+        // panel's own `Drop` then sets the stop flag and the worker winds up.
+        let panel = panel.downgrade();
         cx.spawn(async move |_this, cx| {
             let (tx, mut rx) = futures::channel::mpsc::unbounded::<SearchUpdate>();
             let worker = cx.background_spawn(async move {
@@ -287,15 +318,33 @@ impl UnpackerView {
                 );
             });
 
-            while let Some(update) = futures::StreamExt::next(&mut rx).await {
-                panel.update(cx, |panel, cx| match update {
-                    SearchUpdate::Hit(hit) => panel.extend_hits([hit], cx),
-                    SearchUpdate::Progress(progress) => panel.set_progress(progress, cx),
+            // Drained in batches: a broad query matches faster than the
+            // foreground can repaint, and applying one hit per wake-up turns
+            // the scan into a per-hit relayout.
+            while let Some(first) = futures::StreamExt::next(&mut rx).await {
+                let mut hits = Vec::new();
+                let mut latest_progress = None;
+                let mut pending = Some(first);
+                while let Some(update) = pending.take().or_else(|| rx.try_recv().ok()) {
+                    match update {
+                        SearchUpdate::Hit(hit) => hits.push(hit),
+                        SearchUpdate::Progress(progress) => latest_progress = Some(progress),
+                    }
+                }
+
+                let applied = panel.update(cx, |panel, cx| {
+                    if let Some(progress) = latest_progress {
+                        panel.set_progress(progress, cx);
+                    }
+                    panel.extend_hits(hits, cx);
                 });
+                if applied.is_err() {
+                    return;
+                }
             }
 
             worker.await;
-            panel.update(cx, |panel, cx| panel.finish(cx));
+            let _ = panel.update(cx, |panel, cx| panel.finish(cx));
         })
         .detach();
     }
@@ -319,24 +368,22 @@ impl UnpackerView {
 
     /// Asks for a destination, then writes the queue to it off the UI thread.
     fn start_extraction(&mut self, cx: &mut Context<Self>) {
-        if self.queue.is_empty() || matches!(self.extract_state, ExtractState::Running(_)) {
+        if self.queue.is_empty() || matches!(self.extract_state, ExtractState::Counting | ExtractState::Running(_)) {
             return;
         }
         let Some(output_dir) = rfd::FileDialog::new().set_title("Extract to").pick_folder() else {
             return;
         };
 
-        let queued = std::mem::take(&mut self.queue);
+        let queued = self.queue.take();
         let stop_flag = Arc::new(AtomicBool::new(false));
         self.stop_flag = stop_flag.clone();
-        self.extract_state = ExtractState::Running(ExtractProgress { written: 0, total: 0 });
+        self.extract_state = ExtractState::Counting;
 
         cx.spawn(async move |this, cx| {
             let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<ExtractProgress>();
             let worker = cx.background_spawn(async move {
                 let files = expand_to_files(&queued);
-                let total = files.len();
-                let _ = progress_tx.unbounded_send(ExtractProgress { written: 0, total });
                 extract_files(
                     &files,
                     &output_dir,
@@ -345,7 +392,6 @@ impl UnpackerView {
                     },
                     || stop_flag.load(Ordering::Relaxed),
                 )
-                .map(|()| total)
             });
 
             while let Some(progress) = futures::StreamExt::next(&mut progress_rx).await {
@@ -358,7 +404,7 @@ impl UnpackerView {
             let outcome = worker.await;
             let _ = this.update(cx, |this, cx| {
                 this.extract_state = match outcome {
-                    Ok(written) => ExtractState::Done(written),
+                    Ok(outcome) => ExtractState::Done(outcome),
                     Err(err) => ExtractState::Failed(format!("{err}")),
                 };
                 cx.notify();
@@ -402,14 +448,17 @@ impl Render for UnpackerView {
 
         let status: Option<String> = match &self.extract_state {
             ExtractState::Idle => None,
+            ExtractState::Counting => Some("Counting files...".to_string()),
             ExtractState::Running(progress) => Some(format!("Extracting {} of {}", progress.written, progress.total)),
             ExtractState::Failed(reason) => Some(format!("Extraction failed: {reason}")),
-            ExtractState::Done(written) => Some(format!("Extracted {written} files")),
+            ExtractState::Done(ExtractOutcome::Completed { written }) => Some(format!("Extracted {written} files")),
+            ExtractState::Done(ExtractOutcome::Stopped { written }) => Some(format!("Cancelled after {written} files")),
         };
         let running = match &self.extract_state {
             ExtractState::Running(progress) => Some(*progress),
             _ => None,
         };
+        let busy = running.is_some() || matches!(self.extract_state, ExtractState::Counting);
 
         let queue_bar = h_flex()
             .flex_none()
@@ -432,14 +481,14 @@ impl Render for UnpackerView {
                 Button::new("unpacker-extract")
                     .label("Extract...")
                     .compact()
-                    .disabled(self.queue.is_empty() || running.is_some())
+                    .disabled(self.queue.is_empty() || busy)
                     .on_click(cx.listener(|this, _event, _window, cx| this.start_extraction(cx))),
             )
             .child(
                 Button::new("unpacker-cancel")
                     .label("Cancel")
                     .compact()
-                    .disabled(running.is_none())
+                    .disabled(!busy)
                     .on_click(cx.listener(|this, _event, _window, cx| this.cancel_extraction(cx))),
             )
             .child(
