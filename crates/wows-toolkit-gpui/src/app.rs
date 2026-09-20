@@ -245,7 +245,11 @@ impl App {
         self.proxy_input.update(cx, |state, cx| state.set_value(settings.proxy_url.clone(), window, cx));
 
         let unpacker_dir = settings.wows_dir.clone();
-        self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(unpacker_dir, window, cx));
+        let output_dir = settings.output_dir.clone();
+        self.unpacker.update(cx, |unpacker, cx| {
+            unpacker.apply_settings(unpacker_dir, window, cx);
+            unpacker.set_output_dir(output_dir, window, cx);
+        });
         self.poll_armor_game_data(cx);
         self.settings = SettingsState::Loaded(settings);
     }

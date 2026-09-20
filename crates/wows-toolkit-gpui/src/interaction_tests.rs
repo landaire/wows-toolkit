@@ -57,6 +57,7 @@ const CLEAR_QUEUE: &str = "unpacker-clear-queue";
 const PKG_FILTER: &str = "unpacker-pkg-filter";
 const DUMP_PARAMS: &str = "unpacker-dump-params";
 const DUMP_BASE_PARAMS: &str = "unpacker-dump-base-params";
+const OUTPUT_DIR: &str = "unpacker-output-dir";
 
 /// Stats tab filter bar (`stats::view`).
 const STATS_LIMIT_ENABLED: &str = "stats-limit-enabled";
@@ -281,6 +282,7 @@ fn test_settings() -> GpuiSettings {
         data_sharing: DataSharingMode::Off,
         proxy_url: String::new(),
         auto_load_latest_replay: false,
+        output_dir: String::new(),
         armor_defaults: None,
     }
 }
@@ -369,6 +371,23 @@ fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(c
             window.click(action, cx);
         }
         assert!(window.try_find(EXTRACT).is_some(), "the queue bar survives clicks on its disabled buttons");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_unpacker_shows_the_saved_extraction_directory(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    let settings = GpuiSettings { output_dir: "C:/extracted".to_string(), ..test_settings() };
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+        assert_eq!(
+            window.find(OUTPUT_DIR).value(),
+            Some("C:/extracted"),
+            "the field opens showing what the shared database holds"
+        );
     })
     .expect("the test window stays open");
 }

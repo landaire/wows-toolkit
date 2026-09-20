@@ -673,13 +673,6 @@ fn open_file_viewer(file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewe
 
 /// Infer a decodable `PrototypeType` from a filename's extension.
 /// Returns `Some` only if the extension maps to a type we can decode to JSON.
-fn decodable_prototype_type(filename: &str) -> Option<PrototypeType> {
-    let dot = filename.rfind('.')?;
-    let ext = &filename[dot..];
-    let pt = PrototypeType::from_extension(ext)?;
-    if wowsunpack::models::can_decode_prototype(pt) { Some(pt) } else { None }
-}
-
 /// Add a "View Contents" context menu to a response for viewable file types.
 /// For Assets.bin files, shows "View as JSON" / "Extract as JSON" for decodable prototype types.
 fn add_view_file_context_menu(
@@ -689,7 +682,7 @@ fn add_view_file_context_menu(
     source: &BrowserSource,
 ) {
     if *source == BrowserSource::AssetsBin {
-        if let Some(pt) = decodable_prototype_type(&node.filename()) {
+        if let Some(pt) = wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype(&node.filename()) {
             let node_view = node.clone();
             let node_extract = node.clone();
             response.context_menu(|ui| {
@@ -1441,7 +1434,9 @@ impl ToolkitTabViewer<'_> {
                     }
 
                     // Try JSON decode for Assets.bin prototypes when toggle is on
-                    if decode_json && let Some(pt) = decodable_prototype_type(&filename) {
+                    if decode_json
+                        && let Some(pt) = wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype(&filename)
+                    {
                         let mut data = Vec::new();
                         if let Ok(mut reader) = file.open_file() {
                             let _ = reader.read_to_end(&mut data);
@@ -1467,7 +1462,9 @@ impl ToolkitTabViewer<'_> {
 
     fn extract_files_clicked(&mut self) {
         let items_to_unpack = self.tab_state.items_to_extract.lock().clone();
-        let output_dir = Path::new(self.tab_state.persisted.read().output_dir.as_str()).join("res");
+        let output_dir = wows_toolkit_viewmodel::unpacker::extract::extract_root(Path::new(
+            self.tab_state.persisted.read().output_dir.as_str(),
+        ));
         let decode_json = self.tab_state.browser_state.decode_prototypes_as_json;
 
         self.extract_files(output_dir.as_ref(), items_to_unpack.entries(), decode_json);

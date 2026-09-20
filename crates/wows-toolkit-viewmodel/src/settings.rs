@@ -20,6 +20,9 @@ pub mod keys {
     pub const LOCALE: &str = "locale";
     pub const REPLAY_SETTINGS: &str = "replay_settings";
     pub const AUTO_LOAD_LATEST_REPLAY: &str = "auto_load_latest_replay";
+    /// Where the unpacker writes extracted files. Empty until the user picks
+    /// one, which is why the Extract control stays disabled.
+    pub const OUTPUT_DIR: &str = "output_dir";
 }
 
 /// What the app is allowed to send upstream.

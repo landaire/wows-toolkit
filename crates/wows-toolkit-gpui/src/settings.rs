@@ -45,6 +45,10 @@ pub struct GpuiSettings {
     /// it back, and does not yet act on it (see the checkbox's own doc
     /// comment in `replay_inspector::view`).
     pub auto_load_latest_replay: bool,
+    /// Where the unpacker writes extracted files. Empty until the user picks
+    /// one, which is the absence this setting has always used; the Extract
+    /// control stays disabled while it is.
+    pub output_dir: String,
     /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
     /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
@@ -69,6 +73,7 @@ impl GpuiSettings {
             queries::get_setting::<Option<String>>(pool, keys::PROXY_URL).await.flatten().unwrap_or_default();
         let auto_load_latest_replay =
             queries::get_setting::<bool>(pool, keys::AUTO_LOAD_LATEST_REPLAY).await.unwrap_or(true);
+        let output_dir = queries::get_setting::<String>(pool, keys::OUTPUT_DIR).await.unwrap_or_default();
         let armor_defaults = match queries::get_armor_viewer_defaults(pool).await {
             Ok(defaults) => defaults,
             Err(e) => {
@@ -88,6 +93,7 @@ impl GpuiSettings {
             data_sharing,
             proxy_url,
             auto_load_latest_replay,
+            output_dir,
             armor_defaults,
         }
     }

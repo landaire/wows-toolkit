@@ -5,6 +5,7 @@
 //! when the install carries more than one build, and the package and
 //! assets.bin browsers are separate tabs of an inner dock.
 
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -15,9 +16,13 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::input::InputEvent;
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::searchable_list::SearchableListItem;
 use gpui_kit::component::searchable_list::SearchableVec;
@@ -35,11 +40,14 @@ use super::browser::BrowserSource;
 use super::search_panel::SearchPanel;
 use super::search_panel::SearchPanelEvent;
 use super::viewer_panel::FileViewerPanel;
+use wows_toolkit_viewmodel::settings::keys as setting_keys;
 use wows_toolkit_viewmodel::unpacker::assets_bin;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractOutcome;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractProgress;
+use wows_toolkit_viewmodel::unpacker::extract::PrototypeOutput;
 use wows_toolkit_viewmodel::unpacker::extract::expand_to_files;
 use wows_toolkit_viewmodel::unpacker::extract::extract_files;
+use wows_toolkit_viewmodel::unpacker::extract::extract_root;
 use wows_toolkit_viewmodel::unpacker::game_params;
 use wows_toolkit_viewmodel::unpacker::game_params::GameParamsFormat;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
@@ -124,6 +132,14 @@ pub struct UnpackerView {
     extract_state: ExtractState,
     /// Set to stop an in-flight extraction; replaced per run.
     stop_flag: Arc<AtomicBool>,
+    /// Where an extraction writes. Empty until the user picks one, which is
+    /// what keeps Extract disabled; shared with the egui app, so a directory
+    /// chosen in either is the one both use.
+    output_dir: String,
+    output_dir_input: Entity<InputState>,
+    /// Whether an extraction rewrites decodable assets.bin prototypes as
+    /// JSON. Session state, as in the egui app, which does not persist it.
+    prototypes: PrototypeOutput,
     /// One per open search panel, kept so its events keep reaching this tab.
     search_subscriptions: Vec<Subscription>,
     focus_handle: FocusHandle,
@@ -144,7 +160,10 @@ impl UnpackerView {
         let build_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(false));
 
+        let output_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("Extract to"));
+
         let subscriptions = vec![
+            cx.subscribe(&output_dir_input, Self::on_output_dir_edited),
             cx.subscribe_in(&pkg_browser, window, Self::on_browser_event),
             cx.subscribe_in(&assets_browser, window, Self::on_browser_event),
             cx.subscribe_in(&build_select, window, |this, _state, event, window, cx| {
@@ -168,12 +187,50 @@ impl UnpackerView {
             pkg_browser,
             assets_browser,
             queue: ExtractQueue::new(),
+            output_dir: String::new(),
+            output_dir_input,
+            prototypes: PrototypeOutput::Raw,
             extract_state: ExtractState::Idle,
             stop_flag: Arc::new(AtomicBool::new(false)),
             search_subscriptions: Vec::new(),
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Adopts the saved extraction directory and seeds the path field with it.
+    pub fn set_output_dir(&mut self, output_dir: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.output_dir_input.update(cx, |state, cx| state.set_value(output_dir.clone(), window, cx));
+        self.output_dir = output_dir;
+        cx.notify();
+    }
+
+    /// Saved on blur or Enter rather than per keystroke, so a half-typed path
+    /// never reaches the database.
+    fn on_output_dir_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let path = state.read(cx).value().trim().to_string();
+        self.store_output_dir(path, cx);
+    }
+
+    fn store_output_dir(&mut self, output_dir: String, cx: &mut Context<Self>) {
+        if self.output_dir == output_dir {
+            return;
+        }
+        self.output_dir = output_dir.clone();
+        crate::settings_store::save(setting_keys::OUTPUT_DIR, &output_dir, cx);
+        cx.notify();
+    }
+
+    fn browse_for_output_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(picked) = rfd::FileDialog::new().set_title("Extract to").pick_folder() else {
+            return;
+        };
+        let picked = picked.to_string_lossy().into_owned();
+        self.output_dir_input.update(cx, |state, cx| state.set_value(picked.clone(), window, cx));
+        self.store_output_dir(picked, cx);
     }
 
     /// Adopts the WoWs directory, enumerates its builds and loads the newest.
@@ -487,11 +544,13 @@ impl UnpackerView {
         if self.queue.is_empty() || matches!(self.extract_state, ExtractState::Counting | ExtractState::Running(_)) {
             return;
         }
-        let Some(output_dir) = rfd::FileDialog::new().set_title("Extract to").pick_folder() else {
+        if self.output_dir.is_empty() {
             return;
-        };
+        }
+        let output_dir = extract_root(Path::new(&self.output_dir));
 
         let queued = self.queue.take();
+        let prototypes = self.prototypes;
         let stop_flag = Arc::new(AtomicBool::new(false));
         self.stop_flag = stop_flag.clone();
         self.extract_state = ExtractState::Counting;
@@ -503,6 +562,7 @@ impl UnpackerView {
                 extract_files(
                     &files,
                     &output_dir,
+                    prototypes,
                     |progress| {
                         let _ = progress_tx.unbounded_send(progress);
                     },
@@ -576,6 +636,41 @@ impl Render for UnpackerView {
         };
         let busy = running.is_some() || matches!(self.extract_state, ExtractState::Counting);
 
+        // The egui button carries the queue count in its own label rather
+        // than only beside it.
+        let queued = self.queue.len();
+        let extract_label = match queued {
+            0 => "Extract".to_string(),
+            1 => "Extract 1 Item".to_string(),
+            count => format!("Extract {count} Items"),
+        };
+
+        let output_bar = h_flex()
+            .flex_none()
+            .gap_2()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(border)
+            .child(
+                Button::new("unpacker-browse-output")
+                    .label("Browse")
+                    .compact()
+                    .on_click(cx.listener(|this, _event, window, cx| this.browse_for_output_dir(window, cx))),
+            )
+            .child(div().flex_1().min_w(px(0.)).child(Input::new(&self.output_dir_input).id("unpacker-output-dir")))
+            .child(
+                Checkbox::new("unpacker-decode-prototypes")
+                    .label("Decode prototypes as JSON")
+                    .checked(self.prototypes == PrototypeOutput::DecodeToJson)
+                    .tooltip("Write decodable assets.bin entries as readable JSON instead of their stored form")
+                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                        this.prototypes = if *checked { PrototypeOutput::DecodeToJson } else { PrototypeOutput::Raw };
+                        cx.notify();
+                    })),
+            );
+
         let queue_bar = h_flex()
             .flex_none()
             .gap_2()
@@ -595,9 +690,10 @@ impl Render for UnpackerView {
             .when_some(status, |this, status| this.child(div().flex_1().text_xs().opacity(0.6).child(status)))
             .child(
                 Button::new("unpacker-extract")
-                    .label("Extract...")
+                    .label(extract_label)
                     .compact()
-                    .disabled(self.queue.is_empty() || busy)
+                    .disabled(self.queue.is_empty() || busy || self.output_dir.is_empty())
+                    .when(self.output_dir.is_empty(), |this| this.tooltip("Choose a directory to extract to first"))
                     .on_click(cx.listener(|this, _event, _window, cx| this.start_extraction(cx))),
             )
             .child(
@@ -644,6 +740,7 @@ impl Render for UnpackerView {
             .size_full()
             .when_some(version_bar, |this, bar| this.child(bar))
             .child(queue_bar)
+            .child(output_bar)
             .child(div().flex_1().min_h(px(0.)).child(self.dock_area.clone()))
     }
 }

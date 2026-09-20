@@ -8,6 +8,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io;
+use std::io::Read as _;
 use std::path::Path;
 use std::path::PathBuf;
 use wowsunpack::vfs::VfsPath;
@@ -73,6 +74,25 @@ pub fn expand_to_files(queued: &[VfsPath]) -> Vec<VfsPath> {
     files
 }
 
+/// This file decoded to JSON, when it is a prototype the decoder handles and
+/// the decode succeeds. `None` for every other file, which is then written
+/// as it is stored.
+fn decode_prototype(file: &VfsPath) -> Option<String> {
+    let prototype = super::viewer::decodable_prototype(&file.filename())?;
+    let mut bytes = Vec::new();
+    file.open_file().and_then(|mut reader| Ok(reader.read_to_end(&mut bytes)?)).ok()?;
+    wowsunpack::models::decode_prototype_to_json(&bytes, prototype).ok()
+}
+
+/// The game's resource directory. A VFS path is relative to it, so an
+/// extraction writes under it and the output mirrors an install's own layout.
+pub const EXTRACT_ROOT: &str = "res";
+
+/// Where an extraction writes, given the directory the user chose.
+pub fn extract_root(output_dir: &Path) -> PathBuf {
+    output_dir.join(EXTRACT_ROOT)
+}
+
 /// The on-disk path `file` extracts to: its VFS path, minus the leading
 /// slash, rebased under `output_dir`.
 pub fn destination(output_dir: &Path, file: &VfsPath) -> PathBuf {
@@ -97,6 +117,18 @@ impl ExtractOutcome {
     }
 }
 
+/// Whether an extraction rewrites decodable assets.bin prototypes as JSON.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PrototypeOutput {
+    /// Write every file exactly as it is stored.
+    #[default]
+    Raw,
+    /// Write a decodable prototype as `<name>.json`, and every other file
+    /// raw. A prototype the decoder rejects is written raw rather than
+    /// skipped, so the extraction never silently loses a file.
+    DecodeToJson,
+}
+
 /// Writes every file in `files` under `output_dir`, reporting progress to
 /// `on_progress` after each one. Returns early on the first IO failure.
 ///
@@ -105,6 +137,7 @@ impl ExtractOutcome {
 pub fn extract_files(
     files: &[VfsPath],
     output_dir: &Path,
+    prototypes: PrototypeOutput,
     mut on_progress: impl FnMut(ExtractProgress),
     should_stop: impl Fn() -> bool,
 ) -> Result<ExtractOutcome, ExtractError> {
@@ -121,6 +154,16 @@ pub fn extract_files(
         let parent = destination.parent().unwrap_or(output_dir).to_path_buf();
         if created.insert(parent.clone()) {
             fs::create_dir_all(&parent).map_err(|source| ExtractError::CreateDir { path: parent.clone(), source })?;
+        }
+
+        if prototypes == PrototypeOutput::DecodeToJson
+            && let Some(json) = decode_prototype(file)
+        {
+            let json_path = destination.with_file_name(format!("{}.json", file.filename()));
+            fs::write(&json_path, json).map_err(|source| ExtractError::Write { path: json_path.clone(), source })?;
+            written += 1;
+            on_progress(ExtractProgress { written, total });
+            continue;
         }
 
         let mut reader =
@@ -185,6 +228,11 @@ mod tests {
     }
 
     #[test]
+    fn an_extraction_writes_under_the_chosen_directorys_res_folder() {
+        assert_eq!(extract_root(Path::new("/out")), PathBuf::from("/out/res"));
+    }
+
+    #[test]
     fn destination_mirrors_the_vfs_path_under_the_output_directory() {
         let root = fixture();
         let file = root.join("res/content/a.xml").unwrap();
@@ -198,7 +246,8 @@ mod tests {
         let files = expand_to_files(&[root.join("res").unwrap()]);
 
         let mut seen = Vec::new();
-        let outcome = extract_files(&files, &out, |progress| seen.push(progress), || false).unwrap();
+        let outcome =
+            extract_files(&files, &out, PrototypeOutput::Raw, |progress| seen.push(progress), || false).unwrap();
 
         assert_eq!(outcome, ExtractOutcome::Completed { written: 3 });
         assert_eq!(fs::read_to_string(out.join("res/content/a.xml")).unwrap(), "<a/>");
@@ -215,7 +264,7 @@ mod tests {
         let files = expand_to_files(&[root.join("res").unwrap()]);
 
         let mut seen = Vec::new();
-        extract_files(&files, &out, |progress| seen.push(progress), || false).unwrap();
+        extract_files(&files, &out, PrototypeOutput::Raw, |progress| seen.push(progress), || false).unwrap();
 
         assert_eq!(seen.iter().map(|p| p.written).collect::<Vec<_>>(), vec![1, 2, 3]);
         assert!(seen.iter().all(|p| p.total == 3));
@@ -233,6 +282,7 @@ mod tests {
         let outcome = extract_files(
             &files,
             &out,
+            PrototypeOutput::Raw,
             |_| {
                 reported += 1;
                 stop.store(true, Ordering::Relaxed);
@@ -243,6 +293,20 @@ mod tests {
 
         assert_eq!(reported, 1, "the stop is observed before the second file");
         assert_eq!(outcome, ExtractOutcome::Stopped { written: 1 }, "a cancel reports what reached disk");
+        let _ = fs::remove_dir_all(&out);
+    }
+
+    #[test]
+    fn asking_for_json_still_writes_an_ordinary_file_as_it_is_stored() {
+        let root = fixture();
+        let out = temp_dir("decode-passthrough");
+        let files = expand_to_files(&[root.join("res/top.txt").unwrap()]);
+
+        let outcome = extract_files(&files, &out, PrototypeOutput::DecodeToJson, |_| {}, || false).unwrap();
+
+        assert_eq!(outcome, ExtractOutcome::Completed { written: 1 });
+        assert_eq!(fs::read_to_string(out.join("res/top.txt")).unwrap(), "top");
+        assert!(!out.join("res/top.txt.json").exists(), "a text file names no prototype to decode");
         let _ = fs::remove_dir_all(&out);
     }
 
