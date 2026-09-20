@@ -340,6 +340,12 @@ impl ReplayInspectorView {
     /// replay tab (mirroring `set_debug_mode`'s live-propagation pattern) so
     /// the table(s) update immediately rather than only on the next replay
     /// opened.
+    /// Replaces the whole settings blob, for an edit made on the Settings tab
+    /// rather than through this header's own checkboxes.
+    pub(crate) fn set_replay_settings(&mut self, settings: ReplaySettings, cx: &mut Context<Self>) {
+        self.set_column_filter(|current| *current = settings, cx);
+    }
+
     fn set_column_filter(&mut self, apply: impl FnOnce(&mut ReplaySettings), cx: &mut Context<Self>) {
         apply(&mut self.replay_settings);
         let columns = default_columns(&self.replay_settings);

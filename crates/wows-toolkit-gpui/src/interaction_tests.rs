@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_viewmodel::settings::DataSharingMode;
 
 use wows_toolkit_config::ReplayGrouping;
 
@@ -262,6 +263,10 @@ fn test_settings() -> GpuiSettings {
             ..ReplaySettings::default()
         },
         debug_mode: false,
+        check_for_updates: true,
+        enable_logging: false,
+        data_sharing: DataSharingMode::Off,
+        proxy_url: String::new(),
         auto_load_latest_replay: false,
         armor_defaults: None,
     }
@@ -277,23 +282,6 @@ fn the_settings_tab_shows_the_values_it_was_given(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Settings, cx);
         assert_eq!(window.find("show-raw-xp").checked(), Some(true));
-        assert_eq!(window.find("show-observed-damage").checked(), Some(false));
-    })
-    .expect("the test window stays open");
-}
-
-#[gpui_kit::test]
-fn the_read_only_settings_checkboxes_refuse_a_click(cx: &mut TestAppContext) {
-    let window = open_app(cx);
-    window
-        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
-        .expect("the test window stays open");
-
-    cx.update_window(window.into(), |_, window, cx| {
-        show_tab(window, AppTab::Settings, cx);
-        window.click("show-raw-xp", cx);
-        window.click("show-observed-damage", cx);
-        assert_eq!(window.find("show-raw-xp").checked(), Some(true), "the settings tab is read-only in this port");
         assert_eq!(window.find("show-observed-damage").checked(), Some(false));
     })
     .expect("the test window stays open");
@@ -436,6 +424,75 @@ fn the_recent_games_limit_can_be_switched_on_and_off(cx: &mut TestAppContext) {
 
         window.click(STATS_LIMIT_ENABLED, cx);
         assert_eq!(window.find(STATS_LIMIT_ENABLED).checked(), Some(false), "the limit toggles back off");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_settings_checkboxes_apply_and_toggle_back(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+
+        // The tab is writable now, so a click moves the control rather than
+        // being refused.
+        let before = window.find("show-raw-xp").checked().expect("the checkbox reports a state");
+        window.click("show-raw-xp", cx);
+        assert_eq!(window.find("show-raw-xp").checked(), Some(!before));
+        window.click("show-raw-xp", cx);
+        assert_eq!(window.find("show-raw-xp").checked(), Some(before));
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_data_sharing_mode_is_single_select(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+
+        let off = ("data-sharing", 0usize);
+        let builds = ("data-sharing", 1usize);
+        let replays = ("data-sharing", 2usize);
+
+        assert_eq!(window.find(off).selected(), Some(true), "sharing is off by default");
+
+        window.click(builds, cx);
+        assert_eq!(window.find(builds).selected(), Some(true));
+        assert_eq!(window.find(off).selected(), Some(false), "the modes are exclusive");
+
+        window.click(replays, cx);
+        assert_eq!(window.find(replays).selected(), Some(true));
+        assert_eq!(window.find(builds).selected(), Some(false));
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+        // test_settings starts with Raw XP on; turn it off here.
+        assert_eq!(window.find("show-raw-xp").checked(), Some(true));
+        window.click("show-raw-xp", cx);
+
+        // The replay header's own filter mirrors the same setting.
+        show_tab(window, AppTab::ReplayInspector, cx);
+        window.click(COLUMN_FILTERS_TRIGGER, cx);
+        assert_eq!(window.find(FILTER_RAW_XP).checked(), Some(false), "the edit reached the other tab");
     })
     .expect("the test window stays open");
 }
