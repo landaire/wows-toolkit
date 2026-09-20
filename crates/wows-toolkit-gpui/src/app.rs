@@ -2,8 +2,13 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::Selectable;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::input::InputEvent;
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, v_flex};
@@ -14,10 +19,15 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
+use crate::settings_store;
 use crate::stats::load::SessionData;
 use crate::stats::view::StatsView;
 use crate::theme;
+use crate::ui::selectable;
 use crate::unpacker::view::UnpackerView;
+use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wows_toolkit_viewmodel::settings::keys;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
@@ -93,6 +103,11 @@ pub struct App {
     unpacker: Entity<UnpackerView>,
     /// The Stats tab: session filters over the per-ship aggregate.
     stats: Entity<StatsView>,
+    /// Settings tab text fields. Held so an edit can be read back and the
+    /// saved value can be shown when the tab first renders.
+    wows_dir_input: Entity<InputState>,
+    proxy_input: Entity<InputState>,
+    settings_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -104,6 +119,8 @@ impl App {
         let armor_pane = cx.new(|cx| ArmorViewerPane::new(window, cx));
         let unpacker = cx.new(|cx| UnpackerView::new(window, cx));
         let stats = cx.new(|cx| StatsView::new(window, cx));
+        let wows_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("World of Warships directory"));
+        let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
 
@@ -115,6 +132,8 @@ impl App {
         let subscription = cx.observe(&replay_inspector, |this, _replay_inspector, cx| {
             this.poll_armor_game_data(cx);
         });
+        let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
+        let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
 
         Self {
             active_tab: AppTab::ReplayInspector,
@@ -128,7 +147,10 @@ impl App {
             armor_game_data_requested: false,
             unpacker,
             stats,
-            _subscriptions: vec![subscription],
+            wows_dir_input,
+            proxy_input,
+            settings_scroll: ScrollHandle::new(),
+            _subscriptions: vec![subscription, wows_dir_edited, proxy_edited],
         }
     }
 
@@ -191,6 +213,10 @@ impl App {
             view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, window, cx)
         });
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
+        // Seed the text fields so the tab opens showing what is saved.
+        self.wows_dir_input.update(cx, |state, cx| state.set_value(settings.wows_dir.clone(), window, cx));
+        self.proxy_input.update(cx, |state, cx| state.set_value(settings.proxy_url.clone(), window, cx));
+
         let unpacker_dir = settings.wows_dir.clone();
         self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(unpacker_dir, window, cx));
         self.poll_armor_game_data(cx);
@@ -253,7 +279,99 @@ impl App {
             )))
     }
 
-    fn render_settings_tab(&self, cx: &Context<Self>) -> impl IntoElement {
+    fn on_wows_dir_edited(
+        &mut self,
+        state: &Entity<InputState>,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let path = state.read(cx).value().trim().to_string();
+        self.apply_wows_dir(path, window, cx);
+    }
+
+    /// Saved on blur or Enter rather than per keystroke, so a half-typed URL
+    /// never reaches the database.
+    fn on_proxy_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let url = state.read(cx).value().trim().to_string();
+        let Some(settings) = self.settings_mut() else { return };
+        if settings.proxy_url == url {
+            return;
+        }
+        settings.proxy_url = url.clone();
+        settings_store::save(keys::PROXY_URL, &url, cx);
+    }
+
+    fn settings_mut(&mut self) -> Option<&mut GpuiSettings> {
+        match &mut self.settings {
+            SettingsState::Loaded(settings) => Some(settings),
+            _ => None,
+        }
+    }
+
+    /// Applies one edit to the in-memory snapshot and persists it.
+    ///
+    /// Edits take effect immediately and are written as they happen, as the
+    /// egui settings tab does; there is no apply step to forget.
+    fn edit_setting<T: serde::Serialize>(
+        &mut self,
+        key: &'static str,
+        cx: &mut Context<Self>,
+        apply: impl FnOnce(&mut GpuiSettings) -> T,
+    ) {
+        let Some(settings) = self.settings_mut() else { return };
+        let value = apply(settings);
+        settings_store::save(key, &value, cx);
+        cx.notify();
+    }
+
+    /// Rewrites the whole `ReplaySettings` blob, which is stored as one row,
+    /// and pushes it into the replay inspector so its columns follow.
+    fn edit_replay_settings(&mut self, cx: &mut Context<Self>, apply: impl FnOnce(&mut ReplaySettings)) {
+        let Some(settings) = self.settings_mut() else { return };
+        apply(&mut settings.replay);
+        let replay = settings.replay.clone();
+        settings_store::save(keys::REPLAY_SETTINGS, &replay, cx);
+        self.replay_inspector.update(cx, |view, cx| view.set_replay_settings(replay.clone(), cx));
+        cx.notify();
+    }
+
+    fn browse_for_wows_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(picked) = rfd::FileDialog::new().set_title("World of Warships directory").pick_folder() else {
+            return;
+        };
+        let path = picked.to_string_lossy().into_owned();
+        self.wows_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
+        self.apply_wows_dir(path, window, cx);
+    }
+
+    /// Adopts a new game directory: saved, then pushed into the tabs that read
+    /// it so they reload rather than keep showing the old install.
+    fn apply_wows_dir(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(settings) = self.settings_mut() else { return };
+        if settings.wows_dir == path {
+            return;
+        }
+        settings.wows_dir = path.clone();
+        settings_store::save(keys::WOWS_DIR, &path, cx);
+
+        let replay_settings = settings.replay.clone();
+        let debug_mode = settings.debug_mode;
+        let auto_load = settings.auto_load_latest_replay;
+        let for_unpacker = path.clone();
+        self.replay_inspector
+            .update(cx, |view, cx| view.apply_settings(path, debug_mode, replay_settings, auto_load, window, cx));
+        self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(for_unpacker, window, cx));
+        cx.notify();
+    }
+
+    fn render_settings_tab(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let settings = match &self.settings {
             SettingsState::Loading => {
                 return v_flex()
@@ -272,82 +390,160 @@ impl App {
             SettingsState::Loaded(settings) => settings,
         };
 
-        v_flex()
-            .size_full()
-            .gap_4()
-            .p_4()
+        let check_for_updates = settings.check_for_updates;
+        let enable_logging = settings.enable_logging;
+        let data_sharing = settings.data_sharing;
+        let replay = settings.replay.clone();
+        let current_replay_path = settings.current_replay_path.display().to_string();
+
+        let application = v_flex()
+            .gap_2()
+            .child(section_heading("Application Settings", "General application behavior and appearance"))
+            .child(
+                Checkbox::new("check-for-updates")
+                    .label("Check for updates at startup")
+                    .checked(check_for_updates)
+                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                        let checked = *checked;
+                        this.edit_setting(keys::CHECK_FOR_UPDATES, cx, |settings| {
+                            settings.check_for_updates = checked;
+                            checked
+                        });
+                    })),
+            )
+            .child(Checkbox::new("enable-logging").label("Write a log file").checked(enable_logging).on_click(
+                cx.listener(|this, checked: &bool, _window, cx| {
+                    let checked = *checked;
+                    this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
+                        settings.enable_logging = checked;
+                        checked
+                    });
+                }),
+            ))
+            .child(self.render_zoom_row(cx))
             .child(
                 v_flex()
-                    .gap_2()
-                    .child(section_heading("Application Settings", "General application behavior and appearance"))
-                    .child(self.render_zoom_row(cx)),
+                    .gap_1()
+                    .child(div().text_sm().child("Data sharing"))
+                    .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
+                        selectable(
+                            ("data-sharing", mode as usize),
+                            data_sharing == mode,
+                            Button::new(("data-sharing-button", mode as usize))
+                                .label(mode.label())
+                                .compact()
+                                .selected(data_sharing == mode)
+                                .tooltip(mode.description())
+                                .on_click(cx.listener(move |this, _event, _window, cx| {
+                                    this.edit_setting(keys::DATA_SHARING_MODE, cx, |settings| {
+                                        settings.data_sharing = mode;
+                                        mode
+                                    });
+                                })),
+                        )
+                    })))
+                    .child(div().text_xs().opacity(0.6).child(data_sharing.description())),
             )
             .child(
                 v_flex()
-                    .gap_2()
-                    .child(section_heading("World of Warships Settings", "Path to your World of Warships installation"))
-                    .child(settings_row("World of Warships Directory", settings.wows_dir.clone())),
-            )
+                    .gap_1()
+                    .child(div().text_sm().child("Proxy URL"))
+                    .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full()),
+            );
+
+        let game = v_flex()
+            .gap_2()
+            .child(section_heading("World of Warships Settings", "Path to your World of Warships installation"))
             .child(
-                v_flex()
+                h_flex()
                     .gap_2()
-                    .child(section_heading(
-                        "Replay Settings",
-                        "Configure which columns appear in the replay results table",
-                    ))
-                    .child(settings_row("Current Replay Path", settings.current_replay_path.display().to_string()))
+                    .items_center()
+                    .child(div().flex_1().child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()))
                     .child(
-                        h_flex()
-                            .gap_4()
-                            .child(
-                                Checkbox::new("show-raw-xp")
-                                    .label("Show Raw XP")
-                                    .checked(settings.replay.show_raw_xp)
-                                    .disabled(true),
-                            )
-                            .child(
-                                Checkbox::new("show-entity-id")
-                                    .label("Show Entity ID")
-                                    .checked(settings.replay.show_entity_id)
-                                    .disabled(true),
-                            )
-                            .child(
-                                Checkbox::new("show-observed-damage")
-                                    .label("Show Observed Damage")
-                                    .checked(settings.replay.show_observed_damage)
-                                    .disabled(true),
-                            ),
+                        Button::new("wows-dir-browse")
+                            .icon(IconName::FolderOpen)
+                            .label("Browse...")
+                            .compact()
+                            .on_click(cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx))),
                     ),
-            )
+            );
+
+        let replay_section = v_flex()
+            .gap_2()
+            .child(section_heading("Replay Settings", "Which columns appear in the replay results table"))
+            .child(settings_row("Current Replay Path", current_replay_path))
             .child(
-                v_flex()
-                    .gap_2()
-                    .child(section_heading("Armor Viewer Defaults", "Saved defaults for the armor viewport"))
-                    .child(match &settings.armor_defaults {
-                        Some(d) => h_flex()
-                            .gap_4()
-                            .child(
-                                Checkbox::new("armor-show-plate-edges")
-                                    .label("Show Plate Edges")
-                                    .checked(d.show_plate_edges)
-                                    .disabled(true),
-                            )
-                            .child(
-                                Checkbox::new("armor-show-waterline")
-                                    .label("Show Waterline")
-                                    .checked(d.show_waterline)
-                                    .disabled(true),
-                            )
-                            .child(
-                                Checkbox::new("armor-hull-opaque")
-                                    .label("Hull Opaque")
-                                    .checked(d.hull_opaque)
-                                    .disabled(true),
-                            )
-                            .into_any_element(),
-                        None => div().text_sm().opacity(0.6).child("(no saved defaults)").into_any_element(),
-                    }),
-            )
+                h_flex()
+                    .flex_wrap()
+                    .gap_4()
+                    .child(Checkbox::new("show-raw-xp").label("Show Raw XP").checked(replay.show_raw_xp).on_click(
+                        cx.listener(|this, checked: &bool, _window, cx| {
+                            let checked = *checked;
+                            this.edit_replay_settings(cx, |replay| replay.show_raw_xp = checked);
+                        }),
+                    ))
+                    .child(
+                        Checkbox::new("show-observed-damage")
+                            .label("Show Observed Damage")
+                            .checked(replay.show_observed_damage)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                let checked = *checked;
+                                this.edit_replay_settings(cx, |replay| replay.show_observed_damage = checked);
+                            })),
+                    )
+                    .child(Checkbox::new("show-heals").label("Show Heals").checked(replay.show_heals).on_click(
+                        cx.listener(|this, checked: &bool, _window, cx| {
+                            let checked = *checked;
+                            this.edit_replay_settings(cx, |replay| replay.show_heals = checked);
+                        }),
+                    ))
+                    .child(
+                        Checkbox::new("enable-replay-previews")
+                            .label("Hover a replay to preview it")
+                            .checked(replay.enable_replay_previews)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                let checked = *checked;
+                                this.edit_replay_settings(cx, |replay| replay.enable_replay_previews = checked);
+                            })),
+                    ),
+            );
+
+        // The viewport writes these itself when a pane changes, so the tab
+        // reports them rather than offering a second way to set them.
+        let armor = v_flex()
+            .gap_2()
+            .child(section_heading("Armor Viewer Defaults", "Saved defaults for the armor viewport"))
+            .child(match &settings.armor_defaults {
+                Some(defaults) => h_flex()
+                    .gap_4()
+                    .child(
+                        Checkbox::new("armor-show-plate-edges")
+                            .label("Show Plate Edges")
+                            .checked(defaults.show_plate_edges)
+                            .disabled(true),
+                    )
+                    .child(
+                        Checkbox::new("armor-show-waterline")
+                            .label("Show Waterline")
+                            .checked(defaults.show_waterline)
+                            .disabled(true),
+                    )
+                    .child(
+                        Checkbox::new("armor-hull-opaque")
+                            .label("Hull Opaque")
+                            .checked(defaults.hull_opaque)
+                            .disabled(true),
+                    )
+                    .into_any_element(),
+                None => div().text_sm().opacity(0.6).child("(no saved defaults)").into_any_element(),
+            });
+
+        div()
+            .id("settings-scroll")
+            .size_full()
+            .overflow_y_scroll()
+            .track_scroll(&self.settings_scroll)
+            .child(v_flex().gap_4().p_4().child(application).child(game).child(replay_section).child(armor))
             .into_any_element()
     }
 }

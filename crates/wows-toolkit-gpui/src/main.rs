@@ -5,6 +5,7 @@ mod interaction_tests;
 mod replay_inspector;
 mod runtime;
 mod settings;
+mod settings_store;
 mod stats;
 mod theme;
 mod ui;
@@ -83,11 +84,13 @@ fn main() {
                 let pool = wows_toolkit_config::open_db().await?;
                 let settings = GpuiSettings::load(&pool).await;
                 let session = stats::load::SessionData::load(&pool).await;
-                Ok::<(GpuiSettings, stats::load::SessionData), anyhow::Error>((settings, session))
+                // The pool comes back so settings edits have somewhere to go;
+                // the startup read would otherwise close it.
+                Ok::<_, anyhow::Error>((settings, session, pool))
             })
             .await;
 
-            let (loaded, session) = match loaded {
+            let (loaded, session, pool) = match loaded {
                 Ok(Ok(loaded)) => loaded,
                 Ok(Err(err)) => {
                     // DB open or settings load failed: keep the hardcoded
@@ -117,6 +120,7 @@ fn main() {
             // rather than discarded.
             let zoom = loaded.zoom;
             if let Err(err) = window.update(cx, |_root, window, cx| {
+                settings_store::init(pool, cx);
                 theme::apply_egui_dark_theme(zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.apply_settings(loaded, window, cx);
