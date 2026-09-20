@@ -5,6 +5,7 @@ mod interaction_tests;
 mod player_tracker;
 mod replay_inspector;
 mod runtime;
+mod search;
 mod settings;
 mod settings_store;
 mod stats;
