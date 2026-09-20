@@ -310,6 +310,7 @@ impl UnpackerView {
                 self.open_search(*source, query.clone(), path_filter.clone(), files.clone(), _window, cx);
             }
             BrowserEvent::View { path } => self.open_viewer(path.clone(), _window, cx),
+            BrowserEvent::ViewAsJson { path } => self.open_json_viewer(path.clone(), _window, cx),
         }
     }
 
@@ -454,6 +455,25 @@ impl UnpackerView {
             });
         })
         .detach();
+    }
+
+    /// Decodes an assets.bin prototype and shows the JSON in a viewer tab.
+    fn open_json_viewer(&mut self, path: VfsPath, window: &mut Window, cx: &mut Context<Self>) {
+        let json = match viewer::decode_to_json(&path) {
+            Ok(json) => json,
+            Err(err) => {
+                tracing::warn!("unpacker: {err}");
+                return;
+            }
+        };
+
+        let title = SharedString::from(format!("{} (JSON)", path.as_str().trim_start_matches('/')));
+        let content = viewer::ViewerContent::Plaintext { extension: ".json".to_string(), text: json };
+        let panel = cx.new(|cx| FileViewerPanel::new(title, content, cx));
+        self.dock_area.update(cx, |dock, cx| {
+            dock.add_panel(panel, DockPlacement::Center, None, window, cx);
+        });
+        cx.notify();
     }
 
     fn clear_queue(&mut self, cx: &mut Context<Self>) {
