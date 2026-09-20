@@ -1,0 +1,64 @@
+[package]
+name = "wows-toolkit-gpui"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# GPUI Kit is the single application-facing entry point: `gpui_kit::*` is GPUI
+# itself, `gpui_kit::component` the styled widget library, `gpui_kit::assets`
+# the bundled icon set. GPUI ships as the `gpui-pre-*` crates.io family that
+# Kit depends on for us, so there is no git source to unify and no `[patch]`
+# block. Pinned by branch; the committed Cargo.lock pins the exact commit.
+gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "upstream-dock" }
+anyhow = "1"
+# Matches gpui's own `image` version so Cargo unifies both into one crate
+# instance instead of resolving two. Only "png" is enabled: the game ships
+# ship-class icons as PNG, and that is the only format `icons.rs` decodes.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# The armor viewport owns its own wgpu device (offscreen render + CPU readback
+# into a gpui image). wgpu 29 is what GPUI Kit already resolves, so this direct
+# dependency unifies to the same version rather than pulling a second one.
+wgpu = "29"
+nalgebra = "0.34"
+bytemuck = "1"
+pollster = "0.4"
+serde = { version = "1", features = ["derive"] }
+wows-toolkit-config = { path = "../wows-toolkit-config" }
+# vfs-mmap: load.rs builds the game VFS directly from a live install
+# (wowsunpack::game_data::build_game_vfs_for_build) to run the background
+# replay parse; implies vfs + arc + parsing. rkyv: the on-disk GameParams
+# cache (game_params::cache), shared with the egui app's identical cache file.
+# models: armor_viewer/assets.rs's ShipAssets (ship-export data: assets.bin,
+# camo DB).
+wowsunpack = { path = "../wowsunpack", default-features = false, features = ["arc", "parsing", "vfs-mmap", "rkyv", "models"] }
+wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing", "vfs"] }
+wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb"] }
+wows-battle-world = { path = "../wows-battle-world", default-features = false }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread"] }
+sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+thiserror = "2.0"
+escaper = "0.1.1"
+gettext = "0.4"
+rfd = "0.17"
+# ASCII-folded search names for the armor viewer's ship catalog, matching the
+# egui app's `ShipCatalog::build` and wowsunpack's own pinned version.
+unidecode = "0.3"
+
+[dev-dependencies]
+# Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the
+# pointer/keyboard dispatch used by the interaction tests. Enabling it here
+# keeps it out of release builds; `.test_support()` in the views is inert
+# without it.
+gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "upstream-dock", features = ["test-support"] }
+jiff = "0.2"
+
+[workspace]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.97"
