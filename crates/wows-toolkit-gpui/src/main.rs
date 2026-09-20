@@ -2,6 +2,7 @@ mod app;
 mod armor_viewer;
 #[cfg(test)]
 mod interaction_tests;
+mod player_tracker;
 mod replay_inspector;
 mod runtime;
 mod settings;
@@ -120,11 +121,12 @@ fn main() {
             // rather than discarded.
             let zoom = loaded.zoom;
             if let Err(err) = window.update(cx, |_root, window, cx| {
-                settings_store::init(pool, cx);
+                settings_store::init(pool.clone(), cx);
                 theme::apply_egui_dark_theme(zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.apply_settings(loaded, window, cx);
                     app.apply_session_stats(session, window, cx);
+                    app.start_player_tracker(pool, cx);
                     cx.notify();
                 });
             }) {

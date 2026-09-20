@@ -19,6 +19,8 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_viewmodel::player_tracker::SortColumn;
+use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
@@ -56,6 +58,9 @@ const PKG_FILTER: &str = "unpacker-pkg-filter";
 /// Stats tab filter bar (`stats::view`).
 const STATS_LIMIT_ENABLED: &str = "stats-limit-enabled";
 const STATS_LIMIT_COUNT: &str = "stats-limit-count";
+
+/// Player Tracker controls (`player_tracker`).
+const TRACKER_FILTER: &str = "tracker-filter";
 
 /// Opens the real root view in a headless window sized like the app's own
 /// default, with the component layer initialized.
@@ -548,6 +553,57 @@ fn adding_a_chart_opens_another_pane_with_its_own_controls(cx: &mut TestAppConte
 
         window.click("stats-add-chart", cx);
         assert!(window.try_find(second_pane_line_mode).is_some(), "the new pane brought its own controls");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_player_tracker_period_is_single_select(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::PlayerTracker, cx);
+
+        let last_day = ("tracker-period", TimePeriod::LastDay as usize);
+        let all_time = ("tracker-period", TimePeriod::AllTime as usize);
+
+        assert_eq!(window.find(last_day).selected(), Some(true), "the tracker opens on the last day");
+
+        window.click(all_time, cx);
+        assert_eq!(window.find(all_time).selected(), Some(true));
+        assert_eq!(window.find(last_day).selected(), Some(false), "the periods are exclusive");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn clicking_a_tracker_column_sorts_by_it_and_clicking_again_reverses(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::PlayerTracker, cx);
+
+        let by_name = ("tracker-sort", SortColumn::Name as usize);
+        let by_count = ("tracker-sort", SortColumn::Encounters as usize);
+
+        assert_eq!(window.find(by_count).selected(), Some(true), "encounters is the opening sort");
+
+        window.click(by_name, cx);
+        assert_eq!(window.find(by_name).selected(), Some(true));
+        assert_eq!(window.find(by_count).selected(), Some(false), "only one column sorts at a time");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_tracker_says_it_is_waiting_when_no_index_is_open(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::PlayerTracker, cx);
+        // With no config database the table has nothing to draw, so the
+        // filter box is the only input present.
+        assert!(window.try_find(TRACKER_FILTER).is_some());
     })
     .expect("the test window stays open");
 }

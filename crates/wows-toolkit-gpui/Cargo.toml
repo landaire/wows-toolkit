@@ -45,6 +45,8 @@ sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # The recent-games input accepts digits only, which NumberInput takes as a
 # pattern.
 regex = "1"
+# Time periods for the Player Tracker window.
+jiff = "0.2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 thiserror = "2.0"

@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 glob.workspace = true
+jiff.workspace = true
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
