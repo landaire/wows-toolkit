@@ -40,6 +40,8 @@ use wows_toolkit_viewmodel::unpacker::extract::ExtractOutcome;
 use wows_toolkit_viewmodel::unpacker::extract::ExtractProgress;
 use wows_toolkit_viewmodel::unpacker::extract::expand_to_files;
 use wows_toolkit_viewmodel::unpacker::extract::extract_files;
+use wows_toolkit_viewmodel::unpacker::game_params;
+use wows_toolkit_viewmodel::unpacker::game_params::GameParamsFormat;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
 use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
@@ -105,6 +107,12 @@ pub struct UnpackerView {
     loaded_source: Option<(PathBuf, BuildNumber)>,
     /// Bumped per build-load request so a stale result can be dropped.
     load_generation: u64,
+    /// The package VFS of the loaded build, for the parameters dump. Held here
+    /// rather than reached out of the pane, which owns its own copy for
+    /// browsing.
+    package_vfs: Option<wowsunpack::vfs::VfsPath>,
+    /// What the last parameters dump did, shown beside the button.
+    dump_status: Option<String>,
     build_select: Entity<SelectState<SearchableVec<BuildItem>>>,
     wows_dir: Option<PathBuf>,
     dock_area: Entity<DockArea>,
@@ -152,6 +160,8 @@ impl UnpackerView {
             selected_build: None,
             loaded_source: None,
             load_generation: 0,
+            package_vfs: None,
+            dump_status: None,
             build_select,
             wows_dir: None,
             dock_area,
@@ -252,6 +262,8 @@ impl UnpackerView {
             let package_vfs = match loaded {
                 Ok(vfs) => {
                     let handed = vfs.clone();
+                    let held = vfs.clone();
+                    let _ = this.update(cx, |this, _cx| this.package_vfs = Some(held));
                     let _ = pkg_browser.update_in(cx, |pane, window, cx| pane.set_vfs(handed, window, cx));
                     vfs
                 }
@@ -407,6 +419,43 @@ impl UnpackerView {
         cx.notify();
     }
 
+    /// Writes the build's parameters out in `format`.
+    ///
+    /// The minimal formats write the toolkit's own decoded parameters, which
+    /// this tab does not hold, so they are not offered here; the two raw
+    /// formats are.
+    fn dump_game_params(&mut self, format: GameParamsFormat, base_only: bool, cx: &mut Context<Self>) {
+        let Some(vfs) = self.package_vfs.clone() else {
+            self.dump_status = Some("No build is loaded".to_string());
+            cx.notify();
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Save game parameters")
+            .set_file_name(format!("GameParams.{}", format.extension()))
+            .save_file()
+        else {
+            return;
+        };
+
+        self.dump_status = Some("Writing...".to_string());
+        cx.notify();
+
+        cx.spawn(async move |this, cx| {
+            let written =
+                cx.background_spawn(async move { game_params::dump_pickled(&vfs, &path, format, base_only) }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.dump_status = Some(match written {
+                    Ok(()) => "Parameters written".to_string(),
+                    Err(err) => format!("{err}"),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn clear_queue(&mut self, cx: &mut Context<Self>) {
         self.queue.clear();
         self.extract_state = ExtractState::Idle;
@@ -538,6 +587,29 @@ impl Render for UnpackerView {
                     .disabled(!busy)
                     .on_click(cx.listener(|this, _event, _window, cx| this.cancel_extraction(cx))),
             )
+            .child(
+                Button::new("unpacker-dump-params")
+                    .label("Dump parameters")
+                    .compact()
+                    .disabled(self.package_vfs.is_none())
+                    .tooltip("Write this build's GameParams.data out as JSON")
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.dump_game_params(GameParamsFormat::Json, false, cx)
+                    })),
+            )
+            .child(
+                Button::new("unpacker-dump-base-params")
+                    .label("Dump base parameters")
+                    .compact()
+                    .disabled(self.package_vfs.is_none())
+                    .tooltip("Write only the base entry of GameParams.data as JSON")
+                    .on_click(
+                        cx.listener(|this, _event, _window, cx| {
+                            this.dump_game_params(GameParamsFormat::Json, true, cx)
+                        }),
+                    ),
+            )
+            .when_some(self.dump_status.clone(), |this, status| this.child(div().text_xs().opacity(0.6).child(status)))
             .child(
                 Button::new("unpacker-clear-queue")
                     .label("Clear")
