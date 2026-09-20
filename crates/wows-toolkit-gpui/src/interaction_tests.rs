@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_config::index::query::SortColumn as SearchSortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -61,6 +62,9 @@ const STATS_LIMIT_COUNT: &str = "stats-limit-count";
 
 /// Player Tracker controls (`player_tracker`).
 const TRACKER_FILTER: &str = "tracker-filter";
+
+/// Search tab controls (`search`).
+const SEARCH_QUERY: &str = "search-query";
 
 /// Opens the real root view in a headless window sized like the app's own
 /// default, with the component layer initialized.
@@ -604,6 +608,55 @@ fn the_tracker_says_it_is_waiting_when_no_index_is_open(cx: &mut TestAppContext)
         // With no config database the table has nothing to draw, so the
         // filter box is the only input present.
         assert!(window.try_find(TRACKER_FILTER).is_some());
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_search_tab_invites_a_query_before_one_is_run(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        assert!(window.try_find(SEARCH_QUERY).is_some(), "the query box is ready");
+        // Date is the opening sort, newest first.
+        assert_eq!(window.find(("search-sort", SearchSortColumn::Date as usize)).selected(), Some(true));
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn a_query_that_does_not_parse_is_reported_rather_than_searched_for(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+
+        window.click(SEARCH_QUERY, cx);
+        // A trailing operator is a parse error, not a literal to search for.
+        window.input("outcome=win and", cx);
+        window.click("search-run", cx);
+
+        // The tab stays usable and keeps its query box rather than clearing.
+        assert!(window.try_find(SEARCH_QUERY).is_some());
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn clicking_a_search_column_moves_the_sort_to_it(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+
+        let by_date = ("search-sort", SearchSortColumn::Date as usize);
+        let by_damage = ("search-sort", SearchSortColumn::Damage as usize);
+
+        assert_eq!(window.find(by_date).selected(), Some(true));
+        window.click(by_damage, cx);
+        assert_eq!(window.find(by_damage).selected(), Some(true));
+        assert_eq!(window.find(by_date).selected(), Some(false), "one column sorts at a time");
     })
     .expect("the test window stays open");
 }

@@ -19,6 +19,7 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
+use crate::search::SearchView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::settings_store;
 use crate::stats::load::SessionData;
@@ -35,6 +36,7 @@ pub enum AppTab {
     ReplayInspector,
     Stats,
     PlayerTracker,
+    Search,
     ArmorViewer,
     Unpacker,
     Settings,
@@ -43,12 +45,13 @@ pub enum AppTab {
 impl AppTab {
     /// Left-to-right order, following the egui app's own dock order
     /// (`app.rs`'s `DockState::new`): replays first, settings last. The tabs
-    /// tabs that order also carries -- Player Tracker and Search -- are not
-    /// ported yet, so this is that sequence with those gaps closed.
-    pub const ALL: [AppTab; 6] = [
+    /// This is every tab the egui dock opens, in its order. `Tab::ModManager`
+    /// is deliberately absent: the egui app never adds it to its dock either.
+    pub const ALL: [AppTab; 7] = [
         AppTab::ReplayInspector,
         AppTab::Stats,
         AppTab::PlayerTracker,
+        AppTab::Search,
         AppTab::ArmorViewer,
         AppTab::Unpacker,
         AppTab::Settings,
@@ -59,6 +62,7 @@ impl AppTab {
             AppTab::ReplayInspector => "Replay Inspector",
             AppTab::Stats => "Stats",
             AppTab::PlayerTracker => "Player Tracker",
+            AppTab::Search => "Search",
             AppTab::ArmorViewer => "Armor Viewer",
             AppTab::Unpacker => "Unpacker",
             AppTab::Settings => "Settings",
@@ -114,6 +118,8 @@ pub struct App {
     stats: Entity<StatsView>,
     /// The Player Tracker tab: everyone met, from the replay index.
     player_tracker: Entity<PlayerTrackerView>,
+    /// The Search tab: a query over the replay index.
+    search: Entity<SearchView>,
     /// Settings tab text fields. Held so an edit can be read back and the
     /// saved value can be shown when the tab first renders.
     wows_dir_input: Entity<InputState>,
@@ -131,6 +137,7 @@ impl App {
         let unpacker = cx.new(|cx| UnpackerView::new(window, cx));
         let stats = cx.new(|cx| StatsView::new(window, cx));
         let player_tracker = cx.new(|cx| PlayerTrackerView::new(window, cx));
+        let search = cx.new(|cx| SearchView::new(window, cx));
         let wows_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("World of Warships directory"));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
         let focus_handle = cx.focus_handle();
@@ -160,6 +167,7 @@ impl App {
             unpacker,
             stats,
             player_tracker,
+            search,
             wows_dir_input,
             proxy_input,
             settings_scroll: ScrollHandle::new(),
@@ -593,6 +601,7 @@ impl Render for App {
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
             AppTab::Stats => self.stats.clone().into_any_element(),
             AppTab::PlayerTracker => self.player_tracker.clone().into_any_element(),
+            AppTab::Search => self.search.clone().into_any_element(),
             AppTab::Unpacker => self.unpacker.clone().into_any_element(),
         };
 
