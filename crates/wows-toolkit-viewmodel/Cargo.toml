@@ -11,13 +11,15 @@ name = "wows_toolkit_viewmodel"
 path = "src/lib.rs"
 
 [dependencies]
+ciborium.workspace = true
 glob.workspace = true
+pickled.workspace = true
 jiff.workspace = true
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-wowsunpack = { workspace = true, features = ["vfs", "parsing"] }
+wowsunpack = { workspace = true, features = ["vfs", "parsing", "rkyv"] }
 wows_replays = { workspace = true }
 wows-toolkit-config = { workspace = true }
 
