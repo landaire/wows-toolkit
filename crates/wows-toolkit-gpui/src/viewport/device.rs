@@ -128,7 +128,7 @@ mod tests {
     use super::*;
 
     /// `readback_to_render_image` swaps R and B in place so the RGBA readback
-    /// becomes BGRA (gpui_kit's `RenderImage` pixel layout); alpha is untouched.
+    /// becomes BGRA (gpui's `RenderImage` pixel layout); alpha is untouched.
     #[test]
     fn readback_to_render_image_swaps_r_and_b_to_bgra() {
         let rgba = vec![10u8, 20, 30, 40];

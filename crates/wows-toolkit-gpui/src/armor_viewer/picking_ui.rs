@@ -16,10 +16,10 @@ use gpui_kit::IntoElement;
 use gpui_kit::ParentElement;
 use gpui_kit::Pixels;
 use gpui_kit::Styled;
-use gpui_kit::div;
-use gpui_kit::px;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
+use gpui_kit::div;
+use gpui_kit::px;
 
 use wowsunpack::export::gltf_export::thickness_to_color;
 

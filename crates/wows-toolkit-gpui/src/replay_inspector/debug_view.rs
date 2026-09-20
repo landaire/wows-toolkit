@@ -7,10 +7,10 @@
 //! side-panel slot instead, the same v1 tradeoff `chat.rs` documents for the
 //! chat window.
 
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
+use gpui_kit::*;
 
 /// One JSON payload's scrollable text view, split into one child `div` per
 /// line so gpui_kit lays out each line individually rather than wrapping the

@@ -21,8 +21,6 @@
 //! move/up to the whole interactive surface rather than the small hit target
 //! that started the drag.
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
@@ -30,6 +28,8 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wowsunpack::export::gltf_export::ArmorLegendEntry;
 use wowsunpack::export::gltf_export::armor_color_legend;

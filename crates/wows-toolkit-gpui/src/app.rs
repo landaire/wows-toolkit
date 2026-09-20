@@ -1,5 +1,3 @@
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -9,6 +7,8 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::slider::{Slider, SliderState};
 use gpui_kit::component::tab::{Tab, TabBar};
 use gpui_kit::component::{h_flex, v_flex};
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 use crate::armor_viewer::ArmorViewerPane;
 use crate::replay_inspector::GameDataStatus;
@@ -142,7 +142,15 @@ impl App {
     /// lifetime of the session (no write-back). Also kicks off the replay
     /// inspector's background directory scan and game-data cache, now that
     /// the WoWs directory is known.
-    pub fn apply_settings(&mut self, settings: GpuiSettings, cx: &mut Context<Self>) {
+    /// The Replay Inspector tab's view, so state the tab owns (its grouping,
+    /// for one) can be asserted without reaching through the rendered frame.
+    /// Test-only: the app itself reaches the field directly.
+    #[cfg(test)]
+    pub(crate) fn replay_inspector(&self) -> &Entity<ReplayInspectorView> {
+        &self.replay_inspector
+    }
+
+    pub fn apply_settings(&mut self, settings: GpuiSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.zoom = settings.zoom;
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
@@ -152,7 +160,7 @@ impl App {
         let auto_load_latest_replay = settings.auto_load_latest_replay;
         self.debug_mode = debug_mode;
         self.replay_inspector.update(cx, |view, cx| {
-            view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, cx)
+            view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, window, cx)
         });
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
         self.poll_armor_game_data(cx);
@@ -348,6 +356,8 @@ impl Render for App {
         // instead of a unicode character in source.
         let warning_color = cx.theme().warning;
         let debug_notice = h_flex()
+            .id("app-debug-notice")
+            .test_support()
             .flex_none()
             .gap_1()
             .items_center()

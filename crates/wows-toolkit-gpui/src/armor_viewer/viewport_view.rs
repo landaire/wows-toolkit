@@ -1,6 +1,6 @@
 //! Armor viewport view: wraps the offscreen-rendered `img()` (Task 1) with
 //! gpui_kit mouse/scroll/key input driving the copied `viewport_3d` arcball
-//! camera, plus a gpui_kit-native redraw of the navigation gizmo overlaid on top.
+//! camera, plus a gpui-native redraw of the navigation gizmo overlaid on top.
 //! Milestone 3 Task 6 adds CPU plate picking on top of the same mouse-move
 //! handler: hovering a plate shows a thickness tooltip (`picking_ui.rs`) and
 //! a highlight overlay; a plain click (not a camera drag) toggles that
@@ -25,8 +25,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::h_flex;
@@ -35,6 +33,8 @@ use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::slider::SliderEvent;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -1994,8 +1994,8 @@ impl Render for ViewportView {
 
         // Floating thickness tooltip, anchored near (not under) the cursor
         // and snapped back inside the window if it would overflow -- reuses
-        // gpui_kit's own `anchored()`/`deferred()` primitives (the same ones the
-        // context menu below and gpui_kit-component's managed tooltips use)
+        // gpui's own `anchored()`/`deferred()` primitives (the same ones the
+        // context menu below and gpui-component's managed tooltips use)
         // rather than hand-measuring the tooltip's size.
         let tooltip_overlay = self.hovered.as_ref().map(|hover| {
             let theme = cx.theme();
@@ -2022,7 +2022,7 @@ impl Render for ViewportView {
 
         // Export-confirm panel (Milestone 5 Task 10): a minimal inline
         // overlay (no `Modal`/`ContextModal` exists in this pinned
-        // gpui_kit-component revision) reproducing egui's own `export_confirm`
+        // gpui-component revision) reproducing egui's own `export_confirm`
         // dialog (`tab.rs:1045-1111`) -- ship name, disclaimer, Export/Cancel.
         // `.occlude()` blocks the 3D viewport's own mouse handlers underneath
         // while it's open, matching `legend.rs`'s dragged panel.
@@ -2249,7 +2249,7 @@ fn ball_bounds(center: Point<Pixels>, radius: f32) -> Bounds<Pixels> {
 /// label on the positive balls), depth-ordered so the ball nearest the
 /// camera draws on top, plus a white hover ring. Reuses the copied gizmo
 /// projection math (`gizmo::ball_draw_order`/`gizmo_rect`) verbatim; only the
-/// drawing itself is gpui_kit-native (the egui version used `egui::Painter`).
+/// drawing itself is gpui-native (the egui version used `egui::Painter`).
 fn draw_gizmo_overlay(
     bounds: Bounds<Pixels>,
     camera: &ArcballCamera,

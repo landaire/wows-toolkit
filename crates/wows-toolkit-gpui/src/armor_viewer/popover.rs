@@ -18,8 +18,6 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -37,6 +35,8 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;

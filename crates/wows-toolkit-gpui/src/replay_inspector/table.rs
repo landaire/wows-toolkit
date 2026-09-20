@@ -16,8 +16,6 @@
 
 use std::collections::HashSet;
 
-use gpui_kit::prelude::FluentBuilder;
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
@@ -31,6 +29,8 @@ use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::*;
 
 use super::columns::BattleOutcome;
 use super::columns::CaptainPointsTier;
@@ -257,7 +257,7 @@ fn column_sort(col: ReplayColumn) -> Option<SortColumn> {
 }
 
 /// Sort-direction icon shown after the active sort column's label. The egui
-/// app uses an icon-font glyph; gpui_kit-component ships the same shape as a
+/// app uses an icon-font glyph; gpui-component ships the same shape as a
 /// bundled SVG (`sort-ascending`/`sort-descending`), so this port uses that
 /// instead of an ASCII arrow.
 fn sort_caret_icon(order: SortOrder) -> IconName {
@@ -678,7 +678,7 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// backing URL/JSON is `None`, per this port's "hidden, not a panic" rule for
 /// missing config (`PlayerRow::ship_config_url`'s field doc). "Open"/"WoWS
 /// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
-/// (gpui_kit's own OS-opener, no `open`-crate dependency needed) and renders the
+/// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
 /// external-link glyph the egui app's SHARE icon stood in for; the copy
 /// items write to the clipboard via `cx.write_to_clipboard`, matching
 /// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View
@@ -725,7 +725,7 @@ impl ActionsMenuData {
 /// backing URL/JSON is `None`, per this port's "hidden, not a panic" rule for
 /// missing config (`PlayerRow::ship_config_url`'s field doc). "Open"/"WoWS
 /// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
-/// (gpui_kit's own OS-opener, no `open`-crate dependency needed) and renders the
+/// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
 /// external-link glyph the egui app's SHARE icon stood in for; the copy
 /// items write to the clipboard via `cx.write_to_clipboard`, matching
 /// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View

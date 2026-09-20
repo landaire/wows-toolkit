@@ -593,7 +593,7 @@ mod tests {
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored --nocapture upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry
+    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture upload_armor_to_viewport_against_a_real_install_renders_thickness_colored_geometry
     /// ```
     #[test]
     #[ignore = "needs a local game install and a real GPU adapter; see the doc comment for the run command"]

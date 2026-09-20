@@ -147,7 +147,7 @@ mod tests {
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored load_armor_assets_against_a_real_install_loads_assets_catalog_and_icons
+    /// cargo test -p wows-toolkit-gpui -- --ignored load_armor_assets_against_a_real_install_loads_assets_catalog_and_icons
     /// ```
     #[test]
     #[ignore = "needs a local game install; see the doc comment for the run command"]

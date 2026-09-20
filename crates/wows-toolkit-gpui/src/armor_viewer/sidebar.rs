@@ -1,5 +1,5 @@
 //! Ship sidebar tree: nation -> class -> ship, filtered by a search box.
-//! Reuses the same gpui_kit-component `tree`/`TreeState` the Replay Inspector's
+//! Reuses the same gpui-component `tree`/`TreeState` the Replay Inspector's
 //! file browser is built on (`replay_inspector::browser_view`), and its
 //! `render_browser_item`-style pattern of a side id->metadata map consulted
 //! by the row renderer.
@@ -39,7 +39,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use gpui_kit::*;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
@@ -56,6 +55,7 @@ use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
 use gpui_kit::component::tree::tree;
 use gpui_kit::component::v_flex;
+use gpui_kit::*;
 
 use wowsunpack::game_params::types::Species;
 
@@ -307,7 +307,7 @@ impl Render for Sidebar {
             .border_b_1()
             .border_color(border)
             .child(Icon::new(IconName::Search))
-            .child(Input::new(&self.search_state).small().w_full());
+            .child(Input::new(&self.search_state).id("armor-sidebar-search").small().w_full());
 
         let body: AnyElement = match &self.bundle {
             None => div().p_2().text_sm().opacity(0.6).child("Loading ship catalog...").into_any_element(),

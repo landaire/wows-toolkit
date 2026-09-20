@@ -957,7 +957,7 @@ mod tests {
     /// ```text
     /// WOWS_REPLAY_INSPECTOR_TEST_GAME_DIR=G:\wows_builds\13.11.0 \
     /// WOWS_REPLAY_INSPECTOR_TEST_VERSION="13, 11, 0, 12668706" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored from_normalized_resolves_species_text_from_a_real_provider
+    /// cargo test -p wows-toolkit-gpui -- --ignored from_normalized_resolves_species_text_from_a_real_provider
     /// ```
     ///
     /// See `reference_test_replays_and_builds.md` for the build-directory

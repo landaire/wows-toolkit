@@ -43,8 +43,8 @@ use wowsunpack::export::camo_textures::CamoSchemeInfo;
 use wowsunpack::export::camo_textures::CamoTextureSource;
 use wowsunpack::export::gltf_export::InteractiveArmorMesh;
 use wowsunpack::export::gltf_export::InteractiveHullMesh;
-use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ExportContents;
+use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::game_params::keys::ComponentType;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -695,7 +695,7 @@ mod tests {
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored load_ship_armor_against_a_real_install_produces_a_renderable_model
+    /// cargo test -p wows-toolkit-gpui -- --ignored load_ship_armor_against_a_real_install_produces_a_renderable_model
     /// ```
     #[test]
     #[ignore = "needs a local game install; see the doc comment for the run command"]
@@ -759,7 +759,7 @@ mod tests {
     ///
     /// ```text
     /// WOWS_ARMOR_VIEWER_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
-    /// cargo test -p wows-toolkit-gpui_kit -- --ignored export_ship_glb_against_a_real_install_writes_a_valid_glb_file
+    /// cargo test -p wows-toolkit-gpui -- --ignored export_ship_glb_against_a_real_install_writes_a_valid_glb_file
     /// ```
     #[test]
     #[ignore = "needs a local game install; see the doc comment for the run command"]
@@ -790,7 +790,7 @@ mod tests {
             .next()
             .expect("expected at least one ship in the real catalog");
 
-        let out_dir = std::env::temp_dir().join("wows-toolkit-gpui_kit-export-glb-test");
+        let out_dir = std::env::temp_dir().join("wows-toolkit-gpui-export-glb-test");
         std::fs::create_dir_all(&out_dir).expect("failed to create scratch output dir");
         let out_path = out_dir.join(default_export_filename(&ship.display_name));
 

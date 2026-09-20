@@ -1,7 +1,7 @@
 //! GPUI Armor Viewer tab. `viewport_view` owns the 3D viewport: gpui_kit mouse
 //! and key input drives the copied `viewport_3d` arcball camera, an
 //! on-demand (dirty-gated) offscreen render feeds a gpui_kit `RenderImage`, and a
-//! gpui_kit-native overlay reimplements the navigation gizmo on top of it.
+//! gpui-native overlay reimplements the navigation gizmo on top of it.
 //! `catalog` builds the ship selector's nation/class/ship listing from the
 //! loaded `GameMetadataProvider`; `assets` loads the shared `ShipAssets`
 //! (ship-export data) plus the catalog and its nation-flag/class-icon cache
