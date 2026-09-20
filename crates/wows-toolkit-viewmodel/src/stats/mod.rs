@@ -7,6 +7,8 @@
 //! after the fact, so "no games" is a state the type admits instead of a
 //! number that happens to mean nothing.
 
+pub mod chart;
+
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::types::GameParamId;

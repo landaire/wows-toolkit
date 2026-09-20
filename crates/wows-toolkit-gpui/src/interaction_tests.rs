@@ -20,6 +20,8 @@ use std::time::Duration;
 
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wows_toolkit_viewmodel::stats::chart::ChartMode;
+use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 
 use wows_toolkit_config::ReplayGrouping;
 
@@ -493,6 +495,59 @@ fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
         show_tab(window, AppTab::ReplayInspector, cx);
         window.click(COLUMN_FILTERS_TRIGGER, cx);
         assert_eq!(window.find(FILTER_RAW_XP).checked(), Some(false), "the edit reached the other tab");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_chart_mode_toggle_is_single_select(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+
+        // The first chart pane is id 0, so its mode ids start at 0.
+        let line = ("chart-mode", 0usize);
+        let bar = ("chart-mode", 1usize);
+
+        assert_eq!(window.find(line).selected(), Some(true), "a chart opens as a line");
+
+        window.click(bar, cx);
+        assert_eq!(window.find(bar).selected(), Some(true));
+        assert_eq!(window.find(line).selected(), Some(false), "the modes are exclusive");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn switching_to_a_bar_chart_offers_win_rate_which_a_line_cannot_plot(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+
+        // Win rate is the last statistic; a line chart does not offer it.
+        let win_rate = ("chart-stat", ChartableStat::WinRate as usize);
+        assert!(window.try_find(win_rate).is_none(), "a line chart cannot plot win rate");
+
+        window.click(("chart-mode", 1usize), cx);
+        assert!(window.try_find(win_rate).is_some(), "a bar chart can");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn adding_a_chart_opens_another_pane_with_its_own_controls(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+        // The second pane's ids are offset by its id, so they do not collide.
+        let second_pane_line_mode = ("chart-mode", ChartMode::ALL.len());
+        assert!(window.try_find(second_pane_line_mode).is_none(), "only one chart is open to begin with");
+
+        window.click("stats-add-chart", cx);
+        assert!(window.try_find(second_pane_line_mode).is_some(), "the new pane brought its own controls");
     })
     .expect("the test window stays open");
 }
