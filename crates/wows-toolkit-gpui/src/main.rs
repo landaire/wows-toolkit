@@ -6,6 +6,7 @@ mod replay_inspector;
 mod runtime;
 mod settings;
 mod theme;
+mod unpacker;
 mod viewport;
 
 use app::App;
