@@ -5,7 +5,9 @@ mod interaction_tests;
 mod replay_inspector;
 mod runtime;
 mod settings;
+mod stats;
 mod theme;
+mod ui;
 mod unpacker;
 mod viewport;
 
@@ -79,11 +81,13 @@ fn main() {
 
             let loaded = runtime::spawn(cx, async move {
                 let pool = wows_toolkit_config::open_db().await?;
-                Ok::<GpuiSettings, anyhow::Error>(GpuiSettings::load(&pool).await)
+                let settings = GpuiSettings::load(&pool).await;
+                let session = stats::load::SessionData::load(&pool).await;
+                Ok::<(GpuiSettings, stats::load::SessionData), anyhow::Error>((settings, session))
             })
             .await;
 
-            let loaded = match loaded {
+            let (loaded, session) = match loaded {
                 Ok(Ok(loaded)) => loaded,
                 Ok(Err(err)) => {
                     // DB open or settings load failed: keep the hardcoded
@@ -116,6 +120,7 @@ fn main() {
                 theme::apply_egui_dark_theme(zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.apply_settings(loaded, window, cx);
+                    app.apply_session_stats(session, window, cx);
                     cx.notify();
                 });
             }) {
