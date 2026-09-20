@@ -25,6 +25,8 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::list::ListItem;
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
 use gpui_kit::component::scroll::Scrollbar;
@@ -45,6 +47,7 @@ use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
 use wows_toolkit_viewmodel::unpacker::listing::filtered_entries;
 use wows_toolkit_viewmodel::unpacker::listing::is_filtering;
+use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
 
 /// Which VFS a pane browses. The two sources load differently -- the package
 /// VFS arrives with the build, assets.bin is parsed in the background -- so
@@ -100,6 +103,8 @@ pub enum BrowserEvent {
     Search { source: BrowserSource, query: String, path_filter: String, files: Arc<FileList> },
     /// Open this file in the viewer its name calls for.
     View { path: VfsPath },
+    /// Decode this assets.bin prototype and show the JSON.
+    ViewAsJson { path: VfsPath },
 }
 
 impl EventEmitter<BrowserEvent> for BrowserPanel {}
@@ -409,6 +414,11 @@ impl Render for BrowserPanel {
                 let path = row.path.clone();
                 let is_dir = row.is_dir;
                 let size = row.size.map(format_size).unwrap_or_default();
+                // Only an assets.bin prototype the decoder understands offers
+                // the JSON view.
+                let decodable = !is_dir && decodable_prototype(&row.label).is_some();
+                let json_path = path.clone();
+                let json_entity = entity.clone();
                 h_flex()
                     .id(ix)
                     .w_full()
@@ -434,6 +444,17 @@ impl Render for BrowserPanel {
                                 cx.emit(BrowserEvent::View { path: path.clone() });
                             }
                         });
+                    })
+                    .context_menu(move |menu, _window, _cx| {
+                        if !decodable {
+                            return menu;
+                        }
+                        let path = json_path.clone();
+                        let entity = json_entity.clone();
+                        menu.item(PopupMenuItem::new("View as JSON").on_click(move |_event, _window, cx| {
+                            let path = path.clone();
+                            entity.update(cx, |_this, cx| cx.emit(BrowserEvent::ViewAsJson { path }));
+                        }))
                     })
                     .into_any_element()
             }

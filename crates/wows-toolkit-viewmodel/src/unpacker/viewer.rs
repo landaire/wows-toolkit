@@ -4,6 +4,7 @@
 //! ends; how the result is drawn is not.
 
 use std::io::Read as _;
+use wowsunpack::data::assets_bin_vfs::PrototypeType;
 use wowsunpack::vfs::VfsPath;
 
 use super::listing::FileKind;
@@ -22,6 +23,36 @@ pub enum ViewerContent {
     },
 }
 
+/// The prototype an assets.bin entry decodes to, when its extension names one
+/// the decoder understands.
+///
+/// `None` for every other file, including assets.bin entries whose type is
+/// recognised but not yet decodable.
+pub fn decodable_prototype(file_name: &str) -> Option<PrototypeType> {
+    let dot = file_name.rfind('.')?;
+    let prototype = PrototypeType::from_extension(&file_name[dot..])?;
+    wowsunpack::models::can_decode_prototype(prototype).then_some(prototype)
+}
+
+/// Decodes one assets.bin entry to JSON.
+pub fn decode_to_json(path: &VfsPath) -> Result<String, ViewerError> {
+    let name = path.filename();
+    let Some(prototype) = decodable_prototype(&name) else {
+        return Err(ViewerError::NotDecodable { name });
+    };
+
+    let mut bytes = Vec::new();
+    path.open_file()
+        .and_then(|mut file| {
+            file.read_to_end(&mut bytes)?;
+            Ok(())
+        })
+        .map_err(|source| ViewerError::Read { name: name.clone(), source })?;
+
+    wowsunpack::models::decode_prototype_to_json(&bytes, prototype)
+        .map_err(|err| ViewerError::Decode { name, reason: err.to_string() })
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ViewerError {
     #[error("{name} has no in-app viewer")]
@@ -34,6 +65,10 @@ pub enum ViewerError {
     },
     #[error("{name} is not valid UTF-8, so it cannot be shown as text")]
     NotText { name: String },
+    #[error("{name} is not a prototype this build can decode")]
+    NotDecodable { name: String },
+    #[error("{name} could not be decoded: {reason}")]
+    Decode { name: String, reason: String },
 }
 
 /// Reads `path` for viewing.
@@ -111,5 +146,30 @@ mod tests {
     fn a_missing_file_reports_the_read_failure() {
         let error = load(&fixture().join("res/nope.xml").unwrap()).expect_err("there is no such file");
         assert!(matches!(error, ViewerError::Read { .. }));
+    }
+}
+
+#[cfg(test)]
+mod prototype_tests {
+    use super::ViewerError;
+    use super::decodable_prototype;
+    use super::decode_to_json;
+    use std::io::Write as _;
+    use wowsunpack::vfs::MemoryFS;
+    use wowsunpack::vfs::VfsPath;
+
+    #[test]
+    fn a_file_whose_extension_names_no_prototype_is_not_decodable() {
+        assert!(decodable_prototype("notes.txt").is_none());
+        assert!(decodable_prototype("noextension").is_none());
+    }
+
+    #[test]
+    fn asking_to_decode_an_ordinary_file_says_so_rather_than_reading_it() {
+        let root: VfsPath = MemoryFS::new().into();
+        root.join("a.txt").unwrap().create_file().unwrap().write_all(b"hello").unwrap();
+
+        let error = decode_to_json(&root.join("a.txt").unwrap()).expect_err("txt is not a prototype");
+        assert!(matches!(error, ViewerError::NotDecodable { .. }));
     }
 }

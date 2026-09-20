@@ -19,9 +19,9 @@ regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
-wowsunpack = { workspace = true, features = ["vfs", "parsing", "rkyv"] }
+wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
 wows-toolkit-config = { workspace = true }
 
 [dev-dependencies]
-wowsunpack = { workspace = true, features = ["vfs", "parsing"] }
+wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
