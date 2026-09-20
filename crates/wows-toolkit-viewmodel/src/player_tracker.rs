@@ -268,3 +268,171 @@ mod tests {
         assert_eq!(by_count.order, SortOrder::Descending, "counts open at the most met");
     }
 }
+
+/// One clan's aggregate across the players met from it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClanRow {
+    pub clan: String,
+    /// Distinct accounts met wearing this clan's tag.
+    pub members_met: usize,
+    /// Encounters with those accounts, summed.
+    pub encounters: i64,
+}
+
+/// Which column the clans table is ordered by.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ClanSortColumn {
+    Clan,
+    Members,
+    #[default]
+    Encounters,
+}
+
+impl ClanSortColumn {
+    pub const ALL: [ClanSortColumn; 3] = [Self::Clan, Self::Members, Self::Encounters];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Clan => "Clan",
+            Self::Members => "Members met",
+            Self::Encounters => "Encounters",
+        }
+    }
+
+    pub fn default_order(self) -> SortOrder {
+        match self {
+            Self::Clan => SortOrder::Ascending,
+            Self::Members | Self::Encounters => SortOrder::Descending,
+        }
+    }
+}
+
+/// How the clans table is ordered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ClanSort {
+    pub column: ClanSortColumn,
+    pub order: SortOrder,
+}
+
+impl Default for ClanSort {
+    fn default() -> Self {
+        Self { column: ClanSortColumn::Encounters, order: ClanSortColumn::Encounters.default_order() }
+    }
+}
+
+impl ClanSort {
+    pub fn toggled(self, column: ClanSortColumn) -> Self {
+        if self.column == column {
+            Self { column, order: self.order.reversed() }
+        } else {
+            Self { column, order: column.default_order() }
+        }
+    }
+}
+
+/// Groups the players met into their clans.
+///
+/// Players with no clan tag are left out rather than gathered under an empty
+/// name: "no clan" is not a clan, and a row for it would top the table on
+/// every account met solo.
+pub fn clan_rows(players: &[PlayerFacet], needle: &str, sort: ClanSort) -> Vec<ClanRow> {
+    let mut by_clan: std::collections::BTreeMap<&str, ClanRow> = std::collections::BTreeMap::new();
+
+    for player in players.iter().filter(|player| !player.clan.is_empty()) {
+        let row = by_clan.entry(player.clan.as_str()).or_insert_with(|| ClanRow {
+            clan: player.clan.clone(),
+            members_met: 0,
+            encounters: 0,
+        });
+        row.members_met += 1;
+        row.encounters += player.match_count;
+    }
+
+    let needle = needle.to_lowercase();
+    let mut rows: Vec<ClanRow> = by_clan
+        .into_values()
+        .filter(|row| needle.is_empty() || row.clan.to_lowercase().contains(&needle))
+        .collect();
+
+    rows.sort_by(|a, b| {
+        let ordering = match sort.column {
+            ClanSortColumn::Clan => a.clan.to_lowercase().cmp(&b.clan.to_lowercase()),
+            ClanSortColumn::Members => a.members_met.cmp(&b.members_met),
+            ClanSortColumn::Encounters => a.encounters.cmp(&b.encounters),
+        };
+        // Ties break on the tag so the order is stable between refreshes.
+        sort.order.apply(ordering).then_with(|| a.clan.cmp(&b.clan))
+    });
+    rows
+}
+
+#[cfg(test)]
+mod clan_tests {
+    use super::ClanSort;
+    use super::ClanSortColumn;
+    use super::SortOrder;
+    use super::clan_rows;
+    use wows_toolkit_config::index::rows::PlayerFacet;
+
+    fn player(account: i64, name: &str, clan: &str, count: i64) -> PlayerFacet {
+        PlayerFacet {
+            account_id: account.into(),
+            latest_name: name.to_string(),
+            clan: clan.to_string(),
+            match_count: count,
+        }
+    }
+
+    fn sample() -> Vec<PlayerFacet> {
+        vec![
+            player(1, "a", "ALPHA", 3),
+            player(2, "b", "ALPHA", 4),
+            player(3, "c", "ZULU", 10),
+            player(4, "solo", "", 99),
+        ]
+    }
+
+    #[test]
+    fn players_are_gathered_into_their_clans() {
+        let rows = clan_rows(&sample(), "", ClanSort::default());
+        assert_eq!(rows.len(), 2, "two clans, and the clanless player is not one");
+
+        let alpha = rows.iter().find(|row| row.clan == "ALPHA").unwrap();
+        assert_eq!(alpha.members_met, 2);
+        assert_eq!(alpha.encounters, 7, "three plus four");
+    }
+
+    #[test]
+    fn a_player_with_no_tag_is_left_out_rather_than_gathered_under_an_empty_name() {
+        let rows = clan_rows(&sample(), "", ClanSort::default());
+        assert!(rows.iter().all(|row| !row.clan.is_empty()));
+        assert!(rows.iter().all(|row| row.encounters != 99), "the solo player's count is nowhere");
+    }
+
+    #[test]
+    fn encounters_lead_by_default_so_the_most_met_clan_is_first() {
+        let rows = clan_rows(&sample(), "", ClanSort::default());
+        assert_eq!(rows[0].clan, "ZULU", "ten beats seven");
+    }
+
+    #[test]
+    fn sorting_by_members_counts_accounts_rather_than_encounters() {
+        let sort = ClanSort { column: ClanSortColumn::Members, order: SortOrder::Descending };
+        let rows = clan_rows(&sample(), "", sort);
+        assert_eq!(rows[0].clan, "ALPHA", "two members beats one, despite fewer encounters");
+    }
+
+    #[test]
+    fn the_filter_narrows_by_tag() {
+        assert_eq!(clan_rows(&sample(), "zul", ClanSort::default()).len(), 1);
+        assert!(clan_rows(&sample(), "nothing", ClanSort::default()).is_empty());
+    }
+
+    #[test]
+    fn clicking_the_same_column_flips_it_and_a_new_one_starts_at_its_own_default() {
+        let sort = ClanSort::default();
+        assert_eq!(sort.order, SortOrder::Descending);
+        assert_eq!(sort.toggled(ClanSortColumn::Encounters).order, SortOrder::Ascending);
+        assert_eq!(sort.toggled(ClanSortColumn::Clan).order, SortOrder::Ascending, "tags read A to Z");
+    }
+}
