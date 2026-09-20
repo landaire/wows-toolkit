@@ -44,6 +44,12 @@ const GROUPING: &str = "replay-header-grouping";
 /// Armor Viewer sidebar ship search (`armor_viewer::sidebar`).
 const SHIP_SEARCH: &str = "armor-sidebar-search";
 
+/// Unpacker tab controls (`unpacker::view`, `unpacker::browser`).
+const EXTRACT: &str = "unpacker-extract";
+const CANCEL: &str = "unpacker-cancel";
+const CLEAR_QUEUE: &str = "unpacker-clear-queue";
+const PKG_FILTER: &str = "unpacker-pkg-filter";
+
 /// Opens the real root view in a headless window sized like the app's own
 /// default, with the component layer initialized.
 fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
@@ -56,15 +62,17 @@ fn tab_index(tab: AppTab) -> usize {
 }
 
 #[gpui_kit::test]
-fn the_settings_tab_is_selected_at_startup(cx: &mut TestAppContext) {
+fn the_replay_inspector_tab_is_selected_at_startup(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
         let tabs = window.within(TAB_BAR);
-        assert_eq!(tabs.find(tab_index(AppTab::Settings)).selected(), Some(true));
-        assert_eq!(tabs.find(tab_index(AppTab::ReplayInspector)).selected(), Some(false));
-        assert_eq!(tabs.find(tab_index(AppTab::ArmorViewer)).selected(), Some(false));
+        // The egui app opens on its replays tab, so this one does too.
+        assert_eq!(tabs.find(tab_index(AppTab::ReplayInspector)).selected(), Some(true));
+        for other in AppTab::ALL.into_iter().filter(|tab| *tab != AppTab::ReplayInspector) {
+            assert_eq!(tabs.find(tab_index(other)).selected(), Some(false), "{other:?} is not selected");
+        }
     })
     .expect("the test window stays open");
 }
@@ -76,7 +84,7 @@ fn clicking_a_tab_moves_the_selection_to_it(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
 
-        for tab in [AppTab::ReplayInspector, AppTab::ArmorViewer, AppTab::Settings] {
+        for tab in AppTab::ALL {
             window.within(TAB_BAR).click(tab_index(tab), cx);
             for other in AppTab::ALL {
                 let selected = window.within(TAB_BAR).find(tab_index(other)).selected();
@@ -102,7 +110,11 @@ fn hovering_a_tab_leaves_the_selection_alone(cx: &mut TestAppContext) {
         window.within(TAB_BAR).hover(tab_index(AppTab::ArmorViewer), cx);
 
         let tabs = window.within(TAB_BAR);
-        assert_eq!(tabs.find(tab_index(AppTab::Settings)).selected(), Some(true), "hover must not select");
+        assert_eq!(
+            tabs.find(tab_index(AppTab::ReplayInspector)).selected(),
+            Some(true),
+            "hover must not move the selection off the startup tab"
+        );
         assert_eq!(tabs.find(tab_index(AppTab::ArmorViewer)).selected(), Some(false));
     })
     .expect("the test window stays open");
@@ -147,6 +159,11 @@ fn an_unmodified_d_does_not_toggle_the_debug_strip(cx: &mut TestAppContext) {
 fn show_tab(window: &mut gpui_kit::Window, tab: AppTab, cx: &mut gpui_kit::App) {
     window.render_frame(cx);
     window.within(TAB_BAR).click(tab_index(tab), cx);
+    assert_eq!(
+        window.within(TAB_BAR).find(tab_index(tab)).selected(),
+        Some(true),
+        "the {tab:?} tab is showing before its controls are exercised"
+    );
 }
 
 /// `Select` commits through `defer_in` after the dispatch callback returns, so
@@ -254,7 +271,7 @@ fn the_settings_tab_shows_the_values_it_was_given(cx: &mut TestAppContext) {
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
+        show_tab(window, AppTab::Settings, cx);
         assert_eq!(window.find("show-raw-xp").checked(), Some(true));
         assert_eq!(window.find("show-observed-damage").checked(), Some(false));
     })
@@ -269,7 +286,7 @@ fn the_read_only_settings_checkboxes_refuse_a_click(cx: &mut TestAppContext) {
         .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
+        show_tab(window, AppTab::Settings, cx);
         window.click("show-raw-xp", cx);
         window.click("show-observed-damage", cx);
         assert_eq!(window.find("show-raw-xp").checked(), Some(true), "the settings tab is read-only in this port");
@@ -327,6 +344,41 @@ fn the_loaded_grouping_reaches_the_browser_and_the_combo(cx: &mut TestAppContext
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::ReplayInspector, cx);
         assert_eq!(window.find(GROUPING).value(), Some("Group: Ship"), "and the combo mirrors it");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+
+        // Nothing queued, so every queue action is refused. Clicking anyway
+        // must leave the tab alone rather than starting a run.
+        for action in [EXTRACT, CANCEL, CLEAR_QUEUE] {
+            window.click(action, cx);
+        }
+        assert!(window.try_find(EXTRACT).is_some(), "the queue bar survives clicks on its disabled buttons");
+    })
+    .expect("the test window stays open");
+}
+
+#[gpui_kit::test]
+fn the_unpacker_browsers_say_there_is_no_game_data_when_the_directory_is_unset(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+        // With no VFS the panes show a status line instead of a filter box.
+        assert!(window.try_find(PKG_FILTER).is_none(), "the filter appears only once a VFS is loaded");
     })
     .expect("the test window stays open");
 }

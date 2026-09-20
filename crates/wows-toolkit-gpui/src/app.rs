@@ -15,22 +15,29 @@ use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::theme;
+use crate::unpacker::view::UnpackerView;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
-    Settings,
     ReplayInspector,
     ArmorViewer,
+    Unpacker,
+    Settings,
 }
 
 impl AppTab {
-    pub const ALL: [AppTab; 3] = [AppTab::Settings, AppTab::ReplayInspector, AppTab::ArmorViewer];
+    /// Left-to-right order, following the egui app's own dock order
+    /// (`app.rs`'s `DockState::new`): replays first, settings last. The tabs
+    /// that order interleaves -- Stats, Player Tracker, Search -- are not
+    /// ported yet, so this is that sequence with the gaps closed.
+    pub const ALL: [AppTab; 4] = [AppTab::ReplayInspector, AppTab::ArmorViewer, AppTab::Unpacker, AppTab::Settings];
 
     pub fn label(self) -> &'static str {
         match self {
-            AppTab::Settings => "Settings",
             AppTab::ReplayInspector => "Replay Inspector",
             AppTab::ArmorViewer => "Armor Viewer",
+            AppTab::Unpacker => "Unpacker",
+            AppTab::Settings => "Settings",
         }
     }
 }
@@ -75,6 +82,10 @@ pub struct App {
     /// `replay_inspector` game-data observer (`Self::new`) triggers it
     /// exactly once -- see `Self::poll_armor_game_data`.
     armor_game_data_requested: bool,
+    /// The Unpacker tab: build selector, VFS browsers and the extraction
+    /// queue. Runs its own VFS load per build, independent of the replay
+    /// inspector's game-data cache, since it needs only the package tree.
+    unpacker: Entity<UnpackerView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -84,6 +95,7 @@ impl App {
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(DEFAULT_ZOOM));
         let replay_inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
         let armor_pane = cx.new(|cx| ArmorViewerPane::new(window, cx));
+        let unpacker = cx.new(|cx| UnpackerView::new(window, cx));
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
 
@@ -97,7 +109,7 @@ impl App {
         });
 
         Self {
-            active_tab: AppTab::Settings,
+            active_tab: AppTab::ReplayInspector,
             settings: SettingsState::Loading,
             zoom: DEFAULT_ZOOM,
             zoom_slider,
@@ -106,6 +118,7 @@ impl App {
             focus_handle,
             armor_pane,
             armor_game_data_requested: false,
+            unpacker,
             _subscriptions: vec![subscription],
         }
     }
@@ -163,6 +176,8 @@ impl App {
             view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, window, cx)
         });
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
+        let unpacker_dir = settings.wows_dir.clone();
+        self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(unpacker_dir, window, cx));
         self.poll_armor_game_data(cx);
         self.settings = SettingsState::Loaded(settings);
     }
@@ -346,6 +361,7 @@ impl Render for App {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
             AppTab::ArmorViewer => self.armor_pane.clone().into_any_element(),
+            AppTab::Unpacker => self.unpacker.clone().into_any_element(),
         };
 
         // Reproduces the egui app's `app.rs:720-722` bottom-panel notice: a
