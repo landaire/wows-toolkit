@@ -18,6 +18,9 @@ members = [
     "crates/wows-battle-world",
     "build-support/buck/reindeer-features",
 ]
+# Separate cargo workspace: it resolves GPUI, which the shipping egui app must
+# not pull into its lockfile.
+exclude = ["crates/wows-toolkit-gpui"]
 
 [workspace.package]
 version = "1.0.2-beta2"
