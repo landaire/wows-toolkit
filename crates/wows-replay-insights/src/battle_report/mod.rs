@@ -16,6 +16,7 @@ use serde_json::Value;
 use wows_battle_world::report::BattleReport;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
 use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::decoder::DamageStatEntry;
@@ -117,6 +118,26 @@ pub struct NormalizedPlayer {
     pub heal_count: Option<u32>,
     pub personal_rating: Option<PersonalRatingResult>,
     pub time_lived_secs: Option<u64>,
+    /// The account hides its own statistics, which the client reports on the
+    /// arena state.
+    pub is_hidden_profile: bool,
+    /// What this player's connection did during the battle, when that is
+    /// worth reporting. `None` when nothing was out of the ordinary.
+    pub connection: Option<ConnectionNote>,
+}
+
+/// A connection history worth showing beside a name.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ConnectionNote {
+    /// In the roster but never in the battle. Only said of a player who
+    /// never spawned a ship: a client that does not broadcast usable
+    /// connection state reports everyone as not-connected and never updates
+    /// it, and a player who spawned was plainly connected.
+    NeverConnected,
+    /// Dropped at least once while still alive. Each entry is one event
+    /// after the opening connect, as "connected @ M:SS" or
+    /// "disconnected @ M:SS".
+    Interrupted { events: Vec<String> },
 }
 
 impl NormalizedPlayer {
@@ -769,7 +790,39 @@ fn build_player(
         heal_count,
         personal_rating: None,
         time_lived_secs,
+        is_hidden_profile: state.is_hidden(),
+        connection: connection_note(player),
     }
+}
+
+/// What to say about a player's connection, if anything.
+fn connection_note(player: &Player) -> Option<ConnectionNote> {
+    let changes = player.connection_change_info();
+    if changes.is_empty() {
+        return player.vehicle_entity().is_none().then_some(ConnectionNote::NeverConnected);
+    }
+
+    let dropped_while_alive = changes
+        .iter()
+        .any(|change| change.event_kind() == ConnectionChangeKind::Disconnected && !change.had_death_event());
+    if !dropped_while_alive {
+        return None;
+    }
+
+    // The opening connect is every player's, so it says nothing.
+    let events = changes
+        .iter()
+        .skip(1)
+        .map(|change| {
+            let secs = change.at_game_duration().as_secs();
+            let timestamp = format!("{}:{:02}", secs / 60, secs % 60);
+            match change.event_kind() {
+                ConnectionChangeKind::Connected => format!("connected @ {timestamp}"),
+                ConnectionChangeKind::Disconnected => format!("disconnected @ {timestamp}"),
+            }
+        })
+        .collect();
+    Some(ConnectionNote::Interrupted { events })
 }
 
 /// Second pass: attribute each player's received damage from the per-victim

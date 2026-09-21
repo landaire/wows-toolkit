@@ -81,8 +81,10 @@ use super::model::ReplayReportModel;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
+use wows_toolkit_config::index::query;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
+use wows_toolkit_viewmodel::twitch;
 
 const LOADING_TITLE: &str = "Loading...";
 const FAILED_TITLE: &str = "Failed to load replay";
@@ -272,6 +274,45 @@ impl ReplayPanel {
         }
     }
 
+    /// Looks up who was in the monitored Twitch channel's chat around this
+    /// battle and flags the rows their logins plausibly name.
+    ///
+    /// The observations are in the shared database, which the egui app fills
+    /// from its own poll and this one from `App::start_twitch_poll`; a
+    /// lookup that finds nothing simply leaves the rows unflagged.
+    fn load_twitch_candidates(&self, table: Entity<PlayerTable>, battle_at: jiff::Timestamp, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let start = battle_at.as_second() + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64;
+        let end = battle_at.as_second() + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64;
+
+        cx.spawn(async move |_this, cx| {
+            let found =
+                crate::runtime::spawn(cx, async move { query::observations_in_window(&pool, start, end).await }).await;
+            let rows = match found {
+                Ok(Ok(rows)) => rows,
+                Ok(Err(err)) => {
+                    tracing::warn!("replay inspector: the chat lookup failed: {err}");
+                    return;
+                }
+                Err(err) => {
+                    tracing::warn!("replay inspector: the chat lookup did not complete: {err}");
+                    return;
+                }
+            };
+            let observations: Vec<(String, jiff::Timestamp)> = rows
+                .into_iter()
+                .filter_map(|(login, seen_at)| {
+                    jiff::Timestamp::from_second(seen_at).ok().map(|seen_at| (login, seen_at))
+                })
+                .collect();
+            if observations.is_empty() {
+                return;
+            }
+            table.update(cx, |table, cx| table.populate_twitch_candidates(&observations, cx));
+        })
+        .detach();
+    }
+
     fn apply_result(
         &mut self,
         result: Result<ParsedReplay, ReplayLoadError>,
@@ -315,7 +356,9 @@ impl ReplayPanel {
         let chat = std::mem::take(&mut model.chat);
         let chat_title = title.to_string();
         let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, chat_title, cx)));
+        let battle_at = model.timestamp;
         let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
+        self.load_twitch_candidates(table.clone(), battle_at, cx);
         self._table_subscription = Some(cx.subscribe_in(&table, window, Self::on_table_event));
         let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), window, cx));
         let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), window, cx)));
@@ -821,6 +864,7 @@ mod tests {
             columns: ReplayColumn::ALL.to_vec(),
             map: "Ocean".to_string(),
             chat: Vec::new(),
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
         }
     }
 
@@ -840,6 +884,38 @@ mod tests {
             for format in ExportFormat::ALL {
                 assert!(window.try_find(format.id()).is_some(), "{} is offered", format.label());
             }
+        })
+        .expect("the window is open");
+    }
+
+    /// The markers beside a name: a hidden profile, a chat login that
+    /// plausibly names the player, and a connection that dropped.
+    ///
+    /// Each is drawn only for the row it belongs to, so a table that drew
+    /// them for everyone would read as an accusation of everyone.
+    #[gpui_kit::test]
+    fn a_name_carries_its_own_markers(cx: &mut TestAppContext) {
+        use wows_replay_insights::battle_report::ConnectionNote;
+        use wows_toolkit_viewmodel::twitch::SniperCandidate;
+
+        let mut model = model_at_expected_values();
+        model.rows[0].is_hidden_profile = true;
+        model.rows[0].twitch_candidates = vec![SniperCandidate { login: "harvey635".to_string(), minutes: vec![3] }];
+        model.rows[0].connection = Some(ConnectionNote::NeverConnected);
+
+        cx.update(gpui_kit::init);
+        let window = cx
+            .open_window(size(px(1400.), px(600.)), |window, cx| ReplayPanel::loaded_for_test(model, None, window, cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find(("replay-hidden-profile", 0usize)).is_some(), "the hidden-profile eye is drawn");
+            assert!(window.try_find(("replay-twitch", 0usize)).is_some(), "the twitch chip is drawn");
+            assert!(window.try_find(("replay-disconnect", 0usize)).is_some(), "the connection marker is drawn");
+
+            assert!(window.try_find(("replay-hidden-profile", 1usize)).is_none(), "and not on a row without them");
+            assert!(window.try_find(("replay-twitch", 1usize)).is_none(), "and not on a row without them");
+            assert!(window.try_find(("replay-disconnect", 1usize)).is_none(), "and not on a row without them");
         })
         .expect("the window is open");
     }
