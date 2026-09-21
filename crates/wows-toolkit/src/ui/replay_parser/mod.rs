@@ -2682,6 +2682,13 @@ impl UiReport {
             return;
         };
 
+        // The normalized report is what the export and the replay index read,
+        // so it changes language with the rows rather than staying in the
+        // locale the replay was parsed under.
+        for (player, np) in self.player_reports.iter().zip(self.normalized.players.iter_mut()) {
+            np.refresh_translations(&player.player, metadata_provider, &self.version);
+        }
+
         for report in &mut self.player_reports {
             let vehicle_param = report.player.vehicle();
             let player_state = report.player.initial_state();

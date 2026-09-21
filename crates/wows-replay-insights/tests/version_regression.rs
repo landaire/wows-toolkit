@@ -233,6 +233,7 @@ fn run_entry(entry: &Entry) {
         NormalizedBattleReport::from_battle_report(&report, &loaded.replay.meta, loaded.provider, &loaded.constants);
 
     assert_structural_invariants(entry, &report, &normalized);
+    assert_translations_are_rebuilt(&report, &normalized, loaded.provider, &loaded.version);
 
     let mut produced = serde_json::to_value(&normalized).expect("normalized report serializes");
     sort_players(&mut produced);
@@ -260,6 +261,47 @@ fn run_entry(entry: &Entry) {
 
     if let Err(path) = approx_eq(&produced, &golden) {
         panic!("{} (build {}): normalized report does not match golden at {}", entry.version_label, entry.build, path);
+    }
+}
+
+/// A locale change re-derives every name the provider supplies, so the export
+/// and the index do not keep the language the replay was parsed under.
+///
+/// Proved by scribbling over each of those fields and refreshing: a field the
+/// refresh forgot stays scribbled.
+fn assert_translations_are_rebuilt(
+    report: &BattleReport,
+    normalized: &NormalizedBattleReport,
+    provider: &GameMetadataProvider,
+    version: &Version,
+) {
+    const SCRIBBLE: &str = "not a name";
+
+    for (player, original) in report.players().iter().zip(normalized.players.iter()) {
+        let mut scribbled = original.clone();
+        scribbled.ship_name = SCRIBBLE.to_string();
+        scribbled.display_name = SCRIBBLE.to_string();
+        scribbled.build = None;
+        for achievement in &mut scribbled.achievements {
+            achievement.display_name = SCRIBBLE.to_string();
+            achievement.description = SCRIBBLE.to_string();
+        }
+        for ribbon in &mut scribbled.ribbons {
+            ribbon.display_name = SCRIBBLE.to_string();
+            ribbon.description = SCRIBBLE.to_string();
+        }
+
+        scribbled.refresh_translations(player, provider, version);
+
+        assert_eq!(scribbled.ship_name, original.ship_name, "the ship is named again");
+        assert_eq!(scribbled.display_name, original.display_name, "the player is named again");
+        assert!(scribbled.build.is_some() == original.build.is_some(), "the build is rebuilt whenever there was one");
+        let names: Vec<&str> = scribbled.achievements.iter().map(|a| a.display_name.as_str()).collect();
+        let expected: Vec<&str> = original.achievements.iter().map(|a| a.display_name.as_str()).collect();
+        assert_eq!(names, expected, "every achievement is named again");
+        let ribbons: Vec<&str> = scribbled.ribbons.iter().map(|r| r.display_name.as_str()).collect();
+        let expected: Vec<&str> = original.ribbons.iter().map(|r| r.display_name.as_str()).collect();
+        assert_eq!(ribbons, expected, "every ribbon is named again");
     }
 }
 
