@@ -119,8 +119,10 @@ kept so the next audit does not re-report them.
   since the reader has moved on from the set.
 - Set as / Add to Session Stats is still not offered, for one replay or for a
   set: the port has no session-stats writer.
-- The Actions menu is missing entirely: match timeline, open in game, replay
-  controls, load other team perspective, hide my test-ship stats.
+- The header's Actions menu carries "Hide My Test Ship Stats", and is shown
+  only for a test ship, which is the case it means anything in. Open in Game
+  and Show Replay Controls are in the listing's row menu instead. The match
+  timeline and the other-team perspective are not ported at all.
 - [done] Alt turns the damage breakdown's percentages around.
 - [done] The Effective Fire Chance block is under the recording player's row:
   the counts, the expected figure beside them, the ships they cover, and a row

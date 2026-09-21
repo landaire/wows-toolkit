@@ -56,6 +56,8 @@ use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
@@ -683,6 +685,11 @@ struct HeaderState {
     /// Whether the results resolved into their named form, which is a
     /// separate viewer from the raw payload.
     has_mapped_results: bool,
+    /// Whether the recording player is in a test ship, which is the only
+    /// case the hide-my-stats toggle means anything in.
+    self_is_test_ship: bool,
+    /// Whether their own figures are currently hidden.
+    self_stats_hidden: bool,
     /// Whether the parse has produced a document to export yet.
     can_export: bool,
     export_status: Option<String>,
@@ -735,6 +742,25 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
 /// What the egui line puts between its fields.
 const SEPARATOR: &str = "-";
 
+/// The header's Actions menu.
+///
+/// Only what this port can actually do is here: the egui menu also carries
+/// the match timeline and the other-team perspective, neither of which the
+/// port has. Shown only for a test ship, which is the one case hiding your
+/// own figures means anything in.
+fn actions_menu(panel: Entity<ReplayPanel>, hidden: bool) -> impl IntoElement + use<> {
+    Button::new("replay-actions").label(t!("ui.replay.actions").into_owned()).compact().dropdown_menu(
+        move |menu, _window, _cx| {
+            let panel = panel.clone();
+            menu.item(PopupMenuItem::new(t!("ui.replay.hide_my_stats").into_owned()).checked(hidden).on_click(
+                move |_event, _window, cx| {
+                    panel.update(cx, |panel, cx| panel.set_self_stats_hidden(!hidden, cx));
+                },
+            ))
+        },
+    )
+}
+
 fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
     let HeaderState {
         battle_result,
@@ -742,6 +768,8 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         has_chat,
         has_results,
         has_mapped_results,
+        self_is_test_ship,
+        self_stats_hidden,
         can_export,
         export_status,
         debug,
@@ -768,6 +796,7 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         .when_some(export_status, |this, status| {
             this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
         })
+        .when(self_is_test_ship, |row| row.child(actions_menu(cx.entity(), self_stats_hidden)))
         .child(export_menu(cx.entity(), can_export))
         .child(chat_button);
     if debug {
@@ -849,6 +878,13 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
 }
 
 impl ReplayPanel {
+    /// Hides or shows the recording player's own figures, for a test ship.
+    fn set_self_stats_hidden(&mut self, hidden: bool, cx: &mut Context<Self>) {
+        let LoadState::Loaded(loaded) = &self.state else { return };
+        loaded.table.update(cx, |table, cx| table.set_self_stats_hidden(hidden, cx));
+        cx.notify();
+    }
+
     /// Toggles the side-panel slot: switching to whichever of `panel`
     /// is not already showing, or closing it if `panel` is already active.
     fn toggle_side_panel(&mut self, panel: SidePanel, cx: &mut Context<Self>) {
@@ -894,6 +930,8 @@ impl Render for ReplayPanel {
                 let has_chat = loaded.chat_panel.is_some();
                 let has_results = loaded.raw_results_panel.is_some();
                 let has_mapped_results = loaded.mapped_results_panel.is_some();
+                let self_is_test_ship = loaded.table.read(cx).self_is_test_ship();
+                let self_stats_hidden = loaded.table.read(cx).self_stats_hidden();
                 let table = loaded.table.clone();
                 let battle_result = loaded.battle_result;
                 let personal_rating = loaded.table.read(cx).self_personal_rating();
@@ -920,6 +958,8 @@ impl Render for ReplayPanel {
                             has_chat,
                             has_results,
                             has_mapped_results,
+                            self_is_test_ship,
+                            self_stats_hidden,
                             can_export: self.export.is_some(),
                             export_status: self.export_status.clone(),
                             debug: self.debug,
@@ -1024,6 +1064,36 @@ mod tests {
             }
         })
         .expect("the window is open");
+    }
+
+    /// The recording player's own figures can be hidden when they are in a
+    /// test ship, which is the case the NDA covers.
+    #[gpui_kit::test]
+    fn a_test_ship_s_own_figures_can_be_hidden(cx: &mut TestAppContext) {
+        let mut model = model_at_expected_values();
+        for row in &mut model.rows {
+            if row.is_self {
+                row.is_test_ship = true;
+            }
+        }
+
+        cx.update(gpui_kit::init);
+        let window = cx
+            .open_window(size(px(1400.), px(600.)), |window, cx| ReplayPanel::loaded_for_test(model, None, window, cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-actions").is_some(), "a test ship is offered the toggle");
+        })
+        .expect("the window is open");
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.set_self_stats_hidden(true, cx);
+                let super::LoadState::Loaded(loaded) = &panel.state else { panic!("the panel is loaded") };
+                assert!(loaded.table.read(cx).self_stats_hidden(), "the figures are hidden");
+            })
+            .expect("the window is open");
     }
 
     /// Dragging a column header's grip widens that column, and every row
