@@ -61,6 +61,7 @@ use gpui_kit::component::tree::TreeState;
 use gpui_kit::component::tree::tree;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use wowsunpack::game_params::types::Species;
 
@@ -147,7 +148,8 @@ impl EventEmitter<ExportModelRequested> for Sidebar {}
 impl Sidebar {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
-        let search_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search ships..."));
+        let search_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.armor.search_ships").to_string()));
         let subscription = cx.subscribe_in(&search_state, window, Self::on_search_event);
 
         Self {
@@ -175,7 +177,7 @@ impl Sidebar {
                 Button::new("armor-sidebar-common-trigger")
                     .icon(IconName::Settings2)
                     .compact()
-                    .tooltip("What the comparison panes share"),
+                    .tooltip(t!("ui.armor.common_settings").to_string()),
             )
             .content(move |_state, _window, _cx| {
                 let mirror_entity = entity.clone();
@@ -186,10 +188,10 @@ impl Sidebar {
                     .p_2()
                     .child(
                         Checkbox::new("armor-pane-mirror-cameras")
-                            .label("Mirror cameras")
+                            .label(t!("ui.armor.mirror_cameras").to_string())
                             .checked(common.mirror_cameras)
                             .disabled(!common.comparing)
-                            .tooltip("Move every pane's camera together")
+                            .tooltip(t!("ui.armor.mirror_cameras_tooltip").to_string())
                             .on_click(move |checked, _window, cx| {
                                 let mirror_cameras = *checked;
                                 mirror_entity.update(cx, |sidebar, cx| {
@@ -199,10 +201,10 @@ impl Sidebar {
                     )
                     .child(
                         Checkbox::new("armor-pane-sync-options")
-                            .label("Sync settings")
+                            .label(t!("ui.armor.sync_options").to_string())
                             .checked(common.sync_options)
                             .disabled(!common.comparing)
-                            .tooltip("Sync visibility and display settings across all panes")
+                            .tooltip(t!("ui.armor.sync_tooltip").to_string())
                             .on_click(move |checked, _window, cx| {
                                 let sync_options = *checked;
                                 sync_entity.update(cx, |sidebar, cx| {
@@ -387,13 +389,13 @@ impl Render for Sidebar {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Ships"))
+            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.ships").to_string()))
             .child(
                 Button::new("armor-sidebar-compare")
                     .icon(IconName::LayoutDashboard)
-                    .label("Compare")
+                    .label(t!("ui.armor.compare").to_string())
                     .compact()
-                    .tooltip("Open a new comparison pane, or right-click a ship to compare that one")
+                    .tooltip(t!("ui.armor.compare_tooltip").to_string())
                     .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(CompareSplit::default()))),
             )
             .child(self.common_menu(cx));
@@ -414,7 +416,7 @@ impl Render for Sidebar {
                 .p_2()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
-                .child("Loading ship catalog...")
+                .child(t!("ui.armor.loading_catalog").to_string())
                 .into_any_element(),
             Some(bundle) => {
                 let entity = cx.entity();
@@ -435,11 +437,13 @@ impl Render for Sidebar {
                     let compare_ship = ship.clone();
                     let compare_entity = context_menu_entity.clone();
                     let entity = context_menu_entity.clone();
-                    menu.item(PopupMenuItem::new("Compare (split view)").on_click(move |_event, _window, cx| {
-                        let request = CompareSplit { ship: Some(compare_ship.clone()) };
-                        compare_entity.update(cx, |_sidebar, cx| cx.emit(request));
-                    }))
-                    .item(PopupMenuItem::new("Export model").on_click(
+                    menu.item(PopupMenuItem::new(t!("ui.armor.compare_split").into_owned()).on_click(
+                        move |_event, _window, cx| {
+                            let request = CompareSplit { ship: Some(compare_ship.clone()) };
+                            compare_entity.update(cx, |_sidebar, cx| cx.emit(request));
+                        },
+                    ))
+                    .item(PopupMenuItem::new(t!("ui.armor.export_model").into_owned()).on_click(
                         move |_event, _window, cx| {
                             let request = ship.clone();
                             entity.update(cx, |_sidebar, cx| cx.emit(request));

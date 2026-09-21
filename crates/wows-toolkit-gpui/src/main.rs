@@ -157,3 +157,62 @@ fn main() {
         .detach();
     });
 }
+
+/// Every `t!` key this crate names has to exist in the catalog: a missing one
+/// does not fail to compile, it silently draws the key itself.
+#[cfg(test)]
+mod translation_keys {
+    use std::path::Path;
+
+    /// Collects the literal keys of every `t!` call under `src`.
+    ///
+    /// A key is dotted and lower-case, which is how a match inside a doc
+    /// comment or a nested macro is told from a real one.
+    fn keys_in_source(dir: &Path, keys: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).expect("the source directory is readable").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                keys_in_source(&path, keys);
+                continue;
+            }
+            if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("a source file is readable");
+            let bytes = source.as_bytes();
+            let mut from = 0;
+            while let Some(at) = source[from..].find("t!(\"") {
+                let at = from + at;
+                from = at + 4;
+                // `format!("` ends in the same three characters, so the macro
+                // is only this one when a name does not run into it.
+                let preceded_by_name = at > 0 && (bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
+                if preceded_by_name {
+                    continue;
+                }
+                let Some(end) = source[from..].find('"') else { break };
+                let key = &source[from..from + end];
+                from += end;
+                if key.contains('.') && !key.contains(' ') {
+                    keys.push(key.to_string());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_key_the_port_names_is_in_the_catalog() {
+        let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut keys = Vec::new();
+        keys_in_source(&src, &mut keys);
+        assert!(!keys.is_empty(), "the scan found no keys, so it is not reading the source");
+
+        keys.sort();
+        keys.dedup();
+        for key in keys {
+            let rendered = rust_i18n::t!(&key).into_owned();
+            assert_ne!(rendered, key, "no catalog entry for {key}");
+            assert!(!rendered.trim().is_empty(), "empty catalog entry for {key}");
+        }
+    }
+}

@@ -24,6 +24,7 @@ use gpui_kit::component::input::StepAction;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_toolkit_config::queries;
 
 use wows_toolkit_viewmodel::stats::DivisionFilter;
@@ -354,12 +355,14 @@ impl Render for StatsView {
             h_flex()
                 .gap_1()
                 .items_center()
-                .child(div().text_xs().text_color(crate::theme::text_dim()).child("Mode:"))
+                .child(
+                    div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.stats.mode_label").to_string()),
+                )
                 .child(selectable(
                     "stats-mode-all",
                     self.filters.game_modes.is_empty(),
                     Button::new("stats-mode-all-button")
-                        .label("All")
+                        .label(t!("ui.stats.div_all").to_string())
                         .compact()
                         .selected(self.filters.game_modes.is_empty())
                         .on_click(cx.listener(|this, _event, _window, cx| this.clear_modes(cx))),
@@ -392,7 +395,7 @@ impl Render for StatsView {
             .border_color(border)
             .child(
                 Checkbox::new("stats-limit-enabled")
-                    .label("Limit to recent games")
+                    .label(t!("ui.stats.limit_to_recent").to_string())
                     .checked(limited)
                     .on_click(cx.listener(|this, checked: &bool, _window, cx| this.set_limit_enabled(*checked, cx))),
             )
@@ -406,13 +409,15 @@ impl Render for StatsView {
                     .child(NumberInput::new(&self.limit_input).small().disabled(!limited)),
             )
             .child(crate::ui::rule_v(cx))
-            .child(div().text_xs().text_color(crate::theme::text_dim()).child("Division:"))
+            .child(
+                div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.stats.division_label").to_string()),
+            )
             .children(division_buttons)
             .when_some(mode_row, |this, row| this.child(crate::ui::rule_v(cx)).child(row))
             .child(crate::ui::rule_v(cx))
             .child(
                 Button::new("stats-add-chart")
-                    .label("Add chart")
+                    .label(t!("ui.stats.add_chart").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event, window, cx| this.add_chart(window, cx))),
             )
@@ -423,11 +428,15 @@ impl Render for StatsView {
             .child(
                 Button::new("stats-clear")
                     .child(crate::icons::icon(crate::icons::ERASER))
-                    .label(if self.clear_armed { "Clear every game?" } else { "Clear" })
+                    .label(if self.clear_armed {
+                        t!("ui.stats.clear_confirm").into_owned()
+                    } else {
+                        t!("ui.stats.clear").into_owned()
+                    })
                     .compact()
                     .selected(self.clear_armed)
                     .disabled(self.games.is_empty())
-                    .tooltip("Forget every recorded game")
+                    .tooltip(t!("ui.stats.clear_tooltip").to_string())
                     .on_click(cx.listener(|this, _event, _window, cx| this.clear_session(cx))),
             );
 

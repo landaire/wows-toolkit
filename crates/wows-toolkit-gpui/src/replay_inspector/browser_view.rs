@@ -44,6 +44,7 @@ use gpui_kit::component::tree::tree;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
@@ -733,29 +734,26 @@ impl Render for ReplayBrowser {
         let border = cx.theme().border;
         let entity = cx.entity();
 
-        let header = h_flex()
-            .flex_none()
-            .gap_1()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
-            .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Replays"));
+        let header = h_flex().flex_none().gap_1().items_center().px_2().py_1().border_b_1().border_color(border).child(
+            div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.replay.listing_caption").to_string()),
+        );
 
         let body = match &self.status {
             ScanStatus::Loading => div()
                 .p_2()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
-                .child("Scanning replays...")
+                .child(t!("ui.replay.scanning").to_string())
                 .into_any_element(),
             ScanStatus::Failed(reason) => {
                 div().p_2().text_sm().text_color(crate::theme::text_dim()).child(reason.to_string()).into_any_element()
             }
-            ScanStatus::Empty => {
-                div().p_2().text_sm().text_color(crate::theme::text_dim()).child("No replays found").into_any_element()
-            }
+            ScanStatus::Empty => div()
+                .p_2()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.replay.no_replays").to_string())
+                .into_any_element(),
             // Every row's ship and map name comes from the game data, so a
             // list built before it loads is a list of raw ids. The egui app
             // never shows that state: it builds its listing as part of the
@@ -764,7 +762,7 @@ impl Render for ReplayBrowser {
                 .p_2()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
-                .child("Loading game data...")
+                .child(t!("ui.replay.loading_game_data").to_string())
                 .into_any_element(),
             ScanStatus::Loaded => {
                 let entity = entity.clone();
@@ -788,7 +786,7 @@ impl Render for ReplayBrowser {
                         if paths.is_empty() {
                             return menu;
                         }
-                        let label = format!("Copy {} paths", paths.len());
+                        let label = t!("ui.replay.context.copy_replays", count = paths.len()).into_owned();
                         return menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
                             copy_paths(&paths, cx);
                         }));
@@ -798,18 +796,24 @@ impl Render for ReplayBrowser {
                     let copy_path = leaf.path.clone();
                     let reveal_path = leaf.path.clone();
                     let open_entity = context_menu_entity.clone();
-                    menu.item(PopupMenuItem::new("Open").on_click(move |_event, _window, cx| {
-                        let path = open_path.clone();
-                        open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
-                    }))
-                    .item(PopupMenuItem::new("Copy path").on_click(move |_event, _window, cx| {
-                        copy_paths(std::slice::from_ref(&copy_path), cx);
-                    }))
-                    .item(PopupMenuItem::new("Show in file explorer").on_click(
-                        move |_event, _window, _cx| {
-                            reveal_in_file_manager(&reveal_path);
+                    menu.item(PopupMenuItem::new(t!("ui.collab.open").into_owned()).on_click(
+                        move |_event, _window, cx| {
+                            let path = open_path.clone();
+                            open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
                         },
                     ))
+                    .item(PopupMenuItem::new(t!("ui.replay.context.copy_path").into_owned()).on_click(
+                        move |_event, _window, cx| {
+                            copy_paths(std::slice::from_ref(&copy_path), cx);
+                        },
+                    ))
+                    .item(
+                        PopupMenuItem::new(t!("ui.replay.context.show_in_explorer").into_owned()).on_click(
+                            move |_event, _window, _cx| {
+                                reveal_in_file_manager(&reveal_path);
+                            },
+                        ),
+                    )
                 })
                 .flex_1()
                 .into_any_element()

@@ -30,6 +30,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wowsunpack::export::gltf_export::ArmorLegendEntry;
 use wowsunpack::export::gltf_export::armor_color_legend;
@@ -144,7 +145,7 @@ pub fn render_panel(state: &LegendState, cx: &mut Context<ArmorViewerPane>) -> A
                 .icon(collapse_icon)
                 .ghost()
                 .xsmall()
-                .tooltip("Collapse")
+                .tooltip(t!("ui.armor.legend_collapse").to_string())
                 .on_click(cx.listener(ArmorViewerPane::toggle_legend_collapsed)),
         )
         .child(
@@ -154,7 +155,7 @@ pub fn render_panel(state: &LegendState, cx: &mut Context<ArmorViewerPane>) -> A
                 .cursor_grab()
                 .font_weight(FontWeight::BOLD)
                 .text_size(TITLE_FONT_SIZE)
-                .child("Armor Thickness")
+                .child(t!("ui.armor.armor_thickness_title").to_string())
                 .on_mouse_down(MouseButton::Left, cx.listener(ArmorViewerPane::start_legend_drag)),
         )
         .child(
@@ -162,7 +163,7 @@ pub fn render_panel(state: &LegendState, cx: &mut Context<ArmorViewerPane>) -> A
                 .icon(IconName::Close)
                 .ghost()
                 .xsmall()
-                .tooltip("Hide legend")
+                .tooltip(t!("ui.armor.legend_hide").to_string())
                 .on_click(cx.listener(ArmorViewerPane::close_legend)),
         );
 

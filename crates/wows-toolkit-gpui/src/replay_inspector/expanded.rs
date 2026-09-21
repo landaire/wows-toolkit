@@ -27,6 +27,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
@@ -171,7 +172,7 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
     let mut max_w: f32 = 0.0;
 
     if has_achievements {
-        max_w = max_w.max(text_width("Achievements".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.achievements").into_owned().into(), window, true));
         for achievement in &row.achievements {
             let label = if achievement.count > 1 {
                 format!("{} ({}x)", achievement.display_name, achievement.count)
@@ -185,7 +186,7 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
     }
 
     if has_ribbons {
-        max_w = max_w.max(text_width("Ribbons".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.ribbons").into_owned().into(), window, true));
         for ribbon in &row.ribbons {
             // `ribbon_row`: subribbons render at LARGE_ICON_SIZE, others at
             // RIBBON_ICON_SIZE; a fitted wide ribbon's width tops out at its
@@ -198,21 +199,31 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
     }
 
     if has_damage_events {
-        max_w = max_w.max(text_width("Damage Events".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.damage_events").into_owned().into(), window, true));
         if row.should_hide_stats() && !debug {
             max_w = max_w.max(text_width(NDA.into(), window, false));
         } else {
             if let Some(fires) = row.fires {
-                max_w = max_w.max(text_width(format!("Fires: {fires}").into(), window, false));
+                max_w =
+                    max_w.max(text_width(format!("{}: {}", t!("ui.replay.column.fires"), fires).into(), window, false));
             }
             if let Some(floods) = row.floods {
-                max_w = max_w.max(text_width(format!("Floods: {floods}").into(), window, false));
+                max_w = max_w.max(text_width(
+                    format!("{}: {}", t!("ui.replay.column.floods"), floods).into(),
+                    window,
+                    false,
+                ));
             }
             if let Some(citadels) = row.citadels {
-                max_w = max_w.max(text_width(format!("Citadels: {citadels}").into(), window, false));
+                max_w = max_w.max(text_width(
+                    format!("{}: {}", t!("ui.replay.column.citadels"), citadels).into(),
+                    window,
+                    false,
+                ));
             }
             if let Some(crits) = row.crits {
-                max_w = max_w.max(text_width(format!("Crits: {crits}").into(), window, false));
+                max_w =
+                    max_w.max(text_width(format!("{}: {}", t!("ui.replay.column.crits"), crits).into(), window, false));
             }
         }
     }
@@ -249,19 +260,19 @@ fn build_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32
     }
 
     if let Some(build) = row.translated_build.as_ref() {
-        max_w = max_w.max(text_width("Modules:".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.modules").into_owned().into(), window, true));
         if build.modernization_slots.is_empty() {
-            max_w = max_w.max(text_width("No Modules".into(), window, false));
+            max_w = max_w.max(text_width(t!("ui.replay.sections.modules_none").into_owned().into(), window, false));
         }
         has_content = true;
 
         if !build.signals.is_empty() {
-            max_w = max_w.max(text_width("Signals:".into(), window, true));
+            max_w = max_w.max(text_width(t!("ui.replay.sections.signals").into_owned().into(), window, true));
         }
 
-        max_w = max_w.max(text_width("Loadout:".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.loadout").into_owned().into(), window, true));
         if build.loadout.is_empty() {
-            max_w = max_w.max(text_width("No Loadout".into(), window, false));
+            max_w = max_w.max(text_width(t!("ui.replay.sections.loadout_none").into_owned().into(), window, false));
         } else {
             for module in &build.loadout {
                 if let Some(name) = module.name.as_ref() {
@@ -272,27 +283,36 @@ fn build_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32
 
         match build.captain_skills.as_ref() {
             Some(skills) => {
-                max_w = max_w.max(text_width("Captain Skills:".into(), window, true));
+                max_w =
+                    max_w.max(text_width(t!("ui.replay.sections.captain_skills").into_owned().into(), window, true));
                 if skills.is_empty() {
-                    max_w = max_w.max(text_width("No Captain Skills".into(), window, false));
+                    max_w = max_w.max(text_width(
+                        t!("ui.replay.sections.captain_skills_none").into_owned().into(),
+                        window,
+                        false,
+                    ));
                 } else {
                     max_w = max_w.max(skill_grid_width(skills, gap_1));
                 }
             }
             None => {
-                max_w = max_w.max(text_width("No Captain Skills".into(), window, false));
+                max_w = max_w.max(text_width(
+                    t!("ui.replay.sections.captain_skills_none").into_owned().into(),
+                    window,
+                    false,
+                ));
             }
         }
     }
 
     if !row.consumables.is_empty() {
-        max_w = max_w.max(text_width("Consumables:".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.consumables").into_owned().into(), window, true));
         max_w = max_w.max(consumables_width(gap_2));
         has_content = true;
     } else if let Some(build) = row.translated_build.as_ref()
         && !build.abilities.is_empty()
     {
-        max_w = max_w.max(text_width("Consumables:".into(), window, true));
+        max_w = max_w.max(text_width(t!("ui.replay.sections.consumables").into_owned().into(), window, true));
         for ability in &build.abilities {
             if let Some(name) = ability.name.as_ref() {
                 max_w = max_w.max(text_width(name.clone().into(), window, false));
@@ -349,7 +369,7 @@ fn multiline_body(text: &str) -> AnyElement {
     v_flex().gap_0().text_xs().children(text.split('\n').map(|line| div().child(line.to_string()))).into_any_element()
 }
 
-fn section_heading(text: &'static str) -> AnyElement {
+fn section_heading(text: String) -> AnyElement {
     div().text_xs().font_weight(FontWeight::BOLD).child(text).into_any_element()
 }
 
@@ -468,7 +488,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
     let mut col = v_flex().gap(px(3.));
 
     if has_achievements {
-        col = col.child(section_heading("Achievements"));
+        col = col.child(section_heading(t!("ui.replay.sections.achievements").into_owned()));
         col = col.child(achievements_view(row_ix, &row.achievements, icons));
     }
 
@@ -476,7 +496,7 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
         if has_achievements {
             col = col.child(Separator::horizontal());
         }
-        col = col.child(section_heading("Ribbons"));
+        col = col.child(section_heading(t!("ui.replay.sections.ribbons").into_owned()));
         let mut ribbons: Vec<&RibbonResult> = row.ribbons.iter().collect();
         ribbons.sort_by(|a, b| a.name.cmp(&b.name));
         reorder_bulge_after_main_caliber(&mut ribbons);
@@ -487,21 +507,21 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
         if has_achievements || has_ribbons {
             col = col.child(Separator::horizontal());
         }
-        col = col.child(section_heading("Damage Events"));
+        col = col.child(section_heading(t!("ui.replay.sections.damage_events").into_owned()));
         if row.should_hide_stats() && !debug {
             col = col.child(nda_text());
         } else {
             if let Some(fires) = row.fires {
-                col = col.child(body_text(format!("Fires: {fires}")));
+                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.fires"), fires)));
             }
             if let Some(floods) = row.floods {
-                col = col.child(body_text(format!("Floods: {floods}")));
+                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.floods"), floods)));
             }
             if let Some(citadels) = row.citadels {
-                col = col.child(body_text(format!("Citadels: {citadels}")));
+                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.citadels"), citadels)));
             }
             if let Some(crits) = row.crits {
-                col = col.child(body_text(format!("Crits: {crits}")));
+                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.crits"), crits)));
             }
         }
     }
@@ -606,14 +626,14 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         if build.modernization_slots.is_empty() {
             col = col.child(body_text("No Modules"));
         } else {
-            col = col.child(section_heading("Modules:"));
+            col = col.child(section_heading(t!("ui.replay.sections.modules").into_owned()));
             col = col.child(modernization_slots_view(row_ix, &build.modernization_slots, icons));
         }
         has_content = true;
 
         if !build.signals.is_empty() {
             col = col.child(Separator::horizontal());
-            col = col.child(section_heading("Signals:"));
+            col = col.child(section_heading(t!("ui.replay.sections.signals").into_owned()));
             col = col.child(signals_view(row_ix, &build.signals, icons));
         }
 
@@ -621,7 +641,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         if build.loadout.is_empty() {
             col = col.child(body_text("No Loadout"));
         } else {
-            col = col.child(section_heading("Loadout:"));
+            col = col.child(section_heading(t!("ui.replay.sections.loadout").into_owned()));
             for (idx, module) in build.loadout.iter().enumerate() {
                 if let Some(name) = module.name.as_ref() {
                     col = col.child(text_row("replay-loadout", row_ix, idx, name.clone(), module.description.clone()));
@@ -632,7 +652,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         col = col.child(Separator::horizontal());
         match build.captain_skills.as_ref() {
             Some(skills) => {
-                col = col.child(section_heading("Captain Skills:"));
+                col = col.child(section_heading(t!("ui.replay.sections.captain_skills").into_owned()));
                 if skills.is_empty() {
                     col = col.child(body_text("No Captain Skills"));
                 } else {
@@ -649,7 +669,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         if has_content {
             col = col.child(Separator::horizontal());
         }
-        col = col.child(section_heading("Consumables:"));
+        col = col.child(section_heading(t!("ui.replay.sections.consumables").into_owned()));
         col = col.child(consumables_view(row_ix, &row.consumables, icons));
         has_content = true;
     } else if let Some(build) = row.translated_build.as_ref()
@@ -658,7 +678,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
         if has_content {
             col = col.child(Separator::horizontal());
         }
-        col = col.child(section_heading("Consumables:"));
+        col = col.child(section_heading(t!("ui.replay.sections.consumables").into_owned()));
         for (idx, ability) in build.abilities.iter().enumerate() {
             if let Some(name) = ability.name.as_ref() {
                 col = col.child(text_row("replay-ability", row_ix, idx, name.clone(), None));

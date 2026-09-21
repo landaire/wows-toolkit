@@ -15,6 +15,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use std::collections::HashMap;
 use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::personal_rating;
@@ -136,12 +137,7 @@ impl Render for StatsOverviewPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child("No games recorded for the current filters"),
-                )
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(t!("ui.stats.no_games").to_string()))
                 .into_any_element();
         }
 
@@ -170,13 +166,23 @@ impl Render for StatsOverviewPanel {
                         .text_sm()
                         .font_weight(FontWeight::BOLD)
                         .text_color(rgb(personal_rating::chip_text(rating.category, dark)))
-                        .child(format!("PR {:.0} ({})", rating.pr, rating.category.name())),
+                        .child(format!("{} {:.0} ({})", t!("ui.stats.pr"), rating.pr, rating.category.name())),
                 )
             })
-            .child(div().text_sm().text_color(crate::theme::text_dim()).child(format!("{} frags", summary.total_frags)))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.stats.frags", count = summary.total_frags).to_string()),
+            )
             .when_some(summary.best_frags, |this, (ship, frags)| {
                 let ship = self.ship_name(ship);
-                this.child(div().text_sm().text_color(dim).child(format!("Best frags: {frags} ({ship})")))
+                this.child(
+                    div()
+                        .text_sm()
+                        .text_color(dim)
+                        .child(t!("ui.stats.best_frags", ship = ship, count = frags).to_string()),
+                )
             })
             .when_some(summary.best_damage, |this, (ship, damage)| {
                 let ship = self.ship_name(ship);
@@ -184,7 +190,7 @@ impl Render for StatsOverviewPanel {
                     div()
                         .text_sm()
                         .text_color(dim)
-                        .child(format!("Max damage: {} ({ship})", separate_thousands(damage))),
+                        .child(t!("ui.stats.max_damage", ship = ship, damage = separate_thousands(damage)).to_string()),
                 )
             });
 
@@ -196,11 +202,41 @@ impl Render for StatsOverviewPanel {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().w(SHIP_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Ship"))
-            .child(div().w(NUMBER_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Battles"))
-            .child(div().w(NUMBER_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Win rate"))
-            .child(div().w(NUMBER_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Avg damage"))
-            .child(div().w(NUMBER_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Avg frags"));
+            .child(
+                div()
+                    .w(SHIP_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.stats.column_ship").to_string()),
+            )
+            .child(
+                div()
+                    .w(NUMBER_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.stats.column_battles").to_string()),
+            )
+            .child(
+                div()
+                    .w(NUMBER_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.stats.column_win_rate").to_string()),
+            )
+            .child(
+                div()
+                    .w(NUMBER_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.stats.column_avg_damage").to_string()),
+            )
+            .child(
+                div()
+                    .w(NUMBER_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.stats.column_avg_frags").to_string()),
+            );
 
         let ships: Vec<(String, PerformanceInfo)> = self.computed.ships.clone();
         let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| {
@@ -239,7 +275,12 @@ impl Render for StatsOverviewPanel {
                 .py_1()
                 .border_t_1()
                 .border_color(border)
-                .child(div().text_xs().font_weight(FontWeight::BOLD).child("Achievements"))
+                .child(
+                    div()
+                        .text_xs()
+                        .font_weight(FontWeight::BOLD)
+                        .child(t!("ui.replay.sections.achievements").to_string()),
+                )
                 .child(div().id("stats-achievements").overflow_y_scroll().track_scroll(&self.scroll).child(
                     h_flex().flex_wrap().gap_2().children(self.computed.achievements.iter().map(|earned| {
                         h_flex()

@@ -665,8 +665,8 @@ impl ArmorViewerPane {
     /// (`ViewportView::set_ship_loading`), where the user is looking.
     fn status_text(&self) -> Option<String> {
         match &self.bundle {
-            BundleState::NotStarted | BundleState::Loading => Some("Loading ship catalog...".to_string()),
-            BundleState::Failed(reason) => Some(format!("Failed to load ship catalog: {reason}")),
+            BundleState::NotStarted | BundleState::Loading => Some(t!("ui.armor.loading_catalog").into_owned()),
+            BundleState::Failed(reason) => Some(t!("ui.armor.catalog_failed", reason = reason).to_string()),
             BundleState::Ready(_) => match &self.ship_load {
                 ShipLoadState::Idle | ShipLoadState::Loading { .. } => None,
                 ShipLoadState::Failed { display_name, reason } => {

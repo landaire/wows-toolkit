@@ -20,6 +20,7 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use std::sync::Arc;
 
@@ -177,10 +178,10 @@ impl StatsChartPanel {
     /// read when that is not the raw per-game figure.
     fn value_label(&self) -> String {
         if self.mode == ChartMode::Bar {
-            return format!("{} (average)", self.stat.label());
+            return t!("ui.stats.series_average", stat = self.stat.label()).into_owned();
         }
         if self.running || self.combined {
-            return format!("{} (running)", self.stat.label());
+            return t!("ui.stats.series_running", stat = self.stat.label()).into_owned();
         }
         self.stat.label().to_string()
     }
@@ -300,7 +301,7 @@ impl StatsChartPanel {
         let played = self.played.clone();
         let selected = self.selected_ships.clone();
 
-        let trigger = Button::new(("chart-settings", id)).label("Settings").compact();
+        let trigger = Button::new(("chart-settings", id)).label(t!("ui.stats.settings").to_string()).compact();
         Popover::new(("chart-settings-menu", id)).trigger(trigger).content(move |_state, _window, _cx| {
             let stat_entity = entity.clone();
             let stat_buttons: Vec<_> = stats
@@ -376,21 +377,24 @@ impl StatsChartPanel {
                 .p_2()
                 .id(("chart-settings-body", id))
                 .overflow_scroll()
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child("Statistic"))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.statistic").to_string()))
                 .child(h_flex().flex_wrap().gap_1().children(stat_buttons))
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child("Chart"))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.chart").to_string()))
                 .child(h_flex().gap_1().children(mode_buttons))
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child("Options"))
-                .child(Checkbox::new(("chart-combined", id)).label("Combine ships").checked(combined).on_click(
-                    move |checked, _window, cx| {
-                        let checked = *checked;
-                        combined_entity.update(cx, |this, cx| this.set_combined(checked, cx));
-                    },
-                ))
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.options").to_string()))
+                .child(
+                    Checkbox::new(("chart-combined", id))
+                        .label(t!("ui.stats.combine_ships").to_string())
+                        .checked(combined)
+                        .on_click(move |checked, _window, cx| {
+                            let checked = *checked;
+                            combined_entity.update(cx, |this, cx| this.set_combined(checked, cx));
+                        }),
+                )
                 .when(mode == ChartMode::Line, |this| {
                     this.child(
                         Checkbox::new(("chart-running", id))
-                            .label("Running average")
+                            .label(t!("ui.stats.running_average").to_string())
                             .checked(running || combined)
                             // Combining the ships is already a running line.
                             .disabled(combined)
@@ -400,26 +404,35 @@ impl StatsChartPanel {
                             }),
                     )
                 })
-                .child(Checkbox::new(("chart-values", id)).label("Value labels").checked(show_values).on_click(
-                    move |checked, _window, cx| {
-                        let checked = *checked;
-                        values_entity.update(cx, |this, cx| this.set_show_values(checked, cx));
-                    },
-                ))
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child("Ships"))
+                .child(
+                    Checkbox::new(("chart-values", id))
+                        .label(t!("ui.stats.value_labels").to_string())
+                        .checked(show_values)
+                        .on_click(move |checked, _window, cx| {
+                            let checked = *checked;
+                            values_entity.update(cx, |this, cx| this.set_show_values(checked, cx));
+                        }),
+                )
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.ships").to_string()))
                 .child(
                     h_flex()
                         .gap_1()
-                        .child(Button::new(("chart-ships-all", id)).label("All").compact().on_click(
-                            move |_event, _window, cx| {
-                                all_entity.update(cx, |this, cx| this.select_all_ships(cx));
-                            },
-                        ))
-                        .child(Button::new(("chart-ships-none", id)).label("None").compact().on_click(
-                            move |_event, _window, cx| {
-                                none_entity.update(cx, |this, cx| this.select_no_ships(cx));
-                            },
-                        )),
+                        .child(
+                            Button::new(("chart-ships-all", id))
+                                .label(t!("ui.stats.all_ships").to_string())
+                                .compact()
+                                .on_click(move |_event, _window, cx| {
+                                    all_entity.update(cx, |this, cx| this.select_all_ships(cx));
+                                }),
+                        )
+                        .child(
+                            Button::new(("chart-ships-none", id))
+                                .label(t!("ui.stats.no_ships").to_string())
+                                .compact()
+                                .on_click(move |_event, _window, cx| {
+                                    none_entity.update(cx, |this, cx| this.select_no_ships(cx));
+                                }),
+                        ),
                 )
                 .children(ship_rows)
                 .into_any_element()
@@ -464,15 +477,23 @@ impl Render for StatsChartPanel {
             .child(self.settings_menu(cx))
             .child(div().flex_1())
             .when(!self.view.is_default(), |this| {
-                this.child(Button::new(("chart-reset-view", id)).label("Reset view").compact().xsmall().on_click(
-                    cx.listener(|this, _event, _window, cx| {
-                        this.view.reset();
-                        cx.notify();
-                    }),
-                ))
+                this.child(
+                    Button::new(("chart-reset-view", id))
+                        .label(t!("ui.stats.reset_view").to_string())
+                        .compact()
+                        .xsmall()
+                        .on_click(cx.listener(|this, _event, _window, cx| {
+                            this.view.reset();
+                            cx.notify();
+                        })),
+                )
             });
 
-        let x_label = if self.mode == ChartMode::Bar { "Ship" } else { "Game" };
+        let x_label = if self.mode == ChartMode::Bar {
+            t!("ui.stats.column_ship").into_owned()
+        } else {
+            t!("ui.stats.axis_game").into_owned()
+        };
         let value_label = self.value_label();
         let view = self.view;
         let show_values = self.show_values;
@@ -480,7 +501,14 @@ impl Render for StatsChartPanel {
             |_bounds, _window, _cx| {},
             move |bounds, _prepaint, window, cx| {
                 plot::paint(
-                    &plot::Plot { series: &series, bars: &bars, x_label, y_label: &value_label, show_values, view },
+                    &plot::Plot {
+                        series: &series,
+                        bars: &bars,
+                        x_label: &x_label,
+                        y_label: &value_label,
+                        show_values,
+                        view,
+                    },
                     bounds,
                     window,
                     cx,
@@ -498,7 +526,7 @@ impl Render for StatsChartPanel {
                     div()
                         .text_sm()
                         .text_color(crate::theme::text_dim())
-                        .child("Nothing to plot for the current filters"),
+                        .child(t!("ui.stats.nothing_to_plot").to_string()),
                 )
                 .into_any_element()
         } else {

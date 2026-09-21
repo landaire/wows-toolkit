@@ -32,6 +32,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -124,12 +125,17 @@ impl SubTab {
     /// The order the egui app lists them in.
     const ALL: [SubTab; 3] = [SubTab::Players, SubTab::CurrentMatch, SubTab::Clans];
 
-    fn label(self) -> &'static str {
+    const fn label_key(self) -> &'static str {
         match self {
-            Self::Players => "Players",
-            Self::CurrentMatch => "Current Match",
-            Self::Clans => "Clans",
+            Self::Players => "ui.player_tracker.subtab_players",
+            Self::CurrentMatch => "ui.player_tracker.subtab_current_match",
+            Self::Clans => "ui.player_tracker.subtab_clans",
         }
+    }
+
+    /// The section's name in the reader's own language.
+    fn label(self) -> String {
+        t!(self.label_key()).into_owned()
     }
 }
 const CLAN_COLUMN_WIDTH: Pixels = px(120.);
@@ -297,7 +303,8 @@ pub struct PlayerTrackerView {
 
 impl PlayerTrackerView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by player or clan..."));
+        let filter_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.player_tracker.filter_hint").to_string()));
         let periods = SearchableVec::new(TimePeriod::ALL.map(PeriodItem).to_vec());
         let period_select = cx.new(|cx| {
             SelectState::new(periods, Some(IndexPath::new(period_index(TimePeriod::default()))), window, cx)
@@ -310,7 +317,8 @@ impl PlayerTrackerView {
             let pool = crate::settings_store::pool(cx);
             this.set_period(*period, pool, cx);
         });
-        let note_input = cx.new(|cx| InputState::new(window, cx).placeholder("Notes about this player..."));
+        let note_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.player_tracker.notes_hint").to_string()));
         let subscription = cx.subscribe(&filter_input, Self::on_filter_event);
         let note_edited = cx.subscribe(&note_input, Self::on_note_edited);
 
@@ -1110,9 +1118,9 @@ impl PlayerTrackerView {
         let border = cx.theme().border;
 
         let status = match (&self.game_data, self.live_checked, &self.live_match) {
-            (None, _, _) => Some("Set the World of Warships directory to watch for battles"),
-            (_, false, _) => Some("Checking for a battle in progress..."),
-            (_, true, None) => Some("No battle in progress"),
+            (None, _, _) => Some(t!("ui.player_tracker.live_no_directory").into_owned()),
+            (_, false, _) => Some(t!("ui.player_tracker.live_checking").into_owned()),
+            (_, true, None) => Some(t!("ui.player_tracker.live_none").into_owned()),
             (_, true, Some(_)) => None,
         };
 
@@ -1187,12 +1195,10 @@ impl PlayerTrackerView {
             // A failure is reported even while the ships are unresolved: a
             // build that did not load is why they are unresolved, and saying
             // "loading" for it would never stop being wrong.
-            StatsState::Failed(reason) => Some(format!("Player statistics are unavailable: {reason}")),
-            _ if !roster.ships_resolved => {
-                Some("Loading this build's ship data; names and classes fill in when it lands.".to_string())
-            }
-            StatsState::Scanning => Some("Reading the roster off the battle in progress...".to_string()),
-            StatsState::Fetching => Some("Looking up player statistics...".to_string()),
+            StatsState::Failed(reason) => Some(t!("ui.player_tracker.stats_unavailable", reason = reason).to_string()),
+            _ if !roster.ships_resolved => Some(t!("ui.player_tracker.live_loading_build").into_owned().to_string()),
+            StatsState::Scanning => Some(t!("ui.player_tracker.stats_resolving").into_owned().to_string()),
+            StatsState::Fetching => Some(t!("ui.player_tracker.stats_fetching").into_owned().to_string()),
             StatsState::Idle | StatsState::Ready(_) => None,
         };
         let stats = match &self.stats {
@@ -1221,9 +1227,9 @@ impl PlayerTrackerView {
                     .flex_1()
                     .min_h(px(0.))
                     .items_start()
-                    .child(team_column("Allies", "ally", &roster.friendly, layout))
+                    .child(team_column(t!("ui.player_tracker.allies").into_owned(), "ally", &roster.friendly, layout))
                     .child(div().w(px(1.)).h_full().bg(border))
-                    .child(team_column("Enemies", "enemy", &roster.enemy, layout)),
+                    .child(team_column(t!("ui.player_tracker.enemies").into_owned(), "enemy", &roster.enemy, layout)),
             )
             .into_any_element()
     }
@@ -1360,7 +1366,7 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
         )
         .compact()
         .when_some(tooltip, |this, note| this.tooltip(SharedString::from(note)))
-        .when(!has_note, |this| this.tooltip("Add a note about this player"))
+        .when(!has_note, |this| this.tooltip(t!("ui.player_tracker.notes_hint").into_owned()))
         .on_click(move |_event, window, cx: &mut App| {
             tracker.update(cx, |this, cx| this.edit_note(account, window, cx));
         })
@@ -1387,7 +1393,7 @@ struct RosterLayout<'a> {
 }
 
 /// One team's roster column, with its own header row.
-fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], layout: RosterLayout) -> AnyElement {
+fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout: RosterLayout) -> AnyElement {
     let mut header = h_flex()
         .w_full()
         .gap_2()
@@ -1401,7 +1407,7 @@ fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], 
         .child(div().flex_none().w(CLASS_COLUMN_WIDTH))
         .child(div().flex_none().w(CHIP_COLUMN_WIDTH))
         .child(div().flex_1().min_w(px(0.)).child(title))
-        .child(div().w(SHIP_COLUMN_WIDTH).child("Ship"));
+        .child(div().w(SHIP_COLUMN_WIDTH).child(t!("ui.player_tracker.win_rate_ship").to_string()));
 
     // One group of columns per scope, so a detailed row reads
     // "overall, then this ship" rather than interleaving the two.
@@ -1417,7 +1423,7 @@ fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], 
     v_flex()
         .flex_1()
         .min_w(px(0.))
-        .child(header.child(div().w(MET_COLUMN_WIDTH).child("Seen")))
+        .child(header.child(div().w(MET_COLUMN_WIDTH).child(t!("ui.player_tracker.column.encounters").to_string())))
         .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, layout)))
         .into_any_element()
 }
@@ -1658,7 +1664,7 @@ impl Render for PlayerTrackerView {
                 .child(
                     Select::new(&self.period_select)
                         .id("tracker-period")
-                        .accessibility_label("Time period")
+                        .accessibility_label(t!("ui.player_tracker.time_period").to_string())
                         .small()
                         .w(PERIOD_COMBO_WIDTH)
                         // The menu takes the width of the element the popup is
@@ -1680,9 +1686,9 @@ impl Render for PlayerTrackerView {
                     let show = self.show_division_mates;
                     this.child(
                         Checkbox::new("tracker-show-division-mates")
-                            .label("Count division mates")
+                            .label(t!("ui.player_tracker.show_division_mates").to_string())
                             .checked(show)
-                            .tooltip("Battles you arranged with someone inflate how often you have met them")
+                            .tooltip(t!("ui.player_tracker.show_division_mates_hover").to_string())
                             .on_click(cx.listener(move |this, _event, _window, cx| {
                                 this.set_show_division_mates(!show, cx);
                             })),
@@ -1835,15 +1841,15 @@ impl Render for PlayerTrackerView {
             _ => &self.state,
         };
         let status = match load_state {
-            LoadState::Idle => Some("Waiting for the replay index".to_string()),
+            LoadState::Idle => Some(t!("ui.player_tracker.waiting_for_index").into_owned().to_string()),
             LoadState::Loading => match self.sub_tab {
-                SubTab::Clans => Some("Loading clans...".to_string()),
-                _ => Some("Loading players...".to_string()),
+                SubTab::Clans => Some(t!("ui.player_tracker.loading_clans").into_owned().to_string()),
+                _ => Some(t!("ui.player_tracker.loading_players").into_owned().to_string()),
             },
-            LoadState::Failed(reason) => Some(format!("Could not read the index: {reason}")),
+            LoadState::Failed(reason) => Some(t!("ui.player_tracker.index_failed", reason = reason).to_string()),
             LoadState::Loaded if self.visible_len() == 0 => match self.sub_tab {
-                SubTab::Players => Some("No players indexed for this period".to_string()),
-                SubTab::Clans => Some("No clans met in this period".to_string()),
+                SubTab::Players => Some(t!("ui.player_tracker.no_players").into_owned().to_string()),
+                SubTab::Clans => Some(t!("ui.player_tracker.clan_no_data").into_owned().to_string()),
                 SubTab::CurrentMatch => unreachable!("the roster returns above"),
             },
             LoadState::Loaded => None,
@@ -1885,13 +1891,21 @@ impl Render for PlayerTrackerView {
                     h_flex()
                         .justify_between()
                         .items_center()
-                        .child(div().text_xs().font_weight(FontWeight::BOLD).child(format!("Notes: {name}")))
-                        .child(Button::new("tracker-note-close").label("Close").compact().on_click(cx.listener(
-                            |this, _event, _window, cx| {
-                                this.editing_note = None;
-                                cx.notify();
-                            },
-                        ))),
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .child(t!("ui.player_tracker.notes_title", name = name).to_string()),
+                        )
+                        .child(
+                            Button::new("tracker-note-close")
+                                .label(t!("ui.armor.export.close_button").to_string())
+                                .compact()
+                                .on_click(cx.listener(|this, _event, _window, cx| {
+                                    this.editing_note = None;
+                                    cx.notify();
+                                })),
+                        ),
                 )
                 .child(Input::new(&self.note_input).id("tracker-note-input").w_full())
                 .when_some(self.note_error.clone(), |this, reason| {
@@ -1901,7 +1915,7 @@ impl Render for PlayerTrackerView {
                             .test_support()
                             .text_xs()
                             .text_color(rgb(0xff8080))
-                            .child(format!("Not saved: {reason}")),
+                            .child(t!("ui.player_tracker.note_not_saved", reason = reason).to_string()),
                     )
                 })
         });

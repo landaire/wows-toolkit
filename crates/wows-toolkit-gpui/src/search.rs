@@ -22,6 +22,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use crate::search_pills::EditablePart;
 use wows_toolkit_config::index::query;
@@ -745,12 +746,12 @@ fn column_width(column: SortColumn) -> Pixels {
     }
 }
 
-fn outcome_label(outcome: MatchOutcome) -> &'static str {
+fn outcome_label(outcome: MatchOutcome) -> String {
     match outcome {
-        MatchOutcome::Win => "Win",
-        MatchOutcome::Loss => "Loss",
-        MatchOutcome::Draw => "Draw",
-        MatchOutcome::Unknown => "-",
+        MatchOutcome::Win => t!("ui.search.outcome_win").into_owned(),
+        MatchOutcome::Loss => t!("ui.search.outcome_loss").into_owned(),
+        MatchOutcome::Draw => t!("ui.search.outcome_draw").into_owned(),
+        MatchOutcome::Unknown => "-".to_string(),
     }
 }
 
@@ -777,18 +778,24 @@ fn row_actions(ix: usize, hit: &MatchHit, exists: bool, search: Entity<SearchVie
                 .icon(IconName::FolderOpen)
                 .compact()
                 .disabled(!exists)
-                .tooltip(if exists { "Open this replay" } else { "This replay is no longer on disk" })
+                .tooltip(if exists {
+                    t!("ui.search.open").into_owned()
+                } else {
+                    t!("ui.search.open_missing").into_owned()
+                })
                 .on_click(move |_event, _window, cx: &mut App| {
                     let open_path = open_path.clone();
                     search.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(open_path)));
                 }),
         )
         .child(
-            Button::new(("search-copy", ix)).icon(IconName::Copy).compact().tooltip("Copy the replay path").on_click(
-                move |_event, _window, cx: &mut App| {
+            Button::new(("search-copy", ix))
+                .icon(IconName::Copy)
+                .compact()
+                .tooltip(t!("ui.search.copy_path").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
                     cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
-                },
-            ),
+                }),
         )
         .into_any_element()
 }
@@ -865,7 +872,7 @@ impl Render for SearchView {
             )
             .child(
                 Button::new("search-run")
-                    .label("Search")
+                    .label(t!("ui.tabs.search").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event, _window, cx| this.run(cx))),
             );
@@ -950,7 +957,7 @@ impl Render for SearchView {
                 .items_center()
                 .px_2()
                 .py_1()
-                .child(div().text_xs().text_color(muted).child("Looking up values..."))
+                .child(div().text_xs().text_color(muted).child(t!("ui.search.looking_up_values").into_owned()))
                 .into_any_element()
         });
 
@@ -1111,11 +1118,11 @@ impl Render for SearchView {
         });
 
         let status = match &self.state {
-            SearchState::Idle => Some("Type a query and press Enter".to_string()),
-            SearchState::Invalid(reason) => Some(format!("That query did not parse: {reason}")),
-            SearchState::Running => Some("Searching...".to_string()),
-            SearchState::Failed(reason) => Some(format!("The search failed: {reason}")),
-            SearchState::Done if self.hits.is_empty() => Some("No matches".to_string()),
+            SearchState::Idle => Some(t!("ui.search.type_a_query").into_owned()),
+            SearchState::Invalid(reason) => Some(t!("ui.search.parse_failed", reason = reason).into_owned()),
+            SearchState::Running => Some(t!("ui.search.searching").into_owned()),
+            SearchState::Failed(reason) => Some(t!("ui.search.failed", reason = reason).into_owned()),
+            SearchState::Done if self.hits.is_empty() => Some(t!("ui.search.no_matches").into_owned()),
             SearchState::Done => None,
         };
 
@@ -1155,9 +1162,9 @@ impl Render for SearchView {
             let capped = self.truncated;
             h_flex().flex_none().px_2().py_1().border_t_1().border_color(border).child(
                 div().text_xs().text_color(crate::theme::text_dim()).child(if capped {
-                    format!("First {RESULT_LIMIT} matches")
+                    t!("ui.search.match_count_truncated", count = RESULT_LIMIT).into_owned()
                 } else {
-                    format!("{} matches", self.hits.len())
+                    t!("ui.search.match_count", count = self.hits.len()).into_owned()
                 }),
             )
         });

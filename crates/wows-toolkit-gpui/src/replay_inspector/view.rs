@@ -33,6 +33,7 @@ use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -447,7 +448,7 @@ impl ReplayInspectorView {
 fn column_filter_checkbox(
     entity: Entity<ReplayInspectorView>,
     id: &'static str,
-    label: &'static str,
+    label: String,
     checked: bool,
     apply: impl Fn(&mut ReplaySettings, bool) + Copy + 'static,
 ) -> impl IntoElement {
@@ -467,7 +468,11 @@ fn column_filter_checkbox(
 /// nothing.
 fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplaySettings) -> impl IntoElement {
     Popover::new("replay-header-column-filters")
-        .trigger(Button::new("replay-header-column-filters-trigger").label("Column Filters").compact())
+        .trigger(
+            Button::new("replay-header-column-filters-trigger")
+                .label(t!("ui.replay.column_filters").to_string())
+                .compact(),
+        )
         .content(move |_state, _window, _cx| {
             v_flex()
                 .gap_1()
@@ -475,21 +480,21 @@ fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplayS
                 .child(column_filter_checkbox(
                     entity.clone(),
                     "replay-header-filter-raw-xp",
-                    "Raw XP",
+                    t!("stat.raw_xp").into_owned(),
                     settings.show_raw_xp,
                     |settings, value| settings.show_raw_xp = value,
                 ))
                 .child(column_filter_checkbox(
                     entity.clone(),
                     "replay-header-filter-observed-damage",
-                    "Observed Damage",
+                    t!("ui.replay.column.observed_damage").into_owned(),
                     settings.show_observed_damage,
                     |settings, value| settings.show_observed_damage = value,
                 ))
                 .child(column_filter_checkbox(
                     entity.clone(),
                     "replay-header-filter-heals",
-                    "Heals",
+                    t!("ui.replay.column.heals").into_owned(),
                     settings.show_heals,
                     |settings, value| settings.show_heals = value,
                 ))
@@ -505,7 +510,12 @@ impl Render for ReplayInspectorView {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().text_color(crate::theme::text_dim()).child("Select a replay"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.replay.select_replay").to_string()),
+                )
                 .into_any_element()
         };
 
@@ -517,7 +527,7 @@ impl Render for ReplayInspectorView {
                 div()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(format!("Game data failed to load: {reason}"))
+                    .child(t!("ui.replay.game_data_failed", error = reason).to_string())
                     .into_any_element(),
             ),
             GameDataStatus::Loading | GameDataStatus::Ready(_) => None,
@@ -542,15 +552,15 @@ impl Render for ReplayInspectorView {
             .child(
                 Button::new("replay-header-open-manually")
                     .icon(IconName::FolderOpen)
-                    .label("Manually Open Replay File...")
+                    .label(t!("ui.replay.open_manually").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.open_manually(window, cx))),
             )
             .child(
                 Checkbox::new("replay-header-auto-load-latest")
-                    .label("Autoload Latest Replay")
+                    .label(t!("ui.replay.autoload_latest").to_string())
                     .checked(self.auto_load_latest_replay)
-                    .tooltip("Open a match as soon as the game finishes writing it")
+                    .tooltip(t!("ui.replay.autoload_latest_tooltip").to_string())
                     .on_click(
                         cx.listener(|this, checked: &bool, _window, cx| this.set_auto_load_latest_replay(*checked, cx)),
                     ),
@@ -559,8 +569,8 @@ impl Render for ReplayInspectorView {
             .child(
                 Select::new(&self.grouping_select)
                     .id("replay-header-grouping")
-                    .title_prefix("Group: ")
-                    .accessibility_label("Replay grouping")
+                    .title_prefix(t!("ui.replay.group_prefix").to_string())
+                    .accessibility_label(t!("ui.replay.group_label").to_string())
                     .small()
                     .w(px(160.)),
             )
