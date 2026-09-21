@@ -231,6 +231,9 @@ pub struct ReplayBrowser {
     /// The watch on the replays directory. Held because dropping it stops the
     /// watch; replaced whenever the directory changes.
     watcher: Option<notify::RecommendedWatcher>,
+    /// Bumped per scan, so a slower earlier scan (and the watch task it
+    /// started) cannot write over a later one's listing.
+    scan_generation: u64,
 }
 
 /// What the browser can translate its labels with.
@@ -275,6 +278,7 @@ impl ReplayBrowser {
             preview: PreviewHover::default(),
             preview_anchor: Point::default(),
             watcher: None,
+            scan_generation: 0,
         }
     }
 
@@ -387,7 +391,18 @@ impl ReplayBrowser {
     /// again later (e.g. if the user changes the WoWs directory); replaces
     /// whatever the previous scan found.
     pub fn start_scan(&mut self, wows_dir: String, cx: &mut Context<Self>) {
+        // Every scan takes a number, and only the newest one's result is
+        // applied: two scans in flight otherwise land in whichever order they
+        // finish, leaving the listing (and the watch) on the older directory.
+        self.scan_generation = self.scan_generation.wrapping_add(1);
+        let generation = self.scan_generation;
+
         if wows_dir.is_empty() {
+            // The directory the watch was on is no longer the one to watch,
+            // and there is no new one; dropping it is what stops a match
+            // finishing there from refilling a listing that says there is no
+            // directory set.
+            self.watcher = None;
             self.status = ScanStatus::Failed(ScanError::WowsDirMissing);
             cx.notify();
             return;
@@ -401,10 +416,13 @@ impl ReplayBrowser {
             let scanned = replays_dir.clone();
             let files = cx.background_spawn(async move { scan_replay_files(&scanned) }).await;
             let _ = this.update(cx, |this, cx| {
+                if this.scan_generation != generation {
+                    return;
+                }
                 this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
                 this.files = files;
                 this.rebuild_tree(cx);
-                this.watch_replays_dir(replays_dir, cx);
+                this.watch_replays_dir(replays_dir, generation, cx);
                 cx.notify();
             });
         })
@@ -415,7 +433,7 @@ impl ReplayBrowser {
     /// joins the listing without a rescan, which is what makes "Autoload
     /// Latest Replay" mean anything (the egui app's own watcher,
     /// `tab_state.rs`).
-    fn watch_replays_dir(&mut self, replays_dir: PathBuf, cx: &mut Context<Self>) {
+    fn watch_replays_dir(&mut self, replays_dir: PathBuf, generation: u64, cx: &mut Context<Self>) {
         use notify::Watcher as _;
 
         // Dropped before the new one is installed, so the old directory stops
@@ -456,14 +474,14 @@ impl ReplayBrowser {
 
         cx.spawn(async move |this, cx| {
             while let Some(path) = futures::StreamExt::next(&mut rx).await {
-                // The game creates the file and then writes it, so the header
-                // is not there yet when the event arrives.
-                let read = path.clone();
-                let Some(raw) = cx.background_spawn(async move { read_replay_when_complete(&read) }).await else {
-                    continue;
-                };
+                let Some(raw) = read_replay_when_complete(path, cx).await else { continue };
                 let appeared = raw.path.clone();
                 let updated = this.update(cx, |this, cx| {
+                    // A scan started while this read was waiting means the
+                    // listing is no longer the one this replay belongs to.
+                    if this.scan_generation != generation {
+                        return false;
+                    }
                     if this.files.iter().any(|existing| existing.path == raw.path) {
                         return false;
                     }
@@ -993,13 +1011,20 @@ const APPEARED_REPLAY_RETRY: std::time::Duration = std::time::Duration::from_mil
 /// Reads the header of a replay the watcher reported, retrying while the game
 /// finishes writing it. `None` once the attempts run out, which is what a file
 /// that is not a replay after all looks like.
-fn read_replay_when_complete(path: &Path) -> Option<RawReplay> {
+///
+/// The wait is a timer rather than a sleep: parking a thread of the shared
+/// background executor for it would serialise every other background job
+/// behind one replay, and would stall the single-threaded test executor
+/// outright.
+async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawReplay> {
     for attempt in 0..APPEARED_REPLAY_ATTEMPTS {
         if attempt > 0 {
-            std::thread::sleep(APPEARED_REPLAY_RETRY);
+            cx.background_executor().timer(APPEARED_REPLAY_RETRY).await;
         }
-        if let Ok(meta) = ReplayFile::meta_from_file(path) {
-            return Some(RawReplay { listed: ListedReplay::from_meta(&meta), path: path.to_path_buf() });
+        let read = path.clone();
+        let parsed = cx.background_spawn(async move { ReplayFile::meta_from_file(&read).ok() }).await;
+        if let Some(meta) = parsed {
+            return Some(RawReplay { listed: ListedReplay::from_meta(&meta), path });
         }
     }
     tracing::warn!(path = %path.display(), "replay browser: a new replay never became readable");

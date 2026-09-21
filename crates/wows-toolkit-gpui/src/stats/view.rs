@@ -70,6 +70,8 @@ pub struct StatsView {
     /// Whether the clear button has been pressed once and is waiting to be
     /// confirmed.
     clear_armed: bool,
+    /// Why the last clear did not go through, if it did not.
+    clear_error: Option<SharedString>,
     /// Handed to every panel so the rating is computed against one table.
     personal_rating: Option<std::sync::Arc<wows_toolkit_viewmodel::personal_rating::PersonalRatingData>>,
     focus_handle: FocusHandle,
@@ -120,6 +122,7 @@ impl StatsView {
             charts: vec![first_chart],
             next_chart_id: 1,
             clear_armed: false,
+            clear_error: None,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -154,6 +157,7 @@ impl StatsView {
     /// filter goes through here, so none of them can forget to save.
     fn push_filtered(&mut self, cx: &mut Context<Self>) {
         self.save_filters(cx);
+        self.drop_closed_charts(cx);
         let filtered = filter_games(&self.games, &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         self.ships.update(cx, |panel, cx| panel.set_games(&filtered, cx));
@@ -161,6 +165,16 @@ impl StatsView {
             chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         }
         cx.notify();
+    }
+
+    /// Lets go of the charts whose tab has been closed.
+    ///
+    /// The dock owns what is on screen; this list is only how the tab feeds
+    /// them. A closed chart left here would keep its own copy of every
+    /// filtered game and be handed each new one forever.
+    fn drop_closed_charts(&mut self, cx: &mut Context<Self>) {
+        let dock = self.dock_area.read(cx);
+        self.charts.retain(|chart| dock.panel(PanelId::from(chart.entity_id())).is_some());
     }
 
     /// Forgets every recorded game, once the button has been pressed twice.
@@ -176,17 +190,30 @@ impl StatsView {
         self.clear_armed = false;
 
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        self.games.clear();
-        self.available_modes.clear();
-        self.push_filtered(cx);
-
-        cx.spawn(async move |_this, cx| {
+        // The rows go once the delete has gone through, not before: a
+        // failure would otherwise leave the tab showing an empty session that
+        // comes back at the next load, with nothing saying why.
+        cx.spawn(async move |this, cx| {
             let cleared = crate::runtime::spawn(cx, async move { queries::clear_session_stats(&pool).await }).await;
-            if let Ok(Err(err)) = cleared {
-                tracing::warn!("stats: the session was not cleared: {err}");
-            }
+            let _ = this.update(cx, |this, cx| match cleared {
+                Ok(Ok(_)) => {
+                    this.clear_error = None;
+                    this.games.clear();
+                    this.available_modes.clear();
+                    this.push_filtered(cx);
+                }
+                Ok(Err(err)) => this.report_clear_failure(&err.to_string(), cx),
+                Err(err) => this.report_clear_failure(&err.to_string(), cx),
+            });
         })
         .detach();
+    }
+
+    /// Says a clear did not go through, where the button that asked for it is.
+    fn report_clear_failure(&mut self, reason: &str, cx: &mut Context<Self>) {
+        tracing::warn!("stats: the session was not cleared: {reason}");
+        self.clear_error = Some(t!("ui.stats.clear_failed", reason = reason).into_owned().into());
+        cx.notify();
     }
 
     /// Forgets one ship's games, which the Ships panel asks for but the tab
@@ -196,18 +223,22 @@ impl StatsView {
         let ship = *ship;
 
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        self.games.retain(|game| game.ship_id != ship);
-        self.available_modes = all_match_groups(&self.games).into_iter().collect();
-        self.push_filtered(cx);
 
-        cx.spawn(async move |_this, cx| {
+        cx.spawn(async move |this, cx| {
             let cleared = crate::runtime::spawn(cx, async move {
                 queries::clear_session_stats_for_ship(&pool, ship.raw() as i64).await
             })
             .await;
-            if let Ok(Err(err)) = cleared {
-                tracing::warn!("stats: the ship's games were not cleared: {err}");
-            }
+            let _ = this.update(cx, |this, cx| match cleared {
+                Ok(Ok(_)) => {
+                    this.clear_error = None;
+                    this.games.retain(|game| game.ship_id != ship);
+                    this.available_modes = all_match_groups(&this.games).into_iter().collect();
+                    this.push_filtered(cx);
+                }
+                Ok(Err(err)) => this.report_clear_failure(&err.to_string(), cx),
+                Err(err) => this.report_clear_failure(&err.to_string(), cx),
+            });
         })
         .detach();
     }
@@ -422,6 +453,9 @@ impl Render for StatsView {
                     .on_click(cx.listener(|this, _event, window, cx| this.add_chart(window, cx))),
             )
             .child(div().flex_1())
+            .when_some(self.clear_error.clone(), |this, reason| {
+                this.child(div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason))
+            })
             // Two presses rather than a dialog: the first says what the second
             // will do, and clicking anything else forgets it. The egui tab
             // asks the same question through its confirm panel.

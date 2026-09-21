@@ -127,6 +127,9 @@ impl StatsShipsPanel {
 
     /// Adopts the games the filter bar has already selected.
     pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
+        // A confirmation only stands for the table it was asked about: the
+        // filters changing is a new question.
+        self.clear_armed = None;
         self.games = games.iter().map(|game| (*game).clone()).collect();
         self.rebuild();
         cx.notify();
@@ -294,7 +297,11 @@ impl Render for StatsShipsPanel {
             let table = open.then(|| {
                 let heading = h_flex().w_full().gap_2().px_2().py_1().child(div().w(LABEL_COLUMN_WIDTH)).children(
                     stats_table::COLUMNS.map(|column| {
-                        div().w(CELL_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child(column.english())
+                        div()
+                            .w(CELL_COLUMN_WIDTH)
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .child(t!(column.translation_key()).to_string())
                     }),
                 );
 
@@ -305,7 +312,7 @@ impl Render for StatsShipsPanel {
                         .px_2()
                         .py(px(2.))
                         .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
-                        .child(div().w(LABEL_COLUMN_WIDTH).text_sm().child(row.label.english()))
+                        .child(div().w(LABEL_COLUMN_WIDTH).text_sm().child(t!(row.label.translation_key()).to_string()))
                         .children(stats_table::COLUMNS.map(|column| {
                             let cell = row.cell(column);
                             div()

@@ -246,6 +246,7 @@ proxy_url_hint = "host:port, or leave empty to use your system proxy settings (t
 heading = "World of Warships Settings"
 description = "Path to your World of Warships installation"
 directory_hint = "World of Warships Directory"
+browse = "Browse..."
 
 [ui.settings.wows.cache]
 auto_dump = "Cache game data for old replay compatibility"
@@ -316,6 +317,7 @@ description = "Connect to Twitch for chat integration and player tracking"
 get_token = "Get Login Token"
 get_token_tooltip = "We use Chatterino's login page as it provides a token with the necessary permissions (basically a moderator token with chat permissions), and it removes the need for the WoWs Toolkit developer to host their own login page website which would have the same result."
 paste_token_no_token = "Paste Token (No Token Set)"
+paste_token_tooltip = "Reads the credential from the clipboard"
 paste_token_valid = "Paste Token (Token Valid)"
 paste_token_unvalidated = "Checking token"
 paste_token_invalid = "Paste Token (Token Invalid / Expired)"
@@ -323,7 +325,6 @@ monitored_channel = "Monitored Channel (Default to Self)"
 
 # -- Replay Inspector --
 
-paste_token_tooltip = "Reads the credential from the clipboard"
 [ui.replay]
 collapse_listing = "Collapse Replay Listing"
 expand_listing = "Expand Replay Listing"
@@ -680,6 +681,7 @@ division_label = "Division:"
 add_chart = "Add chart"
 clear_confirm = "Clear every game?"
 clear_tooltip = "Forget every recorded game"
+clear_failed = "Not cleared: %{reason}"
 clear_ship_confirm = "Press again to forget this ship's games"
 copy_table = "Copy this table"
 no_games = "No games recorded for the current filters"

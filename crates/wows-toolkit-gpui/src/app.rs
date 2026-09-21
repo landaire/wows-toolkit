@@ -234,8 +234,8 @@ impl App {
         // second VFS/`GameParams` load for the same build; observing here
         // catches the `Loading` -> `Ready` transition whenever it lands,
         // including if it already landed before this tab is ever opened.
-        let subscription = cx.observe(&replay_inspector, |this, _replay_inspector, cx| {
-            this.poll_armor_game_data(cx);
+        let subscription = cx.observe_in(&replay_inspector, window, |this, _replay_inspector, window, cx| {
+            this.poll_armor_game_data(window, cx);
         });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
@@ -289,21 +289,27 @@ impl App {
         rust_i18n::set_locale(&code);
         wows_toolkit_viewmodel::set_locale(&code);
 
-        let replay_settings = settings.replay.clone();
-        let wows_dir = settings.wows_dir.clone();
-        let debug_mode = settings.debug_mode;
-        let auto_load = settings.auto_load_latest_replay;
-        self.replay_inspector.update(cx, |view, cx| {
-            let settings = InspectorSettings {
-                wows_dir,
-                debug_mode,
-                replay_settings,
-                auto_load_latest_replay: auto_load,
-                locale: Some(code),
-            };
-            view.apply_settings(settings, window, cx);
-        });
+        self.replay_inspector.update(cx, |view, cx| view.set_locale(Some(code), cx));
+        // Placeholders are stored on their input states, so the ones the
+        // reader sees are rewritten rather than left in the old language.
+        self.refresh_placeholders(window, cx);
         cx.notify();
+    }
+
+    /// Rewrites every placeholder this tab owns in the current language.
+    ///
+    /// A placeholder is held by its `InputState`, not re-read per frame, so a
+    /// language change has to push the new text in.
+    fn refresh_placeholders(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let pairs: [(&Entity<InputState>, &str); 3] = [
+            (&self.wows_dir_input, "ui.settings.wows.directory_hint"),
+            (&self.twitch_channel_input, "ui.settings.twitch.monitored_channel"),
+            (&self.proxy_input, "ui.settings.app.proxy_url_hint"),
+        ];
+        for (input, key) in pairs {
+            let text = t!(key).into_owned();
+            input.update(cx, |state, cx| state.set_placeholder(text, window, cx));
+        }
     }
 
     /// Forwards the replay inspector's preloaded game data to the Armor
@@ -320,7 +326,7 @@ impl App {
     /// (`Self::render`) whenever the Armor Viewer tab is selected, and,
     /// redundantly but harmlessly, from `apply_settings` in case the
     /// observer's first notification races the settings load.
-    fn poll_armor_game_data(&mut self, cx: &mut Context<Self>) {
+    fn poll_armor_game_data(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.armor_game_data_requested {
             return;
         }
@@ -329,7 +335,7 @@ impl App {
         }
         if let GameDataStatus::Ready(loaded) = self.replay_inspector.read(cx).game_data_status() {
             self.armor_game_data_requested = true;
-            self.armor_pane.update(cx, |pane, cx| pane.load_game_data(loaded, cx));
+            self.armor_pane.update(cx, |pane, cx| pane.load_game_data(loaded, window, cx));
         }
     }
 
@@ -479,7 +485,7 @@ impl App {
             unpacker.apply_settings(unpacker_dir, window, cx);
             unpacker.set_output_dir(output_dir, window, cx);
         });
-        self.poll_armor_game_data(cx);
+        self.poll_armor_game_data(window, cx);
         self.settings = SettingsState::Loaded(Box::new(settings));
     }
 
@@ -594,6 +600,22 @@ impl App {
         }
         settings.proxy_url = url.clone();
         settings_store::save(keys::PROXY_URL, &url, cx);
+    }
+
+    /// What the paste button says: whether a credential is stored, and what
+    /// the last paste made of it. The egui settings tab labels the same four
+    /// states (`ui.settings.twitch.paste_token_*`).
+    fn twitch_paste_label_key(&self) -> &'static str {
+        let stored = match &self.settings {
+            SettingsState::Loaded(settings) => settings.twitch_token.as_ref(),
+            _ => None,
+        };
+        match (stored, self.twitch_paste.as_ref()) {
+            (_, Some(Err(_))) => "ui.settings.twitch.paste_token_invalid",
+            (None, _) => "ui.settings.twitch.paste_token_no_token",
+            (Some(_), Some(Ok(_))) => "ui.settings.twitch.paste_token_valid",
+            (Some(_), None) => "ui.settings.twitch.paste_token_unvalidated",
+        }
     }
 
     /// What the last credential paste did. Test-only.
@@ -881,7 +903,7 @@ impl App {
                             .items_center()
                             .child(
                                 Button::new("twitch-paste-token")
-                                    .label(t!("ui.settings.twitch.paste_token_no_token").to_string())
+                                    .label(t!(self.twitch_paste_label_key()).to_string())
                                     .compact()
                                     .tooltip(t!("ui.settings.twitch.paste_token_tooltip").to_string())
                                     .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
@@ -917,7 +939,7 @@ impl App {
                     .child(
                         Button::new("wows-dir-browse")
                             .icon(IconName::FolderOpen)
-                            .label(t!("ui.settings.wows.cache.browse").to_string())
+                            .label(t!("ui.settings.wows.browse").to_string())
                             .compact()
                             .on_click(cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx))),
                     ),
@@ -1084,9 +1106,9 @@ impl Render for App {
                         .child(t.label()),
                 )
             }))
-            .on_click(cx.listener(|this, ix: &usize, _window, cx| {
+            .on_click(cx.listener(|this, ix: &usize, window, cx| {
                 this.active_tab = AppTab::ALL[*ix];
-                this.poll_armor_game_data(cx);
+                this.poll_armor_game_data(window, cx);
                 if this.active_tab == AppTab::PlayerTracker {
                     this.player_tracker.update(cx, |tracker, cx| tracker.load_index_once(cx));
                 }
