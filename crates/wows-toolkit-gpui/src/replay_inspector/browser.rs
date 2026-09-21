@@ -118,22 +118,22 @@ fn group_node(name: String, replays: Vec<&ReplayLite>, grouping: ReplayGrouping,
 }
 
 /// Groups path-descending-sorted `files` by the date part of `game_time`
-/// (`game_time.split(' ').next()`), as a run of consecutive same-date entries
-/// rather than a global grouping by date key: if two runs of the same date
-/// are separated by a different date (an out-of-order file timestamp), they
-/// become two separate groups. Mirrors `mod.rs:3330-3344` exactly, including
-/// this quirk.
+/// (`game_time.split(' ').next()`).
+///
+/// One group per date, in first-seen order: rows are newest-first, so that
+/// puts the dates in descending order and a file whose timestamp is out of
+/// order still joins the group its date names rather than opening a second
+/// one. Mirrors `listing_cache.rs`'s `build_groups`.
 fn build_date_groups(files: &[&ReplayLite], locale: Option<&str>) -> Vec<BrowserNode> {
     let mut groups: Vec<(String, Vec<&ReplayLite>)> = Vec::new();
+    let mut by_date: HashMap<String, usize> = HashMap::new();
     for &r in files {
         let date = r.identity.date_time.split(' ').next().unwrap_or(&r.identity.date_time).to_string();
-        if let Some((last_date, last_group)) = groups.last_mut()
-            && *last_date == date
-        {
-            last_group.push(r);
-            continue;
-        }
-        groups.push((date, vec![r]));
+        let index = *by_date.entry(date.clone()).or_insert_with(|| {
+            groups.push((date, Vec::new()));
+            groups.len() - 1
+        });
+        groups[index].1.push(r);
     }
     groups.into_iter().map(|(date, replays)| group_node(date, replays, ReplayGrouping::Date, locale)).collect()
 }
@@ -264,7 +264,7 @@ mod tests {
     }
 
     #[test]
-    fn date_grouping_buckets_consecutive_same_date_entries_newest_first() {
+    fn date_grouping_buckets_same_date_entries_newest_first() {
         // Paths sort descending to "b3, b2, b1, a2, a1"; game_time dates are
         // "02" for the b-paths and "01" for the a-paths, so this is a clean
         // two-group case that also proves the path-descending sort feeds the
@@ -293,11 +293,13 @@ mod tests {
         );
     }
 
+    /// A file whose timestamp is out of order joins the group its date
+    /// names. It used to open a second group with the same heading, which
+    /// read as two different days.
     #[test]
-    fn date_grouping_splits_out_of_order_runs_of_the_same_date() {
+    fn date_grouping_folds_an_out_of_order_entry_into_its_own_date() {
         // Paths sort descending to "c, b, a"; "c" and "a" share a date but
-        // "b" sits between them with a different date, so the same-date run
-        // is not merged across "b" -- two "01.01.2026" groups result.
+        // "b" sits between them with a different date.
         let files = vec![
             replay("replays/a.wowsreplay", "Kleber", "Ocean", "01.01.2026 09:00:00", MatchOutcome::Unknown),
             replay("replays/b.wowsreplay", "Kleber", "Ocean", "02.01.2026 09:00:00", MatchOutcome::Unknown),
@@ -309,11 +311,10 @@ mod tests {
         assert_eq!(
             labels(&tree),
             vec![
-                (0, "01.01.2026 (1)".to_string()),
+                (0, "01.01.2026 (2)".to_string()),
+                (1, "Kleber - Ocean".to_string()),
                 (1, "Kleber - Ocean".to_string()),
                 (0, "02.01.2026 (1)".to_string()),
-                (1, "Kleber - Ocean".to_string()),
-                (0, "01.01.2026 (1)".to_string()),
                 (1, "Kleber - Ocean".to_string()),
             ]
         );
