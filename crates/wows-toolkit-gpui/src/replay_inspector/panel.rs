@@ -43,6 +43,7 @@
 //! (subscribed in `apply_result`) builds a `RawJsonPanel` for that row's JSON
 //! and opens it as `SidePanel::RawPlayerMetadata`.
 
+use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -56,6 +57,7 @@ use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -78,10 +80,13 @@ use super::model::ReplayReportModel;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
+use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
+use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 
 const LOADING_TITLE: &str = "Loading...";
 const FAILED_TITLE: &str = "Failed to load replay";
 const SIDE_PANEL_WIDTH: Pixels = px(360.);
+const EXPORT_MENU_WIDTH: Pixels = px(220.);
 
 /// Which entity (if any) occupies the panel's single side-panel slot. Chat
 /// and the debug-mode raw viewers share the slot rather than each having
@@ -150,6 +155,11 @@ pub struct ReplayPanel {
     /// here so `set_personal_rating` can fill in a replay that was already
     /// open when the table arrived.
     personal_rating: Option<Arc<PersonalRatingData>>,
+    /// The match the Export menu writes, in its debug form. `None` until the
+    /// parse finishes, which is what keeps the menu disabled until then.
+    export: Option<ExportedMatch>,
+    /// What the last export did, shown beside the menu.
+    export_status: Option<String>,
     _parse_task: Task<()>,
     /// Subscription to `table`'s `PlayerTableEvent`s, live once the replay
     /// finishes loading (`apply_result` creates both `table` and this
@@ -181,6 +191,8 @@ impl ReplayPanel {
             debug,
             columns,
             personal_rating,
+            export: None,
+            export_status: None,
             _parse_task: parse_task,
             _table_subscription: None,
         }
@@ -212,6 +224,44 @@ impl ReplayPanel {
         }
     }
 
+    /// Asks for a destination and writes the match to it.
+    ///
+    /// The document is held in its debug form, so an ordinary export strips a
+    /// copy here rather than reparsing the replay.
+    fn export_match(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
+        let Some(export) = self.export.clone() else {
+            return;
+        };
+        let export = if self.debug { export } else { export.stripped() };
+
+        let name = match &self.state {
+            LoadState::Loaded(loaded) => loaded.title.replace([' ', '/'], "_"),
+            _ => "replay".to_string(),
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Export results")
+            .set_file_name(format!("{name}.{}", format.extension()))
+            .save_file()
+        else {
+            return;
+        };
+
+        cx.spawn(async move |this, cx| {
+            let written = cx.background_spawn(async move { write_export(&export, &path, format) }).await;
+            let _ = this.update(cx, |this, cx| {
+                this.export_status = match written {
+                    Ok(()) => Some("Results exported".to_string()),
+                    Err(err) => {
+                        tracing::warn!("replay export failed: {err}");
+                        Some(err.to_string())
+                    }
+                };
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Applies an expected-values table that arrived after this tab opened
     /// (`view.rs::ReplayInspectorView::set_personal_rating`). Remembered for
     /// `apply_result` in case the parse has not finished yet, and pushed
@@ -227,7 +277,8 @@ impl ReplayPanel {
 
     fn apply_result(&mut self, result: Result<ParsedReplay, ReplayLoadError>, cx: &mut Context<Self>) {
         self.state = match result {
-            Ok(ParsedReplay { model, game_data, raw_metadata_json, raw_results_json }) => {
+            Ok(ParsedReplay { model, export, game_data, raw_metadata_json, raw_results_json }) => {
+                self.export = Some(export);
                 self.loaded_state(model, game_data.vfs().clone(), raw_metadata_json, raw_results_json, cx)
             }
             Err(err) => LoadState::Failed(err),
@@ -291,6 +342,10 @@ impl ReplayPanel {
             debug: false,
             columns: model.columns.clone(),
             personal_rating,
+            // Stands in for the document the parse builds: the Export menu's
+            // gate is that there is one, not what is in it.
+            export: Some(ExportedMatch::new(&super::test_support::fixture_normalized_battle_report(), &[], &[], true)),
+            export_status: None,
             _parse_task: Task::ready(()),
             _table_subscription: None,
         };
@@ -352,6 +407,99 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
         .child(Icon::new(icon))
         .child(label)
         .into_any_element()
+}
+
+/// The Export dropdown, mirroring the egui app's three Export Results items.
+/// Disabled until the parse finishes, since there is nothing to write before
+/// then.
+fn export_menu(panel: Entity<ReplayPanel>, can_export: bool) -> impl IntoElement {
+    let trigger = Button::new("replay-export-trigger")
+        .icon(IconName::HardDrive)
+        .label("Export")
+        .compact()
+        .disabled(!can_export)
+        .when(!can_export, |this| this.tooltip("The replay is still loading"));
+
+    Popover::new("replay-export").trigger(trigger).content(move |_state, _window, _cx| {
+        let panel = panel.clone();
+        v_flex().w(EXPORT_MENU_WIDTH).gap_1().p_1().children(ExportFormat::ALL.map(|format| {
+            let panel = panel.clone();
+            Button::new(format.id()).label(format.label()).compact().on_click(move |_event, _window, cx: &mut App| {
+                panel.update(cx, |this, cx| this.export_match(format, cx));
+            })
+        }))
+    })
+}
+
+/// What the Export menu writes.
+///
+/// JSON and CBOR carry the whole match; CSV carries one flattened row per
+/// vehicle, which is what a spreadsheet can read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExportFormat {
+    Json,
+    Cbor,
+    Csv,
+}
+
+impl ExportFormat {
+    const ALL: [ExportFormat; 3] = [Self::Json, Self::Cbor, Self::Csv];
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Json => "Export Results as JSON",
+            Self::Cbor => "Export Results as CBOR",
+            Self::Csv => "Export Results as CSV",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Json => "json",
+            Self::Cbor => "cbor",
+            Self::Csv => "csv",
+        }
+    }
+
+    fn id(self) -> &'static str {
+        match self {
+            Self::Json => "replay-export-json",
+            Self::Cbor => "replay-export-cbor",
+            Self::Csv => "replay-export-csv",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+enum ExportError {
+    #[error("could not create {path}")]
+    Create {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("could not write {path}: {reason}")]
+    Write { path: PathBuf, reason: String },
+}
+
+/// Writes `match_data` to `path`.
+fn write_export(match_data: &ExportedMatch, path: &Path, format: ExportFormat) -> Result<(), ExportError> {
+    let file = std::io::BufWriter::new(
+        std::fs::File::create(path).map_err(|source| ExportError::Create { path: path.to_path_buf(), source })?,
+    );
+    let failed = |reason: String| ExportError::Write { path: path.to_path_buf(), reason };
+
+    match format {
+        ExportFormat::Json => serde_json::to_writer(file, match_data).map_err(|err| failed(err.to_string())),
+        ExportFormat::Cbor => ciborium::into_writer(match_data, file).map_err(|err| failed(err.to_string())),
+        ExportFormat::Csv => {
+            let mut writer = csv::WriterBuilder::new().has_headers(true).from_writer(file);
+            for vehicle in match_data.vehicles.iter().cloned() {
+                writer.serialize(FlattenedVehicle::from(vehicle)).map_err(|err| failed(err.to_string()))?;
+            }
+            writer.flush().map_err(|err| failed(err.to_string()))
+        }
+    }
 }
 
 /// The PR badge's element id, so a test can assert on its presence and label.
@@ -427,15 +575,32 @@ fn side_panel_button(spec: SidePanelButtonSpec, current: SidePanel, cx: &mut Con
 /// (see the module doc); `has_chat`/`has_results` disable their respective
 /// buttons exactly like `ui.add_enabled(...)` there, since a chat-less or
 /// results-less replay has nothing to show.
-fn header_row(
+/// What the header row draws, bundled so it stays under clippy's
+/// argument-count limit (the same reason `SidePanelButtonSpec` exists).
+struct HeaderState {
     battle_result: Option<BattleResult>,
     personal_rating: Option<PersonalRatingResult>,
     has_chat: bool,
     has_results: bool,
+    /// Whether the parse has produced a document to export yet.
+    can_export: bool,
+    export_status: Option<String>,
     debug: bool,
     side_panel: SidePanel,
-    cx: &mut Context<ReplayPanel>,
-) -> AnyElement {
+}
+
+fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
+    let HeaderState {
+        battle_result,
+        personal_rating,
+        has_chat,
+        has_results,
+        can_export,
+        export_status,
+        debug,
+        side_panel,
+    } = state;
+
     let chat_button = side_panel_button(
         SidePanelButtonSpec {
             id: "replay-chat-toggle",
@@ -449,7 +614,13 @@ fn header_row(
         cx,
     );
 
-    let mut buttons = h_flex().flex_none().items_center().gap_1().child(chat_button);
+    let mut buttons = h_flex()
+        .flex_none()
+        .items_center()
+        .gap_1()
+        .when_some(export_status, |this, status| this.child(div().text_xs().opacity(0.6).child(status)))
+        .child(export_menu(cx.entity(), can_export))
+        .child(chat_button);
     if debug {
         buttons = buttons
             .child(side_panel_button(
@@ -549,12 +720,16 @@ impl Render for ReplayPanel {
                 v_flex()
                     .size_full()
                     .child(header_row(
-                        battle_result,
-                        personal_rating,
-                        has_chat,
-                        has_results,
-                        self.debug,
-                        self.side_panel,
+                        HeaderState {
+                            battle_result,
+                            personal_rating,
+                            has_chat,
+                            has_results,
+                            can_export: self.export.is_some(),
+                            export_status: self.export_status.clone(),
+                            debug: self.debug,
+                            side_panel: self.side_panel,
+                        },
                         cx,
                     ))
                     .child(
@@ -597,9 +772,12 @@ mod tests {
     use wows_replays::types::TeamId;
     use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
+    use super::ExportFormat;
+    use super::ExportedMatch;
     use super::PR_BADGE_ID;
     use super::ReplayPanel;
     use super::personal_rating_label;
+    use super::write_export;
     use crate::replay_inspector::columns::ReplayColumn;
     use crate::replay_inspector::model::PlayerRow;
     use crate::replay_inspector::model::ReplayReportModel;
@@ -627,6 +805,74 @@ mod tests {
             map: "Ocean".to_string(),
             chat: Vec::new(),
         }
+    }
+
+    /// The menu opens only once there is something to write, and each item
+    /// writes the format it names.
+    #[gpui_kit::test]
+    fn the_export_menu_opens_once_a_replay_has_loaded(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-export-json").is_none(), "the formats live behind the trigger");
+            window.click("replay-export-trigger", cx);
+            for format in ExportFormat::ALL {
+                assert!(window.try_find(format.id()).is_some(), "{} is offered", format.label());
+            }
+        })
+        .expect("the window is open");
+    }
+
+    /// Every format writes a file the caller can read back, and CSV carries a
+    /// header row plus one row per vehicle.
+    #[test]
+    fn each_export_format_writes_its_own_shape() {
+        use crate::replay_inspector::test_support::fixture_normalized_battle_report;
+
+        let normalized = fixture_normalized_battle_report();
+        let export = ExportedMatch::new(&normalized, &[], &[], true);
+        let dir = std::env::temp_dir().join(format!("wt-gpui-export-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("the test directory is creatable");
+
+        for format in ExportFormat::ALL {
+            let path = dir.join(format!("match.{}", format.extension()));
+            write_export(&export, &path, format).expect("the export writes");
+
+            assert!(path.is_file(), "{} wrote no file", format.label());
+        }
+
+        // CSV writes one row per vehicle and the fixture has none to zip raw
+        // players against, so an empty file is the honest result there; the
+        // whole-document formats always carry the metadata.
+        assert!(!std::fs::read(dir.join("match.cbor")).expect("the CBOR exists").is_empty());
+
+        let json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("match.json")).expect("the JSON exists"))
+                .expect("the JSON parses back");
+        assert!(json.get("metadata").is_some(), "the document keeps its metadata");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An ordinary export strips what the debug one keeps.
+    #[test]
+    fn stripping_removes_enemy_builds() {
+        use crate::replay_inspector::test_support::fixture_normalized_battle_report;
+
+        let normalized = fixture_normalized_battle_report();
+        let full = ExportedMatch::new(&normalized, &[], &[], true);
+        let stripped = full.clone().stripped();
+
+        assert_eq!(full.vehicles.len(), stripped.vehicles.len(), "stripping drops no vehicle");
+        assert!(
+            stripped.vehicles.iter().all(|vehicle| !vehicle.is_enemy || vehicle.translated_build.is_none()),
+            "an ordinary export carries no enemy build"
+        );
     }
 
     #[gpui_kit::test]

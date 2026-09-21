@@ -64,6 +64,7 @@ use wows_replays::analyzer::Analyzer;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::cache as game_params_cache;
@@ -386,6 +387,10 @@ fn load_versioned_constants(build: u32) -> Value {
 /// itself used, so resolving icons never triggers a second game-data load.
 pub struct ParsedReplay {
     pub model: ReplayReportModel,
+    /// The match as the Export menu writes it, kept in its debug form: the
+    /// debug toggle is a runtime one, so an ordinary export strips a copy
+    /// rather than reparsing.
+    pub export: ExportedMatch,
     pub game_data: Arc<LoadedGameData>,
     /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
     /// for the debug-mode raw-metadata viewer (mirrors the egui app's
@@ -472,9 +477,10 @@ fn parse_replay(
     if let Some(table) = personal_rating {
         model.populate_personal_ratings(table);
     }
+    let export = ExportedMatch::new(&normalized, report.players(), report.game_chat(), true);
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 
-    Ok(ParsedReplay { model, game_data: loaded, raw_metadata_json, raw_results_json })
+    Ok(ParsedReplay { model, export, game_data: loaded, raw_metadata_json, raw_results_json })
 }
 
 /// Parses `path` into a [`ParsedReplay`] on the background executor

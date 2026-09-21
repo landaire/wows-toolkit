@@ -21,7 +21,9 @@ pub mod gpu;
 pub mod hardening;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
-#[cfg(feature = "profile-bins")]
+// Also under test: the export's equivalence check needs the same headless
+// replay load this module already performs.
+#[cfg(any(feature = "profile-bins", test))]
 pub mod profiling;
 
 /// Accumulate the wall time of an expression against a named sub-stage, for

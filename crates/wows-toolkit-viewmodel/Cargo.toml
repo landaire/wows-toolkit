@@ -12,6 +12,9 @@ path = "src/lib.rs"
 
 [dependencies]
 ciborium.workspace = true
+# HTML entities in game chat, which the export decodes before writing.
+escaper = "0.1.1"
+tracing = "0.1"
 glob.workspace = true
 pickled.workspace = true
 jiff.workspace = true

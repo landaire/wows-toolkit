@@ -116,6 +116,27 @@ pub struct NormalizedPlayer {
     pub time_lived_secs: Option<u64>,
 }
 
+impl NormalizedPlayer {
+    /// Spotting damage as every surface reports it: the server's own figure,
+    /// falling back to the recording player's controller total where the
+    /// server omitted it. `None` when neither is recorded.
+    pub fn spotting_damage(&self) -> Option<u64> {
+        self.server_results
+            .as_ref()
+            .and_then(|results| results.spotting_damage)
+            .or_else(|| self.is_self.then_some(self.controller_spotting_damage).flatten())
+    }
+
+    /// Potential damage on the same rule as [`Self::spotting_damage`]: the
+    /// results object's total, else the recording player's controller total.
+    pub fn potential_damage(&self) -> Option<u64> {
+        match self.server_results.as_ref() {
+            Some(results) => Some(results.potential_damage),
+            None => self.is_self.then_some(self.controller_potential_damage).flatten(),
+        }
+    }
+}
+
 /// A fully normalized, egui-free battle report.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct NormalizedBattleReport {

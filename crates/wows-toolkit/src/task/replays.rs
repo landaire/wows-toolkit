@@ -46,7 +46,7 @@ use crate::ui::replay_parser::Replay;
 use crate::ui::replay_parser::SortOrder;
 use crate::util::error::ToolkitError;
 use crate::util::replay_export::FlattenedVehicle;
-use crate::util::replay_export::Match;
+use crate::util::replay_export::export_match;
 
 use super::BackgroundTask;
 use super::BackgroundTaskCompletion;
@@ -578,7 +578,7 @@ fn parse_replay_data_in_background(
                                     ReplayExportFormat::Csv => "csv",
                                 });
 
-                            let transformed_data = Match::new(&replay, data.is_debug);
+                            let transformed_data = export_match(&replay, data.is_debug);
 
                             if let Err(e) =
                                 File::create(&export_path).context("failed to create export file").and_then(|file| {
