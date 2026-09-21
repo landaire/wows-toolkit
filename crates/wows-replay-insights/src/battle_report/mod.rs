@@ -119,6 +119,57 @@ pub struct NormalizedPlayer {
     pub time_lived_secs: Option<u64>,
 }
 
+impl NormalizedPlayer {
+    /// Re-derives every field the metadata provider names, for a locale
+    /// change.
+    ///
+    /// `player` is the same entity this was built from; the provider names
+    /// the ship, the bot, the build and the earned awards, and all of those
+    /// change with the active language. What is left alone is what the
+    /// provider never named: the raw username, the results figures, and the
+    /// rating.
+    pub fn refresh_translations(&mut self, player: &Player, provider: &GameMetadataProvider, version: &Version) {
+        let state = player.initial_state();
+        let vehicle_param = player.vehicle();
+
+        self.ship_name =
+            provider.localized_name_from_param(vehicle_param).unwrap_or_else(|| format!("{}", vehicle_param.id()));
+
+        self.display_name = if state.is_bot() && state.username().starts_with("IDS_") {
+            provider
+                .localized_name_from_id(&TranslationKey::new(state.username()))
+                .unwrap_or_else(|| state.username().to_string())
+        } else {
+            state.username().to_string()
+        };
+
+        self.build = TranslatedBuild::new(player, provider, version);
+
+        for achievement in &mut self.achievements {
+            if let Some(name) =
+                wowsunpack::game_params::translations::translate_achievement_name(&achievement.icon_key, provider)
+            {
+                achievement.display_name = name;
+            }
+            if let Some(description) = wowsunpack::game_params::translations::translate_achievement_description(
+                &achievement.icon_key,
+                provider,
+            ) {
+                achievement.description = description;
+            }
+        }
+
+        for ribbon in &mut self.ribbons {
+            let Some(translation) = wowsunpack::game_params::translations::translate_ribbon(&ribbon.name, provider)
+            else {
+                continue;
+            };
+            ribbon.display_name = translation.display_name;
+            ribbon.description = translation.description;
+        }
+    }
+}
+
 impl NormalizedBattleReport {
     /// Rates every player against `table`, from this battle alone.
     ///
