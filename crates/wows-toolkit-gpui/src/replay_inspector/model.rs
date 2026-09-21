@@ -355,6 +355,26 @@ pub struct ReplayReportModel {
     /// When the battle was played, which is the middle of the window the
     /// Twitch chip looks for chat sightings in.
     pub timestamp: jiff::Timestamp,
+    /// What match this was, for the line under the header.
+    pub context: MatchContext,
+}
+
+/// The subdued line under the outcome: who was recording, and which match.
+///
+/// Mirrors the egui app's Row 2 (`ui/replay_parser/mod.rs`), which reads the
+/// same fields off the battle report.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MatchContext {
+    /// The recording player's clan tag, already bracketed. `None` when
+    /// clanless.
+    pub clan_tag: Option<String>,
+    pub player_name: String,
+    /// The battle type, translated (Random Battle, Ranked, ...).
+    pub game_type: String,
+    /// The build the replay was recorded on, as the game writes it.
+    pub version: String,
+    pub game_mode: String,
+    pub map: String,
 }
 
 impl ReplayReportModel {
@@ -385,6 +405,7 @@ impl ReplayReportModel {
                     .unwrap_or_else(|| species.name().to_string())
             },
             |ship_index| metadata_provider.game_param_by_index(ship_index).map(|param| param.id()),
+            |game_type| wowsunpack::game_params::translations::translate_game_mode(game_type, metadata_provider),
         );
         model.chat = build_chat_messages(chat_messages, metadata_provider);
         model.populate_action_links(players, metadata_provider);
@@ -424,6 +445,7 @@ impl ReplayReportModel {
         normalized: &NormalizedBattleReport,
         species_text: impl Fn(Species) -> String,
         ship_id: impl Fn(&str) -> Option<GameParamId>,
+        game_type_text: impl Fn(&str) -> String,
     ) -> Self {
         let self_player = normalized.players.iter().find(|p| p.is_self);
         let self_team =
@@ -453,6 +475,14 @@ impl ReplayReportModel {
             map: normalized.metadata.map.clone(),
             timestamp: normalized.metadata.timestamp,
             chat: Vec::new(),
+            context: MatchContext {
+                clan_tag: self_player.filter(|p| !p.clan.is_empty()).map(|p| format!("[{}]", p.clan)),
+                player_name: self_player.map(|p| p.display_name.clone()).unwrap_or_default(),
+                game_type: game_type_text(&normalized.metadata.game_type),
+                version: normalized.metadata.version.to_path(),
+                game_mode: normalized.metadata.game_mode.clone(),
+                map: normalized.metadata.map.clone(),
+            },
         }
     }
 
@@ -846,7 +876,12 @@ mod tests {
     fn from_normalized_builds_one_row_per_player_and_identifies_self() {
         let normalized = test_support::fixture_normalized_battle_report();
 
-        let model = ReplayReportModel::build(&normalized, |species| species.name().to_string(), |_ship_index| None);
+        let model = ReplayReportModel::build(
+            &normalized,
+            |species| species.name().to_string(),
+            |_ship_index| None,
+            str::to_string,
+        );
 
         assert_eq!(model.rows.len(), 2);
         assert_eq!(model.self_team, TeamId::from(0i64));
@@ -861,7 +896,12 @@ mod tests {
     #[test]
     fn from_normalized_populates_breakdowns_only_when_server_results_exist() {
         let normalized = test_support::fixture_normalized_battle_report();
-        let model = ReplayReportModel::build(&normalized, |species| species.name().to_string(), |_ship_index| None);
+        let model = ReplayReportModel::build(
+            &normalized,
+            |species| species.name().to_string(),
+            |_ship_index| None,
+            str::to_string,
+        );
 
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
         assert!(self_row.actual_damage_report.is_some());
@@ -913,6 +953,7 @@ mod tests {
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),
+            context: MatchContext::default(),
             timestamp: battle_at,
         };
 
@@ -944,6 +985,7 @@ mod tests {
             &normalized,
             |species| species.name().to_string(),
             |_ship_index| Some(self_ship_id),
+            str::to_string,
         );
         model.battle_result = Some(BattleResult::Win(0));
 
@@ -990,6 +1032,7 @@ mod tests {
             map: "Test Map".to_string(),
             chat: Vec::new(),
             timestamp: jiff::Timestamp::UNIX_EPOCH,
+            context: MatchContext::default(),
         };
 
         // Unloaded PR data would make `calculate_pr` return `None` for any

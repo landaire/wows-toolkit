@@ -26,6 +26,7 @@ use wowsunpack::game_types::ChargeCount;
 
 use super::columns::ReplayColumn;
 use super::model::ChatMessage;
+use super::model::MatchContext;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
 
@@ -507,6 +508,7 @@ pub fn sample_model() -> ReplayReportModel {
         map: "Fault Line".to_string(),
         chat: sample_chat_messages(),
         timestamp: jiff::Timestamp::UNIX_EPOCH,
+        context: MatchContext::default(),
     }
 }
 

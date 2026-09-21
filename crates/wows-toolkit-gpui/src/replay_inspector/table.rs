@@ -46,6 +46,7 @@ use super::columns::player_color_kind;
 use super::columns::player_color_kind_rgb;
 use super::expanded;
 use super::icons::IconCache;
+use super::model::MatchContext;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
 use super::sort::SortColumn;
@@ -456,6 +457,30 @@ impl PlayerTable {
     /// player occupies, which is what the outcome row's PR badge shows
     /// (`panel.rs::personal_rating_badge`). `None` until an expected-values
     /// table has been applied, or when the replay carries no self row.
+    /// What match this was, for the line under the header.
+    pub fn match_context(&self) -> &MatchContext {
+        &self.model.context
+    }
+
+    /// Damage dealt by each side: the reader's own team first.
+    ///
+    /// Rows with no server damage figure count as zero, which is what the
+    /// egui app's own tally does (`unwrap_or(0)`): a row that reported
+    /// nothing did not thereby deal damage.
+    pub fn team_damage(&self) -> (u64, u64) {
+        let mut friendly = 0u64;
+        let mut enemy = 0u64;
+        for row in &self.model.rows {
+            let damage = row.actual_damage.unwrap_or(0);
+            if row.relation.is_enemy() {
+                enemy += damage;
+            } else {
+                friendly += damage;
+            }
+        }
+        (friendly, enemy)
+    }
+
     pub fn self_personal_rating(&self) -> Option<PersonalRatingResult> {
         self.model.rows.iter().find(|row| row.is_self)?.personal_rating.clone()
     }
