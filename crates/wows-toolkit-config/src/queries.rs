@@ -92,6 +92,22 @@ pub async fn get_all_session_stats(pool: &SqlitePool) -> Result<Vec<SessionStatR
     sqlx::query_as("SELECT * FROM session_stats ORDER BY sort_key ASC").fetch_all(pool).await
 }
 
+/// Forgets every recorded game.
+///
+/// What the Stats tab's own clear does: the table is the session, so there is
+/// nothing else to unwind.
+pub async fn clear_session_stats(pool: &SqlitePool) -> Result<u64, sqlx::Error> {
+    let result = sqlx::query("DELETE FROM session_stats").execute(pool).await?;
+    Ok(result.rows_affected())
+}
+
+/// Forgets the games recorded in one ship.
+pub async fn clear_session_stats_for_ship(pool: &SqlitePool, ship_id: i64) -> Result<u64, sqlx::Error> {
+    let result =
+        sqlx::query("DELETE FROM session_stats WHERE ship_id = ?1").bind(ship_id).execute(pool).await?;
+    Ok(result.rows_affected())
+}
+
 /// Insert a sent replay path (no-op if already exists).
 pub async fn insert_sent_replay(pool: &SqlitePool, path: &str) -> Result<(), sqlx::Error> {
     sqlx::query("INSERT OR IGNORE INTO sent_replays (replay_path) VALUES (?1)").bind(path).execute(pool).await?;

@@ -15,6 +15,9 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use std::collections::HashMap;
+use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::personal_rating;
 
 use std::sync::Arc;
 
@@ -44,6 +47,9 @@ struct Computed {
 }
 
 pub struct StatsOverviewPanel {
+    /// The name each ship in the session goes by, for the records that name
+    /// only an id.
+    ship_names: HashMap<GameParamId, String>,
     computed: Computed,
     personal_rating: Option<Arc<PersonalRatingData>>,
     list_state: ListState,
@@ -56,6 +62,7 @@ impl EventEmitter<PanelEvent> for StatsOverviewPanel {}
 impl StatsOverviewPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            ship_names: HashMap::new(),
             computed: Computed::default(),
             personal_rating: None,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
@@ -72,6 +79,9 @@ impl StatsOverviewPanel {
     }
 
     pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
+        // The records name the ship that set them, which needs a name for the
+        // id `SessionSummary` carries; the games themselves have one.
+        self.ship_names = games.iter().map(|game| (game.ship_id, game.ship_name.clone())).collect();
         self.computed = Computed {
             summary: SessionSummary::from_games(games),
             ships: per_ship_performance(games),
@@ -80,6 +90,14 @@ impl StatsOverviewPanel {
         };
         self.list_state.reset(self.computed.ships.len());
         cx.notify();
+    }
+}
+
+impl StatsOverviewPanel {
+    /// The name of the ship an id names, or the id itself when the session
+    /// holds no game in it -- which cannot happen for a record set in one.
+    fn ship_name(&self, ship: GameParamId) -> String {
+        self.ship_names.get(&ship).cloned().unwrap_or_else(|| ship.raw().to_string())
     }
 }
 
@@ -109,6 +127,8 @@ impl Panel for StatsOverviewPanel {
 impl Render for StatsOverviewPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
+        let radius = cx.theme().radius;
+        let dim = crate::theme::text_dim();
         let summary = &self.computed.summary;
 
         if summary.games_played() == 0 && self.computed.ships.is_empty() {
@@ -137,18 +157,30 @@ impl Render for StatsOverviewPanel {
             .border_color(border)
             .child(div().text_sm().font_weight(FontWeight::BOLD).child(record))
             .when_some(self.computed.personal_rating.as_ref(), |this, rating| {
-                this.child(div().text_sm().opacity(0.8).child(format!(
-                    "PR {:.0} ({})",
-                    rating.pr,
-                    rating.category.name()
-                )))
+                let dark = crate::theme::is_dark_mode();
+                this.child(
+                    div()
+                        .px_1()
+                        .rounded(radius)
+                        .bg(rgb(personal_rating::chip_hue(rating.category)))
+                        .text_sm()
+                        .text_color(rgb(personal_rating::chip_text(rating.category, dark)))
+                        .child(format!("PR {:.0} ({})", rating.pr, rating.category.name())),
+                )
             })
             .child(div().text_sm().opacity(0.8).child(format!("{} frags", summary.total_frags)))
-            .when_some(summary.best_frags, |this, (_, frags)| {
-                this.child(div().text_sm().opacity(0.8).child(format!("Best frags: {frags}")))
+            .when_some(summary.best_frags, |this, (ship, frags)| {
+                let ship = self.ship_name(ship);
+                this.child(div().text_sm().text_color(dim).child(format!("Best frags: {frags} ({ship})")))
             })
-            .when_some(summary.best_damage, |this, (_, damage)| {
-                this.child(div().text_sm().opacity(0.8).child(format!("Max damage: {}", separate_thousands(damage))))
+            .when_some(summary.best_damage, |this, (ship, damage)| {
+                let ship = self.ship_name(ship);
+                this.child(
+                    div()
+                        .text_sm()
+                        .text_color(dim)
+                        .child(format!("Max damage: {} ({ship})", separate_thousands(damage))),
+                )
             });
 
         let header = h_flex()

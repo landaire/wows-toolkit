@@ -124,7 +124,7 @@ pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &
     let mask = ContentMask { bounds: area };
     window.with_content_mask(Some(mask), |window| {
         if plot.bars.is_empty() {
-            paint_lines(plot, &frame, colors, window, cx);
+            paint_lines(plot, &frame, window, cx);
         } else {
             paint_bars(plot, &frame, colors, window, cx);
         }
@@ -262,6 +262,7 @@ fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut
         if x < area.origin.x || x > area.origin.x + area.size.width {
             continue;
         }
+        window.paint_quad(fill(Bounds::new(point(x, area.origin.y), size(px(1.), area.size.height)), colors.grid));
         let shaped = shape(&(index + 1).to_string(), TICK_FONT, colors.text, window);
         let origin = point(x - shaped.width() * 0.5, area.origin.y + area.size.height + px(6.));
         let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
@@ -276,7 +277,7 @@ fn paint_axes(area: Bounds<Pixels>, color: Hsla, window: &mut Window) {
     window.paint_quad(fill(Bounds::new(area.origin, size(px(1.), area.size.height)), color));
 }
 
-fn paint_lines(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut Window, cx: &mut App) {
+fn paint_lines(plot: &Plot<'_>, frame: &Frame, window: &mut Window, cx: &mut App) {
     for series in plot.series {
         let count = series.points.len();
         let positions: Vec<Point<Pixels>> =
@@ -298,7 +299,7 @@ fn paint_lines(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut Wind
             window.paint_quad(fill(dot_bounds(*position), color).corner_radii(px(POINT_RADIUS)));
             if plot.show_values {
                 let label = format_value(series.points[index].value);
-                let shaped = shape(&label, TICK_FONT, colors.text, window);
+                let shaped = shape(&label, TICK_FONT, color, window);
                 let origin = point(position.x - shaped.width() * 0.5, position.y - px(TICK_FONT + 6.0));
                 let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
             }
@@ -335,7 +336,7 @@ fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut Windo
         }
         if plot.show_values {
             let label = format_value(bar.value);
-            let shaped = shape(&label, TICK_FONT, colors.text, window);
+            let shaped = shape(&label, TICK_FONT, hsla_from(bar.color), window);
             let origin = point(centre.x - shaped.width() * 0.5, top - px(TICK_FONT + 4.0));
             let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
         }
