@@ -397,6 +397,14 @@ impl SearchView {
         self.run(cx);
     }
 
+    /// Puts `query` in the bar and runs it.
+    ///
+    /// For a caller outside the tab -- the command palette's seeded searches,
+    /// which are a query the reader can then edit rather than a fixed result.
+    pub(crate) fn run_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.take_edit(query.to_string(), window, cx);
+    }
+
     /// What the preview is showing, if anything. Test-only.
     #[cfg(test)]
     pub(crate) fn preview_frame_count(&self) -> Option<usize> {
