@@ -1,5 +1,6 @@
 mod app;
 mod armor_viewer;
+mod http;
 #[cfg(test)]
 mod interaction_tests;
 mod personal_rating;

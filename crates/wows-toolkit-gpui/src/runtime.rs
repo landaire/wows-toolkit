@@ -11,12 +11,12 @@ use std::future::Future;
 use tokio::runtime::{Builder, Handle, Runtime};
 use tokio::task::JoinHandle;
 
-/// Worker threads for the shared runtime. The only work submitted here is the
-/// startup settings read (`main.rs`): open the config DB, then one sequential
-/// batch of `get_setting` queries. Replay parsing, the directory scan and ship
-/// loading are CPU-bound and run on GPUI's own pool via `background_spawn`, not
-/// here. One thread would serve, and two leaves room for a concurrent sqlx
-/// query without sizing the pool for work that never arrives.
+/// Worker threads for the shared runtime. What is submitted here is sqlx and
+/// reqwest work: the settings and index reads, the expected-values refresh,
+/// and the live match-stats lookup. Replay parsing, the directory scan and
+/// ship loading are CPU-bound and run on GPUI's own pool via
+/// `background_spawn`, not here, so this stays sized for a handful of
+/// concurrent awaits rather than for throughput.
 const WORKER_THREADS: usize = 2;
 
 #[derive(Debug, thiserror::Error)]

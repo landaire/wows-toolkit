@@ -10,9 +10,11 @@
 //! covers that with a separate startup check. One poll covers both, and at
 //! this interval costs a `stat` per tick.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Duration;
+use std::time::Instant;
 use std::time::SystemTime;
 
 use gpui_kit::App;
@@ -22,9 +24,11 @@ use gpui_kit::Task;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::analyzer::arena_scan::scan_arena_state;
+use wows_replays::types::ArenaId;
 use wows_toolkit_viewmodel::match_stats;
 use wows_toolkit_viewmodel::match_stats::MatchStatsError;
 use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
+use wows_toolkit_viewmodel::match_stats::RateLimiter;
 use wows_toolkit_viewmodel::match_stats::build_request;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wowsunpack::data::ResourceLoader;
@@ -43,6 +47,14 @@ pub const ARENA_INFO_FILE: &str = "tempArenaInfo.json";
 /// The bare packet stream the game writes beside it. Wrapped into a replay
 /// file only once the battle ends.
 pub const LIVE_STREAM_FILE: &str = "temp.wowsreplay";
+
+/// How many times an unreadable arena info is re-read before it is taken at
+/// face value as "no battle this app can read".
+///
+/// The game flushes the file in one go, so a couple of ticks covers the race;
+/// past that the file is malformed rather than incomplete, and re-reading it
+/// every two seconds for a whole battle only fills the log.
+const READ_ATTEMPTS: usize = 3;
 
 /// Where a battle in progress keeps its two halves.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,8 +94,10 @@ pub fn poll(source: &LiveSource) -> Option<ArenaInfoStamp> {
 pub enum LiveMatchError {
     #[error("the arena info could not be read")]
     Read(#[source] std::io::Error),
-    #[error("the arena info is not a replay header: {0}")]
-    Parse(String),
+    #[error("the arena info is not a replay header")]
+    Parse(#[source] wows_replays::ParseError),
+    #[error("the arena info carries no date the game's format reads")]
+    NoTimestamp,
 }
 
 /// Reads the battle in progress.
@@ -93,9 +107,8 @@ pub enum LiveMatchError {
 /// than a permanent error.
 pub fn read(source: &LiveSource) -> Result<LiveMatch, LiveMatchError> {
     let bytes = std::fs::read(&source.arena_info).map_err(LiveMatchError::Read)?;
-    let replay =
-        ReplayFile::from_decrypted_parts(bytes, Vec::new()).map_err(|err| LiveMatchError::Parse(format!("{err:?}")))?;
-    Ok(LiveMatch::from_meta(&replay.meta))
+    let replay = ReplayFile::from_decrypted_parts(bytes, Vec::new()).map_err(LiveMatchError::Parse)?;
+    LiveMatch::from_meta(&replay.meta).ok_or(LiveMatchError::NoTimestamp)
 }
 
 /// Polls `replay_dir`, handing each change to `on_change`; `None` means no
@@ -106,7 +119,7 @@ pub fn read(source: &LiveSource) -> Result<LiveMatch, LiveMatchError> {
 pub fn watch(
     replay_dir: PathBuf,
     cx: &App,
-    mut on_change: impl FnMut(Option<LiveMatch>, &mut AsyncApp) + 'static,
+    mut on_change: impl FnMut(Option<LiveMatch>, &mut AsyncApp) -> bool + 'static,
 ) -> Task<()> {
     let source = LiveSource::in_dir(&replay_dir);
 
@@ -115,29 +128,51 @@ pub fn watch(
         // Nothing has been reported yet, so the first poll reports even when
         // it finds no battle: the tab shows "checking" until it does.
         let mut reported = false;
+        // Reading a file the game is still flushing fails; the next tick
+        // retries it. A file that never parses is reported once, as absent,
+        // rather than re-read every two seconds for the whole battle.
+        let mut attempts = 0usize;
 
         loop {
-            let stamp = poll(&source);
+            // `poll` is a blocking `metadata`, which on a network share or a
+            // spun-down drive would stall a frame if it ran here.
+            let stamp = {
+                let source = source.clone();
+                cx.background_spawn(async move { poll(&source) }).await
+            };
+
             if stamp != current || !reported {
                 let read_source = source.clone();
-                let live = match stamp {
-                    Some(_) => match cx.background_spawn(async move { read(&read_source) }).await {
-                        Ok(live) => Some(live),
-                        Err(err) => {
-                            tracing::debug!("live match: the arena info is not readable yet: {err}");
-                            None
-                        }
-                    },
+                let read = match stamp {
+                    Some(_) => Some(cx.background_spawn(async move { read(&read_source) }).await),
                     None => None,
                 };
 
-                // A half-written file leaves `current` alone, so the next
-                // poll sees the same stamp as a change and retries it.
-                let readable = stamp.is_none() || live.is_some();
-                if readable {
+                let settled = match &read {
+                    // No battle: nothing to wait for.
+                    None => true,
+                    Some(Ok(_)) => true,
+                    Some(Err(err)) => {
+                        attempts += 1;
+                        let give_up = attempts >= READ_ATTEMPTS;
+                        if give_up {
+                            tracing::warn!("live match: the arena info never parsed, giving up on it: {err}");
+                        } else {
+                            tracing::debug!("live match: the arena info is not readable yet: {err}");
+                        }
+                        give_up
+                    }
+                };
+
+                if settled {
                     current = stamp;
                     reported = true;
-                    on_change(live, cx);
+                    attempts = 0;
+                    let live = read.and_then(|read| read.ok());
+                    // The view is gone; so is any reason to keep polling.
+                    if !on_change(live, cx) {
+                        return;
+                    }
                 }
             }
 
@@ -176,30 +211,79 @@ pub enum StatsError {
     NoRoster,
     #[error(transparent)]
     Refused(#[from] MatchStatsError),
-    #[error("the stats client could not be built")]
-    Client(#[source] reqwest::Error),
+    #[error(transparent)]
+    Client(#[from] crate::http::HttpError),
     #[error("could not reach the stats service")]
     Transport(#[source] reqwest::Error),
 }
 
+/// The stats lookups this session has made.
+///
+/// Holds what the service's own client would: one answer per arena, the
+/// budget spent so far, and which arenas recently failed. Consulted before a
+/// request is sent, so a refusal costs nothing rather than a request the
+/// service would reject.
+#[derive(Default)]
+pub struct StatsBudget {
+    limiter: RateLimiter,
+    answered: HashMap<ArenaId, MatchStatsResponse>,
+    /// Arenas the service answered a failure for, and when. Checked before
+    /// the limiter so an outage does not spend the whole budget
+    /// rediscovering itself.
+    failed: HashMap<ArenaId, Instant>,
+}
+
+impl StatsBudget {
+    /// What this session already knows about `arena_id`, if anything.
+    pub fn answered(&self, arena_id: ArenaId) -> Option<&MatchStatsResponse> {
+        self.answered.get(&arena_id)
+    }
+
+    /// Whether a request for `arena_id` may be sent, and why not when it may
+    /// not. Does not spend the budget; `record` does that.
+    pub fn check(&self, arena_id: ArenaId, now: Instant) -> Result<(), MatchStatsError> {
+        if let Some(failed_at) = self.failed.get(&arena_id).copied() {
+            let elapsed = now.duration_since(failed_at);
+            if elapsed < match_stats::RATE_LIMIT_WINDOW {
+                return Err(MatchStatsError::RecentlyFailed { retry_after: match_stats::RATE_LIMIT_WINDOW - elapsed });
+            }
+        }
+
+        self.limiter.check(now).map_err(|retry_after| MatchStatsError::RateLimited { retry_after })
+    }
+
+    /// Spends one request against the budget.
+    pub fn record(&mut self, now: Instant) {
+        self.limiter.record(now);
+    }
+
+    pub fn remember(&mut self, response: MatchStatsResponse) {
+        self.answered.insert(response.arena_id, response);
+    }
+
+    /// Starts a cooldown when the service actually answered a failure.
+    /// A transport error never reached it and is likely transient, a refusal
+    /// cost no request either way, and a validation error was never sent.
+    pub fn note_failure(&mut self, arena_id: ArenaId, error: &StatsError, now: Instant) {
+        if matches!(error, StatsError::Refused(MatchStatsError::Http { .. } | MatchStatsError::Decode(_))) {
+            self.failed.insert(arena_id, now);
+        }
+    }
+}
+
 /// Asks the stats service about this match's roster.
 ///
-/// The service's own budget is small, so a match is asked about once: the
-/// caller holds the answer for the battle's duration rather than polling.
+/// The caller holds the budget (see [`StatsBudget`]): this sends the request
+/// it was cleared for.
 pub async fn fetch_stats(state: &ArenaState, proxy_url: &str) -> Result<MatchStatsResponse, StatsError> {
     let request = build_request(state.arena_id, &state.players)?;
 
     let mut body = Vec::new();
     ciborium::into_writer(&request, &mut body).map_err(|err| MatchStatsError::Encode(err.to_string()))?;
 
-    let mut builder = reqwest::Client::builder().user_agent(concat!("wows-toolkit/", env!("CARGO_PKG_VERSION")));
-    if !proxy_url.is_empty() {
-        match reqwest::Proxy::all(proxy_url) {
-            Ok(proxy) => builder = builder.proxy(proxy),
-            Err(err) => tracing::warn!("live match stats: ignoring a malformed proxy URL: {err}"),
-        }
-    }
-    let client = builder.build().map_err(StatsError::Client)?;
+    // No redirects: a 3xx is classified rather than followed, so the API key
+    // is never forwarded to whatever a redirect names.
+    let client = crate::http::client(proxy_url, reqwest::redirect::Policy::none())?;
 
     let response = client
         .post(match_stats::ENDPOINT)
@@ -229,6 +313,25 @@ pub async fn fetch_stats(state: &ArenaState, proxy_url: &str) -> Result<MatchSta
 
     let bytes = response.bytes().await.map_err(StatsError::Transport)?;
     ciborium::from_reader(bytes.as_ref()).map_err(|err| MatchStatsError::Decode(err.to_string()).into())
+}
+
+/// A refusal in the words the tab shows.
+///
+/// A wait is reported in whole minutes rather than the raw seconds the error
+/// carries, which is what the egui app tells the user too.
+pub fn refusal_text(error: &StatsError) -> String {
+    match error {
+        StatsError::Refused(MatchStatsError::RateLimited { retry_after })
+        | StatsError::Refused(MatchStatsError::RecentlyFailed { retry_after }) => {
+            let minutes = retry_after.as_secs().div_ceil(60).max(1);
+            if minutes == 1 {
+                "rate limited, try again in 1 minute".to_string()
+            } else {
+                format!("rate limited, try again in {minutes} minutes")
+            }
+        }
+        other => other.to_string(),
+    }
 }
 
 #[cfg(test)]

@@ -183,15 +183,27 @@ fn results_battle_result(resolved_results: &Option<Value>, report: &BattleReport
     }
 }
 
-/// Parse the replay's `dateTime` field into a timestamp.
-pub fn replay_timestamp(meta: &ReplayMeta) -> jiff::Timestamp {
+/// The replay's `dateTime` field as a timestamp.
+///
+/// `None` for a header whose date does not read as the game's format, which
+/// a file the game is still writing can be. Callers with a fully written
+/// replay in hand use [`replay_timestamp`].
+pub fn try_replay_timestamp(meta: &ReplayMeta) -> Option<jiff::Timestamp> {
     const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
 
     jiff::civil::DateTime::strptime(REPLAY_DATE_FORMAT, &meta.dateTime)
-        .expect("failed to parse replay timestamp")
+        .ok()?
         .to_zoned(jiff::tz::TimeZone::system())
-        .expect("failed to convert DateTime to zoned time")
-        .into()
+        .ok()
+        .map(Into::into)
+}
+
+/// Parse the replay's `dateTime` field into a timestamp.
+///
+/// Panics on a header whose date is not the game's format; every replay the
+/// game finished writing carries one.
+pub fn replay_timestamp(meta: &ReplayMeta) -> jiff::Timestamp {
+    try_replay_timestamp(meta).expect("failed to parse replay timestamp")
 }
 
 /// Packed `0xRRGGBB` team color, matching the toolkit's
