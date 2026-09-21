@@ -18,6 +18,8 @@ tracing = "0.1"
 glob.workspace = true
 pickled.workspace = true
 jiff.workspace = true
+# The Twitch login/in-game-name similarity rule.
+levenshtein = "1.0.5"
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true

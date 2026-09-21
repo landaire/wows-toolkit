@@ -61,6 +61,7 @@ use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_players;
+use wows_toolkit_viewmodel::twitch;
 use wowsunpack::game_params::types::Species;
 
 use crate::replay_inspector::GameDataCache;
@@ -82,6 +83,7 @@ const SHIP_COLUMN_WIDTH: Pixels = px(130.);
 const MET_COLUMN_WIDTH: Pixels = px(80.);
 const STAT_COLUMN_WIDTH: Pixels = px(64.);
 const CLASS_COLUMN_WIDTH: Pixels = px(16.);
+const CHIP_COLUMN_WIDTH: Pixels = px(24.);
 
 /// Which table the tab is showing.
 ///
@@ -155,6 +157,10 @@ pub struct PlayerTrackerView {
     /// The replays directory being watched, so the scan knows where the live
     /// packet stream is.
     replay_dir: Option<PathBuf>,
+    /// Twitch logins seen in chat around the battle in progress, and when.
+    /// Read from the shared index, which the egui app's chat poll fills: a
+    /// user who has connected Twitch there gets the chips here too.
+    chat_observations: Vec<(String, Timestamp)>,
     /// Notes kept against the players met, keyed by account. Shared with the
     /// egui app through the `player_tracker_data` blob, so a note written in
     /// either is the note both show.
@@ -219,6 +225,7 @@ impl PlayerTrackerView {
             live_identities: None,
             stats: StatsState::Idle,
             replay_dir: None,
+            chat_observations: Vec::new(),
             tracked: HashMap::new(),
             editing_note: None,
             note_input,
@@ -247,6 +254,45 @@ impl PlayerTrackerView {
 
     /// Queries the index for the current period. Called once the config
     /// database is open, and again whenever the period changes.
+    /// Reads the Twitch chat observations around this battle.
+    ///
+    /// Only the window the chip rule cares about is queried, so an index
+    /// holding a month of observations still answers in one small read.
+    fn look_up_chat_observations(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live_match.as_ref() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        let started_at = live.started_at;
+        let start = started_at.as_second() + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64;
+        let end = started_at.as_second() + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64;
+
+        cx.spawn(async move |this, cx| {
+            let found = runtime::spawn(cx, async move { query::observations_in_window(&pool, start, end).await }).await;
+
+            let _ = this.update(cx, |this, cx| {
+                if this.live_started_at() != Some(started_at) {
+                    return;
+                }
+                match found {
+                    Ok(Ok(rows)) => {
+                        this.chat_observations = rows
+                            .into_iter()
+                            .filter_map(|(login, seen_at)| {
+                                Timestamp::from_second(seen_at).ok().map(|seen_at| (login, seen_at))
+                            })
+                            .collect();
+                    }
+                    // The roster still lists everyone; only the chips are
+                    // missing.
+                    Ok(Err(err)) => tracing::warn!("player tracker: the chat lookup failed: {err}"),
+                    Err(err) => tracing::warn!("player tracker: the chat lookup did not complete: {err}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// Reads the notes the two apps share. Called once the config database
     /// is open.
     fn load_tracked_players(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
@@ -263,6 +309,13 @@ impl PlayerTrackerView {
             });
         })
         .detach();
+    }
+
+    /// Seeds the chat observations a lookup would have returned. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_chat_observations(&mut self, observations: Vec<(String, Timestamp)>, cx: &mut Context<Self>) {
+        self.chat_observations = observations;
+        cx.notify();
     }
 
     /// Seeds the players the index returned and the notes kept against them.
@@ -488,6 +541,7 @@ impl PlayerTrackerView {
         cx.notify();
 
         self.look_up_met_before(cx);
+        self.look_up_chat_observations(cx);
 
         let (Some(started_at), Some(build)) = (started_at, build) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
@@ -539,6 +593,7 @@ impl PlayerTrackerView {
     /// scan if one was still running.
     fn clear_live_match_data(&mut self) {
         self.met_before.clear();
+        self.chat_observations.clear();
         self.live_identities = None;
         self.stats = StatsState::Idle;
         self._live_scan = None;
@@ -803,7 +858,14 @@ impl PlayerTrackerView {
             _ => None,
         };
         let modes = visible_stat_modes(self.view_mode, self.win_rate_mode);
-        let layout = RosterLayout { stats, icons: &self.icons, modes: &modes, border };
+        let layout = RosterLayout {
+            stats,
+            icons: &self.icons,
+            chat: &self.chat_observations,
+            started_at: roster.started_at,
+            modes: &modes,
+            border,
+        };
 
         v_flex()
             .size_full()
@@ -940,6 +1002,11 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
 struct RosterLayout<'a> {
     stats: Option<&'a HashMap<AccountId, PlayerStatsOut>>,
     icons: &'a IconCache,
+    /// Twitch logins seen in chat around this battle, and when.
+    chat: &'a [(String, Timestamp)],
+    /// When the battle started, which is what the chat window is measured
+    /// against.
+    started_at: Timestamp,
     /// The scopes each row shows, left to right.
     modes: &'a [WinRateMode],
     border: Hsla,
@@ -958,6 +1025,7 @@ fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], 
         .text_xs()
         .font_weight(FontWeight::BOLD)
         .child(div().flex_none().w(CLASS_COLUMN_WIDTH))
+        .child(div().flex_none().w(CHIP_COLUMN_WIDTH))
         .child(div().flex_1().min_w(px(0.)).child(title))
         .child(div().w(SHIP_COLUMN_WIDTH).child("Ship"));
 
@@ -1029,6 +1097,41 @@ fn scope_cells(stats: RowStats, hidden: bool, pending: bool) -> Vec<AnyElement> 
     ]
 }
 
+/// The possible-stream-sniper chip: shown when a Twitch login that
+/// plausibly names this player was in chat around this battle. Clicking it
+/// copies the login, which is what the egui chip does.
+fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: RosterLayout) -> AnyElement {
+    let slot = div().flex_none().w(CHIP_COLUMN_WIDTH);
+    let observations = layout.chat.iter().map(|(login, seen_at)| (login.as_str(), *seen_at));
+    let Some(candidates) = twitch::potential_stream_snipers(observations, &row.name, layout.started_at) else {
+        return slot.into_any_element();
+    };
+
+    // The map has no stable order, so the login shown is the first
+    // alphabetically rather than whichever the hash handed over.
+    let mut logins: Vec<&String> = candidates.keys().collect();
+    logins.sort();
+    let Some(login) = logins.first().map(|login| (*login).clone()) else {
+        return slot.into_any_element();
+    };
+    let hover = if logins.len() == 1 {
+        format!("{login} was in chat around this battle. Click to copy.")
+    } else {
+        format!("{} chat logins match this player. Click to copy {login}.", logins.len())
+    };
+
+    slot.child(
+        Button::new(SharedString::from(format!("tracker-twitch-{side}-{index}")))
+            .icon(IconName::Bell)
+            .compact()
+            .tooltip(SharedString::from(hover))
+            .on_click(move |_event, _window, cx: &mut App| {
+                cx.write_to_clipboard(ClipboardItem::new_string(login.clone()))
+            }),
+    )
+    .into_any_element()
+}
+
 /// The row's ship-class glyph, tinted like its name. A fixed-width slot
 /// either way, so the names below it stay aligned while the icons load.
 fn class_icon(row: &LiveRosterRow, icons: &IconCache) -> AnyElement {
@@ -1070,6 +1173,7 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
         .items_center()
         .px_2()
         .child(class_icon(row, layout.icons))
+        .child(twitch_chip(side, index, row, layout))
         .child(div().flex_1().min_w(px(0.)).text_sm().text_color(tint_color(row.tint)).truncate().child(name))
         .child(
             div()
@@ -1349,6 +1453,7 @@ mod tests {
     use super::PlayerTrackerView;
     use super::SubTab;
     use crate::replay_inspector::GameDataCache;
+    use jiff::Timestamp;
     use wows_replays::types::AccountId;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
@@ -1376,6 +1481,31 @@ mod tests {
         "dateTime": "28.12.2023 00:52:26",
         "mapName": "spaces/00_CO_ocean",
         "playerName": "Me",
+        "scenarioConfigId": 1,
+        "teamsCount": 2,
+        "logic": null,
+        "playerVehicle": "PFSD110-Kleber"
+    }"#;
+
+    /// The same shape as `ARENA_INFO` with names long enough for the Twitch
+    /// matching rule, which ignores anything five bytes or shorter.
+    const ARENA_INFO_LONG_NAMES: &str = r#"{
+        "gameMode": 7,
+        "clientVersionFromExe": "13, 11, 0, 12668706",
+        "mapDisplayName": "ocean",
+        "mapId": 1,
+        "clientVersionFromXml": "13, 11, 0, 12668706",
+        "duration": 1200,
+        "gameLogic": null,
+        "name": "12x12",
+        "scenario": "Domination",
+        "playerID": 0,
+        "vehicles": [{"shipId": 100, "relation": 0, "id": 1, "name": "Harvey635"},
+                     {"shipId": 200, "relation": 2, "id": 2, "name": "Stranger99"}],
+        "playersPerTeam": 12,
+        "dateTime": "28.12.2023 00:52:26",
+        "mapName": "spaces/00_CO_ocean",
+        "playerName": "Harvey635",
         "scenarioConfigId": 1,
         "teamsCount": 2,
         "logic": null,
@@ -1453,6 +1583,73 @@ mod tests {
                 Some("[WTK] Me"),
                 "the scan's clan tag reaches the name"
             );
+        })
+        .expect("the window is open");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A player who was in chat around the battle gets a chip; a player who
+    /// was not gets nothing.
+    #[gpui_kit::test]
+    async fn a_chat_login_that_names_a_player_puts_a_chip_on_their_row(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let dir = temp_dir("twitch-chip");
+        let window = cx.open_window(size(px(1200.), px(700.)), PlayerTrackerView::new);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+                tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
+            })
+            .expect("the window is open");
+
+        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO_LONG_NAMES)
+            .expect("the arena info is writable");
+        cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
+            window.render_frame(cx);
+            window.try_find("tracker-roster-ally-0").is_some()
+        })
+        .await;
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("tracker-twitch-ally-0").is_none(), "no observations, no chip");
+        })
+        .expect("the window is open");
+
+        let started_at = window
+            .update(cx, |tracker, _window, _cx| tracker.live_started_at().expect("a battle is under way"))
+            .expect("the window is open");
+
+        // One login names the ally, and one names nobody in this battle.
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.seed_chat_observations(
+                    vec![("harvey_635".to_string(), started_at), ("someoneelse".to_string(), started_at)],
+                    cx,
+                );
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("tracker-twitch-ally-0").is_some(), "the login that names the ally chips them");
+            assert!(window.try_find("tracker-twitch-enemy-0").is_none(), "the enemy nobody named keeps no chip");
+        })
+        .expect("the window is open");
+
+        // An observation outside the window says nothing about this battle.
+        let long_after = Timestamp::from_second(started_at.as_second() + 60 * 60).expect("a valid timestamp");
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.seed_chat_observations(vec![("harvey_635".to_string(), long_after)], cx);
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("tracker-twitch-ally-0").is_none(), "an hour later is not this battle");
         })
         .expect("the window is open");
 
