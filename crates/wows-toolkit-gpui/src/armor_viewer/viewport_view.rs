@@ -52,6 +52,7 @@ use crate::armor_viewer::load_ship::LoadedShipArmor;
 use crate::armor_viewer::load_ship::PlateKey;
 use crate::armor_viewer::load_ship::ShipLoadError;
 use crate::armor_viewer::load_ship::spawn_reload_ship_armor;
+use crate::armor_viewer::pane::ArmorViewerPane;
 use crate::armor_viewer::picking_ui;
 use crate::armor_viewer::popover;
 use crate::armor_viewer::upload;
@@ -418,6 +419,11 @@ pub struct ViewportView {
     /// The zone and thickness of the last plate the pointer was over, kept
     /// after the hover ends so the penetration checker opens on it.
     last_plate: Option<(SharedString, f32)>,
+    /// The pane this viewport is one of. Weak: the pane owns the dock that
+    /// owns this. Carried so the toolbar can offer the pane's own controls --
+    /// the legend and the penetration checker -- rather than a second strip
+    /// above it.
+    pane: Option<WeakEntity<ArmorViewerPane>>,
     /// Live display settings (plate edges, waterline, zero-mm plates, armor
     /// opacity) mutable via the display-settings popover (`popover.rs`, Task
     /// 7b); changing any field re-uploads the armor since they affect
@@ -519,6 +525,7 @@ impl ViewportView {
             sidebar_highlight: None,
             mesh_triangle_info: Vec::new(),
             last_plate: None,
+            pane: None,
             display_settings,
             display_sliders,
             _display_slider_subscriptions: display_slider_subscriptions,
@@ -833,6 +840,22 @@ impl ViewportView {
 
     /// The ship this viewport is showing, if any. Read by the pane's chrome,
     /// which names it.
+    /// Whether a ship's armor is loaded, which is what the pane-level controls
+    /// in the toolbar are gated on.
+    pub(crate) fn has_armor(&self) -> bool {
+        self.current_armor.is_some()
+    }
+
+    /// Adopts the pane this viewport belongs to.
+    pub(crate) fn set_pane(&mut self, pane: WeakEntity<ArmorViewerPane>) {
+        self.pane = Some(pane);
+    }
+
+    /// The pane this viewport belongs to, while it is still alive.
+    pub(crate) fn pane(&self) -> Option<Entity<ArmorViewerPane>> {
+        self.pane.as_ref().and_then(|pane| pane.upgrade())
+    }
+
     /// The last plate the pointer was over: its zone and its thickness.
     pub(crate) fn last_plate(&self) -> Option<(SharedString, f32)> {
         self.last_plate.clone()

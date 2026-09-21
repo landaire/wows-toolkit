@@ -165,7 +165,14 @@ pub struct ArmorViewerPane {
 impl ArmorViewerPane {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let sidebar = cx.new(|cx| Sidebar::new(window, cx));
-        let viewport = cx.new(ViewportView::new);
+        // Every viewport knows its pane, so the pane's own controls can sit
+        // in the viewport's toolbar rather than on a strip above it.
+        let this = cx.weak_entity();
+        let viewport = cx.new(|cx| {
+            let mut viewport = ViewportView::new(cx);
+            viewport.set_pane(this);
+            viewport
+        });
         let viewport_event_sub = cx.subscribe(&viewport, Self::on_viewport_event);
         let dock = cx.new(|_| ViewportDock::new(viewport));
         let ship_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
@@ -304,13 +311,25 @@ impl ArmorViewerPane {
 
     /// Points the checker at the plate the pointer was last over, so opening
     /// it right after a hover asks about that plate rather than the default.
-    fn seed_penetration_plate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn seed_penetration_plate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some((zone, thickness_mm)) = self.dock.read(cx).active_viewport().read(cx).last_plate() else {
             return;
         };
         self.pen.plate = Some(zone);
         let value = format!("{thickness_mm:.0}");
         self.pen.thickness.update(cx, |state, cx| state.set_value(value, window, cx));
+        cx.notify();
+    }
+
+    /// Whether the armor legend is up. Read by the Display menu, which is
+    /// where the egui app's own checkbox for it lives.
+    pub(crate) fn legend_visible(&self) -> bool {
+        self.legend.visible
+    }
+
+    /// Shows or hides the armor legend.
+    pub(crate) fn set_legend_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
+        self.legend.visible = visible;
         cx.notify();
     }
 
@@ -357,7 +376,12 @@ impl ArmorViewerPane {
                 .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
         };
 
-        let viewport = cx.new(ViewportView::new);
+        let this = cx.weak_entity();
+        let viewport = cx.new(|cx| {
+            let mut viewport = ViewportView::new(cx);
+            viewport.set_pane(this);
+            viewport
+        });
         let viewport_event_sub = cx.subscribe(&viewport, Self::on_viewport_event);
         self._subscriptions.push(viewport_event_sub);
 
@@ -736,85 +760,19 @@ impl ArmorViewerPane {
 
 impl Render for ArmorViewerPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let status_banner =
-            self.status_text().map(|text| div().text_xs().text_color(crate::theme::text_dim()).child(text));
-        // What the active pane is showing, so a comparison says which ship is
-        // in front of you rather than leaving the two panes unlabelled.
-        let shown_ship = self.dock.read(cx).active_viewport().read(cx).shown_ship_name();
-
-        let content = v_flex()
-            .size_full()
-            // A fixed strip, whether or not it has anything to say: a status
-            // line that comes and goes would shift the viewport under the
-            // pointer every time a catalog load finished.
-            .child(
-                h_flex()
-                    .flex_none()
-                    .h(CHROME_HEIGHT)
-                    .gap_2()
-                    .items_center()
-                    .px_2()
-                    .when_some(shown_ship, |this, name| {
-                        this.child(div().text_xs().font_weight(FontWeight::BOLD).child(name))
-                    })
-                    .when_some(status_banner, |this, banner| this.child(banner))
-                    .child(div().flex_1())
-                    // The egui app asks the same question from its Analysis
-                    // window's Penetration tab.
+        let content = v_flex().size_full().child(
+            div().flex_1().min_h(px(0.)).child(
+                h_resizable("armor-viewer-split")
                     .child(
-                        Popover::new("armor-analysis-popover")
-                            .on_open_change(cx.listener(|this, open: &bool, window, cx| {
-                                if *open {
-                                    this.seed_penetration_plate(window, cx);
-                                }
-                            }))
-                            .trigger(
-                                Button::new("armor-analysis-toggle")
-                                    .label(t!("ui.armor.pen.title").to_string())
-                                    .compact()
-                                    .xsmall()
-                                    .disabled(!self.ship_loaded)
-                                    .tooltip(t!("ui.armor.pen.title_tooltip").to_string()),
-                            )
-                            .content({
-                                let pane = cx.entity();
-                                move |_state, _window, cx| {
-                                    // Read the whole panel out before the
-                                    // builder takes `cx` mutably.
-                                    analysis::render_panel(&pane, cx)
-                                }
-                            }),
+                        resizable_panel()
+                            .size(SIDEBAR_WIDTH)
+                            .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                            .flex_none()
+                            .child(self.sidebar.clone()),
                     )
-                    // The legend is closed from its own header; without this
-                    // there is no way back to it (the egui display popover
-                    // carries the same checkbox).
-                    .child(
-                        Button::new("armor-legend-toggle")
-                            .label("Legend")
-                            .compact()
-                            .xsmall()
-                            .selected(self.legend.visible)
-                            .disabled(!self.ship_loaded)
-                            .tooltip("Show the armor thickness legend")
-                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                this.legend.visible = !this.legend.visible;
-                                cx.notify();
-                            })),
-                    ),
-            )
-            .child(
-                div().flex_1().min_h(px(0.)).child(
-                    h_resizable("armor-viewer-split")
-                        .child(
-                            resizable_panel()
-                                .size(SIDEBAR_WIDTH)
-                                .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
-                                .flex_none()
-                                .child(self.sidebar.clone()),
-                        )
-                        .child(resizable_panel().child(self.dock.clone())),
-                ),
-            );
+                    .child(resizable_panel().child(self.dock.clone())),
+            ),
+        );
 
         // Legend floats over the whole pane (not just the viewport), gated
         // on a ship being loaded, matching the egui app's `any_ship_loaded`

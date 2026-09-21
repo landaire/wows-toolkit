@@ -62,6 +62,8 @@ use super::visibility::part_on;
 use super::visibility::plate_explicitly_hidden;
 use super::visibility::zone_all_on;
 use super::visibility::zone_any_on;
+use crate::armor_viewer::analysis;
+use crate::armor_viewer::pane::ArmorViewerPane;
 
 /// Checkbox box size for [`TriState`] partial-dash placement (`Size::Medium`,
 /// `checkbox.rs`'s own `size_4` = 1rem = 16px).
@@ -84,10 +86,41 @@ pub fn render_toolbar(
         .py_1()
         .border_b_1()
         .border_color(cx.theme().border)
+        // What this viewport is showing, where the controls that act on it
+        // are, rather than on a strip of its own above them.
+        .when_some(view.shown_ship_name(), |this, name| {
+            this.child(div().text_xs().font_weight(FontWeight::BOLD).child(name)).child(crate::ui::rule_v(cx))
+        })
         .child(render_visibility_button(view, entity))
         .child(render_hull_button(view, entity))
         .child(render_display_button(view, entity))
         .child(render_export_button(view, entity))
+        // The pane's own controls: one toolbar, not two.
+        .when_some(view.pane(), |this, pane| {
+            this.child(crate::ui::rule_v(cx)).child(render_penetration_button(pane, view.has_armor()))
+        })
+}
+
+/// Toolbar trigger for the penetration checker, which belongs to the pane
+/// rather than to this viewport: the egui app puts its own Pen Check button
+/// in this same row (`ui/armor.pen_check`).
+fn render_penetration_button(pane: Entity<ArmorViewerPane>, has_armor: bool) -> impl IntoElement + use<> {
+    let seed = pane.clone();
+    Popover::new("armor-analysis-popover")
+        .on_open_change(move |open, window, cx| {
+            if *open {
+                seed.update(cx, |pane, cx| pane.seed_penetration_plate(window, cx));
+            }
+        })
+        .trigger(
+            Button::new("armor-analysis-toggle")
+                .icon(IconName::Search)
+                .label(t!("ui.armor.pen.title").to_string())
+                .compact()
+                .disabled(!has_armor)
+                .tooltip(t!("ui.armor.pen.title_tooltip").to_string()),
+        )
+        .content(move |_state, _window, cx| analysis::render_panel(&pane, cx))
 }
 
 /// Toolbar trigger for the export-confirm flow (Milestone 5 Task 10): opens
@@ -749,6 +782,7 @@ fn render_display_popover_content(
     _window: &mut Window,
     cx: &mut Context<PopoverState>,
 ) -> AnyElement {
+    let pane = entity.read(cx).pane();
     let (display, lighting, waterline_slider, armor_slider, lighting_sliders) = {
         let view = entity.read(cx);
         (
@@ -783,6 +817,21 @@ fn render_display_popover_content(
     let mut col = v_flex()
         .w(px(260.))
         .gap_2()
+        // The legend belongs to the pane, not to this viewport, but the
+        // reader looks for it here: the egui display popover carries the same
+        // checkbox (`ui.armor.show_armor_thickness`).
+        .when_some(pane, |this, pane| {
+            let visible = pane.read(cx).legend_visible();
+            this.child(
+                Checkbox::new("armor-display-legend")
+                    .label(t!("ui.armor.show_armor_thickness").to_string())
+                    .checked(visible)
+                    .on_click(move |checked: &bool, _window, cx: &mut App| {
+                        let checked = *checked;
+                        pane.update(cx, |pane, cx| pane.set_legend_visible(checked, cx));
+                    }),
+            )
+        })
         .child(
             Checkbox::new("armor-display-plate-edges")
                 .label(t!("ui.armor.plate_edges").to_string())
