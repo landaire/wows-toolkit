@@ -33,6 +33,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
@@ -119,6 +120,45 @@ fn copy_paths(paths: &[PathBuf], cx: &mut App) {
     cx.write_to_clipboard(ClipboardItem::new_string(text));
 }
 
+/// Puts the replay files themselves on the clipboard, so they paste into a
+/// file manager or an upload dialog rather than as their paths.
+///
+/// GPUI's clipboard has no file-list format, so this goes through `arboard`
+/// directly, which is what the egui app's `copy_files_to_clipboard` does.
+fn copy_replay_files(paths: &[PathBuf], window: &mut Window, cx: &mut App) {
+    let outcome = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set().file_list(paths));
+    match outcome {
+        Ok(()) => {
+            let message = if paths.len() == 1 {
+                t!("ui.replay.context.copy_replay").into_owned()
+            } else {
+                t!("ui.replay.context.copy_replays", count = paths.len()).into_owned()
+            };
+            crate::toast::ok(message, window, cx);
+        }
+        Err(err) => {
+            tracing::warn!("replay browser: the replay files could not be copied: {err}");
+            crate::toast::failed(err.to_string(), window, cx);
+        }
+    }
+}
+
+/// Asks the game to play `replay`.
+///
+/// The client takes a replay path on its command line, which is what the
+/// egui app's confirmed `OpenInGame` action does. A launch that fails says
+/// so rather than leaving the reader waiting for a window.
+fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &mut App) {
+    let exe = Path::new(wows_dir).join("WorldOfWarships.exe");
+    match std::process::Command::new(&exe).arg(replay).spawn() {
+        Ok(_) => {}
+        Err(err) => {
+            tracing::warn!("replay browser: {} could not be launched: {err}", exe.display());
+            crate::toast::failed(err.to_string(), window, cx);
+        }
+    }
+}
+
 /// Opens the system file manager with `path` selected.
 ///
 /// Best effort: a file manager that is not there, or refuses, leaves a log
@@ -196,6 +236,9 @@ pub enum ReplayBrowserEvent {
 
 pub struct ReplayBrowser {
     files: Vec<RawReplay>,
+    /// The install the listing is reading, empty until one is known. Only
+    /// "Open in Game" needs it: the scan takes its own copy.
+    wows_dir: String,
     grouping: ReplayGrouping,
     tree_state: Entity<TreeState>,
     status: ScanStatus,
@@ -268,6 +311,7 @@ impl ReplayBrowser {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         Self {
             files: Vec::new(),
+            wows_dir: String::new(),
             grouping: ReplayGrouping::default(),
             tree_state,
             status: ScanStatus::Loading,
@@ -395,6 +439,8 @@ impl ReplayBrowser {
     /// again later (e.g. if the user changes the WoWs directory); replaces
     /// whatever the previous scan found.
     pub fn start_scan(&mut self, wows_dir: String, cx: &mut Context<Self>) {
+        // Kept because "Open in Game" launches the executable beside it.
+        self.wows_dir = wows_dir.clone();
         // Every scan takes a number, and only the newest one's result is
         // applied: two scans in flight otherwise land in whichever order they
         // finish, leaving the listing (and the watch) on the older directory.
@@ -834,6 +880,8 @@ impl Render for ReplayBrowser {
                 let context_menu_leaf_info = self.leaf_info.clone();
                 let context_menu_children = self.group_children.clone();
                 let context_menu_entity = entity.clone();
+                let context_menu_wows_dir = self.wows_dir.clone();
+                let context_menu_build_cache = self.build_cache.clone();
                 // Two lines of text plus the space around them, against the
                 // font the theme is currently drawing at.
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
@@ -841,6 +889,8 @@ impl Render for ReplayBrowser {
                     render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, row_height, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
+                    let wows_dir = context_menu_wows_dir.clone();
+                    let build_cache = context_menu_build_cache.clone();
                     let Some(leaf) = context_menu_leaf_info.get(&entry.item().id) else {
                         // A group: its own menu copies the paths of every
                         // replay under it, which is what a batch action on a
@@ -850,14 +900,22 @@ impl Render for ReplayBrowser {
                         if paths.is_empty() {
                             return menu;
                         }
-                        let label = t!("ui.replay.context.copy_replays", count = paths.len()).into_owned();
-                        return menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
-                            copy_paths(&paths, cx);
-                        }));
+                        let copy_paths_label = t!("ui.replay.context.copy_paths", count = paths.len()).into_owned();
+                        let copy_files_label = t!("ui.replay.context.copy_replays", count = paths.len()).into_owned();
+                        let path_list = paths.clone();
+                        return menu
+                            .item(PopupMenuItem::new(copy_files_label).on_click(move |_event, window, cx| {
+                                copy_replay_files(&paths, window, cx);
+                            }))
+                            .item(PopupMenuItem::new(copy_paths_label).on_click(move |_event, _window, cx| {
+                                copy_paths(&path_list, cx);
+                            }));
                     };
 
                     let open_path = leaf.path.clone();
                     let copy_path = leaf.path.clone();
+                    let copy_file = leaf.path.clone();
+                    let in_game_path = leaf.path.clone();
                     let reveal_path = leaf.path.clone();
                     let open_entity = context_menu_entity.clone();
                     menu.item(PopupMenuItem::new(t!("ui.collab.open").into_owned()).on_click(
@@ -866,18 +924,63 @@ impl Render for ReplayBrowser {
                             open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
                         },
                     ))
+                    .item(PopupMenuItem::new(t!("ui.replay.context.copy_replay").into_owned()).on_click(
+                        move |_event, window, cx| {
+                            copy_replay_files(std::slice::from_ref(&copy_file), window, cx);
+                        },
+                    ))
                     .item(PopupMenuItem::new(t!("ui.replay.context.copy_path").into_owned()).on_click(
                         move |_event, _window, cx| {
                             copy_paths(std::slice::from_ref(&copy_path), cx);
                         },
                     ))
-                    .item(
-                        PopupMenuItem::new(t!("ui.replay.context.show_in_explorer").into_owned()).on_click(
-                            move |_event, _window, _cx| {
-                                reveal_in_file_manager(&reveal_path);
+                    .item(PopupMenuItem::new(t!("ui.replay.context.show_in_explorer").into_owned()).on_click(
+                        move |_event, _window, _cx| {
+                            reveal_in_file_manager(&reveal_path);
+                        },
+                    ))
+                    // The game's own keyboard reference, read from whichever
+                    // build is loaded.
+                    .when_some(build_cache, |menu, cache| {
+                        menu.item(
+                            PopupMenuItem::new(t!("ui.replay.context.show_replay_controls").into_owned()).on_click(
+                                move |_event, window, cx| {
+                                    let Some(build) = cache.newest_loaded() else { return };
+                                    match super::controls::read_scheme(build.vfs()) {
+                                        Some(groups) => super::controls::open(groups, window, cx),
+                                        None => crate::toast::warn(
+                                            t!("ui.replay.controls.unavailable").into_owned(),
+                                            window,
+                                            cx,
+                                        ),
+                                    }
+                                },
+                            ),
+                        )
+                    })
+                    // Launching the game is not something to do by a
+                    // mis-click, so it is confirmed first, as in the egui
+                    // app (`ConfirmableAction::OpenInGame`).
+                    .when(!wows_dir.is_empty(), move |menu| {
+                        menu.item(PopupMenuItem::new(t!("ui.replay.context.open_in_game").into_owned()).on_click(
+                            move |_event, window, cx| {
+                                let wows_dir = wows_dir.clone();
+                                let replay = in_game_path.clone();
+                                window.open_alert_dialog(cx, move |alert, _window, _cx| {
+                                    let wows_dir = wows_dir.clone();
+                                    let replay = replay.clone();
+                                    alert
+                                        .title(t!("ui.replay.context.open_in_game").into_owned())
+                                        .description(t!("confirm.open_in_game").into_owned())
+                                        .show_cancel(true)
+                                        .on_ok(move |_event, window, cx| {
+                                            open_replay_in_game(&wows_dir, &replay, window, cx);
+                                            true
+                                        })
+                                });
                             },
-                        ),
-                    )
+                        ))
+                    })
                 })
                 .flex_1()
                 .into_any_element()

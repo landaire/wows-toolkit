@@ -38,7 +38,7 @@ use super::frame_pass::FrameSink;
 use super::frame_pass::build_frame_track;
 use crate::replay::timeline::ShipShotTimeline;
 use crate::replay::timeline::extract_timeline_and_shots;
-use crate::util::controls::parse_commands_scheme;
+use wows_toolkit_viewmodel::controls::parse_commands_scheme;
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn playback_thread(

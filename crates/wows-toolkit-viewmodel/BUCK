@@ -14,6 +14,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:levenshtein",
     "//third-party/rust:pickled",
     "//third-party/rust:regex",
+    "//third-party/rust:roxmltree",
     "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",

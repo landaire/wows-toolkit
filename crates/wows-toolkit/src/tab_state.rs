@@ -601,7 +601,7 @@ pub struct TabState {
     /// Whether the standalone replay controls reference window is open.
     pub show_replay_controls: bool,
     /// Cached parsed replay/spectator keybindings from `commands.scheme.xml`.
-    pub replay_controls_cache: Option<Vec<crate::util::controls::CommandGroup>>,
+    pub replay_controls_cache: Option<Vec<wows_toolkit_viewmodel::controls::CommandGroup>>,
 
     // ─── Collaborative session ─────────────────────────────────────────────
     /// Session token text input for joining.
