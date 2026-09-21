@@ -2,11 +2,12 @@
 //! its `panes` itself with `gpui_kit::component::resizable::h_resizable` rather
 //! than a `dock::DockArea`/`TabPanel` (see Task 9a's doc, preserved below,
 //! for why: `TabPanel::render_title_bar` always draws an unsuppressable 30px
-//! title bar). With exactly one pane this renders identically to Task 9a: no
-//! border, no close button, filling the whole area. Once a second pane is
-//! added (via `ArmorViewerPane`'s "Compare" action, `pane.rs`/`sidebar.rs`),
-//! panes sit side by side in resizable splits, the active pane gets a thin
-//! accent border, and each pane gets a close button.
+//! title bar). With exactly one pane this renders with no border, filling
+//! the whole area. Once a second pane is added (via `ArmorViewerPane`'s
+//! "Compare" action, `pane.rs`/`sidebar.rs`), the panes share the area in
+//! resizable splits, laid out along `split`, and the active pane gets a thin
+//! accent border. Every pane carries a close button; closing the last one
+//! empties it rather than removing it ([`DockEvent::ResetLastPane`]).
 //!
 //! Camera-mirror and settings-sync across panes (Milestone 5 Task 9c) are
 //! out of scope here -- each pane's `ViewportView` remains fully
@@ -29,21 +30,37 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::resizable::h_resizable;
 use gpui_kit::component::resizable::resizable_panel;
+use gpui_kit::component::resizable::v_resizable;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use super::viewport_view::ViewportView;
+
+/// What the dock needs its owner to do, because it cannot do it itself.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DockEvent {
+    /// The last pane's close button was pressed. A viewer with no viewport
+    /// would render nothing, so `ArmorViewerPane` answers this by putting a
+    /// fresh empty pane in its place, as the egui app does when its final
+    /// tab is closed.
+    ResetLastPane,
+}
+
+impl EventEmitter<DockEvent> for ViewportDock {}
 
 pub struct ViewportDock {
     panes: Vec<Entity<ViewportView>>,
     active_ix: usize,
+    /// Which way the panes are laid out; side by side until asked otherwise.
+    split: Axis,
 }
 
 impl ViewportDock {
     /// Wraps the single viewport `pane.rs` creates for the tab. `add_pane`
     /// grows this into a real split once the user clicks "Compare".
     pub fn new(viewport: Entity<ViewportView>) -> Self {
-        Self { panes: vec![viewport], active_ix: 0 }
+        Self { panes: vec![viewport], active_ix: 0, split: Axis::Horizontal }
     }
 
     /// Every pane currently in the dock, in display order. `ArmorViewerPane`
@@ -58,6 +75,22 @@ impl ViewportDock {
     /// clicked in, or the one a new pane became when added.
     pub fn active_viewport(&self) -> Entity<ViewportView> {
         self.panes[self.active_ix].clone()
+    }
+
+    /// Which way the panes are laid out.
+    pub fn split_axis(&self) -> Axis {
+        self.split
+    }
+
+    /// Lays the panes out the other way. Side by side compares two ships'
+    /// beams; one above the other compares their lengths, which is what a
+    /// long hull needs.
+    pub fn set_split(&mut self, split: Axis, cx: &mut Context<Self>) {
+        if self.split == split {
+            return;
+        }
+        self.split = split;
+        cx.notify();
     }
 
     /// Pushes `viewport` onto the split and makes it the active pane, so the
@@ -77,29 +110,54 @@ impl ViewportDock {
         }
     }
 
-    /// Removes the pane at `ix`, never dropping below one pane. A no-op if
-    /// `ix` is out of range or `ix` is the only remaining pane. The index
-    /// math (which pane becomes active afterward) is [`active_ix_after_remove`],
-    /// factored out so it's unit-testable without a gpui_kit `Context`.
-    fn close_pane(&mut self, ix: usize, cx: &mut Context<Self>) {
-        if !can_remove_pane(self.panes.len(), ix) {
-            return;
-        }
-        self.panes.remove(ix);
-        self.active_ix = active_ix_after_remove(self.active_ix, ix, self.panes.len());
+    /// Puts `viewport` in as the dock's only pane, answering
+    /// [`DockEvent::ResetLastPane`].
+    pub fn reset_to(&mut self, viewport: Entity<ViewportView>, cx: &mut Context<Self>) {
+        self.panes = vec![viewport];
+        self.active_ix = 0;
         cx.notify();
+    }
+
+    /// Acts on the close button of pane `ix`. The decision ([`close_outcome`])
+    /// and the index math afterward ([`active_ix_after_remove`]) are factored
+    /// out so they're unit-testable without a gpui_kit `Context`.
+    fn close_pane(&mut self, ix: usize, cx: &mut Context<Self>) {
+        match close_outcome(self.panes.len(), ix) {
+            CloseOutcome::Ignore => {}
+            CloseOutcome::ResetLast => cx.emit(DockEvent::ResetLastPane),
+            CloseOutcome::Remove => {
+                self.panes.remove(ix);
+                self.active_ix = active_ix_after_remove(self.active_ix, ix, self.panes.len());
+                cx.notify();
+            }
+        }
     }
 }
 
-/// Whether removing pane `ix` out of `len` panes is allowed: never drop below
-/// one pane, and `ix` must actually name a pane.
-fn can_remove_pane(len: usize, ix: usize) -> bool {
-    len > 1 && ix < len
+/// What closing pane `ix` out of `len` panes does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CloseOutcome {
+    /// `ix` does not name a pane.
+    Ignore,
+    Remove,
+    /// `ix` is the only pane: it is emptied rather than removed, because a
+    /// viewer with no viewport would render nothing.
+    ResetLast,
+}
+
+fn close_outcome(len: usize, ix: usize) -> CloseOutcome {
+    if ix >= len {
+        CloseOutcome::Ignore
+    } else if len > 1 {
+        CloseOutcome::Remove
+    } else {
+        CloseOutcome::ResetLast
+    }
 }
 
 /// Which pane index should be active after removing `removed_ix`, given the
 /// dock's `active_ix` beforehand and `remaining_len` panes afterward (always
-/// `> 0` -- callers only reach this once [`can_remove_pane`] passed). A pane
+/// `> 0` -- callers only reach this once [`close_outcome`] said to remove). A pane
 /// before the active one shifts every later index down by one; the active
 /// pane being removed (or the active index now pointing past the end)
 /// clamps to the new last pane.
@@ -119,19 +177,23 @@ impl Render for ViewportDock {
         let active_ix = self.active_ix;
         let accent = cx.theme().primary;
 
-        let mut group = h_resizable("armor-viewport-dock");
+        // A resizable group is built for one axis, so switching rebuilds it
+        // under a different id; sharing one id would carry the horizontal
+        // sizes over to the vertical layout.
+        let mut group = match self.split {
+            Axis::Horizontal => h_resizable("armor-viewport-dock-h"),
+            Axis::Vertical => v_resizable("armor-viewport-dock-v"),
+        };
         for (ix, pane) in self.panes.iter().cloned().enumerate() {
             let is_active = ix == active_ix;
-            let close_button = multi.then(|| {
-                div().absolute().top_1().right_1().child(
-                    Button::new(("armor-viewport-pane-close", ix))
-                        .icon(IconName::Close)
-                        .ghost()
-                        .xsmall()
-                        .tooltip("Close pane")
-                        .on_click(cx.listener(move |this, _event, _window, cx| this.close_pane(ix, cx))),
-                )
-            });
+            let close_button = div().absolute().top_1().right_1().child(
+                Button::new(("armor-viewport-pane-close", ix))
+                    .icon(IconName::Close)
+                    .ghost()
+                    .xsmall()
+                    .tooltip(t!("ui.armor.close_pane").to_string())
+                    .on_click(cx.listener(move |this, _event, _window, cx| this.close_pane(ix, cx))),
+            );
             let wrapper = div()
                 .id(("armor-viewport-pane", ix))
                 .relative()
@@ -149,7 +211,7 @@ impl Render for ViewportDock {
                 )
                 .when(multi, |this| this.border_2().border_color(if is_active { accent } else { transparent_black() }))
                 .child(pane)
-                .when_some(close_button, |this, button| this.child(button));
+                .child(close_button);
             group = group.child(resizable_panel().child(wrapper));
         }
 
@@ -159,24 +221,25 @@ impl Render for ViewportDock {
 
 #[cfg(test)]
 mod tests {
+    use super::CloseOutcome;
     use super::active_ix_after_remove;
-    use super::can_remove_pane;
+    use super::close_outcome;
 
     #[test]
-    fn cannot_remove_the_only_pane() {
-        assert!(!can_remove_pane(1, 0));
+    fn closing_the_only_pane_empties_it() {
+        assert_eq!(close_outcome(1, 0), CloseOutcome::ResetLast);
     }
 
     #[test]
-    fn can_remove_when_multiple_panes_exist() {
-        assert!(can_remove_pane(2, 0));
-        assert!(can_remove_pane(3, 2));
+    fn closing_removes_when_multiple_panes_exist() {
+        assert_eq!(close_outcome(2, 0), CloseOutcome::Remove);
+        assert_eq!(close_outcome(3, 2), CloseOutcome::Remove);
     }
 
     #[test]
-    fn cannot_remove_an_out_of_range_index() {
-        assert!(!can_remove_pane(3, 3));
-        assert!(!can_remove_pane(0, 0));
+    fn closing_an_out_of_range_index_does_nothing() {
+        assert_eq!(close_outcome(3, 3), CloseOutcome::Ignore);
+        assert_eq!(close_outcome(0, 0), CloseOutcome::Ignore);
     }
 
     #[test]

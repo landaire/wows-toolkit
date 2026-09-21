@@ -76,6 +76,7 @@ use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
 
 use super::analysis;
 use super::analysis::PenetrationState;
+use super::dock::DockEvent;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
 use super::load_ship;
@@ -188,6 +189,7 @@ impl ArmorViewerPane {
         // goes stale after a close (e.g. stays visible once back down to one
         // pane) until some unrelated event happens to re-render this pane.
         let dock_sub = cx.observe(&dock, |_this, _dock, cx| cx.notify());
+        let dock_event_sub = cx.subscribe_in(&dock, window, Self::on_dock_event);
 
         let pen = PenetrationState::new(window, cx);
         let pen_ship_sub = cx.subscribe_in(&pen.ship_select, window, Self::on_pen_ship_chosen);
@@ -213,6 +215,7 @@ impl ArmorViewerPane {
                 common_settings_sub,
                 viewport_event_sub,
                 dock_sub,
+                dock_event_sub,
             ],
         };
         this.start_gpu_init(cx);
@@ -288,10 +291,12 @@ impl ArmorViewerPane {
     /// Tells the sidebar what the panes share, so its header's own menu
     /// reports the current state.
     fn push_common_settings(&self, cx: &mut Context<Self>) {
+        let dock = self.dock.read(cx);
         let common = CommonPaneSettings {
-            comparing: self.dock.read(cx).panes().len() > 1,
+            comparing: dock.panes().len() > 1,
             mirror_cameras: self.mirror_cameras,
             sync_options: self.sync_options,
+            stack_panes: dock.split_axis() == Axis::Vertical,
         };
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
     }
@@ -363,24 +368,33 @@ impl ArmorViewerPane {
         if event.sync_options != self.sync_options {
             self.set_sync_options(event.sync_options, cx);
         }
+        let split = if event.stack_panes { Axis::Vertical } else { Axis::Horizontal };
+        self.dock.update(cx, |dock, cx| dock.set_split(split, cx));
         self.push_common_settings(cx);
     }
 
-    fn on_compare_split(
+    /// What the dock asks of its owner.
+    fn on_dock_event(
         &mut self,
-        _sidebar: &Entity<Sidebar>,
-        event: &CompareSplit,
+        _dock: &Entity<ViewportDock>,
+        event: &DockEvent,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let active = self.dock.read(cx).active_viewport();
-        let clone_source = {
-            let source = active.read(cx);
-            source
-                .current_armor()
-                .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
-        };
+        match event {
+            DockEvent::ResetLastPane => {
+                let viewport = self.fresh_viewport(cx);
+                self.dock.update(cx, |dock, cx| dock.reset_to(viewport, cx));
+                self.ship_loaded = false;
+                self.push_common_settings(cx);
+                cx.notify();
+            }
+        }
+    }
 
+    /// A new empty viewport, wired to this pane and handed whatever the
+    /// shared GPU device has settled into so far.
+    fn fresh_viewport(&mut self, cx: &mut Context<Self>) -> Entity<ViewportView> {
         let this = cx.weak_entity();
         let viewport = cx.new(|cx| {
             let mut viewport = ViewportView::new(cx);
@@ -402,6 +416,26 @@ impl ArmorViewerPane {
             }
             SharedGpu::Initializing => {}
         }
+
+        viewport
+    }
+
+    fn on_compare_split(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &CompareSplit,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let active = self.dock.read(cx).active_viewport();
+        let clone_source = {
+            let source = active.read(cx);
+            source
+                .current_armor()
+                .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
+        };
+
+        let viewport = self.fresh_viewport(cx);
 
         if let Some((armor, camera, synced, reload_source)) = clone_source {
             viewport.update(cx, |view, cx| {

@@ -84,6 +84,8 @@ pub struct CommonPaneSettings {
     pub comparing: bool,
     pub mirror_cameras: bool,
     pub sync_options: bool,
+    /// Whether the panes are stacked rather than side by side.
+    pub stack_panes: bool,
 }
 
 /// Asks for a new comparison pane.
@@ -177,6 +179,7 @@ impl Sidebar {
             .content(move |_state, _window, _cx| {
                 let mirror_entity = entity.clone();
                 let sync_entity = entity.clone();
+                let stack_entity = entity.clone();
                 v_flex()
                     .w(COMMON_MENU_WIDTH)
                     .gap_2()
@@ -191,6 +194,19 @@ impl Sidebar {
                                 let mirror_cameras = *checked;
                                 mirror_entity.update(cx, |sidebar, cx| {
                                     cx.emit(CommonPaneSettings { mirror_cameras, ..sidebar.common })
+                                });
+                            }),
+                    )
+                    .child(
+                        Checkbox::new("armor-pane-stack")
+                            .label(t!("ui.armor.stack_panes").to_string())
+                            .checked(common.stack_panes)
+                            .disabled(!common.comparing)
+                            .tooltip(t!("ui.armor.stack_panes_tooltip").to_string())
+                            .on_click(move |checked, _window, cx| {
+                                let stack_panes = *checked;
+                                stack_entity.update(cx, |sidebar, cx| {
+                                    cx.emit(CommonPaneSettings { stack_panes, ..sidebar.common })
                                 });
                             }),
                     )
