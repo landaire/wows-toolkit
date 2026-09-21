@@ -166,7 +166,7 @@ pub fn bar_series(ships: &[(String, PerformanceInfo)], stat: ChartableStat) -> V
 }
 
 /// A colour on a chart, as the eight bits per channel both front ends take.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,
@@ -176,14 +176,21 @@ pub struct Rgb {
 /// The colour drawn for one ship.
 ///
 /// Hue from the identifier's hash, at a fixed saturation and value, so a ship
-/// keeps the same colour across sessions and across the two front ends.
+/// keeps the same colour across sessions and across the two front ends. Two
+/// ships can still hash near each other; what a chart draws goes through
+/// [`spread_colors`], which pulls those apart.
 pub fn ship_color(id: GameParamId) -> Rgb {
     use std::hash::Hash;
     use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     id.hash(&mut hasher);
-    let hue = (hasher.finish() % 360) as f32;
+    hue_color((hasher.finish() % 360) as f32)
+}
 
+/// The colour at `hue` degrees, at the saturation and value every series is
+/// drawn at.
+fn hue_color(hue: f32) -> Rgb {
+    let hue = hue.rem_euclid(360.0);
     let (saturation, value) = (0.7f32, 0.9f32);
     let c = value * saturation;
     let x = c * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
@@ -197,6 +204,56 @@ pub fn ship_color(id: GameParamId) -> Rgb {
         _ => (c, 0.0, x),
     };
     Rgb { r: ((r + m) * 255.0) as u8, g: ((g + m) * 255.0) as u8, b: ((b + m) * 255.0) as u8 }
+}
+
+/// This ship's hue, before any spreading.
+fn ship_hue(id: GameParamId) -> f32 {
+    use std::hash::Hash;
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut hasher);
+    (hasher.finish() % 360) as f32
+}
+
+/// How far apart two lines' hues have to be to read as different colours.
+const HUE_SEPARATION: f32 = 40.0;
+
+/// One colour per ship, far enough apart to tell the lines on one chart apart.
+///
+/// A hash gives a ship a stable hue but says nothing about the other ships
+/// being drawn beside it, and a session played in five ships that all hash
+/// into the reds is five lines nobody can follow. Each ship keeps its own hue
+/// where it can; where two fall within [`HUE_SEPARATION`] the later one is
+/// moved on to the next free slot. The result depends only on the set and its
+/// order, so a chart redrawn with the same ships keeps the same colours.
+pub fn spread_colors(ships: &[GameParamId]) -> Vec<Rgb> {
+    let mut taken: Vec<f32> = Vec::with_capacity(ships.len());
+    // With more ships than the circle has room for, the requirement is
+    // relaxed rather than abandoned: every hue is still as far from its
+    // neighbours as the circle allows.
+    let spacing = HUE_SEPARATION.min(360.0 / ships.len().max(1) as f32);
+
+    ships
+        .iter()
+        .map(|id| {
+            let wanted = ship_hue(*id);
+            let mut hue = wanted;
+            let mut step = 0.0;
+            while taken.iter().any(|other| hue_distance(*other, hue) < spacing) && step < 360.0 {
+                step += spacing;
+                hue = wanted + step;
+            }
+            let hue = hue.rem_euclid(360.0);
+            taken.push(hue);
+            hue_color(hue)
+        })
+        .collect()
+}
+
+/// The shorter way round the colour circle between two hues.
+fn hue_distance(a: f32, b: f32) -> f32 {
+    let gap = (a - b).abs().rem_euclid(360.0);
+    gap.min(360.0 - gap)
 }
 
 /// The colour of the one line drawn when the ships are combined.
@@ -256,13 +313,17 @@ pub fn line_chart_series(
         return vec![ChartSeries { name: COMBINED_LABEL.to_string(), color: COMBINED_COLOR, points }];
     }
 
-    ships_played(&chosen)
+    let played = ships_played(&chosen);
+    let ids: Vec<GameParamId> = played.iter().map(|(id, _)| *id).collect();
+    let colors = spread_colors(&ids);
+    played
         .into_iter()
-        .filter_map(|(ship_id, name)| {
+        .zip(colors)
+        .filter_map(|((ship_id, name), color)| {
             let ship_games: Vec<&PerGameStat> = chosen.iter().copied().filter(|game| game.ship_id == ship_id).collect();
             let points =
                 if running { accumulated_points(&ship_games, stat, rating) } else { line_series(&ship_games, stat) };
-            (!points.is_empty()).then(|| ChartSeries { name, color: ship_color(ship_id), points })
+            (!points.is_empty()).then_some(ChartSeries { name, color, points })
         })
         .collect()
 }
@@ -345,17 +406,27 @@ pub fn bar_chart_series(
     selected: &[GameParamId],
     rating: Option<&PersonalRatingData>,
 ) -> Vec<ChartBar> {
-    ships
-        .iter()
-        .filter(|(_, info)| info.ship_id().is_none_or(|id| selected.contains(&id)))
+    let drawn: Vec<&(String, PerformanceInfo)> =
+        ships.iter().filter(|(_, info)| info.ship_id().is_none_or(|id| selected.contains(&id))).collect();
+    let ids: Vec<GameParamId> = drawn.iter().filter_map(|(_, info)| info.ship_id()).collect();
+    let mut colors = spread_colors(&ids).into_iter();
+
+    drawn
+        .into_iter()
         .filter_map(|(ship, info)| {
+            // Taken in step with `ids`, which skipped the ships the index has
+            // no id for; those are drawn in the one colour a line uses when it
+            // stands for more than one ship.
+            let color = match info.ship_id() {
+                Some(_) => colors.next().unwrap_or(COMBINED_COLOR),
+                None => COMBINED_COLOR,
+            };
             // A ship's rating is computed from its whole record, not averaged
             // out of its games, so it is not one of `of_ship`'s aggregates.
             let value = match stat {
                 ChartableStat::PersonalRating => info.personal_rating(rating?).map(|result| result.pr)?,
                 _ => stat.of_ship(info)?,
             };
-            let color = info.ship_id().map_or(COMBINED_COLOR, ship_color);
             Some(ChartBar { label: ship.clone(), value, color })
         })
         .collect()
@@ -493,7 +564,7 @@ mod tests {
         assert_eq!(series.len(), 2, "one line per ship");
         assert_eq!(series[0].name, "Yamato", "in the order first played");
         assert_ne!(series[0].color, series[1].color, "each ship is told apart by its colour");
-        assert_eq!(series[0].color, super::ship_color(7u64.into()), "and keeps that colour");
+        assert_eq!(series[0].color, super::ship_color(7u64.into()), "the first keeps its own hue");
     }
 
     #[test]
@@ -563,14 +634,44 @@ mod tests {
         let names: Vec<&str> = bars.iter().map(|bar| bar.label.as_str()).collect();
         let listed: Vec<&str> = ships.iter().map(|(ship, _)| ship.as_str()).collect();
         assert_eq!(names, listed);
-        assert_eq!(
-            bars.iter().find(|bar| bar.label == "Shimakaze").expect("a bar").color,
-            super::ship_color(9u64.into())
-        );
+        let colors: std::collections::HashSet<_> = bars.iter().map(|bar| bar.color).collect();
+        assert_eq!(colors.len(), 2, "each ship's bar is its own colour");
 
         let bars = super::bar_chart_series(&ships, ChartableStat::Damage, &[7u64.into()], None);
         assert_eq!(bars.len(), 1, "an unselected ship has no bar");
         assert_eq!(bars[0].label, "Yamato");
+    }
+
+    /// Five ships that all hash into one corner of the circle still draw as
+    /// five colours anyone can tell apart.
+    #[test]
+    fn the_colours_of_one_chart_are_pulled_apart() {
+        let ids: Vec<wows_replays::types::GameParamId> = (1u64..=8).map(Into::into).collect();
+
+        let colors = super::spread_colors(&ids);
+
+        assert_eq!(colors.len(), ids.len());
+        let unique: std::collections::HashSet<_> = colors.iter().collect();
+        assert_eq!(unique.len(), ids.len(), "no two lines share a colour");
+    }
+
+    #[test]
+    fn a_ship_drawn_on_its_own_keeps_the_hue_its_id_gives_it() {
+        let id: wows_replays::types::GameParamId = 3u64.into();
+        assert_eq!(super::spread_colors(&[id]), vec![super::ship_color(id)]);
+    }
+
+    /// More ships than the circle has room for at full separation: the
+    /// spacing closes up rather than the rule being dropped.
+    #[test]
+    fn a_session_in_many_ships_still_spaces_them_evenly() {
+        let ids: Vec<wows_replays::types::GameParamId> = (1u64..=30).map(Into::into).collect();
+
+        let colors = super::spread_colors(&ids);
+
+        assert_eq!(colors.len(), 30);
+        let unique: std::collections::HashSet<_> = colors.iter().collect();
+        assert!(unique.len() >= 24, "got {} distinct colours for 30 ships", unique.len());
     }
 
     #[test]
