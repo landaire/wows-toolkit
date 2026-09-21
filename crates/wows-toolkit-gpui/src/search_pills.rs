@@ -16,13 +16,16 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use wows_toolkit_config::index::query_ast::MatchExpr;
+use wows_toolkit_config::index::query_ast::MatchField;
 use wows_toolkit_config::index::query_ast::Op;
+use wows_toolkit_config::index::query_ast::OperatorPreferences;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_viewmodel::query_bar::label;
 use wows_toolkit_viewmodel::query_bar::label::NameCache;
 use wows_toolkit_viewmodel::query_bar::label::SegmentRole;
 use wows_toolkit_viewmodel::query_bar::select;
 use wows_toolkit_viewmodel::query_bar::suggest;
+use wows_toolkit_viewmodel::query_bar::suggest::TermField;
 use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::query_bar::tokens::TokenKind;
@@ -35,6 +38,35 @@ pub const MAX_SUGGESTIONS: usize = 8;
 /// the next pill's. No term renders more than a field, an operator and a
 /// value.
 const SEGMENTS_PER_PILL: usize = 8;
+
+/// Which part of a term a picker is editing.
+///
+/// The value segment only opens a picker for a field whose values enumerate;
+/// a free number or a name is typed in the bar, as it is in the egui one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditablePart {
+    Field,
+    Operator,
+    Value,
+}
+
+impl EditablePart {
+    fn of(role: SegmentRole) -> Self {
+        match role {
+            SegmentRole::Filter => Self::Field,
+            SegmentRole::Operator => Self::Operator,
+            SegmentRole::Value => Self::Value,
+        }
+    }
+}
+
+/// One choice a picker offers, and the query text taking it produces.
+pub struct Choice {
+    pub label: String,
+    pub taken: String,
+    /// Whether this is what the term already says.
+    pub current: bool,
+}
 
 /// An operator a pill's operator segment may be changed to.
 pub struct OperatorChoice {
@@ -69,19 +101,97 @@ pub fn with_operator(expr: &MatchExpr, path: &[usize], op: Op) -> Option<String>
     select::set_op(&mut edited, path, op).then(|| query_text::print_query(&edited))
 }
 
+/// What the picker for `part` of the term at `path` offers.
+///
+/// Empty when that part has nothing to pick from, which is a value that is
+/// typed rather than chosen; the bar then opens no picker at all rather than
+/// an empty one.
+pub fn choices(expr: &MatchExpr, path: &[usize], part: EditablePart) -> Vec<Choice> {
+    match part {
+        EditablePart::Operator => operator_choices(expr, path)
+            .map(|(choices, current)| {
+                choices
+                    .into_iter()
+                    .filter_map(|choice| {
+                        Some(Choice {
+                            label: choice.label,
+                            taken: with_operator(expr, path, choice.op)?,
+                            current: choice.op == current,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        EditablePart::Field => field_choices(expr, path),
+        EditablePart::Value => value_choices(expr, path),
+    }
+}
+
+/// Every match-level field this term could be instead.
+///
+/// Roster terms are left alone: their field list is a different one and
+/// changing it reshapes the quantifier around it, which the bar does not do
+/// yet.
+fn field_choices(expr: &MatchExpr, path: &[usize]) -> Vec<Choice> {
+    let Some((current, _, _)) = select::term_at(expr, path) else { return Vec::new() };
+    if !matches!(current, TermField::Match(_)) {
+        return Vec::new();
+    }
+
+    // The operator a field was last given, so switching to it lands on the
+    // same operator the user chose before rather than the field's default.
+    let mut prefs = OperatorPreferences::default();
+    select::record_operators(expr, &mut prefs);
+
+    MatchField::ALL
+        .iter()
+        .copied()
+        .filter_map(|field| {
+            let mut edited = expr.clone();
+            select::set_field(&mut edited, &path.to_vec(), TermField::Match(field), &prefs).then(|| Choice {
+                label: label::match_field_label(field),
+                taken: query_text::print_query(&edited),
+                current: current == TermField::Match(field),
+            })
+        })
+        .collect()
+}
+
+/// The values this term's field enumerates, when it enumerates any.
+fn value_choices(expr: &MatchExpr, path: &[usize]) -> Vec<Choice> {
+    let Some((field, op, current)) = select::term_at(expr, path) else { return Vec::new() };
+    let Some(offered) = query_text::enumerable_values(field.value_kind()) else { return Vec::new() };
+    let _ = op;
+
+    let current_text = query_text::print_value(current);
+    offered
+        .into_iter()
+        .filter_map(|raw| {
+            let value = query_text::parse_roster_value(field.value_kind(), &raw)?;
+            let is_current = query_text::print_value(&value) == current_text;
+            let mut edited = expr.clone();
+            select::set_value(&mut edited, path, value).then(|| Choice {
+                label: raw,
+                taken: query_text::print_query(&edited),
+                current: is_current,
+            })
+        })
+        .collect()
+}
+
 /// The parsed query as a row of pills.
 ///
 /// `None` when the query is empty or does not parse: there is nothing to read
 /// back, and the bar says so in its own way rather than drawing half a query.
 ///
-/// `on_operator` is handed the path of a pill whose operator segment was
+/// `on_segment` is handed the path of a clicked pill and which part of it was
 /// clicked, together with the app it was clicked in, which is what opens the
 /// picker for it.
 pub fn pill_strip(
     expr: &MatchExpr,
     cache: &NameCache,
     cx: &App,
-    on_operator: impl Fn(NodePath, &mut App) + Clone + 'static,
+    on_segment: impl Fn(NodePath, EditablePart, &mut App) + Clone + 'static,
 ) -> Option<AnyElement> {
     let stream = tokens::tokenize(expr, cache);
     if stream.is_empty() {
@@ -104,26 +214,28 @@ pub fn pill_strip(
                     .rounded_sm()
                     .border_1()
                     .border_color(border);
-                for (part, segment) in segments.iter().enumerate() {
+                for (slot, segment) in segments.iter().enumerate() {
                     // The field and the operator are chrome around the value,
                     // which is the part the reader is looking for.
                     let dimmed = !matches!(segment.role, SegmentRole::Value);
-                    let is_operator = matches!(segment.role, SegmentRole::Operator);
+                    let part = EditablePart::of(segment.role);
+                    let editable = !choices(expr, &token.path, part).is_empty();
                     let path = token.path.clone();
-                    let open = on_operator.clone();
+                    let open = on_segment.clone();
                     pill = pill.child(
                         div()
-                            .id(("search-pill-segment", index * SEGMENTS_PER_PILL + part))
+                            .id(("search-pill-segment", index * SEGMENTS_PER_PILL + slot))
                             .test_support()
                             .text_xs()
                             .when(dimmed, |this| this.opacity(0.7))
                             .when(!dimmed, |this| this.font_weight(FontWeight::MEDIUM))
-                            // Only the operator is editable from the pill so
-                            // far; the rest reads back and is edited as text.
-                            .when(is_operator, |this| {
+                            // A segment is a handle only where there is
+                            // something to pick; a free value is typed in the
+                            // bar instead, as it is in the egui one.
+                            .when(editable, |this| {
                                 this.cursor_pointer()
                                     .underline()
-                                    .on_click(move |_event, _window, cx: &mut App| open(path.clone(), cx))
+                                    .on_click(move |_event, _window, cx: &mut App| open(path.clone(), part, cx))
                             })
                             .child(segment.text.clone()),
                     );
@@ -260,6 +372,65 @@ mod tests {
         let reparsed = query_text::parse_query(&rewritten).expect("what it prints, it can read back");
         let (_, op, _) = select::term_at(&reparsed, &path).expect("still one term");
         assert_eq!(op, other.op, "the operator is the one taken");
+    }
+
+    /// The field segment offers every match field, and taking one keeps the
+    /// term rather than starting a new query.
+    #[test]
+    fn a_field_can_be_changed_from_its_pill() {
+        use wows_toolkit_config::index::query_text;
+        use wows_toolkit_viewmodel::query_bar::label::NameCache;
+        use wows_toolkit_viewmodel::query_bar::select;
+        use wows_toolkit_viewmodel::query_bar::tokens;
+
+        let expr = query_text::parse_query("map:ocean").expect("the fixture parses");
+        let path =
+            select::pill_paths(&tokens::tokenize(&expr, &NameCache::default())).first().cloned().expect("one pill");
+
+        let offered = super::choices(&expr, &path, super::EditablePart::Field);
+        assert!(offered.len() > 1, "there are other fields to choose");
+        assert_eq!(offered.iter().filter(|choice| choice.current).count(), 1, "exactly one is the current field");
+
+        let other = offered.iter().find(|choice| !choice.current).expect("another field");
+        let reparsed = query_text::parse_query(&other.taken).expect("what it prints, it reads back");
+        let (field, _, _) = select::term_at(&reparsed, &path).expect("still one term");
+        assert_ne!(
+            format!("{field:?}"),
+            format!("{:?}", select::term_at(&expr, &path).expect("a term").0),
+            "the field changed"
+        );
+    }
+
+    /// A field whose values enumerate offers them; one that is typed offers
+    /// nothing, so the bar opens no picker for it.
+    #[test]
+    fn only_an_enumerable_value_offers_a_picker() {
+        use wows_toolkit_config::index::query_text;
+        use wows_toolkit_viewmodel::query_bar::label::NameCache;
+        use wows_toolkit_viewmodel::query_bar::select;
+        use wows_toolkit_viewmodel::query_bar::tokens;
+
+        let path_of = |expr: &_| {
+            select::pill_paths(&tokens::tokenize(expr, &NameCache::default())).first().cloned().expect("one pill")
+        };
+
+        // `outcome` is an enumeration.
+        let enumerated = query_text::parse_query("outcome=win").expect("the fixture parses");
+        let path = path_of(&enumerated);
+        let offered = super::choices(&enumerated, &path, super::EditablePart::Value);
+        assert!(offered.len() > 1, "every outcome is offered");
+        assert!(offered.iter().any(|choice| choice.current), "one of them is the current value");
+        let other = offered.iter().find(|choice| !choice.current).expect("another outcome");
+        assert!(
+            query_text::parse_query(&other.taken).is_ok(),
+            "taking it leaves a query that parses: {:?}",
+            other.taken
+        );
+
+        // A build number is typed, not chosen.
+        let typed = query_text::parse_query("build>9000000").expect("the fixture parses");
+        let path = path_of(&typed);
+        assert!(super::choices(&typed, &path, super::EditablePart::Value).is_empty(), "a free number offers no picker");
     }
 
     /// Every category renders, so a new one cannot reach the screen as an

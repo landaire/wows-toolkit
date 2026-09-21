@@ -21,11 +21,11 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use crate::search_pills::EditablePart;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
-use wows_toolkit_config::index::query_ast::Op;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
@@ -118,8 +118,9 @@ pub struct SearchView {
     /// too, and one path that notices covers both.
     completions: Vec<crate::search_pills::Completion>,
     completion_source: String,
-    /// The pill whose operator picker is open. `None` when none is.
-    editing_operator: Option<NodePath>,
+    /// The pill segment whose picker is open, and which part of it. `None`
+    /// when none is.
+    editing: Option<(NodePath, EditablePart)>,
     /// Names the pills read ids back as. Filled from the same lookups the
     /// result table uses, so a pill and a row name a ship the same way.
     name_cache: wows_toolkit_viewmodel::query_bar::label::NameCache,
@@ -162,7 +163,7 @@ impl SearchView {
             query_input,
             completions: Vec::new(),
             completion_source: String::new(),
-            editing_operator: None,
+            editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
             hits: Vec::new(),
@@ -187,25 +188,20 @@ impl SearchView {
         cx.notify();
     }
 
-    /// Opens the operator picker for the pill at `path`, or closes it when
-    /// that pill's is the one already open.
-    fn toggle_operator_picker(&mut self, path: NodePath, cx: &mut Context<Self>) {
-        self.editing_operator =
-            if self.editing_operator.as_deref() == Some(path.as_slice()) { None } else { Some(path) };
+    /// Opens the picker for a pill segment, or closes it when that segment's
+    /// is the one already open.
+    fn toggle_picker(&mut self, path: NodePath, part: EditablePart, cx: &mut Context<Self>) {
+        let same = self.editing.as_ref().is_some_and(|(open, open_part)| open == &path && *open_part == part);
+        self.editing = if same { None } else { Some((path, part)) };
         cx.notify();
     }
 
-    /// Rewrites the query with `op` in place of the operator at `path`, and
-    /// runs it: the bar exists to show matches, and leaving the old ones
-    /// under an edited query would be showing the wrong ones.
-    fn take_operator(&mut self, path: NodePath, op: Op, window: &mut Window, cx: &mut Context<Self>) {
-        self.editing_operator = None;
-        let Some(expr) = self.expr.as_ref() else { return };
-        // `can_set_op` refused it, so the query on screen is still the one
-        // that ran.
-        let Some(rewritten) = crate::search_pills::with_operator(expr, &path, op) else { return };
-
-        self.query_input.update(cx, |state, cx| state.set_value(rewritten, window, cx));
+    /// Puts `query` in the bar and runs it: the bar exists to show matches,
+    /// and leaving the old ones under an edited query would be showing the
+    /// wrong ones.
+    fn take_edit(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing = None;
+        self.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
         self.run(cx);
     }
 
@@ -500,32 +496,33 @@ impl Render for SearchView {
             .as_ref()
             .and_then(|expr| {
                 let entity = entity.clone();
-                crate::search_pills::pill_strip(expr, &self.name_cache, cx, move |path, cx| {
-                    entity.update(cx, |this, cx| this.toggle_operator_picker(path, cx));
+                crate::search_pills::pill_strip(expr, &self.name_cache, cx, move |path, part, cx| {
+                    entity.update(cx, |this, cx| this.toggle_picker(path, part, cx));
                 })
             })
             .map(|strip| div().id("search-pills").test_support().w_full().px(px(20.)).child(strip));
 
-        // The picker for whichever operator segment was clicked.
-        let operator_picker = self.editing_operator.as_ref().and_then(|path| {
-            let (choices, current) = crate::search_pills::operator_choices(self.expr.as_ref()?, path)?;
-            let path = path.clone();
-            Some(h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(choices.into_iter().enumerate().map(
-                |(index, choice)| {
-                    let path = path.clone();
-                    selectable(
-                        ("search-operator", index),
-                        choice.op == current,
-                        Button::new(("search-operator-button", index))
-                            .label(choice.label)
-                            .compact()
-                            .selected(choice.op == current)
-                            .on_click(cx.listener(move |this, _event, window, cx| {
-                                this.take_operator(path.clone(), choice.op, window, cx)
-                            })),
-                    )
-                },
-            )))
+        // The picker for whichever pill segment was clicked.
+        let picker = self.editing.as_ref().and_then(|(path, part)| {
+            let offered = crate::search_pills::choices(self.expr.as_ref()?, path, *part);
+            (!offered.is_empty()).then(|| {
+                h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(offered.into_iter().enumerate().map(
+                    |(index, choice)| {
+                        let taken = choice.taken.clone();
+                        selectable(
+                            ("search-choice", index),
+                            choice.current,
+                            Button::new(("search-choice-button", index))
+                                .label(choice.label)
+                                .compact()
+                                .selected(choice.current)
+                                .on_click(cx.listener(move |this, _event, window, cx| {
+                                    this.take_edit(taken.clone(), window, cx)
+                                })),
+                        )
+                    },
+                ))
+            })
         });
 
         let completions = (!self.completions.is_empty()).then(|| {
@@ -552,7 +549,7 @@ impl Render for SearchView {
             .border_color(border)
             .child(entry_row)
             .when_some(pills, |this, pills| this.child(pills))
-            .when_some(operator_picker, |this, picker| this.child(picker))
+            .when_some(picker, |this, rows| this.child(rows))
             .when_some(completions, |this, rows| this.child(rows));
 
         let header =
