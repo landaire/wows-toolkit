@@ -528,7 +528,7 @@ impl App {
             .child(
                 div().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("ui.settings.app.zoom_factor").to_string()),
             )
-            .child(Slider::new(&self.zoom_slider).w(px(160.)))
+            .child(crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(&self.zoom_slider)))
             .child(div().text_sm().w(px(40.)).child(format!("{:.2}", self.zoom)))
             .child(Button::new("reset-zoom").label(t!("ui.buttons.reset").to_string()).compact().on_click(cx.listener(
                 |this, _event: &ClickEvent, window, cx| {

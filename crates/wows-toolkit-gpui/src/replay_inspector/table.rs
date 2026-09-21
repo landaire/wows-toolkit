@@ -587,7 +587,7 @@ fn cell_element(ix: usize, col: ReplayColumn, cell: CellValue, width: f32) -> An
         .overflow_hidden()
         .text_ellipsis()
         .when_some(cell.color, |el, role| el.text_color(resolve_color(role)))
-        .child(cell.text);
+        .child(crate::ui::selectable_text(("replay-cell-text", ix * CELL_ID_STRIDE + col as usize), cell.text));
 
     match cell.hover {
         Some(text) => base
@@ -660,7 +660,10 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     }
     if let Some(clan) = row.clan_tag.as_ref() {
         cell = cell.child(
-            div().flex_none().text_color(resolve_color(ColorRole::Fixed(row.clan_color_rgb))).child(clan.clone()),
+            div()
+                .flex_none()
+                .text_color(resolve_color(ColorRole::Fixed(row.clan_color_rgb)))
+                .child(crate::ui::selectable_text(("replay-clan", ix), clan.clone())),
         );
     }
     cell = cell.child(
@@ -671,7 +674,7 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
             .text_ellipsis()
             .whitespace_nowrap()
             .text_color(name_color)
-            .child(row.display_name.clone()),
+            .child(crate::ui::selectable_text(("replay-name", ix), row.display_name.clone())),
     );
 
     cell.into_any_element()

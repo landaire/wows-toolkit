@@ -1132,3 +1132,48 @@ fn the_unpacker_dock_opens_on_the_package_listing(cx: &mut TestAppContext) {
     })
     .expect("the test window stays open");
 }
+
+/// Text the reader can drag across has to actually select: `SelectableText`
+/// only works when the window mounts the selection layer and the runs it
+/// registers are reachable by the pointer.
+#[gpui_kit::test]
+fn dragging_across_a_selectable_run_selects_its_text(cx: &mut TestAppContext) {
+    use gpui_kit::base::TextSelection;
+
+    struct Probe;
+    impl gpui_kit::Render for Probe {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            use gpui_kit::ParentElement as _;
+            use gpui_kit::Styled as _;
+            gpui_kit::div()
+                .size_full()
+                .p(px(20.))
+                .text_size(px(16.))
+                .child(crate::ui::selectable_text("probe", "SELECTABLE"))
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(400.), px(200.)), |window, cx| {
+        let probe: gpui_kit::AnyView = cx.new(|_| Probe).into();
+        gpui_kit::component::Root::new(probe, window, cx)
+    });
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // Across the run, which starts at the padding and sits on the first
+        // line of text.
+        window.drag(gpui_kit::point(px(22.), px(28.)), gpui_kit::point(px(120.), px(28.)), cx);
+        let selected = TextSelection::selected_text(window, cx);
+        assert!(!selected.is_empty(), "dragging over the run selected nothing");
+        assert!(
+            "SELECTABLE".starts_with(&selected) || selected.starts_with('S'),
+            "the selection is part of the run, got {selected:?}"
+        );
+    })
+    .expect("the test window stays open");
+}

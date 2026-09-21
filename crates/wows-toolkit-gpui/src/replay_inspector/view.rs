@@ -572,12 +572,13 @@ impl Render for ReplayInspectorView {
             )
             .child(crate::ui::rule_v(cx))
             .child(
-                Select::new(&self.grouping_select)
-                    .id("replay-header-grouping")
-                    .title_prefix(t!("ui.replay.group_prefix").to_string())
-                    .accessibility_label(t!("ui.replay.group_label").to_string())
-                    .small()
-                    .w(px(160.)),
+                crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                    Select::new(&self.grouping_select)
+                        .id("replay-header-grouping")
+                        .title_prefix(t!("ui.replay.group_prefix").to_string())
+                        .accessibility_label(t!("ui.replay.group_label").to_string())
+                        .small(),
+                ),
             )
             .child(column_filters_popover(entity.clone(), self.replay_settings.clone()));
 
