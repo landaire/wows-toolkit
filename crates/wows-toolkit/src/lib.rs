@@ -8,7 +8,7 @@
 // frame larger than the 2 MiB a thread gets by default. Every test that reached
 // `t!()` first therefore died with a stack overflow. `TranslationsBackend`
 // supplies the same catalogs, parsed at startup, with no such frame.
-rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = TranslationsBackend::load());
+rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
 mod app;
 mod armor_viewer;
@@ -111,96 +111,4 @@ impl wt_translations::TextResolver for LocalizedTextResolver {
     }
 }
 
-/// The whole translation catalog: the locales bundled into the binary, plus
-/// any `translations/*.toml` sitting next to the executable, which override
-/// them key by key so a user can correct a string without a rebuild.
-///
-/// Loaded once, at the first `t!()` call.
-pub(crate) struct TranslationsBackend {
-    translations: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
-}
-
-impl TranslationsBackend {
-    pub fn load() -> Self {
-        let mut all = std::collections::HashMap::new();
-        for (locale, source) in wt_translations::embedded::EMBEDDED {
-            if let Some(flat) = parse_locale(source) {
-                all.insert((*locale).to_owned(), flat);
-            }
-        }
-
-        // Applied second so an on-disk file wins, and per key rather than per
-        // file, so an override listing one string does not blank the rest.
-        let mut on_disk = std::collections::HashMap::new();
-        if let Some(dir) = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("translations"))) {
-            load_toml_dir(&dir, &mut on_disk);
-        }
-        for (locale, overrides) in on_disk {
-            all.entry(locale).or_default().extend(overrides);
-        }
-
-        Self { translations: all }
-    }
-}
-
-fn load_toml_dir(
-    dir: &std::path::Path,
-    out: &mut std::collections::HashMap<String, std::collections::HashMap<String, String>>,
-) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().is_some_and(|e| e == "toml")
-            && let Some(locale) = path.file_stem().and_then(|s| s.to_str())
-            && let Some(flat) = load_locale_file(&path)
-        {
-            out.insert(locale.to_string(), flat);
-        }
-    }
-}
-
-/// Load and flatten a single locale TOML file. Kept as a separate non-inlined
-/// function so the large `toml::Table` intermediate lives in its own stack frame
-/// (reused across files) rather than accumulating in the caller's frame.
-#[inline(never)]
-fn load_locale_file(path: &std::path::Path) -> Option<std::collections::HashMap<String, String>> {
-    parse_locale(&std::fs::read_to_string(path).ok()?)
-}
-
-/// Flatten one locale's TOML source. Non-inlined for the same reason as
-/// [`load_locale_file`]: the `toml::Table` intermediate is large, and inlining
-/// would accumulate one per locale in the caller's frame.
-#[inline(never)]
-fn parse_locale(source: &str) -> Option<std::collections::HashMap<String, String>> {
-    let table: Box<toml::Table> = Box::new(source.parse().ok()?);
-    let mut flat = std::collections::HashMap::new();
-    flatten_toml("", &table, &mut flat);
-    Some(flat)
-}
-
-fn flatten_toml(prefix: &str, table: &toml::Table, out: &mut std::collections::HashMap<String, String>) {
-    for (k, v) in table {
-        let key = if prefix.is_empty() { k.clone() } else { format!("{prefix}.{k}") };
-        match v {
-            toml::Value::String(s) => {
-                out.insert(key, s.clone());
-            }
-            toml::Value::Table(t) => {
-                flatten_toml(&key, t, out);
-            }
-            _ => {}
-        }
-    }
-}
-
 pub use wows_toolkit_config::storage_dir;
-
-impl rust_i18n::Backend for TranslationsBackend {
-    fn available_locales(&self) -> Vec<&str> {
-        self.translations.keys().map(|s| s.as_str()).collect()
-    }
-
-    fn translate(&self, locale: &str, key: &str) -> Option<&str> {
-        self.translations.get(locale).and_then(|m| m.get(key).map(|s| s.as_str()))
-    }
-}

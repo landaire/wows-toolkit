@@ -22,6 +22,12 @@ language-tags = "0.3"
 # The Twitch login/in-game-name similarity rule.
 levenshtein = "1.0.5"
 regex = "1"
+# The query bar's pill labels and completions are user-facing strings, so the
+# shared half translates them rather than handing keys to each front end.
+# `i18n!` generates its lookup per crate; the catalog behind it is parsed once
+# per process (see `wt_translations::backend`).
+rust-i18n = { workspace = true }
+wt-translations = { workspace = true }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -33,3 +39,6 @@ wows-toolkit-config = { workspace = true }
 
 [dev-dependencies]
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
+# `ZoneGuard`, so the query bar's date assertions read a fixed zone rather than
+# the machine's.
+wows-toolkit-config = { workspace = true, features = ["test-support"] }

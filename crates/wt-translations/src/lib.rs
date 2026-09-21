@@ -1,3 +1,5 @@
+pub mod backend;
+pub use backend::TranslationsBackend;
 /// Translation key mappings, TextResolver trait, and language metadata for WoWs Toolkit.
 ///
 /// This crate does NOT own the translation machinery (that's `rust-i18n` in each
