@@ -11,6 +11,10 @@
     "match_group": "cooperative",
     "max_duration": 1200,
     "played_duration": 623.1336669921875,
+    "results_battle_result": {
+      "team_id": 0,
+      "type": "Win"
+    },
     "timestamp": "2025-01-05T06:54:47Z",
     "version": {
       "build": 9251401,
@@ -20,201 +24,6 @@
     }
   },
   "players": [
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY010_RegenCrewPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": null,
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PBUH101_C2_HULL_A",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PBUA101_C2_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PBUS101_C2_SUO_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PBUE101_C2_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        },
-        {
-          "charges_used": 1,
-          "description": "",
-          "display_name": "regenCrew",
-          "icon_key": "PCY010_RegenCrewPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": -270780760,
-      "display_name": ":Pakenham:",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": 1,
-      "is_abuser": false,
-      "is_bot": true,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": ":Pakenham:",
-      "observed_results": {
-        "damage": 832,
-        "kills": 0
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 1,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 0,
-        "damage": 832,
-        "damage_by_type": {
-          "damage_main_ap": 832
-        },
-        "damage_details": {
-          "ap": 832,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": null
-        },
-        "damage_interactions": {
-          "-270780765": {
-            "damage_dealt": 832,
-            "damage_dealt_by_type": {
-              "ap": 832,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_main_ap": 832
-            },
-            "damage_dealt_inverse_percentage": 10.145104255578588,
-            "damage_dealt_percentage": 100.0,
-            "damage_received": 19305,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 19305
-            },
-            "damage_received_by_type_full": {
-              "damage_tpd_normal": 19305
-            },
-            "damage_received_inverse_percentage": 37.56567425569177,
-            "damage_received_percentage": 100.0
-          }
-        },
-        "distance_traveled": 10.437757797909434,
-        "fires_dealt": 0,
-        "floods_dealt": 0,
-        "hits": 2,
-        "hits_by_type": {
-          "hits_main_ap": 2
-        },
-        "hits_details": {
-          "ap": 2,
-          "ap_secondaries_manual": null,
-          "he": null,
-          "he_secondaries": null,
-          "he_secondaries_manual": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": null
-        },
-        "kills": 0,
-        "potential_damage": 96668,
-        "potential_damage_details": {
-          "artillery": 60400,
-          "planes": 0,
-          "torpedoes": 36268
-        },
-        "raw_xp": 56,
-        "received_damage": 19305,
-        "received_damage_by_type": {
-          "damage_tpd_normal": 19305
-        },
-        "received_damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 19305
-        },
-        "spotting_damage": 0,
-        "xp": 84
-      },
-      "ship_class": "Cruiser",
-      "ship_index": "PBSC102",
-      "ship_name": "4187928528",
-      "ship_nation": "United_Kingdom",
-      "ship_tier": 2,
-      "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
-      },
-      "team_id": 0,
-      "time_lived_secs": 208
-    },
     {
       "achievements": [],
       "build": {
@@ -506,6 +315,7 @@
         "xp": 91
       },
       "ship_class": "Cruiser",
+      "ship_id": 4187928528,
       "ship_index": "PBSC102",
       "ship_name": "4187928528",
       "ship_nation": "United_Kingdom",
@@ -536,27 +346,22 @@
         "loadout": [
           {
             "description": null,
-            "game_params_name": "PBUH205_B3_HULL_A",
+            "game_params_name": "PFUH212_B3_HULL_B",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PBUA204_B3_ART_STOCK",
+            "game_params_name": "PFUA210_B3_ART_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PBUT204_B3_TORP_STOCK",
+            "game_params_name": "PFUS212_B3_SUO_TOP",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PBUS205_B3_SUO_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PBUE204_B3_ENG_STOCK",
+            "game_params_name": "PFUE211_B3_ENG_TOP",
             "name": null
           }
         ],
@@ -588,8 +393,8 @@
       ],
       "controller_potential_damage": null,
       "controller_spotting_damage": null,
-      "db_id": -270780758,
-      "display_name": ":Sterneck:",
+      "db_id": -270780768,
+      "display_name": ":Zavoyko:",
       "division_id": null,
       "division_label": null,
       "heal_count": 1,
@@ -597,235 +402,123 @@
       "is_bot": true,
       "is_self": false,
       "is_test_ship": false,
-      "name": ":Sterneck:",
+      "name": ":Zavoyko:",
       "observed_results": {
-        "damage": 8346,
+        "damage": 2079,
         "kills": 0
       },
       "personal_rating": null,
       "realm": "EU",
-      "relation": 1,
+      "relation": 2,
       "ribbons": [],
       "server_results": {
         "citadels_dealt": 0,
         "crits_dealt": 0,
-        "damage": 8344,
+        "damage": 2078,
         "damage_by_type": {
-          "damage_atba_he": 4157,
-          "damage_fire": 29,
-          "damage_main_ap": 1690,
-          "damage_tpd_normal": 2468
+          "damage_atba_he": 808,
+          "damage_main_he": 1270
         },
         "damage_details": {
-          "ap": 1690,
+          "ap": null,
           "deep_water_torps": null,
-          "fire": 29,
+          "fire": null,
           "flooding": null,
-          "he": null,
-          "he_secondaries": 4157,
+          "he": 1270,
+          "he_secondaries": 808,
           "sap": null,
           "sap_secondaries": null,
-          "torps": 2468
+          "torps": null
         },
         "damage_interactions": {
-          "-270780763": {
-            "damage_dealt": 1415,
+          "513136394": {
+            "damage_dealt": 2078,
             "damage_dealt_by_type": {
               "ap": null,
               "deep_water_torps": null,
-              "fire": 29,
+              "fire": null,
               "flooding": null,
-              "he": null,
-              "he_secondaries": 1386,
+              "he": 1270,
+              "he_secondaries": 808,
               "sap": null,
               "sap_secondaries": null,
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_atba_he": 1386,
-              "damage_fire": 29
+              "damage_atba_he": 808,
+              "damage_main_he": 1270
             },
-            "damage_dealt_inverse_percentage": 14.587628865979383,
-            "damage_dealt_percentage": 16.958293384467883,
-            "damage_received": 31226,
+            "damage_dealt_inverse_percentage": 32.58585541790811,
+            "damage_dealt_percentage": 100.0,
+            "damage_received": 35375,
             "damage_received_by_type": {
               "ap": null,
               "deep_water_torps": null,
               "fire": null,
-              "flooding": 165,
+              "flooding": null,
               "he": null,
               "he_secondaries": null,
               "sap": null,
               "sap_secondaries": null,
-              "torps": 31061
+              "torps": 35375
             },
             "damage_received_by_type_full": {
-              "damage_flood": 165,
-              "damage_tpd_normal": 31061
+              "damage_tpd_normal": 35375
             },
-            "damage_received_inverse_percentage": 60.394948068777445,
-            "damage_received_percentage": 89.90297411683413
-          },
-          "-270780766": {
-            "damage_dealt": 346,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 346,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_atba_he": 346
-            },
-            "damage_dealt_inverse_percentage": 2.0843373493975905,
-            "damage_dealt_percentage": 4.1466922339405565,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "-270780767": {
-            "damage_dealt": 4200,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 1732,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 2468
-            },
-            "damage_dealt_by_type_full": {
-              "damage_atba_he": 1732,
-              "damage_tpd_normal": 2468
-            },
-            "damage_dealt_inverse_percentage": 9.521002878969918,
-            "damage_dealt_percentage": 50.33557046979866,
-            "damage_received": 3507,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 1039,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 2468
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 1039,
-              "damage_tpd_normal": 2468
-            },
-            "damage_received_inverse_percentage": 7.83827276384605,
-            "damage_received_percentage": 10.097025883165864
-          },
-          "-270780769": {
-            "damage_dealt": 2383,
-            "damage_dealt_by_type": {
-              "ap": 1690,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 693,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_atba_he": 693,
-              "damage_main_ap": 1690
-            },
-            "damage_dealt_inverse_percentage": 10.849078078761666,
-            "damage_dealt_percentage": 28.559443911792904,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
+            "damage_received_inverse_percentage": 32.56646781558403,
+            "damage_received_percentage": 100.0
           }
         },
-        "distance_traveled": 12.827768059596416,
-        "fires_dealt": 1,
+        "distance_traveled": 12.923301785452054,
+        "fires_dealt": 0,
         "floods_dealt": 0,
-        "hits": 3,
+        "hits": 2,
         "hits_by_type": {
-          "hits_atba_he": 16,
-          "hits_main_ap": 3,
-          "hits_tpd": 1
+          "hits_atba_he": 3,
+          "hits_main_he": 2
         },
         "hits_details": {
-          "ap": 3,
+          "ap": null,
           "ap_secondaries_manual": null,
-          "he": null,
-          "he_secondaries": 16,
+          "he": 2,
+          "he_secondaries": 3,
           "he_secondaries_manual": null,
           "sap": null,
           "sap_secondaries": null,
           "sap_secondaries_manual": null,
-          "torps": 1
+          "torps": null
         },
         "kills": 0,
-        "potential_damage": 153538,
+        "potential_damage": 72670,
         "potential_damage_details": {
-          "artillery": 63000,
+          "artillery": 11000,
           "planes": 0,
-          "torpedoes": 90538
+          "torpedoes": 61670
         },
-        "raw_xp": 87,
-        "received_damage": 34733,
+        "raw_xp": 58,
+        "received_damage": 35375,
         "received_damage_by_type": {
-          "damage_atba_he": 1039,
-          "damage_flood": 165,
-          "damage_tpd_normal": 33529
+          "damage_tpd_normal": 35375
         },
         "received_damage_details": {
           "ap": null,
           "deep_water_torps": null,
           "fire": null,
-          "flooding": 165,
+          "flooding": null,
           "he": null,
-          "he_secondaries": 1039,
+          "he_secondaries": null,
           "sap": null,
           "sap_secondaries": null,
-          "torps": 33529
+          "torps": 35375
         },
         "spotting_damage": 0,
-        "xp": 131
+        "xp": 58
       },
       "ship_class": "Battleship",
-      "ship_index": "PBSB203",
-      "ship_name": "4082055120",
-      "ship_nation": "United_Kingdom",
+      "ship_id": 4186912592,
+      "ship_index": "PFSB103",
+      "ship_name": "4186912592",
+      "ship_nation": "France",
       "ship_tier": 3,
       "skill_info": {
         "highest_tier": 0,
@@ -833,8 +526,8 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
-      "team_id": 0,
-      "time_lived_secs": 254
+      "team_id": 1,
+      "time_lived_secs": 320
     },
     {
       "achievements": [],
@@ -1190,6 +883,7 @@
         "xp": 184
       },
       "ship_class": "Battleship",
+      "ship_id": 4082055120,
       "ship_index": "PBSB203",
       "ship_name": "4082055120",
       "ship_nation": "United_Kingdom",
@@ -1210,6 +904,763 @@
           {
             "game_params_name": "PCY009_CrashCrewPremium",
             "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PIUH102_C2_HULL_B",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PIUA101_C2_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PIUS102_C2_SUO_TOP",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PIUE101_C2_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 0,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780766,
+      "display_name": ":Halgan:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": null,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Halgan:",
+      "observed_results": {
+        "damage": 1604,
+        "kills": 0
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 2,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 0,
+        "damage": 1604,
+        "damage_by_type": {
+          "damage_atba_he": 1089,
+          "damage_main_cs": 515
+        },
+        "damage_details": {
+          "ap": null,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": null,
+          "he": null,
+          "he_secondaries": 1089,
+          "sap": 515,
+          "sap_secondaries": null,
+          "torps": null
+        },
+        "damage_interactions": {
+          "-270780758": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 346,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 346,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 346
+            },
+            "damage_received_inverse_percentage": 4.1466922339405565,
+            "damage_received_percentage": 2.0843373493975905
+          },
+          "-270780759": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "505029074": {
+            "damage_dealt": 436,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 436,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 436
+            },
+            "damage_dealt_inverse_percentage": 5.972602739726027,
+            "damage_dealt_percentage": 27.18204488778055,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "513136394": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 6684,
+            "damage_received_by_type": {
+              "ap": 5292,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 1392
+            },
+            "damage_received_by_type_full": {
+              "damage_main_ap": 5292,
+              "damage_tpd_normal": 1392
+            },
+            "damage_received_inverse_percentage": 6.153336279275298,
+            "damage_received_percentage": 40.265060240963855
+          },
+          "698373469": {
+            "damage_dealt": 1168,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 653,
+              "sap": 515,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 653,
+              "damage_main_cs": 515
+            },
+            "damage_dealt_inverse_percentage": 62.76195593766792,
+            "damage_dealt_percentage": 72.81795511221945,
+            "damage_received": 9570,
+            "damage_received_by_type": {
+              "ap": 1200,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 8370
+            },
+            "damage_received_by_type_full": {
+              "damage_main_ap": 1200,
+              "damage_tpd_normal": 8370
+            },
+            "damage_received_inverse_percentage": 55.088648399723695,
+            "damage_received_percentage": 57.65060240963855
+          }
+        },
+        "distance_traveled": 24.80948804672342,
+        "fires_dealt": 0,
+        "floods_dealt": 0,
+        "hits": 1,
+        "hits_by_type": {
+          "hits_atba_he": 5,
+          "hits_main_cs": 1
+        },
+        "hits_details": {
+          "ap": null,
+          "ap_secondaries_manual": null,
+          "he": null,
+          "he_secondaries": 5,
+          "he_secondaries_manual": null,
+          "sap": 1,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": null
+        },
+        "kills": 0,
+        "potential_damage": 238538,
+        "potential_damage_details": {
+          "artillery": 123200,
+          "planes": 0,
+          "torpedoes": 115338
+        },
+        "raw_xp": 116,
+        "received_damage": 16600,
+        "received_damage_by_type": {
+          "damage_atba_he": 346,
+          "damage_main_ap": 6492,
+          "damage_tpd_normal": 9762
+        },
+        "received_damage_details": {
+          "ap": 6492,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": null,
+          "he": null,
+          "he_secondaries": 346,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 9762
+        },
+        "spotting_damage": 0,
+        "xp": 116
+      },
+      "ship_class": "Cruiser",
+      "ship_id": 4187928304,
+      "ship_index": "PISC102",
+      "ship_name": "4187928304",
+      "ship_nation": "Italy",
+      "ship_tier": 2,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 1,
+      "time_lived_secs": 445
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY014_SmokeGeneratorPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY015_SpeedBoosterPremium",
+            "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PJUH232_Wakatake_1925",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUA231_D3_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUT204_D3_TORP_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUS231_Suo",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUE211_D3_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null,
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 3,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        },
+        {
+          "charges_used": 3,
+          "description": "",
+          "display_name": "smokeGenerator",
+          "icon_key": "PCY014_SmokeGeneratorPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        },
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "speedBoosters",
+          "icon_key": "PCY015_SpeedBoosterPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780765,
+      "display_name": ":Bergamini:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": null,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Bergamini:",
+      "observed_results": {
+        "damage": 28272,
+        "kills": 4
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 2,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 2,
+        "damage": 51390,
+        "damage_by_type": {
+          "damage_fire": 298,
+          "damage_flood": 49,
+          "damage_main_he": 196,
+          "damage_tpd_normal": 50847
+        },
+        "damage_details": {
+          "ap": null,
+          "deep_water_torps": null,
+          "fire": 298,
+          "flooding": 49,
+          "he": 196,
+          "he_secondaries": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 50847
+        },
+        "damage_interactions": {
+          "-270780759": {
+            "damage_dealt": 6336,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 298,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 6038
+            },
+            "damage_dealt_by_type_full": {
+              "damage_fire": 298,
+              "damage_tpd_normal": 6038
+            },
+            "damage_dealt_inverse_percentage": 14.431486880466474,
+            "damage_dealt_percentage": 12.329246935201402,
+            "damage_received": 3421,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 25,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 3396,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 3396,
+              "damage_fire": 25
+            },
+            "damage_received_inverse_percentage": 10.135095099840019,
+            "damage_received_percentage": 41.71442507011341
+          },
+          "-270780760": {
+            "damage_dealt": 19305,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 19305
+            },
+            "damage_dealt_by_type_full": {
+              "damage_tpd_normal": 19305
+            },
+            "damage_dealt_inverse_percentage": 100.0,
+            "damage_dealt_percentage": 37.56567425569177,
+            "damage_received": 832,
+            "damage_received_by_type": {
+              "ap": 832,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_main_ap": 832
+            },
+            "damage_received_inverse_percentage": 100.0,
+            "damage_received_percentage": 10.145104255578588
+          },
+          "1064617078": {
+            "damage_dealt": 4383,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 4383
+            },
+            "damage_dealt_by_type_full": {
+              "damage_tpd_normal": 4383
+            },
+            "damage_dealt_inverse_percentage": 29.026490066225165,
+            "damage_dealt_percentage": 8.528896672504379,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "505029074": {
+            "damage_dealt": 1766,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": 196,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 1570
+            },
+            "damage_dealt_by_type_full": {
+              "damage_main_he": 196,
+              "damage_tpd_normal": 1570
+            },
+            "damage_dealt_inverse_percentage": 24.191780821917806,
+            "damage_dealt_percentage": 3.4364662385678146,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "513136394": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 3748,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 295,
+              "flooding": null,
+              "he": 3453,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_fire": 295,
+              "damage_main_he": 3453
+            },
+            "damage_received_inverse_percentage": 3.4504345264398295,
+            "damage_received_percentage": 45.70174368979393
+          },
+          "570590750": {
+            "damage_dealt": 19600,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": 49,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 19551
+            },
+            "damage_dealt_by_type_full": {
+              "damage_flood": 49,
+              "damage_tpd_normal": 19551
+            },
+            "damage_dealt_inverse_percentage": 100.0,
+            "damage_dealt_percentage": 38.13971589803464,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "698373469": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 200,
+            "damage_received_by_type": {
+              "ap": 200,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_main_ap": 200
+            },
+            "damage_received_inverse_percentage": 1.1512779184895234,
+            "damage_received_percentage": 2.4387269845140835
+          }
+        },
+        "distance_traveled": 32.192823186665485,
+        "fires_dealt": 1,
+        "floods_dealt": 3,
+        "hits": 9,
+        "hits_by_type": {
+          "hits_main_he": 9,
+          "hits_tpd": 12
+        },
+        "hits_details": {
+          "ap": null,
+          "ap_secondaries_manual": null,
+          "he": 9,
+          "he_secondaries": null,
+          "he_secondaries_manual": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": 12
+        },
+        "kills": 4,
+        "potential_damage": 253434,
+        "potential_damage_details": {
+          "artillery": 241100,
+          "planes": 0,
+          "torpedoes": 12334
+        },
+        "raw_xp": 256,
+        "received_damage": 8201,
+        "received_damage_by_type": {
+          "damage_atba_he": 3396,
+          "damage_fire": 320,
+          "damage_main_ap": 1032,
+          "damage_main_he": 3453
+        },
+        "received_damage_details": {
+          "ap": 1032,
+          "deep_water_torps": null,
+          "fire": 320,
+          "flooding": null,
+          "he": 3453,
+          "he_secondaries": 3396,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": null
+        },
+        "spotting_damage": 0,
+        "xp": 256
+      },
+      "ship_class": "Destroyer",
+      "ship_id": 4269684432,
+      "ship_index": "PJSD024",
+      "ship_name": "4269684432",
+      "ship_nation": "Japan",
+      "ship_tier": 3,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 1,
+      "time_lived_secs": 597
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
           },
           {
             "game_params_name": "PCY010_RegenCrewPremium",
@@ -1220,22 +1671,231 @@
         "loadout": [
           {
             "description": null,
-            "game_params_name": "PFUH212_B3_HULL_B",
+            "game_params_name": "PVUH102_C2_HULL_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PFUA210_B3_ART_STOCK",
+            "game_params_name": "PVUA102_C2_ART_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PFUS212_B3_SUO_TOP",
+            "game_params_name": "PVUS102_C2_SUO_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PFUE211_B3_ENG_TOP",
+            "game_params_name": "PVUE102_C2_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 0,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        },
+        {
+          "charges_used": 0,
+          "description": "",
+          "display_name": "regenCrew",
+          "icon_key": "PCY010_RegenCrewPremium",
+          "total_charges": {
+            "Finite": 4
+          }
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780764,
+      "display_name": ":Duquesne:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": 0,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Duquesne:",
+      "observed_results": {
+        "damage": 337,
+        "kills": 0
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 2,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 0,
+        "damage": 337,
+        "damage_by_type": {
+          "damage_atba_he": 337
+        },
+        "damage_details": {
+          "ap": null,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": null,
+          "he": null,
+          "he_secondaries": 337,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": null
+        },
+        "damage_interactions": {
+          "513136394": {
+            "damage_dealt": 337,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 337,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 337
+            },
+            "damage_dealt_inverse_percentage": 5.284616590873451,
+            "damage_dealt_percentage": 100.0,
+            "damage_received": 15300,
+            "damage_received_by_type": {
+              "ap": 1368,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": 38,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 13894
+            },
+            "damage_received_by_type_full": {
+              "damage_flood": 38,
+              "damage_main_ap": 1368,
+              "damage_tpd_normal": 13894
+            },
+            "damage_received_inverse_percentage": 14.085285019885108,
+            "damage_received_percentage": 100.0
+          }
+        },
+        "distance_traveled": 22.369147119177512,
+        "fires_dealt": 0,
+        "floods_dealt": 0,
+        "hits": 0,
+        "hits_by_type": {
+          "hits_atba_he": 1
+        },
+        "hits_details": {
+          "ap": null,
+          "ap_secondaries_manual": null,
+          "he": null,
+          "he_secondaries": 1,
+          "he_secondaries_manual": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": null
+        },
+        "kills": 0,
+        "potential_damage": 68870,
+        "potential_damage_details": {
+          "artillery": 7200,
+          "planes": 0,
+          "torpedoes": 61670
+        },
+        "raw_xp": 22,
+        "received_damage": 15300,
+        "received_damage_by_type": {
+          "damage_flood": 38,
+          "damage_main_ap": 1368,
+          "damage_tpd_normal": 13894
+        },
+        "received_damage_details": {
+          "ap": 1368,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": 38,
+          "he": null,
+          "he_secondaries": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 13894
+        },
+        "spotting_damage": 0,
+        "xp": 22
+      },
+      "ship_class": "Cruiser",
+      "ship_id": 4187927888,
+      "ship_index": "PVSC102",
+      "ship_name": "4187927888",
+      "ship_nation": "Pan_America",
+      "ship_tier": 2,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 1,
+      "time_lived_secs": 473
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY014_SmokeGeneratorPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY015_SpeedBoosterPremium",
+            "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PRUH212_Derzky_1916",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PRUA211_D3_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PRUT201_D3_TORP_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PRUS212_SUO",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PRUE201_D3_ENG_STOCK",
             "name": null
           }
         ],
@@ -1256,29 +1916,639 @@
           "total_charges": "Unlimited"
         },
         {
+          "charges_used": 2,
+          "description": "",
+          "display_name": "smokeGenerator",
+          "icon_key": "PCY014_SmokeGeneratorPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        },
+        {
           "charges_used": 1,
           "description": "",
-          "display_name": "regenCrew",
-          "icon_key": "PCY010_RegenCrewPremium",
+          "display_name": "speedBoosters",
+          "icon_key": "PCY015_SpeedBoosterPremium",
           "total_charges": {
-            "Finite": 4
+            "Finite": 3
           }
         }
       ],
       "controller_potential_damage": null,
       "controller_spotting_damage": null,
-      "db_id": -270780768,
-      "display_name": ":Zavoyko:",
+      "db_id": -270780763,
+      "display_name": ":Warrender:",
       "division_id": null,
       "division_label": null,
-      "heal_count": 1,
+      "heal_count": null,
       "is_abuser": false,
       "is_bot": true,
       "is_self": false,
       "is_test_ship": false,
-      "name": ":Zavoyko:",
+      "name": ":Warrender:",
       "observed_results": {
-        "damage": 2079,
+        "damage": 41776,
+        "kills": 2
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 2,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 0,
+        "damage": 51703,
+        "damage_by_type": {
+          "damage_fire": 66,
+          "damage_flood": 165,
+          "damage_main_he": 1039,
+          "damage_tpd_normal": 50433
+        },
+        "damage_details": {
+          "ap": null,
+          "deep_water_torps": null,
+          "fire": 66,
+          "flooding": 165,
+          "he": 1039,
+          "he_secondaries": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 50433
+        },
+        "damage_interactions": {
+          "-270780757": {
+            "damage_dealt": 15500,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 15500
+            },
+            "damage_dealt_by_type_full": {
+              "damage_tpd_normal": 15500
+            },
+            "damage_dealt_inverse_percentage": 100.0,
+            "damage_dealt_percentage": 29.97891805117691,
+            "damage_received": 1168,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 653,
+              "sap": 515,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 653,
+              "damage_main_cs": 515
+            },
+            "damage_received_inverse_percentage": 100.0,
+            "damage_received_percentage": 12.041237113402062
+          },
+          "-270780758": {
+            "damage_dealt": 31226,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": 165,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 31061
+            },
+            "damage_dealt_by_type_full": {
+              "damage_flood": 165,
+              "damage_tpd_normal": 31061
+            },
+            "damage_dealt_inverse_percentage": 89.90297411683413,
+            "damage_dealt_percentage": 60.394948068777445,
+            "damage_received": 1415,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 29,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 1386,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 1386,
+              "damage_fire": 29
+            },
+            "damage_received_inverse_percentage": 16.958293384467883,
+            "damage_received_percentage": 14.587628865979383
+          },
+          "-270780759": {
+            "damage_dealt": 3872,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 3872
+            },
+            "damage_dealt_by_type_full": {
+              "damage_tpd_normal": 3872
+            },
+            "damage_dealt_inverse_percentage": 8.81924198250729,
+            "damage_dealt_percentage": 7.488927141558517,
+            "damage_received": 5396,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": 1284,
+              "he_secondaries": 4112,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 4112,
+              "damage_main_he": 1284
+            },
+            "damage_received_inverse_percentage": 15.98625348106891,
+            "damage_received_percentage": 55.628865979381445
+          },
+          "505029074": {
+            "damage_dealt": 1105,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 66,
+              "flooding": null,
+              "he": 1039,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_fire": 66,
+              "damage_main_he": 1039
+            },
+            "damage_dealt_inverse_percentage": 15.136986301369863,
+            "damage_dealt_percentage": 2.1372067384871287,
+            "damage_received": 1721,
+            "damage_received_by_type": {
+              "ap": 860,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": 861,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_main_ap": 860,
+              "damage_main_he": 861
+            },
+            "damage_received_inverse_percentage": 100.0,
+            "damage_received_percentage": 17.742268041237114
+          }
+        },
+        "distance_traveled": 17.056489982502537,
+        "fires_dealt": 1,
+        "floods_dealt": 2,
+        "hits": 3,
+        "hits_by_type": {
+          "hits_main_he": 3,
+          "hits_tpd": 14
+        },
+        "hits_details": {
+          "ap": null,
+          "ap_secondaries_manual": null,
+          "he": 3,
+          "he_secondaries": null,
+          "he_secondaries_manual": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": 14
+        },
+        "kills": 2,
+        "potential_damage": 251268,
+        "potential_damage_details": {
+          "artillery": 210800,
+          "planes": 0,
+          "torpedoes": 40468
+        },
+        "raw_xp": 186,
+        "received_damage": 9700,
+        "received_damage_by_type": {
+          "damage_atba_he": 6151,
+          "damage_fire": 29,
+          "damage_main_ap": 860,
+          "damage_main_cs": 515,
+          "damage_main_he": 2145
+        },
+        "received_damage_details": {
+          "ap": 860,
+          "deep_water_torps": null,
+          "fire": 29,
+          "flooding": null,
+          "he": 2145,
+          "he_secondaries": 6151,
+          "sap": 515,
+          "sap_secondaries": null,
+          "torps": null
+        },
+        "spotting_damage": 0,
+        "xp": 186
+      },
+      "ship_class": "Destroyer",
+      "ship_id": 4186846672,
+      "ship_index": "PRSD103",
+      "ship_name": "4186846672",
+      "ship_nation": "Russia",
+      "ship_tier": 3,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 1,
+      "time_lived_secs": 250
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY014_SmokeGeneratorPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY015_SpeedBoosterPremium",
+            "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PJUH232_Wakatake_1925",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUA231_D3_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUT204_D3_TORP_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUS231_Suo",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUE211_D3_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null,
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        },
+        {
+          "charges_used": 0,
+          "description": "",
+          "display_name": "smokeGenerator",
+          "icon_key": "PCY014_SmokeGeneratorPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        },
+        {
+          "charges_used": 0,
+          "description": "",
+          "display_name": "speedBoosters",
+          "icon_key": "PCY015_SpeedBoosterPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780762,
+      "display_name": ":Buckmaster:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": null,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Buckmaster:",
+      "observed_results": {
+        "damage": 1163,
+        "kills": 1
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 2,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 0,
+        "damage": 10717,
+        "damage_by_type": {
+          "damage_fire": 181,
+          "damage_main_he": 982,
+          "damage_tpd_normal": 9554
+        },
+        "damage_details": {
+          "ap": null,
+          "deep_water_torps": null,
+          "fire": 181,
+          "flooding": null,
+          "he": 982,
+          "he_secondaries": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 9554
+        },
+        "damage_interactions": {
+          "1064617078": {
+            "damage_dealt": 10717,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 181,
+              "flooding": null,
+              "he": 982,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 9554
+            },
+            "damage_dealt_by_type_full": {
+              "damage_fire": 181,
+              "damage_main_he": 982,
+              "damage_tpd_normal": 9554
+            },
+            "damage_dealt_inverse_percentage": 70.97350993377484,
+            "damage_dealt_percentage": 100.0,
+            "damage_received": 1551,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": 1188,
+              "he_secondaries": 363,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 363,
+              "damage_main_he": 1188
+            },
+            "damage_received_inverse_percentage": 56.62650602409639,
+            "damage_received_percentage": 18.914634146341463
+          },
+          "513136394": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 2779,
+            "damage_received_by_type": {
+              "ap": 774,
+              "deep_water_torps": null,
+              "fire": 25,
+              "flooding": null,
+              "he": 1980,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_fire": 25,
+              "damage_main_ap": 774,
+              "damage_main_he": 1980
+            },
+            "damage_received_inverse_percentage": 2.558366475180439,
+            "damage_received_percentage": 33.890243902439025
+          },
+          "698373469": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 3870,
+            "damage_received_by_type": {
+              "ap": 200,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 3670
+            },
+            "damage_received_by_type_full": {
+              "damage_main_ap": 200,
+              "damage_tpd_normal": 3670
+            },
+            "damage_received_inverse_percentage": 22.277227722772277,
+            "damage_received_percentage": 47.19512195121951
+          }
+        },
+        "distance_traveled": 16.042606409937147,
+        "fires_dealt": 1,
+        "floods_dealt": 0,
+        "hits": 4,
+        "hits_by_type": {
+          "hits_main_he": 4,
+          "hits_tpd": 2
+        },
+        "hits_details": {
+          "ap": null,
+          "ap_secondaries_manual": null,
+          "he": 4,
+          "he_secondaries": null,
+          "he_secondaries_manual": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": 2
+        },
+        "kills": 1,
+        "potential_damage": 175439,
+        "potential_damage_details": {
+          "artillery": 50300,
+          "planes": 0,
+          "torpedoes": 125139
+        },
+        "raw_xp": 107,
+        "received_damage": 8200,
+        "received_damage_by_type": {
+          "damage_atba_he": 363,
+          "damage_fire": 25,
+          "damage_main_ap": 974,
+          "damage_main_he": 3168,
+          "damage_tpd_normal": 3670
+        },
+        "received_damage_details": {
+          "ap": 974,
+          "deep_water_torps": null,
+          "fire": 25,
+          "flooding": null,
+          "he": 3168,
+          "he_secondaries": 363,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 3670
+        },
+        "spotting_damage": 0,
+        "xp": 107
+      },
+      "ship_class": "Destroyer",
+      "ship_id": 4269684432,
+      "ship_index": "PJSD024",
+      "ship_name": "4269684432",
+      "ship_nation": "Japan",
+      "ship_tier": 3,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 1,
+      "time_lived_secs": 203
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PAUH101_Chester_1908",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PAUA101_C2_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PAUS101_Suo",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PAUE101_C2_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780761,
+      "display_name": ":Hipper:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": null,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Hipper:",
+      "observed_results": {
+        "damage": 0,
         "kills": 0
       },
       "personal_rating": null,
@@ -1288,43 +2558,270 @@
       "server_results": {
         "citadels_dealt": 0,
         "crits_dealt": 0,
-        "damage": 2078,
-        "damage_by_type": {
-          "damage_atba_he": 808,
-          "damage_main_he": 1270
-        },
+        "damage": 0,
+        "damage_by_type": {},
         "damage_details": {
           "ap": null,
           "deep_water_torps": null,
           "fire": null,
           "flooding": null,
-          "he": 1270,
-          "he_secondaries": 808,
+          "he": null,
+          "he_secondaries": null,
           "sap": null,
           "sap_secondaries": null,
           "torps": null
         },
         "damage_interactions": {
-          "513136394": {
-            "damage_dealt": 2078,
+          "1064617078": {
+            "damage_dealt": 0,
             "damage_dealt_by_type": {
               "ap": null,
               "deep_water_torps": null,
               "fire": null,
               "flooding": null,
-              "he": 1270,
-              "he_secondaries": 808,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 1188,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": 1188,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_main_he": 1188
+            },
+            "damage_received_inverse_percentage": 43.373493975903614,
+            "damage_received_percentage": 7.867549668874172
+          },
+          "513136394": {
+            "damage_dealt": 0,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {},
+            "damage_dealt_inverse_percentage": 0.0,
+            "damage_dealt_percentage": 0.0,
+            "damage_received": 13912,
+            "damage_received_by_type": {
+              "ap": 954,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": 38,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 12920
+            },
+            "damage_received_by_type_full": {
+              "damage_flood": 38,
+              "damage_main_ap": 954,
+              "damage_tpd_normal": 12920
+            },
+            "damage_received_inverse_percentage": 12.807482692590956,
+            "damage_received_percentage": 92.13245033112582
+          }
+        },
+        "distance_traveled": 14.87922543598339,
+        "fires_dealt": 0,
+        "floods_dealt": 0,
+        "hits": 0,
+        "hits_by_type": {},
+        "hits_details": {
+          "ap": null,
+          "ap_secondaries_manual": null,
+          "he": null,
+          "he_secondaries": null,
+          "he_secondaries_manual": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": null
+        },
+        "kills": 0,
+        "potential_damage": 49868,
+        "potential_damage_details": {
+          "artillery": 25200,
+          "planes": 0,
+          "torpedoes": 24668
+        },
+        "raw_xp": 127,
+        "received_damage": 15100,
+        "received_damage_by_type": {
+          "damage_flood": 38,
+          "damage_main_ap": 954,
+          "damage_main_he": 1188,
+          "damage_tpd_normal": 12920
+        },
+        "received_damage_details": {
+          "ap": 954,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": 38,
+          "he": 1188,
+          "he_secondaries": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 12920
+        },
+        "spotting_damage": 0,
+        "xp": 127
+      },
+      "ship_class": "Cruiser",
+      "ship_id": 4292786160,
+      "ship_index": "PASC002",
+      "ship_name": "4292786160",
+      "ship_nation": "USA",
+      "ship_tier": 2,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 1,
+      "time_lived_secs": 275
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY010_RegenCrewPremium",
+            "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PBUH101_C2_HULL_A",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PBUA101_C2_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PBUS101_C2_SUO_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PBUE101_C2_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 0,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        },
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "regenCrew",
+          "icon_key": "PCY010_RegenCrewPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780760,
+      "display_name": ":Pakenham:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": 1,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Pakenham:",
+      "observed_results": {
+        "damage": 832,
+        "kills": 0
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 1,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 0,
+        "damage": 832,
+        "damage_by_type": {
+          "damage_main_ap": 832
+        },
+        "damage_details": {
+          "ap": 832,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": null,
+          "he": null,
+          "he_secondaries": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": null
+        },
+        "damage_interactions": {
+          "-270780765": {
+            "damage_dealt": 832,
+            "damage_dealt_by_type": {
+              "ap": 832,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
               "sap": null,
               "sap_secondaries": null,
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_atba_he": 808,
-              "damage_main_he": 1270
+              "damage_main_ap": 832
             },
-            "damage_dealt_inverse_percentage": 32.58585541790811,
+            "damage_dealt_inverse_percentage": 10.145104255578588,
             "damage_dealt_percentage": 100.0,
-            "damage_received": 35375,
+            "damage_received": 19305,
             "damage_received_by_type": {
               "ap": null,
               "deep_water_torps": null,
@@ -1334,28 +2831,27 @@
               "he_secondaries": null,
               "sap": null,
               "sap_secondaries": null,
-              "torps": 35375
+              "torps": 19305
             },
             "damage_received_by_type_full": {
-              "damage_tpd_normal": 35375
+              "damage_tpd_normal": 19305
             },
-            "damage_received_inverse_percentage": 32.56646781558403,
+            "damage_received_inverse_percentage": 37.56567425569177,
             "damage_received_percentage": 100.0
           }
         },
-        "distance_traveled": 12.923301785452054,
+        "distance_traveled": 10.437757797909434,
         "fires_dealt": 0,
         "floods_dealt": 0,
         "hits": 2,
         "hits_by_type": {
-          "hits_atba_he": 3,
-          "hits_main_he": 2
+          "hits_main_ap": 2
         },
         "hits_details": {
-          "ap": null,
+          "ap": 2,
           "ap_secondaries_manual": null,
-          "he": 2,
-          "he_secondaries": 3,
+          "he": null,
+          "he_secondaries": null,
           "he_secondaries_manual": null,
           "sap": null,
           "sap_secondaries": null,
@@ -1363,16 +2859,16 @@
           "torps": null
         },
         "kills": 0,
-        "potential_damage": 72670,
+        "potential_damage": 96668,
         "potential_damage_details": {
-          "artillery": 11000,
+          "artillery": 60400,
           "planes": 0,
-          "torpedoes": 61670
+          "torpedoes": 36268
         },
-        "raw_xp": 58,
-        "received_damage": 35375,
+        "raw_xp": 56,
+        "received_damage": 19305,
         "received_damage_by_type": {
-          "damage_tpd_normal": 35375
+          "damage_tpd_normal": 19305
         },
         "received_damage_details": {
           "ap": null,
@@ -1383,24 +2879,25 @@
           "he_secondaries": null,
           "sap": null,
           "sap_secondaries": null,
-          "torps": 35375
+          "torps": 19305
         },
         "spotting_damage": 0,
-        "xp": 58
+        "xp": 84
       },
-      "ship_class": "Battleship",
-      "ship_index": "PFSB103",
-      "ship_name": "4186912592",
-      "ship_nation": "France",
-      "ship_tier": 3,
+      "ship_class": "Cruiser",
+      "ship_id": 4187928528,
+      "ship_index": "PBSC102",
+      "ship_name": "4187928528",
+      "ship_nation": "United_Kingdom",
+      "ship_tier": 2,
       "skill_info": {
         "highest_tier": 0,
         "num_skills": 0,
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
-      "team_id": 1,
-      "time_lived_secs": 320
+      "team_id": 0,
+      "time_lived_secs": 208
     },
     {
       "achievements": [],
@@ -1711,6 +3208,7 @@
         "xp": 263
       },
       "ship_class": "Battleship",
+      "ship_id": 4186912560,
       "ship_index": "PGSB103",
       "ship_name": "4186912560",
       "ship_nation": "Germany",
@@ -1741,22 +3239,336 @@
         "loadout": [
           {
             "description": null,
-            "game_params_name": "PVUH102_C2_HULL_STOCK",
+            "game_params_name": "PBUH205_B3_HULL_A",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PVUA102_C2_ART_STOCK",
+            "game_params_name": "PBUA204_B3_ART_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PVUS102_C2_SUO_STOCK",
+            "game_params_name": "PBUT204_B3_TORP_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PVUE102_C2_ENG_STOCK",
+            "game_params_name": "PBUS205_B3_SUO_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PBUE204_B3_ENG_STOCK",
+            "name": null
+          }
+        ],
+        "modernization_slots": [
+          null,
+          null
+        ],
+        "signals": []
+      },
+      "clan": "",
+      "clan_color_rgb": 0,
+      "consumables": [
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "crashCrew",
+          "icon_key": "PCY009_CrashCrewPremium",
+          "total_charges": "Unlimited"
+        },
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "regenCrew",
+          "icon_key": "PCY010_RegenCrewPremium",
+          "total_charges": {
+            "Finite": 4
+          }
+        }
+      ],
+      "controller_potential_damage": null,
+      "controller_spotting_damage": null,
+      "db_id": -270780758,
+      "display_name": ":Sterneck:",
+      "division_id": null,
+      "division_label": null,
+      "heal_count": 1,
+      "is_abuser": false,
+      "is_bot": true,
+      "is_self": false,
+      "is_test_ship": false,
+      "name": ":Sterneck:",
+      "observed_results": {
+        "damage": 8346,
+        "kills": 0
+      },
+      "personal_rating": null,
+      "realm": "EU",
+      "relation": 1,
+      "ribbons": [],
+      "server_results": {
+        "citadels_dealt": 0,
+        "crits_dealt": 0,
+        "damage": 8344,
+        "damage_by_type": {
+          "damage_atba_he": 4157,
+          "damage_fire": 29,
+          "damage_main_ap": 1690,
+          "damage_tpd_normal": 2468
+        },
+        "damage_details": {
+          "ap": 1690,
+          "deep_water_torps": null,
+          "fire": 29,
+          "flooding": null,
+          "he": null,
+          "he_secondaries": 4157,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 2468
+        },
+        "damage_interactions": {
+          "-270780763": {
+            "damage_dealt": 1415,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": 29,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 1386,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 1386,
+              "damage_fire": 29
+            },
+            "damage_dealt_inverse_percentage": 14.587628865979383,
+            "damage_dealt_percentage": 16.958293384467883,
+            "damage_received": 31226,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": 165,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 31061
+            },
+            "damage_received_by_type_full": {
+              "damage_flood": 165,
+              "damage_tpd_normal": 31061
+            },
+            "damage_received_inverse_percentage": 60.394948068777445,
+            "damage_received_percentage": 89.90297411683413
+          },
+          "-270780766": {
+            "damage_dealt": 346,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 346,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 346
+            },
+            "damage_dealt_inverse_percentage": 2.0843373493975905,
+            "damage_dealt_percentage": 4.1466922339405565,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "-270780767": {
+            "damage_dealt": 4200,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 1732,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 2468
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 1732,
+              "damage_tpd_normal": 2468
+            },
+            "damage_dealt_inverse_percentage": 9.521002878969918,
+            "damage_dealt_percentage": 50.33557046979866,
+            "damage_received": 3507,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 1039,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 2468
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 1039,
+              "damage_tpd_normal": 2468
+            },
+            "damage_received_inverse_percentage": 7.83827276384605,
+            "damage_received_percentage": 10.097025883165864
+          },
+          "-270780769": {
+            "damage_dealt": 2383,
+            "damage_dealt_by_type": {
+              "ap": 1690,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 693,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_atba_he": 693,
+              "damage_main_ap": 1690
+            },
+            "damage_dealt_inverse_percentage": 10.849078078761666,
+            "damage_dealt_percentage": 28.559443911792904,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          }
+        },
+        "distance_traveled": 12.827768059596416,
+        "fires_dealt": 1,
+        "floods_dealt": 0,
+        "hits": 3,
+        "hits_by_type": {
+          "hits_atba_he": 16,
+          "hits_main_ap": 3,
+          "hits_tpd": 1
+        },
+        "hits_details": {
+          "ap": 3,
+          "ap_secondaries_manual": null,
+          "he": null,
+          "he_secondaries": 16,
+          "he_secondaries_manual": null,
+          "sap": null,
+          "sap_secondaries": null,
+          "sap_secondaries_manual": null,
+          "torps": 1
+        },
+        "kills": 0,
+        "potential_damage": 153538,
+        "potential_damage_details": {
+          "artillery": 63000,
+          "planes": 0,
+          "torpedoes": 90538
+        },
+        "raw_xp": 87,
+        "received_damage": 34733,
+        "received_damage_by_type": {
+          "damage_atba_he": 1039,
+          "damage_flood": 165,
+          "damage_tpd_normal": 33529
+        },
+        "received_damage_details": {
+          "ap": null,
+          "deep_water_torps": null,
+          "fire": null,
+          "flooding": 165,
+          "he": null,
+          "he_secondaries": 1039,
+          "sap": null,
+          "sap_secondaries": null,
+          "torps": 33529
+        },
+        "spotting_damage": 0,
+        "xp": 131
+      },
+      "ship_class": "Battleship",
+      "ship_id": 4082055120,
+      "ship_index": "PBSB203",
+      "ship_name": "4082055120",
+      "ship_nation": "United_Kingdom",
+      "ship_tier": 3,
+      "skill_info": {
+        "highest_tier": 0,
+        "num_skills": 0,
+        "num_tier_1_skills": 0,
+        "skill_points": 0
+      },
+      "team_id": 0,
+      "time_lived_secs": 254
+    },
+    {
+      "achievements": [],
+      "build": {
+        "abilities": [
+          {
+            "game_params_name": "PCY009_CrashCrewPremium",
+            "name": null
+          }
+        ],
+        "captain_skills": null,
+        "loadout": [
+          {
+            "description": null,
+            "game_params_name": "PIUH101_C2_HULL_A",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PIUA101_C2_ART_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PIUS101_C2_SUO_STOCK",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PIUE101_C2_ENG_STOCK",
             "name": null
           }
         ],
@@ -1774,43 +3586,35 @@
           "display_name": "crashCrew",
           "icon_key": "PCY009_CrashCrewPremium",
           "total_charges": "Unlimited"
-        },
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "regenCrew",
-          "icon_key": "PCY010_RegenCrewPremium",
-          "total_charges": {
-            "Finite": 4
-          }
         }
       ],
       "controller_potential_damage": null,
       "controller_spotting_damage": null,
-      "db_id": -270780764,
-      "display_name": ":Duquesne:",
+      "db_id": -270780757,
+      "display_name": ":Krabbe:",
       "division_id": null,
       "division_label": null,
-      "heal_count": 0,
+      "heal_count": null,
       "is_abuser": false,
       "is_bot": true,
       "is_self": false,
       "is_test_ship": false,
-      "name": ":Duquesne:",
+      "name": ":Krabbe:",
       "observed_results": {
-        "damage": 337,
+        "damage": 1169,
         "kills": 0
       },
       "personal_rating": null,
       "realm": "EU",
-      "relation": 2,
+      "relation": 1,
       "ribbons": [],
       "server_results": {
         "citadels_dealt": 0,
         "crits_dealt": 0,
-        "damage": 337,
+        "damage": 1168,
         "damage_by_type": {
-          "damage_atba_he": 337
+          "damage_atba_he": 653,
+          "damage_main_cs": 515
         },
         "damage_details": {
           "ap": null,
@@ -1818,101 +3622,100 @@
           "fire": null,
           "flooding": null,
           "he": null,
-          "he_secondaries": 337,
-          "sap": null,
+          "he_secondaries": 653,
+          "sap": 515,
           "sap_secondaries": null,
           "torps": null
         },
         "damage_interactions": {
-          "513136394": {
-            "damage_dealt": 337,
+          "-270780763": {
+            "damage_dealt": 1168,
             "damage_dealt_by_type": {
               "ap": null,
               "deep_water_torps": null,
               "fire": null,
               "flooding": null,
               "he": null,
-              "he_secondaries": 337,
-              "sap": null,
+              "he_secondaries": 653,
+              "sap": 515,
               "sap_secondaries": null,
               "torps": null
             },
             "damage_dealt_by_type_full": {
-              "damage_atba_he": 337
+              "damage_atba_he": 653,
+              "damage_main_cs": 515
             },
-            "damage_dealt_inverse_percentage": 5.284616590873451,
+            "damage_dealt_inverse_percentage": 12.041237113402062,
             "damage_dealt_percentage": 100.0,
-            "damage_received": 15300,
+            "damage_received": 15500,
             "damage_received_by_type": {
-              "ap": 1368,
+              "ap": null,
               "deep_water_torps": null,
               "fire": null,
-              "flooding": 38,
+              "flooding": null,
               "he": null,
               "he_secondaries": null,
               "sap": null,
               "sap_secondaries": null,
-              "torps": 13894
+              "torps": 15500
             },
             "damage_received_by_type_full": {
-              "damage_flood": 38,
-              "damage_main_ap": 1368,
-              "damage_tpd_normal": 13894
+              "damage_tpd_normal": 15500
             },
-            "damage_received_inverse_percentage": 14.085285019885108,
+            "damage_received_inverse_percentage": 29.97891805117691,
             "damage_received_percentage": 100.0
           }
         },
-        "distance_traveled": 22.369147119177512,
+        "distance_traveled": 7.264238659723197,
         "fires_dealt": 0,
         "floods_dealt": 0,
-        "hits": 0,
+        "hits": 1,
         "hits_by_type": {
-          "hits_atba_he": 1
+          "hits_atba_he": 3,
+          "hits_main_cs": 1
         },
         "hits_details": {
           "ap": null,
           "ap_secondaries_manual": null,
           "he": null,
-          "he_secondaries": 1,
+          "he_secondaries": 3,
           "he_secondaries_manual": null,
-          "sap": null,
+          "sap": 1,
           "sap_secondaries": null,
           "sap_secondaries_manual": null,
           "torps": null
         },
         "kills": 0,
-        "potential_damage": 68870,
+        "potential_damage": 24668,
         "potential_damage_details": {
-          "artillery": 7200,
+          "artillery": 0,
           "planes": 0,
-          "torpedoes": 61670
+          "torpedoes": 24668
         },
-        "raw_xp": 22,
-        "received_damage": 15300,
+        "raw_xp": 42,
+        "received_damage": 15500,
         "received_damage_by_type": {
-          "damage_flood": 38,
-          "damage_main_ap": 1368,
-          "damage_tpd_normal": 13894
+          "damage_tpd_normal": 15500
         },
         "received_damage_details": {
-          "ap": 1368,
+          "ap": null,
           "deep_water_torps": null,
           "fire": null,
-          "flooding": 38,
+          "flooding": null,
           "he": null,
           "he_secondaries": null,
           "sap": null,
           "sap_secondaries": null,
-          "torps": 13894
+          "torps": 15500
         },
         "spotting_damage": 0,
-        "xp": 22
+        "xp": 62
       },
       "ship_class": "Cruiser",
-      "ship_index": "PVSC102",
-      "ship_name": "4187927888",
-      "ship_nation": "Pan_America",
+      "ship_id": 4187928304,
+      "ship_index": "PISC102",
+      "ship_name": "4187928304",
+      "ship_nation": "Italy",
       "ship_tier": 2,
       "skill_info": {
         "highest_tier": 0,
@@ -1920,8 +3723,8 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
-      "team_id": 1,
-      "time_lived_secs": 473
+      "team_id": 0,
+      "time_lived_secs": 116
     },
     {
       "achievements": [],
@@ -2521,6 +4324,7 @@
         "xp": 107
       },
       "ship_class": "Destroyer",
+      "ship_id": 4269684432,
       "ship_index": "PJSD024",
       "ship_name": "4269684432",
       "ship_nation": "Japan",
@@ -2533,641 +4337,6 @@
       },
       "team_id": 0,
       "time_lived_secs": 313
-    },
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY014_SmokeGeneratorPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY015_SpeedBoosterPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": [
-          {
-            "point_cost": 1,
-            "skills": [
-              {
-                "description": "+15 GMRotationSpeed",
-                "internal_name": "GmTurn",
-                "learned": false,
-                "name": null,
-                "point_cost": 1,
-                "skill_type": 3
-              },
-              {
-                "description": "+30 floodChanceFactor",
-                "internal_name": "TorpedoFloodingProbability",
-                "learned": false,
-                "name": null,
-                "point_cost": 1,
-                "skill_type": 60
-              },
-              {
-                "description": null,
-                "internal_name": "ConsumablesReload",
-                "learned": false,
-                "name": null,
-                "point_cost": 1,
-                "skill_type": 13
-              },
-              {
-                "description": "-40 switchAmmoReloadCoef",
-                "internal_name": "GmShellReload",
-                "learned": false,
-                "name": null,
-                "point_cost": 1,
-                "skill_type": 21
-              },
-              {
-                "description": null,
-                "internal_name": "DetectionAlert",
-                "learned": true,
-                "name": null,
-                "point_cost": 1,
-                "skill_type": 19
-              },
-              {
-                "description": "+15 AAMaxHP\n+15 GSMaxHP\n-30 critProbCoefficient",
-                "internal_name": "DefenseCritProbability",
-                "learned": false,
-                "name": null,
-                "point_cost": 1,
-                "skill_type": 18
-              }
-            ]
-          },
-          {
-            "point_cost": 2,
-            "skills": [
-              {
-                "description": "+15 ammoSplashRadiusMultiplier\n+1 artilleryBurnChanceBonus",
-                "internal_name": "HeFireProbability",
-                "learned": false,
-                "name": null,
-                "point_cost": 2,
-                "skill_type": 8
-              },
-              {
-                "description": "+5 planeTorpedoSpeedMultiplier\n+5 torpedoSpeedMultiplier",
-                "internal_name": "TorpedoSpeed",
-                "learned": false,
-                "name": null,
-                "point_cost": 2,
-                "skill_type": 24
-              },
-              {
-                "description": "+10 rlsWorkTimeCoeff\n+10 smokeGeneratorWorkTimeCoeff\n+10 sonarWorkTimeCoeff\n+10 speedBoostersWorkTimeCoeff",
-                "internal_name": "ConsumablesDuration",
-                "learned": false,
-                "name": null,
-                "point_cost": 2,
-                "skill_type": 6
-              },
-              {
-                "description": "+7.5 GMAPDamageCoeff\n+10 dcAlphaDamageMultiplier",
-                "internal_name": "ApDamageDd",
-                "learned": false,
-                "name": null,
-                "point_cost": 2,
-                "skill_type": 39
-              },
-              {
-                "description": null,
-                "internal_name": "DetectionAiming",
-                "learned": false,
-                "name": null,
-                "point_cost": 2,
-                "skill_type": 28
-              },
-              {
-                "description": "+100 SGCritRudderTime\n-78.3 damagedEngineCoeff",
-                "internal_name": "Maneuverability",
-                "learned": false,
-                "name": null,
-                "point_cost": 2,
-                "skill_type": 20
-              }
-            ]
-          },
-          {
-            "point_cost": 3,
-            "skills": [
-              {
-                "description": "+10 AAAuraDamage\n-5 GMShotDelay",
-                "internal_name": "GmReloadAaDamageConstant",
-                "learned": false,
-                "name": null,
-                "point_cost": 3,
-                "skill_type": 1
-              },
-              {
-                "description": "-10 GTShotDelay",
-                "internal_name": "TorpedoReload",
-                "learned": false,
-                "name": null,
-                "point_cost": 3,
-                "skill_type": 4
-              },
-              {
-                "description": "+20 lastChanceReloadCoefficient",
-                "internal_name": "ArmamentReloadAaDamage",
-                "learned": false,
-                "name": null,
-                "point_cost": 3,
-                "skill_type": 23
-              },
-              {
-                "description": "+25 GMPenetrationCoeffHE\n+25 GSPenetrationCoeffHE\nburnChanceFactorLowLevel",
-                "internal_name": "HePenetration",
-                "learned": false,
-                "name": null,
-                "point_cost": 3,
-                "skill_type": 33
-              },
-              {
-                "description": "+1  additionalConsumables",
-                "internal_name": "ConsumablesAdditional",
-                "learned": false,
-                "name": null,
-                "point_cost": 3,
-                "skill_type": 17
-              },
-              {
-                "description": "+350  healthPerLevel",
-                "internal_name": "DefenseHp",
-                "learned": false,
-                "name": null,
-                "point_cost": 3,
-                "skill_type": 25
-              }
-            ]
-          },
-          {
-            "point_cost": 4,
-            "skills": [
-              {
-                "description": "+15 AABubbleDamage\n+20 GMMaxDist",
-                "internal_name": "GmRangeAaDamageBubbles",
-                "learned": false,
-                "name": null,
-                "point_cost": 4,
-                "skill_type": 9
-              },
-              {
-                "description": "+5 GMShotDelay\n+8 speedCoef (when triggered)",
-                "internal_name": "TriggerSpeed",
-                "learned": false,
-                "name": null,
-                "point_cost": 4,
-                "skill_type": 65
-              },
-              {
-                "description": null,
-                "internal_name": "DetectionDirection",
-                "learned": false,
-                "name": null,
-                "point_cost": 4,
-                "skill_type": 34
-              },
-              {
-                "description": "+1  AAExtraBubbles\n-10 GMShotDelay (when triggered)",
-                "internal_name": "TriggerGmReload",
-                "learned": false,
-                "name": null,
-                "point_cost": 4,
-                "skill_type": 64
-              },
-              {
-                "description": "-10 visibilityDistCoeff\n-10 visibilityForSubmarineCoeff",
-                "internal_name": "DetectionVisibilityRange",
-                "learned": false,
-                "name": null,
-                "point_cost": 4,
-                "skill_type": 12
-              },
-              {
-                "description": "+20 shootShift (when triggered)\n+8 speedCoef (when triggered)",
-                "internal_name": "TriggerSpreading",
-                "learned": false,
-                "name": null,
-                "point_cost": 4,
-                "skill_type": 67
-              }
-            ]
-          }
-        ],
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PJUH232_Wakatake_1925",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUA231_D3_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUT204_D3_TORP_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUS231_Suo",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUE211_D3_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null,
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        },
-        {
-          "charges_used": 1,
-          "description": "",
-          "display_name": "smokeGenerator",
-          "icon_key": "PCY014_SmokeGeneratorPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        },
-        {
-          "charges_used": 2,
-          "description": "",
-          "display_name": "speedBoosters",
-          "icon_key": "PCY015_SpeedBoosterPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": 698373469,
-      "display_name": "BeedeeCzek",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": null,
-      "is_abuser": false,
-      "is_bot": false,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": "BeedeeCzek",
-      "observed_results": {
-        "damage": 10396,
-        "kills": 2
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 1,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 1,
-        "damage": 17372,
-        "damage_by_type": {
-          "damage_main_ap": 2026,
-          "damage_tpd_normal": 15346
-        },
-        "damage_details": {
-          "ap": 2026,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 15346
-        },
-        "damage_interactions": {
-          "-270780761": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "-270780762": {
-            "damage_dealt": 3870,
-            "damage_dealt_by_type": {
-              "ap": 200,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 3670
-            },
-            "damage_dealt_by_type_full": {
-              "damage_main_ap": 200,
-              "damage_tpd_normal": 3670
-            },
-            "damage_dealt_inverse_percentage": 47.19512195121951,
-            "damage_dealt_percentage": 22.277227722772277,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "-270780765": {
-            "damage_dealt": 200,
-            "damage_dealt_by_type": {
-              "ap": 200,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_main_ap": 200
-            },
-            "damage_dealt_inverse_percentage": 2.4387269845140835,
-            "damage_dealt_percentage": 1.1512779184895234,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "-270780766": {
-            "damage_dealt": 9570,
-            "damage_dealt_by_type": {
-              "ap": 1200,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 8370
-            },
-            "damage_dealt_by_type_full": {
-              "damage_main_ap": 1200,
-              "damage_tpd_normal": 8370
-            },
-            "damage_dealt_inverse_percentage": 57.65060240963855,
-            "damage_dealt_percentage": 55.088648399723695,
-            "damage_received": 1168,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 653,
-              "sap": 515,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 653,
-              "damage_main_cs": 515
-            },
-            "damage_received_inverse_percentage": 72.81795511221945,
-            "damage_received_percentage": 62.76195593766792
-          },
-          "-270780767": {
-            "damage_dealt": 3306,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 3306
-            },
-            "damage_dealt_by_type_full": {
-              "damage_tpd_normal": 3306
-            },
-            "damage_dealt_inverse_percentage": 7.49438940901775,
-            "damage_dealt_percentage": 19.03062399263182,
-            "damage_received": 693,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 693,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 693
-            },
-            "damage_received_inverse_percentage": 1.548880246748022,
-            "damage_received_percentage": 37.23804406233208
-          },
-          "-270780768": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "-270780769": {
-            "damage_dealt": 426,
-            "damage_dealt_by_type": {
-              "ap": 426,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_main_ap": 426
-            },
-            "damage_dealt_inverse_percentage": 1.9394491236057365,
-            "damage_dealt_percentage": 2.4522219663826847,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          }
-        },
-        "distance_traveled": 56.72639904879033,
-        "fires_dealt": 0,
-        "floods_dealt": 1,
-        "hits": 11,
-        "hits_by_type": {
-          "hits_main_ap": 11,
-          "hits_tpd": 3
-        },
-        "hits_details": {
-          "ap": 11,
-          "ap_secondaries_manual": null,
-          "he": null,
-          "he_secondaries": null,
-          "he_secondaries_manual": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": 3
-        },
-        "kills": 2,
-        "potential_damage": 242134,
-        "potential_damage_details": {
-          "artillery": 224000,
-          "planes": 0,
-          "torpedoes": 18134
-        },
-        "raw_xp": 169,
-        "received_damage": 1861,
-        "received_damage_by_type": {
-          "damage_atba_he": 1346,
-          "damage_main_cs": 515
-        },
-        "received_damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": 1346,
-          "sap": 515,
-          "sap_secondaries": null,
-          "torps": null
-        },
-        "spotting_damage": 940,
-        "xp": 254
-      },
-      "ship_class": "Destroyer",
-      "ship_index": "PJSD024",
-      "ship_name": "4269684432",
-      "ship_nation": "Japan",
-      "ship_tier": 3,
-      "skill_info": {
-        "highest_tier": 1,
-        "num_skills": 1,
-        "num_tier_1_skills": 1,
-        "skill_points": 1
-      },
-      "team_id": 0,
-      "time_lived_secs": null
     },
     {
       "achievements": [],
@@ -3851,6 +5020,7 @@
         "xp": 568
       },
       "ship_class": "Destroyer",
+      "ship_id": 4186846672,
       "ship_index": "PRSD103",
       "ship_name": "4186846672",
       "ship_nation": "Russia",
@@ -3863,1069 +5033,6 @@
       },
       "team_id": 0,
       "time_lived_secs": null
-    },
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY014_SmokeGeneratorPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY015_SpeedBoosterPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": null,
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PJUH232_Wakatake_1925",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUA231_D3_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUT204_D3_TORP_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUS231_Suo",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUE211_D3_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null,
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 1,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        },
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "smokeGenerator",
-          "icon_key": "PCY014_SmokeGeneratorPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        },
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "speedBoosters",
-          "icon_key": "PCY015_SpeedBoosterPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": -270780762,
-      "display_name": ":Buckmaster:",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": null,
-      "is_abuser": false,
-      "is_bot": true,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": ":Buckmaster:",
-      "observed_results": {
-        "damage": 1163,
-        "kills": 1
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 2,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 0,
-        "damage": 10717,
-        "damage_by_type": {
-          "damage_fire": 181,
-          "damage_main_he": 982,
-          "damage_tpd_normal": 9554
-        },
-        "damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": 181,
-          "flooding": null,
-          "he": 982,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 9554
-        },
-        "damage_interactions": {
-          "1064617078": {
-            "damage_dealt": 10717,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": 181,
-              "flooding": null,
-              "he": 982,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 9554
-            },
-            "damage_dealt_by_type_full": {
-              "damage_fire": 181,
-              "damage_main_he": 982,
-              "damage_tpd_normal": 9554
-            },
-            "damage_dealt_inverse_percentage": 70.97350993377484,
-            "damage_dealt_percentage": 100.0,
-            "damage_received": 1551,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": 1188,
-              "he_secondaries": 363,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 363,
-              "damage_main_he": 1188
-            },
-            "damage_received_inverse_percentage": 56.62650602409639,
-            "damage_received_percentage": 18.914634146341463
-          },
-          "513136394": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 2779,
-            "damage_received_by_type": {
-              "ap": 774,
-              "deep_water_torps": null,
-              "fire": 25,
-              "flooding": null,
-              "he": 1980,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_fire": 25,
-              "damage_main_ap": 774,
-              "damage_main_he": 1980
-            },
-            "damage_received_inverse_percentage": 2.558366475180439,
-            "damage_received_percentage": 33.890243902439025
-          },
-          "698373469": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 3870,
-            "damage_received_by_type": {
-              "ap": 200,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 3670
-            },
-            "damage_received_by_type_full": {
-              "damage_main_ap": 200,
-              "damage_tpd_normal": 3670
-            },
-            "damage_received_inverse_percentage": 22.277227722772277,
-            "damage_received_percentage": 47.19512195121951
-          }
-        },
-        "distance_traveled": 16.042606409937147,
-        "fires_dealt": 1,
-        "floods_dealt": 0,
-        "hits": 4,
-        "hits_by_type": {
-          "hits_main_he": 4,
-          "hits_tpd": 2
-        },
-        "hits_details": {
-          "ap": null,
-          "ap_secondaries_manual": null,
-          "he": 4,
-          "he_secondaries": null,
-          "he_secondaries_manual": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": 2
-        },
-        "kills": 1,
-        "potential_damage": 175439,
-        "potential_damage_details": {
-          "artillery": 50300,
-          "planes": 0,
-          "torpedoes": 125139
-        },
-        "raw_xp": 107,
-        "received_damage": 8200,
-        "received_damage_by_type": {
-          "damage_atba_he": 363,
-          "damage_fire": 25,
-          "damage_main_ap": 974,
-          "damage_main_he": 3168,
-          "damage_tpd_normal": 3670
-        },
-        "received_damage_details": {
-          "ap": 974,
-          "deep_water_torps": null,
-          "fire": 25,
-          "flooding": null,
-          "he": 3168,
-          "he_secondaries": 363,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 3670
-        },
-        "spotting_damage": 0,
-        "xp": 107
-      },
-      "ship_class": "Destroyer",
-      "ship_index": "PJSD024",
-      "ship_name": "4269684432",
-      "ship_nation": "Japan",
-      "ship_tier": 3,
-      "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
-      },
-      "team_id": 1,
-      "time_lived_secs": 203
-    },
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY014_SmokeGeneratorPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY015_SpeedBoosterPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": null,
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PJUH232_Wakatake_1925",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUA231_D3_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUT204_D3_TORP_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUS231_Suo",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PJUE211_D3_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null,
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 3,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        },
-        {
-          "charges_used": 3,
-          "description": "",
-          "display_name": "smokeGenerator",
-          "icon_key": "PCY014_SmokeGeneratorPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        },
-        {
-          "charges_used": 1,
-          "description": "",
-          "display_name": "speedBoosters",
-          "icon_key": "PCY015_SpeedBoosterPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": -270780765,
-      "display_name": ":Bergamini:",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": null,
-      "is_abuser": false,
-      "is_bot": true,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": ":Bergamini:",
-      "observed_results": {
-        "damage": 28272,
-        "kills": 4
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 2,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 2,
-        "damage": 51390,
-        "damage_by_type": {
-          "damage_fire": 298,
-          "damage_flood": 49,
-          "damage_main_he": 196,
-          "damage_tpd_normal": 50847
-        },
-        "damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": 298,
-          "flooding": 49,
-          "he": 196,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 50847
-        },
-        "damage_interactions": {
-          "-270780759": {
-            "damage_dealt": 6336,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": 298,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 6038
-            },
-            "damage_dealt_by_type_full": {
-              "damage_fire": 298,
-              "damage_tpd_normal": 6038
-            },
-            "damage_dealt_inverse_percentage": 14.431486880466474,
-            "damage_dealt_percentage": 12.329246935201402,
-            "damage_received": 3421,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": 25,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 3396,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 3396,
-              "damage_fire": 25
-            },
-            "damage_received_inverse_percentage": 10.135095099840019,
-            "damage_received_percentage": 41.71442507011341
-          },
-          "-270780760": {
-            "damage_dealt": 19305,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 19305
-            },
-            "damage_dealt_by_type_full": {
-              "damage_tpd_normal": 19305
-            },
-            "damage_dealt_inverse_percentage": 100.0,
-            "damage_dealt_percentage": 37.56567425569177,
-            "damage_received": 832,
-            "damage_received_by_type": {
-              "ap": 832,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_main_ap": 832
-            },
-            "damage_received_inverse_percentage": 100.0,
-            "damage_received_percentage": 10.145104255578588
-          },
-          "1064617078": {
-            "damage_dealt": 4383,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 4383
-            },
-            "damage_dealt_by_type_full": {
-              "damage_tpd_normal": 4383
-            },
-            "damage_dealt_inverse_percentage": 29.026490066225165,
-            "damage_dealt_percentage": 8.528896672504379,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "505029074": {
-            "damage_dealt": 1766,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": 196,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 1570
-            },
-            "damage_dealt_by_type_full": {
-              "damage_main_he": 196,
-              "damage_tpd_normal": 1570
-            },
-            "damage_dealt_inverse_percentage": 24.191780821917806,
-            "damage_dealt_percentage": 3.4364662385678146,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "513136394": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 3748,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": 295,
-              "flooding": null,
-              "he": 3453,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_fire": 295,
-              "damage_main_he": 3453
-            },
-            "damage_received_inverse_percentage": 3.4504345264398295,
-            "damage_received_percentage": 45.70174368979393
-          },
-          "570590750": {
-            "damage_dealt": 19600,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": 49,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 19551
-            },
-            "damage_dealt_by_type_full": {
-              "damage_flood": 49,
-              "damage_tpd_normal": 19551
-            },
-            "damage_dealt_inverse_percentage": 100.0,
-            "damage_dealt_percentage": 38.13971589803464,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "698373469": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 200,
-            "damage_received_by_type": {
-              "ap": 200,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_main_ap": 200
-            },
-            "damage_received_inverse_percentage": 1.1512779184895234,
-            "damage_received_percentage": 2.4387269845140835
-          }
-        },
-        "distance_traveled": 32.192823186665485,
-        "fires_dealt": 1,
-        "floods_dealt": 3,
-        "hits": 9,
-        "hits_by_type": {
-          "hits_main_he": 9,
-          "hits_tpd": 12
-        },
-        "hits_details": {
-          "ap": null,
-          "ap_secondaries_manual": null,
-          "he": 9,
-          "he_secondaries": null,
-          "he_secondaries_manual": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": 12
-        },
-        "kills": 4,
-        "potential_damage": 253434,
-        "potential_damage_details": {
-          "artillery": 241100,
-          "planes": 0,
-          "torpedoes": 12334
-        },
-        "raw_xp": 256,
-        "received_damage": 8201,
-        "received_damage_by_type": {
-          "damage_atba_he": 3396,
-          "damage_fire": 320,
-          "damage_main_ap": 1032,
-          "damage_main_he": 3453
-        },
-        "received_damage_details": {
-          "ap": 1032,
-          "deep_water_torps": null,
-          "fire": 320,
-          "flooding": null,
-          "he": 3453,
-          "he_secondaries": 3396,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": null
-        },
-        "spotting_damage": 0,
-        "xp": 256
-      },
-      "ship_class": "Destroyer",
-      "ship_index": "PJSD024",
-      "ship_name": "4269684432",
-      "ship_nation": "Japan",
-      "ship_tier": 3,
-      "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
-      },
-      "team_id": 1,
-      "time_lived_secs": 597
-    },
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY014_SmokeGeneratorPremium",
-            "name": null
-          },
-          {
-            "game_params_name": "PCY015_SpeedBoosterPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": null,
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PRUH212_Derzky_1916",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PRUA211_D3_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PRUT201_D3_TORP_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PRUS212_SUO",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PRUE201_D3_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null,
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 1,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        },
-        {
-          "charges_used": 2,
-          "description": "",
-          "display_name": "smokeGenerator",
-          "icon_key": "PCY014_SmokeGeneratorPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        },
-        {
-          "charges_used": 1,
-          "description": "",
-          "display_name": "speedBoosters",
-          "icon_key": "PCY015_SpeedBoosterPremium",
-          "total_charges": {
-            "Finite": 3
-          }
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": -270780763,
-      "display_name": ":Warrender:",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": null,
-      "is_abuser": false,
-      "is_bot": true,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": ":Warrender:",
-      "observed_results": {
-        "damage": 41776,
-        "kills": 2
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 2,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 0,
-        "damage": 51703,
-        "damage_by_type": {
-          "damage_fire": 66,
-          "damage_flood": 165,
-          "damage_main_he": 1039,
-          "damage_tpd_normal": 50433
-        },
-        "damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": 66,
-          "flooding": 165,
-          "he": 1039,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 50433
-        },
-        "damage_interactions": {
-          "-270780757": {
-            "damage_dealt": 15500,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 15500
-            },
-            "damage_dealt_by_type_full": {
-              "damage_tpd_normal": 15500
-            },
-            "damage_dealt_inverse_percentage": 100.0,
-            "damage_dealt_percentage": 29.97891805117691,
-            "damage_received": 1168,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 653,
-              "sap": 515,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 653,
-              "damage_main_cs": 515
-            },
-            "damage_received_inverse_percentage": 100.0,
-            "damage_received_percentage": 12.041237113402062
-          },
-          "-270780758": {
-            "damage_dealt": 31226,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": 165,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 31061
-            },
-            "damage_dealt_by_type_full": {
-              "damage_flood": 165,
-              "damage_tpd_normal": 31061
-            },
-            "damage_dealt_inverse_percentage": 89.90297411683413,
-            "damage_dealt_percentage": 60.394948068777445,
-            "damage_received": 1415,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": 29,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 1386,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 1386,
-              "damage_fire": 29
-            },
-            "damage_received_inverse_percentage": 16.958293384467883,
-            "damage_received_percentage": 14.587628865979383
-          },
-          "-270780759": {
-            "damage_dealt": 3872,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 3872
-            },
-            "damage_dealt_by_type_full": {
-              "damage_tpd_normal": 3872
-            },
-            "damage_dealt_inverse_percentage": 8.81924198250729,
-            "damage_dealt_percentage": 7.488927141558517,
-            "damage_received": 5396,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": 1284,
-              "he_secondaries": 4112,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 4112,
-              "damage_main_he": 1284
-            },
-            "damage_received_inverse_percentage": 15.98625348106891,
-            "damage_received_percentage": 55.628865979381445
-          },
-          "505029074": {
-            "damage_dealt": 1105,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": 66,
-              "flooding": null,
-              "he": 1039,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_fire": 66,
-              "damage_main_he": 1039
-            },
-            "damage_dealt_inverse_percentage": 15.136986301369863,
-            "damage_dealt_percentage": 2.1372067384871287,
-            "damage_received": 1721,
-            "damage_received_by_type": {
-              "ap": 860,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": 861,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_main_ap": 860,
-              "damage_main_he": 861
-            },
-            "damage_received_inverse_percentage": 100.0,
-            "damage_received_percentage": 17.742268041237114
-          }
-        },
-        "distance_traveled": 17.056489982502537,
-        "fires_dealt": 1,
-        "floods_dealt": 2,
-        "hits": 3,
-        "hits_by_type": {
-          "hits_main_he": 3,
-          "hits_tpd": 14
-        },
-        "hits_details": {
-          "ap": null,
-          "ap_secondaries_manual": null,
-          "he": 3,
-          "he_secondaries": null,
-          "he_secondaries_manual": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": 14
-        },
-        "kills": 2,
-        "potential_damage": 251268,
-        "potential_damage_details": {
-          "artillery": 210800,
-          "planes": 0,
-          "torpedoes": 40468
-        },
-        "raw_xp": 186,
-        "received_damage": 9700,
-        "received_damage_by_type": {
-          "damage_atba_he": 6151,
-          "damage_fire": 29,
-          "damage_main_ap": 860,
-          "damage_main_cs": 515,
-          "damage_main_he": 2145
-        },
-        "received_damage_details": {
-          "ap": 860,
-          "deep_water_torps": null,
-          "fire": 29,
-          "flooding": null,
-          "he": 2145,
-          "he_secondaries": 6151,
-          "sap": 515,
-          "sap_secondaries": null,
-          "torps": null
-        },
-        "spotting_damage": 0,
-        "xp": 186
-      },
-      "ship_class": "Destroyer",
-      "ship_index": "PRSD103",
-      "ship_name": "4186846672",
-      "ship_nation": "Russia",
-      "ship_tier": 3,
-      "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
-      },
-      "team_id": 1,
-      "time_lived_secs": 250
     },
     {
       "achievements": [],
@@ -5311,6 +5418,7 @@
         "xp": 29
       },
       "ship_class": "Cruiser",
+      "ship_id": 4187928400,
       "ship_index": "PFSC102",
       "ship_name": "4187928400",
       "ship_nation": "France",
@@ -5331,32 +5439,259 @@
           {
             "game_params_name": "PCY009_CrashCrewPremium",
             "name": null
+          },
+          {
+            "game_params_name": "PCY014_SmokeGeneratorPremium",
+            "name": null
+          },
+          {
+            "game_params_name": "PCY015_SpeedBoosterPremium",
+            "name": null
           }
         ],
-        "captain_skills": null,
+        "captain_skills": [
+          {
+            "point_cost": 1,
+            "skills": [
+              {
+                "description": "+15 GMRotationSpeed",
+                "internal_name": "GmTurn",
+                "learned": false,
+                "name": null,
+                "point_cost": 1,
+                "skill_type": 3
+              },
+              {
+                "description": "+30 floodChanceFactor",
+                "internal_name": "TorpedoFloodingProbability",
+                "learned": false,
+                "name": null,
+                "point_cost": 1,
+                "skill_type": 60
+              },
+              {
+                "description": null,
+                "internal_name": "ConsumablesReload",
+                "learned": false,
+                "name": null,
+                "point_cost": 1,
+                "skill_type": 13
+              },
+              {
+                "description": "-40 switchAmmoReloadCoef",
+                "internal_name": "GmShellReload",
+                "learned": false,
+                "name": null,
+                "point_cost": 1,
+                "skill_type": 21
+              },
+              {
+                "description": null,
+                "internal_name": "DetectionAlert",
+                "learned": true,
+                "name": null,
+                "point_cost": 1,
+                "skill_type": 19
+              },
+              {
+                "description": "+15 AAMaxHP\n+15 GSMaxHP\n-30 critProbCoefficient",
+                "internal_name": "DefenseCritProbability",
+                "learned": false,
+                "name": null,
+                "point_cost": 1,
+                "skill_type": 18
+              }
+            ]
+          },
+          {
+            "point_cost": 2,
+            "skills": [
+              {
+                "description": "+15 ammoSplashRadiusMultiplier\n+1 artilleryBurnChanceBonus",
+                "internal_name": "HeFireProbability",
+                "learned": false,
+                "name": null,
+                "point_cost": 2,
+                "skill_type": 8
+              },
+              {
+                "description": "+5 planeTorpedoSpeedMultiplier\n+5 torpedoSpeedMultiplier",
+                "internal_name": "TorpedoSpeed",
+                "learned": false,
+                "name": null,
+                "point_cost": 2,
+                "skill_type": 24
+              },
+              {
+                "description": "+10 rlsWorkTimeCoeff\n+10 smokeGeneratorWorkTimeCoeff\n+10 sonarWorkTimeCoeff\n+10 speedBoostersWorkTimeCoeff",
+                "internal_name": "ConsumablesDuration",
+                "learned": false,
+                "name": null,
+                "point_cost": 2,
+                "skill_type": 6
+              },
+              {
+                "description": "+7.5 GMAPDamageCoeff\n+10 dcAlphaDamageMultiplier",
+                "internal_name": "ApDamageDd",
+                "learned": false,
+                "name": null,
+                "point_cost": 2,
+                "skill_type": 39
+              },
+              {
+                "description": null,
+                "internal_name": "DetectionAiming",
+                "learned": false,
+                "name": null,
+                "point_cost": 2,
+                "skill_type": 28
+              },
+              {
+                "description": "+100 SGCritRudderTime\n-78.3 damagedEngineCoeff",
+                "internal_name": "Maneuverability",
+                "learned": false,
+                "name": null,
+                "point_cost": 2,
+                "skill_type": 20
+              }
+            ]
+          },
+          {
+            "point_cost": 3,
+            "skills": [
+              {
+                "description": "+10 AAAuraDamage\n-5 GMShotDelay",
+                "internal_name": "GmReloadAaDamageConstant",
+                "learned": false,
+                "name": null,
+                "point_cost": 3,
+                "skill_type": 1
+              },
+              {
+                "description": "-10 GTShotDelay",
+                "internal_name": "TorpedoReload",
+                "learned": false,
+                "name": null,
+                "point_cost": 3,
+                "skill_type": 4
+              },
+              {
+                "description": "+20 lastChanceReloadCoefficient",
+                "internal_name": "ArmamentReloadAaDamage",
+                "learned": false,
+                "name": null,
+                "point_cost": 3,
+                "skill_type": 23
+              },
+              {
+                "description": "+25 GMPenetrationCoeffHE\n+25 GSPenetrationCoeffHE\nburnChanceFactorLowLevel",
+                "internal_name": "HePenetration",
+                "learned": false,
+                "name": null,
+                "point_cost": 3,
+                "skill_type": 33
+              },
+              {
+                "description": "+1  additionalConsumables",
+                "internal_name": "ConsumablesAdditional",
+                "learned": false,
+                "name": null,
+                "point_cost": 3,
+                "skill_type": 17
+              },
+              {
+                "description": "+350  healthPerLevel",
+                "internal_name": "DefenseHp",
+                "learned": false,
+                "name": null,
+                "point_cost": 3,
+                "skill_type": 25
+              }
+            ]
+          },
+          {
+            "point_cost": 4,
+            "skills": [
+              {
+                "description": "+15 AABubbleDamage\n+20 GMMaxDist",
+                "internal_name": "GmRangeAaDamageBubbles",
+                "learned": false,
+                "name": null,
+                "point_cost": 4,
+                "skill_type": 9
+              },
+              {
+                "description": "+5 GMShotDelay\n+8 speedCoef (when triggered)",
+                "internal_name": "TriggerSpeed",
+                "learned": false,
+                "name": null,
+                "point_cost": 4,
+                "skill_type": 65
+              },
+              {
+                "description": null,
+                "internal_name": "DetectionDirection",
+                "learned": false,
+                "name": null,
+                "point_cost": 4,
+                "skill_type": 34
+              },
+              {
+                "description": "+1  AAExtraBubbles\n-10 GMShotDelay (when triggered)",
+                "internal_name": "TriggerGmReload",
+                "learned": false,
+                "name": null,
+                "point_cost": 4,
+                "skill_type": 64
+              },
+              {
+                "description": "-10 visibilityDistCoeff\n-10 visibilityForSubmarineCoeff",
+                "internal_name": "DetectionVisibilityRange",
+                "learned": false,
+                "name": null,
+                "point_cost": 4,
+                "skill_type": 12
+              },
+              {
+                "description": "+20 shootShift (when triggered)\n+8 speedCoef (when triggered)",
+                "internal_name": "TriggerSpreading",
+                "learned": false,
+                "name": null,
+                "point_cost": 4,
+                "skill_type": 67
+              }
+            ]
+          }
+        ],
         "loadout": [
           {
             "description": null,
-            "game_params_name": "PAUH101_Chester_1908",
+            "game_params_name": "PJUH232_Wakatake_1925",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PAUA101_C2_ART_STOCK",
+            "game_params_name": "PJUA231_D3_ART_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PAUS101_Suo",
+            "game_params_name": "PJUT204_D3_TORP_STOCK",
             "name": null
           },
           {
             "description": null,
-            "game_params_name": "PAUE101_C2_ENG_STOCK",
+            "game_params_name": "PJUS231_Suo",
+            "name": null
+          },
+          {
+            "description": null,
+            "game_params_name": "PJUE211_D3_ENG_STOCK",
             "name": null
           }
         ],
         "modernization_slots": [
+          null,
           null
         ],
         "signals": []
@@ -5365,40 +5700,61 @@
       "clan_color_rgb": 0,
       "consumables": [
         {
-          "charges_used": 1,
+          "charges_used": 0,
           "description": "",
           "display_name": "crashCrew",
           "icon_key": "PCY009_CrashCrewPremium",
           "total_charges": "Unlimited"
+        },
+        {
+          "charges_used": 1,
+          "description": "",
+          "display_name": "smokeGenerator",
+          "icon_key": "PCY014_SmokeGeneratorPremium",
+          "total_charges": {
+            "Finite": 3
+          }
+        },
+        {
+          "charges_used": 2,
+          "description": "",
+          "display_name": "speedBoosters",
+          "icon_key": "PCY015_SpeedBoosterPremium",
+          "total_charges": {
+            "Finite": 3
+          }
         }
       ],
       "controller_potential_damage": null,
       "controller_spotting_damage": null,
-      "db_id": -270780761,
-      "display_name": ":Hipper:",
+      "db_id": 698373469,
+      "display_name": "BeedeeCzek",
       "division_id": null,
       "division_label": null,
       "heal_count": null,
       "is_abuser": false,
-      "is_bot": true,
+      "is_bot": false,
       "is_self": false,
       "is_test_ship": false,
-      "name": ":Hipper:",
+      "name": "BeedeeCzek",
       "observed_results": {
-        "damage": 0,
-        "kills": 0
+        "damage": 10396,
+        "kills": 2
       },
       "personal_rating": null,
       "realm": "EU",
-      "relation": 2,
+      "relation": 1,
       "ribbons": [],
       "server_results": {
         "citadels_dealt": 0,
-        "crits_dealt": 0,
-        "damage": 0,
-        "damage_by_type": {},
+        "crits_dealt": 1,
+        "damage": 17372,
+        "damage_by_type": {
+          "damage_main_ap": 2026,
+          "damage_tpd_normal": 15346
+        },
         "damage_details": {
-          "ap": null,
+          "ap": 2026,
           "deep_water_torps": null,
           "fire": null,
           "flooding": null,
@@ -5406,10 +5762,10 @@
           "he_secondaries": null,
           "sap": null,
           "sap_secondaries": null,
-          "torps": null
+          "torps": 15346
         },
         "damage_interactions": {
-          "1064617078": {
+          "-270780761": {
             "damage_dealt": 0,
             "damage_dealt_by_type": {
               "ap": null,
@@ -5425,25 +5781,166 @@
             "damage_dealt_by_type_full": {},
             "damage_dealt_inverse_percentage": 0.0,
             "damage_dealt_percentage": 0.0,
-            "damage_received": 1188,
+            "damage_received": 0,
             "damage_received_by_type": {
               "ap": null,
               "deep_water_torps": null,
               "fire": null,
               "flooding": null,
-              "he": 1188,
+              "he": null,
               "he_secondaries": null,
               "sap": null,
               "sap_secondaries": null,
               "torps": null
             },
-            "damage_received_by_type_full": {
-              "damage_main_he": 1188
-            },
-            "damage_received_inverse_percentage": 43.373493975903614,
-            "damage_received_percentage": 7.867549668874172
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
           },
-          "513136394": {
+          "-270780762": {
+            "damage_dealt": 3870,
+            "damage_dealt_by_type": {
+              "ap": 200,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 3670
+            },
+            "damage_dealt_by_type_full": {
+              "damage_main_ap": 200,
+              "damage_tpd_normal": 3670
+            },
+            "damage_dealt_inverse_percentage": 47.19512195121951,
+            "damage_dealt_percentage": 22.277227722772277,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "-270780765": {
+            "damage_dealt": 200,
+            "damage_dealt_by_type": {
+              "ap": 200,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_dealt_by_type_full": {
+              "damage_main_ap": 200
+            },
+            "damage_dealt_inverse_percentage": 2.4387269845140835,
+            "damage_dealt_percentage": 1.1512779184895234,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "-270780766": {
+            "damage_dealt": 9570,
+            "damage_dealt_by_type": {
+              "ap": 1200,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 8370
+            },
+            "damage_dealt_by_type_full": {
+              "damage_main_ap": 1200,
+              "damage_tpd_normal": 8370
+            },
+            "damage_dealt_inverse_percentage": 57.65060240963855,
+            "damage_dealt_percentage": 55.088648399723695,
+            "damage_received": 1168,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 653,
+              "sap": 515,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 653,
+              "damage_main_cs": 515
+            },
+            "damage_received_inverse_percentage": 72.81795511221945,
+            "damage_received_percentage": 62.76195593766792
+          },
+          "-270780767": {
+            "damage_dealt": 3306,
+            "damage_dealt_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": 3306
+            },
+            "damage_dealt_by_type_full": {
+              "damage_tpd_normal": 3306
+            },
+            "damage_dealt_inverse_percentage": 7.49438940901775,
+            "damage_dealt_percentage": 19.03062399263182,
+            "damage_received": 693,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": 693,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {
+              "damage_atba_he": 693
+            },
+            "damage_received_inverse_percentage": 1.548880246748022,
+            "damage_received_percentage": 37.23804406233208
+          },
+          "-270780768": {
             "damage_dealt": 0,
             "damage_dealt_by_type": {
               "ap": null,
@@ -5459,34 +5956,67 @@
             "damage_dealt_by_type_full": {},
             "damage_dealt_inverse_percentage": 0.0,
             "damage_dealt_percentage": 0.0,
-            "damage_received": 13912,
+            "damage_received": 0,
             "damage_received_by_type": {
-              "ap": 954,
+              "ap": null,
               "deep_water_torps": null,
               "fire": null,
-              "flooding": 38,
+              "flooding": null,
               "he": null,
               "he_secondaries": null,
               "sap": null,
               "sap_secondaries": null,
-              "torps": 12920
+              "torps": null
             },
-            "damage_received_by_type_full": {
-              "damage_flood": 38,
-              "damage_main_ap": 954,
-              "damage_tpd_normal": 12920
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
+          },
+          "-270780769": {
+            "damage_dealt": 426,
+            "damage_dealt_by_type": {
+              "ap": 426,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
             },
-            "damage_received_inverse_percentage": 12.807482692590956,
-            "damage_received_percentage": 92.13245033112582
+            "damage_dealt_by_type_full": {
+              "damage_main_ap": 426
+            },
+            "damage_dealt_inverse_percentage": 1.9394491236057365,
+            "damage_dealt_percentage": 2.4522219663826847,
+            "damage_received": 0,
+            "damage_received_by_type": {
+              "ap": null,
+              "deep_water_torps": null,
+              "fire": null,
+              "flooding": null,
+              "he": null,
+              "he_secondaries": null,
+              "sap": null,
+              "sap_secondaries": null,
+              "torps": null
+            },
+            "damage_received_by_type_full": {},
+            "damage_received_inverse_percentage": 0.0,
+            "damage_received_percentage": 0.0
           }
         },
-        "distance_traveled": 14.87922543598339,
+        "distance_traveled": 56.72639904879033,
         "fires_dealt": 0,
-        "floods_dealt": 0,
-        "hits": 0,
-        "hits_by_type": {},
+        "floods_dealt": 1,
+        "hits": 11,
+        "hits_by_type": {
+          "hits_main_ap": 11,
+          "hits_tpd": 3
+        },
         "hits_details": {
-          "ap": null,
+          "ap": 11,
           "ap_secondaries_manual": null,
           "he": null,
           "he_secondaries": null,
@@ -5494,50 +6024,49 @@
           "sap": null,
           "sap_secondaries": null,
           "sap_secondaries_manual": null,
-          "torps": null
+          "torps": 3
         },
-        "kills": 0,
-        "potential_damage": 49868,
+        "kills": 2,
+        "potential_damage": 242134,
         "potential_damage_details": {
-          "artillery": 25200,
+          "artillery": 224000,
           "planes": 0,
-          "torpedoes": 24668
+          "torpedoes": 18134
         },
-        "raw_xp": 127,
-        "received_damage": 15100,
+        "raw_xp": 169,
+        "received_damage": 1861,
         "received_damage_by_type": {
-          "damage_flood": 38,
-          "damage_main_ap": 954,
-          "damage_main_he": 1188,
-          "damage_tpd_normal": 12920
+          "damage_atba_he": 1346,
+          "damage_main_cs": 515
         },
         "received_damage_details": {
-          "ap": 954,
+          "ap": null,
           "deep_water_torps": null,
           "fire": null,
-          "flooding": 38,
-          "he": 1188,
-          "he_secondaries": null,
-          "sap": null,
+          "flooding": null,
+          "he": null,
+          "he_secondaries": 1346,
+          "sap": 515,
           "sap_secondaries": null,
-          "torps": 12920
+          "torps": null
         },
-        "spotting_damage": 0,
-        "xp": 127
+        "spotting_damage": 940,
+        "xp": 254
       },
-      "ship_class": "Cruiser",
-      "ship_index": "PASC002",
-      "ship_name": "4292786160",
-      "ship_nation": "USA",
-      "ship_tier": 2,
+      "ship_class": "Destroyer",
+      "ship_id": 4269684432,
+      "ship_index": "PJSD024",
+      "ship_name": "4269684432",
+      "ship_nation": "Japan",
+      "ship_tier": 3,
       "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
+        "highest_tier": 1,
+        "num_skills": 1,
+        "num_tier_1_skills": 1,
+        "skill_points": 1
       },
-      "team_id": 1,
-      "time_lived_secs": 275
+      "team_id": 0,
+      "time_lived_secs": null
     },
     {
       "achievements": [],
@@ -5783,6 +6312,7 @@
         "xp": 127
       },
       "ship_class": "Cruiser",
+      "ship_id": 4292786160,
       "ship_index": "PASC002",
       "ship_name": "4292786160",
       "ship_nation": "USA",
@@ -5795,514 +6325,6 @@
       },
       "team_id": 0,
       "time_lived_secs": 151
-    },
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": null,
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PIUH101_C2_HULL_A",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PIUA101_C2_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PIUS101_C2_SUO_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PIUE101_C2_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": -270780757,
-      "display_name": ":Krabbe:",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": null,
-      "is_abuser": false,
-      "is_bot": true,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": ":Krabbe:",
-      "observed_results": {
-        "damage": 1169,
-        "kills": 0
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 1,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 0,
-        "damage": 1168,
-        "damage_by_type": {
-          "damage_atba_he": 653,
-          "damage_main_cs": 515
-        },
-        "damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": 653,
-          "sap": 515,
-          "sap_secondaries": null,
-          "torps": null
-        },
-        "damage_interactions": {
-          "-270780763": {
-            "damage_dealt": 1168,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 653,
-              "sap": 515,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_atba_he": 653,
-              "damage_main_cs": 515
-            },
-            "damage_dealt_inverse_percentage": 12.041237113402062,
-            "damage_dealt_percentage": 100.0,
-            "damage_received": 15500,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 15500
-            },
-            "damage_received_by_type_full": {
-              "damage_tpd_normal": 15500
-            },
-            "damage_received_inverse_percentage": 29.97891805117691,
-            "damage_received_percentage": 100.0
-          }
-        },
-        "distance_traveled": 7.264238659723197,
-        "fires_dealt": 0,
-        "floods_dealt": 0,
-        "hits": 1,
-        "hits_by_type": {
-          "hits_atba_he": 3,
-          "hits_main_cs": 1
-        },
-        "hits_details": {
-          "ap": null,
-          "ap_secondaries_manual": null,
-          "he": null,
-          "he_secondaries": 3,
-          "he_secondaries_manual": null,
-          "sap": 1,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": null
-        },
-        "kills": 0,
-        "potential_damage": 24668,
-        "potential_damage_details": {
-          "artillery": 0,
-          "planes": 0,
-          "torpedoes": 24668
-        },
-        "raw_xp": 42,
-        "received_damage": 15500,
-        "received_damage_by_type": {
-          "damage_tpd_normal": 15500
-        },
-        "received_damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": null,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 15500
-        },
-        "spotting_damage": 0,
-        "xp": 62
-      },
-      "ship_class": "Cruiser",
-      "ship_index": "PISC102",
-      "ship_name": "4187928304",
-      "ship_nation": "Italy",
-      "ship_tier": 2,
-      "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
-      },
-      "team_id": 0,
-      "time_lived_secs": 116
-    },
-    {
-      "achievements": [],
-      "build": {
-        "abilities": [
-          {
-            "game_params_name": "PCY009_CrashCrewPremium",
-            "name": null
-          }
-        ],
-        "captain_skills": null,
-        "loadout": [
-          {
-            "description": null,
-            "game_params_name": "PIUH102_C2_HULL_B",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PIUA101_C2_ART_STOCK",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PIUS102_C2_SUO_TOP",
-            "name": null
-          },
-          {
-            "description": null,
-            "game_params_name": "PIUE101_C2_ENG_STOCK",
-            "name": null
-          }
-        ],
-        "modernization_slots": [
-          null
-        ],
-        "signals": []
-      },
-      "clan": "",
-      "clan_color_rgb": 0,
-      "consumables": [
-        {
-          "charges_used": 0,
-          "description": "",
-          "display_name": "crashCrew",
-          "icon_key": "PCY009_CrashCrewPremium",
-          "total_charges": "Unlimited"
-        }
-      ],
-      "controller_potential_damage": null,
-      "controller_spotting_damage": null,
-      "db_id": -270780766,
-      "display_name": ":Halgan:",
-      "division_id": null,
-      "division_label": null,
-      "heal_count": null,
-      "is_abuser": false,
-      "is_bot": true,
-      "is_self": false,
-      "is_test_ship": false,
-      "name": ":Halgan:",
-      "observed_results": {
-        "damage": 1604,
-        "kills": 0
-      },
-      "personal_rating": null,
-      "realm": "EU",
-      "relation": 2,
-      "ribbons": [],
-      "server_results": {
-        "citadels_dealt": 0,
-        "crits_dealt": 0,
-        "damage": 1604,
-        "damage_by_type": {
-          "damage_atba_he": 1089,
-          "damage_main_cs": 515
-        },
-        "damage_details": {
-          "ap": null,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": 1089,
-          "sap": 515,
-          "sap_secondaries": null,
-          "torps": null
-        },
-        "damage_interactions": {
-          "-270780758": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 346,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 346,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {
-              "damage_atba_he": 346
-            },
-            "damage_received_inverse_percentage": 4.1466922339405565,
-            "damage_received_percentage": 2.0843373493975905
-          },
-          "-270780759": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "505029074": {
-            "damage_dealt": 436,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 436,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_atba_he": 436
-            },
-            "damage_dealt_inverse_percentage": 5.972602739726027,
-            "damage_dealt_percentage": 27.18204488778055,
-            "damage_received": 0,
-            "damage_received_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_received_by_type_full": {},
-            "damage_received_inverse_percentage": 0.0,
-            "damage_received_percentage": 0.0
-          },
-          "513136394": {
-            "damage_dealt": 0,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {},
-            "damage_dealt_inverse_percentage": 0.0,
-            "damage_dealt_percentage": 0.0,
-            "damage_received": 6684,
-            "damage_received_by_type": {
-              "ap": 5292,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 1392
-            },
-            "damage_received_by_type_full": {
-              "damage_main_ap": 5292,
-              "damage_tpd_normal": 1392
-            },
-            "damage_received_inverse_percentage": 6.153336279275298,
-            "damage_received_percentage": 40.265060240963855
-          },
-          "698373469": {
-            "damage_dealt": 1168,
-            "damage_dealt_by_type": {
-              "ap": null,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": 653,
-              "sap": 515,
-              "sap_secondaries": null,
-              "torps": null
-            },
-            "damage_dealt_by_type_full": {
-              "damage_atba_he": 653,
-              "damage_main_cs": 515
-            },
-            "damage_dealt_inverse_percentage": 62.76195593766792,
-            "damage_dealt_percentage": 72.81795511221945,
-            "damage_received": 9570,
-            "damage_received_by_type": {
-              "ap": 1200,
-              "deep_water_torps": null,
-              "fire": null,
-              "flooding": null,
-              "he": null,
-              "he_secondaries": null,
-              "sap": null,
-              "sap_secondaries": null,
-              "torps": 8370
-            },
-            "damage_received_by_type_full": {
-              "damage_main_ap": 1200,
-              "damage_tpd_normal": 8370
-            },
-            "damage_received_inverse_percentage": 55.088648399723695,
-            "damage_received_percentage": 57.65060240963855
-          }
-        },
-        "distance_traveled": 24.80948804672342,
-        "fires_dealt": 0,
-        "floods_dealt": 0,
-        "hits": 1,
-        "hits_by_type": {
-          "hits_atba_he": 5,
-          "hits_main_cs": 1
-        },
-        "hits_details": {
-          "ap": null,
-          "ap_secondaries_manual": null,
-          "he": null,
-          "he_secondaries": 5,
-          "he_secondaries_manual": null,
-          "sap": 1,
-          "sap_secondaries": null,
-          "sap_secondaries_manual": null,
-          "torps": null
-        },
-        "kills": 0,
-        "potential_damage": 238538,
-        "potential_damage_details": {
-          "artillery": 123200,
-          "planes": 0,
-          "torpedoes": 115338
-        },
-        "raw_xp": 116,
-        "received_damage": 16600,
-        "received_damage_by_type": {
-          "damage_atba_he": 346,
-          "damage_main_ap": 6492,
-          "damage_tpd_normal": 9762
-        },
-        "received_damage_details": {
-          "ap": 6492,
-          "deep_water_torps": null,
-          "fire": null,
-          "flooding": null,
-          "he": null,
-          "he_secondaries": 346,
-          "sap": null,
-          "sap_secondaries": null,
-          "torps": 9762
-        },
-        "spotting_damage": 0,
-        "xp": 116
-      },
-      "ship_class": "Cruiser",
-      "ship_index": "PISC102",
-      "ship_name": "4187928304",
-      "ship_nation": "Italy",
-      "ship_tier": 2,
-      "skill_info": {
-        "highest_tier": 0,
-        "num_skills": 0,
-        "num_tier_1_skills": 0,
-        "skill_points": 0
-      },
-      "team_id": 1,
-      "time_lived_secs": 445
     }
   ]
 }

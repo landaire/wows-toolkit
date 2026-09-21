@@ -20,6 +20,7 @@ use wows_replays::analyzer::battle_controller::Player;
 use wows_replays::analyzer::battle_controller::state::ActiveConsumable;
 use wows_replays::analyzer::decoder::DamageStatEntry;
 use wows_replays::types::AccountId;
+use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
@@ -88,6 +89,8 @@ pub struct NormalizedPlayer {
     pub is_bot: bool,
     pub is_abuser: bool,
     pub ship_index: String,
+    /// The ship's `GameParams` id, which the personal rating is looked up by.
+    pub ship_id: GameParamId,
     pub ship_name: String,
     pub ship_nation: String,
     pub ship_class: Species,
@@ -114,6 +117,32 @@ pub struct NormalizedPlayer {
     pub heal_count: Option<u32>,
     pub personal_rating: Option<PersonalRatingResult>,
     pub time_lived_secs: Option<u64>,
+}
+
+impl NormalizedBattleReport {
+    /// Rates every player against `table`, from this battle alone.
+    ///
+    /// Written into the report itself rather than into each front end's rows,
+    /// so the table, the badge and the export all read one value. A player
+    /// already rated, or one whose damage the results never carried, is left
+    /// alone: a rating computed from an unknown damage would be a real number
+    /// standing for nothing.
+    pub fn populate_personal_ratings(&mut self, table: &crate::personal_rating::PersonalRatingData) {
+        let is_win = matches!(self.metadata.resolved_battle_result(), Some(BattleResult::Win(_)));
+
+        for player in &mut self.players {
+            if player.personal_rating.is_some() {
+                continue;
+            }
+            let Some(damage) = player.server_results.as_ref().and_then(|results| results.damage) else {
+                continue;
+            };
+            let frags = player.server_results.as_ref().and_then(|results| results.kills).unwrap_or(0);
+
+            player.personal_rating =
+                crate::personal_rating::rate_single_battle(table, player.ship_id, damage, frags, is_win);
+        }
+    }
 }
 
 impl NormalizedPlayer {
@@ -671,6 +700,7 @@ fn build_player(
         is_bot: state.is_bot(),
         is_abuser: state.is_abuser(),
         ship_index: vehicle_param.index().to_string(),
+        ship_id: vehicle_param.id(),
         ship_name,
         ship_nation: vehicle_param.nation().to_string(),
         ship_class: species,
