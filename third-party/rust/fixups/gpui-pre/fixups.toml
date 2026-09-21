@@ -1,0 +1,3 @@
+# Emits a check-cfg line, and embeds a Windows manifest when the
+# windows-manifest feature is on, which needs rc.exe from host state.
+buildscript.run = false

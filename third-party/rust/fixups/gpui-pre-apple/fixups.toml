@@ -1,0 +1,2 @@
+# Generates shader bindings with cbindgen and compiles Metal shaders. macOS only.
+buildscript.run = false

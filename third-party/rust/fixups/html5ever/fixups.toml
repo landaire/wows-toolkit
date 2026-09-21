@@ -1,0 +1,2 @@
+# Expands the tree builder's match_token macros into OUT_DIR.
+buildscript.run = true

@@ -86,7 +86,7 @@ Under the hood setup runs the platform bootstrap (`scripts/refresh-buck-toolchai
 
 `third-party/rust/vendor/*.crate` is not committed. Every registry crate is pinned by version and SHA-256 in `Cargo.lock`, so `scripts/fetch-buck-deps.py` downloads them and verifies each against the lock. A cold fetch is about 150 MB and takes seconds; after that the build is offline.
 
-Archives that the lock cannot verify are committed instead, because there is nothing to check a download against. Right now that is one git dependency. If you add another, the fetch script fails and names the file to commit.
+Archives that the lock cannot verify are committed instead, because there is nothing to check a download against. Right now that is two git dependencies, `egui-notify` and the five crates of `gpui-kit`. If you add another, the fetch script fails and names the file to commit.
 
 ### Building
 
@@ -97,7 +97,7 @@ buck2 build //:wows_toolkit
 buck2 build -c native_build.mode=release //:wows_toolkit
 ```
 
-Aliases: `wows_toolkit`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`. `buck2 build root//:` builds all of them.
+Aliases: `wows_toolkit`, `wows_toolkit_gpui`, `wowsunpack`, `wows_data_mgr`, `replayshark`, `minimap_renderer`, `minimap_renderer_cpu`, `wgcheck`, `dhat_load`, `profile_replay`, `dhat_parse`. `buck2 build root//:` builds all of them.
 
 The alias is not always the shipped filename. Buck names a binary after its Rust crate, and a crate name cannot contain a hyphen, so `//:wows_data_mgr` ships as `wows-data-mgr` (which is the name Cargo produced, and the name it shipped under before the Buck cutover). `build-support/release-tools.json` holds that mapping and `scripts/package-tools.*` checks the finished archive against it.
 

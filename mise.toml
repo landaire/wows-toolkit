@@ -50,11 +50,12 @@ run = "cargo fmt -- --config unstable_features=true --config imports_granularity
 
 [tasks.test]
 description = "Runs the unit tests through Buck"
-# Two crates are missing here: wows-replays and wows-toolkit use the
-# rust-crypto, insta and egui_kittest dev-dependencies, and reindeer vendors
-# normal dependencies only, so none of those has a target under
-# //third-party/rust. Integration tests under crates/*/tests are not modelled
-# either. `mise run cargo-test` is the complete run.
+# Three crates are missing here: wows-replays and wows-toolkit use the
+# rust-crypto, insta and egui_kittest dev-dependencies, and wows-toolkit-gpui
+# needs gpui-kit's test-support feature. Reindeer vendors normal dependencies
+# only, so none of those has a target under //third-party/rust. Integration
+# tests under crates/*/tests are not modelled either. `mise run cargo-test` is
+# the complete run.
 run = "buck2 test root//crates/..."
 
 [tasks.fix-all]

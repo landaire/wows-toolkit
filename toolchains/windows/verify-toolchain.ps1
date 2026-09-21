@@ -138,6 +138,8 @@ if ($BuckConfigPath) {
         "clang = $(& $tool "clang")"
         "llvm_ar = $(& $tool "llvm_ar")"
         "rc = $(& $tool "rc")"
+        # gpui compiles its DirectX shaders with fxc in a release build.
+        "fxc = $(& $tool "fxc")"
         "cvtres = $cvtres"
         "midl = $(& $tool "midl")"
         "rustc = $(& $tool "rustc")"

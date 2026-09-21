@@ -1,0 +1,3 @@
+# Builds FreeType from C, and probes pkg-config first. Only the X11 side of gpui
+# links it, so it is never in a Windows or macOS graph.
+buildscript.run = false

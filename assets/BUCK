@@ -19,3 +19,17 @@ export_file(
     out = "wows_toolkit.rc",
     visibility = ["PUBLIC"],
 )
+
+export_file(
+    name = "wows_toolkit_gpui_manifest",
+    src = "wows_toolkit_gpui.manifest.xml",
+    out = "wows_toolkit_gpui.manifest.xml",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "wows_toolkit_gpui_rc",
+    src = "wows_toolkit_gpui.rc",
+    out = "wows_toolkit_gpui.rc",
+    visibility = ["PUBLIC"],
+)

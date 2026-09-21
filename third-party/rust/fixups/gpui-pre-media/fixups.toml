@@ -1,0 +1,2 @@
+# bindgen against the macOS SDK, located through xcrun. macOS only.
+buildscript.run = false

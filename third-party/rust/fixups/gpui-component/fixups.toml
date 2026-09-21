@@ -1,0 +1,3 @@
+# Only republishes gpui-kit-assets' icon directory through an environment
+# variable that nothing in the crate reads.
+buildscript.run = false

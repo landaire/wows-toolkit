@@ -1,0 +1,3 @@
+# Regenerates the parser from the XIM schema under the bootstrap feature, which
+# is off, and writes into the source tree rather than OUT_DIR.
+buildscript.run = false

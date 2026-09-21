@@ -38,3 +38,26 @@ workspace_test(
         "//third-party/rust:winnow",
     ],
 )
+
+# ZoneGuard and NowGuard, for the tests of crates that assert on this crate's
+# date printing. Separate from the shipping library so the guards stay out of
+# the application binaries.
+workspace_library(
+    name = "wows_toolkit_config_test_support",
+    crate = "wows_toolkit_config",
+    package = "wows-toolkit-config",
+    version = "0.1.0",
+    features = ["test-support"],
+    deps = [
+        "//crates/wows-core:wows_core",
+        "//third-party/rust:home",
+        "//third-party/rust:jiff",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+        "//third-party/rust:sqlx",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tokio",
+        "//third-party/rust:tracing",
+        "//third-party/rust:winnow",
+    ],
+)
