@@ -88,6 +88,16 @@ fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
     cx.open_window(size(px(1200.), px(800.)), App::new)
 }
 
+/// The same, tall enough that a whole scrolling tab is in one frame.
+///
+/// The harness refuses to click what is below the fold, so a test that drives
+/// a control near the bottom of the settings tab opens the window this way
+/// rather than scrolling to it.
+fn open_tall_app(cx: &mut TestAppContext) -> WindowHandle<App> {
+    cx.update(gpui_kit::init);
+    cx.open_window(size(px(1200.), px(2000.)), App::new)
+}
+
 /// Opens the root view inside a `Root`, the way `main.rs` does.
 ///
 /// `open_app` mounts the view bare, which is enough for anything that only
@@ -948,7 +958,7 @@ fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
 /// account it belongs to, or which part of the paste was wrong.
 #[gpui_kit::test]
 fn a_pasted_twitch_credential_is_read_or_reported(cx: &mut TestAppContext) {
-    let window = open_app(cx);
+    let window = open_tall_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
         .expect("the test window stays open");
