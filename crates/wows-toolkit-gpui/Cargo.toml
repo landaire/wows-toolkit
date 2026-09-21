@@ -41,9 +41,12 @@ wows-replay-insights = { path = "../wows-replay-insights", default-features = fa
 wows-battle-world = { path = "../wows-battle-world", default-features = false }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
-# Refreshing the personal-rating expected values, the one network fetch this
-# crate makes. Matches the egui app's feature set so both resolve one copy.
+# The personal-rating refresh and the live match-stats lookup, the two network
+# fetches this crate makes. Matches the egui app's feature set so both resolve
+# one copy.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
+# CBOR is what the match-stats service speaks.
+ciborium = "0.2"
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # The recent-games input accepts digits only, which NumberInput takes as a
 # pattern.
