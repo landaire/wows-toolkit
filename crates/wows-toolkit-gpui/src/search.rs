@@ -6,6 +6,7 @@
 //! is the rendering and the wiring.
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
@@ -30,6 +31,15 @@ use wows_toolkit_config::index::rows::MatchOutcome;
 
 use crate::runtime;
 use crate::ui::selectable;
+
+/// Raised for the app to act on.
+#[derive(Clone, Debug)]
+pub enum SearchEvent {
+    /// Open this replay in the Replay Inspector.
+    OpenReplay(std::path::PathBuf),
+}
+
+impl EventEmitter<SearchEvent> for SearchView {}
 
 /// Results asked for per run. The egui table pages the same way rather than
 /// pulling an unbounded set into memory.
@@ -188,6 +198,40 @@ fn outcome_label(outcome: MatchOutcome) -> &'static str {
 
 /// What a hit shows in `column`. An absent value reads as a dash rather than
 /// a zero, which would sort and scan as a real result.
+/// One result's actions: open the replay in the inspector, and copy its
+/// path. A replay the index knows about but that is no longer on disk cannot
+/// be opened, and says so rather than failing on click.
+fn row_actions(ix: usize, hit: &MatchHit, search: Entity<SearchView>) -> AnyElement {
+    let path = hit.replay_path.clone();
+    let exists = path.exists();
+    let open_path = path.clone();
+    let copy_path = path.clone();
+
+    h_flex()
+        .flex_none()
+        .gap_1()
+        .items_center()
+        .child(
+            Button::new(("search-open", ix))
+                .icon(IconName::FolderOpen)
+                .compact()
+                .disabled(!exists)
+                .tooltip(if exists { "Open this replay" } else { "This replay is no longer on disk" })
+                .on_click(move |_event, _window, cx: &mut App| {
+                    let open_path = open_path.clone();
+                    search.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(open_path)));
+                }),
+        )
+        .child(
+            Button::new(("search-copy", ix)).icon(IconName::Copy).compact().tooltip("Copy the replay path").on_click(
+                move |_event, _window, cx: &mut App| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
+                },
+            ),
+        )
+        .into_any_element()
+}
+
 fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
     match column {
         SortColumn::Date => hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string(),
@@ -246,6 +290,7 @@ impl Render for SearchView {
             );
 
         let hits = self.hits.clone();
+        let entity = cx.entity();
         let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| {
             let Some(hit) = hits.get(ix) else {
                 return div().into_any_element();
@@ -261,6 +306,7 @@ impl Render for SearchView {
                 .children(
                     SortColumn::ALL.map(|column| div().w(column_width(column)).text_sm().child(cell_text(hit, column))),
                 )
+                .child(row_actions(ix, hit, entity.clone()))
                 .into_any_element()
         };
 

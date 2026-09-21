@@ -19,6 +19,7 @@ use crate::armor_viewer::ArmorViewerPane;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::ReplayInspectorView;
+use crate::search::SearchEvent;
 use crate::search::SearchView;
 use crate::settings::{DEFAULT_ZOOM, GpuiSettings, MAX_ZOOM, MIN_ZOOM};
 use crate::settings_store;
@@ -152,6 +153,7 @@ impl App {
             this.poll_armor_game_data(cx);
         });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
+        let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
 
         Self {
@@ -171,7 +173,7 @@ impl App {
             wows_dir_input,
             proxy_input,
             settings_scroll: ScrollHandle::new(),
-            _subscriptions: vec![subscription, wows_dir_edited, proxy_edited],
+            _subscriptions: vec![subscription, wows_dir_edited, proxy_edited, search_event],
         }
     }
 
@@ -319,6 +321,31 @@ impl App {
                     cx.notify();
                 },
             )))
+    }
+
+    /// Opens a search result in the Replay Inspector and shows that tab, so
+    /// the replay the user asked for is what they are looking at.
+    fn on_search_event(
+        &mut self,
+        _search: &Entity<SearchView>,
+        event: &SearchEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let SearchEvent::OpenReplay(path) = event;
+        self.open_replay_from_search(path.clone(), window, cx);
+    }
+
+    /// Opens `path` in the Replay Inspector and brings that tab forward.
+    pub(crate) fn open_replay_from_search(
+        &mut self,
+        path: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.replay_inspector.update(cx, |view, cx| view.open_replay(path, window, cx));
+        self.active_tab = AppTab::ReplayInspector;
+        cx.notify();
     }
 
     fn on_wows_dir_edited(
