@@ -848,7 +848,8 @@ impl UiReport {
         // normalized.players is built positionally from report.players() (plain
         // .map(), no filter/reorder), so zip it against `players` instead of
         // joining on db_id, which is not unique (bots are all AccountId(0)).
-        let player_reports: Vec<PlayerReport> = crate::timed_stage!("player_reports", players
+        let player_reports: Vec<PlayerReport> =
+            crate::timed_stage!("player_reports", players
             .iter()
             .zip(normalized.players.iter())
             .map(|(player, np)| {
@@ -940,79 +941,54 @@ impl UiReport {
                         None => (None, None, None, None),
                     };
 
-                // Spotting: prefer server scouting_damage, fall back to the self
-                // player's controller total. Hover is always the controller breakdown.
-                let (spotting_damage, spotting_damage_text, spotting_damage_hover_text) = if let Some(damage_number) =
-                    server.and_then(|sr| sr.spotting_damage)
-                {
-                    let hover = if np.is_self {
-                        build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale)
-                    } else {
-                        None
-                    };
-                    (Some(damage_number), Some(separate_number(damage_number, Some(locale))), hover)
-                } else if np.is_self {
-                    match np.controller_spotting_damage {
-                        Some(total) => (
-                            Some(total),
-                            Some(separate_number(total, Some(locale))),
-                            build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale),
-                        ),
-                        None => (None, None, None),
-                    }
-                } else {
-                    (None, None, None)
-                };
+                let spotting_damage = np.spotting_damage();
+                let spotting_damage_text = spotting_damage.map(|damage| separate_number(damage, Some(locale)));
+                // The breakdown comes from the controller, which only tracks
+                // the recording player.
+                let spotting_damage_hover_text = (spotting_damage.is_some() && np.is_self)
+                    .then(|| build_damage_stat_hover_text(report.self_damage_stats(), DamageStatCategory::Spot, locale))
+                    .flatten();
 
-                let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
-                    match server {
-                        Some(sr) => {
-                            let total = sr.potential_damage;
-                            let art = sr.potential_damage_details.artillery;
-                            let tpd = sr.potential_damage_details.torpedoes;
-                            let air = sr.potential_damage_details.planes;
-                            // Depth-charge agro is the only potential key the 3-field
-                            // report drops; recover it from the total so the hover keeps
-                            // its line (total == art + tpd + air + dbomb by construction).
-                            let dbomb = total.saturating_sub(art + tpd + air);
-                            let hover =
-                                RichText::new(breakdown_hover_string(&POTENTIAL_DAMAGE_DESCRIPTIONS, locale, |key| {
-                                    match key {
-                                        "agro_art" => art,
-                                        "agro_tpd" => tpd,
-                                        "agro_air" => air,
-                                        "agro_dbomb" => dbomb,
-                                        _ => 0,
-                                    }
-                                }))
-                                .font(FontId::monospace(12.0));
-                            (
-                                Some(total),
-                                Some(separate_number(total, Some(locale))),
-                                Some(hover),
-                                Some(sr.potential_damage_details.clone()),
-                            )
-                        }
-                        None => {
-                            if np.is_self {
-                                match np.controller_potential_damage {
-                                    Some(total) => (
-                                        Some(total),
-                                        Some(separate_number(total, Some(locale))),
-                                        build_damage_stat_hover_text(
-                                            report.self_damage_stats(),
-                                            DamageStatCategory::Agro,
-                                            locale,
-                                        ),
-                                        None,
-                                    ),
-                                    None => (None, None, None, None),
+                let potential_damage = np.potential_damage();
+                let potential_damage_text = potential_damage.map(|total| separate_number(total, Some(locale)));
+                // Only the results object carries a breakdown; the controller
+                // total the recording player falls back to has its own hover.
+                let (potential_damage_hover_text, potential_damage_report) = match server {
+                    Some(sr) => {
+                        let total = sr.potential_damage;
+                        let art = sr.potential_damage_details.artillery;
+                        let tpd = sr.potential_damage_details.torpedoes;
+                        let air = sr.potential_damage_details.planes;
+                        // Depth-charge agro is the only potential key the 3-field
+                        // report drops; recover it from the total so the hover keeps
+                        // its line (total == art + tpd + air + dbomb by construction).
+                        let dbomb = total.saturating_sub(art + tpd + air);
+                        let hover =
+                            RichText::new(breakdown_hover_string(&POTENTIAL_DAMAGE_DESCRIPTIONS, locale, |key| {
+                                match key {
+                                    "agro_art" => art,
+                                    "agro_tpd" => tpd,
+                                    "agro_air" => air,
+                                    "agro_dbomb" => dbomb,
+                                    _ => 0,
                                 }
-                            } else {
-                                (None, None, None, None)
-                            }
-                        }
-                    };
+                            }))
+                            .font(FontId::monospace(12.0));
+                        (Some(hover), Some(sr.potential_damage_details.clone()))
+                    }
+                    None => {
+                        let hover = (potential_damage.is_some() && np.is_self)
+                            .then(|| {
+                                build_damage_stat_hover_text(
+                                    report.self_damage_stats(),
+                                    DamageStatCategory::Agro,
+                                    locale,
+                                )
+                            })
+                            .flatten();
+                        (hover, None)
+                    }
+                };
 
                 let time_lived_secs = np.time_lived_secs;
                 let time_lived_text = time_lived_secs.map(|secs| format!("{}:{:02}", secs / 60, secs % 60));
