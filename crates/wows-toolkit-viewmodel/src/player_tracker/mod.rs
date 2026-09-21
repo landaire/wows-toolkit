@@ -6,6 +6,31 @@
 
 pub mod clans;
 pub mod live;
+
+/// How loudly a number of encounters reads.
+///
+/// Meeting someone twice is worth a glance, four times worth a colour, six
+/// times worth the colour a loss is drawn in. The bands are the egui
+/// tracker's (`ui/player_tracker/model.rs`'s `encounter_severity_color`);
+/// which tone each band resolves to is the front end's own, since the two
+/// draw on different surfaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EncounterSeverity {
+    /// Once or never: nothing worth marking.
+    None,
+    Noted,
+    Warned,
+    Heavy,
+}
+
+pub fn encounter_severity(times_in_range: usize) -> EncounterSeverity {
+    match times_in_range {
+        0..=1 => EncounterSeverity::None,
+        2..=3 => EncounterSeverity::Noted,
+        4..=5 => EncounterSeverity::Warned,
+        _ => EncounterSeverity::Heavy,
+    }
+}
 pub mod tracked;
 
 use jiff::Timestamp;
