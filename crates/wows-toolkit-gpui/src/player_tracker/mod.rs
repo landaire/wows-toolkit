@@ -49,7 +49,7 @@ use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wows_toolkit_viewmodel::player_tracker::live::LiveRosterRow;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::ResolvedRoster;
-use wows_toolkit_viewmodel::player_tracker::live::build_name_index;
+use wows_toolkit_viewmodel::player_tracker::live::TrackedIndex;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::visible_players;
 
@@ -163,9 +163,9 @@ pub struct PlayerTrackerView {
     /// Everyone the index returned for the current period, unfiltered. The
     /// filter and sort are applied per render over this.
     players: Vec<PlayerFacet>,
-    /// Everyone the index has ever seen, for the live roster's "met before"
-    /// join. Loaded once: it must not follow the period selector.
-    all_time_players: Vec<PlayerFacet>,
+    /// Which of the battle's players the index has met before, keyed by
+    /// lower-cased name. Looked up per battle, all-time.
+    met_before: HashMap<String, AccountId>,
     state: LoadState,
     /// Bumped per query so a slower earlier period cannot overwrite a later.
     generation: u64,
@@ -200,7 +200,7 @@ impl PlayerTrackerView {
             filter_text: String::new(),
             filter_input,
             players: Vec::new(),
-            all_time_players: Vec::new(),
+            met_before: HashMap::new(),
             state: LoadState::Idle,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
@@ -211,24 +211,31 @@ impl PlayerTrackerView {
 
     /// Queries the index for the current period. Called once the config
     /// database is open, and again whenever the period changes.
-    /// Loads every account the index has ever seen, for the live roster's
-    /// "met before" column. Runs once per session: the set only grows, and a
-    /// player met for the first time this battle was not "met before" anyway.
-    fn load_all_time_players(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
-        if !self.all_time_players.is_empty() {
-            return;
-        }
+    /// Looks up which of this battle's players the index has met before.
+    ///
+    /// Asks about the two dozen names in hand rather than reading every
+    /// account the index holds: the answer is a boolean per row, and the
+    /// whole-index read is hundreds of thousands of rows on an established
+    /// install. All-time by design, so the column does not follow the period
+    /// selector the way the tables above it do.
+    fn look_up_met_before(&mut self, cx: &mut Context<Self>) {
+        let Some(live) = self.live_match.as_ref() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
 
-        let filter = TimePeriod::AllTime.match_filter(Timestamp::now());
+        let started_at = live.started_at;
+        let names: Vec<String> = live.players.iter().map(|player| player.name.clone()).collect();
         cx.spawn(async move |this, cx| {
-            let found = runtime::spawn(cx, async move { query::distinct_players(&pool, &filter).await }).await;
+            let found = runtime::spawn(cx, async move { query::accounts_named(&pool, &names).await }).await;
             let _ = this.update(cx, |this, cx| {
+                if this.live_started_at() != Some(started_at) {
+                    return;
+                }
                 match found {
-                    Ok(Ok(players)) => this.all_time_players = players,
+                    Ok(Ok(accounts)) => this.met_before = accounts,
                     // The roster still lists everyone; only "met before"
                     // stays empty.
-                    Ok(Err(err)) => tracing::warn!("player tracker: the all-time join did not load: {err}"),
-                    Err(err) => tracing::warn!("player tracker: the all-time join did not complete: {err}"),
+                    Ok(Err(err)) => tracing::warn!("player tracker: the met-before lookup failed: {err}"),
+                    Err(err) => tracing::warn!("player tracker: the met-before lookup did not complete: {err}"),
                 }
                 cx.notify();
             });
@@ -240,7 +247,6 @@ impl PlayerTrackerView {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.state = LoadState::Loading;
-        self.load_all_time_players(pool.clone(), cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -299,14 +305,9 @@ impl PlayerTrackerView {
     /// caching it would need invalidating on every one of the four inputs.
     fn live_roster(&self) -> Option<ResolvedRoster> {
         let live = self.live_match.as_ref()?;
-        // Every account ever indexed, not the period in view: "met before"
-        // must not change when the period selector does. The index carries
-        // only the name each account currently goes by, so a rename misses.
-        let name_index = build_name_index(
-            self.all_time_players.len(),
-            std::iter::empty(),
-            self.all_time_players.iter().map(|player| (player.account_id, player.latest_name.as_str())),
-        );
+        // The lookup is already keyed by lower-cased name and scoped to this
+        // battle, which is the shape the index takes.
+        let name_index = TrackedIndex { by_name: self.met_before.clone(), players: self.met_before.len() };
         Some(resolve_roster(
             live,
             &name_index,
@@ -352,6 +353,8 @@ impl PlayerTrackerView {
         // battle's must not show under it.
         self.clear_live_match_data();
         cx.notify();
+
+        self.look_up_met_before(cx);
 
         let (Some(started_at), Some(build)) = (started_at, build) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
@@ -400,6 +403,7 @@ impl PlayerTrackerView {
     /// Drops everything that belonged to the previous battle, and stops its
     /// scan if one was still running.
     fn clear_live_match_data(&mut self) {
+        self.met_before.clear();
         self.live_identities = None;
         self.stats = StatsState::Idle;
         self._live_scan = None;
