@@ -40,6 +40,7 @@ use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::ReplayInspectorView;
+use crate::replay_inspector::view::ReplaySettingsChanged;
 use crate::search::SearchEvent;
 use crate::search::SearchView;
 use crate::settings::DEFAULT_ZOOM;
@@ -288,6 +289,13 @@ impl App {
         let subscription = cx.observe_in(&replay_inspector, window, |this, _replay_inspector, window, cx| {
             this.poll_armor_game_data(window, cx);
         });
+        // A column toggle or the listing's collapse is a preference, so the
+        // tab says when one changed and the row is written here.
+        let replay_settings_changed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
+            let ReplaySettingsChanged(settings) = event;
+            let settings = settings.clone();
+            this.edit_replay_settings(cx, move |replay| *replay = settings);
+        });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
@@ -325,7 +333,14 @@ impl App {
             language_select,
             wows_dir_invalid: false,
             settings_scroll: ScrollHandle::new(),
-            _subscriptions: vec![subscription, wows_dir_edited, proxy_edited, search_event, language_chosen],
+            _subscriptions: vec![
+                subscription,
+                replay_settings_changed,
+                wows_dir_edited,
+                proxy_edited,
+                search_event,
+                language_chosen,
+            ],
         }
     }
 
