@@ -11,6 +11,8 @@ pub mod drawing;
 #[cfg(feature = "rendering")]
 pub mod encoder;
 pub mod error;
+#[cfg(feature = "rendering")]
+pub mod frame_track;
 pub mod map_data;
 pub mod panel_math;
 #[cfg(feature = "rendering")]

@@ -1023,3 +1023,39 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
     })
     .expect("the test window stays open");
 }
+
+/// Hovering a result row starts its preview only once the pointer has
+/// settled, and leaving the row abandons it. The dwell rule is the egui
+/// app's, so a preview appears after the same wait in both.
+#[gpui_kit::test]
+fn a_result_row_previews_only_after_the_pointer_settles(cx: &mut TestAppContext) {
+    use std::path::PathBuf;
+    use std::time::Duration;
+    use wows_toolkit_viewmodel::preview_dwell::DWELL;
+
+    let window = open_app(cx);
+
+    window
+        .update(cx, |app, _window, cx| {
+            app.search().update(cx, |search, cx| {
+                let row = PathBuf::from("does-not-exist.wowsreplay");
+
+                // Crossing the row is not dwelling on it.
+                search.hover_row(row.clone(), Duration::from_millis(50), cx);
+                assert!(search.is_dwelling(), "the row is being watched");
+                assert_eq!(search.preview_frame_count(), None, "but nothing is baked yet");
+
+                // Settling on it asks for a preview. No game data is loaded
+                // here, so the bake finds no build and produces nothing --
+                // which is the point: the row must not be left showing a
+                // stale preview from elsewhere.
+                search.hover_row(row, DWELL, cx);
+                assert_eq!(search.preview_frame_count(), None);
+
+                search.leave_rows(cx);
+                assert!(!search.is_dwelling(), "leaving stops the dwell");
+                assert_eq!(search.preview_frame_count(), None);
+            });
+        })
+        .expect("the test window stays open");
+}

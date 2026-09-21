@@ -238,6 +238,13 @@ impl App {
         &self.replay_inspector
     }
 
+    /// The Search tab, so its hover and preview behaviour can be asserted
+    /// without reaching through the rendered frame. Test-only.
+    #[cfg(test)]
+    pub(crate) fn search(&self) -> &Entity<SearchView> {
+        &self.search
+    }
+
     /// Starts the Player Tracker's first index query, once the config
     /// database is open.
     pub fn start_player_tracker(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {

@@ -51,8 +51,8 @@ impl PreviewRenderer {
     /// `version` selects the asset layout, which moved between builds; the
     /// loaders fall back on their own when it is absent.
     pub fn new(vfs: &VfsPath, version: Option<&Version>, map_name: &str) -> Result<Self, PreviewRenderError> {
-        let map_image =
-            assets::load_map_image(map_name, vfs).ok_or_else(|| PreviewRenderError::NoMapArt { map: map_name.to_string() })?;
+        let map_image = assets::load_map_image(map_name, vfs)
+            .ok_or_else(|| PreviewRenderError::NoMapArt { map: map_name.to_string() })?;
 
         let target = ImageTarget::new(
             Some(map_image),
