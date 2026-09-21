@@ -13,6 +13,7 @@ use std::sync::Arc;
 use wows_replays::types::GameParamId;
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Selectable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::BasePanel;
@@ -37,6 +38,12 @@ use crate::icons;
 const LABEL_COLUMN_WIDTH: Pixels = px(140.);
 const CELL_COLUMN_WIDTH: Pixels = px(110.);
 const COPY_MENU_WIDTH: Pixels = px(180.);
+
+/// What the panel asks the tab to do; the tab owns the session, so it is the
+/// one that forgets a ship's games.
+pub enum ShipsPanelEvent {
+    ClearShip(GameParamId),
+}
 
 /// One ship's section, built once per filter change rather than per frame.
 ///
@@ -69,6 +76,9 @@ pub struct StatsShipsPanel {
     /// Ships whose table is open, so the set survives a filter change that
     /// reorders or drops ships.
     expanded: HashSet<GameParamId>,
+    /// The ship whose clear button has been pressed once and is waiting to be
+    /// confirmed.
+    clear_armed: Option<GameParamId>,
     /// The games the filter bar selected, kept so the sections can be rebuilt
     /// when the expected-values table arrives after them.
     games: Vec<PerGameStat>,
@@ -78,17 +88,31 @@ pub struct StatsShipsPanel {
 }
 
 impl EventEmitter<PanelEvent> for StatsShipsPanel {}
+impl EventEmitter<ShipsPanelEvent> for StatsShipsPanel {}
 
 impl StatsShipsPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             sections: Vec::new(),
             expanded: HashSet::new(),
+            clear_armed: None,
             games: Vec::new(),
             personal_rating: None,
             scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
         }
+    }
+
+    /// Asks the tab to forget `ship`'s games, once the button has been pressed
+    /// twice or once with ctrl held.
+    fn clear_ship(&mut self, ship: GameParamId, skip_confirmation: bool, cx: &mut Context<Self>) {
+        if !skip_confirmation && self.clear_armed != Some(ship) {
+            self.clear_armed = Some(ship);
+            cx.notify();
+            return;
+        }
+        self.clear_armed = None;
+        cx.emit(ShipsPanelEvent::ClearShip(ship));
     }
 
     /// The expected-values table can arrive after the session, so the
@@ -248,7 +272,27 @@ impl Render for StatsShipsPanel {
                             panel.update(cx, |this, cx| this.toggle(ship_id, cx));
                         }),
                 )
-                .child(copy_menu(section));
+                .child(copy_menu(section))
+                // Two presses, or one with ctrl held, matching what the egui
+                // section's trash button does with the same modifier.
+                .child({
+                    let armed = self.clear_armed == Some(ship_id);
+                    let panel = entity.clone();
+                    Button::new(SharedString::from(format!("ship-clear-{ship_id}")))
+                        .child(icons::icon(icons::ERASER))
+                        .ghost()
+                        .compact()
+                        .selected(armed)
+                        .tooltip(if armed {
+                            "Press again to forget this ship's games"
+                        } else {
+                            "Forget this ship's games (ctrl+click to skip the confirmation)"
+                        })
+                        .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
+                            let skip_confirmation = event.modifiers().secondary();
+                            panel.update(cx, |this, cx| this.clear_ship(ship_id, skip_confirmation, cx));
+                        })
+                });
 
             let table = open.then(|| {
                 let heading = h_flex().w_full().gap_2().px_2().py_1().child(div().w(LABEL_COLUMN_WIDTH)).children(

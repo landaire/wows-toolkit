@@ -344,6 +344,12 @@ pub struct PlayerTable {
     /// The row a ctrl+click picked out, if any. One at a time, as in the egui
     /// table.
     selected: Option<AccountId>,
+    /// Whether alt is down, which turns the damage breakdown's percentages
+    /// around: how much of the other player's total this was, rather than how
+    /// much of this row's. The egui table reads the modifier per frame
+    /// (`mod.rs`'s `alt_held`); here a change notifies and the next render
+    /// picks it up.
+    alt_held: bool,
     /// Content-fit width per column, indexed by `ReplayColumn as usize`.
     /// Recomputed by `measure_column_widths` whenever `widths_dirty` is set;
     /// `render` is the only reader/writer of that flag, since computing a
@@ -403,6 +409,7 @@ impl PlayerTable {
             debug,
             expanded: HashSet::new(),
             selected: None,
+            alt_held: false,
             column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
             widths_dirty: true,
         }
@@ -877,7 +884,8 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
     if !layout.is_expanded {
         return collapsed;
     }
-    match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, cx) {
+    match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held, cx)
+    {
         Some(detail) => v_flex()
             .w(layout.column_widths[col as usize])
             .flex_none()
@@ -910,6 +918,7 @@ struct RowLayout<'a> {
     entity: Entity<PlayerTable>,
     is_expanded: bool,
     selected: bool,
+    alt_held: bool,
     all_rows: &'a [PlayerRow],
 }
 
@@ -1030,6 +1039,7 @@ impl Render for PlayerTable {
                 entity: entity.clone(),
                 is_expanded,
                 selected,
+                alt_held: table.alt_held,
                 all_rows: &table.model.rows,
             };
             render_row(ix, row, &layout, hover_bg, cx)
@@ -1038,6 +1048,13 @@ impl Render for PlayerTable {
         div()
             .size_full()
             .relative()
+            .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _window, cx| {
+                if this.alt_held == event.modifiers.alt {
+                    return;
+                }
+                this.alt_held = event.modifiers.alt;
+                cx.notify();
+            }))
             .child(v_flex().size_full().child(header).child(list(self.list_state.clone(), render_item).flex_1()))
             .child(Scrollbar::vertical(&self.list_state))
     }
