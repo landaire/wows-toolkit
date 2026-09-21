@@ -10,6 +10,7 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use gpui_kit::RenderImage;
 use image::RgbImage;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
@@ -118,9 +119,21 @@ pub fn bake(
     Ok(PreviewFrames::render(&mut renderer, &sink.finish()))
 }
 
+/// The edge length a preview's frames are rasterised and drawn at.
+///
+/// The renderer composes at the minimap's own resolution; a preview is shown
+/// far smaller than that, and keeping a whole track at full size is both the
+/// memory and the decode cost that makes the playback stutter.
+pub const PREVIEW_PX: u32 = 384;
+
 /// A rendered preview: every frame as an image gpui can draw.
+///
+/// Decoded, not encoded: a `gpui::Image` carries compressed bytes that gpui
+/// decodes when it paints and caches by id, and a track is far more frames
+/// than that cache holds, so every frame of the loop would decode again --
+/// and paint nothing until it finished.
 pub struct PreviewFrames {
-    frames: Vec<Arc<gpui_kit::Image>>,
+    frames: Vec<Arc<RenderImage>>,
 }
 
 impl PreviewFrames {
@@ -130,7 +143,7 @@ impl PreviewFrames {
     /// few, and re-rasterising on every frame of the *UI* would redraw the
     /// whole map for each one.
     pub fn render(renderer: &mut PreviewRenderer, track: &[Vec<DrawCommand>]) -> Self {
-        let frames = track.iter().map(|commands| Arc::new(to_image(renderer.render(commands)))).collect();
+        let frames = track.iter().map(|commands| to_image(renderer.render(commands))).collect();
         Self { frames }
     }
 
@@ -142,11 +155,16 @@ impl PreviewFrames {
         self.frames.len()
     }
 
+    /// Every frame, for a caller releasing the track's textures.
+    pub fn images(self) -> Vec<Arc<RenderImage>> {
+        self.frames
+    }
+
     /// The frame to show `elapsed` into the preview, looping.
     ///
     /// `None` only when there are no frames at all, which is a track that
     /// baked nothing.
-    pub fn at(&self, elapsed: std::time::Duration) -> Option<Arc<gpui_kit::Image>> {
+    pub fn at(&self, elapsed: std::time::Duration) -> Option<Arc<RenderImage>> {
         if self.frames.is_empty() {
             return None;
         }
@@ -155,31 +173,20 @@ impl PreviewFrames {
     }
 }
 
-/// An RGB frame as a gpui image.
+/// An RGB frame as an image gpui can paint straight from.
 ///
-/// gpui draws RGBA, so the alpha channel is added here; the renderer composes
-/// every frame over opaque map art, so it is fully opaque by construction.
-fn to_image(frame: RgbImage) -> gpui_kit::Image {
-    let (width, height) = frame.dimensions();
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+/// Scaled to the size it is drawn at, then handed over as BGRA, which is the
+/// layout `RenderImage` stores. The renderer composes every frame over opaque
+/// map art, so the alpha channel added here is fully opaque by construction.
+fn to_image(frame: RgbImage) -> Arc<RenderImage> {
+    let frame = image::imageops::resize(&frame, PREVIEW_PX, PREVIEW_PX, image::imageops::FilterType::Triangle);
+    let mut bgra = Vec::with_capacity((PREVIEW_PX * PREVIEW_PX * 4) as usize);
     for pixel in frame.pixels() {
-        rgba.extend_from_slice(&[pixel[0], pixel[1], pixel[2], 255]);
+        bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
     }
-    gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, encode_png(width, height, &rgba))
-}
-
-/// gpui takes encoded image bytes, so the raw frame is wrapped in a PNG.
-///
-/// Lossless and cheap at preview sizes; the alternative is an uncompressed
-/// surface type this crate would have to keep in step with gpui's own.
-fn encode_png(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
-    let mut out = Vec::new();
-    let encoder = image::codecs::png::PngEncoder::new(std::io::Cursor::new(&mut out));
-    // The buffer was built from the frame's own dimensions, so the only way
-    // this fails is an allocation failure, which is not something a preview
-    // can do anything about.
-    let _ = image::ImageEncoder::write_image(encoder, rgba, width, height, image::ExtendedColorType::Rgba8);
-    out
+    let buffer = image::RgbaImage::from_raw(PREVIEW_PX, PREVIEW_PX, bgra)
+        .expect("the buffer is four bytes per pixel of the size it was built at");
+    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
 }
 
 #[cfg(test)]
@@ -191,13 +198,34 @@ mod tests {
 
     fn frames(count: usize) -> PreviewFrames {
         // The images themselves are irrelevant to the timing rule; a one
-        // pixel PNG stands in for a rendered frame.
-        let pixel = super::encode_png(1, 1, &[0, 0, 0, 255]);
+        // pixel frame stands in for a rendered one.
         PreviewFrames {
             frames: (0..count)
-                .map(|_| Arc::new(gpui_kit::Image::from_bytes(gpui_kit::ImageFormat::Png, pixel.clone())))
+                .map(|_| {
+                    let buffer = image::RgbaImage::from_raw(1, 1, vec![0, 0, 0, 255]).expect("one pixel");
+                    Arc::new(gpui_kit::RenderImage::new(vec![image::Frame::new(buffer)]))
+                })
                 .collect(),
         }
+    }
+
+    /// A frame is handed over decoded and at the size it is drawn: gpui
+    /// decodes an encoded image when it paints and caches it by id, and a
+    /// track holds more frames than that cache does, so an encoded track
+    /// would decode a frame afresh on every pass of the loop.
+    #[test]
+    fn a_frame_is_scaled_to_the_drawn_size_and_stored_as_pixels() {
+        let rendered = image::RgbImage::from_pixel(super::PREVIEW_PX * 2, super::PREVIEW_PX * 2, image::Rgb([9, 9, 9]));
+
+        let image = super::to_image(rendered);
+
+        let size = image.size(0);
+        assert_eq!((size.width.0 as u32, size.height.0 as u32), (super::PREVIEW_PX, super::PREVIEW_PX));
+        assert_eq!(
+            image.as_bytes(0).expect("frame 0").len(),
+            (super::PREVIEW_PX * super::PREVIEW_PX * 4) as usize,
+            "four bytes per pixel, ready to upload"
+        );
     }
 
     #[test]
