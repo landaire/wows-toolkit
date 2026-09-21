@@ -122,8 +122,12 @@ kept so the next audit does not re-report them.
 - [done] Chat now copies its whole transcript and saves it to a file.
 - [done] A row's words are the preview popup's own caption, which goes up as
   soon as the row is hovered rather than waiting for a map.
-- The listing panel cannot be collapsed, and its width is fixed rather than
-  fitted to the widest row.
+- [done] The listing collapses and expands from a caret rail beside it, and
+  the state is kept in the `listing_collapsed` field the shared replay
+  settings row already declares. Its width was already draggable; it is still
+  not fitted to the widest row.
+- [done] A column toggle made in the header is written back to that row too.
+  It used to change only the tab's own copy, so it was lost on restart.
 - [done] Tree expansion and selection survive a rebuild.
 - [done] A dock holding several replays drew no tab bar, so only the last one
   opened was reachable; every dock is skinned now.

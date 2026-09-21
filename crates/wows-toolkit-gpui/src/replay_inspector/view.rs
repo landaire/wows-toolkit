@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
@@ -30,6 +31,7 @@ use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::select::SelectEvent;
 use gpui_kit::component::select::SelectState;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -148,6 +150,12 @@ pub struct InspectorSettings {
     /// The locale the listing's figures are grouped in.
     pub locale: Option<String>,
 }
+
+/// A replay setting this tab owns was changed here, so the app writes the
+/// row back. Carries the whole blob because that is how it is stored.
+pub struct ReplaySettingsChanged(pub ReplaySettings);
+
+impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 
 impl ReplayInspectorView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -426,6 +434,14 @@ impl ReplayInspectorView {
     ///
     /// The only writer, so the combo mirror cannot drift from the browser: a
     /// caller that reaches the browser directly would desync the two.
+    /// Shows or hides the replay listing beside the open replays.
+    fn set_listing_collapsed(&mut self, collapsed: bool, cx: &mut Context<Self>) {
+        if self.replay_settings.listing_collapsed == collapsed {
+            return;
+        }
+        self.set_column_filter(|settings| settings.listing_collapsed = collapsed, cx);
+    }
+
     fn set_grouping(&mut self, grouping: ReplayGrouping, window: &mut Window, cx: &mut Context<Self>) {
         self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
         self.grouping_select.update(cx, |state, cx| state.set_selected_value(&grouping, window, cx));
@@ -441,10 +457,19 @@ impl ReplayInspectorView {
     /// Replaces the whole settings blob, for an edit made on the Settings tab
     /// rather than through this header's own checkboxes.
     pub(crate) fn set_replay_settings(&mut self, settings: ReplaySettings, cx: &mut Context<Self>) {
-        self.set_column_filter(|current| *current = settings, cx);
+        // Adopted, not announced: this came from the row, so saying it
+        // changed would ask the app to write back what it just read.
+        self.adopt_replay_settings(|current| *current = settings, cx);
     }
 
+    /// An edit made here, which the app writes back to the shared row.
     fn set_column_filter(&mut self, apply: impl FnOnce(&mut ReplaySettings), cx: &mut Context<Self>) {
+        self.adopt_replay_settings(apply, cx);
+        cx.emit(ReplaySettingsChanged(self.replay_settings.clone()));
+    }
+
+    /// Applies `apply` and pushes the resulting columns into every open tab.
+    fn adopt_replay_settings(&mut self, apply: impl FnOnce(&mut ReplaySettings), cx: &mut Context<Self>) {
         apply(&mut self.replay_settings);
         let columns = default_columns(&self.replay_settings);
         for panel in self.open_panels.values() {
@@ -455,6 +480,36 @@ impl ReplayInspectorView {
         cx.notify();
     }
 }
+
+/// The narrow rail the listing is collapsed and expanded from.
+fn listing_rail(entity: Entity<ReplayInspectorView>, collapsed: bool) -> impl IntoElement {
+    let (glyph, tooltip) = if collapsed {
+        (crate::icons::CARET_RIGHT, "ui.replay.expand_listing")
+    } else {
+        (crate::icons::CARET_LEFT, "ui.replay.collapse_listing")
+    };
+
+    div()
+        .id("replay-listing-rail")
+        .test_support()
+        .flex_none()
+        .w(LISTING_RAIL_WIDTH)
+        .h_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .text_color(crate::theme::text_dim())
+        .tooltip(move |window, cx| Tooltip::new(t!(tooltip).into_owned()).build(window, cx))
+        .child(crate::icons::icon(glyph))
+        .on_click(move |_event, _window, cx| {
+            entity.update(cx, |view, cx| view.set_listing_collapsed(!collapsed, cx));
+        })
+}
+
+/// Wide enough for a caret and its click target, and no wider: the rail is
+/// chrome beside the listing, not a column of its own.
+const LISTING_RAIL_WIDTH: Pixels = px(18.);
 
 /// One column-filter checkbox in the header toolbar: `checked` reflects
 /// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
@@ -602,17 +657,31 @@ impl Render for ReplayInspectorView {
             .child(replay_header)
             .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
             .child(
-                div().flex_1().min_h(px(0.)).child(
-                    h_resizable("replay-inspector-split")
-                        .child(
-                            resizable_panel()
-                                .size(BROWSER_WIDTH)
-                                .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
-                                .flex_none()
-                                .child(self.browser.clone()),
-                        )
-                        .child(resizable_panel().child(dock_content)),
-                ),
+                h_flex()
+                    .flex_1()
+                    .min_h(px(0.))
+                    // A rail beside the listing, as in the egui tab: one
+                    // caret, pointing the way the click will move it.
+                    .child(listing_rail(entity.clone(), self.replay_settings.listing_collapsed))
+                    .child(if self.replay_settings.listing_collapsed {
+                        div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
+                    } else {
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .child(
+                                h_resizable("replay-inspector-split")
+                                    .child(
+                                        resizable_panel()
+                                            .size(BROWSER_WIDTH)
+                                            .size_range(BROWSER_MIN_WIDTH..BROWSER_MAX_WIDTH)
+                                            .flex_none()
+                                            .child(self.browser.clone()),
+                                    )
+                                    .child(resizable_panel().child(dock_content)),
+                            )
+                            .into_any_element()
+                    }),
             )
     }
 }
