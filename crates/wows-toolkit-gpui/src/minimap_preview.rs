@@ -68,7 +68,8 @@ pub fn bake_from_file(
     game_data: &crate::replay_inspector::GameDataCache,
     cancel: &AtomicBool,
     on_map: impl FnOnce(PreviewFrames),
-) -> Result<PreviewFrames, PreviewError> {
+    on_frame: impl FnMut(Arc<RenderImage>),
+) -> Result<(), PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
@@ -79,7 +80,7 @@ pub fn bake_from_file(
     let loaded =
         game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
 
-    bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map)
+    bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map, on_frame)
 }
 
 /// The map `map_name` names, with nothing drawn over it.
@@ -97,12 +98,18 @@ pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCa
     Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
 }
 
-/// Bakes `replay` into the frames a preview plays, then rasterises them.
+/// Bakes `replay` into the frames a preview plays, rasterising them one at a
+/// time.
 ///
 /// One forward pass over the battle, sampled by the shared [`TrackSink`], so
 /// the port shows the same track the egui app does. `cancel` is checked
 /// between the phases that cost anything: a preview the pointer has already
 /// left should not finish parsing a replay.
+///
+/// `on_frame` is handed each frame as it is rasterised rather than the track
+/// at the end: rasterising a whole track costs seconds, and a preview that
+/// waits for all of it shows a still map for the whole time.
+#[allow(clippy::too_many_arguments)]
 pub fn bake(
     replay: &ReplayFile,
     provider: &GameMetadataProvider,
@@ -111,7 +118,8 @@ pub fn bake(
     version: Option<&Version>,
     cancel: &AtomicBool,
     on_map: impl FnOnce(PreviewFrames),
-) -> Result<PreviewFrames, PreviewError> {
+    mut on_frame: impl FnMut(Arc<RenderImage>),
+) -> Result<(), PreviewError> {
     let cancelled = || cancel.load(std::sync::atomic::Ordering::Relaxed);
     if cancelled() {
         return Err(PreviewError::Cancelled);
@@ -145,7 +153,13 @@ pub fn bake(
         return Err(PreviewError::Cancelled);
     }
 
-    Ok(PreviewFrames::render(&mut preview, &sink.finish()))
+    for commands in sink.finish() {
+        if cancelled() {
+            return Err(PreviewError::Cancelled);
+        }
+        on_frame(to_image(preview.render(&commands)));
+    }
+    Ok(())
 }
 
 /// The edge length a preview's frames are rasterised and drawn at.
@@ -163,6 +177,10 @@ pub const PREVIEW_PX: u32 = 384;
 /// and paint nothing until it finished.
 pub struct PreviewFrames {
     frames: Vec<Arc<RenderImage>>,
+    /// Whether every frame of the track is here. An unfinished track plays
+    /// forward and holds on its newest frame; looping a track that is two
+    /// frames long so far reads as a stutter, not as playback.
+    complete: bool,
 }
 
 impl PreviewFrames {
@@ -173,7 +191,27 @@ impl PreviewFrames {
     /// whole map for each one.
     pub fn render(renderer: &mut PreviewRenderer, track: &[Vec<DrawCommand>]) -> Self {
         let frames = track.iter().map(|commands| to_image(renderer.render(commands))).collect();
-        Self { frames }
+        Self { frames, complete: true }
+    }
+
+    /// An empty track, for a preview whose frames are still arriving.
+    pub fn streaming() -> Self {
+        Self { frames: Vec::new(), complete: false }
+    }
+
+    /// Adopts one more rasterised frame.
+    pub fn push(&mut self, frame: Arc<RenderImage>) {
+        self.frames.push(frame);
+    }
+
+    /// Says every frame has arrived, so playback loops.
+    pub fn finish(&mut self) {
+        self.complete = true;
+    }
+
+    /// Whether every frame of the track has been rasterised.
+    pub fn is_complete(&self) -> bool {
+        self.complete
     }
 
     /// How many frames the bake produced. Only the tests and the Search
@@ -198,7 +236,8 @@ impl PreviewFrames {
             return None;
         }
         let step = (elapsed.as_millis() / FRAME_INTERVAL.as_millis().max(1)) as usize;
-        self.frames.get(step % self.frames.len()).cloned()
+        let index = if self.complete { step % self.frames.len() } else { step.min(self.frames.len() - 1) };
+        self.frames.get(index).cloned()
     }
 }
 
@@ -235,7 +274,26 @@ mod tests {
                     Arc::new(gpui_kit::RenderImage::new(vec![image::Frame::new(buffer)]))
                 })
                 .collect(),
+            complete: true,
         }
+    }
+
+    /// A track still being rasterised plays forward and holds on its newest
+    /// frame; a finished one loops.
+    #[test]
+    fn an_unfinished_track_holds_on_its_newest_frame_and_a_finished_one_loops() {
+        let mut track = PreviewFrames::streaming();
+        let one = frames(1);
+        track.push(one.at(Duration::ZERO).expect("one frame"));
+        track.push(frames(1).at(Duration::ZERO).expect("one frame"));
+
+        // Two frames in, well past the end of what has been rasterised.
+        let past_the_end = FRAME_INTERVAL * 5;
+        assert!(track.at(past_the_end).is_some(), "an unfinished track holds rather than showing nothing");
+        assert!(!track.is_complete());
+
+        track.finish();
+        assert!(track.is_complete(), "a finished track loops");
     }
 
     /// A frame is handed over decoded and at the size it is drawn: gpui

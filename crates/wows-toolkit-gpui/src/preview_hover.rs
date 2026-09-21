@@ -30,6 +30,10 @@ use crate::replay_inspector::GameDataCache;
 
 /// A baked preview and where it is in its loop.
 struct Shown {
+    /// The row this track was baked for. Held here because the track outlives
+    /// the hover: `drop_shown` runs once the pointer is already on the next
+    /// row, and the cache has to be keyed by the row the frames belong to.
+    path: PathBuf,
     frames: PreviewFrames,
     started: Instant,
 }
@@ -53,6 +57,12 @@ pub struct PreviewHover {
     /// the replay and load the build it was recorded on. Stays set while the
     /// map is shown on its own, which is most of that time.
     baking: bool,
+    /// The last track baked in full, so moving the pointer away and back is
+    /// instant rather than another bake.
+    ///
+    /// One entry, not a table: a track is a few dozen megabytes of frames,
+    /// and the hover that is worth saving is the one just left.
+    cached: Option<(PathBuf, PreviewFrames)>,
     /// Set when a bake in flight should stop: the pointer has moved on.
     cancel: Arc<AtomicBool>,
     _bake: Option<Task<()>>,
@@ -68,6 +78,7 @@ impl Default for PreviewHover {
             shown: None,
             released: Vec::new(),
             baking: false,
+            cached: None,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
             _dwell_timer: None,
@@ -141,6 +152,16 @@ impl PreviewHover {
         self.watched = Some((path.clone(), Instant::now()));
         self.drop_shown();
         self._ticker = None;
+
+        // The row just left is the one most likely to be returned to, and its
+        // track is still here; there is nothing to bake or to wait for.
+        if self.cached.as_ref().is_some_and(|(cached, _)| cached == &path) {
+            let (_, frames) = self.cached.take().expect("the cache was just checked");
+            self.shown = Some(Shown { path: path.clone(), frames, started: Instant::now() });
+            self.start_ticker(cx, field);
+            cx.notify();
+            return;
+        }
         cx.notify();
 
         let Some(game_data) = game_data else { return };
@@ -176,10 +197,19 @@ impl PreviewHover {
         cx.notify();
     }
 
-    /// Stops showing the current track and queues its textures for release.
+    /// Stops showing the current track.
+    ///
+    /// A track that finished baking is kept for a return visit; the previous
+    /// tenant of that one slot, and any unfinished track, go back to the
+    /// window to have their textures released.
     fn drop_shown(&mut self) {
-        if let Some(shown) = self.shown.take() {
+        let Some(shown) = self.shown.take() else { return };
+        if !shown.frames.is_complete() {
             self.released.push(shown.frames);
+            return;
+        }
+        if let Some((_, evicted)) = self.cached.replace((shown.path, shown.frames)) {
+            self.released.push(evicted);
         }
     }
 
@@ -218,19 +248,31 @@ impl PreviewHover {
                     let _ = view.update(cx, |view, cx| {
                         let this = field(view);
                         this.drop_shown();
-                        this.shown = Some(Shown { frames, started: Instant::now() });
+                        this.shown = Some(Shown { path: path.clone(), frames, started: Instant::now() });
                         cx.notify();
                     });
                 }
             }
 
             let (map_tx, map_rx) = futures::channel::oneshot::channel();
-            let baked = crate::runtime::spawn(cx, {
+            let (frame_tx, mut frame_rx) = futures::channel::mpsc::unbounded();
+            // gpui's own pool, not the two-worker tokio runtime: a bake is
+            // seconds of CPU work, and that runtime is sized for the database
+            // and network awaits it would otherwise be blocking.
+            let baked = cx.background_executor().spawn({
                 let path = path.clone();
                 async move {
-                    crate::minimap_preview::bake_from_file(&path, &game_data, &cancel, move |map| {
-                        let _ = map_tx.send(map);
-                    })
+                    crate::minimap_preview::bake_from_file(
+                        &path,
+                        &game_data,
+                        &cancel,
+                        move |map| {
+                            let _ = map_tx.send(map);
+                        },
+                        move |frame| {
+                            let _ = frame_tx.unbounded_send(frame);
+                        },
+                    )
                 }
             });
 
@@ -244,30 +286,50 @@ impl PreviewHover {
                     if this.shown.is_some() {
                         return;
                     }
-                    this.shown = Some(Shown { frames: map, started: Instant::now() });
+                    this.shown = Some(Shown { path: path.clone(), frames: map, started: Instant::now() });
                     cx.notify();
                 });
             }
 
-            let baked = baked.await;
-
-            let Ok(Ok(frames)) = baked else {
-                if let Ok(Err(err)) = baked {
-                    tracing::debug!("no preview for {}: {err}", path.display());
-                }
-                let _ = view.update(cx, |view, cx| {
-                    field(view).baking = false;
+            // Frames play as they are rasterised: the first replaces the
+            // still map, and the rest extend the track under a ticker that is
+            // already running.
+            let mut started = false;
+            while let Some(frame) = futures::StreamExt::next(&mut frame_rx).await {
+                let alive = view.update(cx, |view, cx| {
+                    let this = field(view);
+                    if !started {
+                        started = true;
+                        this.drop_shown();
+                        this.shown = Some(Shown {
+                            path: path.clone(),
+                            frames: PreviewFrames::streaming(),
+                            started: Instant::now(),
+                        });
+                        this.start_ticker(cx, field);
+                    }
+                    if let Some(shown) = this.shown.as_mut() {
+                        shown.frames.push(frame);
+                    }
                     cx.notify();
                 });
-                return;
-            };
+                if alive.is_err() {
+                    return;
+                }
+            }
+
+            let baked = baked.await;
+            if let Err(err) = &baked {
+                tracing::debug!("no preview for {}: {err}", path.display());
+            }
 
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);
                 this.baking = false;
-                this.drop_shown();
-                this.shown = Some(Shown { frames, started: Instant::now() });
-                this.start_ticker(cx, field);
+                // Looping only starts once the whole track is here.
+                if let Some(shown) = this.shown.as_mut() {
+                    shown.frames.finish();
+                }
                 cx.notify();
             });
         }));
