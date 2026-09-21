@@ -228,12 +228,19 @@ kept so the next audit does not re-report them.
 - The clans table is missing four columns, the member list and the clan
   search.
 - No "find matches for this player/clan" action anywhere.
-- Roster rows have no action menu (wows-numbers, shipbuilds).
+- [done] A roster row's menu links the player to wows-numbers and to
+  shipbuilds. The URL builders moved to
+  `wows_toolkit_viewmodel::player_tracker`, so both apps link the same way. A
+  row the identity scan never named has nothing to link to and shows no menu.
+- The menu has no "find matches for this player" item; that needs the Search
+  tab to accept a seeded player query.
 - [done] Each team is headed by its name, how many players are on it, and its
   average win rate and personal rating in the band's colour. The averaging is
   `wows_toolkit_viewmodel::player_tracker::live`, shared with the egui tab, so
   the heading and the cells under it cannot disagree.
-- The roster's Encounters column is a static "met before" string.
+- [done] The roster's Encounters column counts the battles, in the tone that
+  number deserves, and follows the division-mates toggle. (This entry was
+  already stale when it was written.)
 - Historical rows do not expand; notes are a separate bottom panel, and
   aliases and account ids are invisible.
 - [done] Encounter counts carry the severity ramp.

@@ -45,6 +45,9 @@ use sqlx::sqlite::SqlitePool;
 use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 
+use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::PopupMenuItem;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::ClanCorrection;
@@ -74,9 +77,11 @@ use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
+use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_players;
+use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
 use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
@@ -1541,7 +1546,11 @@ fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout
         .flex_1()
         .min_w(px(0.))
         .child(heading)
-        .child(header.child(div().w(MET_COLUMN_WIDTH).child(t!("ui.player_tracker.column.encounters").to_string())))
+        .child(
+            header
+                .child(div().w(MET_COLUMN_WIDTH).child(t!("ui.player_tracker.column.encounters").to_string()))
+                .child(div().flex_none().w(ACTIONS_COLUMN_WIDTH)),
+        )
         .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, layout)))
         .into_any_element()
 }
@@ -1558,6 +1567,45 @@ fn rating_color(pr: Option<f64>) -> Option<Hsla> {
 fn band_color(band: Option<PersonalRatingCategory>) -> Option<Hsla> {
     Some(rgb(personal_rating::chip_text(band?, crate::theme::is_dark_mode())).into())
 }
+
+/// A roster row's own menu: where to read more about this player.
+///
+/// Both links need an account id and a region, which only the identity scan
+/// supplies; a row it never named has nothing to link to and shows no menu.
+fn roster_row_menu(side: &'static str, index: usize, row: &LiveRosterRow) -> impl IntoElement + use<> {
+    let Some((account_id, region)) = row.account_id.zip(row.region) else {
+        // The column still holds its width, so a row with no menu does not
+        // pull the ones around it out of line.
+        return div().flex_none().w(ACTIONS_COLUMN_WIDTH).into_any_element();
+    };
+
+    let numbers = wows_numbers_player_url(region, account_id, &row.name);
+    let builds = shipbuilds_player_url(region, account_id, &row.name);
+
+    div()
+        .flex_none()
+        .w(ACTIONS_COLUMN_WIDTH)
+        .child(
+            Button::new(SharedString::from(format!("tracker-roster-actions-{side}-{index}")))
+                .icon(IconName::Ellipsis)
+                .ghost()
+                .xsmall()
+                .dropdown_menu(move |menu, _window, _cx| {
+                    menu.item(
+                        PopupMenuItem::link(t!("ui.player_tracker.open_wows_numbers").into_owned(), numbers.clone())
+                            .icon(IconName::ExternalLink),
+                    )
+                    .item(
+                        PopupMenuItem::link(t!("ui.player_tracker.open_shipbuilds").into_owned(), builds.clone())
+                            .icon(IconName::ExternalLink),
+                    )
+                }),
+        )
+        .into_any_element()
+}
+
+/// Room for the row menu's trigger, held even by a row that has none.
+const ACTIONS_COLUMN_WIDTH: Pixels = px(24.);
 
 /// A stats cell: the value when the service answered with one, a dash when it
 /// did not, and nothing at all while the lookup is still running.
@@ -1752,6 +1800,7 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
                 .when(met == 0, |el| el.text_color(crate::theme::text_dim()))
                 .child(if met == 0 { String::new() } else { separate_number(met as i64, None) }),
         )
+        .child(roster_row_menu(side, index, row))
         .into_any_element()
 }
 
