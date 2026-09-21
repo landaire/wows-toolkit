@@ -9,13 +9,10 @@
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
-const CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-const READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
 #[derive(Debug, thiserror::Error)]
 pub enum RefreshError {
-    #[error("the expected-values client could not be built")]
-    Client(#[source] reqwest::Error),
+    #[error(transparent)]
+    Client(#[from] crate::http::HttpError),
     #[error("the expected values could not be fetched")]
     Request(#[source] reqwest::Error),
     #[error("the expected values were rejected")]
@@ -24,19 +21,7 @@ pub enum RefreshError {
 
 /// Fetches the published expected values.
 async fn fetch(proxy_url: &str) -> Result<Vec<u8>, RefreshError> {
-    let mut builder = reqwest::Client::builder()
-        .user_agent(concat!("wows-toolkit/", env!("CARGO_PKG_VERSION")))
-        .connect_timeout(CONNECT_TIMEOUT)
-        .read_timeout(READ_TIMEOUT);
-    // A malformed proxy URL degrades to a direct connection rather than
-    // leaving the client unbuildable, which is what the egui app does.
-    if !proxy_url.is_empty() {
-        match reqwest::Proxy::all(proxy_url) {
-            Ok(proxy) => builder = builder.proxy(proxy),
-            Err(err) => tracing::warn!("personal rating: ignoring a malformed proxy URL: {err}"),
-        }
-    }
-    let client = builder.build().map_err(RefreshError::Client)?;
+    let client = crate::http::client(proxy_url, reqwest::redirect::Policy::default())?;
 
     let response = client
         .get(personal_rating::EXPECTED_VALUES_URL)
@@ -44,6 +29,7 @@ async fn fetch(proxy_url: &str) -> Result<Vec<u8>, RefreshError> {
         .await
         .and_then(|response| response.error_for_status())
         .map_err(RefreshError::Request)?;
+
     response.bytes().await.map(|bytes| bytes.to_vec()).map_err(RefreshError::Request)
 }
 

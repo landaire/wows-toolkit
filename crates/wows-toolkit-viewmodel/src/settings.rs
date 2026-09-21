@@ -25,6 +25,19 @@ pub mod keys {
     pub const OUTPUT_DIR: &str = "output_dir";
 }
 
+/// A proxy setting as a URL a client can take.
+///
+/// `None` for an unset proxy. A bare `host:port` gets the `http://` scheme a
+/// client requires: that is what the Windows proxy dialog stores, and
+/// rejecting it would silently send direct.
+pub fn normalize_proxy_url(raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.contains("://") { Some(raw.to_string()) } else { Some(format!("http://{raw}")) }
+}
+
 /// What the app is allowed to send upstream.
 ///
 /// Stored snake_case, which is what is already in the database; reading it as
@@ -71,6 +84,20 @@ impl DataSharingMode {
 #[cfg(test)]
 mod tests {
     use super::DataSharingMode;
+    use super::normalize_proxy_url;
+
+    #[test]
+    fn an_unset_proxy_is_absent_rather_than_an_empty_url() {
+        assert_eq!(normalize_proxy_url(""), None);
+        assert_eq!(normalize_proxy_url("   "), None);
+    }
+
+    /// The Windows proxy dialog stores a bare host and port.
+    #[test]
+    fn a_scheme_less_proxy_gets_one() {
+        assert_eq!(normalize_proxy_url("proxy.corp:8080"), Some("http://proxy.corp:8080".to_string()));
+        assert_eq!(normalize_proxy_url("https://proxy.corp:8080"), Some("https://proxy.corp:8080".to_string()));
+    }
 
     /// Pinned against real stored values: the database holds snake_case, and
     /// reading it as the variant names would quietly report sharing as off.

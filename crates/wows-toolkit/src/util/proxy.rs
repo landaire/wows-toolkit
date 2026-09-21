@@ -70,11 +70,7 @@ fn redact_userinfo(url: &str) -> String {
 /// Accept what a user or the registry might write and produce a URL a client
 /// can use. A bare `host:port` is what the Windows proxy dialog stores.
 fn normalize_proxy_url(raw: &str) -> Option<String> {
-    let raw = raw.trim();
-    if raw.is_empty() {
-        return None;
-    }
-    if raw.contains("://") { Some(raw.to_string()) } else { Some(format!("http://{raw}")) }
+    wows_toolkit_viewmodel::settings::normalize_proxy_url(raw)
 }
 
 /// Read the `ProxyServer` value, which is either one proxy for every scheme or

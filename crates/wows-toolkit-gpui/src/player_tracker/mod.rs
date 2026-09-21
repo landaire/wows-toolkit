@@ -142,10 +142,15 @@ pub struct PlayerTrackerView {
     /// The replays directory being watched, so the scan knows where the live
     /// packet stream is.
     replay_dir: Option<PathBuf>,
-    /// The proxy the stats lookup goes through, empty for a direct
-    /// connection.
+    /// The proxy the stats lookup goes through, as the settings hold it.
+    /// Normalized and interpreted by `http::client`, which is where an unset
+    /// or malformed value is decided.
     proxy_url: String,
     _live_scan: Option<Task<()>>,
+    _live_build_load: Option<Task<()>>,
+    /// What this session has already asked the stats service, so a battle is
+    /// asked about once and the service's budget is respected locally.
+    stats_budget: live::StatsBudget,
     /// The build `live_metadata` was loaded for, so a new battle on another
     /// build reloads rather than resolving against the wrong one.
     live_metadata_build: Option<u32>,
@@ -158,6 +163,9 @@ pub struct PlayerTrackerView {
     /// Everyone the index returned for the current period, unfiltered. The
     /// filter and sort are applied per render over this.
     players: Vec<PlayerFacet>,
+    /// Everyone the index has ever seen, for the live roster's "met before"
+    /// join. Loaded once: it must not follow the period selector.
+    all_time_players: Vec<PlayerFacet>,
     state: LoadState,
     /// Bumped per query so a slower earlier period cannot overwrite a later.
     generation: u64,
@@ -183,6 +191,8 @@ impl PlayerTrackerView {
             replay_dir: None,
             proxy_url: String::new(),
             _live_scan: None,
+            _live_build_load: None,
+            stats_budget: live::StatsBudget::default(),
             _live_watch: None,
             period: TimePeriod::default(),
             sort: Sort::default(),
@@ -190,6 +200,7 @@ impl PlayerTrackerView {
             filter_text: String::new(),
             filter_input,
             players: Vec::new(),
+            all_time_players: Vec::new(),
             state: LoadState::Idle,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
@@ -200,10 +211,36 @@ impl PlayerTrackerView {
 
     /// Queries the index for the current period. Called once the config
     /// database is open, and again whenever the period changes.
+    /// Loads every account the index has ever seen, for the live roster's
+    /// "met before" column. Runs once per session: the set only grows, and a
+    /// player met for the first time this battle was not "met before" anyway.
+    fn load_all_time_players(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
+        if !self.all_time_players.is_empty() {
+            return;
+        }
+
+        let filter = TimePeriod::AllTime.match_filter(Timestamp::now());
+        cx.spawn(async move |this, cx| {
+            let found = runtime::spawn(cx, async move { query::distinct_players(&pool, &filter).await }).await;
+            let _ = this.update(cx, |this, cx| {
+                match found {
+                    Ok(Ok(players)) => this.all_time_players = players,
+                    // The roster still lists everyone; only "met before"
+                    // stays empty.
+                    Ok(Err(err)) => tracing::warn!("player tracker: the all-time join did not load: {err}"),
+                    Err(err) => tracing::warn!("player tracker: the all-time join did not complete: {err}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub fn refresh(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.state = LoadState::Loading;
+        self.load_all_time_players(pool.clone(), cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -262,16 +299,18 @@ impl PlayerTrackerView {
     /// caching it would need invalidating on every one of the four inputs.
     fn live_roster(&self) -> Option<ResolvedRoster> {
         let live = self.live_match.as_ref()?;
-        // The index carries only the name each account currently goes by:
-        // the replay index records no aliases, so a rename simply misses.
+        // Every account ever indexed, not the period in view: "met before"
+        // must not change when the period selector does. The index carries
+        // only the name each account currently goes by, so a rename misses.
         let name_index = build_name_index(
+            self.all_time_players.len(),
             std::iter::empty(),
-            self.players.iter().map(|player| (player.account_id, player.latest_name.as_str())),
+            self.all_time_players.iter().map(|player| (player.account_id, player.latest_name.as_str())),
         );
         Some(resolve_roster(
             live,
             &name_index,
-            None,
+            self.live_identities.as_ref(),
             self.live_metadata.as_deref().map(|data| data.provider().as_ref()),
         ))
     }
@@ -293,9 +332,11 @@ impl PlayerTrackerView {
         self.live_match = None;
         self.clear_live_match_data();
 
-        let entity = cx.entity();
+        // Weak: the task is owned by this view, and a strong handle here
+        // would be a cycle that keeps the whole tab alive for the process.
+        let entity = cx.entity().downgrade();
         self._live_watch = Some(live::watch(replay_dir, cx, move |live, cx| {
-            entity.update(cx, |this, cx| this.adopt_live_match(live, cx));
+            entity.update(cx, |this, cx| this.adopt_live_match(live, cx)).is_ok()
         }));
         cx.notify();
     }
@@ -304,6 +345,7 @@ impl PlayerTrackerView {
     /// the resolved data does not already cover.
     fn adopt_live_match(&mut self, live: Option<LiveMatch>, cx: &mut Context<Self>) {
         self.live_checked = true;
+        let started_at = live.as_ref().map(|live| live.started_at);
         let build = live.as_ref().and_then(|live| live.build);
         self.live_match = live;
         // A new battle carries its own roster and its own stats; the previous
@@ -311,32 +353,48 @@ impl PlayerTrackerView {
         self.clear_live_match_data();
         cx.notify();
 
-        let Some(build) = build else { return };
+        let (Some(started_at), Some(build)) = (started_at, build) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
 
         if self.live_metadata_build == Some(build) && self.live_metadata.is_some() {
-            self.start_live_scan(cx);
+            self.start_live_scan(started_at, cx);
             return;
         }
 
         self.live_metadata_build = Some(build);
         self.live_metadata = None;
-        cx.spawn(async move |this, cx| {
+        self.stats = StatsState::Scanning;
+        // Held rather than detached: a battle that ends while its build is
+        // still loading drops this with the rest of that battle's state.
+        self._live_build_load = Some(cx.spawn(async move |this, cx| {
             let loaded = cx.background_spawn(async move { game_data.get_or_load_build(build) }).await;
             let _ = this.update(cx, |this, cx| {
+                if this.live_started_at() != Some(started_at) {
+                    return;
+                }
                 match loaded {
                     Ok(data) => {
                         this.live_metadata = Some(data);
-                        this.start_live_scan(cx);
+                        this.start_live_scan(started_at, cx);
                     }
-                    // The roster still lists names and relations; only the
-                    // ship columns and the stats stay empty.
-                    Err(err) => tracing::warn!("live match: build {build} did not load: {err}"),
+                    // The roster still lists names and relations; the ship
+                    // columns and the statistics have nothing to resolve
+                    // against, which is a failure rather than a wait.
+                    Err(err) => {
+                        tracing::warn!("live match: build {build} did not load: {err}");
+                        this.live_metadata_build = None;
+                        this.stats = StatsState::Failed(format!("this battle's game data did not load: {err}"));
+                    }
                 }
                 cx.notify();
             });
-        })
-        .detach();
+        }));
+    }
+
+    /// When the battle in progress started, which keys every write a scan or
+    /// a lookup makes: one that outlives its battle must not land on the next.
+    fn live_started_at(&self) -> Option<Timestamp> {
+        self.live_match.as_ref().map(|live| live.started_at)
     }
 
     /// Drops everything that belonged to the previous battle, and stops its
@@ -345,15 +403,17 @@ impl PlayerTrackerView {
         self.live_identities = None;
         self.stats = StatsState::Idle;
         self._live_scan = None;
+        self._live_build_load = None;
     }
 
     /// Reads the battle's roster off the live packet stream, then asks the
     /// stats service about it.
     ///
     /// The stream arrives in flushes, so the scan retries on a timer until
-    /// the packet naming the roster lands or the budget runs out. A battle
-    /// that ends first drops the task with the rest of its state.
-    fn start_live_scan(&mut self, cx: &mut Context<Self>) {
+    /// the packet naming the roster lands or the budget runs out. Every write
+    /// is keyed on `started_at`, so a scan that outlives its battle is
+    /// dropped rather than landing on the next one.
+    fn start_live_scan(&mut self, started_at: Timestamp, cx: &mut Context<Self>) {
         let (Some(replay_dir), Some(metadata)) = (self.replay_dir.clone(), self.live_metadata.clone()) else {
             return;
         };
@@ -382,33 +442,68 @@ impl PlayerTrackerView {
 
             let Some(state) = state else {
                 let _ = this.update(cx, |this, cx| {
+                    if this.live_started_at() != Some(started_at) {
+                        return;
+                    }
                     this.stats = StatsState::Failed(live::StatsError::NoRoster.to_string());
                     cx.notify();
                 });
                 return;
             };
 
-            // Written before the fetch, so the clan tags and the account join
-            // light up even when the lookup then fails.
+            // Written before the lookup, so the clan tags and the account
+            // join light up even when the lookup then fails or is refused.
             let identities = LiveIdentities::from_player_states(&state.players);
-            let _ = this.update(cx, |this, cx| {
-                this.live_identities = Some(identities);
-                this.stats = StatsState::Fetching;
-                cx.notify();
-            });
+            let arena_id = state.arena_id;
+            let cleared = this
+                .update(cx, |this, cx| {
+                    if this.live_started_at() != Some(started_at) {
+                        return false;
+                    }
+                    this.live_identities = Some(identities);
 
-            let fetched = runtime::spawn(cx, {
-                let proxy_url = proxy_url.clone();
-                async move { live::fetch_stats(&state, &proxy_url).await }
-            })
-            .await;
+                    // An answer this session already has costs no request.
+                    if let Some(answered) = this.stats_budget.answered(arena_id) {
+                        this.stats = StatsState::Ready(index_by_account(answered.players.clone()));
+                        cx.notify();
+                        return false;
+                    }
+
+                    match this.stats_budget.check(arena_id, Instant::now()) {
+                        Ok(()) => {
+                            this.stats_budget.record(Instant::now());
+                            this.stats = StatsState::Fetching;
+                            cx.notify();
+                            true
+                        }
+                        Err(refusal) => {
+                            this.stats = StatsState::Failed(live::refusal_text(&refusal.into()));
+                            cx.notify();
+                            false
+                        }
+                    }
+                })
+                .unwrap_or(false);
+            if !cleared {
+                return;
+            }
+
+            let fetched = runtime::spawn(cx, async move { live::fetch_stats(&state, &proxy_url).await }).await;
 
             let _ = this.update(cx, |this, cx| {
+                if this.live_started_at() != Some(started_at) {
+                    return;
+                }
                 this.stats = match fetched {
-                    Ok(Ok(response)) => StatsState::Ready(
-                        response.players.into_iter().map(|player| (player.account_id, player)).collect(),
-                    ),
-                    Ok(Err(err)) => StatsState::Failed(err.to_string()),
+                    Ok(Ok(response)) => {
+                        let players = index_by_account(response.players.clone());
+                        this.stats_budget.remember(response);
+                        StatsState::Ready(players)
+                    }
+                    Ok(Err(err)) => {
+                        this.stats_budget.note_failure(arena_id, &err, Instant::now());
+                        StatsState::Failed(live::refusal_text(&err))
+                    }
                     Err(err) => StatsState::Failed(err.to_string()),
                 };
                 cx.notify();
@@ -432,6 +527,20 @@ impl PlayerTrackerView {
     fn sort_clans_by(&mut self, column: ClanSortColumn, cx: &mut Context<Self>) {
         self.clan_sort = self.clan_sort.toggled(column);
         self.sync_rows(cx);
+    }
+
+    /// Seeds what a scan and a lookup would have produced. Test-only: in
+    /// production both arrive through `start_live_scan`.
+    #[cfg(test)]
+    pub(crate) fn seed_live_stats(
+        &mut self,
+        identities: LiveIdentities,
+        players: Vec<PlayerStatsOut>,
+        cx: &mut Context<Self>,
+    ) {
+        self.live_identities = Some(identities);
+        self.stats = StatsState::Ready(index_by_account(players));
+        cx.notify();
     }
 
     /// The Current Match body: the roster when a battle is under way, and
@@ -460,12 +569,15 @@ impl PlayerTrackerView {
         };
 
         let note = match &self.stats {
+            // A failure is reported even while the ships are unresolved: a
+            // build that did not load is why they are unresolved, and saying
+            // "loading" for it would never stop being wrong.
+            StatsState::Failed(reason) => Some(format!("Player statistics are unavailable: {reason}")),
             _ if !roster.ships_resolved => {
                 Some("Loading this build's ship data; names and classes fill in when it lands.".to_string())
             }
             StatsState::Scanning => Some("Reading the roster off the battle in progress...".to_string()),
             StatsState::Fetching => Some("Looking up player statistics...".to_string()),
-            StatsState::Failed(reason) => Some(format!("Player statistics are unavailable: {reason}")),
             StatsState::Idle | StatsState::Ready(_) => None,
         };
         let stats = match &self.stats {
@@ -483,9 +595,9 @@ impl PlayerTrackerView {
                     .flex_1()
                     .min_h(px(0.))
                     .items_start()
-                    .child(team_column("Allies", &roster.friendly, stats, border))
+                    .child(team_column("Allies", "ally", &roster.friendly, stats, border))
                     .child(div().w(px(1.)).h_full().bg(border))
-                    .child(team_column("Enemies", &roster.enemy, stats, border)),
+                    .child(team_column("Enemies", "enemy", &roster.enemy, stats, border)),
             )
             .into_any_element()
     }
@@ -557,6 +669,12 @@ fn sort_header(
     .into_any_element()
 }
 
+/// The service's answer keyed by account, which is how a row looks its own
+/// statistics up.
+fn index_by_account(players: Vec<PlayerStatsOut>) -> HashMap<AccountId, PlayerStatsOut> {
+    players.into_iter().map(|player| (player.account_id, player)).collect()
+}
+
 /// A live roster row's colour. The same table the replay inspector's player
 /// names use, so one person reads the same in both tabs.
 fn tint_color(tint: PlayerTint) -> Hsla {
@@ -573,6 +691,7 @@ fn tint_color(tint: PlayerTint) -> Hsla {
 /// One team's roster column, with its own header row.
 fn team_column(
     title: &'static str,
+    side: &'static str,
     rows: &[LiveRosterRow],
     stats: Option<&HashMap<AccountId, PlayerStatsOut>>,
     border: Hsla,
@@ -598,7 +717,7 @@ fn team_column(
         .flex_1()
         .min_w(px(0.))
         .child(header)
-        .children(rows.iter().map(|row| roster_row(row, stats)))
+        .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, stats)))
         .into_any_element()
 }
 
@@ -629,7 +748,12 @@ fn stat_cell(text: Option<String>, color: Option<Hsla>, pending: bool) -> AnyEle
 
 /// One live roster entry: the player, their ship, and whether they have been
 /// met before.
-fn roster_row(row: &LiveRosterRow, stats: Option<&HashMap<AccountId, PlayerStatsOut>>) -> AnyElement {
+fn roster_row(
+    side: &'static str,
+    index: usize,
+    row: &LiveRosterRow,
+    stats: Option<&HashMap<AccountId, PlayerStatsOut>>,
+) -> AnyElement {
     let name = match row.clan.as_deref() {
         Some(clan) => format!("[{clan}] {}", row.name),
         None => row.name.clone(),
@@ -645,7 +769,8 @@ fn roster_row(row: &LiveRosterRow, stats: Option<&HashMap<AccountId, PlayerStats
     let battles = player.and_then(|player| player.battles).map(|battles| battles.to_string());
 
     h_flex()
-        .id(SharedString::from(format!("tracker-roster-{}", row.name)))
+        // Keyed by position as well as name: bots repeat names within a team.
+        .id(SharedString::from(format!("tracker-roster-{side}-{index}")))
         .test_support()
         .aria_label(name.clone())
         .w_full()
@@ -893,6 +1018,12 @@ mod tests {
     use super::PlayerTrackerView;
     use super::SubTab;
     use crate::replay_inspector::GameDataCache;
+    use wows_replays::types::AccountId;
+    use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
+    use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
+    use wows_toolkit_viewmodel::match_stats::Region;
+    use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
+    use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
 
     /// A `tempArenaInfo.json` naming two players on opposite teams.
     const ARENA_INFO: &str = r#"{
@@ -925,6 +1056,76 @@ mod tests {
         dir
     }
 
+    /// The two halves a scan produces must actually reach the cells: the
+    /// identities give a row its account, and only an account can look a
+    /// player's statistics up.
+    #[gpui_kit::test]
+    async fn a_scanned_identity_joins_its_player_to_the_looked_up_statistics(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let dir = temp_dir("stats-join");
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+                tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
+            })
+            .expect("the window is open");
+
+        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
+            window.render_frame(cx);
+            window.try_find("tracker-roster-ally-0").is_some()
+        })
+        .await;
+
+        // Before the scan lands, no row has an account, so no row has stats.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find("tracker-roster-ally-0").label(), Some("Me"), "no clan tag without identities");
+        })
+        .expect("the window is open");
+
+        let account = AccountId(4242);
+        let identity = LiveIdentity {
+            account_id: account,
+            region: Some(Region::Eu),
+            clan: Some("WTK".to_string()),
+            clan_color: 0,
+        };
+        let identities = LiveIdentities { by_name: [("me".to_string(), identity)].into_iter().collect() };
+        let stats = vec![PlayerStatsOut {
+            account_id: account,
+            region: "eu".to_string(),
+            ship_id: 100u64.into(),
+            status: PlayerStatsStatus::Ok,
+            battles: Some(1234),
+            overall_win_rate: Some(54.25),
+            overall_avg_damage: None,
+            ship_win_rate: None,
+            ship_battles: None,
+            ship_avg_damage: None,
+            ship_pr: None,
+            pr: Some(1650.0),
+        }];
+
+        window
+            .update(cx, |tracker, _window, cx| tracker.seed_live_stats(identities, stats, cx))
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("tracker-roster-ally-0").label(),
+                Some("[WTK] Me"),
+                "the scan's clan tag reaches the name"
+            );
+        })
+        .expect("the window is open");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// Drives the real poll against a directory the test writes into, so the
     /// tab's "a battle started" path is exercised end to end rather than by
     /// calling the setter directly. The game data directory is deliberately
@@ -947,14 +1148,14 @@ mod tests {
 
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
-            window.try_find("tracker-roster-Me").is_some()
+            window.try_find("tracker-roster-ally-0").is_some()
         })
         .await;
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            assert_eq!(window.find("tracker-roster-Me").label(), Some("Me"), "the recording player is listed");
-            assert!(window.try_find("tracker-roster-Foe").is_some(), "so is the other team");
+            assert_eq!(window.find("tracker-roster-ally-0").label(), Some("Me"), "the recording player is listed");
+            assert_eq!(window.find("tracker-roster-enemy-0").label(), Some("Foe"), "so is the other team");
         })
         .expect("the window is open");
 
@@ -962,7 +1163,7 @@ mod tests {
         std::fs::remove_file(dir.join(super::live::ARENA_INFO_FILE)).expect("the arena info is removable");
         cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
             window.render_frame(cx);
-            window.try_find("tracker-roster-Me").is_none()
+            window.try_find("tracker-roster-ally-0").is_none()
         })
         .await;
 

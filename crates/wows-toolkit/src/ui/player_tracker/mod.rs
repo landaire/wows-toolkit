@@ -162,8 +162,17 @@ pub struct PlayerTracker {
 }
 
 impl PlayerTracker {
+    /// Adopts the roster `meta` describes.
+    ///
+    /// A header the game has not finished writing carries no readable date;
+    /// the caller sees that file again on the next write, so there is
+    /// nothing to do but leave the previous match in place.
     pub fn update_from_live_arena_info(&mut self, meta: &ReplayMeta) {
-        self.live_match = Some(LiveMatch::from_meta(meta));
+        let Some(live) = LiveMatch::from_meta(meta) else {
+            tracing::warn!("live arena info skipped: it carries no readable date");
+            return;
+        };
+        self.live_match = Some(live);
         self.resolved_roster = None;
         // A new match invalidates any identities and stats the previous one
         // gathered.

@@ -247,12 +247,9 @@ impl App {
         // The tracker watches the same install for a battle in progress, and
         // resolves its roster against the game data the replay inspector has
         // already opened rather than a second copy.
-        if let Some(game_data) = self.replay_inspector.read(cx).game_data() {
-            let replay_dir = std::path::PathBuf::from(&settings.wows_dir).join("replays");
-            let proxy_url = settings.proxy_url.clone();
-            self.player_tracker
-                .update(cx, |tracker, cx| tracker.watch_live_matches(replay_dir, game_data, proxy_url, cx));
-        }
+        let wows_dir = settings.wows_dir.clone();
+        let proxy_url = settings.proxy_url.clone();
+        self.watch_live_matches(&wows_dir, proxy_url, cx);
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
         // Seed the text fields so the tab opens showing what is saved.
         self.wows_dir_input.update(cx, |state, cx| state.set_value(settings.wows_dir.clone(), window, cx));
@@ -409,11 +406,26 @@ impl App {
         let replay_settings = settings.replay.clone();
         let debug_mode = settings.debug_mode;
         let auto_load = settings.auto_load_latest_replay;
+        let proxy_url = settings.proxy_url.clone();
         let for_unpacker = path.clone();
+        let for_tracker = path.clone();
         self.replay_inspector
             .update(cx, |view, cx| view.apply_settings(path, debug_mode, replay_settings, auto_load, window, cx));
         self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(for_unpacker, window, cx));
+        self.watch_live_matches(&for_tracker, proxy_url, cx);
         cx.notify();
+    }
+
+    /// Points the Player Tracker's live watch at `wows_dir`'s replays, using
+    /// the game data the replay inspector just opened for the same install.
+    /// A directory with no game data leaves the tracker saying so rather than
+    /// polling the previous install.
+    fn watch_live_matches(&mut self, wows_dir: &str, proxy_url: String, cx: &mut Context<Self>) {
+        let Some(game_data) = self.replay_inspector.read(cx).game_data() else {
+            return;
+        };
+        let replay_dir = std::path::PathBuf::from(wows_dir).join("replays");
+        self.player_tracker.update(cx, |tracker, cx| tracker.watch_live_matches(replay_dir, game_data, proxy_url, cx));
     }
 
     fn render_settings_tab(&mut self, cx: &mut Context<Self>) -> impl IntoElement {

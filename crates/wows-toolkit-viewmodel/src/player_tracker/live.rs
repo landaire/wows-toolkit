@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 
 use jiff::Timestamp;
-use wows_replay_insights::battle_report::replay_timestamp;
+use wows_replay_insights::battle_report::try_replay_timestamp;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::decoder::PlayerStateData;
 use wows_replays::types::AccountId;
@@ -105,7 +105,12 @@ pub struct LiveRosterRow {
 }
 
 impl LiveMatch {
-    pub fn from_meta(meta: &ReplayMeta) -> Self {
+    /// The roster `meta` describes.
+    ///
+    /// `None` when the header carries no date the game's format reads, which
+    /// a file the game is still flushing can be; the caller retries rather
+    /// than showing a battle that started at an invented time.
+    pub fn from_meta(meta: &ReplayMeta) -> Option<Self> {
         let build = Version::try_from_client_exe(&meta.clientVersionFromExe).and_then(|v| v.build_number());
         let players = meta
             .vehicles
@@ -117,7 +122,7 @@ impl LiveMatch {
             })
             .collect();
 
-        Self { started_at: replay_timestamp(meta), build, players }
+        Some(Self { started_at: try_replay_timestamp(meta)?, build, players })
     }
 }
 
@@ -163,25 +168,36 @@ impl LiveIdentities {
     }
 }
 
+/// The tracked-player lookup a roster is joined against.
+///
+/// `players` is how many accounts went into it, which is not `by_name.len()`:
+/// an account known under several names contributes several entries, and the
+/// consumers check staleness against their own player count.
+pub struct TrackedIndex {
+    pub by_name: HashMap<String, AccountId>,
+    pub players: usize,
+}
+
 /// Tracked players keyed by lower-cased name.
 ///
 /// `aliases` are every name an account has been seen under and `current` the
 /// name it goes by now; a current name beats another account's stale alias,
 /// which is why the two arrive separately rather than as one list.
 pub fn build_name_index<'a>(
+    players: usize,
     aliases: impl Iterator<Item = (AccountId, &'a str)>,
     current: impl Iterator<Item = (AccountId, &'a str)>,
-) -> HashMap<String, AccountId> {
-    let mut index = HashMap::new();
+) -> TrackedIndex {
+    let mut by_name = HashMap::new();
 
     for (id, alias) in aliases.filter(|(_, alias)| !alias.is_empty()) {
-        index.entry(alias.to_ascii_lowercase()).or_insert(id);
+        by_name.entry(alias.to_ascii_lowercase()).or_insert(id);
     }
     for (id, name) in current.filter(|(_, name)| !name.is_empty()) {
-        index.insert(name.to_ascii_lowercase(), id);
+        by_name.insert(name.to_ascii_lowercase(), id);
     }
 
-    index
+    TrackedIndex { by_name, players }
 }
 
 /// Orders one team the way the replay inspector orders players: ship class
@@ -208,7 +224,9 @@ pub struct ResolvedRoster {
     /// Drives a retry, so the roster fills in once a lazy build load completes.
     pub ships_resolved: bool,
     /// Tracked-player count the name join was built against, so the join is
-    /// rebuilt after new replays are indexed.
+    /// rebuilt after new replays are indexed. Counts players, not names: one
+    /// account can be known under several, and the consumers compare this
+    /// against how many players they hold.
     pub tracked_count: usize,
     /// Identity count the name join was built against, so the join is rebuilt
     /// once the scan lands.
@@ -224,10 +242,11 @@ pub struct ResolvedRoster {
 /// each front end stores its tracked players in.
 pub fn resolve_roster(
     live: &LiveMatch,
-    name_index: &HashMap<String, AccountId>,
+    tracked: &TrackedIndex,
     identities: Option<&LiveIdentities>,
     metadata: Option<&GameMetadataProvider>,
 ) -> ResolvedRoster {
+    let name_index = &tracked.by_name;
     let mut friendly = Vec::new();
     let mut enemy = Vec::new();
 
@@ -271,7 +290,7 @@ pub fn resolve_roster(
     ResolvedRoster {
         started_at: live.started_at,
         ships_resolved: metadata.is_some(),
-        tracked_count: name_index.len(),
+        tracked_count: tracked.players,
         identity_count: identities.map_or(0, |ids| ids.by_name.len()),
         friendly,
         enemy,
@@ -346,8 +365,9 @@ mod tests {
         }
     }
 
-    fn index(players: &[Names]) -> HashMap<String, AccountId> {
+    fn index(players: &[Names]) -> TrackedIndex {
         build_name_index(
+            players.len(),
             players.iter().flat_map(|player| player.aliases.iter().map(|alias| (player.id, alias.as_str()))),
             players.iter().map(|player| (player.id, player.current.as_str())),
         )
@@ -358,7 +378,7 @@ mod tests {
         let json = meta_json("13, 11, 0, 12668706", &format!("{},{}", vehicle("Ally", 100, 1), vehicle("Foe", 200, 2)));
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
 
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
         assert_eq!(live.build, Some(12668706));
         assert_eq!(live.players.len(), 2);
@@ -373,28 +393,39 @@ mod tests {
         let json = meta_json("0, 0, 0, 0", &vehicle("Ally", 100, 1));
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
 
-        assert_eq!(LiveMatch::from_meta(&meta).build, None);
+        assert_eq!(LiveMatch::from_meta(&meta).expect("the fixture carries a date").build, None);
     }
 
     #[test]
     fn name_index_matches_current_name_and_aliases_case_insensitively() {
         let index = index(&[tracked(1, "Harvey635", &["fordy890"])]);
 
-        assert_eq!(index.get("harvey635"), Some(&AccountId(1)));
-        assert_eq!(index.get("fordy890"), Some(&AccountId(1)));
-        assert_eq!(index.get("nobody"), None);
+        assert_eq!(index.by_name.get("harvey635"), Some(&AccountId(1)));
+        assert_eq!(index.by_name.get("fordy890"), Some(&AccountId(1)));
+        assert_eq!(index.by_name.get("nobody"), None);
     }
 
     #[test]
     fn name_index_prefers_a_current_name_over_another_accounts_alias() {
         let index = index(&[tracked(1, "Shared", &[]), tracked(2, "Other", &["Shared"])]);
 
-        assert_eq!(index.get("shared"), Some(&AccountId(1)));
+        assert_eq!(index.by_name.get("shared"), Some(&AccountId(1)));
     }
 
     #[test]
     fn name_index_skips_empty_names() {
-        assert!(index(&[tracked(1, "", &[""])]).is_empty());
+        assert!(index(&[tracked(1, "", &[""])]).by_name.is_empty());
+    }
+
+    /// A header the game has not finished writing can carry a date that is
+    /// not yet the game's format; that is a retry, not a battle at an
+    /// invented time.
+    #[test]
+    fn a_header_with_an_unreadable_date_is_not_a_roster() {
+        let json = meta_json("13, 11, 0, 12668706", &vehicle("Ally", 100, 1)).replace("28.12.2023 00:52:26", "");
+        let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
+
+        assert!(LiveMatch::from_meta(&meta).is_none());
     }
 
     #[test]
@@ -429,9 +460,9 @@ mod tests {
             &format!("{},{},{}", vehicle("Me", 100, 0), vehicle("Ally", 101, 1), vehicle("Foe", 200, 2)),
         );
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
-        let resolved = resolve_roster(&live, &HashMap::new(), None, None);
+        let resolved = resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, None, None);
 
         let friendly: Vec<&str> = resolved.friendly.iter().map(|r| r.name.as_str()).collect();
         let enemy: Vec<&str> = resolved.enemy.iter().map(|r| r.name.as_str()).collect();
@@ -445,9 +476,9 @@ mod tests {
     fn resolve_roster_marks_ships_unresolved_without_game_data() {
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Ally", 100, 1));
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
-        let resolved = resolve_roster(&live, &HashMap::new(), None, None);
+        let resolved = resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, None, None);
 
         assert!(!resolved.ships_resolved);
         assert_eq!(resolved.friendly[0].ship_name, None);
@@ -461,7 +492,7 @@ mod tests {
             &format!("{},{}", vehicle("Harvey635", 100, 2), vehicle("Stranger", 101, 2)),
         );
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
         let index = index(&[tracked(42, "Harvey635", &[])]);
 
@@ -543,9 +574,10 @@ mod tests {
         };
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
-        let resolved = resolve_roster(&live, &HashMap::new(), Some(&identities), None);
+        let resolved =
+            resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, Some(&identities), None);
 
         assert_eq!(resolved.enemy[0].account_id, Some(AccountId(42)));
         assert_eq!(resolved.enemy[0].region, Some(Region::Na));
@@ -558,9 +590,9 @@ mod tests {
     fn a_roster_without_identities_keeps_todays_behaviour() {
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
-        let resolved = resolve_roster(&live, &HashMap::new(), None, None);
+        let resolved = resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, None, None);
 
         assert_eq!(resolved.enemy[0].account_id, None);
         assert_eq!(resolved.enemy[0].region, None);
@@ -578,9 +610,10 @@ mod tests {
         };
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));
         let meta: ReplayMeta = serde_json::from_str(&json).expect("meta parses");
-        let live = LiveMatch::from_meta(&meta);
+        let live = LiveMatch::from_meta(&meta).expect("the fixture carries a date");
 
-        let resolved = resolve_roster(&live, &HashMap::new(), Some(&identities), None);
+        let resolved =
+            resolve_roster(&live, &TrackedIndex { by_name: HashMap::new(), players: 0 }, Some(&identities), None);
 
         assert_eq!(resolved.enemy[0].account_id, None);
     }
