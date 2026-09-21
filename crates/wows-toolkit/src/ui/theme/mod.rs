@@ -16,7 +16,7 @@ pub fn install(ctx: &egui::Context) {
 
 /// Apply a theme choice. `System` follows the desktop preference.
 pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
-    ctx.set_theme(egui::ThemePreference::from(choice));
+    ctx.set_theme(crate::data::settings::egui_theme_preference(choice));
 }
 
 /// Pins a pass to the dark theme, restoring the user's preference on drop.
@@ -85,7 +85,7 @@ mod tests {
                 let _guard = DarkPass::force(root);
             });
 
-            assert_eq!(ctx.options(|opt| opt.theme_preference), egui::ThemePreference::from(choice));
+            assert_eq!(ctx.options(|opt| opt.theme_preference), crate::data::settings::egui_theme_preference(choice));
         }
     }
 }

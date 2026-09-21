@@ -30,6 +30,7 @@ use crate::ui::selectable;
 use crate::unpacker::view::UnpackerView;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -85,6 +86,10 @@ pub struct App {
     /// once the DB load completes, then updated live as the slider moves.
     /// Never written back to the DB.
     zoom: f32,
+    /// Which palette is on screen. Seeded from the shared setting, then
+    /// changed from the Settings tab; a zoom change re-applies the theme, so
+    /// it has to be kept rather than re-read.
+    theme: ThemeChoice,
     zoom_slider: Entity<SliderState>,
     /// Replay Inspector tab: the file browser plus the per-replay dock.
     /// Starts its background directory scan once `apply_settings` knows the
@@ -157,6 +162,7 @@ impl App {
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
 
         Self {
+            theme: ThemeChoice::default(),
             active_tab: AppTab::ReplayInspector,
             settings: SettingsState::Loading,
             zoom: DEFAULT_ZOOM,
@@ -236,6 +242,7 @@ impl App {
 
     pub fn apply_settings(&mut self, settings: GpuiSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.zoom = settings.zoom;
+        self.theme = settings.theme;
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
         let wows_dir = settings.wows_dir.clone();
@@ -316,7 +323,7 @@ impl App {
             .child(Button::new("reset-zoom").label("Reset").compact().on_click(cx.listener(
                 |this, _event: &ClickEvent, window, cx| {
                     this.zoom = DEFAULT_ZOOM;
-                    theme::apply_egui_dark_theme(this.zoom, window, cx);
+                    theme::apply_egui_theme(this.theme, this.zoom, window, cx);
                     this.zoom_slider.update(cx, |slider, slider_cx| {
                         slider.set_value(DEFAULT_ZOOM, window, slider_cx);
                     });
@@ -486,6 +493,7 @@ impl App {
         let check_for_updates = settings.check_for_updates;
         let enable_logging = settings.enable_logging;
         let data_sharing = settings.data_sharing;
+        let theme_choice = settings.theme;
         let replay = settings.replay.clone();
         let current_replay_path = settings.current_replay_path.display().to_string();
 
@@ -522,6 +530,26 @@ impl App {
                 }),
             ))
             .child(self.render_zoom_row(cx))
+            .child(v_flex().gap_1().child(div().text_sm().child("Theme")).child(h_flex().gap_2().children(
+                ThemeChoice::ALL.map(|choice| {
+                    selectable(
+                        ("theme-choice", choice as usize),
+                        theme_choice == choice,
+                        Button::new(("theme-choice-button", choice as usize))
+                            .label(choice.label())
+                            .compact()
+                            .selected(theme_choice == choice)
+                            .on_click(cx.listener(move |this, _event, window, cx| {
+                                this.edit_setting(keys::THEME, cx, |settings| {
+                                    settings.theme = choice;
+                                    choice
+                                });
+                                this.theme = choice;
+                                theme::apply_egui_theme(choice, this.zoom, window, cx);
+                            })),
+                    )
+                }),
+            )))
             .child(
                 v_flex()
                     .gap_1()
@@ -683,7 +711,7 @@ impl Render for App {
         let slider_zoom = self.zoom_slider.read(cx).value().start();
         if (slider_zoom - self.zoom).abs() > f32::EPSILON {
             self.zoom = slider_zoom;
-            theme::apply_egui_dark_theme(self.zoom, window, cx);
+            theme::apply_egui_theme(self.theme, self.zoom, window, cx);
         }
 
         let active_ix = AppTab::ALL.iter().position(|t| *t == self.active_tab).unwrap_or(0);

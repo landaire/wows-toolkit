@@ -9,6 +9,7 @@ use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::queries;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
+use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
 
 /// Zoom factor applied when the `zoom_factor` setting has never been saved,
@@ -22,6 +23,9 @@ pub const MAX_ZOOM: f32 = 2.0;
 /// Settings read from the shared config DB, applied once at startup.
 pub struct GpuiSettings {
     pub zoom: f32,
+    /// Which palette to render in. The egui app writes the same setting, so
+    /// the two open in the theme the user last chose in either.
+    pub theme: ThemeChoice,
     pub wows_dir: String,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
@@ -59,6 +63,8 @@ impl GpuiSettings {
     /// back to that field's documented default rather than a sentinel value.
     pub async fn load(pool: &SqlitePool) -> Self {
         let zoom = queries::get_setting::<f32>(pool, keys::ZOOM_FACTOR).await.unwrap_or(DEFAULT_ZOOM);
+        // Never chosen means follow the desktop, which is the egui default.
+        let theme = queries::get_setting::<ThemeChoice>(pool, keys::THEME).await.unwrap_or_default();
         let wows_dir = queries::get_setting::<String>(pool, keys::WOWS_DIR).await.unwrap_or_default();
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, keys::CURRENT_REPLAY_PATH).await.unwrap_or_default();
@@ -84,6 +90,7 @@ impl GpuiSettings {
 
         Self {
             zoom,
+            theme,
             wows_dir,
             current_replay_path,
             replay,

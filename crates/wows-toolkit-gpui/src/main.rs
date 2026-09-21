@@ -22,6 +22,7 @@ use gpui_kit::assets::Assets;
 use gpui_kit::component::Root;
 use gpui_kit::*;
 use settings::GpuiSettings;
+use wows_toolkit_viewmodel::settings::ThemeChoice;
 
 const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1200.), px(800.));
@@ -77,7 +78,10 @@ fn main() {
             let mut app_entity = None;
             let window = cx
                 .open_window(window_options, |window, cx| {
-                    theme::apply_egui_dark_theme(settings::DEFAULT_ZOOM, window, cx);
+                    // Before the database is read: the desktop's own
+                    // preference, which is what the stored default resolves to
+                    // anyway.
+                    theme::apply_egui_theme(ThemeChoice::default(), settings::DEFAULT_ZOOM, window, cx);
                     let view = cx.new(|cx| App::new(window, cx));
                     app_entity = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
@@ -125,9 +129,10 @@ fn main() {
             // no directory scan, no game-data preload -- so it is logged
             // rather than discarded.
             let zoom = loaded.zoom;
+            let theme_choice = loaded.theme;
             if let Err(err) = window.update(cx, |_root, window, cx| {
                 settings_store::init(pool.clone(), cx);
-                theme::apply_egui_dark_theme(zoom, window, cx);
+                theme::apply_egui_theme(theme_choice, zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.apply_settings(loaded, window, cx);
                     app.apply_session_stats(session, window, cx);

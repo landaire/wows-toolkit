@@ -23,6 +23,8 @@ pub mod keys {
     /// Where the unpacker writes extracted files. Empty until the user picks
     /// one, which is why the Extract control stays disabled.
     pub const OUTPUT_DIR: &str = "output_dir";
+    /// Which theme the app renders in; a [`super::ThemeChoice`].
+    pub const THEME: &str = "theme";
 }
 
 /// A proxy setting as a URL a client can take.
@@ -36,6 +38,43 @@ pub fn normalize_proxy_url(raw: &str) -> Option<String> {
         return None;
     }
     if raw.contains("://") { Some(raw.to_string()) } else { Some(format!("http://{raw}")) }
+}
+
+/// Which theme the app renders in.
+///
+/// Stored as the variant name, which is what the egui app already wrote to
+/// the database; renaming a variant would silently read back as `System`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ThemeChoice {
+    /// Follow the desktop's light/dark preference.
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+impl ThemeChoice {
+    pub const ALL: [ThemeChoice; 3] = [Self::System, Self::Dark, Self::Light];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "Follow system",
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+        }
+    }
+
+    /// Whether this choice renders dark, given what the desktop reports.
+    ///
+    /// `system_is_dark` is consulted only for [`Self::System`]; an explicit
+    /// choice ignores the desktop, which is the point of making one.
+    pub fn is_dark(self, system_is_dark: bool) -> bool {
+        match self {
+            Self::System => system_is_dark,
+            Self::Dark => true,
+            Self::Light => false,
+        }
+    }
 }
 
 /// What the app is allowed to send upstream.
@@ -84,6 +123,7 @@ impl DataSharingMode {
 #[cfg(test)]
 mod tests {
     use super::DataSharingMode;
+    use super::ThemeChoice;
     use super::normalize_proxy_url;
 
     #[test]
@@ -111,6 +151,26 @@ mod tests {
             serde_json::from_str::<DataSharingMode>("\"Replays\"").is_err(),
             "the variant spelling is not what is stored"
         );
+    }
+
+    /// Pinned against what the egui app already wrote: the database holds
+    /// the variant names, and reading anything else would quietly put every
+    /// user back on the system theme.
+    #[test]
+    fn the_stored_theme_is_the_variant_name() {
+        assert_eq!(serde_json::to_string(&ThemeChoice::System).unwrap(), "\"System\"");
+        assert_eq!(serde_json::to_string(&ThemeChoice::Dark).unwrap(), "\"Dark\"");
+        assert_eq!(serde_json::to_string(&ThemeChoice::Light).unwrap(), "\"Light\"");
+        assert_eq!(serde_json::from_str::<ThemeChoice>("\"Light\"").unwrap(), ThemeChoice::Light);
+    }
+
+    /// Only the system choice asks the desktop; an explicit one is explicit.
+    #[test]
+    fn an_explicit_theme_ignores_what_the_desktop_reports() {
+        assert!(ThemeChoice::System.is_dark(true));
+        assert!(!ThemeChoice::System.is_dark(false));
+        assert!(ThemeChoice::Dark.is_dark(false));
+        assert!(!ThemeChoice::Light.is_dark(true));
     }
 
     #[test]

@@ -264,7 +264,11 @@ impl Render for StatsShipsPanel {
                                 // and names that band on hover as the egui chip
                                 // does. Dark only, like the rest of the port.
                                 .when_some(cell.rating.as_ref(), |this, rating| {
-                                    this.text_color(rgb(personal_rating::chip_text(rating.category, true))).tooltip({
+                                    this.text_color(rgb(personal_rating::chip_text(
+                                        rating.category,
+                                        crate::theme::is_dark_mode(),
+                                    )))
+                                    .tooltip({
                                         let name = rating.category.name().to_string();
                                         move |window, cx| Tooltip::new(name.clone()).build(window, cx)
                                     })
