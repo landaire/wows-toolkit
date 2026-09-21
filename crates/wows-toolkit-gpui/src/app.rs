@@ -484,6 +484,14 @@ impl App {
             .gap_2()
             .child(section_heading("Application Settings", "General application behavior and appearance"))
             .child(
+                Button::new("open-data-dir")
+                    .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
+                    .label("Open data directory")
+                    .compact()
+                    .tooltip("Where the settings database, the replay index and the cached game data live")
+                    .on_click(|_event, _window, _cx| open_data_directory()),
+            )
+            .child(
                 Checkbox::new("check-for-updates")
                     .label("Check for updates at startup")
                     .checked(check_for_updates)
@@ -629,6 +637,33 @@ impl App {
             .track_scroll(&self.settings_scroll)
             .child(v_flex().gap_4().p_4().child(application).child(game).child(replay_section).child(armor))
             .into_any_element()
+    }
+}
+
+/// Shows the toolkit's storage directory in the system file manager.
+///
+/// The directory is created first: it does not exist until something has
+/// been written there, and opening a path that is not there yet reads as a
+/// broken button rather than an empty folder.
+fn open_data_directory() {
+    let Some(dir) = wows_toolkit_config::storage_dir() else {
+        tracing::warn!("settings: there is no storage directory to open");
+        return;
+    };
+    if let Err(err) = std::fs::create_dir_all(&dir) {
+        tracing::warn!("settings: the storage directory could not be created: {err}");
+        return;
+    }
+
+    #[cfg(target_os = "windows")]
+    let opener = "explorer.exe";
+    #[cfg(target_os = "macos")]
+    let opener = "open";
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let opener = "xdg-open";
+
+    if let Err(err) = std::process::Command::new(opener).arg(&dir).spawn() {
+        tracing::warn!("settings: the storage directory could not be opened: {err}");
     }
 }
 
