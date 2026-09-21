@@ -55,6 +55,9 @@ use wows_toolkit_viewmodel::player_tracker::visible_players;
 
 use crate::replay_inspector::GameDataCache;
 use crate::replay_inspector::LoadedGameData;
+use crate::replay_inspector::columns::ColorRole;
+use crate::replay_inspector::columns::PlayerColorKind;
+use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;
 
@@ -554,17 +557,17 @@ fn sort_header(
     .into_any_element()
 }
 
-/// Colours for a live roster row, matching the replay inspector's player
-/// colours so the same person reads the same in both tabs.
+/// A live roster row's colour. The same table the replay inspector's player
+/// names use, so one person reads the same in both tabs.
 fn tint_color(tint: PlayerTint) -> Hsla {
-    let packed = match tint {
-        PlayerTint::SelfPlayer => 0xffd700,
-        PlayerTint::Ally => 0x90ee90,
-        PlayerTint::Enemy => 0xff8080,
-        PlayerTint::DivisionMate => 0x00bfff,
-        PlayerTint::Abuser => 0xff00ff,
+    let kind = match tint {
+        PlayerTint::SelfPlayer => PlayerColorKind::SelfPlayer,
+        PlayerTint::Ally => PlayerColorKind::Ally,
+        PlayerTint::Enemy => PlayerColorKind::Enemy,
+        PlayerTint::DivisionMate => PlayerColorKind::DivisionMate,
+        PlayerTint::Abuser => PlayerColorKind::Abuser,
     };
-    rgb(packed).into()
+    resolve_color(ColorRole::Player(kind))
 }
 
 /// One team's roster column, with its own header row.
