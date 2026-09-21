@@ -40,6 +40,9 @@ fn base_row(db_id: i64, team_id: i64, relation: Relation, is_self: bool) -> Play
         is_self,
         is_bot: false,
         is_abuser: false,
+        is_hidden_profile: false,
+        connection: None,
+        twitch_candidates: Vec::new(),
         is_test_ship: false,
         manual_stat_hide_toggle: false,
         display_name: format!("Player{db_id}"),
@@ -503,6 +506,7 @@ pub fn sample_model() -> ReplayReportModel {
         columns: ReplayColumn::ALL.to_vec(),
         map: "Fault Line".to_string(),
         chat: sample_chat_messages(),
+        timestamp: jiff::Timestamp::UNIX_EPOCH,
     }
 }
 

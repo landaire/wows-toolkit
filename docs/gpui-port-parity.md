@@ -18,12 +18,16 @@ kept so the next audit does not re-report them.
   load that dominated is now warmed at startup.)
 - The port raises no toasts where the egui app raises 88. A helper and the
   Twitch, clipboard and chat-save messages are wired; the rest are not.
-- No command palette, though `gpui_kit::component::command` provides one and
-  the egui app has `ui/command_palette.rs`.
-- The file viewers show plain text; `gpui_kit::component::highlighter` ships
-  tree-sitter grammars (json, markdown, html and others) an `EditorState`
-  can use.
-- The settings tab is hand-built rows rather than `component::form`.
+  (`Root` holds the queue but the window's own view has to draw the layer,
+  which `App::render` now does; before that every toast and dialog was
+  silent.)
+- [done] The command palette is `gpui_kit::component::command` over
+  `palette.rs`, on ctrl+k and ctrl+shift+p. The egui palette's cascading
+  sub-modes (search a player, a ship, a ship's armor) are not ported.
+- [done] The file viewers and the raw-JSON panels are read-only
+  `EditorState`s with a grammar, so they highlight, select and search.
+- [done] The settings tab is `component::form`: one labelled section card
+  per group, Twitch in a section of its own.
 
 - [done] Every string the port draws was an English literal. The port has its
   own `i18n!` now, a language change sets both its own locale and the shared
@@ -105,9 +109,11 @@ kept so the next audit does not re-report them.
 - [done] Tree expansion and selection survive a rebuild.
 - [done] A dock holding several replays drew no tab bar, so only the last one
   opened was reachable; every dock is skinned now.
-- The incomplete-results warning, the match-context line, the Twitch chip,
-  the hidden-profile and disconnect glyphs, and the Skills tier-marker split
-  are all missing.
+- The incomplete-results warning, the match-context line and the Skills
+  tier-marker split are still missing.
+- [done] The Twitch chip, the hidden-profile eye and the disconnect glyph
+  are drawn beside a name. The chip's candidates come from the same shared
+  observation table the egui app writes.
 - Columns cannot be resized; the Name column has no wider range of its own.
 - [done] The replays directory is watched; a finished match joins the
   listing and, with the checkbox on, opens.
@@ -226,7 +232,8 @@ kept so the next audit does not re-report them.
 - Automatic replay data export is not configurable.
 - No way to build or rebuild the replay index.
 - [done] The language is chosen from a combo.
-- No Twitch "Get Token" link, and a stored credential is invisible.
+- [done] The Twitch section has the "Get Token" link, and says what Twitch
+  made of the stored credential.
 - [done] Zoom is saved.
 - [done] The Settings tab flags an invalid WoWs directory on the tab strip.
 - The WoWs directory field has no validation feedback and is not locked

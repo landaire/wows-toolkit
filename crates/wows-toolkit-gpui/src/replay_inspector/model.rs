@@ -16,6 +16,7 @@ use std::collections::HashMap;
 
 use serde_json::Value;
 use wows_replay_insights::battle_report::AchievementResult;
+use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::Damage;
@@ -43,6 +44,7 @@ use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
+use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -222,6 +224,16 @@ pub struct PlayerRow {
     /// data it accepts). `table.rs::actions_cell` gates the debug menu item
     /// on both this and `PlayerTable::debug`.
     pub raw_metadata_json: Option<String>,
+
+    /// The account hides its own statistics.
+    pub is_hidden_profile: bool,
+    /// What this player's connection did, when that is worth reporting.
+    pub connection: Option<ConnectionNote>,
+    /// Twitch logins that were in the monitored channel's chat around this
+    /// battle and plausibly name this player. Empty until
+    /// [`ReplayReportModel::populate_twitch_candidates`] runs, which needs
+    /// observations from the shared database that the report does not carry.
+    pub twitch_candidates: Vec<SniperCandidate>,
 }
 
 impl PlayerRow {
@@ -340,6 +352,9 @@ pub struct ReplayReportModel {
     /// The replay's in-game chat log, presentation-ready. Empty for a replay
     /// with no chat activity.
     pub chat: Vec<ChatMessage>,
+    /// When the battle was played, which is the middle of the window the
+    /// Twitch chip looks for chat sightings in.
+    pub timestamp: jiff::Timestamp,
 }
 
 impl ReplayReportModel {
@@ -436,6 +451,7 @@ impl ReplayReportModel {
             battle_result: normalized.metadata.resolved_battle_result(),
             columns: ReplayColumn::ALL.to_vec(),
             map: normalized.metadata.map.clone(),
+            timestamp: normalized.metadata.timestamp,
             chat: Vec::new(),
         }
     }
@@ -464,6 +480,21 @@ impl ReplayReportModel {
             };
 
             row.personal_rating = rate_single_battle(pr_data, ship_id, actual_damage, row.kills.unwrap_or(0), is_win);
+        }
+    }
+
+    /// Flags the rows whose names plausibly appeared in the monitored
+    /// channel's chat around this battle.
+    ///
+    /// `observations` is every login seen and when, which is what the shared
+    /// database holds; the window and the name match are
+    /// `wows_toolkit_viewmodel::twitch`, so both front ends flag the same
+    /// rows.
+    pub fn populate_twitch_candidates(&mut self, observations: &[(String, jiff::Timestamp)]) {
+        for row in &mut self.rows {
+            let seen = observations.iter().map(|(login, at)| (login.as_str(), *at));
+            row.twitch_candidates =
+                wows_toolkit_viewmodel::twitch::sniper_candidates(seen, &row.display_name, self.timestamp);
         }
     }
 }
@@ -789,6 +820,9 @@ impl PlayerRow {
             short_ship_config_url: None,
             wows_numbers_url: None,
             raw_metadata_json: None,
+            is_hidden_profile: np.is_hidden_profile,
+            connection: np.connection.clone(),
+            twitch_candidates: Vec::new(),
         }
     }
 }
@@ -858,6 +892,44 @@ mod tests {
         assert!(!self_test_ship.should_hide_stats(), "self player's own test ship is never hidden");
     }
 
+    /// A login close enough to a name, seen inside the window, flags that
+    /// row and no other.
+    #[test]
+    fn a_chat_login_that_names_a_row_flags_it() {
+        let battle_at = jiff::Timestamp::from_second(1_700_000_000).expect("a valid instant");
+        let mut model = ReplayReportModel {
+            self_team: TeamId::from(0i64),
+            rows: vec![
+                PlayerRow {
+                    display_name: "harvey635".to_string(),
+                    ..test_support::base_row(1, Relation::new(0), true)
+                },
+                PlayerRow {
+                    display_name: "somebodyelse".to_string(),
+                    ..test_support::base_row(2, Relation::new(2), false)
+                },
+            ],
+            battle_result: None,
+            columns: ReplayColumn::ALL.to_vec(),
+            map: "Test Map".to_string(),
+            chat: Vec::new(),
+            timestamp: battle_at,
+        };
+
+        let seen_at = battle_at + jiff::SignedDuration::from_mins(5);
+        let far_away = battle_at + jiff::SignedDuration::from_mins(120);
+        model.populate_twitch_candidates(&[
+            ("harvey_635".to_string(), seen_at),
+            ("harvey635".to_string(), far_away),
+            ("stranger".to_string(), seen_at),
+        ]);
+
+        let flagged: Vec<&str> =
+            model.rows[0].twitch_candidates.iter().map(|candidate| candidate.login.as_str()).collect();
+        assert_eq!(flagged, vec!["harvey_635"], "only the in-window login that names the row counts");
+        assert!(model.rows[1].twitch_candidates.is_empty(), "a row nobody named is not flagged");
+    }
+
     #[test]
     fn populate_personal_ratings_computes_pr_from_row_ship_id_damage_and_win() {
         use wows_replay_insights::personal_rating::ExpectedValuesData;
@@ -917,6 +989,7 @@ mod tests {
             columns: ReplayColumn::ALL.to_vec(),
             map: "Test Map".to_string(),
             chat: Vec::new(),
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
         };
 
         // Unloaded PR data would make `calculate_pr` return `None` for any

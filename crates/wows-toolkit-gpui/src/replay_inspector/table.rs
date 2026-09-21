@@ -16,6 +16,7 @@
 
 use std::collections::HashSet;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
@@ -50,11 +51,13 @@ use super::model::ReplayReportModel;
 use super::sort::SortColumn;
 use super::sort::SortOrder;
 use super::sort::sort_rows;
+use wows_replay_insights::battle_report::ConnectionNote;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::vfs::VfsPath;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
@@ -468,6 +471,15 @@ impl PlayerTable {
     /// left it, since nobody asked for a scroll. Notifies rather than emits:
     /// this runs inside the view's fan-out over its open panels, and an event
     /// from here would re-enter the panel that owns this table.
+    /// Flags the rows whose names were plausibly in the monitored channel's
+    /// chat around this battle. Row order does not depend on the flag, so
+    /// this only remeasures.
+    pub fn populate_twitch_candidates(&mut self, observations: &[(String, jiff::Timestamp)], cx: &mut Context<Self>) {
+        self.model.populate_twitch_candidates(observations);
+        self.list_state.remeasure_items(0..self.model.rows.len());
+        cx.notify();
+    }
+
     pub fn populate_personal_ratings(&mut self, table: &PersonalRatingData, cx: &mut Context<Self>) {
         self.model.populate_personal_ratings(table);
         if self.sort.column() == SortColumn::PersonalRating {
@@ -677,7 +689,110 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
             .child(crate::ui::selectable_text(("replay-name", ix), row.display_name.clone())),
     );
 
+    if row.is_hidden_profile {
+        cell = cell.child(
+            crate::icons::icon(crate::icons::EYE_SLASH).id(("replay-hidden-profile", ix)).test_support().tooltip(
+                |window, cx| Tooltip::new(t!("ui.replay.player.hidden_profile").into_owned()).build(window, cx),
+            ),
+        );
+    }
+
+    if let Some(chip) = twitch_chip(ix, &row.twitch_candidates) {
+        cell = cell.child(chip);
+    }
+
+    if let Some(note) = row.connection.as_ref() {
+        let hover: SharedString = connection_hover_text(note).into();
+        cell = cell.child(
+            crate::icons::icon(crate::icons::PLUGS)
+                .id(("replay-disconnect", ix))
+                .test_support()
+                .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx)),
+        );
+    }
+
     cell.into_any_element()
+}
+
+/// What a connection history says, in the egui app's own wording.
+fn connection_hover_text(note: &ConnectionNote) -> String {
+    match note {
+        ConnectionNote::NeverConnected => t!("ui.replay.player.never_connected").into_owned(),
+        ConnectionNote::Interrupted { events } => format!("Player {}", events.join(", ")),
+    }
+}
+
+/// The Twitch chip: a logo beside the name when a chat login around this
+/// battle plausibly names this player.
+///
+/// One candidate copies its login on click; several open a menu so the
+/// reader picks which. `None` when nothing matched, which is a row with no
+/// chip.
+fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> {
+    let first = candidates.first()?;
+
+    let hover: SharedString = candidates
+        .iter()
+        .map(|candidate| {
+            let minutes = candidate.minutes.iter().map(i64::to_string).collect::<Vec<_>>().join(", ");
+            format!(
+                "{}
+{}",
+                t!("ui.twitch.possible_name", name = candidate.login),
+                t!("ui.twitch.seen_minutes", minutes = minutes)
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+
+",
+        )
+        .into();
+    let hover: SharedString = format!(
+        "{hover}
+
+{}",
+        t!("ui.twitch.click_to_copy")
+    )
+    .into();
+
+    let glyph = crate::icons::icon(crate::icons::TWITCH_LOGO)
+        .id(("replay-twitch", ix))
+        .test_support()
+        .cursor_pointer()
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx));
+
+    if candidates.len() == 1 {
+        let login = first.login.clone();
+        return Some(
+            glyph
+                .on_click(move |_event, _window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
+                })
+                .into_any_element(),
+        );
+    }
+
+    let logins: Vec<String> = candidates.iter().map(|candidate| candidate.login.clone()).collect();
+    Some(
+        Button::new(("replay-twitch-menu", ix))
+            .ghost()
+            .xsmall()
+            .child(glyph)
+            .dropdown_menu(move |mut menu, _window, _cx| {
+                for login in &logins {
+                    let login = login.clone();
+                    menu = menu.item(PopupMenuItem::new(login.clone()).icon(IconName::Copy).on_click(
+                        move |_event, _window, cx| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
+                        },
+                    ));
+                }
+                menu
+            })
+            .into_any_element(),
+    )
 }
 
 /// The Skills column's cell: `cell_value`'s text/color/hover, prefixed with
