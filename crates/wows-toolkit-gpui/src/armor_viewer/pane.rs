@@ -46,6 +46,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Disableable;
+use gpui_kit::component::Selectable;
+use gpui_kit::component::Sizable;
+use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::resizable::h_resizable;
@@ -690,7 +694,24 @@ impl Render for ArmorViewerPane {
                     .when_some(shown_ship, |this, name| {
                         this.child(div().text_xs().font_weight(FontWeight::BOLD).child(name))
                     })
-                    .when_some(status_banner, |this, banner| this.child(banner)),
+                    .when_some(status_banner, |this, banner| this.child(banner))
+                    .child(div().flex_1())
+                    // The legend is closed from its own header; without this
+                    // there is no way back to it (the egui display popover
+                    // carries the same checkbox).
+                    .child(
+                        Button::new("armor-legend-toggle")
+                            .label("Legend")
+                            .compact()
+                            .xsmall()
+                            .selected(self.legend.visible)
+                            .disabled(!self.ship_loaded)
+                            .tooltip("Show the armor thickness legend")
+                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                this.legend.visible = !this.legend.visible;
+                                cx.notify();
+                            })),
+                    ),
             )
             .child(
                 div().flex_1().min_h(px(0.)).child(
