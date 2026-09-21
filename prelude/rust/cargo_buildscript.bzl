@@ -157,7 +157,7 @@ def _make_cc_shim(ctx: AnalysisContext, name: str, cmd: cmd_args) -> cmd_args:
 
     language = ctx.attrs._exec_os_type[OsLookup].script
     if language == ScriptLanguage("sh"):
-        script = ctx.actions.declare_output("{}.sh".format(name), has_content_based_path = True)
+        script = ctx.actions.declare_output("{}.sh".format(name), has_content_based_path = False)
         wrapper, _ = ctx.actions.write(
             script,
             [
@@ -187,7 +187,7 @@ def _make_cc_shim(ctx: AnalysisContext, name: str, cmd: cmd_args) -> cmd_args:
             allow_args = True,
         )
     elif language == ScriptLanguage("bat"):
-        script = ctx.actions.declare_output("{}.bat".format(name), has_content_based_path = True)
+        script = ctx.actions.declare_output("{}.bat".format(name), has_content_based_path = False)
         wrapper, _ = ctx.actions.write(
             script,
             [
@@ -227,14 +227,14 @@ def _cargo_buildscript_impl(ctx: AnalysisContext) -> list[Provider]:
     cxx_toolchain_info = ctx.attrs._cxx_toolchain[CxxToolchainInfo]
     rust_toolchain_info = ctx.attrs._rust_toolchain[RustToolchainInfo]
 
-    cwd = ctx.actions.declare_output("cwd", dir = True, has_content_based_path = True)
-    out_dir = ctx.actions.declare_output("OUT_DIR", dir = True, has_content_based_path = True)
-    rustc_flags = ctx.actions.declare_output("rustc_flags", has_content_based_path = True)
+    cwd = ctx.actions.declare_output("cwd", dir = True, has_content_based_path = False)
+    out_dir = ctx.actions.declare_output("OUT_DIR", dir = True, has_content_based_path = False)
+    rustc_flags = ctx.actions.declare_output("rustc_flags", has_content_based_path = False)
 
     if ctx.attrs.manifest_dir != None:
         manifest_dir = ctx.attrs.manifest_dir[DefaultInfo].default_outputs[0]
     else:
-        manifest_dir = ctx.actions.symlinked_dir("manifest_dir", ctx.attrs.filegroup_for_manifest_dir, has_content_based_path = True)
+        manifest_dir = ctx.actions.symlinked_dir("manifest_dir", ctx.attrs.filegroup_for_manifest_dir, has_content_based_path = False)
 
     cmd = [
         ctx.attrs.runner[RunInfo],
