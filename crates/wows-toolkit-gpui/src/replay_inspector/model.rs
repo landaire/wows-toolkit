@@ -648,52 +648,35 @@ impl PlayerRow {
             None => (None, None, None, None),
         };
 
-        // Spotting: prefer server scouting_damage, else the self-player
-        // controller fallback. The hover breakdown is always None; see the
-        // field doc comment.
-        let (spotting_damage, spotting_damage_text) =
-            if let Some(damage_number) = server.and_then(|sr| sr.spotting_damage) {
-                (Some(damage_number), Some(separate_number(damage_number)))
-            } else if np.is_self {
-                match np.controller_spotting_damage {
-                    Some(total) => (Some(total), Some(separate_number(total))),
-                    None => (None, None),
-                }
-            } else {
-                (None, None)
-            };
+        // The hover breakdown is always None; see the field doc comment.
+        let spotting_damage = np.spotting_damage();
+        let spotting_damage_text = spotting_damage.map(separate_number);
 
-        let (potential_damage, potential_damage_text, potential_damage_hover_text, potential_damage_report) =
-            match server {
-                Some(sr) => {
-                    let total = sr.potential_damage;
-                    let art = sr.potential_damage_details.artillery;
-                    let tpd = sr.potential_damage_details.torpedoes;
-                    let air = sr.potential_damage_details.planes;
-                    // Depth-charge agro is the only potential key the 3-field
-                    // report drops; recover it from the total (total == art +
-                    // tpd + air + dbomb by construction).
-                    let dbomb = total.saturating_sub(art + tpd + air);
-                    let hover = breakdown_hover_string(&POTENTIAL_DAMAGE_DESCRIPTIONS, |key| match key {
-                        "agro_art" => art,
-                        "agro_tpd" => tpd,
-                        "agro_air" => air,
-                        "agro_dbomb" => dbomb,
-                        _ => 0,
-                    });
-                    (Some(total), Some(separate_number(total)), Some(hover), Some(sr.potential_damage_details.clone()))
-                }
-                None => {
-                    if np.is_self {
-                        match np.controller_potential_damage {
-                            Some(total) => (Some(total), Some(separate_number(total)), None, None),
-                            None => (None, None, None, None),
-                        }
-                    } else {
-                        (None, None, None, None)
-                    }
-                }
-            };
+        let potential_damage = np.potential_damage();
+        let potential_damage_text = potential_damage.map(separate_number);
+        // Only the results object carries a breakdown; the controller total
+        // the recording player falls back to is a single figure.
+        let (potential_damage_hover_text, potential_damage_report) = match server {
+            Some(sr) => {
+                let total = sr.potential_damage;
+                let art = sr.potential_damage_details.artillery;
+                let tpd = sr.potential_damage_details.torpedoes;
+                let air = sr.potential_damage_details.planes;
+                // Depth-charge agro is the only potential key the 3-field
+                // report drops; recover it from the total (total == art +
+                // tpd + air + dbomb by construction).
+                let dbomb = total.saturating_sub(art + tpd + air);
+                let hover = breakdown_hover_string(&POTENTIAL_DAMAGE_DESCRIPTIONS, |key| match key {
+                    "agro_art" => art,
+                    "agro_tpd" => tpd,
+                    "agro_air" => air,
+                    "agro_dbomb" => dbomb,
+                    _ => 0,
+                });
+                (Some(hover), Some(sr.potential_damage_details.clone()))
+            }
+            None => (None, None),
+        };
 
         let time_lived_secs = np.time_lived_secs;
         let time_lived_text = time_lived_secs.map(|secs| format!("{}:{:02}", secs / 60, secs % 60));
