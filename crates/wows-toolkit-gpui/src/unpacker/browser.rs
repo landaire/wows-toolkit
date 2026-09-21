@@ -8,6 +8,7 @@
 //! listing rows are rebuilt when something changes them, never per frame.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -17,6 +18,8 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
@@ -105,6 +108,10 @@ pub enum BrowserEvent {
     View { path: VfsPath },
     /// Decode this assets.bin prototype and show the JSON.
     ViewAsJson { path: VfsPath },
+    /// Add one entry to the extraction queue.
+    Queue(VfsPath),
+    /// Drop one entry from the extraction queue.
+    Unqueue(VfsPath),
 }
 
 impl EventEmitter<BrowserEvent> for BrowserPanel {}
@@ -127,6 +134,10 @@ pub struct BrowserPanel {
     /// Absolute directory path per tree row id, so a click resolves without
     /// re-walking the tree.
     row_paths: Rc<HashMap<SharedString, String>>,
+    /// The VFS paths currently queued, so each row can show whether it is in
+    /// the queue. Pushed down by the tab that owns the queue; this pane never
+    /// holds the queue itself.
+    queued: Rc<HashSet<String>>,
     filter_state: Entity<InputState>,
     filter_text: String,
     /// The rows the listing draws, rebuilt only when the VFS, the selected
@@ -159,6 +170,7 @@ impl BrowserPanel {
             selected_dir: None,
             tree_state,
             row_paths: Rc::new(HashMap::new()),
+            queued: Rc::new(HashSet::new()),
             filter_state,
             filter_text: String::new(),
             rows: Rc::new(Vec::new()),
@@ -276,6 +288,13 @@ impl BrowserPanel {
 
         self.list_state.reset(rows.len());
         self.rows = Rc::new(rows);
+        cx.notify();
+    }
+
+    /// Adopts the tab's current queue so each listing row can show whether it
+    /// is already in it.
+    pub fn set_queued(&mut self, queued: Rc<HashSet<String>>, cx: &mut Context<Self>) {
+        self.queued = queued;
         cx.notify();
     }
 
@@ -404,6 +423,7 @@ impl Render for BrowserPanel {
         let rows = self.rows.clone();
         let listing_entity = cx.entity();
         let hover_bg = cx.theme().accent;
+        let queued = self.queued.clone();
         let render_row = {
             let rows = rows.clone();
             move |ix: usize, _window: &mut Window, _cx: &mut App| {
@@ -419,6 +439,7 @@ impl Render for BrowserPanel {
                 let decodable = !is_dir && decodable_prototype(&row.label).is_some();
                 let json_path = path.clone();
                 let json_entity = entity.clone();
+                let is_queued = queued.contains(path.as_str());
                 h_flex()
                     .id(ix)
                     .w_full()
@@ -427,6 +448,7 @@ impl Render for BrowserPanel {
                     .items_center()
                     .px_2()
                     .hover(|this| this.bg(hover_bg))
+                    .child(queue_toggle(ix, path.clone(), is_dir, is_queued, entity.clone()))
                     .child(Icon::new(if is_dir { IconName::Folder } else { IconName::FileText }))
                     .child(div().flex_1().text_sm().child(row.label.clone()))
                     .child(div().w(TYPE_COLUMN_WIDTH).text_xs().opacity(0.6).child(row.type_label()))
@@ -481,13 +503,17 @@ impl Render for BrowserPanel {
                     })),
             );
 
-        let listing = v_flex().size_full().child(listing_header).child(
-            div()
-                .relative()
-                .flex_1()
-                .child(list(self.list_state.clone(), render_row).size_full())
-                .child(Scrollbar::vertical(&self.list_state)),
-        );
+        let listing = v_flex()
+            .size_full()
+            .child(breadcrumbs(self.selected_dir.as_deref().unwrap_or(ROOT_PATH), cx.entity()))
+            .child(listing_header)
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .child(list(self.list_state.clone(), render_row).size_full())
+                    .child(Scrollbar::vertical(&self.list_state)),
+            );
 
         h_resizable(SharedString::from(format!("unpacker-{fragment}-split")))
             .child(
@@ -500,6 +526,71 @@ impl Render for BrowserPanel {
             .child(resizable_panel().child(listing))
             .into_any_element()
     }
+}
+
+/// One listing row's queue control. A file gets a checkbox, a directory a
+/// plus/remove button, matching the egui listing: a directory is queued whole
+/// rather than ticked like a single file.
+fn queue_toggle(ix: usize, path: VfsPath, is_dir: bool, is_queued: bool, entity: Entity<BrowserPanel>) -> AnyElement {
+    let emit = move |cx: &mut App| {
+        let path = path.clone();
+        entity.update(cx, |_this, cx| {
+            if is_queued {
+                cx.emit(BrowserEvent::Unqueue(path));
+            } else {
+                cx.emit(BrowserEvent::Queue(path));
+            }
+        });
+    };
+
+    if is_dir {
+        let (icon, tooltip) = if is_queued {
+            (IconName::Close, "Remove this folder from the queue")
+        } else {
+            (IconName::Plus, "Queue this folder")
+        };
+        return Button::new(("queue-toggle", ix))
+            .icon(icon)
+            .compact()
+            .tooltip(tooltip)
+            .on_click(move |_event, _window, cx: &mut App| emit(cx))
+            .into_any_element();
+    }
+
+    Checkbox::new(("queue-toggle", ix))
+        .checked(is_queued)
+        .on_click(move |_checked: &bool, _window, cx: &mut App| emit(cx))
+        .into_any_element()
+}
+
+/// The path bar above the listing: "res" and then one segment per directory,
+/// each navigating to that level. Mirrors the egui app's breadcrumb row.
+fn breadcrumbs(selected_dir: &str, entity: Entity<BrowserPanel>) -> impl IntoElement {
+    let mut crumbs: Vec<AnyElement> = vec![crumb("res", ROOT_PATH.to_string(), 0, entity.clone())];
+
+    let mut accumulated = String::new();
+    for (depth, part) in selected_dir.trim_matches('/').split('/').filter(|part| !part.is_empty()).enumerate() {
+        accumulated.push('/');
+        accumulated.push_str(part);
+        crumbs.push(div().flex_none().text_xs().opacity(0.4).child("/").into_any_element());
+        crumbs.push(crumb(part, accumulated.clone(), depth + 1, entity.clone()));
+    }
+
+    h_flex().flex_none().gap_1().items_center().px_2().py_1().children(crumbs)
+}
+
+/// One breadcrumb segment. `depth` only distinguishes the element ids, since
+/// two levels can share a directory name.
+fn crumb(label: &str, path: String, depth: usize, entity: Entity<BrowserPanel>) -> AnyElement {
+    Button::new(("breadcrumb", depth))
+        .label(SharedString::from(label.to_string()))
+        .compact()
+        .ghost()
+        .on_click(move |_event, _window, cx: &mut App| {
+            let path = path.clone();
+            entity.update(cx, |this, cx| this.select_dir(path, cx));
+        })
+        .into_any_element()
 }
 
 /// Byte count in the largest unit that keeps it under four digits.
@@ -542,7 +633,7 @@ fn render_folder_row(
 }
 
 #[cfg(test)]
-mod tests {
+mod format_tests {
     use super::format_size;
 
     #[test]
@@ -552,5 +643,136 @@ mod tests {
         assert_eq!(format_size(1024), "1.0 KiB");
         assert_eq!(format_size(1024 * 1024), "1.0 MiB");
         assert_eq!(format_size(1536 * 1024), "1.5 MiB");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::AppContext;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt;
+    use std::cell::RefCell;
+    use std::collections::HashSet;
+    use std::io::Write as _;
+    use std::rc::Rc;
+    use wowsunpack::vfs::MemoryFS;
+    use wowsunpack::vfs::VfsPath;
+
+    use super::BrowserEvent;
+    use super::BrowserPanel;
+    use super::BrowserSource;
+
+    /// A package tree with one nested directory and two files, enough to
+    /// exercise the breadcrumb path and both kinds of queue control.
+    fn fixture() -> VfsPath {
+        let root: VfsPath = MemoryFS::new().into();
+        root.join("content/gameplay").unwrap().create_dir_all().unwrap();
+        root.join("content/a.xml").unwrap().create_file().unwrap().write_all(b"<a/>").unwrap();
+        root.join("content/gameplay/b.xml").unwrap().create_file().unwrap().write_all(b"<b/>").unwrap();
+        root
+    }
+
+    fn open_pane(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<BrowserPanel> {
+        cx.update(gpui_kit::init);
+        cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            let mut pane = BrowserPanel::new(BrowserSource::Pkg, window, cx);
+            pane.set_vfs(fixture(), window, cx);
+            pane
+        })
+    }
+
+    #[gpui_kit::test]
+    fn the_breadcrumbs_follow_the_selected_directory(cx: &mut TestAppContext) {
+        let window = open_pane(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find(("breadcrumb", 0usize)).label(), Some("res"), "the root crumb is always there");
+            assert!(window.try_find(("breadcrumb", 1usize)).is_none(), "the root has no deeper crumb");
+        })
+        .expect("the window is open");
+
+        window
+            .update(cx, |pane, _window, cx| pane.select_dir("/content/gameplay".to_string(), cx))
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find(("breadcrumb", 1usize)).label(), Some("content"));
+            assert_eq!(window.find(("breadcrumb", 2usize)).label(), Some("gameplay"));
+        })
+        .expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_breadcrumb_navigates_to_that_level(cx: &mut TestAppContext) {
+        let window = open_pane(cx);
+        window
+            .update(cx, |pane, _window, cx| pane.select_dir("/content/gameplay".to_string(), cx))
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("breadcrumb", 1usize), cx);
+            assert!(window.try_find(("breadcrumb", 2usize)).is_none(), "clicking 'content' drops the level below it");
+            assert_eq!(window.find(("breadcrumb", 1usize)).label(), Some("content"));
+        })
+        .expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn a_listing_rows_queue_control_reports_what_the_tab_has_queued(cx: &mut TestAppContext) {
+        let window = open_pane(cx);
+        window.update(cx, |pane, _window, cx| pane.select_dir("/content".to_string(), cx)).expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            // Directories sort first, so row 0 is "gameplay" and row 1 "a.xml".
+            assert_eq!(window.find(("queue-toggle", 1usize)).checked(), Some(false), "nothing is queued yet");
+        })
+        .expect("the window is open");
+
+        let queued: Rc<HashSet<String>> = Rc::new(["/content/a.xml".to_string()].into_iter().collect());
+        window.update(cx, |pane, _window, cx| pane.set_queued(queued, cx)).expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find(("queue-toggle", 1usize)).checked(), Some(true), "the queued file reads as queued");
+        })
+        .expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn clicking_a_rows_queue_control_asks_the_tab_to_queue_that_entry(cx: &mut TestAppContext) {
+        let window = open_pane(cx);
+        window.update(cx, |pane, _window, cx| pane.select_dir("/content".to_string(), cx)).expect("the window is open");
+
+        let seen: Rc<RefCell<Vec<BrowserEvent>>> = Rc::new(RefCell::new(Vec::new()));
+        let pane = window.entity(cx).expect("the window has a root view");
+        let recorder = seen.clone();
+        let subscription = cx.update(|cx| {
+            cx.subscribe(&pane, move |_pane, event: &BrowserEvent, _cx| recorder.borrow_mut().push(event.clone()))
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            // Row 0 is the "gameplay" directory, row 1 the file beside it.
+            window.click(("queue-toggle", 0usize), cx);
+            window.click(("queue-toggle", 1usize), cx);
+        })
+        .expect("the window is open");
+
+        let seen = seen.borrow();
+        assert!(
+            matches!(seen.first(), Some(BrowserEvent::Queue(path)) if path.as_str() == "/content/gameplay"),
+            "the folder button queues the folder, got {seen:?}"
+        );
+        assert!(
+            matches!(seen.get(1), Some(BrowserEvent::Queue(path)) if path.as_str() == "/content/a.xml"),
+            "the file checkbox queues the file, got {seen:?}"
+        );
+        drop(subscription);
     }
 }

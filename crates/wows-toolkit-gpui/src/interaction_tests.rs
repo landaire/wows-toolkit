@@ -60,6 +60,8 @@ const PKG_FILTER: &str = "unpacker-pkg-filter";
 const DUMP_PARAMS: &str = "unpacker-dump-params";
 const DUMP_BASE_PARAMS: &str = "unpacker-dump-base-params";
 const OUTPUT_DIR: &str = "unpacker-output-dir";
+const QUEUE_TRIGGER: &str = "unpacker-queue-trigger";
+const QUEUE_CLEAR_ALL: &str = "unpacker-queue-clear-all";
 
 /// Stats tab filter bar (`stats::view`).
 const STATS_LIMIT_ENABLED: &str = "stats-limit-enabled";
@@ -408,6 +410,25 @@ fn the_unpacker_shows_the_saved_extraction_directory(cx: &mut TestAppContext) {
             Some("C:/extracted"),
             "the field opens showing what the shared database holds"
         );
+    })
+    .expect("the test window stays open");
+}
+
+/// The queue dropdown opens on click and offers to empty the queue, the way
+/// the egui app's queue popup does.
+#[gpui_kit::test]
+fn the_unpacker_queue_dropdown_opens_and_offers_to_clear_the_queue(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_none(), "the dropdown starts closed");
+
+        window.click(QUEUE_TRIGGER, cx);
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "clicking the trigger opens the dropdown");
     })
     .expect("the test window stays open");
 }
