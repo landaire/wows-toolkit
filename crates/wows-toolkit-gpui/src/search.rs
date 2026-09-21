@@ -32,6 +32,9 @@ use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_viewmodel::query_bar::suggest;
+use wows_toolkit_viewmodel::query_bar::suggest::ValueOption;
+use wows_toolkit_viewmodel::query_bar::suggest::ValueRequest;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 
 use std::collections::HashMap;
@@ -104,6 +107,67 @@ const LIST_OVERDRAW: Pixels = px(200.);
 /// The open/copy pair at the end of each row, which the header reserves.
 const ACTIONS_COLUMN_WIDTH: Pixels = px(72.);
 
+/// Rows a value lookup offers, matching the egui bar's own limit.
+const VALUE_LIMIT: i64 = 50;
+/// How long the caret sits still before its value lookup is sent.
+const VALUE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
+
+/// The values `request` asks the index for.
+///
+/// Ships and players are searched by what has been typed so far; maps and
+/// sources are whole catalogues, which are small enough to offer entire.
+async fn look_up_values(pool: &sqlx::SqlitePool, request: &ValueRequest) -> Vec<ValueOption> {
+    match request {
+        ValueRequest::Players { needle } => match query::search_players(pool, needle, VALUE_LIMIT).await {
+            Ok(rows) => rows
+                .iter()
+                .map(|facet| ValueOption {
+                    label: if facet.clan.is_empty() {
+                        facet.latest_name.clone()
+                    } else {
+                        format!("[{}] {}", facet.clan, facet.latest_name)
+                    },
+                    token: facet.account_id.raw().to_string(),
+                })
+                .collect(),
+            Err(err) => {
+                tracing::warn!("search: the player lookup failed: {err}");
+                Vec::new()
+            }
+        },
+        ValueRequest::Ships { needle } => match query::search_ships(pool, needle, VALUE_LIMIT).await {
+            Ok(rows) => rows
+                .iter()
+                .map(|facet| ValueOption { label: facet.ship_name.clone(), token: facet.ship_id.raw().to_string() })
+                .collect(),
+            Err(err) => {
+                tracing::warn!("search: the ship lookup failed: {err}");
+                Vec::new()
+            }
+        },
+        ValueRequest::Maps => match query::distinct_maps(pool, VALUE_LIMIT).await {
+            Ok(names) => names
+                .iter()
+                .map(|name| ValueOption { label: name.clone(), token: query_text::quote_if_needed(name) })
+                .collect(),
+            Err(err) => {
+                tracing::warn!("search: the map lookup failed: {err}");
+                Vec::new()
+            }
+        },
+        ValueRequest::Sources => match query::list_sources(pool).await {
+            Ok(sources) => sources
+                .iter()
+                .map(|source| ValueOption { label: source.name.clone(), token: source.id.0.to_string() })
+                .collect(),
+            Err(err) => {
+                tracing::warn!("search: the source lookup failed: {err}");
+                Vec::new()
+            }
+        },
+    }
+}
+
 /// Where the tab is in running a query.
 enum SearchState {
     /// Nothing asked for yet.
@@ -123,6 +187,21 @@ pub struct SearchView {
     /// too, and one path that notices covers both.
     completions: Vec<crate::search_pills::Completion>,
     completion_source: String,
+    /// What the query says as it is typed, which is what the pills read back.
+    /// Separate from `expr`, which is the query the results on screen came
+    /// from: editing the text must not relabel results it has not been run
+    /// against.
+    reading: Option<wows_toolkit_config::index::query_ast::MatchExpr>,
+    /// The value lookup the caret calls for, and the options it returned.
+    /// The index is asked for ships and players; maps and sources are read
+    /// once and kept.
+    value_request: Option<ValueRequest>,
+    value_options: Vec<ValueOption>,
+    /// Whether the index is still being asked. A whole-index name search is
+    /// seconds on an established index, so the bar says it is looking rather
+    /// than showing an empty dropdown that reads as "nothing matches".
+    value_lookup_running: bool,
+    _value_lookup: Option<Task<()>>,
     /// The pill segment whose picker is open, and which part of it. `None`
     /// when none is.
     editing: Option<(NodePath, EditablePart)>,
@@ -171,6 +250,11 @@ impl SearchView {
             query_input,
             completions: Vec::new(),
             completion_source: String::new(),
+            reading: None,
+            value_request: None,
+            value_options: Vec::new(),
+            value_lookup_running: false,
+            _value_lookup: None,
             editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
@@ -238,15 +322,59 @@ impl SearchView {
         self.preview.leave(cx);
     }
 
-    /// Re-offers the completions when the bar text has changed since they
-    /// were built.
-    fn refresh_completions(&mut self, cx: &mut Context<Self>) {
+    /// Re-reads the bar when its text has changed: what the query says, and
+    /// what the fragment under the caret may be completed to.
+    ///
+    /// The query is parsed on every edit, not only when it is run, so the
+    /// pills read back what is being typed the way the egui bar's do.
+    fn refresh_bar(&mut self, cx: &mut Context<Self>) {
         let text = self.query_input.read(cx).value().to_string();
         if text == self.completion_source {
             return;
         }
+        self.reading = query_text::parse_query(&text).ok();
         self.completions = crate::search_pills::completions(&text);
-        self.completion_source = text;
+        self.completion_source = text.clone();
+        self.refresh_value_options(&text, cx);
+    }
+
+    /// Asks for the values the caret's field takes, when it takes any.
+    ///
+    /// A fragment that names no field, or one whose values are typed rather
+    /// than chosen, leaves the static suggestions showing. The lookup waits
+    /// out `VALUE_DEBOUNCE` so typing a ship name does not put one query per
+    /// keystroke through the index.
+    fn refresh_value_options(&mut self, text: &str, cx: &mut Context<Self>) {
+        let request = suggest::value_request_for(text);
+        if request == self.value_request {
+            return;
+        }
+        self.value_request = request.clone();
+        self.value_options.clear();
+        let Some(request) = request else {
+            self.value_lookup_running = false;
+            self._value_lookup = None;
+            return;
+        };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        self.value_lookup_running = true;
+        self._value_lookup = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(VALUE_DEBOUNCE).await;
+            let asked = request.clone();
+            let found = runtime::spawn(cx, async move { look_up_values(&pool, &asked).await }).await;
+            let _ = this.update(cx, |this, cx| {
+                // The caret has moved on to another field since.
+                if this.value_request.as_ref() != Some(&request) {
+                    return;
+                }
+                this.value_lookup_running = false;
+                if let Ok(options) = found {
+                    this.value_options = options;
+                }
+                cx.notify();
+            });
+        }));
     }
 
     /// Enter runs the query, as it does in the egui query bar.
@@ -505,7 +633,7 @@ fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
 impl Render for SearchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.preview.release_dropped(window);
-        self.refresh_completions(cx);
+        self.refresh_bar(cx);
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
 
@@ -526,7 +654,7 @@ impl Render for SearchView {
         // same rules the egui bar draws its pills with.
         let entity = cx.entity();
         let pills = self
-            .expr
+            .reading
             .as_ref()
             .and_then(|expr| {
                 let entity = entity.clone();
@@ -538,7 +666,7 @@ impl Render for SearchView {
 
         // The picker for whichever pill segment was clicked.
         let picker = self.editing.as_ref().and_then(|(path, part)| {
-            let offered = crate::search_pills::choices(self.expr.as_ref()?, path, *part);
+            let offered = crate::search_pills::choices(self.reading.as_ref()?, path, *part);
             (!offered.is_empty()).then(|| {
                 h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(offered.into_iter().enumerate().map(
                     |(index, choice)| {
@@ -559,8 +687,26 @@ impl Render for SearchView {
             })
         });
 
-        let completions = (!self.completions.is_empty()).then(|| {
-            h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(self.completions.iter().enumerate().map(
+        // The values the caret's own field takes, when the index has been
+        // asked for them; otherwise the vocabulary a new term may start with.
+        let offered: Vec<crate::search_pills::Completion> = if self.value_options.is_empty() {
+            self.completions.clone()
+        } else {
+            let text = self.completion_source.clone();
+            self.value_options
+                .iter()
+                .map(|option| crate::search_pills::Completion {
+                    label: option.label.clone(),
+                    context: "value".to_string(),
+                    replacement: suggest::replace_active_value(&text, &option.token),
+                })
+                .collect()
+        };
+        let looking_up = self
+            .value_lookup_running
+            .then(|| div().px(px(20.)).text_xs().opacity(0.6).child("Looking up values...").into_any_element());
+        let completions = (!offered.is_empty()).then(|| {
+            h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(offered.into_iter().enumerate().map(
                 |(index, completion)| {
                     let replacement = completion.replacement.clone();
                     Button::new(("search-completion", index))
@@ -584,6 +730,7 @@ impl Render for SearchView {
             .child(entry_row)
             .when_some(pills, |this, pills| this.child(pills))
             .when_some(picker, |this, rows| this.child(rows))
+            .when_some(looking_up, |this, row| this.child(row))
             .when_some(completions, |this, rows| this.child(rows));
 
         let header =
