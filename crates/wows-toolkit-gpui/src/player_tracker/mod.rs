@@ -41,6 +41,7 @@ use std::time::Instant;
 
 use jiff::Timestamp;
 use sqlx::sqlite::SqlitePool;
+use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 
 use wows_replays::types::AccountId;
@@ -650,15 +651,25 @@ impl PlayerTrackerView {
 
         let filter = self.period.match_filter(Timestamp::now());
         cx.spawn(async move |this, cx| {
-            let found = runtime::spawn(cx, async move { query::distinct_players(&pool, &filter).await }).await;
+            let found = runtime::spawn(cx, async move {
+                let players = query::distinct_players(&pool, &filter).await?;
+                // The perspective player of a replay is not someone you met:
+                // the egui tracker drops those accounts too
+                // (`player_tracker/model.rs`'s `populate_from_index`), and
+                // left in they lead the table, since they were in every
+                // battle their own replay recorded.
+                let own = query::self_account_ids(&pool, &filter).await?;
+                Ok::<_, wows_toolkit_config::index::rows::IndexError>((players, own))
+            })
+            .await;
 
             let _ = this.update(cx, |this, cx| {
                 if this.generation != generation {
                     return;
                 }
                 match found {
-                    Ok(Ok(players)) => {
-                        this.players = players;
+                    Ok(Ok((players, own))) => {
+                        this.players = players.into_iter().filter(|facet| !own.contains(&facet.account_id)).collect();
                         this.state = LoadState::Loaded;
                     }
                     Ok(Err(err)) => this.state = LoadState::Failed(err.to_string()),
@@ -1424,8 +1435,9 @@ fn scope_cells(stats: RowStats, status: PlayerStatsStatus, pending: bool) -> Vec
     vec![
         stat_cell(stats.win_rate.map(|rate| format!("{rate:.1}%")), band_color(stats.band), pending),
         stat_cell(stats.pr.map(|pr| format!("{pr:.0}")), rating_color(stats.pr), pending),
-        stat_cell(stats.avg_damage.map(|damage| damage.to_string()), None, pending),
-        stat_cell(stats.battles.map(|battles| battles.to_string()), None, pending),
+        // Grouped, as every other figure this size in the app is.
+        stat_cell(stats.avg_damage.map(|damage| separate_number(damage, None)), None, pending),
+        stat_cell(stats.battles.map(|battles| separate_number(battles, None)), None, pending),
     ]
 }
 
@@ -1707,7 +1719,7 @@ impl Render for PlayerTrackerView {
             .map(|(id, player)| (*id, player.notes.clone()))
             .collect();
         let tracker = cx.entity();
-        let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| match sub_tab {
+        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| match sub_tab {
             SubTab::Players => {
                 let Some(row) = players.get(ix) else {
                     return div().into_any_element();
@@ -1719,6 +1731,7 @@ impl Render for PlayerTrackerView {
                     .gap_2()
                     .items_center()
                     .px_2()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
                     .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.latest_name.clone()))
                     .child(div().w(CLAN_COLUMN_WIDTH).text_sm().opacity(0.8).child(row.clan.clone()))
@@ -1738,6 +1751,7 @@ impl Render for PlayerTrackerView {
                     .gap_2()
                     .items_center()
                     .px_2()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
                     .child(div().w(CLAN_TAG_COLUMN_WIDTH).text_sm().child(row.clan.clone()))
                     .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))

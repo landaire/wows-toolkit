@@ -246,12 +246,13 @@ impl Render for StatsShipsPanel {
                     }),
                 );
 
-                let rows = section.rows.iter().map(|row| {
+                let rows = section.rows.iter().enumerate().map(|(ix, row)| {
                     h_flex()
                         .w_full()
                         .gap_2()
                         .px_2()
-                        .py(px(1.))
+                        .py(px(2.))
+                        .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                         .child(div().w(LABEL_COLUMN_WIDTH).text_sm().child(row.label.english()))
                         .children(stats_table::COLUMNS.map(|column| {
                             let cell = row.cell(column);

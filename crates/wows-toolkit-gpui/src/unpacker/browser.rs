@@ -38,6 +38,7 @@ use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
 use gpui_kit::component::tree::tree;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wowsunpack::vfs::VfsPath;
 
@@ -384,8 +385,8 @@ impl Render for BrowserPanel {
 
         let row_paths = self.row_paths.clone();
         let entity = cx.entity();
-        let folder_tree = tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
-            render_folder_row(ix, entry, selected, &row_paths, entity.clone())
+        let folder_tree = tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
+            render_folder_row(ix, entry, selected, &row_paths, entity.clone(), cx)
         })
         .flex_1();
 
@@ -426,7 +427,8 @@ impl Render for BrowserPanel {
         let queued = self.queued.clone();
         let render_row = {
             let rows = rows.clone();
-            move |ix: usize, _window: &mut Window, _cx: &mut App| {
+            move |ix: usize, _window: &mut Window, cx: &mut App| {
+                let dim = crate::theme::text_dim();
                 let Some(row) = rows.get(ix) else {
                     return div().into_any_element();
                 };
@@ -447,12 +449,13 @@ impl Render for BrowserPanel {
                     .gap_1()
                     .items_center()
                     .px_2()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
                     .child(queue_toggle(ix, path.clone(), is_dir, is_queued, entity.clone()))
-                    .child(Icon::new(if is_dir { IconName::Folder } else { IconName::FileText }))
-                    .child(div().flex_1().text_sm().child(row.label.clone()))
-                    .child(div().w(TYPE_COLUMN_WIDTH).text_xs().opacity(0.6).child(row.type_label()))
-                    .child(div().w(SIZE_COLUMN_WIDTH).text_xs().opacity(0.6).child(size))
+                    .child(file_glyph(&row.label, is_dir))
+                    .child(div().flex_1().text_sm().truncate().child(row.label.clone()))
+                    .child(div().w(SIZE_COLUMN_WIDTH).text_xs().text_color(dim).child(size))
+                    .child(div().w(TYPE_COLUMN_WIDTH).text_xs().text_color(dim).child(row.type_label()))
                     .on_click(move |event, _window, cx| {
                         if event.click_count() < 2 {
                             return;
@@ -483,6 +486,25 @@ impl Render for BrowserPanel {
         };
 
         let queue_rows = rows.clone();
+        // The columns are named, as they are in the egui listing: a bare
+        // number and a bare word at the end of a row say nothing about which
+        // is the size and which the type.
+        let column_header = h_flex()
+            .flex_none()
+            .h(ROW_HEIGHT)
+            .gap_1()
+            .items_center()
+            .px_2()
+            .bg(crate::theme::surface())
+            .border_b_1()
+            .border_color(border)
+            .child(div().w(QUEUE_COLUMN_WIDTH))
+            .child(div().w(GLYPH_COLUMN_WIDTH))
+            .child(div().flex_1().text_xs().font_weight(FontWeight::BOLD).child("Name"))
+            .child(div().w(SIZE_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Size"))
+            .child(div().w(TYPE_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Type"));
+
+        let dim = crate::theme::text_dim();
         let listing_header = h_flex()
             .flex_none()
             .gap_2()
@@ -491,7 +513,7 @@ impl Render for BrowserPanel {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().flex_1().text_xs().opacity(0.6).child(format!("{} items", rows.len())))
+            .child(div().flex_1().text_xs().text_color(dim).child(format!("{} items", rows.len())))
             .child(
                 Button::new(SharedString::from(format!("unpacker-{fragment}-extract-listed")))
                     .icon(IconName::HardDrive)
@@ -507,6 +529,7 @@ impl Render for BrowserPanel {
             .size_full()
             .child(breadcrumbs(self.selected_dir.as_deref().unwrap_or(ROOT_PATH), cx.entity()))
             .child(listing_header)
+            .child(column_header)
             .child(
                 div()
                     .relative()
@@ -605,6 +628,30 @@ fn format_size(bytes: u64) -> String {
     if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
 }
 
+/// What one level of the tree indents by, and the width its guide is drawn in.
+const INDENT: Pixels = px(16.);
+
+/// The two columns the listing header has to line its labels up with.
+const QUEUE_COLUMN_WIDTH: Pixels = px(20.);
+const GLYPH_COLUMN_WIDTH: Pixels = px(16.);
+
+/// The glyph for a listing row: a directory, or the kind of file its name
+/// says it is, from the same four the egui listing tells apart
+/// (`ui/file_unpacker.rs`'s `file_icon_rich_text`).
+fn file_glyph(label: &str, is_dir: bool) -> impl IntoElement {
+    if is_dir {
+        return crate::icons::icon(crate::icons::FOLDER).text_color(crate::theme::icon_accent());
+    }
+    let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+    let glyph = match extension.as_str() {
+        "png" | "jpg" | "jpeg" | "dds" | "svg" | "tga" | "bmp" => crate::icons::IMAGE,
+        "txt" | "xml" | "json" | "cfg" | "log" | "csv" | "md" => crate::icons::FILE_TEXT,
+        "wem" | "bnk" | "ogg" | "wav" | "mp3" => crate::icons::MUSIC_NOTE,
+        _ => crate::icons::FILE,
+    };
+    crate::icons::icon(glyph)
+}
+
 /// One folder row: indentation by depth, a folder glyph, the directory name.
 /// Clicking selects the directory, which is what drives the listing; the
 /// tree's own chevron still handles expand and collapse.
@@ -614,13 +661,22 @@ fn render_folder_row(
     selected: bool,
     row_paths: &HashMap<SharedString, String>,
     panel: Entity<BrowserPanel>,
+    cx: &App,
 ) -> ListItem {
     let item = entry.item();
-    let row = h_flex()
-        .gap_1()
-        .items_center()
-        .pl(px(16.) * entry.depth())
-        .child(Icon::new(if entry.is_folder() { IconName::FolderOpen } else { IconName::Folder }))
+    // The chevron says whether a directory is open; the folder glyph follows
+    // it rather than following whether the directory has children, which is
+    // what it used to do -- a closed parent drew as open.
+    let mut row = h_flex().gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
+    if entry.is_folder() {
+        let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
+        row = row.child(Icon::new(chevron));
+    } else {
+        row = row.child(div().w(INDENT));
+    }
+    let folder = if entry.is_expanded() { IconName::FolderOpen } else { IconName::Folder };
+    let row = row
+        .child(Icon::new(folder).text_color(crate::theme::icon_accent()))
         .child(div().text_sm().child(item.label.clone()));
 
     let list_item = ListItem::new(ix).selected(selected).child(row);

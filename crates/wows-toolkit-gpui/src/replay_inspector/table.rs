@@ -281,17 +281,23 @@ pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
         // it follows the one on screen.
         ColorRole::PrTier(category) => personal_rating::chip_text(category, crate::theme::is_dark_mode()),
         ColorRole::PrTierTint(category) => personal_rating::chip_hue(category),
-        ColorRole::CaptainPoints(tier) => match tier {
-            CaptainPointsTier::Bad => 0xff8080,
-            CaptainPointsTier::Warning => 0xfcae1e,
-            CaptainPointsTier::Caution => 0xffff00,
-            CaptainPointsTier::Good => 0x90ee90,
-        },
-        ColorRole::WinLoss(outcome) => match outcome {
-            BattleOutcome::Win => 0x90ee90,
-            BattleOutcome::Loss => 0xff8080,
-            BattleOutcome::Draw => 0xffffe0,
-        },
+        ColorRole::CaptainPoints(tier) => {
+            let semantic = crate::theme::semantic();
+            match tier {
+                CaptainPointsTier::Bad => semantic.loss,
+                CaptainPointsTier::Warning => semantic.warn,
+                CaptainPointsTier::Caution => semantic.notice,
+                CaptainPointsTier::Good => semantic.win,
+            }
+        }
+        ColorRole::WinLoss(outcome) => {
+            let semantic = crate::theme::semantic();
+            match outcome {
+                BattleOutcome::Win => semantic.win,
+                BattleOutcome::Loss => semantic.loss,
+                BattleOutcome::Draw => semantic.draw,
+            }
+        }
         ColorRole::Fixed(rgb) => rgb,
     };
     rgb(packed).into()
@@ -335,6 +341,9 @@ pub struct PlayerTable {
     /// `is_row_expanded: BTreeMap<u64, bool>`, minus the closed/`false`
     /// entries it also keeps around (a `HashSet` has no use for them).
     expanded: HashSet<AccountId>,
+    /// The row a ctrl+click picked out, if any. One at a time, as in the egui
+    /// table.
+    selected: Option<AccountId>,
     /// Content-fit width per column, indexed by `ReplayColumn as usize`.
     /// Recomputed by `measure_column_widths` whenever `widths_dirty` is set;
     /// `render` is the only reader/writer of that flag, since computing a
@@ -393,6 +402,7 @@ impl PlayerTable {
             icons: IconCache::new(),
             debug,
             expanded: HashSet::new(),
+            selected: None,
             column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
             widths_dirty: true,
         }
@@ -479,6 +489,15 @@ impl PlayerTable {
     /// row's Skills/Name/damage columns may need to grow to fit that row's
     /// detail (`measure_column_widths`'s `expanded` argument), and a
     /// collapsing row may let them shrink back.
+    /// Ctrl+click picks a row out and clicking it again puts it back, which
+    /// is how the egui table marks the one it is reading
+    /// (`ui/replay_parser/mod.rs:2620`).
+    fn toggle_selected(&mut self, ix: usize, cx: &mut Context<Self>) {
+        let db_id = self.model.rows.get(ix).map(|row| row.db_id);
+        self.selected = if self.selected == db_id { None } else { db_id };
+        cx.notify();
+    }
+
     fn toggle_expanded(&mut self, ix: usize, cx: &mut Context<Self>) {
         let db_id = self.model.rows[ix].db_id;
         if !self.expanded.remove(&db_id) {
@@ -890,6 +909,7 @@ struct RowLayout<'a> {
     h_scroll: &'a ScrollHandle,
     entity: Entity<PlayerTable>,
     is_expanded: bool,
+    selected: bool,
     all_rows: &'a [PlayerRow],
 }
 
@@ -906,24 +926,40 @@ struct RowLayout<'a> {
 /// mirroring the egui app's whole-row double-click handler in
 /// `cell_content_ui`.
 fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx: &App) -> AnyElement {
-    let mut sticky = h_flex().flex_none().items_start();
+    // A collapsed row is one line of cells and reads across, so its cells are
+    // centred on that line; an expanded row grows detail downward under each
+    // column, which only lines up if the columns start at the same top edge.
+    let align_top = layout.is_expanded;
+    let mut sticky = h_flex().flex_none().map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.sticky_columns {
         sticky = sticky.child(render_column_cell(ix, col, row, layout, cx));
     }
 
-    let mut scrolling = h_flex().w(px(layout.scroll_width)).flex_none().items_start();
+    let mut scrolling = h_flex()
+        .w(px(layout.scroll_width))
+        .flex_none()
+        .map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.scroll_columns {
         scrolling = scrolling.child(render_column_cell(ix, col, row, layout, cx));
     }
 
+    // Selection is what a ctrl+click leaves behind, over the stripe; the
+    // egui table paints the same two (`ui/replay_parser/mod.rs:3011`).
+    let background = if layout.selected { Some(cx.theme().selection) } else { crate::ui::stripe(ix, cx) };
     let entity = layout.entity.clone();
+    let select_entity = layout.entity.clone();
     h_flex()
         .id(ix)
         .w_full()
         .py_0p5()
-        .items_start()
+        .map(|el| if align_top { el.items_start() } else { el.items_center() })
+        .when_some(background, |el, color| el.bg(color))
         .hover(move |style| style.bg(hover_bg))
         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
+            if event.modifiers().secondary() {
+                select_entity.update(cx, |this, cx| this.toggle_selected(ix, cx));
+                return;
+            }
             if event.click_count() >= 2 {
                 entity.update(cx, |this, cx| this.toggle_expanded(ix, cx));
             }
@@ -982,6 +1018,7 @@ impl Render for PlayerTable {
             let table = entity.read(cx);
             let row = &table.model.rows[ix];
             let is_expanded = table.expanded.contains(&row.db_id);
+            let selected = table.selected == Some(row.db_id);
             let layout = RowLayout {
                 sticky_columns: &sticky_columns,
                 scroll_columns: &scroll_columns,
@@ -992,6 +1029,7 @@ impl Render for PlayerTable {
                 h_scroll: &h_scroll,
                 entity: entity.clone(),
                 is_expanded,
+                selected,
                 all_rows: &table.model.rows,
             };
             render_row(ix, row, &layout, hover_bg, cx)
