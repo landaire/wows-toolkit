@@ -4,6 +4,8 @@
 //! The rows come from the shared replay index; this decides what the table
 //! shows of them, the same way in both front ends.
 
+pub mod live;
+
 use jiff::Timestamp;
 use jiff::ToSpan;
 use serde::Deserialize;

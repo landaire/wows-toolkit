@@ -1,10 +1,9 @@
 use crate::data::match_stats::Region;
 use crate::icons;
+use crate::ui::replay_parser::PlayerTintColor as _;
 use crate::ui::theme::semantic::semantic;
 use egui::Color32;
 use jiff::Timestamp;
-use jiff::civil::DateTime;
-use jiff::tz::TimeZone;
 use language_tags::LanguageTag;
 use std::path::Path;
 use std::process::Command;
@@ -24,13 +23,7 @@ use wowsunpack::game_params::types::KnownCrewSkill;
 const TOOLKIT_REFERRER: &str = "landaire";
 
 pub fn replay_timestamp(replay_meta: &ReplayMeta) -> Timestamp {
-    const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
-
-    DateTime::strptime(REPLAY_DATE_FORMAT, &replay_meta.dateTime)
-        .expect("failed to parse replay timestamp")
-        .to_zoned(TimeZone::system())
-        .expect("failed to convert DateTime to zoned time")
-        .into()
+    wows_replay_insights::battle_report::replay_timestamp(replay_meta)
 }
 
 pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {

@@ -183,9 +183,8 @@ fn results_battle_result(resolved_results: &Option<Value>, report: &BattleReport
     }
 }
 
-/// Parse the replay's `dateTime` field into a timestamp. Ported from the
-/// toolkit's `util::replay_timestamp` so insights carries no toolkit dependency.
-fn replay_timestamp(meta: &ReplayMeta) -> jiff::Timestamp {
+/// Parse the replay's `dateTime` field into a timestamp.
+pub fn replay_timestamp(meta: &ReplayMeta) -> jiff::Timestamp {
     const REPLAY_DATE_FORMAT: &str = "%d.%m.%Y %H:%M:%S";
 
     jiff::civil::DateTime::strptime(REPLAY_DATE_FORMAT, &meta.dateTime)

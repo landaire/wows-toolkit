@@ -48,6 +48,7 @@ use super::WinRateMode;
 use super::encounter_severity_color;
 use super::last_seen_text;
 use super::live::LiveRosterRow;
+use crate::ui::replay_parser::PlayerTintColor as _;
 
 const ROW_EDGE_PADDING_X: i8 = 10;
 const ROW_EDGE_PADDING_Y: i8 = 3;
