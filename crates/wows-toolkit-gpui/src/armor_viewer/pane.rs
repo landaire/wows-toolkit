@@ -140,6 +140,9 @@ pub struct ArmorViewerPane {
     /// The floating Armor Thickness legend's visibility/collapsed/position
     /// state; see the module doc and `legend.rs`.
     legend: LegendState,
+    /// The fields of the shared defaults row this port has no control for,
+    /// kept as read so a save here writes them back unchanged.
+    unported_defaults: UnportedDefaults,
     /// Bumped by every `start_ship_load` call and captured into that load's
     /// background task; a completing task whose captured value no longer
     /// matches this field was superseded by a later ship selection and its
@@ -197,6 +200,7 @@ impl ArmorViewerPane {
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
             legend: LegendState::default(),
+            unported_defaults: UnportedDefaults::default(),
             ship_load_generation: 0,
             mirror_cameras: false,
             sync_options: false,
@@ -330,6 +334,7 @@ impl ArmorViewerPane {
     /// Shows or hides the armor legend.
     pub(crate) fn set_legend_visible(&mut self, visible: bool, cx: &mut Context<Self>) {
         self.legend.visible = visible;
+        self.save_defaults(cx);
         cx.notify();
     }
 
@@ -429,7 +434,14 @@ impl ArmorViewerPane {
     fn on_viewport_event(&mut self, source: Entity<ViewportView>, event: &ViewportEvent, cx: &mut Context<Self>) {
         match event {
             ViewportEvent::CameraChanged if self.mirror_cameras => self.push_camera_from(&source, cx),
-            ViewportEvent::SettingsChanged if self.sync_options => self.push_settings_from(&source, cx),
+            ViewportEvent::SettingsChanged => {
+                if self.sync_options {
+                    self.push_settings_from(&source, cx);
+                }
+                // The display settings are a preference, so they outlive the
+                // session that changed them.
+                self.save_defaults(cx);
+            }
             _ => {}
         }
     }
@@ -500,6 +512,13 @@ impl ArmorViewerPane {
     /// the ship catalog itself has loaded, so `dock` only ever holds its
     /// single initial pane at this point -- no "Compare" pane can exist yet.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
+        if let Some(defaults) = defaults {
+            self.unported_defaults = UnportedDefaults {
+                hull_all_visible: defaults.hull_all_visible,
+                armor_all_visible: defaults.armor_all_visible,
+                show_splash_boxes: defaults.show_splash_boxes,
+            };
+        }
         self.legend = LegendState::from_defaults(defaults);
         let panes = self.dock.read(cx).panes().to_vec();
         for pane in panes {
@@ -739,6 +758,7 @@ impl ArmorViewerPane {
         cx: &mut Context<Self>,
     ) {
         self.legend.collapsed = !self.legend.collapsed;
+        self.save_defaults(cx);
         cx.notify();
     }
 
@@ -746,6 +766,7 @@ impl ArmorViewerPane {
     /// matching the egui window's own close (`open`) toggle.
     pub(crate) fn close_legend(&mut self, _event: &ClickEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.legend.visible = false;
+        self.save_defaults(cx);
         cx.notify();
     }
 
@@ -771,15 +792,70 @@ impl ArmorViewerPane {
 
     fn end_legend_drag(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if self.legend.drag.take().is_some() {
+            self.save_defaults(cx);
             cx.notify();
         }
-        // TODO: persist `self.legend.pos`/`visible`/`collapsed` here once a
-        // general settings write-back path exists. `settings.rs` is
-        // documented read-only (the port has no shared DB pool handle this
-        // pane could reuse, and `save_armor_viewer_defaults` writes the
-        // whole `armor_viewer_defaults` row, not just the legend fields), so
-        // legend placement/visibility is in-session only for now: it resets
-        // to the persisted (or default) position/state on every restart.
+    }
+
+    /// Writes the viewport's display settings and the legend's placement
+    /// back to the `armor_viewer_defaults` row, so the viewer opens the way
+    /// it was left.
+    ///
+    /// The row is a single record covering both, which is why this writes
+    /// the whole of it rather than the fields that changed. The active
+    /// pane's settings are the ones kept: a comparison pane is a second view
+    /// of the same ship, not a second preference.
+    pub(crate) fn save_defaults(&self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let display = self.dock.read(cx).active_viewport().read(cx).display_settings;
+        let (visible, collapsed, pos) = (self.legend.visible, self.legend.collapsed, self.legend.pos);
+        let unported = self.unported_defaults;
+        let row = ArmorViewerDefaultsRow {
+            show_plate_edges: display.show_plate_edges,
+            show_waterline: display.show_waterline,
+            show_zero_mm: display.show_zero_mm,
+            armor_opacity: display.armor_opacity as f64,
+            waterline_opacity: display.waterline_opacity as f64,
+            hull_opaque: display.hull_opaque,
+            // The egui row carries these too, and the port has no control
+            // for any of them. They are written back exactly as they were
+            // read, so saving here never overwrites what the other app set.
+            hull_all_visible: unported.hull_all_visible,
+            armor_all_visible: unported.armor_all_visible,
+            show_splash_boxes: unported.show_splash_boxes,
+            show_legend: visible,
+            legend_collapsed: collapsed,
+            legend_pos_x: Some(f32::from(pos.x) as f64),
+            legend_pos_y: Some(f32::from(pos.y) as f64),
+        };
+
+        cx.spawn(async move |_this, cx| {
+            let written = crate::runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::save_armor_viewer_defaults(&pool, &row).await
+            })
+            .await;
+            match written {
+                Ok(Ok(())) => {}
+                Ok(Err(err)) => tracing::warn!("armor viewer: the defaults could not be written: {err}"),
+                Err(err) => tracing::warn!("armor viewer: the defaults write did not complete: {err}"),
+            }
+        })
+        .detach();
+    }
+}
+
+/// The parts of `armor_viewer_defaults` the port does not draw a control
+/// for. Defaults match the row's own, for a database with no row yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct UnportedDefaults {
+    hull_all_visible: bool,
+    armor_all_visible: bool,
+    show_splash_boxes: bool,
+}
+
+impl Default for UnportedDefaults {
+    fn default() -> Self {
+        Self { hull_all_visible: true, armor_all_visible: true, show_splash_boxes: false }
     }
 }
 
