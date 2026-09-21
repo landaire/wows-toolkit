@@ -16,7 +16,6 @@ pub use wows_toolkit_viewmodel::match_stats::ENDPOINT;
 pub use wows_toolkit_viewmodel::match_stats::MatchStatsError;
 pub use wows_toolkit_viewmodel::match_stats::MatchStatsRequest;
 pub use wows_toolkit_viewmodel::match_stats::MatchStatsResponse;
-pub use wows_toolkit_viewmodel::match_stats::PlayerRef;
 pub use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 pub use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 pub use wows_toolkit_viewmodel::match_stats::RATE_LIMIT_WINDOW;

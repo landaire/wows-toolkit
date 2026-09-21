@@ -11,7 +11,6 @@ pub use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 pub use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 pub use wows_toolkit_viewmodel::player_tracker::live::LiveRosterRow;
 pub use wows_toolkit_viewmodel::player_tracker::live::ResolvedRoster;
-pub use wows_toolkit_viewmodel::player_tracker::live::TrackedNames;
 
 use super::TrackedPlayer;
 use crate::data::wows_data::BuildData;
@@ -19,11 +18,10 @@ use crate::data::wows_data::BuildData;
 /// Tracked players keyed by lower-cased name, covering the current name and
 /// every recorded alias.
 pub(crate) fn build_name_index(players: &HashMap<AccountId, TrackedPlayer>) -> HashMap<String, AccountId> {
-    wows_toolkit_viewmodel::player_tracker::live::build_name_index(players.iter().map(|(id, player)| TrackedNames {
-        id: *id,
-        current: &player.last_name,
-        aliases: &player.names,
-    }))
+    wows_toolkit_viewmodel::player_tracker::live::build_name_index(
+        players.iter().flat_map(|(id, player)| player.names.iter().map(move |alias| (*id, alias.as_str()))),
+        players.iter().map(|(id, player)| (*id, player.last_name.as_str())),
+    )
 }
 
 /// Joins the live roster to game data, tracked history and the identity scan.

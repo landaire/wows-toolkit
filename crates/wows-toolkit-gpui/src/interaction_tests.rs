@@ -723,14 +723,15 @@ fn clicking_a_search_column_moves_the_sort_to_it(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_tracker_sub_tabs_switch_between_players_and_clans(cx: &mut TestAppContext) {
+fn the_tracker_sub_tabs_switch_between_their_three_views(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
 
         let players = ("tracker-subtab", 0usize);
-        let clans = ("tracker-subtab", 1usize);
+        let current_match = ("tracker-subtab", 1usize);
+        let clans = ("tracker-subtab", 2usize);
 
         assert_eq!(window.find(players).selected(), Some(true), "the tracker opens on players");
         // The players table sorts by its own columns.
@@ -743,6 +744,12 @@ fn the_tracker_sub_tabs_switch_between_players_and_clans(cx: &mut TestAppContext
         // And the clans table brings its own.
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_some());
         assert!(window.try_find(("tracker-sort", 0usize)).is_none());
+
+        // The roster is its own layout, so neither table's header survives it.
+        window.click(current_match, cx);
+        assert_eq!(window.find(current_match).selected(), Some(true));
+        assert!(window.try_find(("tracker-sort", 0usize)).is_none());
+        assert!(window.try_find(("tracker-clan-sort", 0usize)).is_none());
     })
     .expect("the test window stays open");
 }
@@ -753,7 +760,7 @@ fn the_clans_table_keeps_its_own_sort(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
-        window.click(("tracker-subtab", 1usize), cx);
+        window.click(("tracker-subtab", 2usize), cx);
 
         let by_tag = ("tracker-clan-sort", 0usize);
         let by_encounters = ("tracker-clan-sort", 2usize);
