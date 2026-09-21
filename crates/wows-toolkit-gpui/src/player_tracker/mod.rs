@@ -149,6 +149,9 @@ enum StatsState {
     Failed(String),
 }
 
+/// What the name filter is given: enough to read a name in.
+const FILTER_WIDTH: Pixels = px(220.);
+
 /// The period combo, and the menu under it.
 const PERIOD_COMBO_WIDTH: Pixels = px(150.);
 
@@ -1591,47 +1594,51 @@ impl Render for PlayerTrackerView {
                 this.set_sub_tab(SubTab::ALL[*ix], cx);
             }));
 
-        let toolbar = h_flex()
-            .flex_none()
-            .flex_wrap()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
-            .child(
-                Select::new(&self.period_select)
-                    .id("tracker-period")
-                    .accessibility_label("Time period")
-                    .small()
-                    .w(PERIOD_COMBO_WIDTH)
-                    // The menu takes the width of the element the popup is
-                    // anchored to, which is the row this combo sits in rather
-                    // than the combo itself.
-                    .menu_width(PERIOD_COMBO_WIDTH),
-            )
-            .child(
-                h_flex()
-                    .gap_1()
-                    .items_center()
-                    .child(Icon::new(IconName::Search))
-                    .child(div().w(px(220.)).child(Input::new(&self.filter_input).id("tracker-filter").small())),
-            )
-            // Only the tables it filters offer it; the roster shows the
-            // battle in progress, which has no history to leave out.
-            .when(self.sub_tab != SubTab::CurrentMatch, |this| {
-                let show = self.show_division_mates;
-                this.child(
-                    Checkbox::new("tracker-show-division-mates")
-                        .label("Count division mates")
-                        .checked(show)
-                        .tooltip("Battles you arranged with someone inflate how often you have met them")
-                        .on_click(cx.listener(move |this, _event, _window, cx| {
-                            this.set_show_division_mates(!show, cx);
-                        })),
+        // Not wrapping: a wrapped row does not grow its own height in this
+        // layout, so a second line would be drawn over the table header
+        // under it. The filter gives up width instead.
+        let toolbar =
+            h_flex()
+                .flex_none()
+                .gap_2()
+                .items_center()
+                .px_2()
+                .py_1()
+                .border_b_1()
+                .border_color(border)
+                .child(
+                    Select::new(&self.period_select)
+                        .id("tracker-period")
+                        .accessibility_label("Time period")
+                        .small()
+                        .w(PERIOD_COMBO_WIDTH)
+                        // The menu takes the width of the element the popup is
+                        // anchored to, which is the row this combo sits in rather
+                        // than the combo itself.
+                        .menu_width(PERIOD_COMBO_WIDTH),
                 )
-            });
+                .child(
+                    h_flex().gap_1().items_center().flex_none().child(Icon::new(IconName::Search)).child(
+                        div().w(FILTER_WIDTH).child(Input::new(&self.filter_input).id("tracker-filter").small()),
+                    ),
+                )
+                // The checkbox sits at the far end rather than beside the filter,
+                // so neither moves when the other changes size.
+                .child(div().flex_1().min_w(px(0.)))
+                // Only the tables it filters offer it; the roster shows the
+                // battle in progress, which has no history to leave out.
+                .when(self.sub_tab != SubTab::CurrentMatch, |this| {
+                    let show = self.show_division_mates;
+                    this.child(
+                        Checkbox::new("tracker-show-division-mates")
+                            .label("Count division mates")
+                            .checked(show)
+                            .tooltip("Battles you arranged with someone inflate how often you have met them")
+                            .on_click(cx.listener(move |this, _event, _window, cx| {
+                                this.set_show_division_mates(!show, cx);
+                            })),
+                    )
+                });
 
         // The Current Match roster is its own layout: two teams side by
         // side, each with its own header, so the shared table chrome below
