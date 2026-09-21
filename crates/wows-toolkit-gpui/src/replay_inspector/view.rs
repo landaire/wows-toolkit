@@ -3,8 +3,8 @@
 //! open replay. Double-clicking a replay in the browser
 //! (`ReplayBrowserEvent::OpenReplay`) starts a background parse and adds a
 //! tab; the tab itself shows "Loading..." until the parse completes (see
-//! `panel.rs`). A repeat double-click on an already-open replay is a no-op
-//! rather than adding a duplicate tab (see `open_replay`).
+//! `panel.rs`). A repeat double-click on an already-open replay brings its
+//! tab forward rather than adding a second one (see `open_replay`).
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -18,6 +18,7 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::resizable::h_resizable;
@@ -285,9 +286,13 @@ impl ReplayInspectorView {
             return;
         };
 
-        if let Some(existing) = self.open_panels.get(&path)
-            && existing.upgrade().is_some()
-        {
+        // A replay that is already open is shown, not opened twice: the tab
+        // it is in comes forward, which is what the egui listing does with a
+        // replay it has already hydrated.
+        if let Some(existing) = self.open_panels.get(&path).and_then(|panel| panel.upgrade()) {
+            let id = PanelId::from(existing.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            cx.notify();
             return;
         }
 
