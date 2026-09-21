@@ -514,8 +514,30 @@ impl UnpackerView {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let SearchPanelEvent::View { path } = event;
-        self.open_viewer(path.clone(), _window, cx);
+        match event {
+            SearchPanelEvent::View { path } => self.open_viewer(path.clone(), _window, cx),
+            SearchPanelEvent::Queue { path } => {
+                self.queue.push(path.clone());
+                self.publish_queue(cx);
+            }
+            SearchPanelEvent::Reveal { path } => {
+                let source = _panel.read(cx).source();
+                self.reveal_in_tree(source, path.clone(), _window, cx);
+            }
+        }
+    }
+
+    /// Shows `path` in the package tree it came from, and brings that pane
+    /// forward so the reader is looking at it.
+    fn reveal_in_tree(&mut self, source: BrowserSource, path: VfsPath, window: &mut Window, cx: &mut Context<Self>) {
+        let browser = match source {
+            BrowserSource::Pkg => self.pkg_browser.clone(),
+            BrowserSource::AssetsBin => self.assets_browser.clone(),
+        };
+        browser.update(cx, |panel, cx| panel.reveal(&path, window, cx));
+        let id = PanelId::from(browser.entity_id());
+        self.dock_area.update(cx, |dock, cx| dock.select_panel(id, window, cx));
+        cx.notify();
     }
 
     /// Opens a file in its viewer, or logs why it has none.

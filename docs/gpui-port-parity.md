@@ -294,8 +294,13 @@ kept so the next audit does not re-report them.
   file rather than pressed with a plus button.
 - [done] Starting an extraction no longer empties the queue, so a cancelled
   or failed run does not cost every tick the reader made.
-- Content-search hits cannot be queued, revealed or inspected by offset.
-- Filter results do not reveal the file in the tree.
+- [done] A content-search hit has its own menu: view the file, put it in the
+  extraction queue, or show it in the package tree it came from. The row also
+  carries the match's byte offset, so a hit in a large file can be found
+  again.
+- [done] Revealing a hit selects the directory it is in and clears a filter
+  that would hide it, then brings that tree forward. A listing-filter row
+  still has no reveal of its own.
 - [done] Extraction progress names the file it is writing, under the bar.
 
 ## Settings

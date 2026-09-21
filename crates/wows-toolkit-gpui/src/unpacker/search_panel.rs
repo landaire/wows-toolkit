@@ -23,6 +23,10 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use super::browser::BrowserSource;
+use gpui_kit::component::Sizable;
+use gpui_kit::component::button::ButtonVariants;
+use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::PopupMenuItem;
 use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
 use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
 
@@ -31,10 +35,49 @@ use wows_toolkit_viewmodel::unpacker::search::SearchProgress;
 pub enum SearchPanelEvent {
     /// Open the file a hit points at.
     View { path: wowsunpack::vfs::VfsPath },
+    /// Put the file a hit points at in the extraction queue.
+    Queue { path: wowsunpack::vfs::VfsPath },
+    /// Show the file a hit points at in the package tree.
+    Reveal { path: wowsunpack::vfs::VfsPath },
 }
 
 impl EventEmitter<SearchPanelEvent> for SearchPanel {}
 impl EventEmitter<PanelEvent> for SearchPanel {}
+
+/// A hit's own menu: view it, queue it, or find it in the tree.
+fn hit_menu(ix: usize, entity: Entity<SearchPanel>, path: wowsunpack::vfs::VfsPath) -> impl IntoElement + use<> {
+    let view_path = path.clone();
+    let queue_path = path.clone();
+    let view_entity = entity.clone();
+    let queue_entity = entity.clone();
+
+    Button::new(("unpacker-hit-actions", ix)).icon(IconName::Ellipsis).ghost().xsmall().dropdown_menu(
+        move |menu, _window, _cx| {
+            let view_path = view_path.clone();
+            let queue_path = queue_path.clone();
+            let reveal_path = path.clone();
+            let view_entity = view_entity.clone();
+            let queue_entity = queue_entity.clone();
+            let reveal_entity = entity.clone();
+            menu.item(PopupMenuItem::new(t!("ui.unpacker.view_contents").into_owned()).on_click(
+                move |_event, _window, cx| {
+                    let path = view_path.clone();
+                    view_entity.update(cx, |_this, cx| cx.emit(SearchPanelEvent::View { path }));
+                },
+            ))
+            .item(PopupMenuItem::new(t!("ui.unpacker.queue").into_owned()).on_click(move |_event, _window, cx| {
+                let path = queue_path.clone();
+                queue_entity.update(cx, |_this, cx| cx.emit(SearchPanelEvent::Queue { path }));
+            }))
+            .item(PopupMenuItem::new(t!("ui.unpacker.reveal_in_tree").into_owned()).on_click(
+                move |_event, _window, cx| {
+                    let path = reveal_path.clone();
+                    reveal_entity.update(cx, |_this, cx| cx.emit(SearchPanelEvent::Reveal { path }));
+                },
+            ))
+        },
+    )
+}
 
 const ROW_HEIGHT: Pixels = px(34.);
 const LIST_OVERDRAW: Pixels = px(200.);
@@ -71,6 +114,11 @@ impl SearchPanel {
     /// The list is spliced rather than reset: `reset` clears the scroll
     /// position and drops scroll events until the next paint, which would
     /// make the results unscrollable for as long as the scan runs.
+    /// Which tree this scan ran over, so a hit can be revealed in it.
+    pub fn source(&self) -> BrowserSource {
+        self.source
+    }
+
     pub fn extend_hits(&mut self, hits: impl IntoIterator<Item = ContentSearchHit>, cx: &mut Context<Self>) {
         let before = self.hits.len();
         self.hits.extend(hits);
@@ -166,23 +214,47 @@ impl Render for SearchPanel {
             };
             let entity = entity.clone();
             let path = hit.vfs_path.clone();
-            v_flex()
+            let menu_entity = entity.clone();
+            let menu_path = hit.vfs_path.clone();
+            h_flex()
                 .id(ix)
                 .w_full()
                 .h(ROW_HEIGHT)
                 .px_2()
-                .justify_center()
+                .gap_1()
+                .items_center()
                 .hover(|this| this.bg(hover_bg))
-                .child(div().text_xs().child(hit.path.clone()))
-                .child(div().text_xs().text_color(crate::theme::text_dim()).child(hit.context.clone()))
-                .on_click(move |event, _window, cx| {
-                    if event.click_count() < 2 {
-                        return;
-                    }
-                    entity.update(cx, |_this, cx| {
-                        cx.emit(SearchPanelEvent::View { path: path.clone() });
-                    });
-                })
+                .child(
+                    v_flex()
+                        .id(("unpacker-hit-body", ix))
+                        .flex_1()
+                        .min_w(px(0.))
+                        .justify_center()
+                        .child(div().text_xs().truncate().child(hit.path.clone()))
+                        // The offset says where in the file the match is, so
+                        // a hit in a large file can be found again.
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .text_xs()
+                                .text_color(crate::theme::text_dim())
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .child(t!("ui.unpacker.hit_offset", offset = hit.offset).into_owned()),
+                                )
+                                .child(div().flex_1().min_w(px(0.)).truncate().child(hit.context.clone())),
+                        )
+                        .on_click(move |event, _window, cx| {
+                            if event.click_count() < 2 {
+                                return;
+                            }
+                            entity.update(cx, |_this, cx| {
+                                cx.emit(SearchPanelEvent::View { path: path.clone() });
+                            });
+                        }),
+                )
+                .child(hit_menu(ix, menu_entity, menu_path))
                 .into_any_element()
         };
 
