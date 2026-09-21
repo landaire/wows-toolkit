@@ -99,9 +99,9 @@ pub struct LiveRosterRow {
     /// info at all, so this is `None` until the scan lands, same as
     /// `account_id`, and stays `None` for a player with no clan.
     pub clan: Option<String>,
-    /// Raw server clan colour, `0` when the scan carried none (or hasn't
-    /// landed). Resolved against the row's relation tint at render time.
-    pub clan_color: i64,
+    /// The clan's colour, `None` when the scan carried none or has not
+    /// landed. Resolved against the row's relation tint at render time.
+    pub clan_color: Option<ClanColor>,
 }
 
 impl LiveMatch {
@@ -137,9 +137,34 @@ pub struct LiveIdentity {
     /// `None` for a player with no clan. `tempArenaInfo` carries no clan
     /// field at all, so this only ever comes from the packet scan.
     pub clan: Option<String>,
-    /// Raw server clan colour, `0` when the player has no clan or the replay
-    /// predates clan colours.
-    pub clan_color: i64,
+    /// The clan colour the server sent, packed `0xRRGGBB`. `None` for a
+    /// player with no clan and for a replay predating clan colours; the
+    /// wire carries both as zero, which is not a colour.
+    pub clan_color: Option<ClanColor>,
+}
+
+/// A clan's server-sent colour, packed `0xRRGGBB`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClanColor(pub u32);
+
+impl ClanColor {
+    /// The colour a raw server value names, if it names one. Zero is how the
+    /// wire spells "none", not black.
+    pub fn from_raw(raw: i64) -> Option<Self> {
+        (raw != 0).then_some(Self((raw & 0xFF_FF_FF) as u32))
+    }
+
+    pub fn red(self) -> u8 {
+        (self.0 >> 16) as u8
+    }
+
+    pub fn green(self) -> u8 {
+        (self.0 >> 8) as u8
+    }
+
+    pub fn blue(self) -> u8 {
+        self.0 as u8
+    }
 }
 
 /// Every identity one `onArenaStateReceived` packet carried, keyed by
@@ -158,8 +183,12 @@ impl LiveIdentities {
             .map(|player| {
                 let region = player.realm().and_then(Region::from_realm);
                 let clan = (!player.clan().is_empty()).then(|| player.clan().to_string());
-                let identity =
-                    LiveIdentity { account_id: player.db_id(), region, clan, clan_color: player.clan_color() };
+                let identity = LiveIdentity {
+                    account_id: player.db_id(),
+                    region,
+                    clan,
+                    clan_color: ClanColor::from_raw(player.clan_color()),
+                };
                 (player.username().to_ascii_lowercase(), identity)
             })
             .collect();
@@ -277,7 +306,7 @@ pub fn resolve_roster(
             account_id: identity.map(|identity| identity.account_id),
             region: identity.and_then(|identity| identity.region),
             clan: identity.and_then(|identity| identity.clan.clone()),
-            clan_color: identity.map_or(0, |identity| identity.clan_color),
+            clan_color: identity.and_then(|identity| identity.clan_color),
             name: player.name.clone(),
         };
 
@@ -346,7 +375,7 @@ mod tests {
             account_id: None,
             region: None,
             clan: None,
-            clan_color: 0,
+            clan_color: None,
         }
     }
 
@@ -541,7 +570,7 @@ mod tests {
         let identity = identities.by_name.get("harvey635").expect("the player is indexed by lower-cased name");
         assert_eq!(identity.account_id, AccountId(42));
         assert_eq!(identity.clan, Some("RAIN".to_string()));
-        assert_eq!(identity.clan_color, 0x00_ff_00);
+        assert_eq!(identity.clan_color, Some(ClanColor(0x00_ff_00)));
     }
 
     #[test]
@@ -568,7 +597,7 @@ mod tests {
                     account_id: AccountId(42),
                     region: Some(Region::Na),
                     clan: Some("RAIN".to_string()),
-                    clan_color: 0x00_ff_00,
+                    clan_color: Some(ClanColor(0x00_ff_00)),
                 },
             )]),
         };
@@ -582,7 +611,7 @@ mod tests {
         assert_eq!(resolved.enemy[0].account_id, Some(AccountId(42)));
         assert_eq!(resolved.enemy[0].region, Some(Region::Na));
         assert_eq!(resolved.enemy[0].clan, Some("RAIN".to_string()));
-        assert_eq!(resolved.enemy[0].clan_color, 0x00_ff_00);
+        assert_eq!(resolved.enemy[0].clan_color, Some(ClanColor(0x00_ff_00)));
         assert_eq!(resolved.identity_count, 1);
     }
 
@@ -605,7 +634,7 @@ mod tests {
         let identities = LiveIdentities {
             by_name: HashMap::from([(
                 "someone_else".to_string(),
-                LiveIdentity { account_id: AccountId(42), region: Some(Region::Eu), clan: None, clan_color: 0 },
+                LiveIdentity { account_id: AccountId(42), region: Some(Region::Eu), clan: None, clan_color: None },
             )]),
         };
         let json = meta_json("13, 11, 0, 12668706", &vehicle("Harvey635", 100, 2));

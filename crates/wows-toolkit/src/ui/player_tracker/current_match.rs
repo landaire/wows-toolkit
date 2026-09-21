@@ -49,6 +49,7 @@ use super::encounter_severity_color;
 use super::last_seen_text;
 use super::live::LiveRosterRow;
 use crate::ui::replay_parser::PlayerTintColor as _;
+use wows_toolkit_viewmodel::player_tracker::live::ClanColor as LiveClanColor;
 
 const ROW_EDGE_PADDING_X: i8 = 10;
 const ROW_EDGE_PADDING_Y: i8 = 3;
@@ -441,15 +442,11 @@ fn team_average_personal_rating(
 /// The clan tag's colour: the server-supplied clan colour when the scan
 /// carried one, otherwise the row's relation tint so the tag still renders on
 /// older data.
-fn clan_color_from_raw(raw: i64, fallback: PlayerTint) -> ClanColor {
-    if raw == 0 {
-        return ClanColor::Relation(fallback);
+fn clan_color_from_raw(color: Option<LiveClanColor>, fallback: PlayerTint) -> ClanColor {
+    match color {
+        Some(color) => ClanColor::Fixed(Color32::from_rgb(color.red(), color.green(), color.blue())),
+        None => ClanColor::Relation(fallback),
     }
-    ClanColor::Fixed(Color32::from_rgb(
-        ((raw & 0xFF_00_00) >> 16) as u8,
-        ((raw & 0xFF_00) >> 8) as u8,
-        (raw & 0xFF) as u8,
-    ))
 }
 
 /// `swatch()`'s chip tint is tuned for a small chip; laid across an entire
@@ -1226,7 +1223,7 @@ mod tests {
             account_id,
             region: None,
             clan: None,
-            clan_color: 0,
+            clan_color: None,
         }
     }
 
@@ -1241,7 +1238,7 @@ mod tests {
             account_id: Some(AccountId(account_id)),
             region: Some(Region::Eu),
             clan: clan.map(str::to_string),
-            clan_color: 0,
+            clan_color: None,
         }
     }
 
@@ -1821,12 +1818,12 @@ mod tests {
 
     #[test]
     fn clan_color_from_raw_falls_back_to_the_relation_tint_when_the_scan_carried_none() {
-        assert_eq!(clan_color_from_raw(0, PlayerTint::Ally), ClanColor::Relation(PlayerTint::Ally));
+        assert_eq!(clan_color_from_raw(None, PlayerTint::Ally), ClanColor::Relation(PlayerTint::Ally));
     }
 
     #[test]
     fn clan_color_from_raw_decodes_a_nonzero_server_colour() {
-        let color = clan_color_from_raw(0x00_ff_80, PlayerTint::Enemy);
+        let color = clan_color_from_raw(Some(LiveClanColor(0x00_ff_80)), PlayerTint::Enemy);
 
         assert_eq!(color, ClanColor::Fixed(Color32::from_rgb(0x00, 0xff, 0x80)));
     }
