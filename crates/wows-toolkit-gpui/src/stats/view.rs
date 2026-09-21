@@ -329,7 +329,7 @@ impl Render for StatsView {
             h_flex()
                 .gap_1()
                 .items_center()
-                .child(div().text_xs().opacity(0.6).child("Mode:"))
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child("Mode:"))
                 .child(selectable(
                     "stats-mode-all",
                     self.filters.game_modes.is_empty(),
@@ -359,8 +359,7 @@ impl Render for StatsView {
 
         let filter_bar = h_flex()
             .flex_none()
-            .flex_wrap()
-            .gap_3()
+            .gap_2()
             .items_center()
             .px_2()
             .py_1()
@@ -381,9 +380,11 @@ impl Render for StatsView {
                     .w(px(90.))
                     .child(NumberInput::new(&self.limit_input).small().disabled(!limited)),
             )
-            .child(div().text_xs().opacity(0.6).child("Division:"))
+            .child(crate::ui::rule_v(cx))
+            .child(div().text_xs().text_color(crate::theme::text_dim()).child("Division:"))
             .children(division_buttons)
-            .when_some(mode_row, |this, row| this.child(row))
+            .when_some(mode_row, |this, row| this.child(crate::ui::rule_v(cx)).child(row))
+            .child(crate::ui::rule_v(cx))
             .child(
                 Button::new("stats-add-chart")
                     .label("Add chart")

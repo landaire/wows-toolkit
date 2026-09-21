@@ -137,7 +137,12 @@ impl Render for StatsOverviewPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child("No games recorded for the current filters"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child("No games recorded for the current filters"),
+                )
                 .into_any_element();
         }
 
@@ -168,7 +173,7 @@ impl Render for StatsOverviewPanel {
                         .child(format!("PR {:.0} ({})", rating.pr, rating.category.name())),
                 )
             })
-            .child(div().text_sm().opacity(0.8).child(format!("{} frags", summary.total_frags)))
+            .child(div().text_sm().text_color(crate::theme::text_dim()).child(format!("{} frags", summary.total_frags)))
             .when_some(summary.best_frags, |this, (ship, frags)| {
                 let ship = self.ship_name(ship);
                 this.child(div().text_sm().text_color(dim).child(format!("Best frags: {frags} ({ship})")))
@@ -241,7 +246,12 @@ impl Render for StatsOverviewPanel {
                             .items_center()
                             .child(Icon::new(IconName::Star))
                             .child(div().text_xs().child(earned.display_name.clone()))
-                            .child(div().text_xs().opacity(0.6).child(format!("x{}", earned.count)))
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(crate::theme::text_dim())
+                                    .child(format!("x{}", earned.count)),
+                            )
                     })),
                 ))
         });

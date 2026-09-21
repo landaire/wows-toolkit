@@ -53,3 +53,11 @@ pub fn tree_row(item: ListItem, cx: &App) -> ListItem {
 pub fn selectable(id: impl Into<ElementId>, selected: bool, control: impl IntoElement) -> impl IntoElement {
     div().id(id).test_support().aria_selected(selected).child(control)
 }
+
+/// A vertical rule between two groups of controls on one row.
+///
+/// The egui toolbars separate their groups with `ui.separator()`; without it
+/// a row of buttons reads as one undifferentiated strip.
+pub fn rule_v(cx: &App) -> impl IntoElement {
+    div().flex_none().w(px(1.)).h(px(16.)).mx_1().bg(cx.theme().border)
+}

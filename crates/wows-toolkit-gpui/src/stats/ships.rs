@@ -201,7 +201,12 @@ impl Render for StatsShipsPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child("No games recorded for the current filters"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child("No games recorded for the current filters"),
+                )
                 .into_any_element();
         }
 

@@ -1170,7 +1170,11 @@ impl PlayerTrackerView {
                 .size_full()
                 .child(mode_bar)
                 .child(
-                    v_flex().flex_1().items_center().justify_center().child(div().text_sm().opacity(0.6).child(status)),
+                    v_flex()
+                        .flex_1()
+                        .items_center()
+                        .justify_center()
+                        .child(div().text_sm().text_color(crate::theme::text_dim()).child(status)),
                 )
                 .into_any_element();
         }
@@ -1210,7 +1214,7 @@ impl PlayerTrackerView {
             .size_full()
             .child(mode_bar)
             .when_some(note, |this, note| {
-                this.child(div().flex_none().px_2().py_1().text_xs().opacity(0.6).child(note))
+                this.child(div().flex_none().px_2().py_1().text_xs().text_color(crate::theme::text_dim()).child(note))
             })
             .child(
                 h_flex()
@@ -1350,7 +1354,10 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
     let tooltip = note.cloned();
 
     Button::new(("tracker-note", ix))
-        .child(crate::icons::icon(crate::icons::NOTE_PENCIL).when(!has_note, |this| this.opacity(0.4)))
+        .child(
+            crate::icons::icon(crate::icons::NOTE_PENCIL)
+                .when(!has_note, |this| this.text_color(crate::theme::text_faint())),
+        )
         .compact()
         .when_some(tooltip, |this, note| this.tooltip(SharedString::from(note)))
         .when(!has_note, |this| this.tooltip("Add a note about this player"))
@@ -1441,7 +1448,7 @@ fn stat_cell(text: Option<String>, color: Option<Hsla>, pending: bool) -> AnyEle
         .w(STAT_COLUMN_WIDTH)
         .text_xs()
         .when_some(color, |this, color| this.text_color(color))
-        .when(color.is_none(), |this| this.opacity(0.6))
+        .when(color.is_none(), |this| this.text_color(crate::theme::text_dim()))
         .child(text)
         .into_any_element()
 }
@@ -1603,7 +1610,7 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
             div()
                 .w(SHIP_COLUMN_WIDTH)
                 .text_xs()
-                .opacity(0.8)
+                .text_color(crate::theme::text_dim())
                 .truncate()
                 .child(row.ship_name.clone().unwrap_or_else(|| "-".to_string())),
         )
@@ -1783,7 +1790,13 @@ impl Render for PlayerTrackerView {
                     .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
                     .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.latest_name.clone()))
-                    .child(div().w(CLAN_COLUMN_WIDTH).text_sm().opacity(0.8).child(row.clan.clone()))
+                    .child(
+                        div()
+                            .w(CLAN_COLUMN_WIDTH)
+                            .text_sm()
+                            .text_color(crate::theme::text_dim())
+                            .child(row.clan.clone()),
+                    )
                     .child(
                         div()
                             .w(COUNT_COLUMN_WIDTH)
@@ -1841,7 +1854,7 @@ impl Render for PlayerTrackerView {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child(status))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
                 .into_any_element(),
             None => div()
                 .relative()

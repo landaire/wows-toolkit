@@ -493,7 +493,7 @@ fn section_heading(title: &'static str, description: &'static str) -> impl IntoE
     v_flex()
         .gap_1()
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(title))
-        .child(div().text_xs().opacity(0.6).child(description))
+        .child(div().text_xs().text_color(crate::theme::text_dim()).child(description))
 }
 
 fn settings_row(label: &'static str, value: String) -> impl IntoElement {
@@ -737,7 +737,7 @@ impl App {
             SettingsState::Loading => {
                 return v_flex()
                     .p_4()
-                    .child(div().text_sm().opacity(0.6).child("Loading settings..."))
+                    .child(div().text_sm().text_color(crate::theme::text_dim()).child("Loading settings..."))
                     .into_any_element();
             }
             SettingsState::Failed(reason) => {
@@ -745,7 +745,7 @@ impl App {
                     .p_4()
                     .gap_1()
                     .child(div().text_sm().font_weight(FontWeight::BOLD).child("Failed to load settings"))
-                    .child(div().text_sm().opacity(0.6).child(reason.clone()))
+                    .child(div().text_sm().text_color(crate::theme::text_dim()).child(reason.clone()))
                     .into_any_element();
             }
             SettingsState::Loaded(settings) => settings,
@@ -842,7 +842,7 @@ impl App {
                                 })),
                         )
                     })))
-                    .child(div().text_xs().opacity(0.6).child(data_sharing.description())),
+                    .child(div().text_xs().text_color(crate::theme::text_dim()).child(data_sharing.description())),
             )
             .child(
                 v_flex()
@@ -876,7 +876,9 @@ impl App {
                             Ok(who) => (format!("Signed in as {who}"), true),
                             Err(why) => (why.clone(), false),
                         };
-                        this.child(div().text_xs().when(dimmed, |this| this.opacity(0.6)).child(text))
+                        this.child(
+                            div().text_xs().when(dimmed, |this| this.text_color(crate::theme::text_dim())).child(text),
+                        )
                     }),
             );
 
@@ -973,7 +975,9 @@ impl App {
                             .disabled(true),
                     )
                     .into_any_element(),
-                None => div().text_sm().opacity(0.6).child("(no saved defaults)").into_any_element(),
+                None => {
+                    div().text_sm().text_color(crate::theme::text_dim()).child("(no saved defaults)").into_any_element()
+                }
             });
 
         div()

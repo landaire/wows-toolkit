@@ -45,7 +45,9 @@ const SWATCH_HEIGHT: Pixels = px(12.);
 const SWATCH_RADIUS: Pixels = px(2.);
 const TITLE_FONT_SIZE: Pixels = px(12.);
 const TITLE_GAP: Pixels = px(2.);
-const PANEL_WIDTH: Pixels = px(140.);
+/// The legend is as wide as its longest label wants, never narrower than
+/// this, so a long plate name is not wrapped into a column.
+const PANEL_MIN_WIDTH: Pixels = px(140.);
 
 /// Floating-panel state: visibility, collapsed state, position, and the
 /// in-flight drag (if any). Owned by `ArmorViewerPane`, seeded from the
@@ -170,7 +172,7 @@ pub fn render_panel(state: &LegendState, cx: &mut Context<ArmorViewerPane>) -> A
         .absolute()
         .left(state.pos.x)
         .top(state.pos.y)
-        .w(PANEL_WIDTH)
+        .min_w(PANEL_MIN_WIDTH)
         .bg(background)
         .border_1()
         .border_color(border)

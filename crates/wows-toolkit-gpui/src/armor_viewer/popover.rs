@@ -153,7 +153,7 @@ fn render_popover_content(
     };
 
     let Some(armor) = armor else {
-        return div().text_sm().opacity(0.6).p_2().child("No ship loaded").into_any_element();
+        return div().text_sm().text_color(crate::theme::text_dim()).p_2().child("No ship loaded").into_any_element();
     };
 
     let warn = cx.theme().warning;
@@ -284,7 +284,7 @@ fn render_hull_popover_content(
     };
 
     let Some(armor) = armor else {
-        return div().text_sm().opacity(0.6).p_2().child("No ship loaded").into_any_element();
+        return div().text_sm().text_color(crate::theme::text_dim()).p_2().child("No ship loaded").into_any_element();
     };
 
     let warn = cx.theme().warning;
@@ -903,7 +903,7 @@ fn render_zone_row(
             .child(chevron)
             .child(checkbox)
             .child(div().text_sm().child(zone.name.clone()))
-            .child(div().text_xs().opacity(0.5).child("(ctrl+click to solo)")),
+            .child(div().text_xs().text_color(crate::theme::text_faint()).child("(ctrl+click to solo)")),
     );
 
     let mut column = v_flex().gap_1().child(header);

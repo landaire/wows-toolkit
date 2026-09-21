@@ -362,7 +362,7 @@ impl Render for BrowserPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child(status))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
                 .into_any_element();
         }
 
@@ -382,7 +382,8 @@ impl Render for BrowserPanel {
                 Input::new(&self.filter_state)
                     .id(SharedString::from(format!("unpacker-{fragment}-filter")))
                     .small()
-                    .w_full(),
+                    .flex_1()
+                    .min_w(px(0.)),
             );
 
         let row_paths = self.row_paths.clone();
@@ -405,7 +406,8 @@ impl Render for BrowserPanel {
                     Input::new(&self.search_state)
                         .id(SharedString::from(format!("unpacker-{fragment}-search")))
                         .small()
-                        .w_full(),
+                        .flex_1()
+                        .min_w(px(0.)),
                 ),
             )
             .child(
@@ -621,7 +623,7 @@ fn breadcrumbs(selected_dir: &str, entity: Entity<BrowserPanel>) -> impl IntoEle
     for (depth, part) in selected_dir.trim_matches('/').split('/').filter(|part| !part.is_empty()).enumerate() {
         accumulated.push('/');
         accumulated.push_str(part);
-        crumbs.push(div().flex_none().text_xs().opacity(0.4).child("/").into_any_element());
+        crumbs.push(div().flex_none().text_xs().text_color(crate::theme::text_faint()).child("/").into_any_element());
         crumbs.push(crumb(part, accumulated.clone(), depth + 1, entity.clone()));
     }
 

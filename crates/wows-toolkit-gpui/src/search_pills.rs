@@ -228,7 +228,7 @@ pub fn pill_strip(
                             .id(("search-pill-segment", index * SEGMENTS_PER_PILL + slot))
                             .test_support()
                             .text_xs()
-                            .when(dimmed, |this| this.opacity(0.7))
+                            .when(dimmed, |this| this.text_color(crate::theme::text_dim()))
                             .when(!dimmed, |this| this.font_weight(FontWeight::MEDIUM))
                             // A segment is a handle only where there is
                             // something to pick; a free value is typed in the
@@ -244,18 +244,18 @@ pub fn pill_strip(
                 row.child(pill)
             }
             TokenKind::Connector { is_or } => {
-                row.child(div().text_xs().opacity(0.6).child(if *is_or { "or" } else { "and" }))
+                row.child(div().text_xs().text_color(crate::theme::text_dim()).child(if *is_or { "or" } else { "and" }))
             }
             TokenKind::NotPrefix => row.child(div().text_xs().text_color(accent).child("not")),
-            TokenKind::GroupOpen { .. } => row.child(div().text_xs().opacity(0.5).child("(")),
-            TokenKind::GroupClose => row.child(div().text_xs().opacity(0.5).child(")")),
+            TokenKind::GroupOpen { .. } => row.child(div().text_xs().text_color(crate::theme::text_faint()).child("(")),
+            TokenKind::GroupClose => row.child(div().text_xs().text_color(crate::theme::text_faint()).child(")")),
             TokenKind::QuantOpen { prefix } => row.child(
                 h_flex()
                     .gap_0p5()
                     .child(div().text_xs().text_color(muted).child(prefix.clone()))
-                    .child(div().text_xs().opacity(0.5).child("[")),
+                    .child(div().text_xs().text_color(crate::theme::text_faint()).child("[")),
             ),
-            TokenKind::QuantClose => row.child(div().text_xs().opacity(0.5).child("]")),
+            TokenKind::QuantClose => row.child(div().text_xs().text_color(crate::theme::text_faint()).child("]")),
             // The caret is the text input itself here, not a token to draw.
             TokenKind::Caret => row,
         };
