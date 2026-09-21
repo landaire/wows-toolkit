@@ -490,14 +490,14 @@ impl Render for ReplayInspectorView {
                 .into_any_element()
         };
 
+        // The listing says so itself while the game data loads (it is what
+        // the rows are named from), so the banner carries only the failure,
+        // which nothing else reports.
         let status_banner = match &self.game_data_status {
-            GameDataStatus::Loading => {
-                Some(div().text_xs().opacity(0.6).child("Loading game data...").into_any_element())
-            }
             GameDataStatus::Failed(reason) => Some(
                 div().text_xs().opacity(0.6).child(format!("Game data failed to load: {reason}")).into_any_element(),
             ),
-            GameDataStatus::Ready(_) => None,
+            GameDataStatus::Loading | GameDataStatus::Ready(_) => None,
         };
 
         let entity = cx.entity();
