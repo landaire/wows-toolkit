@@ -70,15 +70,19 @@ pub fn bake_from_file(
     on_map: impl FnOnce(PreviewFrames),
     on_frame: impl FnMut(Arc<RenderImage>),
 ) -> Result<(), PreviewError> {
+    let read_at = std::time::Instant::now();
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    tracing::debug!("preview: replay read in {:?}", read_at.elapsed());
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
 
     // A replay whose header carries no build number names no build to load.
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let build_at = std::time::Instant::now();
     let loaded =
         game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+    tracing::debug!("preview: build {} ready in {:?}", build.get(), build_at.elapsed());
 
     bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map, on_frame)
 }
@@ -130,14 +134,20 @@ pub fn bake(
         assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
 
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+    let started = std::time::Instant::now();
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
     renderer.set_fonts(assets::load_game_fonts(vfs));
+    tracing::debug!("preview: fonts and renderer in {:?}", started.elapsed());
 
     // Built before the battle is walked so the map can be shown during it; it
     // is the same renderer the track is rasterised with afterwards.
+    let assets_at = std::time::Instant::now();
     let mut preview = PreviewRenderer::new(vfs, version, &map_name)?;
+    tracing::debug!("preview: art for {map_name} in {:?}", assets_at.elapsed());
     let nothing_drawn: Vec<DrawCommand> = Vec::new();
+    let map_at = std::time::Instant::now();
     on_map(PreviewFrames::render(&mut preview, std::slice::from_ref(&nothing_drawn)));
+    tracing::debug!("preview: map frame in {:?}", map_at.elapsed());
 
     let mut session = MergedReplays::new(provider.entity_specs(), provider, constants, session_version, replay, &[])
         .map_err(|_| PreviewError::UnreadableReplay)?;
@@ -146,19 +156,28 @@ pub fn bake(
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::new();
+    let walk_at = std::time::Instant::now();
     build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
     session.finish();
+    tracing::debug!("preview: battle walked in {:?}", walk_at.elapsed());
 
     if cancelled() {
         return Err(PreviewError::Cancelled);
     }
 
+    let raster_at = std::time::Instant::now();
+    let mut first = true;
     for commands in sink.finish() {
         if cancelled() {
             return Err(PreviewError::Cancelled);
         }
         on_frame(to_image(preview.render(&commands)));
+        if first {
+            tracing::debug!("preview: first animated frame in {:?}", raster_at.elapsed());
+            first = false;
+        }
     }
+    tracing::debug!("preview: whole track in {:?}", raster_at.elapsed());
     Ok(())
 }
 

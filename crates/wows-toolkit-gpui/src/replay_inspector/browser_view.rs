@@ -52,9 +52,10 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
+use wows_toolkit_viewmodel::listing_row::HoverFact;
 use wows_toolkit_viewmodel::listing_row::LinePart;
 use wows_toolkit_viewmodel::listing_row::ListedReplay;
-use wows_toolkit_viewmodel::listing_row::hover_text;
+use wows_toolkit_viewmodel::listing_row::hover_facts;
 use wows_toolkit_viewmodel::listing_row::listed_row_identity;
 use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
 use wowsunpack::data::ResourceLoader;
@@ -107,9 +108,9 @@ struct LeafInfo {
     stats: Rc<Vec<LinePart>>,
     outcome: MatchOutcome,
     in_division: bool,
-    /// What the hover popup says under the minimap, in the words the egui
-    /// tooltip uses.
-    hover: SharedString,
+    /// What the hover popup says under the minimap: one labelled fact per
+    /// line, laid out as a grid rather than run together.
+    hover: Rc<Vec<HoverFact>>,
 }
 
 /// Writes `paths` to the clipboard, one per line.
@@ -142,6 +143,9 @@ const ROW_LINE_HEIGHTS: f32 = 2.8;
 /// What one level of the tree indents by, and the width the guide for it is
 /// drawn in.
 const INDENT: Pixels = px(16.);
+
+/// The hover grid's label column, wide enough for the longest of them.
+const HOVER_LABEL_WIDTH: Pixels = px(58.);
 
 /// How far to the right of the pointer the hover preview sits, so it never
 /// covers the row it belongs to.
@@ -423,8 +427,35 @@ impl ReplayBrowser {
                 this.files = files;
                 this.rebuild_tree(cx);
                 this.watch_replays_dir(replays_dir, generation, cx);
+                this.warm_listed_build(cx);
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// Loads the build most of the listed replays were recorded on, ahead of
+    /// anything asking for it.
+    ///
+    /// A preview cannot be baked without the build its replay was recorded
+    /// on, and that is over a second of work. The startup preload warms the
+    /// *installed* build, which is the right one only until the game
+    /// updates; after that the first hover pays for the older build every
+    /// session. Warming what the listing actually holds moves that cost off
+    /// the first hover.
+    fn warm_listed_build(&mut self, cx: &mut Context<Self>) {
+        let Some(cache) = self.build_cache.clone() else { return };
+        let Some(build) = most_common_build(&self.files) else { return };
+        if cache.loaded_build(build).is_some() {
+            return;
+        }
+
+        cx.spawn(async move |_this, cx| {
+            let warmed = cx.background_spawn(async move { cache.get_or_load_build(build) }).await;
+            match warmed {
+                Ok(_) => tracing::debug!("replay browser: warmed build {build} for previews"),
+                Err(err) => tracing::debug!("replay browser: build {build} did not warm: {err}"),
+            }
         })
         .detach();
     }
@@ -532,8 +563,8 @@ impl ReplayBrowser {
             .collect();
         // The hover text is assembled per replay rather than per node: a leaf
         // knows its path, and the tree nodes carry only what they draw.
-        let mut hover: HashMap<PathBuf, String> =
-            translated.iter().map(|r| (r.path.clone(), hover_text(&r.identity, &r.stats, locale))).collect();
+        let mut hover: HashMap<PathBuf, Rc<Vec<HoverFact>>> =
+            translated.iter().map(|r| (r.path.clone(), Rc::new(hover_facts(&r.identity, &r.stats, locale)))).collect();
         let nodes = build_browser_tree(&translated, self.grouping, locale);
         let mut leaf_info = HashMap::new();
         let mut group_children = HashMap::new();
@@ -589,6 +620,18 @@ impl ReplayBrowser {
     }
 }
 
+/// The hover's facts as a two-column grid: labels down the left, values down
+/// the right, so a reader finds the damage without reading the whole caption.
+fn hover_grid(facts: &[HoverFact], label_color: Hsla) -> impl IntoElement {
+    v_flex().gap_0().max_w(px(PREVIEW_SIZE)).children(facts.iter().map(move |fact| {
+        h_flex()
+            .gap_2()
+            .items_start()
+            .child(div().w(HOVER_LABEL_WIDTH).flex_none().text_xs().text_color(label_color).child(fact.label.clone()))
+            .child(div().flex_1().min_w(px(0.)).text_xs().child(fact.value.clone()))
+    }))
+}
+
 /// Re-closes the groups the user had closed, by label.
 fn restore_expansion(item: TreeItem, closed: &HashSet<SharedString>) -> TreeItem {
     if !item.is_folder() {
@@ -614,7 +657,7 @@ fn node_to_tree_item(
     next_group_id: &mut usize,
     leaf_info: &mut HashMap<SharedString, LeafInfo>,
     group_children: &mut HashMap<SharedString, Vec<PathBuf>>,
-    hover: &mut HashMap<PathBuf, String>,
+    hover: &mut HashMap<PathBuf, Rc<Vec<HoverFact>>>,
 ) -> (TreeItem, Vec<PathBuf>) {
     match node {
         BrowserNode::Group { label, children } => {
@@ -638,7 +681,7 @@ fn node_to_tree_item(
             let under = vec![path.clone()];
             leaf_info.insert(
                 id.clone(),
-                LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover: hover.into() },
+                LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover },
             );
             (TreeItem::new(id, label), under)
         }
@@ -873,16 +916,16 @@ impl Render for ReplayBrowser {
             ),
             (None, false) => None,
         };
-        // Under the map: the detail the two drawn lines drop, in the words
-        // the egui tooltip uses (`listing_row::hover_text`).
-        let hover_text = self
+        // Under the map: the detail the two drawn lines drop, one labelled
+        // fact per line.
+        let hover_facts = self
             .preview
             .watched_path()
             .and_then(|path| self.leaf_info.values().find(|leaf| leaf.path == path))
             .map(|leaf| leaf.hover.clone());
         // The popup is what a hovered row says, so it goes up as soon as the
         // row is known -- with the map once there is one.
-        let preview_popup = (preview_map.is_some() || hover_text.is_some()).then(|| {
+        let preview_popup = (preview_map.is_some() || hover_facts.is_some()).then(|| {
             let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
             deferred(
@@ -895,9 +938,7 @@ impl Render for ReplayBrowser {
                         .border_color(theme.border)
                         .bg(theme.background)
                         .children(preview_map)
-                        .when_some(hover_text, |this, text| {
-                            this.child(div().max_w(px(PREVIEW_SIZE)).text_xs().child(text))
-                        }),
+                        .when_some(hover_facts, |this, facts| this.child(hover_grid(&facts, crate::theme::text_dim()))),
                 ),
             )
             .with_priority(1)
@@ -992,6 +1033,21 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
         }
     }
     out
+}
+
+/// The build the most listed replays were recorded on.
+///
+/// The most common one rather than the newest: a directory holding one
+/// replay from a build nobody plays any more should not have the session
+/// spend a second loading it.
+fn most_common_build(files: &[RawReplay]) -> Option<u32> {
+    let mut counts: HashMap<u32, usize> = HashMap::new();
+    for file in files {
+        if let Some(build) = file.listed.build {
+            *counts.entry(build).or_default() += 1;
+        }
+    }
+    counts.into_iter().max_by_key(|(build, count)| (*count, *build)).map(|(build, _)| build)
 }
 
 /// Whether `path` names a replay the listing shows. `temp.wowsreplay` is the
