@@ -33,12 +33,27 @@ pub fn encounter_severity(times_in_range: usize) -> EncounterSeverity {
 }
 pub mod tracked;
 
+use crate::match_stats::Region;
 use jiff::Timestamp;
 use jiff::ToSpan;
 use serde::Deserialize;
 use serde::Serialize;
+use wows_replays::types::AccountId;
 use wows_toolkit_config::index::rows::MatchFilter;
 use wows_toolkit_config::index::rows::PlayerFacet;
+
+/// A player's wows-numbers page.
+pub fn wows_numbers_player_url(region: Region, account_id: AccountId, name: &str) -> String {
+    format!("https://{}.wows-numbers.com/player/{},{}", region.as_wire(), account_id.0, name)
+}
+
+/// A player's shipbuilds page.
+///
+/// Only the `EU` form of the region segment is confirmed against the live
+/// site; the others follow the same shape.
+pub fn shipbuilds_player_url(region: Region, account_id: AccountId, name: &str) -> String {
+    format!("https://shipbuilds.com/player/{}/{}/{}", region.as_url_segment(), account_id.0, name)
+}
 
 /// How far back the tracker looks.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -448,5 +463,28 @@ mod clan_tests {
         assert_eq!(sort.order, SortOrder::Descending);
         assert_eq!(sort.toggled(ClanSortColumn::Encounters).order, SortOrder::Ascending);
         assert_eq!(sort.toggled(ClanSortColumn::Clan).order, SortOrder::Ascending, "tags read A to Z");
+    }
+}
+
+#[cfg(test)]
+mod player_link_tests {
+    use super::shipbuilds_player_url;
+    use super::wows_numbers_player_url;
+    use crate::match_stats::Region;
+    use wows_replays::types::AccountId;
+
+    /// Both links carry the region, the account and the name, because the
+    /// sites key on the id and show the name.
+    #[test]
+    fn a_player_links_to_both_sites_by_region_and_id() {
+        let id = AccountId(123456789);
+        assert_eq!(
+            wows_numbers_player_url(Region::Eu, id, "gapedd"),
+            "https://eu.wows-numbers.com/player/123456789,gapedd"
+        );
+        assert_eq!(
+            shipbuilds_player_url(Region::Eu, id, "gapedd"),
+            "https://shipbuilds.com/player/EU/123456789/gapedd"
+        );
     }
 }

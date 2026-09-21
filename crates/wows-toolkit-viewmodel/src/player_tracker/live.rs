@@ -320,9 +320,11 @@ pub fn team_average_win_rate(
     stats: &HashMap<AccountId, PlayerStatsOut>,
     mode: WinRateMode,
 ) -> Option<f64> {
-    average(rows.iter().filter_map(|row| row.account_id.and_then(|id| stats.get(&id))).filter_map(|entry| {
-        row_stats(Some(entry), mode).win_rate
-    }))
+    average(
+        rows.iter()
+            .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
+            .filter_map(|entry| row_stats(Some(entry), mode).win_rate),
+    )
 }
 
 /// One team's average personal rating, on the same rule.
