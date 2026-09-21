@@ -50,7 +50,8 @@ pub struct PreviewHover {
     released: Vec<PreviewFrames>,
     /// Whether a bake is in flight, so the surface can say the preview is
     /// coming rather than showing nothing for the seconds it takes to read
-    /// the replay and load the build it was recorded on.
+    /// the replay and load the build it was recorded on. Stays set while the
+    /// map is shown on its own, which is most of that time.
     baking: bool,
     /// Set when a bake in flight should stop: the pointer has moved on.
     cancel: Arc<AtomicBool>,
@@ -204,11 +205,28 @@ impl PreviewHover {
         cx.notify();
         let cancel = Arc::clone(&self.cancel);
         self._bake = Some(cx.spawn(async move |view, cx| {
+            let (map_tx, map_rx) = futures::channel::oneshot::channel();
             let baked = crate::runtime::spawn(cx, {
                 let path = path.clone();
-                async move { crate::minimap_preview::bake_from_file(&path, &game_data, &cancel) }
-            })
-            .await;
+                async move {
+                    crate::minimap_preview::bake_from_file(&path, &game_data, &cancel, move |map| {
+                        let _ = map_tx.send(map);
+                    })
+                }
+            });
+
+            // The map stands in for the preview while the battle is walked,
+            // which is the slow half; the track replaces it below.
+            if let Ok(map) = map_rx.await {
+                let _ = view.update(cx, |view, cx| {
+                    let this = field(view);
+                    this.drop_shown();
+                    this.shown = Some(Shown { frames: map, started: Instant::now() });
+                    cx.notify();
+                });
+            }
+
+            let baked = baked.await;
 
             let Ok(Ok(frames)) = baked else {
                 if let Ok(Err(err)) = baked {
