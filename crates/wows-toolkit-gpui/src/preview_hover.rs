@@ -43,6 +43,11 @@ pub struct PreviewHover {
     /// hover.
     watched: Option<(PathBuf, Instant)>,
     shown: Option<Shown>,
+    /// Tracks whose textures are still held by the window. gpui keeps an
+    /// image's texture until it is told to let go, and only a `Window` can be
+    /// told; the surface hands them back on its next render
+    /// (`release_dropped`).
+    released: Vec<PreviewFrames>,
     /// Whether a bake is in flight, so the surface can say the preview is
     /// coming rather than showing nothing for the seconds it takes to read
     /// the replay and load the build it was recorded on.
@@ -60,6 +65,7 @@ impl Default for PreviewHover {
             dwell: Dwell::new(),
             watched: None,
             shown: None,
+            released: Vec::new(),
             baking: false,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
@@ -71,9 +77,22 @@ impl Default for PreviewHover {
 
 impl PreviewHover {
     /// The frame to draw now, if a preview is playing.
-    pub fn frame(&self) -> Option<Arc<gpui_kit::Image>> {
+    pub fn frame(&self) -> Option<Arc<gpui_kit::RenderImage>> {
         let shown = self.shown.as_ref()?;
         shown.frames.at(shown.started.elapsed())
+    }
+
+    /// Releases the textures of every track that is no longer showing.
+    ///
+    /// Called from the owning view's `render`, which is where a `Window` is
+    /// at hand. Without it a hover over a dozen replays leaves a dozen
+    /// tracks' frames resident.
+    pub fn release_dropped(&mut self, window: &mut gpui_kit::Window) {
+        for track in self.released.drain(..) {
+            for image in track.images() {
+                let _ = window.drop_image(image);
+            }
+        }
     }
 
     /// The row under the pointer, whether or not its preview has baked yet.
@@ -118,7 +137,7 @@ impl PreviewHover {
         self.dwell = Dwell::new();
         self.dwell.hover(path.clone(), Duration::ZERO);
         self.watched = Some((path.clone(), Instant::now()));
-        self.shown = None;
+        self.drop_shown();
         self._ticker = None;
         cx.notify();
 
@@ -148,11 +167,18 @@ impl PreviewHover {
         }
         self.dwell.leave();
         self.watched = None;
-        self.shown = None;
+        self.drop_shown();
         self._dwell_timer = None;
         self._ticker = None;
         self.cancel_bake();
         cx.notify();
+    }
+
+    /// Stops showing the current track and queues its textures for release.
+    fn drop_shown(&mut self) {
+        if let Some(shown) = self.shown.take() {
+            self.released.push(shown.frames);
+        }
     }
 
     fn cancel_bake(&mut self) {
@@ -198,6 +224,7 @@ impl PreviewHover {
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);
                 this.baking = false;
+                this.drop_shown();
                 this.shown = Some(Shown { frames, started: Instant::now() });
                 this.start_ticker(cx, field);
                 cx.notify();

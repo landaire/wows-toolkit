@@ -503,7 +503,8 @@ fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
 }
 
 impl Render for SearchView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.preview.release_dropped(window);
         self.refresh_completions(cx);
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
