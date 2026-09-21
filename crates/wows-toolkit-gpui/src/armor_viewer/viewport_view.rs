@@ -414,6 +414,9 @@ pub struct ViewportView {
     /// Per-mesh triangle tooltip data from the most recent armor upload, used
     /// to map a `pick()` hit back to its `ArmorTriangleTooltip`.
     mesh_triangle_info: Vec<(MeshId, Vec<ArmorTriangleTooltip>)>,
+    /// The zone and thickness of the last plate the pointer was over, kept
+    /// after the hover ends so the penetration checker opens on it.
+    last_plate: Option<(SharedString, f32)>,
     /// Live display settings (plate edges, waterline, zero-mm plates, armor
     /// opacity) mutable via the display-settings popover (`popover.rs`, Task
     /// 7b); changing any field re-uploads the armor since they affect
@@ -514,6 +517,7 @@ impl ViewportView {
             hover_highlight: None,
             sidebar_highlight: None,
             mesh_triangle_info: Vec::new(),
+            last_plate: None,
             display_settings,
             display_sliders,
             _display_slider_subscriptions: display_slider_subscriptions,
@@ -828,6 +832,11 @@ impl ViewportView {
 
     /// The ship this viewport is showing, if any. Read by the pane's chrome,
     /// which names it.
+    /// The last plate the pointer was over: its zone and its thickness.
+    pub(crate) fn last_plate(&self) -> Option<(SharedString, f32)> {
+        self.last_plate.clone()
+    }
+
     pub(crate) fn shown_ship_name(&self) -> Option<SharedString> {
         self.reload_source.as_ref().map(|source| SharedString::from(source.display_name.clone()))
     }
@@ -1146,6 +1155,9 @@ impl ViewportView {
         let Some((key, tooltip)) = found else { return self.clear_plate_hover() };
 
         let key_changed = self.hovered.as_ref().map(|h| h.key != key).unwrap_or(true);
+        // Remembered past the hover itself: the penetration checker is opened
+        // from a button, which the pointer has to leave the plate to reach.
+        self.last_plate = Some((SharedString::from(tooltip.zone.clone()), tooltip.thickness_mm));
         self.hovered = Some(HoverInfo { key: key.clone(), tooltip, cursor: position });
         if key_changed {
             self.rebuild_hover_highlight(&key);

@@ -10,6 +10,10 @@ kept so the next audit does not re-report them.
 
 ## Shell and visual design
 
+- Every string the port draws is an English literal. The egui app translates
+  through `t!`; the port now has its own `i18n!` and the penetration checker
+  reads from the catalog, but the rest of its chrome does not.
+
 - [done] The palette was egui's stock greys rather than Graphite and Bone
   (`ui/theme/palette.rs`): one surface, one border, one text tone. The seven
   tiers and both semantic sets are now in `theme.rs`, mapped onto
@@ -83,7 +87,9 @@ kept so the next audit does not re-report them.
   a header menu that is always present instead of a row that appeared with
   the second pane.
 - [done] The pane names the ship it is showing.
-- Penetration checker and the whole Analysis window are absent.
+- [done] The penetration checker is a popover on the pane's own strip, over
+  the plate the pointer was last on. The rest of the Analysis window (the
+  comparison list, the server-vs-simulation report) is still absent.
 - Shell trajectory mode is absent.
 - Splash/blast mode and the splash-box popover are absent.
 - Gap detection, "show hidden plates", the roll slider and the camera-rings

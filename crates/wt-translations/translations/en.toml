@@ -1177,6 +1177,25 @@ roll = "Roll"
 ctrl_click_solo = "Ctrl+click to solo"
 reset_plates = "Reset plates"
 
+# -- Armor Viewer: penetration checker --
+
+[ui.armor.pen]
+title = "Penetration"
+title_tooltip = "Check what a ship's shells do to a plate"
+ship = "Ship firing"
+pick_ship = "Pick the ship firing at this one"
+enter_thickness = "Enter the plate thickness"
+no_shells = "%{ship} has no main battery shells"
+plate = "Plate"
+mm = "mm"
+ifhe = "IFHE"
+ifhe_tooltip = "Inertia Fuse for HE Shells raises HE penetration by a quarter"
+last_hovered = "Last hovered: %{plate}"
+penetrates = "penetrates"
+shatters = "shatters"
+angle_dependent = "depends on the angle"
+no_data = "no penetration data"
+
 [ui.armor.export]
 hull = "Hull"
 contents = "Contents"

@@ -21,6 +21,7 @@ pub fn locale() -> String {
     rust_i18n::locale().to_string()
 }
 
+pub mod armor;
 pub mod formatting;
 pub mod glyphs;
 pub mod listing_row;
