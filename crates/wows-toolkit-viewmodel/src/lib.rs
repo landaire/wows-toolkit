@@ -11,4 +11,5 @@ pub mod player_tracker;
 pub mod replay_export;
 pub mod settings;
 pub mod stats;
+pub mod twitch;
 pub mod unpacker;
