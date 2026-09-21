@@ -1662,15 +1662,16 @@ impl Render for PlayerTrackerView {
                 .border_b_1()
                 .border_color(border)
                 .child(
-                    Select::new(&self.period_select)
-                        .id("tracker-period")
-                        .accessibility_label(t!("ui.player_tracker.time_period").to_string())
-                        .small()
-                        .w(PERIOD_COMBO_WIDTH)
-                        // The menu takes the width of the element the popup is
-                        // anchored to, which is the row this combo sits in rather
-                        // than the combo itself.
-                        .menu_width(PERIOD_COMBO_WIDTH),
+                    crate::ui::boxed(PERIOD_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                        Select::new(&self.period_select)
+                            .id("tracker-period")
+                            .accessibility_label(t!("ui.player_tracker.time_period").to_string())
+                            .small()
+                            // The menu takes the width of the element the popup
+                            // is anchored to, which is the box this combo sits
+                            // in rather than the combo itself.
+                            .menu_width(PERIOD_COMBO_WIDTH),
+                    ),
                 )
                 .child(
                     h_flex().gap_1().items_center().flex_none().child(Icon::new(IconName::Search)).child(
@@ -1907,7 +1908,7 @@ impl Render for PlayerTrackerView {
                                 })),
                         ),
                 )
-                .child(Input::new(&self.note_input).id("tracker-note-input").w_full())
+                .child(Input::new(&self.note_input).id("tracker-note-input").small().w_full())
                 .when_some(self.note_error.clone(), |this, reason| {
                     this.child(
                         div()

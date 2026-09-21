@@ -933,7 +933,7 @@ fn labeled_slider_row(label: String, slider: &Entity<SliderState>, value: f32, d
         .gap_2()
         .items_center()
         .child(div().text_sm().w(px(110.)).child(label))
-        .child(Slider::new(slider).w(px(110.)).disabled(disabled))
+        .child(crate::ui::boxed(px(110.), crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(slider).disabled(disabled)))
         .child(div().text_sm().w(px(40.)).child(format!("{value:.2}")))
         .into_any_element()
 }

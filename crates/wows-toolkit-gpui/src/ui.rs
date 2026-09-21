@@ -1,5 +1,7 @@
 //! Small rendering helpers shared across the tabs.
 
+use gpui_kit::base::SelectableText;
+use gpui_kit::base::TextSelectionHandle;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
@@ -52,6 +54,43 @@ pub fn tree_row(item: ListItem, cx: &App) -> ListItem {
 /// carries that state without giving up the button's look.
 pub fn selectable(id: impl Into<ElementId>, selected: bool, control: impl IntoElement) -> impl IntoElement {
     div().id(id).test_support().aria_selected(selected).child(control)
+}
+
+/// One run of text the reader can select and copy with the pointer.
+///
+/// Plain `div().child(text)` paints glyphs the pointer cannot touch. Anything
+/// a reader would reasonably lift out of the window -- a name, a figure, a
+/// line of JSON -- goes through this instead. `Root` already mounts the
+/// selection layer the runs register with (`main.rs`).
+pub fn selectable_text(id: impl Into<ElementId>, text: impl Into<SharedString>) -> SelectableText {
+    SelectableText::new(id, text)
+}
+
+/// One run of a larger selectable document.
+///
+/// Runs sharing a handle select as one body of text in `order`, so dragging
+/// across several lines copies them in reading order rather than one at a
+/// time.
+pub fn selectable_run(
+    id: impl Into<ElementId>,
+    handle: &TextSelectionHandle,
+    order: u64,
+    text: impl Into<SharedString>,
+) -> SelectableText {
+    SelectableText::with_handle(id, handle.clone(), text).document_order(order)
+}
+
+/// The height a `Select` occupies in a row, by its size.
+///
+/// `Select` puts its trigger inside a `size_full` root, so in a row taller
+/// than the trigger the trigger top-anchors rather than centring. Boxing it
+/// at its own height is what makes a combo line up with the buttons beside
+/// it. Small is `input_h(Small)` = 24px; the default is 32px.
+pub const SELECT_SMALL_HEIGHT: Pixels = px(24.);
+
+/// Boxes a control at a definite size so a row can centre it.
+pub fn boxed(width: Pixels, height: Pixels) -> Div {
+    div().flex_none().w(width).h(height)
 }
 
 /// A vertical rule between two groups of controls on one row.

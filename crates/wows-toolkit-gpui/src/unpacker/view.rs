@@ -843,7 +843,10 @@ impl Render for UnpackerView {
                 .child(
                     div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.unpacker.version").to_string()),
                 )
-                .child(Select::new(&self.build_select).id("unpacker-build").small().w(px(160.)))
+                .child(
+                    crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT)
+                        .child(Select::new(&self.build_select).id("unpacker-build").small()),
+                )
         });
 
         let status: Option<String> = match &self.extract_state {

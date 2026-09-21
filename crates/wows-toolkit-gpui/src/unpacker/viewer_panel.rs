@@ -102,7 +102,7 @@ impl Render for FileViewerPanel {
                 .p_2()
                 .font_family("monospace")
                 .text_xs()
-                .child(text.clone())
+                .child(crate::ui::selectable_text("file-viewer-body", text.clone()))
                 .into_any_element(),
             Shown::Image(image) => div()
                 .id("file-viewer-image")

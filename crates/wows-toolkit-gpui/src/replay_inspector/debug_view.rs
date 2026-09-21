@@ -7,6 +7,7 @@
 //! side-panel slot instead, the same v1 tradeoff `chat.rs` documents for the
 //! chat window.
 
+use gpui_kit::base::TextSelectionHandle;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
@@ -25,13 +26,18 @@ pub struct RawJsonPanel {
     /// payload can run thousands of lines) was pure per-frame waste. Cloning
     /// a `SharedString` in `render` is a refcount bump, not a copy.
     lines: Vec<SharedString>,
+    /// Ties every line into one selectable document, so a drag down the
+    /// payload copies it in order rather than a line at a time.
+    selection: TextSelectionHandle,
     scroll: ScrollHandle,
 }
 
 impl RawJsonPanel {
-    pub fn new(content: SharedString, _cx: &mut Context<Self>) -> Self {
+    pub fn new(content: SharedString, cx: &mut Context<Self>) -> Self {
         let lines = content.split('\n').map(|line| SharedString::from(line.to_string())).collect();
-        Self { lines, scroll: ScrollHandle::new() }
+        // The whole payload is what a copy with nothing selected yields.
+        let selection = TextSelectionHandle::new(content.to_string(), cx);
+        Self { lines, selection, scroll: ScrollHandle::new() }
     }
 }
 
@@ -39,15 +45,14 @@ impl Render for RawJsonPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let mono_font_family = cx.theme().mono_font_family.clone();
 
-        let body = div().id("raw-json-body").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(
-            v_flex()
-                .w_full()
-                .p_2()
-                .gap_0()
-                .text_xs()
-                .font_family(mono_font_family)
-                .children(self.lines.iter().cloned().map(|line| div().child(line))),
-        );
+        let body =
+            div().id("raw-json-body").size_full().overflow_y_scroll().track_scroll(&self.scroll).child(
+                v_flex().w_full().p_2().gap_0().text_xs().font_family(mono_font_family).children(
+                    self.lines.iter().cloned().enumerate().map(|(ix, line)| {
+                        crate::ui::selectable_run(("raw-json", ix), &self.selection, ix as u64, line)
+                    }),
+                ),
+            );
 
         div().relative().size_full().child(body).child(Scrollbar::vertical(&self.scroll))
     }
