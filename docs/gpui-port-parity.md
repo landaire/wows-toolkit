@@ -205,7 +205,9 @@ kept so the next audit does not re-report them.
 - Historical rows do not expand; notes are a separate bottom panel, and
   aliases and account ids are invisible.
 - [done] Encounter counts carry the severity ramp.
-- Period, sort and filter are not persisted.
+- [done] Period, both table sorts and the filter are kept in a settings row
+  and read back on the first frame. The egui tracker keeps none of these, so
+  the row is the port's own rather than one the two apps share.
 - The sub-tabs cannot be split or docked.
 
 ## Search
