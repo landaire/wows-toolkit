@@ -448,7 +448,7 @@ impl Render for BrowserPanel {
                 let entity = listing_entity.clone();
                 let path = row.path.clone();
                 let is_dir = row.is_dir;
-                let size = row.size.map(format_size).unwrap_or_default();
+                let size = row.size.map(wows_toolkit_viewmodel::formatting::byte_size).unwrap_or_default();
                 // Only an assets.bin prototype the decoder understands offers
                 // the JSON view.
                 let decodable = !is_dir && decodable_prototype(&row.label).is_some();
@@ -674,18 +674,6 @@ fn crumb(label: &str, path: String, depth: usize, entity: Entity<BrowserPanel>) 
         .into_any_element()
 }
 
-/// Byte count in the largest unit that keeps it under four digits.
-fn format_size(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut size = bytes as f64;
-    let mut unit = 0;
-    while size >= 1024.0 && unit + 1 < UNITS.len() {
-        size /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
-}
-
 /// What one level of the tree indents by, and the width its guide is drawn in.
 const INDENT: Pixels = px(16.);
 
@@ -752,20 +740,6 @@ fn render_folder_row(
             panel.update(cx, |this, cx| this.select_dir(path.clone(), cx));
         }),
         None => list_item,
-    }
-}
-
-#[cfg(test)]
-mod format_tests {
-    use super::format_size;
-
-    #[test]
-    fn sizes_are_shown_in_the_largest_unit_that_keeps_them_under_four_digits() {
-        assert_eq!(format_size(0), "0 B");
-        assert_eq!(format_size(512), "512 B");
-        assert_eq!(format_size(1024), "1.0 KiB");
-        assert_eq!(format_size(1024 * 1024), "1.0 MiB");
-        assert_eq!(format_size(1536 * 1024), "1.5 MiB");
     }
 }
 

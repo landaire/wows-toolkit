@@ -586,7 +586,7 @@ impl ArmorViewerPane {
         &mut self,
         _sidebar: &Entity<Sidebar>,
         event: &ExportModelRequested,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let BundleState::Ready(bundle) = &self.bundle else {
@@ -602,16 +602,41 @@ impl ArmorViewerPane {
             &load_ship::default_export_filename(&display_name),
             Some(crate::dialog::GLB),
         );
-        cx.spawn(async move |_this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let Some(path) = asked.await else { return };
             let options = load_ship::export_options_from_selection(load_ship::DEFAULT_LOD, None, HashMap::new());
-            cx.background_spawn(async move {
-                match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
-                    Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
-                    Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
+            let for_log = display_name.clone();
+            let written = cx
+                .background_spawn(async move {
+                    let result = load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path);
+                    // The size is what the egui app reports beside the ship,
+                    // and it is only knowable once the file is on disk.
+                    result.map(|()| std::fs::metadata(&path).map(|meta| meta.len()).ok())
+                })
+                .await;
+
+            let _ = this.update_in(cx, |_this, window, cx| match written {
+                Ok(size) => {
+                    let message = match size {
+                        Some(bytes) => t!(
+                            "ui.armor.export.exported_with_size",
+                            ship = for_log,
+                            size = wows_toolkit_viewmodel::formatting::byte_size(bytes)
+                        )
+                        .into_owned(),
+                        None => t!("ui.armor.export.exported", ship = for_log).into_owned(),
+                    };
+                    crate::toast::ok(message, window, cx);
                 }
-            })
-            .await;
+                Err(err) => {
+                    tracing::error!("armor viewer: failed to export {for_log}: {err}");
+                    crate::toast::failed(
+                        t!("ui.armor.export.export_failed", error = err.to_string()).into_owned(),
+                        window,
+                        cx,
+                    );
+                }
+            });
         })
         .detach();
     }

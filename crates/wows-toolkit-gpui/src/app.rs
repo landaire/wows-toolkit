@@ -933,6 +933,7 @@ impl App {
         // (`ui/settings_tab.rs`'s `wows_dir_invalid`).
         self.wows_dir_invalid = !path.is_empty() && !std::path::Path::new(&path).join("bin").is_dir();
         if self.wows_dir_invalid {
+            crate::toast::failed(t!("ui.messages.wows_dir_invalid").to_string(), window, cx);
             cx.notify();
             return;
         }

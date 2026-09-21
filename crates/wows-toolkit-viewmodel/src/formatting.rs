@@ -19,6 +19,21 @@ pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
     }
 }
 
+/// A byte count in the largest binary unit that keeps it under four digits.
+///
+/// Matches what the egui app prints through `humansize`'s `BINARY` format,
+/// so the two apps report the same size for the same file.
+pub fn byte_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit + 1 < UNITS.len() {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 { format!("{bytes} B") } else { format!("{size:.1} {}", UNITS[unit]) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::separate_number;
@@ -41,5 +56,14 @@ mod tests {
     #[test]
     fn an_unreadable_locale_falls_back_to_commas() {
         assert_eq!(separate_number(1_234_567u64, Some("not a tag")), "1,234,567");
+    }
+
+    #[test]
+    fn sizes_are_shown_in_the_largest_unit_that_keeps_them_under_four_digits() {
+        assert_eq!(super::byte_size(0), "0 B");
+        assert_eq!(super::byte_size(512), "512 B");
+        assert_eq!(super::byte_size(1024), "1.0 KiB");
+        assert_eq!(super::byte_size(1024 * 1024), "1.0 MiB");
+        assert_eq!(super::byte_size(1536 * 1024), "1.5 MiB");
     }
 }
