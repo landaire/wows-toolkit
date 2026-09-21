@@ -41,8 +41,9 @@ const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
 const SHIP_COLUMN_WIDTH: Pixels = px(200.);
 const NUMBER_COLUMN_WIDTH: Pixels = px(96.);
-/// One achievement's column, at the size the egui roundup draws them.
-const ACHIEVEMENT_COLUMN_WIDTH: Pixels = px(56.);
+/// One achievement's column. The icon is the egui roundup's size; the column
+/// is wider than the icon so a two-word name wraps rather than being cut.
+const ACHIEVEMENT_COLUMN_WIDTH: Pixels = px(84.);
 const ACHIEVEMENT_ICON_SIZE: Pixels = px(48.);
 
 /// What the panel shows, recomputed when the games or the filters change.
@@ -291,7 +292,7 @@ impl Render for StatsOverviewPanel {
         let achievements = (!self.computed.achievements.is_empty()).then(|| {
             v_flex()
                 .flex_none()
-                .max_h(px(160.))
+                .max_h(px(190.))
                 .gap_1()
                 .px_2()
                 .py_1()
@@ -327,11 +328,14 @@ impl Render for StatsOverviewPanel {
                                 .child(
                                     div().text_xs().font_weight(FontWeight::BOLD).child(format!("x{}", earned.count)),
                                 )
+                                // Wrapped, not truncated: the name is what
+                                // tells two achievements apart, and half of
+                                // one tells the reader nothing.
                                 .child(
                                     div()
                                         .text_xs()
+                                        .text_center()
                                         .text_color(crate::theme::text_dim())
-                                        .truncate()
                                         .child(earned.display_name.clone()),
                                 )
                         },

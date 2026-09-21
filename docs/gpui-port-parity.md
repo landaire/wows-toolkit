@@ -13,7 +13,17 @@ kept so the next audit does not re-report them.
 - A hover preview costs ~740 MB of steady-state memory after sweeping a few
   dozen rows: the renderer's whole asset set is loaded from the VFS twice per
   hover and never cached, and one baked track is kept for a return visit.
-  Caching `PreviewRenderer` per build and map is the fix.
+  Caching `PreviewRenderer` per build and map is the fix. (Latency is no
+  longer the reason to do it: measured, the asset load is 50 ms and the build
+  load that dominated is now warmed at startup.)
+- The port raises no toasts where the egui app raises 88. A helper and the
+  Twitch, clipboard and chat-save messages are wired; the rest are not.
+- No command palette, though `gpui_kit::component::command` provides one and
+  the egui app has `ui/command_palette.rs`.
+- The file viewers show plain text; `gpui_kit::component::highlighter` ships
+  tree-sitter grammars (json, markdown, html and others) an `EditorState`
+  can use.
+- The settings tab is hand-built rows rather than `component::form`.
 
 - [done] Every string the port draws was an English literal. The port has its
   own `i18n!` now, a language change sets both its own locale and the shared
