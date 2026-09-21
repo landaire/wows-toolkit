@@ -537,6 +537,32 @@ impl PlayerTable {
     /// left it, since nobody asked for a scroll. Notifies rather than emits:
     /// this runs inside the view's fan-out over its open panels, and an event
     /// from here would re-enter the panel that owns this table.
+    /// Whether the recording player is in a test ship, which is the only
+    /// case where hiding their own figures means anything.
+    pub fn self_is_test_ship(&self) -> bool {
+        self.model.rows.iter().any(|row| row.is_self && row.is_test_ship)
+    }
+
+    /// Whether the recording player's own figures are currently hidden.
+    pub fn self_stats_hidden(&self) -> bool {
+        self.model.rows.iter().any(|row| row.is_self && row.manual_stat_hide_toggle)
+    }
+
+    /// Hides or shows the recording player's own figures.
+    ///
+    /// The egui app offers this for a test ship, where the NDA applies to the
+    /// player's own numbers as much as to anyone else's.
+    pub fn set_self_stats_hidden(&mut self, hidden: bool, cx: &mut Context<Self>) {
+        let Some(row) = self.model.rows.iter_mut().find(|row| row.is_self) else { return };
+        if row.manual_stat_hide_toggle == hidden {
+            return;
+        }
+        row.manual_stat_hide_toggle = hidden;
+        self.widths_dirty = true;
+        self.list_state.remeasure_items(0..self.model.rows.len());
+        cx.notify();
+    }
+
     /// Flags the rows whose names were plausibly in the monitored channel's
     /// chat around this battle. Row order does not depend on the flag, so
     /// this only remeasures.
