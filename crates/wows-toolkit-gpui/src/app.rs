@@ -252,6 +252,8 @@ impl App {
         let wows_dir = settings.wows_dir.clone();
         let proxy_url = settings.proxy_url.clone();
         self.watch_live_matches(&wows_dir, proxy_url, cx);
+        let game_data = self.replay_inspector.read(cx).game_data();
+        self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
         // Seed the text fields so the tab opens showing what is saved.
         self.wows_dir_input.update(cx, |state, cx| state.set_value(settings.wows_dir.clone(), window, cx));
@@ -337,6 +339,11 @@ impl App {
     }
 
     /// Opens `path` in the Replay Inspector and brings that tab forward.
+    ///
+    /// A replay cannot be parsed without the game data its build came from,
+    /// so with no WoWs directory set the user is moved to the inspector,
+    /// which is where that state is explained, rather than to a tab that
+    /// would sit empty with no reason given.
     pub(crate) fn open_replay_from_search(
         &mut self,
         path: std::path::PathBuf,
@@ -440,6 +447,8 @@ impl App {
             .update(cx, |view, cx| view.apply_settings(path, debug_mode, replay_settings, auto_load, window, cx));
         self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(for_unpacker, window, cx));
         self.watch_live_matches(&for_tracker, proxy_url, cx);
+        let game_data = self.replay_inspector.read(cx).game_data();
+        self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
         cx.notify();
     }
 

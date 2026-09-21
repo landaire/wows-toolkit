@@ -264,6 +264,20 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
 }
 
 /// Save tracked players.
+/// The tracker as this process last wrote it, so an unchanged one is not
+/// written again.
+///
+/// The save task runs on a timer whether or not anything changed, and the
+/// GPUI port writes the same key to annotate players. Rewriting an unchanged
+/// tracker would replace those annotations with this process's stale copy of
+/// them.
+static LAST_TRACKER_JSON: parking_lot::Mutex<Option<String>> = parking_lot::Mutex::new(None);
+
+/// Writes the tracker, unless this process already wrote exactly it.
+///
+/// A tracker that has changed here still wins: each app holds the whole
+/// document, so the last writer of a changed one replaces it. What this stops
+/// is an *unchanged* one overwriting the other app's edits.
 async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx::Error> {
     let json = {
         let pt = ctx.player_tracker.read();
@@ -272,7 +286,17 @@ async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<()
 
     match json {
         Some(json) => {
+            // Compared against what this process last wrote, not against what
+            // is stored: the port's own write makes the two differ, and
+            // rewriting then would be exactly the clobber this avoids. The
+            // guard is dropped before the await so the future stays `Send`.
+            let unchanged = LAST_TRACKER_JSON.lock().as_deref() == Some(json.as_str());
+            if unchanged {
+                trace!("  player tracker unchanged, not written");
+                return Ok(());
+            }
             queries::set_setting(pool, "player_tracker_data", &json).await?;
+            *LAST_TRACKER_JSON.lock() = Some(json);
         }
         None => {
             error!("Failed to serialize player tracker");

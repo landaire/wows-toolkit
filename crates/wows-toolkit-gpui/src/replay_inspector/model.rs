@@ -440,13 +440,15 @@ impl ReplayReportModel {
         }
     }
 
-    /// Populates Personal Rating for every row using externally loaded PR
-    /// reference data. Ports `UiReport::populate_personal_ratings`
-    /// (`ui/replay_parser/mod.rs:2217-2249`) exactly: build one
-    /// `ShipBattleStats` per row from that row's `ship_id`/`actual_damage`/
-    /// win-or-loss/`kills`, then hand it to `pr_data.calculate_pr`. A row
-    /// whose PR is already `Some`, or that lacks a resolved `ship_id` or
-    /// `actual_damage`, is left untouched.
+    /// Rates any row the parse left unrated.
+    ///
+    /// The parse rates the report itself, which is where these rows and the
+    /// export both take their ratings from; this covers only the case where
+    /// the expected values arrived while a replay was already parsing. It
+    /// reaches the rows, not the export, which was written during that parse
+    /// -- so an export from such a tab carries no ratings until it is
+    /// reopened. Startup loads the table before any replay can be opened, so
+    /// that window is not one a user meets.
     pub fn populate_personal_ratings(&mut self, pr_data: &PersonalRatingData) {
         let is_win = matches!(self.battle_result, Some(BattleResult::Win(_)));
 
@@ -797,7 +799,7 @@ impl PlayerRow {
             consumables: np.consumables.clone(),
             // PR data isn't loaded at report-construction time; see the
             // field doc and `ReplayReportModel::populate_personal_ratings`.
-            personal_rating: None,
+            personal_rating: np.personal_rating.clone(),
             // Needs the raw `Player`, which `NormalizedPlayer` does not
             // carry; see the field docs and `populate_action_links`.
             ship_config_url: None,

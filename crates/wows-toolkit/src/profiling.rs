@@ -106,10 +106,12 @@ impl StageTimings {
     }
 }
 
-/// Build dependencies sufficient for `build_ui_report`. Twitch and
-/// personal-rating state are empty: neither is populated during a normal load
-/// either, and the sender is a dead end because the UI report only uses it to
-/// queue follow-up work.
+/// Build dependencies sufficient for `build_ui_report`.
+///
+/// Personal rating comes from the shared cache, so a headless load rates its
+/// players as a real one does; Twitch state is empty, which is what a load
+/// with no connected account has. The sender is a dead end because the UI
+/// report only uses it to queue follow-up work.
 pub(crate) fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
     let (tx, rx) = egui_inbox::UiInbox::channel();
     // Leaking the receiver keeps sends from failing; nothing consumes them.
@@ -122,7 +124,11 @@ pub(crate) fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
         replay_sort: Arc::new(Mutex::new(SortOrder::default())),
         background_task_sender: tx,
         is_debug_mode: false,
-        personal_rating_data: Arc::new(RwLock::new(Default::default())),
+        // Loaded from the shared cache when there is one, so a headless load
+        // rates its players the way a real one does.
+        personal_rating_data: Arc::new(RwLock::new(
+            wows_toolkit_viewmodel::personal_rating::load_cached().unwrap_or_default(),
+        )),
         // Headless: nothing paints, so wakes go nowhere by construction.
         egui_ctx: egui::Context::default(),
     }

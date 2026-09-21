@@ -4,6 +4,31 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use sqlx::SqlitePool;
 
+/// Why a setting could not be read.
+#[derive(Debug, thiserror::Error)]
+pub enum SettingError {
+    #[error("the settings table could not be read")]
+    Query(#[source] sqlx::Error),
+    #[error("the stored value is not the shape this setting holds")]
+    Decode(#[source] serde_json::Error),
+}
+
+/// A JSON-encoded setting, distinguishing "not set" from "could not be read".
+///
+/// [`get_setting`] collapses the two, which is right for a setting whose
+/// absence means a default. A caller that rewrites what it reads needs the
+/// difference: treating a failed read as "nothing stored" would write its own
+/// value over whatever is really there.
+pub async fn try_get_setting<T: DeserializeOwned>(pool: &SqlitePool, key: &str) -> Result<Option<T>, SettingError> {
+    let row: Option<(String,)> = sqlx::query_as("SELECT value FROM settings WHERE key = ?1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .map_err(SettingError::Query)?;
+
+    row.map(|(json,)| serde_json::from_str(&json).map_err(SettingError::Decode)).transpose()
+}
+
 /// Get a JSON-encoded setting by key.
 pub async fn get_setting<T: DeserializeOwned>(pool: &SqlitePool, key: &str) -> Option<T> {
     let row: Option<(String,)> =

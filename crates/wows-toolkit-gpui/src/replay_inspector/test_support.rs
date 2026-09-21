@@ -105,6 +105,7 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
 /// default, for `ReplayReportModel::build` tests.
 pub(crate) fn base_normalized_player(db_id: i64, relation: Relation, is_self: bool) -> NormalizedPlayer {
     NormalizedPlayer {
+        ship_id: 1u64.into(),
         db_id: AccountId(db_id),
         name: format!("Player{db_id}"),
         display_name: format!("Player{db_id}"),
@@ -199,6 +200,15 @@ pub(crate) fn fixture_normalized_battle_report() -> NormalizedBattleReport {
 }
 
 /// A minimal but valid `ReplayMeta`, for the ignored provider-backed test.
+/// The same report with no roster, for the export tests: `Match::new` zips
+/// the normalized players against the battle report's own, and those tests
+/// have no raw players to zip against.
+pub(crate) fn fixture_empty_battle_report() -> NormalizedBattleReport {
+    let mut report = fixture_normalized_battle_report();
+    report.players.clear();
+    report
+}
+
 pub(crate) fn fixture_replay_meta() -> ReplayMeta {
     serde_json::from_value(serde_json::json!({
         "matchGroup": "pvp",

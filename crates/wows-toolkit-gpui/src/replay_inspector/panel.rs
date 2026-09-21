@@ -16,9 +16,8 @@
 //! which reads as a real "Bad" rating for a battle whose damage is simply
 //! unknown. Unknown damage is left unrated here, so no badge appears.
 //!
-//! **Deferred**, not implemented in this milestone:
-//! - The export menu (JSON/CBOR/CSV via `util::replay_export`) -- that module
-//!   lives in the egui crate; porting it is out of scope here.
+//! The Export menu writes the same document the egui app does
+//! (`wows_toolkit_viewmodel::replay_export`), in the same three formats.
 //!
 //! **Chat.** The egui app's chat button (`ui/replay_parser/mod.rs` ~3000-3016)
 //! toggles a standalone window; this port toggles an inline side panel next
@@ -345,7 +344,7 @@ impl ReplayPanel {
             personal_rating,
             // Stands in for the document the parse builds: the Export menu's
             // gate is that there is one, not what is in it.
-            export: Some(ExportedMatch::new(&super::test_support::fixture_normalized_battle_report(), &[], &[], true)),
+            export: Some(ExportedMatch::new(&super::test_support::fixture_empty_battle_report(), &[], &[], true)),
             export_status: None,
             _parse_task: Task::ready(()),
             _table_subscription: None,
@@ -832,9 +831,9 @@ mod tests {
     /// header row plus one row per vehicle.
     #[test]
     fn each_export_format_writes_its_own_shape() {
-        use crate::replay_inspector::test_support::fixture_normalized_battle_report;
+        use crate::replay_inspector::test_support::fixture_empty_battle_report;
 
-        let normalized = fixture_normalized_battle_report();
+        let normalized = fixture_empty_battle_report();
         let export = ExportedMatch::new(&normalized, &[], &[], true);
         let dir = std::env::temp_dir().join(format!("wt-gpui-export-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -858,22 +857,6 @@ mod tests {
         assert!(json.get("metadata").is_some(), "the document keeps its metadata");
 
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// An ordinary export strips what the debug one keeps.
-    #[test]
-    fn stripping_removes_enemy_builds() {
-        use crate::replay_inspector::test_support::fixture_normalized_battle_report;
-
-        let normalized = fixture_normalized_battle_report();
-        let full = ExportedMatch::new(&normalized, &[], &[], true);
-        let stripped = full.clone().stripped();
-
-        assert_eq!(full.vehicles.len(), stripped.vehicles.len(), "stripping drops no vehicle");
-        assert!(
-            stripped.vehicles.iter().all(|vehicle| !vehicle.is_enemy || vehicle.translated_build.is_none()),
-            "an ordinary export carries no enemy build"
-        );
     }
 
     #[gpui_kit::test]

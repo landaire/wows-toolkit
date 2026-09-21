@@ -64,8 +64,24 @@ impl Match {
             battle_result: normalized.metadata.battle_result,
         };
 
-        let vehicles: Vec<Vehicle> =
-            normalized.players.iter().zip(players.iter()).map(|(np, player)| Vehicle::new(np, player)).collect();
+        // The two lists are the same roster in the same order, and a document
+        // built from a mismatched pair would attribute one player's results
+        // to another's account. Checked rather than assumed: this document is
+        // read by a service that cannot tell.
+        assert_eq!(
+            normalized.players.len(),
+            players.len(),
+            "the normalized roster and the battle report's own must be the same players"
+        );
+        let vehicles: Vec<Vehicle> = normalized
+            .players
+            .iter()
+            .zip(players.iter())
+            .map(|(np, player)| {
+                debug_assert_eq!(np.db_id, player.initial_state().db_id(), "roster order drifted");
+                Vehicle::new(np, player)
+            })
+            .collect();
 
         let match_data = Match {
             vehicles,
@@ -73,7 +89,7 @@ impl Match {
             game_chat: game_chat
                 .iter()
                 .filter(|message| message.sender_relation.is_some())
-                .map(Message::from)
+                .filter_map(Message::from_game_message)
                 .collect(),
         };
 
@@ -263,7 +279,7 @@ pub struct FlattenedVehicle {
     /// Ship class
     ship_class: Species,
     /// Ship tier
-    ship_tier: u32,
+    ship_tier: Option<u32>,
     /// Whether this is a test ship
     is_test_ship: bool,
     /// Whether this is an enemy
@@ -327,8 +343,8 @@ pub struct FlattenedVehicle {
     time_lived_secs: Option<u64>,
     relation: String,
     division_label: Option<String>,
-    personal_rating: Option<f64>,
-    personal_rating_category: Option<String>,
+    pub personal_rating: Option<f64>,
+    pub personal_rating_category: Option<String>,
     achievement_count: usize,
     ribbon_count: usize,
 }
@@ -478,8 +494,9 @@ pub struct Vehicle {
     pub nation: String,
     /// Ship class
     pub class: Species,
-    /// Ship tier
-    pub tier: u32,
+    /// Ship tier. `None` for an entity carrying no vehicle ref, which a
+    /// spectator row does.
+    pub tier: Option<u32>,
     /// Whether this is a test ship
     pub is_test_ship: bool,
     /// Whether this is an enemy
@@ -525,7 +542,7 @@ impl Vehicle {
             name: np.ship_name.clone(),
             nation: player_data.vehicle().nation().to_string(),
             class: np.ship_class,
-            tier: np.ship_tier.expect("no vehicle ref"),
+            tier: np.ship_tier,
             is_test_ship: np.is_test_ship,
             is_enemy: np.relation.is_enemy(),
             raw_config: vehicle_entity.map(|v| v.props().ship_config().clone()),
@@ -624,14 +641,118 @@ pub struct Message {
     message: String,
 }
 
-impl From<&GameMessage> for Message {
-    fn from(value: &GameMessage) -> Self {
+impl Message {
+    /// One chat message, or `None` when its sender cannot be named.
+    ///
+    /// A message whose relation was resolved from the arena metadata rather
+    /// than from a player object carries no account to attribute it to, and
+    /// the document has no way to say "somebody"; such a message is left out
+    /// rather than panicking the parse it was read by.
+    fn from_game_message(value: &GameMessage) -> Option<Self> {
         let message =
             if let Ok(decoded) = decode_html(value.message.as_str()) { decoded } else { value.message.clone() };
-        Self {
-            sender_db_id: value.player.as_ref().expect("no player for message").initial_state().db_id(),
+        Some(Self {
+            sender_db_id: value.player.as_ref()?.initial_state().db_id(),
             channel: value.channel.clone(),
             message,
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A vehicle carrying only what `stripped` looks at; every other field is
+    /// at its empty value, which the strip never reads.
+    fn vehicle(is_enemy: bool, is_test_ship: bool, is_replay_perspective: bool) -> Vehicle {
+        Vehicle {
+            player: ExportPlayer {
+                db_id: AccountId(1),
+                realm: None,
+                name: String::new(),
+                clan: String::new(),
+                clan_color_rgb: 0,
+                division_id: None,
+                team_id: 0,
+                is_replay_perspective,
+            },
+            index: String::new(),
+            name: String::new(),
+            nation: String::new(),
+            class: Species::Destroyer,
+            tier: Some(10),
+            is_test_ship,
+            is_enemy,
+            raw_config: None,
+            translated_build: Some(TranslatedBuild {
+                modernization_slots: Vec::new(),
+                signals: Vec::new(),
+                loadout: Vec::new(),
+                abilities: Vec::new(),
+                captain_skills: None,
+            }),
+            captain_id: String::new(),
+            server_results: None,
+            observed_results: Some(ObservedResults { damage: 1, kills: 1 }),
+            skill_meta_info: Some(SkillInfo { skill_points: 0, num_skills: 0, highest_tier: 0, num_tier_1_skills: 0 }),
+            time_lived_secs: None,
+            relation: String::new(),
+            division_label: None,
+            achievements: Vec::new(),
+            ribbons: Vec::new(),
+            personal_rating: None,
+            personal_rating_category: None,
         }
+    }
+
+    fn document(vehicles: Vec<Vehicle>) -> Match {
+        Match {
+            vehicles,
+            metadata: Metadata {
+                map: String::new(),
+                game_mode: String::new(),
+                game_type: String::new(),
+                match_group: String::new(),
+                version: Version::default(),
+                max_duration: 0,
+                played_duration: None,
+                extra_duration: None,
+                timestamp: Timestamp::UNIX_EPOCH,
+                battle_result: None,
+            },
+            game_chat: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn an_ordinary_export_carries_no_enemy_build() {
+        let stripped = document(vec![vehicle(true, false, false), vehicle(false, false, false)]).stripped();
+
+        let enemy = stripped.vehicles.iter().find(|vehicle| vehicle.is_enemy).expect("the enemy is still listed");
+        assert!(enemy.translated_build.is_none(), "an enemy build is stripped");
+        assert!(enemy.skill_meta_info.is_none());
+
+        let ally = stripped.vehicles.iter().find(|vehicle| !vehicle.is_enemy).expect("the ally is still listed");
+        assert!(ally.translated_build.is_some(), "an ally keeps theirs");
+    }
+
+    /// The game hides test-ship results for everyone but the player flying
+    /// one, and so does an ordinary export.
+    #[test]
+    fn a_test_ship_keeps_its_results_only_for_the_recording_player() {
+        let stripped = document(vec![vehicle(false, true, false), vehicle(false, true, true)]).stripped();
+
+        let other = &stripped.vehicles[0];
+        assert!(other.observed_results.is_none(), "another player's test ship is stripped");
+
+        let mine = &stripped.vehicles[1];
+        assert!(mine.observed_results.is_some(), "my own test ship is not");
+    }
+
+    #[test]
+    fn stripping_drops_no_vehicle() {
+        let full = document(vec![vehicle(true, false, false), vehicle(false, true, true)]);
+        assert_eq!(full.clone().stripped().vehicles.len(), full.vehicles.len());
     }
 }

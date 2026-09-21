@@ -25,11 +25,12 @@ pub const WINDOW_BEFORE_MINUTES: f64 = -2.0;
 /// Matches if `ign` is longer than 5 bytes and within Levenshtein distance 3
 /// of `login`, or if a 5-character chunk of `ign` is a substring of `login`.
 ///
-/// The chunk arm compares `chunk.len() > 5`, which is a byte count against a
-/// chunk of at most 5 characters: it can only fire for a name whose
-/// characters are multi-byte, which in practice means a Cyrillic or CJK one.
-/// That asymmetry is the rule as the egui app has always applied it, and
-/// changing it here would change which players it chips.
+/// The chunk arm compares `chunk.len() > 5`, a byte count against a chunk of
+/// at most 5 characters: a chunk clears it only if one of those characters is
+/// multi-byte, so an all-ASCII name never matches on a chunk while a name
+/// carrying one accent or one Cyrillic letter can. That asymmetry is the rule
+/// as the egui app has always applied it, and changing it here would change
+/// which players it chips.
 ///
 /// Carries no time-window filtering; callers apply that separately.
 pub fn login_matches_ign(login: &str, ign: &str) -> bool {
@@ -68,9 +69,17 @@ pub fn potential_stream_snipers<'a>(
 
 /// Whether an observation at `seen_at` is close enough to a battle that
 /// started at `match_timestamp` to count.
+///
+/// Inclusive at both ends: an observation is stored with its seconds
+/// truncated, so one recorded a fraction inside the window lands exactly on
+/// the boundary, and excluding the boundary would drop it.
 pub fn in_window(seen_at: Timestamp, match_timestamp: Timestamp) -> bool {
-    let minutes = (seen_at - match_timestamp).total(Unit::Minute).unwrap_or(0.0);
-    minutes < WINDOW_AFTER_MINUTES && minutes > WINDOW_BEFORE_MINUTES
+    // A span this app cannot measure in minutes is not an observation it can
+    // place against the battle, so it does not count.
+    let Ok(minutes) = (seen_at - match_timestamp).total(Unit::Minute) else {
+        return false;
+    };
+    (WINDOW_BEFORE_MINUTES..=WINDOW_AFTER_MINUTES).contains(&minutes)
 }
 
 #[cfg(test)]
@@ -96,14 +105,19 @@ mod tests {
         assert!(!login_matches_ign("abcde", "abcde"));
     }
 
-    /// The chunk arm needs a chunk over five *bytes*, which an ASCII name
-    /// never produces; a Cyrillic one does.
+    /// The chunk arm needs a chunk over five *bytes*: an all-ASCII chunk is
+    /// exactly five and never clears it, while a single multi-byte character
+    /// inside one does.
     #[test]
     fn the_chunk_rule_reaches_only_multi_byte_names() {
         assert!(!login_matches_ign("xx_longplayername_yy", "longplayername"), "ASCII chunks are five bytes");
         // A Cyrillic name, written as escapes to keep the source ASCII.
         let name = "\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}\u{438}\u{43a}";
         assert!(login_matches_ign(&format!("xx_{name}_yy"), name));
+
+        // One accented character in an otherwise ASCII name is enough.
+        let mixed = "J\u{fc}rgen_Klopp";
+        assert!(login_matches_ign(&format!("xx_{mixed}_yy"), mixed), "one multi-byte character clears the arm");
     }
 
     #[test]
@@ -113,6 +127,10 @@ mod tests {
         assert!(in_window(at(19), start));
         assert!(!in_window(at(-3), start), "too long before");
         assert!(!in_window(at(21), start), "after the battle would have ended");
+        // The boundaries themselves count: a stored timestamp has its
+        // seconds truncated onto them.
+        assert!(in_window(at(-2), start));
+        assert!(in_window(at(20), start));
     }
 
     #[test]

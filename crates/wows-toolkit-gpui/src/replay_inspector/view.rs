@@ -260,9 +260,9 @@ impl ReplayInspectorView {
     /// exposes no public API to change which tab is active from outside the
     /// crate (`TabPanel::set_active_ix` is private). Skipping the duplicate
     /// is the "do not over-engineer" fallback the milestone brief calls for.
-    /// Opens `path` as a replay tab. `pub(crate)` so another tab can send a
-    /// replay here: the Search tab's results open in this inspector rather
-    /// than in one of their own.
+    ///
+    /// `pub(crate)` so another tab can send a replay here: the Search tab's
+    /// results open in this inspector rather than in one of their own.
     pub(crate) fn open_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(game_data) = self.game_data.clone() else {
             tracing::warn!(
