@@ -137,8 +137,9 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                     .ghost()
                     .xsmall()
                     .tooltip(t!("ui.replay.copy_message").to_string())
-                    .on_click(move |_event, _window, cx: &mut App| {
+                    .on_click(move |_event, window, cx: &mut App| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.clone()));
+                        crate::toast::ok(t!("ui.replay.chat_copied").to_string(), window, cx);
                     }),
             ),
         )
@@ -173,19 +174,24 @@ impl ChatPanel {
     }
 
     /// Asks where to write the log and writes it there.
-    fn save_to_file(&self, cx: &mut Context<Self>) {
+    fn save_to_file(&self, window: &mut Window, cx: &mut Context<Self>) {
         let transcript = self.transcript();
         let asked = crate::dialog::save_file(
             Some(t!("ui.replay.chat_save_title").as_ref()),
             &format!("{} - Game Chat.txt", self.title),
             None,
         );
-        cx.spawn(async move |_this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let Some(path) = asked.await else { return };
+            let shown = path.display().to_string();
             let written = cx.background_spawn(async move { std::fs::write(&path, transcript) }).await;
-            if let Err(err) = written {
-                tracing::warn!("replay chat: the log was not saved: {err}");
-            }
+            let _ = this.update_in(cx, |_this, window, cx| match written {
+                Ok(()) => crate::toast::ok(t!("ui.replay.chat_saved", path = shown).to_string(), window, cx),
+                Err(err) => {
+                    tracing::warn!("replay chat: the log was not saved: {err}");
+                    crate::toast::failed(t!("ui.replay.chat_save_failed", error = err).to_string(), window, cx);
+                }
+            });
         })
         .detach();
     }
@@ -221,7 +227,7 @@ impl Render for ChatPanel {
                 Button::new("chat-save")
                     .label(t!("ui.replay.chat_save_to_file").to_string())
                     .compact()
-                    .on_click(cx.listener(|this, _event, _window, cx| this.save_to_file(cx))),
+                    .on_click(cx.listener(|this, _event, window, cx| this.save_to_file(window, cx))),
             );
 
         v_flex()

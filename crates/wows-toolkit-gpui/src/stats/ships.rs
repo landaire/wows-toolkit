@@ -376,16 +376,18 @@ fn copy_menu(section: &ShipSection) -> impl IntoElement {
                     Button::new(SharedString::from(format!("copy-markdown-{ship_id}")))
                         .label(t!("ui.stats.copy_markdown").to_string())
                         .compact()
-                        .on_click(move |_event, _window, cx: &mut App| {
+                        .on_click(move |_event, window, cx: &mut App| {
                             cx.write_to_clipboard(ClipboardItem::new_string(markdown.to_string()));
+                            crate::toast::ok(t!("ui.stats.copied").to_string(), window, cx);
                         }),
                 )
                 .child(
                     Button::new(SharedString::from(format!("copy-csv-{ship_id}")))
                         .label(t!("ui.stats.copy_csv").to_string())
                         .compact()
-                        .on_click(move |_event, _window, cx: &mut App| {
+                        .on_click(move |_event, window, cx: &mut App| {
                             cx.write_to_clipboard(ClipboardItem::new_string(csv.to_string()));
+                            crate::toast::ok(t!("ui.stats.copied").to_string(), window, cx);
                         }),
                 )
         },

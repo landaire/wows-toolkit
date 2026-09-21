@@ -793,8 +793,9 @@ fn row_actions(ix: usize, hit: &MatchHit, exists: bool, search: Entity<SearchVie
                 .icon(IconName::Copy)
                 .compact()
                 .tooltip(t!("ui.search.copy_path").to_string())
-                .on_click(move |_event, _window, cx: &mut App| {
+                .on_click(move |_event, window, cx: &mut App| {
                     cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
+                    crate::toast::ok(t!("ui.search.path_copied").to_string(), window, cx);
                 }),
         )
         .into_any_element()

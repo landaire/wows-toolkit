@@ -49,6 +49,22 @@ use wows_toolkit_viewmodel::settings::keys;
 use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
 use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
+/// What Twitch made of the stored credential.
+///
+/// Only Twitch can answer this, so it is a reply rather than a guess: a
+/// credential that is present is not therefore working.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TwitchStatus {
+    /// Nothing stored to check.
+    Unset,
+    /// Stored, and the reply has not come back.
+    Checking,
+    /// Twitch took it.
+    Accepted { who: String },
+    /// Twitch refused it: expired, revoked, or never valid.
+    Refused,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
     ReplayInspector,
@@ -186,6 +202,9 @@ pub struct App {
     armor_game_data_requested: bool,
     /// Whether the Stats roundup has been handed the build's art.
     stats_game_data_requested: bool,
+    /// What Twitch made of the stored credential, which is the only thing
+    /// that can say whether it still works.
+    twitch_status: TwitchStatus,
     /// The Unpacker tab: build selector, VFS browsers and the extraction
     /// queue. Runs its own VFS load per build, independent of the replay
     /// inspector's game-data cache, since it needs only the package tree.
@@ -264,6 +283,7 @@ impl App {
             armor_pane,
             armor_game_data_requested: false,
             stats_game_data_requested: false,
+            twitch_status: TwitchStatus::Unset,
             unpacker,
             stats,
             player_tracker,
@@ -396,11 +416,17 @@ impl App {
     /// chip then shows whatever the other app collected.
     fn start_twitch_poll(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {
         let Some(settings) = self.settings_mut() else { return };
-        let Some(token) = settings.twitch_token.clone() else { return };
+        let Some(token) = settings.twitch_token.clone() else {
+            self.twitch_status = TwitchStatus::Unset;
+            return;
+        };
         let channel = settings.twitch_channel.clone();
         let proxy = settings.proxy_url.clone();
+        let who = token.username().to_string();
+        self.twitch_status = TwitchStatus::Checking;
+        cx.notify();
 
-        self._twitch_poll = Some(cx.spawn(async move |_this, cx| {
+        self._twitch_poll = Some(cx.spawn(async move |this, cx| {
             let client = match crate::http::client(&proxy, reqwest::redirect::Policy::default()) {
                 Ok(client) => client,
                 Err(err) => {
@@ -418,13 +444,19 @@ impl App {
                 Ok(Ok(session)) => session,
                 Ok(Err(err)) => {
                     tracing::warn!("twitch: the stored credential is not usable: {err}");
+                    let _ = this.update_in(cx, |this, window, cx| this.twitch_refused(window, cx));
                     return;
                 }
                 Err(err) => {
                     tracing::warn!("twitch: the credential check did not complete: {err}");
+                    let _ = this.update_in(cx, |this, window, cx| this.twitch_refused(window, cx));
                     return;
                 }
             };
+            let _ = this.update(cx, |this, cx| {
+                this.twitch_status = TwitchStatus::Accepted { who };
+                cx.notify();
+            });
             let session = std::sync::Arc::new(session);
 
             loop {
@@ -446,6 +478,31 @@ impl App {
                 cx.background_executor().timer(crate::twitch::poll_interval()).await;
             }
         }));
+    }
+
+    /// Twitch would not take the stored credential.
+    ///
+    /// Said out loud rather than only logged: the credential goes stale on its
+    /// own schedule, and nothing else on screen would show it.
+    fn twitch_refused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.twitch_status = TwitchStatus::Refused;
+        crate::toast::warn(t!("ui.messages.twitch_token_invalid").to_string(), window, cx);
+        cx.notify();
+    }
+
+    /// What the paste button says: what Twitch made of the stored credential,
+    /// and what the last paste made of the clipboard. The egui settings tab
+    /// names the same four states.
+    fn twitch_paste_label_key(&self) -> &'static str {
+        if matches!(self.twitch_paste, Some(Err(_))) {
+            return "ui.settings.twitch.paste_token_invalid";
+        }
+        match self.twitch_status {
+            TwitchStatus::Unset => "ui.settings.twitch.paste_token_no_token",
+            TwitchStatus::Checking => "ui.settings.twitch.paste_token_unvalidated",
+            TwitchStatus::Accepted { .. } => "ui.settings.twitch.paste_token_valid",
+            TwitchStatus::Refused => "ui.settings.twitch.paste_token_invalid",
+        }
     }
 
     /// Adopts the session statistics read from the config database. The
@@ -620,22 +677,6 @@ impl App {
         }
         settings.proxy_url = url.clone();
         settings_store::save(keys::PROXY_URL, &url, cx);
-    }
-
-    /// What the paste button says: whether a credential is stored, and what
-    /// the last paste made of it. The egui settings tab labels the same four
-    /// states (`ui.settings.twitch.paste_token_*`).
-    fn twitch_paste_label_key(&self) -> &'static str {
-        let stored = match &self.settings {
-            SettingsState::Loaded(settings) => settings.twitch_token.as_ref(),
-            _ => None,
-        };
-        match (stored, self.twitch_paste.as_ref()) {
-            (_, Some(Err(_))) => "ui.settings.twitch.paste_token_invalid",
-            (None, _) => "ui.settings.twitch.paste_token_no_token",
-            (Some(_), Some(Ok(_))) => "ui.settings.twitch.paste_token_valid",
-            (Some(_), None) => "ui.settings.twitch.paste_token_unvalidated",
-        }
     }
 
     /// What the last credential paste did. Test-only.
