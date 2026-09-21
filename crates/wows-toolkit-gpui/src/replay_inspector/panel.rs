@@ -238,15 +238,10 @@ impl ReplayPanel {
             LoadState::Loaded(loaded) => loaded.title.replace([' ', '/'], "_"),
             _ => "replay".to_string(),
         };
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("Export results")
-            .set_file_name(format!("{name}.{}", format.extension()))
-            .save_file()
-        else {
-            return;
-        };
+        let asked = crate::dialog::save_file(Some("Export results"), &format!("{name}.{}", format.extension()), None);
 
         cx.spawn(async move |this, cx| {
+            let Some(path) = asked.await else { return };
             let written = cx.background_spawn(async move { write_export(&export, &path, format) }).await;
             let _ = this.update(cx, |this, cx| {
                 this.export_status = match written {

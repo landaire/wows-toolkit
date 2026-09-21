@@ -354,16 +354,17 @@ impl ReplayInspectorView {
 
     /// "Open manually": the header toolbar's file-picker button. Mirrors the
     /// egui app's `build_replay_header` open-manually handler
-    /// (`ui/replay_parser/mod.rs:3659`) exactly -- same `rfd::FileDialog`
-    /// filter -- except the picked path opens through this port's own dock
-    /// flow (`open_replay`) rather than the egui app's
-    /// `parse_replay_from_path` background task. A cancelled dialog is a
-    /// no-op.
-    fn open_manually(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(file) = rfd::FileDialog::new().add_filter("WoWs Replays", &["wowsreplay"]).pick_file() else {
-            return;
-        };
-        self.open_replay(file, window, cx);
+    /// (`ui/replay_parser/mod.rs:3659`) exactly -- same file filter -- except
+    /// the picked path opens through this port's own dock flow
+    /// (`open_replay`) rather than the egui app's `parse_replay_from_path`
+    /// background task. A cancelled dialog is a no-op.
+    fn open_manually(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_file(None, Some(crate::dialog::REPLAYS));
+        cx.spawn(async move |this, cx| {
+            let Some(file) = asked.await else { return };
+            let _ = this.update_in(cx, |this, window, cx| this.open_replay(file, window, cx));
+        })
+        .detach();
     }
 
     /// Flips the session "Autoload Latest Replay" flag. Reflects the
