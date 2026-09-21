@@ -139,6 +139,11 @@ pub struct ViewModes {
     pub win_rate_mode: crate::player_tracker::live::WinRateMode,
     #[serde(default)]
     pub current_match_view_mode: crate::player_tracker::live::CurrentMatchViewMode,
+    /// Whether the Historical and Clans tables count the encounters marked in
+    /// each player's `division_encounters`. Off by default: a battle you
+    /// arranged says less about meeting someone than one you did not.
+    #[serde(default)]
+    pub show_division_mates: bool,
 }
 
 /// The view settings a stored blob carries.
@@ -170,6 +175,10 @@ pub fn blob_with_view_modes(json: &str, modes: ViewModes) -> Result<String, Blob
     object.insert(
         "current_match_view_mode".to_string(),
         serde_json::to_value(modes.current_match_view_mode).map_err(BlobError::Encode)?,
+    );
+    object.insert(
+        "show_division_mates".to_string(),
+        serde_json::to_value(modes.show_division_mates).map_err(BlobError::Encode)?,
     );
     serde_json::to_string(&blob).map_err(BlobError::Encode)
 }
@@ -255,14 +264,18 @@ mod tests {
 
         let players: HashMap<_, _> = [player(1, "Someone", "note")].into_iter().collect();
         let blob = blob_with_players("{}", &players).expect("the blob encodes");
-        let modes =
-            ViewModes { win_rate_mode: WinRateMode::Ship, current_match_view_mode: CurrentMatchViewMode::Compact };
+        let modes = ViewModes {
+            win_rate_mode: WinRateMode::Ship,
+            current_match_view_mode: CurrentMatchViewMode::Compact,
+            show_division_mates: true,
+        };
 
         let written = blob_with_view_modes(&blob, modes).expect("the blob encodes");
         let read = view_modes_from_blob(&written).expect("the blob reads back");
 
         assert_eq!(read.win_rate_mode, WinRateMode::Ship);
         assert_eq!(read.current_match_view_mode, CurrentMatchViewMode::Compact);
+        assert!(read.show_division_mates, "the division toggle survives the round trip");
         assert_eq!(players_from_blob(&written).expect("the blob reads back").len(), 1, "the players survive");
     }
 

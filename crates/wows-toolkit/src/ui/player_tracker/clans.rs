@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use egui::RichText;
 use jiff::Timestamp;
@@ -8,6 +7,7 @@ use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
 use wows_replays::types::AccountId;
+#[cfg(test)]
 use wows_replays::types::ArenaId;
 
 use crate::app::ToolkitTabViewer;
@@ -28,19 +28,9 @@ use super::relative_age_text;
 use super::row_offset;
 use super::sort_header_label;
 
-/// One clan's encounter aggregates.
-#[derive(Debug, Clone)]
-pub(crate) struct ClanRow {
-    pub clan: String,
-    /// Accounts with at least one encounter attributed here, with the match
-    /// count each contributed. Drives the expanded member list.
-    pub members: Vec<(AccountId, usize)>,
-    pub matches: usize,
-    pub matches_in_range: usize,
-    pub sightings: usize,
-    pub sightings_in_range: usize,
-    pub last_seen: Timestamp,
-}
+/// One clan's encounter aggregates, and the rule that counts them. Shared
+/// with the GPUI port, which shows the same table over the same history.
+pub(crate) use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 
 /// What the index-sourced inputs to a breakdown were fetched against.
 ///
@@ -96,35 +86,8 @@ pub(crate) struct ClanBreakdown {
     pub rows: Vec<ClanRow>,
 }
 
-#[derive(Default)]
-struct ClanAccumulator {
-    members: HashMap<AccountId, usize>,
-    arenas: HashSet<ArenaId>,
-    range_timestamps: HashSet<Timestamp>,
-    sightings: usize,
-    sightings_in_range: usize,
-    last_seen: Option<Timestamp>,
-}
-
-/// Aggregate tracked encounters by clan.
-///
-/// `index_latest_clan` is the index's latest clan per account, which wins over
-/// the tracker's when the index knows the account. `corrections` are the roster
-/// rows whose clan at the time differed from that latest clan.
-///
-/// Matches are counted by distinct arena and in-range matches by distinct
-/// timestamp. Both keys are exact on their own, which is why the tracker's
-/// unpaired `arena_ids` and `timestamps` sets need no reconciliation: every
-/// player in a battle shares that battle's timestamp.
-///
-/// While `show_division_mates` is off, the encounters marked as division ones
-/// contribute nothing at all, so a clan's matches, sightings and member count
-/// are not inflated by the battles you arranged with them. Filtering happens
-/// per encounter under each of the two keys, so a player met both in and out of
-/// your division still contributes the meetings outside it.
-///
-/// `inputs_key` describes where `index_latest_clan` and `corrections` came
-/// from, and is carried on the result as part of its cache key.
+/// Aggregate tracked encounters by clan, carrying the cache key the rows were
+/// counted against.
 pub(crate) fn build_clan_breakdown(
     tracked: &HashMap<AccountId, TrackedPlayer>,
     inputs_key: IndexInputsKey,
@@ -133,79 +96,13 @@ pub(crate) fn build_clan_breakdown(
     since: Option<Timestamp>,
     show_division_mates: bool,
 ) -> ClanBreakdown {
-    let mut by_arena: HashMap<(AccountId, ArenaId), &str> = HashMap::new();
-    let mut by_timestamp: HashMap<(AccountId, Timestamp), &str> = HashMap::new();
-    for correction in corrections {
-        by_arena.insert((correction.account_id, correction.arena_id), &correction.clan);
-        by_timestamp.insert((correction.account_id, correction.timestamp), &correction.clan);
-    }
-
-    let mut clans: HashMap<String, ClanAccumulator> = HashMap::new();
-
-    for (account_id, player) in tracked {
-        // The tracker holds one clan per player, the latest it saw. The index's
-        // latest is fresher wherever the index knows the account at all.
-        let baseline = index_latest_clan.get(account_id).map(String::as_str).unwrap_or(player.clan.as_str());
-
-        for arena_id in player.visible_arena_ids(show_division_mates) {
-            let clan = by_arena.get(&(*account_id, arena_id)).copied().unwrap_or(baseline);
-            if clan.is_empty() {
-                continue;
-            }
-            let entry = clans.entry(clan.to_string()).or_default();
-            entry.arenas.insert(arena_id);
-            entry.sightings += 1;
-            *entry.members.entry(*account_id).or_default() += 1;
-        }
-
-        for timestamp in player.visible_timestamps(show_division_mates) {
-            let clan = by_timestamp.get(&(*account_id, timestamp)).copied().unwrap_or(baseline);
-            if clan.is_empty() {
-                continue;
-            }
-            let entry = clans.entry(clan.to_string()).or_default();
-            entry.last_seen = Some(entry.last_seen.map_or(timestamp, |seen| seen.max(timestamp)));
-
-            if since.is_none_or(|since| timestamp > since) {
-                entry.range_timestamps.insert(timestamp);
-                entry.sightings_in_range += 1;
-            }
-        }
-    }
-
-    let mut rows: Vec<ClanRow> = clans
-        .into_iter()
-        .filter_map(|(clan, acc)| {
-            // A clan only reached here through an encounter, so `last_seen` is
-            // set unless the arena and timestamp passes disagreed on the label,
-            // which a correction to a different clan can cause. Drop those
-            // rather than invent a timestamp, and say so: the row would
-            // otherwise vanish with a non-zero match count and no signal.
-            let Some(last_seen) = acc.last_seen else {
-                tracing::warn!(
-                    clan = clan.as_str(),
-                    matches = acc.arenas.len(),
-                    "clan breakdown: dropping a clan whose encounters carry no timestamp"
-                );
-                return None;
-            };
-            let mut members: Vec<(AccountId, usize)> = acc.members.into_iter().collect();
-            members.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.raw().cmp(&b.0.raw())));
-
-            Some(ClanRow {
-                clan,
-                members,
-                matches: acc.arenas.len(),
-                matches_in_range: acc.range_timestamps.len(),
-                sightings: acc.sightings,
-                sightings_in_range: acc.sightings_in_range,
-                last_seen,
-            })
-        })
-        .collect();
-
-    rows.sort_by(|a, b| b.matches.cmp(&a.matches).then_with(|| a.clan.cmp(&b.clan)));
-
+    let rows = wows_toolkit_viewmodel::player_tracker::clans::build_clan_breakdown(
+        tracked,
+        index_latest_clan,
+        corrections,
+        since,
+        show_division_mates,
+    );
     ClanBreakdown { inputs_key, show_division_mates, rows }
 }
 
