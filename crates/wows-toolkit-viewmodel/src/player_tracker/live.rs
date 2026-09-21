@@ -310,6 +310,42 @@ pub fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> RowStats 
     RowStats { win_rate, battles, avg_damage, pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
 }
 
+/// One team's average win rate, over the rows that have one.
+///
+/// A row with no rate is skipped rather than counted as zero, and the answer
+/// is `None` when nobody on the team has one: the same "absent, not zero"
+/// rule the row cells follow.
+pub fn team_average_win_rate(
+    rows: &[LiveRosterRow],
+    stats: &HashMap<AccountId, PlayerStatsOut>,
+    mode: WinRateMode,
+) -> Option<f64> {
+    average(rows.iter().filter_map(|row| row.account_id.and_then(|id| stats.get(&id))).filter_map(|entry| {
+        row_stats(Some(entry), mode).win_rate
+    }))
+}
+
+/// One team's average personal rating, on the same rule.
+pub fn team_average_personal_rating(
+    rows: &[LiveRosterRow],
+    stats: &HashMap<AccountId, PlayerStatsOut>,
+    mode: WinRateMode,
+) -> Option<f64> {
+    average(
+        rows.iter()
+            .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
+            .filter_map(|entry| row_stats(Some(entry), mode).pr),
+    )
+}
+
+fn average(values: impl Iterator<Item = f64>) -> Option<f64> {
+    let values: Vec<f64> = values.collect();
+    if values.is_empty() {
+        return None;
+    }
+    Some(values.iter().sum::<f64>() / values.len() as f64)
+}
+
 /// Orders one team the way the replay inspector orders players: ship class
 /// ascending. The inspector tie-breaks on account id, which the live roster
 /// does not carry, so ship name then player name stand in. Entries whose ship

@@ -1458,8 +1458,59 @@ struct RosterLayout<'a> {
     border: Hsla,
 }
 
+/// One team's heading: its name, how many players are on it, and what they
+/// average.
+///
+/// The averages are the shared ones, over the scope the rows are showing, so
+/// the heading and the cells under it cannot disagree. A team nobody has
+/// stats for shows no average rather than a zero.
+fn team_heading(title: String, rows: &[LiveRosterRow], layout: RosterLayout) -> impl IntoElement + use<> {
+    let mode = layout.modes.first().copied().unwrap_or(WinRateMode::Overall);
+    let stats = layout.stats;
+    let win_rate =
+        stats.and_then(|stats| wows_toolkit_viewmodel::player_tracker::live::team_average_win_rate(rows, stats, mode));
+    let rating = stats.and_then(|stats| {
+        wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating(rows, stats, mode)
+    });
+
+    h_flex()
+        .w_full()
+        .gap_2()
+        .items_center()
+        .px_2()
+        .py_1()
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(title))
+        .child(
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.player_tracker.team_players", count = rows.len()).into_owned()),
+        )
+        .when_some(win_rate, |row, rate| {
+            row.child(
+                div()
+                    .text_xs()
+                    .when_some(band_color(Some(PersonalRatingCategory::from_win_rate(rate))), |cell, color| {
+                        cell.text_color(color)
+                    })
+                    .child(t!("ui.player_tracker.team_average_win_rate", rate = format!("{rate:.1}%")).into_owned()),
+            )
+        })
+        .when_some(rating, |row, pr| {
+            row.child(
+                div()
+                    .text_xs()
+                    .when_some(band_color(Some(PersonalRatingCategory::from_pr(pr))), |cell, color| {
+                        cell.text_color(color)
+                    })
+                    .child(format!("{}: {pr:.0}", t!("stat.avg_pr"))),
+            )
+        })
+}
+
 /// One team's roster column, with its own header row.
 fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout: RosterLayout) -> AnyElement {
+    let heading = team_heading(title, rows, layout);
     let mut header = h_flex()
         .w_full()
         .gap_2()
@@ -1472,7 +1523,7 @@ fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout
         .font_weight(FontWeight::BOLD)
         .child(div().flex_none().w(CLASS_COLUMN_WIDTH))
         .child(div().flex_none().w(CHIP_COLUMN_WIDTH))
-        .child(div().flex_1().min_w(px(0.)).child(title))
+        .child(div().flex_1().min_w(px(0.)).child(t!("ui.player_tracker.column.player_name").to_string()))
         .child(div().w(SHIP_COLUMN_WIDTH).child(t!("ui.player_tracker.win_rate_ship").to_string()));
 
     // One group of columns per scope, so a detailed row reads
@@ -1489,6 +1540,7 @@ fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout
     v_flex()
         .flex_1()
         .min_w(px(0.))
+        .child(heading)
         .child(header.child(div().w(MET_COLUMN_WIDTH).child(t!("ui.player_tracker.column.encounters").to_string())))
         .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, layout)))
         .into_any_element()

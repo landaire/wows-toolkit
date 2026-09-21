@@ -380,16 +380,7 @@ fn team_average_win_rate(
     stats: &HashMap<AccountId, PlayerStatsOut>,
     mode: WinRateMode,
 ) -> Option<f64> {
-    let rates: Vec<f64> = rows
-        .iter()
-        .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
-        .filter_map(|entry| row_stats(Some(entry), mode).win_rate)
-        .collect();
-
-    if rates.is_empty() {
-        return None;
-    }
-    Some(rates.iter().sum::<f64>() / rates.len() as f64)
+    wows_toolkit_viewmodel::player_tracker::live::team_average_win_rate(rows, stats, mode)
 }
 
 fn team_average_personal_rating(
@@ -397,16 +388,7 @@ fn team_average_personal_rating(
     stats: &HashMap<AccountId, PlayerStatsOut>,
     mode: WinRateMode,
 ) -> Option<f64> {
-    let ratings: Vec<f64> = rows
-        .iter()
-        .filter_map(|row| row.account_id.and_then(|id| stats.get(&id)))
-        .filter_map(|entry| row_stats(Some(entry), mode).pr)
-        .collect();
-
-    if ratings.is_empty() {
-        return None;
-    }
-    Some(ratings.iter().sum::<f64>() / ratings.len() as f64)
+    wows_toolkit_viewmodel::player_tracker::live::team_average_personal_rating(rows, stats, mode)
 }
 
 /// The clan tag's colour: the server-supplied clan colour when the scan
