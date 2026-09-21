@@ -58,45 +58,13 @@ const POLL_INTERVAL: Duration = Duration::from_millis(50);
 /// table is scrolled fast, and scrolling drags the pointer across every row
 /// in between; this gate is what stops that from queuing a bake per row the
 /// pointer merely crossed.
-const PREVIEW_DWELL: Duration = Duration::from_millis(300);
+#[cfg(test)]
+use wows_toolkit_viewmodel::preview_dwell::DWELL as PREVIEW_DWELL;
 
-/// Tracks how long the pointer has continuously dwelled on one result row's
-/// map cell, independent of egui: the table calls `hover`/`leave` once per
-/// frame, and `pending_request` says whether a preview should actually be
-/// asked for. Kept as pure logic so the dwell and cancellation behaviour can
-/// be tested without rendering a frame.
-#[derive(Default)]
-struct PreviewState {
-    /// The row currently under the pointer and how long it has been watched
-    /// there.
-    watched: Option<(PreviewKey, Duration)>,
-}
-
-impl PreviewState {
-    /// Record that `key` was under the pointer for another `elapsed` of wall
-    /// time. A key different from the one already being watched replaces it
-    /// rather than adding to it: the dwell belongs to whichever row is
-    /// currently under the pointer, not to a sum across rows visited earlier.
-    fn hover(&mut self, key: PreviewKey, elapsed: Duration) {
-        match &mut self.watched {
-            Some((watched_key, dwelled)) if *watched_key == key => *dwelled += elapsed,
-            _ => self.watched = Some((key, elapsed)),
-        }
-    }
-
-    /// The row a preview should be requested for, once the pointer has
-    /// dwelled on it for at least `PREVIEW_DWELL`.
-    fn pending_request(&self) -> Option<PreviewKey> {
-        let (key, dwelled) = self.watched.as_ref()?;
-        (*dwelled >= PREVIEW_DWELL).then(|| key.clone())
-    }
-
-    /// The pointer left the table this frame, so nothing is dwelling
-    /// anymore; whatever was pending is cancelled.
-    fn leave(&mut self) {
-        self.watched = None;
-    }
-}
+/// How long the pointer dwells on a row before its preview is baked, and the
+/// state that measures it. Shared with the GPUI port so a preview appears
+/// after the same wait in both.
+type PreviewState = wows_toolkit_viewmodel::preview_dwell::Dwell<PreviewKey>;
 
 /// What a search row was asked to do with its replay.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
