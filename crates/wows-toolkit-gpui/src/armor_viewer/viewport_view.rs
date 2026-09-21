@@ -65,7 +65,6 @@ use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::Axis;
 use crate::viewport::device::GpuContext;
 use crate::viewport::device::readback_to_render_image;
-use crate::viewport::device::unit_cube;
 use crate::viewport::gizmo;
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
@@ -75,10 +74,6 @@ use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
-
-/// Placeholder mesh color, uploaded once the owned wgpu device is ready.
-/// Ship meshes replace this in a later milestone.
-const PLACEHOLDER_COLOR: [f32; 4] = [0.35, 0.55, 0.85, 1.0];
 
 /// How long a gizmo-snap animation runs before the ticker (`start_animation_ticker`)
 /// stops re-rendering.
@@ -274,9 +269,13 @@ pub struct ViewportView {
     /// second key-down does not stack a duplicate ticker.
     key_ticking: bool,
     /// A ship picked in the sidebar before the owned wgpu device finished
-    /// initializing. `apply_gpu_result` uploads this instead of the
-    /// placeholder cube once the device becomes ready, then clears it.
+    /// initializing. `set_gpu` uploads this once the device becomes ready,
+    /// then clears it.
     pending_armor: Option<Arc<LoadedShipArmor>>,
+    /// Whether a ship load is in flight, so the empty state can say so
+    /// rather than inviting a selection that has already been made. Set by
+    /// the pane (`set_ship_loading`), which owns the load.
+    ship_loading: bool,
     /// The armor currently displayed, kept (beyond the initial upload) so a
     /// visibility change can re-upload without reloading the ship. `pub(crate)`
     /// so `popover.rs` can read it while building the popover's tree.
@@ -486,6 +485,7 @@ impl ViewportView {
             held_keys: HashSet::new(),
             key_ticking: false,
             pending_armor: None,
+            ship_loading: false,
             current_armor: None,
             part_visibility: HashMap::new(),
             armor_all_visible: true,
@@ -807,26 +807,30 @@ impl ViewportView {
     /// Adopts the pane's shared wgpu device once it finishes initializing
     /// (`ArmorViewerPane`'s `SharedGpu` background task): transitions to
     /// `GpuState::Ready` and uploads whatever a ship selection stashed in
-    /// `pending_armor` while the device was not ready yet, or the placeholder
-    /// cube otherwise. Called once per viewport by the pane -- for a viewport
-    /// created after the shared device is already `Ready` (Task 9b's later
-    /// panes), the pane calls this immediately instead of waiting on a new
-    /// background task.
+    /// `pending_armor` while the device was not ready yet. Called once per
+    /// viewport by the pane -- for a viewport created after the shared device
+    /// is already `Ready` (Task 9b's later panes), the pane calls this
+    /// immediately instead of waiting on a new background task.
+    ///
+    /// With nothing to show, the viewport draws no scene at all: `render`
+    /// puts the egui app's own empty-state message there instead
+    /// (`ui/tab.rs`'s `ui.armor.select_ship`).
     pub(crate) fn set_gpu(&mut self, ctx: Arc<GpuContext>, pipeline: Arc<GpuPipeline>, cx: &mut Context<Self>) {
         self.gpu = GpuState::Ready { ctx, pipeline };
-        // A ship picked in the sidebar while the device was still
-        // initializing takes priority over the placeholder cube.
         if let Some(armor) = self.pending_armor.take() {
             self.upload_armor_now(armor);
-        } else {
-            let GpuState::Ready { ctx, .. } = &self.gpu else { unreachable!() };
-            let (vertices, indices) = unit_cube(PLACEHOLDER_COLOR);
-            self.viewport.add_mesh(&ctx.device, &vertices, &indices, LAYER_DEFAULT);
-            let (min, max) = (Vec3::new(-0.5, -0.5, -0.5), Vec3::new(0.5, 0.5, 0.5));
-            self.viewport.camera = ArcballCamera::from_bounds(min, max);
-            self.model_bounds = Some((min, max));
         }
         self.viewport.mark_dirty();
+        cx.notify();
+    }
+
+    /// Whether a ship load is in flight for this viewport, so the empty state
+    /// says so. Driven by the pane, which owns the load itself.
+    pub(crate) fn set_ship_loading(&mut self, loading: bool, cx: &mut Context<Self>) {
+        if self.ship_loading == loading {
+            return;
+        }
+        self.ship_loading = loading;
         cx.notify();
     }
 
@@ -1960,13 +1964,31 @@ impl Render for ViewportView {
             GpuState::Failed(reason) => Some(format!("Armor viewport failed to initialize: {reason}")),
             GpuState::Ready { .. } => None,
         };
-        let image_child = match self.image.clone() {
-            Some(image) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
-            None => h_flex()
+        // Nothing is drawn until a ship is picked, so the viewport carries
+        // the egui app's own two messages instead (`ui.armor.loading_armor`
+        // and `ui.armor.select_ship`, hardcoded like the rest of this
+        // crate's strings -- see `replay_inspector::browser_view`).
+        let empty_state = self.current_armor.is_none().then(|| {
+            status.clone().unwrap_or_else(|| {
+                if self.ship_loading {
+                    "Loading ship...".to_string()
+                } else {
+                    "Select a ship from the list".to_string()
+                }
+            })
+        });
+        let image_child = match (empty_state, self.image.clone()) {
+            (None, Some(image)) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
+            (message, _) => h_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child(status.unwrap_or_else(|| "Rendering...".to_string())))
+                .child(
+                    div()
+                        .text_sm()
+                        .opacity(0.6)
+                        .child(message.or(status).unwrap_or_else(|| "Rendering...".to_string())),
+                )
                 .into_any_element(),
         };
 
