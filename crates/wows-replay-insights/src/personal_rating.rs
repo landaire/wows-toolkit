@@ -45,7 +45,7 @@ impl ShipExpectedValuesEntry {
 }
 
 /// Result of a PR calculation
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct PersonalRatingResult {
     pub pr: f64,
     pub category: PersonalRatingCategory,

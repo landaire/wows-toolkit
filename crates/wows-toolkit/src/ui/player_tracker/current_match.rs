@@ -727,9 +727,8 @@ fn render_player_identity_line(
             ui.label(icons::NOTE_PENCIL).on_hover_text(&player.notes);
         }
 
-        if let Some(candidates) = ctx.twitch_state.player_is_potential_stream_sniper(&row_data.name, ctx.started_at)
-            && let Some(login) = crate::ui::widgets::twitch_chip(ui, &candidates, ctx.started_at)
-        {
+        let candidates = ctx.twitch_state.player_is_potential_stream_sniper(&row_data.name, ctx.started_at);
+        if let Some(login) = crate::ui::widgets::twitch_chip(ui, &candidates) {
             actions.copy_login = Some(login);
         }
 

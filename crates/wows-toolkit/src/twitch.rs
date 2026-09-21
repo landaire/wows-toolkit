@@ -124,17 +124,19 @@ impl TwitchState {
         self.client = HelixClient::with_client(client);
     }
 
+    /// The chat logins that plausibly name `name`, each with its sightings.
+    /// Empty when nothing matched, which is a roster row with no chip.
     pub fn player_is_potential_stream_sniper(
         &self,
         name: &str,
         match_timestamp: Timestamp,
-    ) -> Option<HashMap<String, Vec<Timestamp>>> {
+    ) -> Vec<wows_toolkit_viewmodel::twitch::SniperCandidate> {
         let observations = self
             .participants
             .iter()
             .flat_map(|(login, seen)| seen.iter().map(move |timestamp| (login.as_str(), *timestamp)));
 
-        wows_toolkit_viewmodel::twitch::potential_stream_snipers(observations, name, match_timestamp)
+        wows_toolkit_viewmodel::twitch::sniper_candidates(observations, name, match_timestamp)
     }
 }
 
@@ -166,10 +168,9 @@ mod tests {
 
         // "Player1" has levenshtein distance 0 from "Player1" and len > 5
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some());
-        let map = result.unwrap();
-        assert!(map.contains_key("Player1"));
-        assert_eq!(map["Player1"].len(), 1);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].login, "Player1");
+        assert_eq!(result[0].minutes.len(), 1, "the one sighting is carried");
     }
 
     #[test]
@@ -180,7 +181,7 @@ mod tests {
         let state = state_with_viewers(vec![("PlayerX", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some());
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -191,7 +192,7 @@ mod tests {
         let state = state_with_viewers(vec![("ABCDEFGH", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_none());
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -202,7 +203,7 @@ mod tests {
         let state = state_with_viewers(vec![("ABCDE", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("ABCDE", match_ts);
-        assert!(result.is_none());
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -213,7 +214,7 @@ mod tests {
         let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_none());
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -224,7 +225,7 @@ mod tests {
         let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_none());
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -235,7 +236,7 @@ mod tests {
         let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some());
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -245,7 +246,7 @@ mod tests {
         let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some());
+        assert!(!result.is_empty());
     }
 
     #[test]
@@ -256,11 +257,10 @@ mod tests {
         let state = state_with_viewers(vec![("Player1", vec![ts_in, ts_out])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some());
-        let map = result.unwrap();
-        // Only the in-window timestamp should remain
-        assert_eq!(map["Player1"].len(), 1);
-        assert_eq!(map["Player1"][0], ts_in);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].login, "Player1");
+        // Only the in-window sighting should remain, five minutes in.
+        assert_eq!(result[0].minutes, vec![5]);
     }
 
     #[test]
@@ -275,17 +275,15 @@ mod tests {
         ]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some());
-        let map = result.unwrap();
-        assert_eq!(map.len(), 1);
-        assert!(map.contains_key("Player1"));
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].login, "Player1");
     }
 
     #[test]
-    fn no_participants_returns_none() {
+    fn no_participants_matches_nobody() {
         let state = TwitchState::default();
         let result = state.player_is_potential_stream_sniper("Player1", Timestamp::now());
-        assert!(result.is_none());
+        assert!(result.is_empty());
     }
 
     #[test]
@@ -297,7 +295,7 @@ mod tests {
         let state = state_with_viewers(vec![("Player1", vec![viewer_ts])]);
 
         let result = state.player_is_potential_stream_sniper("Player1", match_ts);
-        assert!(result.is_some(), "10 minutes should be within the -2..+20 window");
+        assert!(!result.is_empty(), "10 minutes should be within the -2..+20 window");
 
         // Verify the delta computes correctly (the original bug: get_minutes() returned 0)
         let delta = viewer_ts - match_ts;

@@ -8,6 +8,7 @@ use egui_dock::tab_viewer::OnCloseResponse;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::session_stats::DivisionFilter;
+use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::resolve_ship_name;
 use crate::data::wows_data::GameAsset;
 use crate::icons;
@@ -42,9 +43,9 @@ fn translated_label(label: stats_table::StatLabel) -> String {
 /// render its content inside the `egui_dock` DockArea.
 struct StatsTabViewer<'a> {
     tab_state: &'a mut crate::tab_state::TabState,
-    /// Cached count of Charts tabs — used to decide closability.
+    /// Cached count of Charts tabs -- used to decide closability.
     chart_tab_count: usize,
-    /// Pending tab additions (surface, node) — applied after show_inside returns,
+    /// Pending tab additions (surface, node) -- applied after show_inside returns,
     /// because the dock state is swapped out during rendering.
     pending_adds: Vec<egui_dock::NodePath>,
 }
@@ -129,7 +130,6 @@ impl TabViewer for StatsTabViewer<'_> {
 
 impl ToolkitTabViewer<'_> {
     pub fn build_stats_tab(&mut self, ui: &mut egui::Ui) {
-        // ── Shared filter bar (above the dock, applies to all sub-tabs) ──
         ui.horizontal_wrapped(|ui| {
             let mut limit_enabled = self.tab_state.persisted.read().settings.stats_filters.limit_enabled;
             if ui.checkbox(&mut limit_enabled, t!("ui.stats.limit")).changed() {
@@ -207,7 +207,6 @@ impl ToolkitTabViewer<'_> {
             p.session_stats.game_mode_filter = p.settings.stats_filters.game_mode_filter.iter().cloned().collect();
         }
 
-        // ── Dock area with sub-tabs ──
         // Validate persisted dock state: must have Overview and at least one Charts tab.
         {
             let p = self.tab_state.persisted.read();
@@ -276,7 +275,6 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
     let provider = get_metadata_provider(tab_state);
     let provider_ref = provider.as_deref();
 
-    // ── Summary stats: compact horizontal flow ──
     let p = tab_state.persisted.read();
     let wins = p.session_stats.games_won();
     let losses = p.session_stats.games_lost();
@@ -325,7 +323,6 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
         }
     });
 
-    // ── Achievements ──
     let mut all_achievements: Vec<crate::data::session_stats::SerializableAchievement> = Vec::new();
     for game in tab_state.persisted.read().session_stats.filtered_games() {
         for achievement in &game.achievements {
@@ -400,51 +397,40 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
     ui.separator();
 
     ScrollArea::vertical().show(ui, |ui| {
-        // Rated before entering the mutable loop, which cannot hold the
-        // persisted state borrowed.
-        let pr_stats_by_ship: std::collections::HashMap<GameParamId, PrStats> = {
+        // Grouped and rated once, outside the loop: the loop needs the
+        // persisted state mutably, and an immediate-mode redraw would
+        // otherwise copy every recorded game on every frame.
+        let (mut battle_results, pr_stats_by_ship) = {
             let p = tab_state.persisted.read();
-            let per_ship_games = p.session_stats.per_ship_limited_games();
-            let mut games_by_ship: std::collections::HashMap<
-                GameParamId,
-                Vec<wows_toolkit_viewmodel::stats::PerGameStat>,
-            > = std::collections::HashMap::new();
-            for game in &per_ship_games {
-                games_by_ship.entry(game.ship_id).or_default().push(game.to_shared());
-            }
-            let pr_data = tab_state.personal_rating_data.read();
-            games_by_ship
-                .into_iter()
-                .filter_map(|(id, games)| {
-                    let games: Vec<&wows_toolkit_viewmodel::stats::PerGameStat> = games.iter().collect();
-                    PrStats::from_games(&games, &pr_data).map(|pr| (id, pr))
-                })
-                .collect()
-        };
+            let games: Vec<wows_toolkit_viewmodel::stats::PerGameStat> =
+                p.session_stats.per_ship_limited_games().into_iter().map(PerGameStat::to_shared).collect();
 
-        let mut battle_results: Vec<(GameParamId, PerformanceInfo)> = {
-            let p = tab_state.persisted.read();
-            let per_ship_games = p.session_stats.per_ship_limited_games();
             let mut games_by_ship: std::collections::HashMap<
                 GameParamId,
-                Vec<wows_toolkit_viewmodel::stats::PerGameStat>,
+                Vec<&wows_toolkit_viewmodel::stats::PerGameStat>,
             > = std::collections::HashMap::new();
-            for game in &per_ship_games {
-                games_by_ship.entry(game.ship_id).or_default().push(game.to_shared());
+            for game in &games {
+                games_by_ship.entry(game.ship_id).or_default().push(game);
             }
-            games_by_ship
-                .into_iter()
-                .map(|(id, games)| {
-                    let games: Vec<&wows_toolkit_viewmodel::stats::PerGameStat> = games.iter().collect();
-                    (id, PerformanceInfo::from_games(&games))
-                })
-                .collect()
+
+            let pr_data = tab_state.personal_rating_data.read();
+            let mut aggregates: Vec<(GameParamId, PerformanceInfo)> = Vec::with_capacity(games_by_ship.len());
+            let mut ratings: std::collections::HashMap<GameParamId, PrStats> = std::collections::HashMap::new();
+            for (id, games) in games_by_ship {
+                aggregates.push((id, PerformanceInfo::from_games(&games)));
+                if let Some(rating) = PrStats::from_games(&games, &pr_data) {
+                    ratings.insert(id, rating);
+                }
+            }
+            (aggregates, ratings)
         };
-        battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()));
+        // The id breaks a tie so two ships whose newest game shares a
+        // timestamp do not swap places from frame to frame.
+        battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()).then_with(|| a.0.raw().cmp(&b.0.raw())));
         for (ship_id, perf_info) in &battle_results {
-            if perf_info.win_rate().is_none() {
+            let Some(win_rate) = perf_info.win_rate() else {
                 continue;
-            }
+            };
 
             let ship_name = resolve_ship_name(*ship_id, provider_ref);
             let locale = tab_state.persisted.read().settings.app.locale.clone();
@@ -456,10 +442,9 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
             } else {
                 format!("{}W/{}L", perf_info.wins(), perf_info.losses())
             };
-            let header = if let Some(pr) = pr_stats {
-                format!("{ship_name} {wld} ({:.0}%) - PR: {:.0}", perf_info.win_rate().unwrap(), pr.average)
-            } else {
-                format!("{ship_name} {wld} ({:.0}%)", perf_info.win_rate().unwrap())
+            let header = match pr_stats {
+                Some(pr) => format!("{ship_name} {wld} ({win_rate:.0}%) - PR: {:.0}", pr.average.pr),
+                None => format!("{ship_name} {wld} ({win_rate:.0}%)"),
             };
 
             let table_rows = stats_table::ship_rows(perf_info, pr_stats, locale_ref2);
@@ -498,8 +483,6 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                 })
                 .body(|ui| {
                     egui::Grid::new(("ship_stats", ship_id)).num_columns(5).striped(true).show(ui, |ui| {
-                        use crate::util::personal_rating::PersonalRatingCategory;
-
                         ui.strong("");
                         for column in stats_table::COLUMNS {
                             ui.strong(translated_column(column));
@@ -508,31 +491,25 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
 
                         for row in &table_rows {
                             ui.label(translated_label(row.label));
-
-                            // The rating row is chipped by category rather than
-                            // printed plain, and carries no total to chip. The
-                            // category comes from the figure, not from the cell
-                            // text it was formatted into.
-                            if let (stats_table::StatLabel::PersonalRating, Some(rating)) = (row.label, pr_stats) {
-                                for (column, value) in
-                                    [(stats_table::Column::Min, rating.min), (stats_table::Column::Max, rating.max)]
-                                {
-                                    let category = PersonalRatingCategory::from_pr(value);
-                                    crate::ui::widgets::pr_chip(ui, category, row.cell(column), false)
-                                        .on_hover_text(category.name());
+                            for column in stats_table::COLUMNS {
+                                let cell = row.cell(column);
+                                // A rating is chipped by its own band; every
+                                // other figure is printed plain, with the
+                                // average emphasised.
+                                match cell.rating.as_ref() {
+                                    Some(rating) => {
+                                        let emphasised = column == stats_table::Column::Average;
+                                        crate::ui::widgets::pr_chip(ui, rating.category, &cell.text, emphasised)
+                                            .on_hover_text(rating.category.name());
+                                    }
+                                    None if column == stats_table::Column::Average => {
+                                        ui.strong(&cell.text);
+                                    }
+                                    None => {
+                                        ui.label(&cell.text);
+                                    }
                                 }
-                                ui.label("");
-                                let category = PersonalRatingCategory::from_pr(rating.average);
-                                crate::ui::widgets::pr_chip(ui, category, row.cell(stats_table::Column::Average), true)
-                                    .on_hover_text(category.name());
-                                ui.end_row();
-                                continue;
                             }
-
-                            ui.label(row.cell(stats_table::Column::Min));
-                            ui.label(row.cell(stats_table::Column::Max));
-                            ui.label(row.cell(stats_table::Column::Total));
-                            ui.strong(row.cell(stats_table::Column::Average));
                             ui.end_row();
                         }
                     });
@@ -624,7 +601,6 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
         }
     }
 
-    // ── Toolbar: settings popover + copy button ──
     // push_id with chart_id to guarantee unique popup IDs when the same
     // toolbar appears in multiple split panes of the stats dock.
     ui.push_id(chart_id, |ui| {
@@ -637,7 +613,6 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
                 ScrollArea::vertical().max_height(400.0).show(ui, |ui| {
                     ui.set_min_width(280.0);
 
-                    // ── Chart Type ──
                     ui.strong(t!("ui.stats.chart_type"));
                     ui.indent(("chart_type_indent", chart_id), |ui| {
                         ui.label(t!("ui.stats.stat_label"));
@@ -670,7 +645,6 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
 
                     ui.separator();
 
-                    // ── Options ──
                     ui.strong(t!("ui.stats.options"));
                     ui.indent(("options_indent", chart_id), |ui| {
                         if ui.checkbox(&mut cfg.combined, t!("ui.stats.combined")).changed() {
@@ -690,7 +664,6 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
 
                     ui.separator();
 
-                    // ── Ships ──
                     ui.strong(t!("ui.stats.ships"));
                     ui.indent(("ships_indent", chart_id), |ui| {
                         ui.horizontal(|ui| {
@@ -729,7 +702,6 @@ fn build_stats_charts(tab_state: &mut crate::tab_state::TabState, chart_id: u64,
         });
     }); // push_id(chart_id)
 
-    // ── Chart fills all remaining space ──
     let (selected_stat, selected_ships, show_labels, reset_plot, mode, rolling_average, combined) = {
         let mut p = tab_state.persisted.write();
         let cfg = p.chart_configs.entry(chart_id).or_default();

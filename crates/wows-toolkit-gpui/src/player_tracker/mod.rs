@@ -17,6 +17,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
@@ -64,6 +65,7 @@ use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_players;
 use wows_toolkit_viewmodel::twitch;
+use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
 
 use crate::replay_inspector::GameDataCache;
@@ -85,6 +87,7 @@ const SHIP_COLUMN_WIDTH: Pixels = px(130.);
 const MET_COLUMN_WIDTH: Pixels = px(80.);
 const STAT_COLUMN_WIDTH: Pixels = px(64.);
 const CLASS_COLUMN_WIDTH: Pixels = px(16.);
+const TWITCH_MENU_WIDTH: Pixels = px(180.);
 const CHIP_COLUMN_WIDTH: Pixels = px(24.);
 /// How often the chat observations are re-read while a battle is under way.
 ///
@@ -168,6 +171,10 @@ pub struct PlayerTrackerView {
     /// Read from the shared index, which the egui app's chat poll fills: a
     /// user who has connected Twitch there gets the chips here too.
     chat_observations: Vec<(String, Timestamp)>,
+    /// The chip's candidates per roster name, rebuilt when the chat or the
+    /// roster changes. Matching is a Levenshtein pass over every observation
+    /// for every row, which is too much to redo on every frame.
+    twitch_candidates: HashMap<String, Vec<SniperCandidate>>,
     _chat_watch: Option<Task<()>>,
     /// Notes kept against the players met, keyed by account. Shared with the
     /// egui app through the `player_tracker_data` blob, so a note written in
@@ -240,6 +247,7 @@ impl PlayerTrackerView {
             stats: StatsState::Idle,
             replay_dir: None,
             chat_observations: Vec::new(),
+            twitch_candidates: HashMap::new(),
             _chat_watch: None,
             tracked: HashMap::new(),
             editing_note: None,
@@ -305,6 +313,7 @@ impl PlayerTrackerView {
                                         Timestamp::from_second(seen_at).ok().map(|seen_at| (login, seen_at))
                                     })
                                     .collect();
+                                this.recompute_twitch_candidates();
                             }
                             // The roster still lists everyone; only the chips
                             // are missing.
@@ -335,9 +344,8 @@ impl PlayerTrackerView {
                     .await;
 
             let Ok(Some(json)) = stored else { return };
-            let modes = tracked::view_modes_from_blob(&json);
-            match tracked::players_from_blob(&json) {
-                Ok(players) => {
+            match (tracked::players_from_blob(&json), tracked::view_modes_from_blob(&json)) {
+                (Ok(players), Ok(modes)) => {
                     let _ = this.update(cx, |this, cx| {
                         this.tracked = players;
                         this.win_rate_mode = modes.win_rate_mode;
@@ -347,7 +355,7 @@ impl PlayerTrackerView {
                 }
                 // Left unloaded rather than shown as empty: a write from here
                 // would then replace the players it could not read.
-                Err(err) => {
+                (Err(err), _) | (_, Err(err)) => {
                     let _ = this.update(cx, |this, cx| {
                         this.note_error = Some(err.to_string());
                         cx.notify();
@@ -363,6 +371,7 @@ impl PlayerTrackerView {
     #[cfg(test)]
     pub(crate) fn seed_chat_observations(&mut self, observations: Vec<(String, Timestamp)>, cx: &mut Context<Self>) {
         self.chat_observations = observations;
+        self.recompute_twitch_candidates();
         cx.notify();
     }
 
@@ -564,6 +573,28 @@ impl PlayerTrackerView {
         ))
     }
 
+    /// Rebuilds the chip candidates for everyone currently on the roster.
+    ///
+    /// Called when the chat observations change and when a scan replaces the
+    /// roster; a row whose name matched nothing is left out of the map, which
+    /// is a row with no chip.
+    fn recompute_twitch_candidates(&mut self) {
+        let Some(roster) = self.live_roster() else {
+            self.twitch_candidates.clear();
+            return;
+        };
+
+        let mut candidates = HashMap::new();
+        for row in roster.friendly.iter().chain(roster.enemy.iter()) {
+            let observations = self.chat_observations.iter().map(|(login, seen_at)| (login.as_str(), *seen_at));
+            let found = twitch::sniper_candidates(observations, &row.name, roster.started_at);
+            if !found.is_empty() {
+                candidates.insert(row.name.clone(), found);
+            }
+        }
+        self.twitch_candidates = candidates;
+    }
+
     /// Starts watching `replay_dir` for a battle in progress, replacing any
     /// watch already running. Called when the WoWs directory becomes known
     /// and whenever it changes.
@@ -663,6 +694,7 @@ impl PlayerTrackerView {
     fn clear_live_match_data(&mut self) {
         self.met_before.clear();
         self.chat_observations.clear();
+        self.twitch_candidates.clear();
         self._chat_watch = None;
         self.live_identities = None;
         self.stats = StatsState::Idle;
@@ -725,6 +757,9 @@ impl PlayerTrackerView {
                         return false;
                     }
                     this.live_identities = Some(identities);
+                    // The roster's names can change with the identities, and
+                    // the chip is keyed by them.
+                    this.recompute_twitch_candidates();
 
                     // An answer this session already has costs no request.
                     if let Some(answered) = this.stats_budget.answered(arena_id) {
@@ -803,6 +838,7 @@ impl PlayerTrackerView {
         cx: &mut Context<Self>,
     ) {
         self.live_identities = Some(identities);
+        self.recompute_twitch_candidates();
         self.stats = StatsState::Ready(index_by_account(players));
         cx.notify();
     }
@@ -952,14 +988,7 @@ impl PlayerTrackerView {
             _ => None,
         };
         let modes = visible_stat_modes(self.view_mode, self.win_rate_mode);
-        let layout = RosterLayout {
-            stats,
-            icons: &self.icons,
-            chat: &self.chat_observations,
-            started_at: roster.started_at,
-            modes: &modes,
-            border,
-        };
+        let layout = RosterLayout { stats, icons: &self.icons, twitch: &self.twitch_candidates, modes: &modes, border };
 
         v_flex()
             .size_full()
@@ -1121,11 +1150,9 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
 struct RosterLayout<'a> {
     stats: Option<&'a HashMap<AccountId, PlayerStatsOut>>,
     icons: &'a IconCache,
-    /// Twitch logins seen in chat around this battle, and when.
-    chat: &'a [(String, Timestamp)],
-    /// When the battle started, which is what the chat window is measured
-    /// against.
-    started_at: Timestamp,
+    /// The chip's candidates per roster name; a name that is absent has no
+    /// chip.
+    twitch: &'a HashMap<String, Vec<SniperCandidate>>,
     /// The scopes each row shows, left to right.
     modes: &'a [WinRateMode],
     border: Hsla,
@@ -1223,38 +1250,73 @@ fn scope_cells(stats: RowStats, status: PlayerStatsStatus, pending: bool) -> Vec
 }
 
 /// The possible-stream-sniper chip: shown when a Twitch login that
-/// plausibly names this player was in chat around this battle. Clicking it
-/// copies the login, which is what the egui chip does.
+/// plausibly names this player was in chat around this battle.
+///
+/// One candidate copies on click, as the egui chip does; several open a
+/// picker, because copying an arbitrary one of them would be a guess.
 fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: RosterLayout) -> AnyElement {
     let slot = div().flex_none().w(CHIP_COLUMN_WIDTH);
-    let observations = layout.chat.iter().map(|(login, seen_at)| (login.as_str(), *seen_at));
-    let Some(candidates) = twitch::potential_stream_snipers(observations, &row.name, layout.started_at) else {
+    let Some(candidates) = layout.twitch.get(&row.name) else {
+        return slot.into_any_element();
+    };
+    let Some(first) = candidates.first() else {
         return slot.into_any_element();
     };
 
-    // The map has no stable order, so the login shown is the first
-    // alphabetically rather than whichever the hash handed over.
-    let mut logins: Vec<&String> = candidates.keys().collect();
-    logins.sort();
-    let Some(login) = logins.first().map(|login| (*login).clone()) else {
-        return slot.into_any_element();
-    };
-    let hover = if logins.len() == 1 {
-        format!("{login} was in chat around this battle. Click to copy.")
-    } else {
-        format!("{} chat logins match this player. Click to copy {login}.", logins.len())
-    };
+    let hover = SharedString::from(sniper_hover_text(candidates));
+    let trigger = Button::new(SharedString::from(format!("tracker-twitch-{side}-{index}")))
+        .child(crate::icons::icon(crate::icons::TWITCH_LOGO))
+        .compact()
+        .tooltip(hover);
 
-    slot.child(
-        Button::new(SharedString::from(format!("tracker-twitch-{side}-{index}")))
-            .child(crate::icons::icon(crate::icons::TWITCH_LOGO))
-            .compact()
-            .tooltip(SharedString::from(hover))
-            .on_click(move |_event, _window, cx: &mut App| {
+    if candidates.len() == 1 {
+        let login = first.login.clone();
+        return slot
+            .child(trigger.on_click(move |_event, _window, cx: &mut App| {
                 cx.write_to_clipboard(ClipboardItem::new_string(login.clone()))
-            }),
+            }))
+            .into_any_element();
+    }
+
+    let logins: Vec<String> = candidates.iter().map(|candidate| candidate.login.clone()).collect();
+    slot.child(
+        Popover::new(SharedString::from(format!("tracker-twitch-menu-{side}-{index}"))).trigger(trigger).content(
+            move |_state, _window, _cx| {
+                let logins = logins.clone();
+                v_flex().w(TWITCH_MENU_WIDTH).gap_1().p_1().children(logins.into_iter().enumerate().map(
+                    |(slot_index, login)| {
+                        let copied = login.clone();
+                        Button::new(SharedString::from(format!("tracker-twitch-pick-{side}-{index}-{slot_index}")))
+                            .label(login)
+                            .compact()
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()))
+                            })
+                    },
+                ))
+            },
+        ),
     )
     .into_any_element()
+}
+
+/// The chip's hover text: each candidate login and how many minutes from the
+/// battle start it was seen, matching what the egui chip says.
+fn sniper_hover_text(candidates: &[SniperCandidate]) -> String {
+    let mut out = String::new();
+    for candidate in candidates {
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        let minutes: Vec<String> = candidate.minutes.iter().map(|minute| minute.to_string()).collect();
+        out.push_str(&format!(
+            "{} may be this player.\nSeen in chat at minute {} of this battle.",
+            candidate.login,
+            minutes.join(", ")
+        ));
+    }
+    out.push_str("\n\nClick to copy.");
+    out
 }
 
 /// The row's ship-class glyph, tinted like its name. A fixed-width slot
@@ -1794,7 +1856,53 @@ mod tests {
         })
         .expect("the window is open");
 
+        // Two logins that both name the ally: copying one of them would be a
+        // guess, so the chip opens a picker instead.
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.seed_chat_observations(
+                    vec![("harvey_635".to_string(), started_at), ("harvey635x".to_string(), started_at)],
+                    cx,
+                );
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("tracker-twitch-pick-ally-0-0").is_none(), "the picker opens from the chip");
+            window.click("tracker-twitch-ally-0", cx);
+        })
+        .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find("tracker-twitch-pick-ally-0-0").label(),
+                Some("harvey635x"),
+                "the picker lists the candidates alphabetically"
+            );
+            assert_eq!(window.find("tracker-twitch-pick-ally-0-1").label(), Some("harvey_635"));
+        })
+        .expect("the window is open");
+
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The hover names every candidate and when each was seen, which is what
+    /// the egui chip says.
+    #[test]
+    fn the_chip_hover_names_each_login_and_its_sightings() {
+        use wows_toolkit_viewmodel::twitch::SniperCandidate;
+
+        let hover = super::sniper_hover_text(&[
+            SniperCandidate { login: "harvey635".to_string(), minutes: vec![-1, 5] },
+            SniperCandidate { login: "harvey_635".to_string(), minutes: vec![3] },
+        ]);
+
+        assert!(hover.contains("harvey635 may be this player."));
+        assert!(hover.contains("Seen in chat at minute -1, 5 of this battle."));
+        assert!(hover.contains("harvey_635 may be this player."));
+        assert!(hover.ends_with("Click to copy."));
     }
 
     /// A note opens for editing from its row, and what is typed is what the

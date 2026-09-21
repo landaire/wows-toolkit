@@ -141,9 +141,17 @@ pub struct ViewModes {
     pub current_match_view_mode: crate::player_tracker::live::CurrentMatchViewMode,
 }
 
-/// The view settings a stored blob carries, or the defaults when it has none.
-pub fn view_modes_from_blob(json: &str) -> ViewModes {
-    serde_json::from_str(json).unwrap_or_default()
+/// The view settings a stored blob carries.
+///
+/// A blob that carries none reads as the defaults, which is what an account
+/// that never opened the tab has. A blob that will not decode is reported
+/// rather than read as defaults: silently resetting the settings would hide
+/// the fact that the rest of the blob is unreadable too.
+pub fn view_modes_from_blob(json: &str) -> Result<ViewModes, BlobError> {
+    if json.trim().is_empty() {
+        return Ok(ViewModes::default());
+    }
+    serde_json::from_str(json).map_err(BlobError::Decode)
 }
 
 /// `json` with the view settings replaced, keeping every other field.
@@ -251,7 +259,7 @@ mod tests {
             ViewModes { win_rate_mode: WinRateMode::Ship, current_match_view_mode: CurrentMatchViewMode::Compact };
 
         let written = blob_with_view_modes(&blob, modes).expect("the blob encodes");
-        let read = view_modes_from_blob(&written);
+        let read = view_modes_from_blob(&written).expect("the blob reads back");
 
         assert_eq!(read.win_rate_mode, WinRateMode::Ship);
         assert_eq!(read.current_match_view_mode, CurrentMatchViewMode::Compact);
