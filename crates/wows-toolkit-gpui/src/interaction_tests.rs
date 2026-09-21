@@ -67,6 +67,8 @@ const STATS_LIMIT_COUNT: &str = "stats-limit-count";
 
 /// Player Tracker controls (`player_tracker`).
 const TRACKER_FILTER: &str = "tracker-filter";
+const TRACKER_SUBTABS: &str = "tracker-subtabs";
+const TRACKER_PERIOD: &str = "tracker-period";
 
 /// Search tab controls (`search`).
 const SEARCH_QUERY: &str = "search-query";
@@ -667,22 +669,35 @@ fn adding_a_chart_opens_another_pane_with_its_own_controls(cx: &mut TestAppConte
 }
 
 #[gpui_kit::test]
-fn the_player_tracker_period_is_single_select(cx: &mut TestAppContext) {
+async fn the_player_tracker_period_is_chosen_from_a_combo(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
 
-        let last_day = ("tracker-period", TimePeriod::LastDay as usize);
-        let all_time = ("tracker-period", TimePeriod::AllTime as usize);
+        assert_eq!(
+            window.find(TRACKER_PERIOD).value(),
+            Some(TimePeriod::LastDay.label()),
+            "the tracker opens on the last day"
+        );
+        assert_eq!(window.find(TRACKER_PERIOD).expanded(), Some(false));
 
-        assert_eq!(window.find(last_day).selected(), Some(true), "the tracker opens on the last day");
+        window.within(TRACKER_PERIOD).click("input", cx);
+        assert_eq!(window.find(TRACKER_PERIOD).expanded(), Some(true), "clicking the combo opens its menu");
 
-        window.click(all_time, cx);
-        assert_eq!(window.find(all_time).selected(), Some(true));
-        assert_eq!(window.find(last_day).selected(), Some(false), "the periods are exclusive");
+        window.press("down", cx);
+        window.press("enter", cx);
     })
     .expect("the test window stays open");
+
+    // `Select` commits through `defer_in`, so the applied period lands after
+    // the dispatch returns.
+    let after_last_day = TimePeriod::ALL[TimePeriod::LastDay as usize + 1].label();
+    cx.wait_for(window.into(), Duration::from_millis(500), |window, _| {
+        window.find(TRACKER_PERIOD).expanded() == Some(false)
+            && window.find(TRACKER_PERIOD).value() == Some(after_last_day)
+    })
+    .await;
 }
 
 #[gpui_kit::test]
@@ -773,25 +788,23 @@ fn the_tracker_sub_tabs_switch_between_their_three_views(cx: &mut TestAppContext
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
 
-        let players = ("tracker-subtab", 0usize);
-        let current_match = ("tracker-subtab", 1usize);
-        let clans = ("tracker-subtab", 2usize);
+        let (players, current_match, clans) = (0usize, 1usize, 2usize);
 
-        assert_eq!(window.find(players).selected(), Some(true), "the tracker opens on players");
+        assert_eq!(window.within(TRACKER_SUBTABS).find(players).selected(), Some(true), "the tracker opens on players");
         // The players table sorts by its own columns.
         assert!(window.try_find(("tracker-sort", 0usize)).is_some());
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_none());
 
-        window.click(clans, cx);
-        assert_eq!(window.find(clans).selected(), Some(true));
-        assert_eq!(window.find(players).selected(), Some(false), "one table at a time");
+        window.within(TRACKER_SUBTABS).click(clans, cx);
+        assert_eq!(window.within(TRACKER_SUBTABS).find(clans).selected(), Some(true));
+        assert_eq!(window.within(TRACKER_SUBTABS).find(players).selected(), Some(false), "one table at a time");
         // And the clans table brings its own.
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_some());
         assert!(window.try_find(("tracker-sort", 0usize)).is_none());
 
         // The roster is its own layout, so neither table's header survives it.
-        window.click(current_match, cx);
-        assert_eq!(window.find(current_match).selected(), Some(true));
+        window.within(TRACKER_SUBTABS).click(current_match, cx);
+        assert_eq!(window.within(TRACKER_SUBTABS).find(current_match).selected(), Some(true));
         assert!(window.try_find(("tracker-sort", 0usize)).is_none());
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_none());
     })
@@ -804,7 +817,7 @@ fn the_clans_table_keeps_its_own_sort(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
-        window.click(("tracker-subtab", 2usize), cx);
+        window.within(TRACKER_SUBTABS).click(2usize, cx);
 
         let by_tag = ("tracker-clan-sort", 0usize);
         let by_encounters = ("tracker-clan-sort", 2usize);
