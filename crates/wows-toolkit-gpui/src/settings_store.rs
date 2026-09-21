@@ -4,8 +4,9 @@
 //! that outlives it, so the pool is held here for the life of the process and
 //! writes are submitted to the tokio runtime like any other sqlx work.
 
+use gpui_kit::App;
 use gpui_kit::AsyncApp;
-use gpui_kit::{App, Global};
+use gpui_kit::Global;
 use serde::Serialize;
 use sqlx::sqlite::SqlitePool;
 

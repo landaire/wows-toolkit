@@ -10,7 +10,7 @@ rust-version.workspace = true
 # the bundled icon set. GPUI ships as the `gpui-pre-*` crates.io family that
 # Kit depends on for us, so there is no git source to unify and no `[patch]`
 # block. Pinned by branch; the committed Cargo.lock pins the exact commit.
-gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "upstream-dock" }
+gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "buck-crate-path-fix" }
 anyhow = "1"
 # Matches gpui's own `image` version so Cargo unifies both into one crate
 # instance instead of resolving two. Only "png" is enabled: the game ships
@@ -85,12 +85,5 @@ futures = "0.3"
 # pointer/keyboard dispatch used by the interaction tests. Enabling it here
 # keeps it out of release builds; `.test_support()` in the views is inert
 # without it.
-gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "upstream-dock", features = ["test-support"] }
+gpui-kit = { git = "https://github.com/landaire-contrib/gpui-component", branch = "buck-crate-path-fix", features = ["test-support"] }
 jiff = "0.2"
-
-[workspace]
-resolver = "3"
-
-[workspace.package]
-edition = "2024"
-rust-version = "1.97"
