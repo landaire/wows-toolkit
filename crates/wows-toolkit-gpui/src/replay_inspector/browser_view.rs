@@ -238,6 +238,9 @@ pub enum ReplayBrowserEvent {
 
 pub struct ReplayBrowser {
     files: Vec<RawReplay>,
+    /// The replays the reader has ctrl-clicked, which every batch action
+    /// works over. Empty means the one highlighted row, if any.
+    marked: HashSet<PathBuf>,
     /// The install the listing is reading, empty until one is known. Only
     /// "Open in Game" needs it: the scan takes its own copy.
     wows_dir: String,
@@ -313,6 +316,7 @@ impl ReplayBrowser {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         Self {
             files: Vec::new(),
+            marked: HashSet::new(),
             wows_dir: String::new(),
             grouping: ReplayGrouping::default(),
             tree_state,
@@ -662,7 +666,15 @@ impl ReplayBrowser {
 
     /// Handles a click on a leaf's rendered item: any click records the
     /// selection, a double-click additionally records/emits the open intent.
-    fn handle_leaf_click(&mut self, path: PathBuf, click_count: usize, cx: &mut Context<Self>) {
+    fn handle_leaf_click(&mut self, path: PathBuf, click_count: usize, modifiers: Modifiers, cx: &mut Context<Self>) {
+        // Ctrl adds to or removes from the set, the way a file manager does;
+        // a plain click replaces it, so the common case stays one replay.
+        if modifiers.secondary() {
+            self.toggle_selected(path, cx);
+            return;
+        }
+
+        self.marked.clear();
         self.selected_path = Some(path.clone());
         if click_count >= 2 {
             tracing::info!(path = %path.display(), "replay browser: open requested");
@@ -670,6 +682,36 @@ impl ReplayBrowser {
             cx.emit(ReplayBrowserEvent::OpenReplay(path));
         }
         cx.notify();
+    }
+
+    /// Adds `path` to the marked set, or takes it out again.
+    fn toggle_selected(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        // The row a plain click left highlighted joins the set, so
+        // ctrl-clicking a second row marks both rather than only the second.
+        if self.marked.is_empty()
+            && let Some(current) = self.selected_path.clone()
+            && current != path
+        {
+            self.marked.insert(current);
+        }
+        if !self.marked.remove(&path) {
+            self.marked.insert(path.clone());
+            self.selected_path = Some(path);
+        }
+        cx.notify();
+    }
+
+    /// Every replay the reader has marked, in listing order.
+    ///
+    /// A single highlighted row counts as a selection of one, so an action
+    /// offered on the set is offered on it too.
+    fn selection(&self) -> Vec<PathBuf> {
+        if self.marked.is_empty() {
+            return self.selected_path.iter().cloned().collect();
+        }
+        let mut paths: Vec<PathBuf> = self.marked.iter().cloned().collect();
+        paths.sort();
+        paths
     }
 }
 
@@ -754,12 +796,14 @@ fn leaf_label_color(outcome: MatchOutcome) -> Option<Hsla> {
     Some(resolve_color(ColorRole::WinLoss(outcome)))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_browser_item(
     browser: Entity<ReplayBrowser>,
     ix: usize,
     entry: &TreeEntry,
     selected: bool,
     leaf_info: &HashMap<SharedString, LeafInfo>,
+    marked: &HashSet<PathBuf>,
     row_height: Pixels,
     cx: &App,
 ) -> ListItem {
@@ -817,6 +861,7 @@ fn render_browser_item(
     // replays under them alternate, which is what makes a long date group
     // scannable (`ui::stripe`).
     let striped = (!is_folder).then(|| crate::ui::stripe(ix, cx)).flatten();
+    let selected = selected || leaf.is_some_and(|leaf| marked.contains(&leaf.path));
     let mut list_item =
         ListItem::new(ix).selected(selected).when_some(striped, |item, color| item.bg(color)).child(row);
 
@@ -832,8 +877,10 @@ fn render_browser_item(
             let position = event.position;
             hover_browser.update(cx, |browser, cx| browser.hover_leaf(path, position, cx));
         });
-        list_item = list_item.on_click(move |event: &ClickEvent, _window, cx: &mut App| {
-            browser.update(cx, |browser, cx| browser.handle_leaf_click(path.clone(), event.click_count(), cx));
+        list_item = list_item.on_click(move |event: &ClickEvent, window, cx: &mut App| {
+            let modifiers = window.modifiers();
+            browser
+                .update(cx, |browser, cx| browser.handle_leaf_click(path.clone(), event.click_count(), modifiers, cx));
         });
     }
 
@@ -892,10 +939,11 @@ impl Render for ReplayBrowser {
                 // Two lines of text plus the space around them, against the
                 // font the theme is currently drawing at.
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
+                let marked = self.marked.clone();
                 let listing = tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
-                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, row_height, cx)
+                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, &marked, row_height, cx)
                 })
-                .context_menu(move |_ix, entry, menu, _window, _cx| {
+                .context_menu(move |_ix, entry, menu, _window, cx| {
                     let wows_dir = context_menu_wows_dir.clone();
                     let build_cache = context_menu_build_cache.clone();
                     let Some(leaf) = context_menu_leaf_info.get(&entry.item().id) else {
@@ -919,20 +967,58 @@ impl Render for ReplayBrowser {
                             }));
                     };
 
+                    // Right-clicking a row that is not in the set acts on
+                    // that row, not on a selection the reader has moved on
+                    // from; right-clicking one that is acts on all of them.
+                    let selection = context_menu_entity.read(cx).selection();
+                    let batch: Vec<PathBuf> =
+                        if selection.len() > 1 && selection.contains(&leaf.path) { selection } else { Vec::new() };
+
                     let open_path = leaf.path.clone();
                     let render_path = leaf.path.clone();
                     let render_entity = context_menu_entity.clone();
+                    let batch_files = batch.clone();
+                    let batch_paths = batch.clone();
+                    let batch_render = batch.clone();
+                    let batch_entity = context_menu_entity.clone();
                     let copy_path = leaf.path.clone();
                     let copy_file = leaf.path.clone();
                     let in_game_path = leaf.path.clone();
                     let reveal_path = leaf.path.clone();
                     let open_entity = context_menu_entity.clone();
-                    menu.item(PopupMenuItem::new(t!("ui.collab.open").into_owned()).on_click(
-                        move |_event, _window, cx| {
-                            let path = open_path.clone();
-                            open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
-                        },
-                    ))
+                    menu.when(!batch.is_empty(), move |menu| {
+                        // The whole marked set, named by its size so the
+                        // reader can see what they are about to act on.
+                        let count = batch_files.len();
+                        menu.item(
+                            PopupMenuItem::new(t!("ui.replay.context.copy_replays", count = count).into_owned())
+                                .on_click(move |_event, window, cx| {
+                                    copy_replay_files(&batch_files, window, cx);
+                                }),
+                        )
+                        .item(
+                            PopupMenuItem::new(t!("ui.replay.context.copy_paths", count = count).into_owned())
+                                .on_click(move |_event, _window, cx| copy_paths(&batch_paths, cx)),
+                        )
+                        .item(
+                            PopupMenuItem::new(
+                                t!("ui.replay.context.render_to_video_many", count = count).into_owned(),
+                            )
+                            .on_click(move |_event, _window, cx| {
+                                let paths = batch_render.clone();
+                                batch_entity.update(cx, |_browser, cx| {
+                                    for path in paths {
+                                        cx.emit(ReplayBrowserEvent::RenderReplay(path));
+                                    }
+                                });
+                            }),
+                        )
+                        .separator()
+                    })
+                    .item(PopupMenuItem::new(t!("ui.collab.open").into_owned()).on_click(move |_event, _window, cx| {
+                        let path = open_path.clone();
+                        open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
+                    }))
                     .item(PopupMenuItem::new(t!("ui.replay.context.render_replay").into_owned()).on_click(
                         move |_event, _window, cx| {
                             let path = render_path.clone();
@@ -1227,6 +1313,42 @@ async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawRe
 
 #[cfg(test)]
 mod tests {
+
+    /// Ctrl-clicking builds a set: the row already highlighted joins it, so
+    /// two ctrl-clicks mark two replays rather than only the second. Clicking
+    /// again takes one out, and a plain click replaces the whole set.
+    #[gpui_kit::test]
+    fn ctrl_clicking_builds_a_selection_and_a_plain_click_replaces_it(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::Modifiers;
+        use std::path::PathBuf;
+
+        cx.update(gpui_kit::init);
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+
+        let a = PathBuf::from("a.wowsreplay");
+        let b = PathBuf::from("b.wowsreplay");
+        let c = PathBuf::from("c.wowsreplay");
+        let plain = Modifiers::default();
+        let ctrl = Modifiers::secondary_key();
+
+        cx.update(|cx| {
+            browser.update(cx, |browser, cx| {
+                browser.handle_leaf_click(a.clone(), 1, plain, cx);
+                assert_eq!(browser.selection(), vec![a.clone()], "one click is a selection of one");
+
+                browser.handle_leaf_click(b.clone(), 1, ctrl, cx);
+                assert_eq!(browser.selection(), vec![a.clone(), b.clone()], "the highlighted row joins the set");
+
+                browser.handle_leaf_click(a.clone(), 1, ctrl, cx);
+                assert_eq!(browser.selection(), vec![b.clone()], "ctrl-clicking a marked row takes it out");
+
+                browser.handle_leaf_click(c.clone(), 1, plain, cx);
+                assert_eq!(browser.selection(), vec![c], "a plain click replaces the set");
+            });
+        });
+    }
+
     use super::is_finished_replay;
     use super::last_server_version;
     use super::resolve_replays_dir;
