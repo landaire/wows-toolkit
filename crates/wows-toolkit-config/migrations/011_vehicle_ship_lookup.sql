@@ -1,0 +1,11 @@
+-- The ship value lookup behind the Search tab's query bar
+-- (`query::search_ships`) groups every vehicle row down to the ships they name.
+-- `indexed_vehicle` holds one row per player per match, so an index carrying a
+-- few hundred ships is read out of a few million rows, and the leading
+-- wildcard in the name filter rules out an index on the name itself. Covering
+-- the group-by and its count answers it from the index instead of the table:
+-- measured on a 2.1M-row index, 18.1s to 0.29s, for about 60MB.
+--
+-- `idx_vehicle_ship` is not a substitute: it leads with ship_id but carries
+-- `relation` rather than the name and arena id this reads.
+CREATE INDEX idx_vehicle_ship_name ON indexed_vehicle(ship_id, ship_name, arena_id);

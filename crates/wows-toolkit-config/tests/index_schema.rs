@@ -19,6 +19,32 @@ async fn index_migration_creates_tables() {
     }
 }
 
+/// The query bar's ship value lookup reads a few hundred ships back out of
+/// `indexed_vehicle`, which holds one row per player per match. The plan has
+/// to answer it from the covering index: reading the table instead is tens of
+/// seconds once a library has been imported.
+#[tokio::test]
+async fn the_ship_lookup_reads_its_covering_index_rather_than_the_table() {
+    let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         SELECT v.ship_id, MAX(v.ship_name) AS ship_name, COUNT(DISTINCT v.arena_id) AS match_count \
+           FROM indexed_vehicle v \
+          WHERE LOWER(v.ship_name) LIKE '%' || LOWER(?1) || '%' \
+          GROUP BY v.ship_id ORDER BY match_count DESC LIMIT ?2",
+    )
+    .bind("yam")
+    .bind(50i64)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    let detail = plan.iter().map(|(_, _, _, detail)| detail.as_str()).collect::<Vec<_>>().join("; ");
+    assert!(detail.contains("idx_vehicle_ship_name"), "the ship lookup reads something else now: {detail}");
+}
+
 #[test]
 fn outcome_and_relation_roundtrip_db_strings() {
     for o in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown] {
