@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -111,6 +112,13 @@ const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
 /// The open/copy pair at the end of each row, which the header reserves.
 const ACTIONS_COLUMN_WIDTH: Pixels = px(72.);
+
+/// Queries the bar remembers. Older ones fall off the end rather than the
+/// row growing without bound.
+const HISTORY_DEPTH: usize = 50;
+
+/// How long a typed edit waits before the results follow it.
+const RERUN_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Rows a value lookup offers, matching the egui bar's own limit.
 const VALUE_LIMIT: i64 = 50;
@@ -228,6 +236,19 @@ pub struct SearchView {
     /// through its own event, and without this the query would run on the
     /// text as it was before the row was taken.
     took_completion_on_enter: bool,
+    /// The query the last run was for, so an edit that leaves the text alone
+    /// (a caret move, a selection) does not re-query.
+    last_run_query: String,
+    /// The pending re-query behind a typed edit. Dropped whenever another
+    /// edit arrives, which is what collapses a burst of keystrokes into one
+    /// query.
+    _rerun: Option<Task<()>>,
+    /// Queries that were run, newest first. Shared with the egui tab, which
+    /// declares the same field and walks it with Up.
+    history: Vec<String>,
+    /// How far back into the history Up has walked, and the text the walk
+    /// started from so Down can put it back.
+    history_walk: Option<(usize, String)>,
     /// The pill segment whose picker is open, and which part of it. `None`
     /// when none is.
     editing: Option<(NodePath, EditablePart)>,
@@ -291,6 +312,10 @@ impl SearchView {
             completions_open: false,
             bar_bounds: None,
             took_completion_on_enter: false,
+            last_run_query: String::new(),
+            _rerun: None,
+            history: Vec::new(),
+            history_walk: None,
             editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
@@ -345,6 +370,10 @@ impl SearchView {
         match event.keystroke.key.as_str() {
             "down" if self.completions_open => self.move_completion_cursor(1, offered, cx),
             "up" if self.completions_open => self.move_completion_cursor(-1, offered, cx),
+            // With no dropdown open the arrows walk what was run before,
+            // which is the recall the egui bar offers on Up.
+            "up" => self.walk_history(1, window, cx),
+            "down" => self.walk_history(-1, window, cx),
             "escape" => {
                 self.completions_open = false;
                 self.completion_cursor = None;
@@ -360,6 +389,82 @@ impl SearchView {
             }
             _ => {}
         }
+    }
+
+    /// Puts an older (positive delta) or newer query in the bar.
+    ///
+    /// Walking past the newest restores the text the walk started from, so
+    /// Up then Down leaves the bar as it was found.
+    fn walk_history(&mut self, delta: isize, window: &mut Window, cx: &mut Context<Self>) {
+        if self.history.is_empty() {
+            return;
+        }
+        let (at, started_from) = match self.history_walk.take() {
+            Some((at, started_from)) => (at as isize + delta, started_from),
+            None if delta > 0 => (0, self.query_input.read(cx).value().to_string()),
+            // Down with no walk in progress is not a recall.
+            None => return,
+        };
+
+        let text = if at < 0 {
+            started_from.clone()
+        } else {
+            match self.history.get(at as usize) {
+                Some(entry) => entry.clone(),
+                // Past the oldest: stay where the walk already is.
+                None => {
+                    self.history_walk = Some(((at - delta) as usize, started_from));
+                    return;
+                }
+            }
+        };
+
+        self.query_input.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+        // The bar was not typed at, so the dropdown stays shut: the arrows
+        // are walking the history, not a list of completions.
+        self.reading = query_text::parse_query(&text).ok();
+        self.completions = crate::search_pills::completions(&text);
+        self.completion_source = text;
+        self.completion_cursor = None;
+        self.completions_open = false;
+        self.history_walk = (at >= 0).then_some((at as usize, started_from));
+        self.run(cx);
+    }
+
+    /// Records the bar's text as a query that was run, newest first.
+    ///
+    /// Only an explicit run is remembered: the results following a typed
+    /// edit would otherwise fill the history with every prefix of it.
+    fn remember_query(&mut self, cx: &mut Context<Self>) {
+        let text = self.query_input.read(cx).value().trim().to_string();
+        if text.is_empty() || self.history.first() == Some(&text) {
+            return;
+        }
+        self.history.retain(|entry| entry != &text);
+        self.history.insert(0, text);
+        self.history.truncate(HISTORY_DEPTH);
+        self.save_history(cx);
+    }
+
+    /// Writes the history back into the shared row beside the query.
+    fn save_history(&self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let history = self.history.clone();
+        cx.spawn(async move |_this, cx| {
+            let _ = runtime::spawn(cx, async move {
+                let mut stored =
+                    wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY)
+                        .await
+                        .unwrap_or_else(|| serde_json::json!({}));
+                if let Some(object) = stored.as_object_mut() {
+                    object.insert("history".to_string(), serde_json::json!(history));
+                }
+                let json = stored.to_string();
+                wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &json).await
+            })
+            .await;
+        })
+        .detach();
     }
 
     /// What the dropdown is offering: the values the caret's own field takes
@@ -491,16 +596,47 @@ impl SearchView {
         }));
     }
 
-    /// Enter runs the query, as it does in the egui query bar.
+    /// The results follow the query as it is typed, and Enter runs it at
+    /// once.
+    ///
+    /// The egui bar re-queries on every change it reports; this waits out a
+    /// short pause first, because a keystroke here is a round trip to the
+    /// index rather than a frame the egui tab was drawing anyway.
     fn on_query_event(&mut self, _state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
-        if !matches!(event, InputEvent::PressEnter { .. }) {
-            return;
+        match event {
+            InputEvent::PressEnter { .. } => {
+                // That Enter was the dropdown's, not the bar's.
+                if std::mem::take(&mut self.took_completion_on_enter) {
+                    return;
+                }
+                self._rerun = None;
+                // Running is an answer to what the dropdown was offering, so
+                // it closes: the arrows then walk the history instead.
+                self.completions_open = false;
+                self.completion_cursor = None;
+                self.remember_query(cx);
+                self.run(cx);
+            }
+            InputEvent::Change => {
+                let text = self.query_input.read(cx).value().to_string();
+                if text == self.last_run_query {
+                    return;
+                }
+                // Typing is a new query, not a step in the walk. The walk's
+                // own edits carry the entry it just recalled, so only text
+                // that is not that leaves the walk.
+                if let Some((at, _)) = self.history_walk.as_ref()
+                    && self.history.get(*at) != Some(&text)
+                {
+                    self.history_walk = None;
+                }
+                self._rerun = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(RERUN_DELAY).await;
+                    let _ = this.update(cx, |this, cx| this.run(cx));
+                }));
+            }
+            _ => {}
         }
-        // That Enter was the dropdown's, not the bar's.
-        if std::mem::take(&mut self.took_completion_on_enter) {
-            return;
-        }
-        self.run(cx);
     }
 
     /// Asks the index how many matches carry no game mode, so a query that
@@ -551,13 +687,19 @@ impl SearchView {
                 wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY).await
             })
             .await;
+            let stored = stored.ok().flatten();
             let query = stored
-                .ok()
-                .flatten()
+                .as_ref()
                 .and_then(|value| value.get("query").and_then(|query| query.as_str()).map(str::to_owned))
+                .unwrap_or_default();
+            let history: Vec<String> = stored
+                .as_ref()
+                .and_then(|value| value.get("history"))
+                .and_then(|history| serde_json::from_value(history.clone()).ok())
                 .unwrap_or_default();
 
             let _ = this.update_in(cx, |this, window, cx| {
+                this.history = history;
                 if !query.is_empty() {
                     this.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
                 }
@@ -647,6 +789,7 @@ impl SearchView {
     /// query that does not parse reports where rather than searching for it
     /// literally.
     fn run(&mut self, cx: &mut Context<Self>) {
+        self.last_run_query = self.query_input.read(cx).value().to_string();
         // Bumped first: every exit below changes what is on screen, and a
         // search already in flight must not land over it.
         self.generation = self.generation.wrapping_add(1);
@@ -689,10 +832,10 @@ impl SearchView {
                 // The map catalog only resolves friendly map names; an empty
                 // one still searches, it just cannot match a map by label.
                 let ctx = CompileCtx::default();
-                // One more than the limit: a set of exactly the limit is a
-                // complete answer, and reporting it as truncated would be a
-                // lie. The extra row is dropped below.
-                query::search_by_ast(&pool, &expr, &ctx, RESULT_LIMIT + 1, sort).await
+                // The query fetches one row past the limit itself, so a set
+                // of exactly the limit reads as a complete answer rather than
+                // a truncated one. The extra row is dropped below.
+                query::search_by_ast(&pool, &expr, &ctx, RESULT_LIMIT, sort).await
             })
             .await;
 
@@ -1154,6 +1297,9 @@ impl Render for SearchView {
 
         let body: AnyElement = match status {
             Some(status) => v_flex()
+                .id("search-status")
+                .test_support()
+                .aria_label(status.clone())
                 .size_full()
                 .items_center()
                 .justify_center()
