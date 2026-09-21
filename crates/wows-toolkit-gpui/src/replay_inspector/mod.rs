@@ -62,4 +62,5 @@ pub use sort::SortColumn;
 pub use sort::SortOrder;
 pub use sort::sort_rows;
 pub use table::PlayerTable;
+pub use view::InspectorSettings;
 pub use view::ReplayInspectorView;
