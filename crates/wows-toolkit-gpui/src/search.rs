@@ -109,6 +109,9 @@ const ACTIONS_COLUMN_WIDTH: Pixels = px(72.);
 
 /// Rows a value lookup offers, matching the egui bar's own limit.
 const VALUE_LIMIT: i64 = 50;
+/// How tall the completions dropdown grows before it scrolls, matching the
+/// egui bar's own cap.
+const COMPLETIONS_MAX_HEIGHT: f32 = 260.0;
 /// How long the caret sits still before its value lookup is sent.
 const VALUE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
 
@@ -202,6 +205,21 @@ pub struct SearchView {
     /// than showing an empty dropdown that reads as "nothing matches".
     value_lookup_running: bool,
     _value_lookup: Option<Task<()>>,
+    /// Which row of the dropdown the keyboard is on. `None` while the caret
+    /// is being typed at, so Enter runs the query rather than taking whatever
+    /// row happened to be first.
+    completion_cursor: Option<usize>,
+    /// Whether the dropdown is showing. Closed by Escape and by taking a row,
+    /// and reopened by the next edit, so it does not sit over the results
+    /// after the query has been committed.
+    completions_open: bool,
+    /// Where the query input sits, so the dropdown can be anchored under it.
+    /// Recorded during layout; `None` before the bar has been drawn once.
+    bar_bounds: Option<Bounds<Pixels>>,
+    /// Set when Enter took a completion. The input reports the same Enter
+    /// through its own event, and without this the query would run on the
+    /// text as it was before the row was taken.
+    took_completion_on_enter: bool,
     /// The pill segment whose picker is open, and which part of it. `None`
     /// when none is.
     editing: Option<(NodePath, EditablePart)>,
@@ -255,6 +273,10 @@ impl SearchView {
             value_options: Vec::new(),
             value_lookup_running: false,
             _value_lookup: None,
+            completion_cursor: None,
+            completions_open: false,
+            bar_bounds: None,
+            took_completion_on_enter: false,
             editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
@@ -278,7 +300,68 @@ impl SearchView {
     /// next render, which notices the text changed.
     fn take_completion(&mut self, replacement: String, window: &mut Window, cx: &mut Context<Self>) {
         self.query_input.update(cx, |state, cx| state.set_value(replacement, window, cx));
+        self.completion_cursor = None;
         cx.notify();
+    }
+
+    /// Moves the highlight `delta` rows, out of `offered` rows.
+    ///
+    /// The first press lands on the first row whichever way it went, so Down
+    /// opens the list at the top and Up at the bottom.
+    fn move_completion_cursor(&mut self, delta: isize, offered: usize, cx: &mut Context<Self>) {
+        if offered == 0 {
+            return;
+        }
+        self.completion_cursor = Some(match self.completion_cursor {
+            None if delta > 0 => 0,
+            None => offered - 1,
+            Some(at) => (at as isize + delta).rem_euclid(offered as isize) as usize,
+        });
+        cx.notify();
+    }
+
+    /// Keyboard on the query bar: the dropdown's rows are walked with the
+    /// arrows, taken with Enter, and dismissed with Escape. Enter with no row
+    /// highlighted runs the query, which is what the bar does with no
+    /// dropdown open at all.
+    fn on_bar_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let offered = self.offered_completions().len();
+        match event.keystroke.key.as_str() {
+            "down" if self.completions_open => self.move_completion_cursor(1, offered, cx),
+            "up" if self.completions_open => self.move_completion_cursor(-1, offered, cx),
+            "escape" => {
+                self.completions_open = false;
+                self.completion_cursor = None;
+                cx.notify();
+            }
+            "enter" => {
+                let Some(at) = self.completion_cursor else { return };
+                let Some(taken) = self.offered_completions().get(at).map(|row| row.replacement.clone()) else {
+                    return;
+                };
+                self.took_completion_on_enter = true;
+                self.take_completion(taken, window, cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// What the dropdown is offering: the values the caret's own field takes
+    /// once the index has answered, and otherwise the vocabulary a new term
+    /// may start with.
+    fn offered_completions(&self) -> Vec<crate::search_pills::Completion> {
+        if self.value_options.is_empty() {
+            return self.completions.clone();
+        }
+        let text = self.completion_source.clone();
+        self.value_options
+            .iter()
+            .map(|option| crate::search_pills::Completion {
+                label: option.label.clone(),
+                context: "value".to_string(),
+                replacement: suggest::replace_active_value(&text, &option.token),
+            })
+            .collect()
     }
 
     /// Opens the picker for a pill segment, or closes it when that segment's
@@ -314,7 +397,10 @@ impl SearchView {
     /// battle plays back under the results.
     pub(crate) fn hover_row(&mut self, path: PathBuf, cx: &mut Context<Self>) {
         let cache = self.game_data.clone();
-        self.preview.enter(path, cache, cx, |panel| &mut panel.preview);
+        // The index records a match's map under the name it displays, not the
+        // one the art is stored under, so a result has no map to draw ahead of
+        // its bake; the bake's own map stands in.
+        self.preview.enter(path, None, cache, cx, |panel| &mut panel.preview);
     }
 
     /// The pointer left the results.
@@ -335,6 +421,10 @@ impl SearchView {
         self.reading = query_text::parse_query(&text).ok();
         self.completions = crate::search_pills::completions(&text);
         self.completion_source = text.clone();
+        // Typing moves the caret off whatever row was highlighted, and an
+        // edit is what reopens a dropdown Escape closed.
+        self.completion_cursor = None;
+        self.completions_open = true;
         self.refresh_value_options(&text, cx);
     }
 
@@ -379,9 +469,14 @@ impl SearchView {
 
     /// Enter runs the query, as it does in the egui query bar.
     fn on_query_event(&mut self, _state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
-        if matches!(event, InputEvent::PressEnter { .. }) {
-            self.run(cx);
+        if !matches!(event, InputEvent::PressEnter { .. }) {
+            return;
         }
+        // That Enter was the dropdown's, not the bar's.
+        if std::mem::take(&mut self.took_completion_on_enter) {
+            return;
+        }
+        self.run(cx);
     }
 
     /// Asks the index how many matches carry no game mode, so a query that
@@ -637,12 +732,35 @@ impl Render for SearchView {
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
 
+        // The input's own rectangle, recorded as it is laid out, so the
+        // dropdown below can be anchored to its left edge and bottom.
+        let measure = cx.weak_entity();
         let entry_row = h_flex()
             .w_full()
             .gap_2()
             .items_center()
             .child(Icon::new(IconName::Search))
-            .child(div().flex_1().child(Input::new(&self.query_input).id("search-query").small().w_full()))
+            .child(
+                div()
+                    .flex_1()
+                    .relative()
+                    .child(Input::new(&self.query_input).id("search-query").small().w_full())
+                    .child(
+                        canvas(
+                            move |bounds, _window, cx| {
+                                let _ = measure.update(cx, |this: &mut Self, cx| {
+                                    if this.bar_bounds != Some(bounds) {
+                                        this.bar_bounds = Some(bounds);
+                                        cx.notify();
+                                    }
+                                });
+                            },
+                            |_bounds, _prepaint, _window, _cx| {},
+                        )
+                        .absolute()
+                        .inset_0(),
+                    ),
+            )
             .child(
                 Button::new("search-run")
                     .label("Search")
@@ -687,38 +805,82 @@ impl Render for SearchView {
             })
         });
 
-        // The values the caret's own field takes, when the index has been
-        // asked for them; otherwise the vocabulary a new term may start with.
-        let offered: Vec<crate::search_pills::Completion> = if self.value_options.is_empty() {
-            self.completions.clone()
-        } else {
-            let text = self.completion_source.clone();
-            self.value_options
-                .iter()
-                .map(|option| crate::search_pills::Completion {
-                    label: option.label.clone(),
-                    context: "value".to_string(),
-                    replacement: suggest::replace_active_value(&text, &option.token),
-                })
-                .collect()
-        };
-        let looking_up = self
-            .value_lookup_running
-            .then(|| div().px(px(20.)).text_xs().opacity(0.6).child("Looking up values...").into_any_element());
-        let completions = (!offered.is_empty()).then(|| {
-            h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(offered.into_iter().enumerate().map(
-                |(index, completion)| {
-                    let replacement = completion.replacement.clone();
-                    Button::new(("search-completion", index))
-                        .label(completion.label.clone())
-                        .compact()
-                        .tooltip(completion.context.clone())
-                        .on_click(cx.listener(move |this, _event, window, cx| {
-                            this.take_completion(replacement.clone(), window, cx)
-                        }))
-                },
-            ))
+        // The completions hang under the input as a dropdown, the way the
+        // egui bar's do, rather than as a row of buttons pushing the results
+        // down the page.
+        let offered = self.offered_completions();
+        let cursor = self.completion_cursor;
+        let theme = cx.theme();
+        let (surface, muted, accent) = (theme.popover, theme.muted_foreground, theme.accent);
+        let rows: Vec<AnyElement> = offered
+            .iter()
+            .enumerate()
+            .map(|(index, completion)| {
+                let replacement = completion.replacement.clone();
+                let highlighted = cursor == Some(index);
+                h_flex()
+                    .id(("search-completion", index))
+                    .test_support()
+                    .aria_label(completion.label.clone())
+                    .w_full()
+                    .gap_2()
+                    .items_center()
+                    .justify_between()
+                    .px_2()
+                    .py_1()
+                    .rounded(theme.radius)
+                    .when(highlighted, |this| this.bg(accent))
+                    .hover(|this| this.bg(accent))
+                    .child(div().text_sm().child(completion.label.clone()))
+                    .child(div().text_xs().text_color(muted).child(completion.context.clone()))
+                    .on_click(cx.listener(move |this, _event, window, cx| {
+                        this.completions_open = false;
+                        this.take_completion(replacement.clone(), window, cx);
+                    }))
+                    .into_any_element()
+            })
+            .collect();
+
+        let looking_up = self.value_lookup_running.then(|| {
+            h_flex()
+                .w_full()
+                .gap_2()
+                .items_center()
+                .px_2()
+                .py_1()
+                .child(div().text_xs().text_color(muted).child("Looking up values..."))
+                .into_any_element()
         });
+
+        let dropdown = (self.completions_open && (!rows.is_empty() || looking_up.is_some()))
+            .then_some(self.bar_bounds)
+            .flatten()
+            .map(|bounds| {
+                deferred(
+                    anchored()
+                        .position(point(bounds.origin.x, bounds.origin.y + bounds.size.height + px(4.)))
+                        .snap_to_window_with_margin(px(8.))
+                        .child(
+                            v_flex()
+                                .id("search-completions")
+                                .occlude()
+                                .w(bounds.size.width)
+                                .max_h(px(COMPLETIONS_MAX_HEIGHT))
+                                .overflow_scroll()
+                                .p_1()
+                                .gap_px()
+                                .bg(surface)
+                                .border_1()
+                                .border_color(border)
+                                .rounded(theme.radius)
+                                .shadow_md()
+                                .children(looking_up)
+                                .children(rows),
+                        ),
+                )
+                .with_priority(1)
+                .into_any_element()
+            });
 
         let query_bar = v_flex()
             .flex_none()
@@ -727,11 +889,11 @@ impl Render for SearchView {
             .py_1()
             .border_b_1()
             .border_color(border)
+            .on_key_down(cx.listener(Self::on_bar_key))
             .child(entry_row)
             .when_some(pills, |this, pills| this.child(pills))
             .when_some(picker, |this, rows| this.child(rows))
-            .when_some(looking_up, |this, row| this.child(row))
-            .when_some(completions, |this, rows| this.child(rows));
+            .when_some(dropdown, |this, rows| this.child(rows));
 
         let header =
             h_flex().flex_none().gap_2().items_center().px_2().py_1().border_b_1().border_color(border).children(
