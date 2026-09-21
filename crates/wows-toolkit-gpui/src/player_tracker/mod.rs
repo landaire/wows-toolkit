@@ -205,6 +205,26 @@ enum LoadState {
     Loaded,
 }
 
+/// The settings row the tracker keeps its view in.
+const TRACKER_SETTINGS_KEY: &str = "player_tracker";
+
+/// What the tracker remembers between sessions: the window of time it looks
+/// back over, how each table is ordered, and what the filter box holds.
+///
+/// The egui tracker keeps none of this, so this row is the port's own rather
+/// than one the two apps share.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+struct TrackerSettings {
+    #[serde(default)]
+    period: TimePeriod,
+    #[serde(default)]
+    sort: Sort,
+    #[serde(default)]
+    clan_sort: ClanSort,
+    #[serde(default)]
+    filter: String,
+}
+
 pub struct PlayerTrackerView {
     sub_tab: SubTab,
     /// The battle in progress, `None` when there is none. Filled in by the
@@ -278,6 +298,9 @@ pub struct PlayerTrackerView {
     live_metadata_build: Option<u32>,
     _live_watch: Option<Task<()>>,
     period: TimePeriod,
+    /// Whether the saved view has been read back yet. One shot, on the first
+    /// frame.
+    view_loaded: bool,
     period_select: Entity<SelectState<SearchableVec<PeriodItem>>>,
     sort: Sort,
     clan_sort: ClanSort,
@@ -353,6 +376,7 @@ impl PlayerTrackerView {
             stats_budget: live::StatsBudget::default(),
             _live_watch: None,
             period: TimePeriod::default(),
+            view_loaded: false,
             period_select,
             sort: Sort::default(),
             clan_sort: ClanSort::default(),
@@ -713,6 +737,7 @@ impl PlayerTrackerView {
             return;
         }
         self.filter_text = text;
+        self.save_view(cx);
         self.sync_rows(cx);
     }
 
@@ -1037,6 +1062,7 @@ impl PlayerTrackerView {
 
     fn sort_clans_by(&mut self, column: ClanSortColumn, cx: &mut Context<Self>) {
         self.clan_sort = self.clan_sort.toggled(column);
+        self.save_view(cx);
         self.sync_rows(cx);
     }
 
@@ -1234,11 +1260,50 @@ impl PlayerTrackerView {
             .into_any_element()
     }
 
+    /// Writes the view back to the settings row.
+    fn save_view(&self, cx: &mut Context<Self>) {
+        let settings = TrackerSettings {
+            period: self.period,
+            sort: self.sort,
+            clan_sort: self.clan_sort,
+            filter: self.filter_text.clone(),
+        };
+        crate::settings_store::save(TRACKER_SETTINGS_KEY, &settings, cx);
+    }
+
+    /// Reads the view back at startup, so the tracker opens where it was
+    /// left rather than on its defaults.
+    fn load_view(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        cx.spawn_in(window, async move |this, cx| {
+            let stored = runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<TrackerSettings>(&pool, TRACKER_SETTINGS_KEY).await
+            })
+            .await;
+            let Ok(Some(settings)) = stored else { return };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.period = settings.period;
+                this.sort = settings.sort;
+                this.clan_sort = settings.clan_sort;
+                this.filter_text = settings.filter.clone();
+                this.period_select.update(cx, |select, cx| {
+                    select.set_selected_index(Some(IndexPath::new(period_index(settings.period))), window, cx)
+                });
+                if !settings.filter.is_empty() {
+                    this.filter_input.update(cx, |state, cx| state.set_value(settings.filter, window, cx));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn set_period(&mut self, period: TimePeriod, pool: Option<SqlitePool>, cx: &mut Context<Self>) {
         if self.period == period {
             return;
         }
         self.period = period;
+        self.save_view(cx);
         match pool {
             // A different window of time is a different query, not a filter
             // over what is already loaded.
@@ -1249,6 +1314,7 @@ impl PlayerTrackerView {
 
     fn sort_by(&mut self, column: SortColumn, cx: &mut Context<Self>) {
         self.sort = self.sort.toggled(column);
+        self.save_view(cx);
         self.sync_rows(cx);
     }
 }
@@ -1638,7 +1704,12 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
 }
 
 impl Render for PlayerTrackerView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The settings row is read on the first frame rather than in `new`,
+        // which runs before the config database is open.
+        if !std::mem::replace(&mut self.view_loaded, true) {
+            self.load_view(window, cx);
+        }
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
 
@@ -2375,6 +2446,32 @@ mod tests {
         .await;
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The view the tracker was left in comes back, including a period that
+    /// is not the default.
+    #[test]
+    fn the_saved_view_round_trips_through_the_settings_row() {
+        use super::ClanSort;
+        use super::Sort;
+        use super::TrackerSettings;
+        use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
+        use wows_toolkit_viewmodel::player_tracker::SortColumn;
+        use wows_toolkit_viewmodel::player_tracker::TimePeriod;
+
+        let saved = TrackerSettings {
+            period: TimePeriod::LastWeek,
+            sort: Sort::default().toggled(SortColumn::Name),
+            clan_sort: ClanSort::default().toggled(ClanSortColumn::Members),
+            filter: "RAIN".to_string(),
+        };
+        let json = serde_json::to_string(&saved).expect("the view serializes");
+        let read: TrackerSettings = serde_json::from_str(&json).expect("and reads back");
+        assert_eq!(read, saved);
+
+        // A row written before a field existed still reads, on the defaults.
+        let older: TrackerSettings = serde_json::from_str("{}").expect("an empty row reads");
+        assert_eq!(older, TrackerSettings::default());
     }
 }
 
