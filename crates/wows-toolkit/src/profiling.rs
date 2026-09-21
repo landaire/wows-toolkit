@@ -139,9 +139,10 @@ pub(crate) fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
 
 /// Loads one replay end to end, the way a double-click does.
 ///
-/// `Err` carries the reason it was skipped. Shared with the export's
-/// equivalence test, which needs a real `UiReport` and has the same
+/// `Err` carries the reason it was skipped. The export's equivalence test is
+/// the only caller: it needs a real `UiReport` and has the same
 /// build-resolution and version-matching requirements.
+#[cfg(test)]
 pub(crate) fn load_one(path: &Path, deps: &ReplayDependencies) -> Result<Replay, String> {
     let mut timings = StageTimings::default();
     load_timed(path, deps, &mut timings)

@@ -483,7 +483,6 @@ impl SessionStats {
 mod tests {
     use super::*;
     use std::collections::HashSet;
-    use std::path::PathBuf;
 
     /// Helper: create a PerGameStat with the given parameters.
     #[allow(clippy::too_many_arguments)]
@@ -534,17 +533,8 @@ mod tests {
     }
 
     fn fixture_pr_data() -> PersonalRatingData {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("tests")
-            .join("fixtures")
-            .join("pr_expected_values.json");
-        let bytes = std::fs::read(&path).expect("fixture must exist");
         let mut pr = PersonalRatingData::new();
-        pr.load_from_bytes(&bytes).unwrap();
+        pr.load_from_bytes(wows_toolkit_viewmodel::personal_rating::EXPECTED_VALUES_FIXTURE).unwrap();
         pr
     }
 
