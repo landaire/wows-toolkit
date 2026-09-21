@@ -9,6 +9,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::h_flex;
@@ -24,10 +25,12 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
+use wows_toolkit_config::index::query_ast::Op;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 
 use std::collections::HashMap;
 
@@ -115,6 +118,8 @@ pub struct SearchView {
     /// too, and one path that notices covers both.
     completions: Vec<crate::search_pills::Completion>,
     completion_source: String,
+    /// The pill whose operator picker is open. `None` when none is.
+    editing_operator: Option<NodePath>,
     /// Names the pills read ids back as. Filled from the same lookups the
     /// result table uses, so a pill and a row name a ship the same way.
     name_cache: wows_toolkit_viewmodel::query_bar::label::NameCache,
@@ -157,6 +162,7 @@ impl SearchView {
             query_input,
             completions: Vec::new(),
             completion_source: String::new(),
+            editing_operator: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
             hits: Vec::new(),
@@ -179,6 +185,28 @@ impl SearchView {
     fn take_completion(&mut self, replacement: String, window: &mut Window, cx: &mut Context<Self>) {
         self.query_input.update(cx, |state, cx| state.set_value(replacement, window, cx));
         cx.notify();
+    }
+
+    /// Opens the operator picker for the pill at `path`, or closes it when
+    /// that pill's is the one already open.
+    fn toggle_operator_picker(&mut self, path: NodePath, cx: &mut Context<Self>) {
+        self.editing_operator =
+            if self.editing_operator.as_deref() == Some(path.as_slice()) { None } else { Some(path) };
+        cx.notify();
+    }
+
+    /// Rewrites the query with `op` in place of the operator at `path`, and
+    /// runs it: the bar exists to show matches, and leaving the old ones
+    /// under an edited query would be showing the wrong ones.
+    fn take_operator(&mut self, path: NodePath, op: Op, window: &mut Window, cx: &mut Context<Self>) {
+        self.editing_operator = None;
+        let Some(expr) = self.expr.as_ref() else { return };
+        // `can_set_op` refused it, so the query on screen is still the one
+        // that ran.
+        let Some(rewritten) = crate::search_pills::with_operator(expr, &path, op) else { return };
+
+        self.query_input.update(cx, |state, cx| state.set_value(rewritten, window, cx));
+        self.run(cx);
     }
 
     /// Re-offers the completions when the bar text has changed since they
@@ -289,13 +317,10 @@ impl SearchView {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
 
-        let Some(pool) = crate::settings_store::pool(cx) else {
-            self.state = SearchState::Failed("the replay index is not open".to_string());
-            self.expr = None;
-            cx.notify();
-            return;
-        };
-
+        // Parsed before the index is asked for: reading the query back as
+        // pills is something the bar can do with no database open, and an
+        // index that is not there says nothing about whether the query is
+        // well formed.
         let text = self.query_input.read(cx).value().trim().to_string();
         let expr = match query_text::parse_query(&text) {
             Ok(expr) => expr,
@@ -310,9 +335,15 @@ impl SearchView {
                 return;
             }
         };
+        self.expr = Some(expr.clone());
+
+        let Some(pool) = crate::settings_store::pool(cx) else {
+            self.state = SearchState::Failed("the replay index is not open".to_string());
+            cx.notify();
+            return;
+        };
 
         self.state = SearchState::Running;
-        self.expr = Some(expr.clone());
         self.look_up_game_mode_gap(cx);
         cx.notify();
 
@@ -463,11 +494,39 @@ impl Render for SearchView {
 
         // What the query the user typed actually says, read back through the
         // same rules the egui bar draws its pills with.
+        let entity = cx.entity();
         let pills = self
             .expr
             .as_ref()
-            .and_then(|expr| crate::search_pills::pill_strip(expr, &self.name_cache, cx))
-            .map(|strip| div().id("search-pills").w_full().px(px(20.)).child(strip));
+            .and_then(|expr| {
+                let entity = entity.clone();
+                crate::search_pills::pill_strip(expr, &self.name_cache, cx, move |path, cx| {
+                    entity.update(cx, |this, cx| this.toggle_operator_picker(path, cx));
+                })
+            })
+            .map(|strip| div().id("search-pills").test_support().w_full().px(px(20.)).child(strip));
+
+        // The picker for whichever operator segment was clicked.
+        let operator_picker = self.editing_operator.as_ref().and_then(|path| {
+            let (choices, current) = crate::search_pills::operator_choices(self.expr.as_ref()?, path)?;
+            let path = path.clone();
+            Some(h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(choices.into_iter().enumerate().map(
+                |(index, choice)| {
+                    let path = path.clone();
+                    selectable(
+                        ("search-operator", index),
+                        choice.op == current,
+                        Button::new(("search-operator-button", index))
+                            .label(choice.label)
+                            .compact()
+                            .selected(choice.op == current)
+                            .on_click(cx.listener(move |this, _event, window, cx| {
+                                this.take_operator(path.clone(), choice.op, window, cx)
+                            })),
+                    )
+                },
+            )))
+        });
 
         let completions = (!self.completions.is_empty()).then(|| {
             h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(self.completions.iter().enumerate().map(
@@ -493,6 +552,7 @@ impl Render for SearchView {
             .border_color(border)
             .child(entry_row)
             .when_some(pills, |this, pills| this.child(pills))
+            .when_some(operator_picker, |this, picker| this.child(picker))
             .when_some(completions, |this, rows| this.child(rows));
 
         let header =
