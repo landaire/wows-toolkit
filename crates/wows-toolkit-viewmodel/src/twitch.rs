@@ -7,9 +7,12 @@
 //! from is not.
 
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use jiff::Timestamp;
 use jiff::Unit;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// How long after a battle started a chat observation still counts.
 pub const WINDOW_AFTER_MINUTES: f64 = 20.0;
@@ -18,6 +21,108 @@ pub const WINDOW_AFTER_MINUTES: f64 = 20.0;
 /// precedes the battle: someone in chat just before queueing is the case this
 /// exists for.
 pub const WINDOW_BEFORE_MINUTES: f64 = -2.0;
+
+/// A Twitch credential, as the helper that produces it writes it out.
+///
+/// Stored as JSON under [`keys::TOKEN`], which is what the egui app already
+/// wrote, so both front ends read one credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Token {
+    username: String,
+    user_id: u64,
+    client_id: String,
+    oauth_token: String,
+}
+
+impl Token {
+    pub fn username(&self) -> &str {
+        &self.username
+    }
+
+    pub fn user_id(&self) -> u64 {
+        self.user_id
+    }
+
+    pub fn client_id(&self) -> &str {
+        &self.client_id
+    }
+
+    pub fn oauth_token(&self) -> &str {
+        &self.oauth_token
+    }
+}
+
+/// Why a pasted credential is not one.
+///
+/// Carries the offending field rather than a message, so a front end can say
+/// which part of the paste was wrong instead of showing the whole string
+/// back.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TokenParseError {
+    #[error("the credential has no {field}")]
+    Missing { field: &'static str },
+    #[error("the credential carries an unknown field {key:?}")]
+    UnknownField { key: String },
+    #[error("{key:?} has no value")]
+    ValueMissing { key: String },
+    #[error("the user id {value:?} is not a number")]
+    UserIdNotANumber { value: String },
+}
+
+impl FromStr for Token {
+    type Err = TokenParseError;
+
+    /// Parses the `key=value;key=value` form the credential helper emits.
+    ///
+    /// Every field is required: a credential missing one cannot be used, and
+    /// accepting it would fail later against Twitch with nothing to point at.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut username = None;
+        let mut user_id = None;
+        let mut client_id = None;
+        let mut oauth_token = None;
+
+        for part in s.split(';') {
+            if part.is_empty() {
+                continue;
+            }
+
+            let mut split = part.split('=');
+            let key = split.next().unwrap_or_default();
+            let value = split.next().ok_or_else(|| TokenParseError::ValueMissing { key: key.to_string() })?;
+            match key {
+                "username" => username = Some(value.to_string()),
+                "user_id" => {
+                    user_id = Some(
+                        value.parse().map_err(|_| TokenParseError::UserIdNotANumber { value: value.to_string() })?,
+                    )
+                }
+                "client_id" => client_id = Some(value.to_string()),
+                "oauth_token" => oauth_token = Some(value.to_string()),
+                key => return Err(TokenParseError::UnknownField { key: key.to_string() }),
+            }
+        }
+
+        Ok(Token {
+            username: username.ok_or(TokenParseError::Missing { field: "username" })?,
+            user_id: user_id.ok_or(TokenParseError::Missing { field: "user_id" })?,
+            client_id: client_id.ok_or(TokenParseError::Missing { field: "client_id" })?,
+            oauth_token: oauth_token.ok_or(TokenParseError::Missing { field: "oauth_token" })?,
+        })
+    }
+}
+
+/// Where the credential and the watched channel live in the shared config
+/// database.
+pub mod keys {
+    /// The credential, stored as JSON.
+    pub const TOKEN: &str = "twitch_token";
+    /// The channel whose chat is polled. Empty means the credential's own.
+    pub const MONITORED_CHANNEL: &str = "twitch_monitored_channel";
+}
+
+/// How often the chat is polled for its current viewers.
+pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Whether a Twitch chat `login` plausibly refers to the same person as
 /// in-game name `ign`.
@@ -127,6 +232,43 @@ pub fn in_window(seen_at: Timestamp, match_timestamp: Timestamp) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_credential_round_trips_through_its_pasted_form() {
+        let token: Token = "username=harvey;user_id=42;client_id=abc;oauth_token=def".parse().expect("it parses");
+        assert_eq!(token.username(), "harvey");
+        assert_eq!(token.user_id(), 42);
+        assert_eq!(token.client_id(), "abc");
+        assert_eq!(token.oauth_token(), "def");
+    }
+
+    /// Each rejection names what was wrong, so the settings tab can say which
+    /// part of the paste to fix rather than showing the paste back.
+    #[test]
+    fn a_malformed_credential_names_what_is_wrong() {
+        assert_eq!(
+            "user_id=42;client_id=abc;oauth_token=def".parse::<Token>(),
+            Err(TokenParseError::Missing { field: "username" })
+        );
+        assert_eq!(
+            "username=harvey;user_id=nope;client_id=abc;oauth_token=def".parse::<Token>(),
+            Err(TokenParseError::UserIdNotANumber { value: "nope".to_string() })
+        );
+        assert_eq!(
+            "username=harvey;surprise=1".parse::<Token>(),
+            Err(TokenParseError::UnknownField { key: "surprise".to_string() })
+        );
+        assert_eq!("username".parse::<Token>(), Err(TokenParseError::ValueMissing { key: "username".to_string() }));
+    }
+
+    /// Pinned against what the egui app already stored.
+    #[test]
+    fn the_stored_credential_is_json_with_the_field_names() {
+        let token: Token = "username=harvey;user_id=42;client_id=abc;oauth_token=def".parse().expect("it parses");
+        let json = serde_json::to_string(&token).expect("it encodes");
+        assert_eq!(json, r#"{"username":"harvey","user_id":42,"client_id":"abc","oauth_token":"def"}"#);
+        assert_eq!(serde_json::from_str::<Token>(&json).expect("it decodes"), token);
+    }
 
     fn at(minutes: i64) -> Timestamp {
         Timestamp::from_second(1_700_000_000 + minutes * 60).expect("a valid timestamp")

@@ -11,6 +11,8 @@ use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
+use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
+use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
 /// Zoom factor applied when the `zoom_factor` setting has never been saved,
 /// matching the egui app's documented default.
@@ -26,6 +28,11 @@ pub struct GpuiSettings {
     /// Which palette to render in. The egui app writes the same setting, so
     /// the two open in the theme the user last chose in either.
     pub theme: ThemeChoice,
+    /// The Twitch credential the chat poll runs under, and the channel it
+    /// watches. Both written by the egui app under the same keys; an empty
+    /// channel watches the credential's own.
+    pub twitch_token: Option<TwitchToken>,
+    pub twitch_channel: String,
     pub wows_dir: String,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
@@ -65,6 +72,9 @@ impl GpuiSettings {
         let zoom = queries::get_setting::<f32>(pool, keys::ZOOM_FACTOR).await.unwrap_or(DEFAULT_ZOOM);
         // Never chosen means follow the desktop, which is the egui default.
         let theme = queries::get_setting::<ThemeChoice>(pool, keys::THEME).await.unwrap_or_default();
+        let twitch_token = queries::get_setting::<TwitchToken>(pool, twitch_keys::TOKEN).await;
+        let twitch_channel =
+            queries::get_setting::<String>(pool, twitch_keys::MONITORED_CHANNEL).await.unwrap_or_default();
         let wows_dir = queries::get_setting::<String>(pool, keys::WOWS_DIR).await.unwrap_or_default();
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, keys::CURRENT_REPLAY_PATH).await.unwrap_or_default();
@@ -91,6 +101,8 @@ impl GpuiSettings {
         Self {
             zoom,
             theme,
+            twitch_token,
+            twitch_channel,
             wows_dir,
             current_replay_path,
             replay,

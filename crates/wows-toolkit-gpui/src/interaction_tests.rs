@@ -271,6 +271,8 @@ fn the_column_filters_popover_opens_and_toggles_only_the_column_clicked(cx: &mut
 fn test_settings() -> GpuiSettings {
     GpuiSettings {
         theme: Default::default(),
+        twitch_token: None,
+        twitch_channel: String::new(),
         zoom: DEFAULT_ZOOM,
         wows_dir: String::new(),
         current_replay_path: PathBuf::new(),
@@ -883,4 +885,50 @@ fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
         chip_text(PersonalRatingCategory::VeryGood, false),
         "a band has a palette per theme"
     );
+}
+
+/// The Twitch credential is pasted, not obtained through a browser flow,
+/// which is what the egui app does. What the settings tab reports back is the
+/// account it belongs to, or which part of the paste was wrong.
+#[gpui_kit::test]
+fn a_pasted_twitch_credential_is_read_or_reported(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+        window.render_frame(cx);
+
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string("not a credential".to_string()));
+        window.click("twitch-paste-token", cx);
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, _window, _cx| {
+            let reported = app.twitch_paste_outcome().expect("the paste was reported");
+            assert!(reported.is_err(), "a malformed paste is refused");
+            assert!(app.stored_twitch_token().is_none(), "and nothing is stored");
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(
+            "username=harvey;user_id=42;client_id=abc;oauth_token=def".to_string(),
+        ));
+        window.click("twitch-paste-token", cx);
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, _window, _cx| {
+            assert_eq!(app.twitch_paste_outcome().expect("the paste was reported").as_deref(), Ok("harvey"));
+            let stored = app.stored_twitch_token().expect("the credential is kept");
+            assert_eq!(stored.username(), "harvey");
+            assert_eq!(stored.user_id(), 42);
+        })
+        .expect("the test window stays open");
 }
