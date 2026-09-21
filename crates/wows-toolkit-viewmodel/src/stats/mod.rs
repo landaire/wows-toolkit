@@ -7,6 +7,8 @@
 //! after the fact, so "no games" is a state the type admits instead of a
 //! number that happens to mean nothing.
 
+pub mod table;
+
 pub mod chart;
 
 use serde::Deserialize;
