@@ -440,16 +440,14 @@ impl ArmorViewerPane {
     }
 
     /// Sidebar per-ship "Export model" context-menu handler
-    /// (`sidebar::ExportModelRequested`, Milestone 5 Task 10, item 4): opens
-    /// a native save-file dialog (blocking, same inline `rfd::FileDialog`
-    /// pattern as `replay_inspector::view::open_manually` and
-    /// `viewport_view::ViewportView::confirm_export`) defaulted to
-    /// `{display_name}.glb`, then exports `event`'s ship at STOCK hull and
-    /// default LOD on the background executor -- independent of whatever
-    /// hull/LOD/module selection any pane currently displays, unlike the
-    /// toolbar's own export (which exports a pane's LIVE selection). A
-    /// cancelled dialog, or a request that arrives before the ship-asset
-    /// bundle finishes loading, is a no-op.
+    /// (`sidebar::ExportModelRequested`, Milestone 5 Task 10, item 4): asks
+    /// where to write `{display_name}.glb` (`crate::dialog`, which keeps the
+    /// app drawing while the dialog is open), then exports `event`'s ship at
+    /// STOCK hull and default LOD on the background executor -- independent
+    /// of whatever hull/LOD/module selection any pane currently displays,
+    /// unlike the toolbar's own export (which exports a pane's LIVE
+    /// selection). A cancelled dialog, or a request that arrives before the
+    /// ship-asset bundle finishes loading, is a no-op.
     fn on_export_model_requested(
         &mut self,
         _sidebar: &Entity<Sidebar>,
@@ -465,19 +463,21 @@ impl ArmorViewerPane {
         let param_index = event.param_index.clone();
         let display_name = event.display_name.clone();
 
-        let default_filename = load_ship::default_export_filename(&display_name);
-        let Some(path) =
-            rfd::FileDialog::new().set_file_name(&default_filename).add_filter("glTF Binary", &["glb"]).save_file()
-        else {
-            return;
-        };
-
-        let options = load_ship::export_options_from_selection(load_ship::DEFAULT_LOD, None, HashMap::new());
-        cx.background_spawn(async move {
-            match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
-                Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
-                Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
-            }
+        let asked = crate::dialog::save_file(
+            None,
+            &load_ship::default_export_filename(&display_name),
+            Some(crate::dialog::GLB),
+        );
+        cx.spawn(async move |_this, cx| {
+            let Some(path) = asked.await else { return };
+            let options = load_ship::export_options_from_selection(load_ship::DEFAULT_LOD, None, HashMap::new());
+            cx.background_spawn(async move {
+                match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
+                    Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
+                    Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
+                }
+            })
+            .await;
         })
         .detach();
     }
@@ -501,7 +501,7 @@ impl ArmorViewerPane {
         self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
         // The viewport shows nothing until a ship arrives, so it says what it
         // is waiting for rather than inviting a selection already made.
-        target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(true, cx));
+        target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(Some(display_name.clone().into()), cx));
         cx.notify();
 
         let task = spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), cx);
@@ -535,7 +535,7 @@ impl ArmorViewerPane {
                 self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
                 target_viewport.update(cx, |viewport, cx| {
-                    viewport.set_ship_loading(false, cx);
+                    viewport.set_ship_loading(None, cx);
                     // Set before `show_armor`: a reload (Milestone 4 Task 8c)
                     // needs to know which bundle/param_index/display_name to
                     // re-export against, and `show_armor`'s own reset
@@ -547,24 +547,22 @@ impl ArmorViewerPane {
             }
             Err(e) => {
                 tracing::error!("armor viewer: failed to load {display_name}: {e}");
-                target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(false, cx));
+                target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(None, cx));
                 self.ship_load = ShipLoadState::Failed { display_name, reason: e.to_string() };
             }
         }
         cx.notify();
     }
 
-    /// The status text shown above the split, if any: bundle load progress/
-    /// failure takes priority over a ship load's own status. `None` once
-    /// everything has settled into a normal idle state, matching
-    /// `replay_inspector::view`'s `status_banner` pattern.
+    /// The status text shown above the split, if any. A ship load in flight
+    /// is not in it: the pane it is loading into says so itself
+    /// (`ViewportView::set_ship_loading`), where the user is looking.
     fn status_text(&self) -> Option<String> {
         match &self.bundle {
             BundleState::NotStarted | BundleState::Loading => Some("Loading ship catalog...".to_string()),
             BundleState::Failed(reason) => Some(format!("Failed to load ship catalog: {reason}")),
             BundleState::Ready(_) => match &self.ship_load {
-                ShipLoadState::Idle => None,
-                ShipLoadState::Loading { display_name } => Some(format!("Loading {display_name}...")),
+                ShipLoadState::Idle | ShipLoadState::Loading { .. } => None,
                 ShipLoadState::Failed { display_name, reason } => {
                     Some(format!("Failed to load {display_name}: {reason}"))
                 }
