@@ -188,9 +188,9 @@ fn swatch(color: [f32; 4], size: Pixels) -> impl IntoElement {
 
 /// Builds the thickness tooltip element for `tooltip`, reproducing the egui
 /// app's `show_armor_tooltip` V1 subset (`tab.rs:2778-2820`): a swatch +
-/// "{mm} mm" header, then "{zone} / {material}" -- material shown raw since
-/// this port has no IDS_ translation wired yet (matching its existing
-/// convention elsewhere) -- then, only when there is more than one layer, a
+/// "{mm} mm" header, then "{zone} / {material}", both named in the reader's
+/// own language through `translate` -- then, only when there is more than one
+/// layer, a
 /// "N layers for this part:" label and a swatch + "{mm} mm" row per layer
 /// (bold when that layer matches the plate's total thickness). The
 /// penetration-check section (`tab.rs:2822-2884`) is out of scope until the
@@ -201,13 +201,14 @@ pub fn tooltip_element(
     border: Hsla,
     radius: Pixels,
     muted: Hsla,
+    translate: &dyn Fn(&str) -> String,
 ) -> AnyElement {
     let mut body = v_flex()
         .gap_1()
         .child(h_flex().gap_1().items_center().child(swatch(tooltip.color, px(12.))).child(
             div().font_weight(FontWeight::BOLD).text_size(px(14.)).child(format!("{:.0} mm", tooltip.thickness_mm)),
         ))
-        .child(div().text_sm().child(format!("{} / {}", tooltip.zone, tooltip.material_name)));
+        .child(div().text_sm().child(format!("{} / {}", translate(&tooltip.zone), translate(&tooltip.material_name))));
 
     if tooltip.layers.len() > 1 {
         body = body

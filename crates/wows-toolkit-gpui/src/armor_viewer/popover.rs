@@ -228,6 +228,14 @@ fn render_popover_content(
             )
         });
 
+    // A zone and a part are named the way the game names them, as the egui
+    // popover does through its own `translate_part`.
+    let bundle = entity.read(cx).reload_bundle();
+    let translate = move |name: &str| match bundle.as_ref() {
+        Some(bundle) => super::catalog::translate_part(bundle.assets.metadata(), name),
+        None => name.to_string(),
+    };
+
     let mut tree = v_flex().gap_1();
     for zone in &armor.zone_part_plates {
         tree = tree.child(render_zone_row(
@@ -239,6 +247,7 @@ fn render_popover_content(
             &expanded_parts,
             warn,
             show_zero_mm,
+            &translate,
         ));
     }
 
@@ -999,6 +1008,7 @@ fn render_zone_row(
     expanded_parts: &HashSet<(String, String)>,
     warn: Hsla,
     show_zero_mm: bool,
+    translate: &dyn Fn(&str) -> String,
 ) -> AnyElement {
     let all_on = zone_all_on(zone, part_visibility, plate_visibility, show_zero_mm);
     let any_on = zone_any_on(zone, part_visibility);
@@ -1034,7 +1044,7 @@ fn render_zone_row(
             .items_center()
             .child(chevron)
             .child(checkbox)
-            .child(div().text_sm().child(zone.name.clone()))
+            .child(div().text_sm().child(translate(&zone.name)))
             .child(
                 div()
                     .text_xs()
@@ -1056,6 +1066,7 @@ fn render_zone_row(
                 expanded_parts,
                 warn,
                 show_zero_mm,
+                translate,
             ));
         }
         column = column.child(body);
@@ -1076,6 +1087,7 @@ fn render_part_row(
     expanded_parts: &HashSet<(String, String)>,
     warn: Hsla,
     show_zero_mm: bool,
+    translate: &dyn Fn(&str) -> String,
 ) -> AnyElement {
     let part_key = (zone_name.to_string(), part.name.clone());
     let part_visible = part_on(part_visibility, zone_name, &part.name);
@@ -1113,7 +1125,7 @@ fn render_part_row(
             format!("armor-vis-part-row-{}-{}", zone_name, part.name),
             entity,
             SidebarHighlightKey::Part(zone_name.to_string(), part.name.clone()),
-            h_flex().gap_1().items_center().child(checkbox).child(div().text_sm().child(part.name.clone())),
+            h_flex().gap_1().items_center().child(checkbox).child(div().text_sm().child(translate(&part.name))),
         )
         .into_any_element();
     }
@@ -1151,7 +1163,12 @@ fn render_part_row(
         format!("armor-vis-part-row-{}-{}", zone_name, part.name),
         entity,
         SidebarHighlightKey::Part(zone_name.to_string(), part.name.clone()),
-        h_flex().gap_1().items_center().child(chevron).child(checkbox).child(div().text_sm().child(part.name.clone())),
+        h_flex()
+            .gap_1()
+            .items_center()
+            .child(chevron)
+            .child(checkbox)
+            .child(div().text_sm().child(translate(&part.name))),
     );
 
     let mut column = v_flex().gap_1().child(header);

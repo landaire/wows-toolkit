@@ -642,6 +642,12 @@ impl ViewportView {
     /// including on a genuinely new ship selection -- `show_armor`'s own
     /// reset (`upload_armor_now`) is what actually clears the selection state
     /// itself; this only updates which ship a reload targets.
+    /// The assets this pane's ship was loaded from, which is where the
+    /// translations for part and material names come from.
+    pub fn reload_bundle(&self) -> Option<Arc<ArmorAssetsBundle>> {
+        self.reload_source.as_ref().map(|source| Arc::clone(&source.bundle))
+    }
+
     pub fn set_reload_source(&mut self, bundle: Arc<ArmorAssetsBundle>, param_index: String, display_name: String) {
         self.reload_source = Some(ReloadSource { bundle, param_index, display_name });
     }
@@ -2097,7 +2103,14 @@ impl Render for ViewportView {
             let theme = cx.theme();
             let (background, border, radius, muted) =
                 (theme.background, theme.border, theme.radius, theme.muted_foreground);
-            let element = picking_ui::tooltip_element(&hover.tooltip, background, border, radius, muted);
+            // A part is named the way the game names it, which is what the
+            // egui tooltip does through its own `translate_part`.
+            let bundle = self.reload_bundle();
+            let translate = move |name: &str| match bundle.as_ref() {
+                Some(bundle) => super::catalog::translate_part(bundle.assets.metadata(), name),
+                None => name.to_string(),
+            };
+            let element = picking_ui::tooltip_element(&hover.tooltip, background, border, radius, muted, &translate);
             let anchor_pos = point(hover.cursor.x + TOOLTIP_CURSOR_OFFSET, hover.cursor.y + TOOLTIP_CURSOR_OFFSET);
             deferred(anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(element))
                 .with_priority(0)
