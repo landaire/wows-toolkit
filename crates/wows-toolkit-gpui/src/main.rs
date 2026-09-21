@@ -2,6 +2,7 @@ mod app;
 mod armor_viewer;
 #[cfg(test)]
 mod interaction_tests;
+mod personal_rating;
 mod player_tracker;
 mod replay_inspector;
 mod runtime;
@@ -85,7 +86,7 @@ fn main() {
             let loaded = runtime::spawn(cx, async move {
                 let pool = wows_toolkit_config::open_db().await?;
                 let settings = GpuiSettings::load(&pool).await;
-                let session = stats::load::SessionData::load(&pool).await;
+                let session = stats::load::SessionData::load(&pool, &settings.proxy_url).await;
                 // The pool comes back so settings edits have somewhere to go;
                 // the startup read would otherwise close it.
                 Ok::<_, anyhow::Error>((settings, session, pool))

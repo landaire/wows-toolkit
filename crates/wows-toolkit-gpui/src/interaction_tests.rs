@@ -16,6 +16,7 @@ use gpui_kit::size;
 use gpui_kit::test::TestAppContextExt;
 use gpui_kit::test::TestWindowExt;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use wows_toolkit_config::ReplaySettings;
@@ -32,6 +33,7 @@ use crate::app::App;
 use crate::app::AppTab;
 use crate::settings::DEFAULT_ZOOM;
 use crate::settings::GpuiSettings;
+use crate::stats::load::SessionData;
 
 /// The app tab bar's element id (`App::render`). Tabs inside it are addressed
 /// by index, matching `AppTab::ALL`'s order.
@@ -373,6 +375,24 @@ fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(c
         assert!(window.try_find(EXTRACT).is_some(), "the queue bar survives clicks on its disabled buttons");
     })
     .expect("the test window stays open");
+}
+
+/// The Replay Inspector rates its players against the same expected-values
+/// table the Stats tab loads, so the session's one copy has to reach it.
+#[gpui_kit::test]
+fn the_session_rating_table_reaches_the_replay_inspector(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    let table = Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+    let session = SessionData { personal_rating: Some(table), ..SessionData::default() };
+
+    window
+        .update(cx, |app, window, cx| {
+            assert!(app.replay_inspector().read(cx).personal_rating().is_none(), "nothing is loaded yet");
+            app.apply_session_stats(session, window, cx);
+            let held = app.replay_inspector().read(cx).personal_rating().expect("the table reached the tab");
+            assert!(held.ship_count() > 0, "the tab holds a table it can actually rate against");
+        })
+        .expect("the test window stays open");
 }
 
 #[gpui_kit::test]

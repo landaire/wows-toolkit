@@ -45,7 +45,24 @@ pub struct MatchMetadata {
     pub played_duration: Option<f32>,
     pub extra_duration: Option<f32>,
     pub timestamp: jiff::Timestamp,
+    /// The packet stream's own verdict, from the `BattleEnd` packet. `None`
+    /// when the recording player left before the battle finished, and on a
+    /// build whose `BattleEnd` this parser does not decode.
     pub battle_result: Option<BattleResult>,
+    /// The verdict the server's results object declares. Resolved
+    /// independently of `battle_result`: a replay can carry one without the
+    /// other.
+    pub results_battle_result: Option<BattleResult>,
+}
+
+impl MatchMetadata {
+    /// The verdict to display and rate against: the packet stream's where it
+    /// resolved, else the results object's. The two agree whenever both are
+    /// present, since each compares the same winning team against the same
+    /// self team.
+    pub fn resolved_battle_result(&self) -> Option<BattleResult> {
+        self.battle_result.or(self.results_battle_result)
+    }
 }
 
 /// One player's normalized identity, ship, and results. Presentation (colors,
@@ -143,9 +160,26 @@ impl NormalizedBattleReport {
             extra_duration: report.extra_duration(),
             timestamp: replay_timestamp(meta),
             battle_result: report.battle_result().cloned(),
+            results_battle_result: results_battle_result(&resolved_results, report),
         };
 
         NormalizedBattleReport { metadata, players }
+    }
+}
+
+/// The results object's own verdict: its `winner_team_id` against the
+/// recording player's team. `None` when the replay carries no results, or
+/// when they name no winning team.
+fn results_battle_result(resolved_results: &Option<Value>, report: &BattleReport) -> Option<BattleResult> {
+    let winning_team_id = resolved_results.as_ref()?.pointer("/commonList/winner_team_id")?.as_i64()?;
+    let self_team_id = report.self_player().initial_state().team_id();
+
+    if winning_team_id == self_team_id {
+        Some(BattleResult::Win(self_team_id as i8))
+    } else if winning_team_id >= 0 {
+        Some(BattleResult::Loss(winning_team_id as i8))
+    } else {
+        Some(BattleResult::Draw)
     }
 }
 

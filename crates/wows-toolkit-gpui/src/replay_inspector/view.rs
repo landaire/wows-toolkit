@@ -32,6 +32,7 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
@@ -99,6 +100,12 @@ pub struct ReplayInspectorView {
     /// closed until the next open for that same path notices the weak
     /// handle no longer upgrades and replaces the entry.
     open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
+    /// The expected-values table every replay tab rates its players against,
+    /// loaded once per session beside the Stats tab's copy (`App::
+    /// apply_session_stats`). Held here rather than fetched per tab so a
+    /// replay opened before it arrives can still be filled in afterward by
+    /// `set_personal_rating`.
+    personal_rating: Option<Arc<PersonalRatingData>>,
     /// Session debug-mode flag: seeded from `AppPreferences.debug_mode` (the
     /// shared config DB) in `apply_settings`, then flippable at runtime via
     /// `App`'s global Ctrl+Shift+D shortcut (`set_debug_mode`, called from
@@ -155,6 +162,7 @@ impl ReplayInspectorView {
             game_data_status: GameDataStatus::Loading,
             has_opened_replay: false,
             open_panels: HashMap::new(),
+            personal_rating: None,
             debug_mode: false,
             replay_settings: ReplaySettings::default(),
             auto_load_latest_replay: true,
@@ -268,12 +276,39 @@ impl ReplayInspectorView {
         }
 
         let columns = default_columns(&self.replay_settings);
-        let panel = cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, cx));
+        let personal_rating = self.personal_rating.clone();
+        let panel =
+            cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, personal_rating, cx));
         self.open_panels.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel(panel, DockPlacement::Center, None, window, cx);
         });
         self.has_opened_replay = true;
+        cx.notify();
+    }
+
+    /// The expected-values table this tab rates replays against. Test-only:
+    /// production code reaches the field directly.
+    #[cfg(test)]
+    pub(crate) fn personal_rating(&self) -> Option<&Arc<PersonalRatingData>> {
+        self.personal_rating.as_ref()
+    }
+
+    /// Adopts the session's expected-values table and pushes it into every
+    /// open replay tab, so a replay opened before the table loaded gets its
+    /// Personal Rating column filled in rather than staying empty until it is
+    /// reopened. Called from `App::apply_session_stats`.
+    ///
+    /// Takes the table itself, not an option: a caller that has none must not
+    /// be able to clear one already in hand, which would leave later tabs
+    /// unrated while the tabs open at the time kept their ratings.
+    pub(crate) fn set_personal_rating(&mut self, table: Arc<PersonalRatingData>, cx: &mut Context<Self>) {
+        self.personal_rating = Some(table.clone());
+        for panel in self.open_panels.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
+            }
+        }
         cx.notify();
     }
 

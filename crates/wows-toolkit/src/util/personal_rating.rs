@@ -1,7 +1,5 @@
 use std::fs;
 use std::path::PathBuf;
-use std::time::Duration;
-use std::time::SystemTime;
 
 use tracing::instrument;
 
@@ -10,20 +8,6 @@ pub use wows_replay_insights::personal_rating::PersonalRatingCategory;
 pub use wows_replay_insights::personal_rating::PersonalRatingData;
 pub use wows_replay_insights::personal_rating::PersonalRatingResult;
 pub use wows_replay_insights::personal_rating::ShipBattleStats;
-
-/// URL to fetch expected values from wows-numbers.com
-const EXPECTED_VALUES_URL: &str = "https://api.wows-numbers.com/personal/rating/expected/json/";
-
-/// How often to check for updates (7 days)
-const UPDATE_INTERVAL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-
-/// File name for cached expected values
-const EXPECTED_VALUES_FILENAME: &str = "pr_expected_values.json";
-
-/// Alpha for the chip background: the canonical hue laid faintly over whatever
-/// row it lands on, so the chip reads the same on card, striped and selected
-/// rows without needing a value per row state.
-const CHIP_TINT_ALPHA: u8 = 46;
 
 /// A rating chip. The canonical hue is preserved exactly: `tint` is that hue at
 /// low alpha, `text` a theme-adjusted version of it that clears the contrast
@@ -42,75 +26,31 @@ pub trait PersonalRatingCategorySwatch {
 
 impl PersonalRatingCategorySwatch for PersonalRatingCategory {
     fn swatch(&self, visuals: &egui::Visuals) -> RatingSwatch {
-        let hue = match self {
-            Self::Bad => egui::Color32::from_rgb(0xFF, 0x00, 0x00),
-            Self::BelowAverage => egui::Color32::from_rgb(0xFE, 0x79, 0x03),
-            Self::Average => egui::Color32::from_rgb(0xFF, 0xC7, 0x1F),
-            Self::Good => egui::Color32::from_rgb(0x44, 0xB3, 0x00),
-            Self::VeryGood => egui::Color32::from_rgb(0x31, 0x80, 0x00),
-            Self::Great => egui::Color32::from_rgb(0x02, 0xC9, 0xB3),
-            Self::Unicum => egui::Color32::from_rgb(0xD0, 0x42, 0xF3),
-            Self::SuperUnicum => egui::Color32::from_rgb(0xA0, 0x0D, 0xC5),
-        };
-        let tint = egui::Color32::from_rgba_unmultiplied(hue.r(), hue.g(), hue.b(), CHIP_TINT_ALPHA);
-        // Solved against the composited chip over card, striped and selected rows.
-        // Several sit just above the floor to keep the chips quiet; retuning any of
-        // those row colours requires re-solving this table, which the contrast test
-        // will catch.
-        let text = if visuals.dark_mode {
-            match self {
-                Self::Bad => egui::Color32::from_rgb(0xF5, 0x68, 0x64),
-                Self::BelowAverage => egui::Color32::from_rgb(0xFB, 0x86, 0x1D),
-                Self::Average => egui::Color32::from_rgb(0xFF, 0xC7, 0x1F),
-                Self::Good => egui::Color32::from_rgb(0x5A, 0xBA, 0x1E),
-                Self::VeryGood => egui::Color32::from_rgb(0x7A, 0xA8, 0x58),
-                Self::Great => egui::Color32::from_rgb(0x02, 0xC9, 0xB3),
-                Self::Unicum => egui::Color32::from_rgb(0xD8, 0x78, 0xEC),
-                Self::SuperUnicum => egui::Color32::from_rgb(0xC3, 0x76, 0xD0),
-            }
-        } else {
-            match self {
-                Self::Bad => egui::Color32::from_rgb(0x9D, 0x04, 0x03),
-                Self::BelowAverage => egui::Color32::from_rgb(0x88, 0x43, 0x05),
-                Self::Average => egui::Color32::from_rgb(0x71, 0x59, 0x12),
-                Self::Good => egui::Color32::from_rgb(0x28, 0x62, 0x04),
-                Self::VeryGood => egui::Color32::from_rgb(0x25, 0x5D, 0x02),
-                Self::Great => egui::Color32::from_rgb(0x06, 0x63, 0x58),
-                Self::Unicum => egui::Color32::from_rgb(0x80, 0x2B, 0x94),
-                Self::SuperUnicum => egui::Color32::from_rgb(0x7F, 0x0C, 0x9B),
-            }
-        };
+        let hue = rgb(wows_toolkit_viewmodel::personal_rating::chip_hue(*self));
+        let tint = egui::Color32::from_rgba_unmultiplied(
+            hue.r(),
+            hue.g(),
+            hue.b(),
+            wows_toolkit_viewmodel::personal_rating::CHIP_TINT_ALPHA,
+        );
+        let text = rgb(wows_toolkit_viewmodel::personal_rating::chip_text(*self, visuals.dark_mode));
         RatingSwatch { tint, text }
     }
 }
 
+/// Unpacks a `0xRRGGBB` colour from the shared palette.
+fn rgb(packed: u32) -> egui::Color32 {
+    egui::Color32::from_rgb((packed >> 16) as u8, (packed >> 8) as u8, packed as u8)
+}
+
 /// Get the path for storing expected values
 pub fn get_expected_values_path() -> PathBuf {
-    let mut path = PathBuf::from(EXPECTED_VALUES_FILENAME);
-    if let Some(storage_dir) = crate::storage_dir() {
-        path = storage_dir.join(path);
-    }
-    path
+    wows_toolkit_viewmodel::personal_rating::expected_values_path()
 }
 
 /// Check if expected values need to be updated
 pub fn needs_update() -> bool {
-    let path = get_expected_values_path();
-
-    if !path.exists() {
-        return true;
-    }
-
-    // Check file modification time
-    if let Ok(metadata) = fs::metadata(&path)
-        && let Ok(modified) = metadata.modified()
-        && let Ok(elapsed) = SystemTime::now().duration_since(modified)
-    {
-        return elapsed > UPDATE_INTERVAL;
-    }
-
-    // If we can't determine the age, assume it needs updating
-    true
+    wows_toolkit_viewmodel::personal_rating::needs_update()
 }
 
 /// Failure fetching or validating the wows-numbers expected-values data.
@@ -124,16 +64,14 @@ pub enum FetchExpectedValuesError {
     Empty,
 }
 
-/// Validate a downloaded expected-values payload before it is cached. The body
-/// must parse into `ExpectedValuesData` with a non-empty ship map; wows-numbers
-/// downtime has served HTML error pages with a 200 status that must not
-/// overwrite good cached data.
+/// Validate a downloaded expected-values payload before it is cached.
 fn validate_expected_values(bytes: &[u8]) -> Result<(), FetchExpectedValuesError> {
-    let parsed: ExpectedValuesData = serde_json::from_slice(bytes)?;
-    if parsed.data.is_empty() {
-        return Err(FetchExpectedValuesError::Empty);
-    }
-    Ok(())
+    use wows_toolkit_viewmodel::personal_rating::InvalidExpectedValues;
+
+    wows_toolkit_viewmodel::personal_rating::validate_expected_values(bytes).map_err(|err| match err {
+        InvalidExpectedValues::Parse(err) => FetchExpectedValuesError::InvalidJson(err),
+        InvalidExpectedValues::NoShips => FetchExpectedValuesError::Empty,
+    })
 }
 
 /// Fetch expected values from the API, returning the raw bytes only if the
@@ -143,7 +81,9 @@ pub async fn fetch_expected_values(
     proxy: Option<&crate::util::proxy::ProxyConfig>,
 ) -> Result<Vec<u8>, FetchExpectedValuesError> {
     let client = crate::util::http::async_client(proxy, reqwest::redirect::Policy::default())?;
-    let response = crate::util::http::get_with_retry(&client, EXPECTED_VALUES_URL).await?;
+    let response =
+        crate::util::http::get_with_retry(&client, wows_toolkit_viewmodel::personal_rating::EXPECTED_VALUES_URL)
+            .await?;
     let bytes = response.bytes().await?.to_vec();
     validate_expected_values(&bytes)?;
     Ok(bytes)
@@ -261,9 +201,25 @@ mod tests {
         // decoding tint back to opaque: Color32's premultiplied storage round-trips
         // through linear light and can round differently by 1 bit at low alpha.
         let average = PersonalRatingCategory::Average.swatch(&egui::Visuals::dark());
-        assert_eq!(average.tint, egui::Color32::from_rgba_unmultiplied(0xFF, 0xC7, 0x1F, CHIP_TINT_ALPHA));
+        assert_eq!(
+            average.tint,
+            egui::Color32::from_rgba_unmultiplied(
+                0xFF,
+                0xC7,
+                0x1F,
+                wows_toolkit_viewmodel::personal_rating::CHIP_TINT_ALPHA
+            )
+        );
         let super_unicum = PersonalRatingCategory::SuperUnicum.swatch(&egui::Visuals::dark());
-        assert_eq!(super_unicum.tint, egui::Color32::from_rgba_unmultiplied(0xA0, 0x0D, 0xC5, CHIP_TINT_ALPHA));
+        assert_eq!(
+            super_unicum.tint,
+            egui::Color32::from_rgba_unmultiplied(
+                0xA0,
+                0x0D,
+                0xC5,
+                wows_toolkit_viewmodel::personal_rating::CHIP_TINT_ALPHA
+            )
+        );
     }
 
     #[test]
