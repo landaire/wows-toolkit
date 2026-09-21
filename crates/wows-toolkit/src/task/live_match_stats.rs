@@ -15,47 +15,16 @@ use tracing::debug;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::arena_scan::ArenaState;
 use wows_replays::analyzer::arena_scan::scan_arena_state;
-use wows_replays::analyzer::decoder::PlayerStateData;
-use wows_replays::types::ArenaId;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 
 use crate::data::match_stats::MatchStatsClient;
 use crate::data::match_stats::MatchStatsError;
-use crate::data::match_stats::MatchStatsRequest;
-use crate::data::match_stats::PlayerRef;
-use crate::data::match_stats::Region;
 use crate::data::wows_data::BuildDataCache;
 use crate::ui::player_tracker::MatchStatsState;
 use crate::ui::player_tracker::PlayerTracker;
 use crate::ui::player_tracker::live::LiveIdentities;
-
-/// Turn a scanned roster into a request, or say why it cannot be one.
-///
-/// Every human in a match shares its realm, so an unsupported one rejects the
-/// whole request rather than dropping players until the roster is empty.
-pub(crate) fn build_request(
-    arena_id: ArenaId,
-    players: &[PlayerStateData],
-) -> Result<MatchStatsRequest, MatchStatsError> {
-    let mut refs = Vec::new();
-    for player in players.iter().filter(|player| !player.is_bot()) {
-        let Some(realm) = player.realm() else {
-            continue;
-        };
-        let Some(region) = Region::from_realm(realm) else {
-            return Err(MatchStatsError::UnsupportedRegion { realm: realm.to_string() });
-        };
-        let Some(ship_id) = player.ship_params_id() else {
-            continue;
-        };
-        refs.push(PlayerRef { account_id: player.db_id(), region, ship_id });
-    }
-
-    let request = MatchStatsRequest { arena_id, players: refs };
-    request.validate()?;
-    Ok(request)
-}
+pub(crate) use wows_toolkit_viewmodel::match_stats::build_request;
 
 /// Where a live-roster scan reads its match from.
 ///
@@ -221,109 +190,8 @@ fn read_file(path: &Path, what: &'static str) -> rootcause::Result<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
-    use wows_replays::types::AccountId;
 
     use super::*;
-
-    /// One human roster entry, deserialized because `PlayerStateData`'s fields
-    /// are crate-private to the parser. `raw_with_names` (which backs
-    /// `ship_params_id()`) is `#[serde(skip_deserializing)]`, so the ship id
-    /// is added afterward through the parser's public `update_from_dict`.
-    fn player_state(name: &str, db_id: i64, realm: &str, ship_id: i64) -> PlayerStateData {
-        let mut player: PlayerStateData = serde_json::from_value(serde_json::json!({
-            "username": name,
-            "clan": "RAIN",
-            "clan_id": 7,
-            "clan_color": 0,
-            "db_id": db_id,
-            "realm": realm,
-            "player_id": 0,
-            "entity_id": 0,
-            "team_id": 0,
-            "max_health": 40_000,
-            "is_abuser": false,
-            "is_hidden": false,
-            "is_bot": false,
-            "human_properties": {
-                "avatar_id": 0,
-                "prebattle_id": 0,
-                "is_client_loaded": true,
-                "is_connected": true,
-            },
-        }))
-        .expect("the roster fixture matches PlayerStateData's shape");
-
-        let mut ship_fields = HashMap::new();
-        ship_fields.insert("shipParamsId", pickled::Value::I64(ship_id));
-        player.update_from_dict(&ship_fields);
-        player
-    }
-
-    /// One bot roster entry, with a realm and ship id that would pass the rest
-    /// of `build_request`'s checks. This is deliberate: only `is_bot()` may be
-    /// the reason a bot is dropped, so the fixture must not also fail the
-    /// realm or ship-id checks, or a deleted `is_bot()` filter would still
-    /// drop it for the wrong reason and the test would not catch the loss.
-    fn bot_state(name: &str, db_id: i64, ship_id: i64) -> PlayerStateData {
-        let mut player: PlayerStateData = serde_json::from_value(serde_json::json!({
-            "username": name,
-            "clan": "",
-            "clan_id": 0,
-            "clan_color": 0,
-            "db_id": db_id,
-            "realm": "na",
-            "player_id": 0,
-            "entity_id": 0,
-            "team_id": 0,
-            "max_health": 40_000,
-            "is_abuser": false,
-            "is_hidden": false,
-            "is_bot": true,
-            "human_properties": {
-                "avatar_id": 0,
-                "prebattle_id": 0,
-                "is_client_loaded": true,
-                "is_connected": true,
-            },
-        }))
-        .expect("the bot fixture matches PlayerStateData's shape");
-
-        let mut ship_fields = HashMap::new();
-        ship_fields.insert("shipParamsId", pickled::Value::I64(ship_id));
-        player.update_from_dict(&ship_fields);
-        player
-    }
-
-    /// A realm the service does not cover must be refused here, not by a 400.
-    #[test]
-    fn an_unsupported_realm_stops_the_request() {
-        let players = vec![player_state("Someone", 1, "ru", 100)];
-
-        let error = build_request(ArenaId::from(1i64), &players).expect_err("ru is unsupported");
-
-        assert!(matches!(error, MatchStatsError::UnsupportedRegion { .. }));
-    }
-
-    #[test]
-    fn bots_are_left_out_of_the_request() {
-        let players = vec![player_state("Human", 1, "eu", 100), bot_state("Bot", 200, 300)];
-
-        let request = build_request(ArenaId::from(1i64), &players).expect("one human is enough");
-
-        assert_eq!(request.players.len(), 1);
-        assert_eq!(request.players[0].account_id, AccountId(1));
-    }
-
-    #[test]
-    fn a_roster_of_only_bots_sends_nothing() {
-        let players = vec![bot_state("Bot", 200, 300)];
-
-        let error = build_request(ArenaId::from(1i64), &players).expect_err("bots are not lookups");
-
-        assert!(matches!(error, MatchStatsError::NoEligiblePlayers));
-    }
 
     /// A wait under a minute still reads as "1 minute": rounding down to zero
     /// would tell the user the retry is available immediately when it is not.

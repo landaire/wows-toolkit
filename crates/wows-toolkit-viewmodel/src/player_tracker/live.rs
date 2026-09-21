@@ -5,7 +5,6 @@
 //! the same work in both front ends; only the drawing differs.
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use jiff::Timestamp;
 use wows_replay_insights::battle_report::replay_timestamp;
@@ -164,29 +163,22 @@ impl LiveIdentities {
     }
 }
 
-/// One tracked player's names, as the name index needs them.
-pub struct TrackedNames<'a> {
-    pub id: AccountId,
-    /// The name this account currently goes by, empty if never recorded.
-    pub current: &'a str,
-    /// Every name it has been seen under, current one included or not.
-    pub aliases: &'a HashSet<String>,
-}
-
-/// Tracked players keyed by lower-cased name, covering the current name and
-/// every recorded alias. A current name beats another account's stale alias.
-pub fn build_name_index<'a>(players: impl Iterator<Item = TrackedNames<'a>> + Clone) -> HashMap<String, AccountId> {
+/// Tracked players keyed by lower-cased name.
+///
+/// `aliases` are every name an account has been seen under and `current` the
+/// name it goes by now; a current name beats another account's stale alias,
+/// which is why the two arrive separately rather than as one list.
+pub fn build_name_index<'a>(
+    aliases: impl Iterator<Item = (AccountId, &'a str)>,
+    current: impl Iterator<Item = (AccountId, &'a str)>,
+) -> HashMap<String, AccountId> {
     let mut index = HashMap::new();
 
-    for player in players.clone() {
-        for alias in player.aliases.iter().filter(|alias| !alias.is_empty()) {
-            index.entry(alias.to_ascii_lowercase()).or_insert(player.id);
-        }
+    for (id, alias) in aliases.filter(|(_, alias)| !alias.is_empty()) {
+        index.entry(alias.to_ascii_lowercase()).or_insert(id);
     }
-    for player in players {
-        if !player.current.is_empty() {
-            index.insert(player.current.to_ascii_lowercase(), player.id);
-        }
+    for (id, name) in current.filter(|(_, name)| !name.is_empty()) {
+        index.insert(name.to_ascii_lowercase(), id);
     }
 
     index
@@ -289,6 +281,7 @@ pub fn resolve_roster(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     /// Minimal `tempArenaInfo` payload. Every key without `#[serde(default)]`
     /// on `ReplayMeta` must be present, which is why `gameLogic` and `logic`
@@ -354,11 +347,10 @@ mod tests {
     }
 
     fn index(players: &[Names]) -> HashMap<String, AccountId> {
-        build_name_index(players.iter().map(|player| TrackedNames {
-            id: player.id,
-            current: &player.current,
-            aliases: &player.aliases,
-        }))
+        build_name_index(
+            players.iter().flat_map(|player| player.aliases.iter().map(|alias| (player.id, alias.as_str()))),
+            players.iter().map(|player| (player.id, player.current.as_str())),
+        )
     }
 
     #[test]

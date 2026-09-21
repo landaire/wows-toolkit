@@ -258,7 +258,7 @@ impl GameDataCache {
     /// map afterward so a later open (e.g. once a transient I/O error clears,
     /// or the build gets installed mid-session) gets to retry instead of
     /// replaying the same cached failure forever.
-    fn get_or_load_build(&self, build: u32) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
+    pub fn get_or_load_build(&self, build: u32) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
         let slot = {
             let mut guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             Arc::clone(guard.entry(build).or_insert_with(|| Arc::new(OnceLock::new())))

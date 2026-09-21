@@ -294,6 +294,13 @@ impl ReplayInspectorView {
         self.personal_rating.as_ref()
     }
 
+    /// The per-build game-data cache this tab loads replays through, once
+    /// the WoWs directory is known. Shared rather than cloned fresh so a
+    /// build another tab needs is loaded once for the whole app.
+    pub(crate) fn game_data(&self) -> Option<GameDataCache> {
+        self.game_data.clone()
+    }
+
     /// Adopts the session's expected-values table and pushes it into every
     /// open replay tab, so a replay opened before the table loaded gets its
     /// Personal Rating column filled in rather than staying empty until it is

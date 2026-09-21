@@ -47,6 +47,7 @@ pub use columns::separate_number;
 pub use debug_view::RawJsonPanel;
 pub use load::GameDataCache;
 pub use load::GameDataStatus;
+pub use load::LoadedGameData;
 pub use load::ReplayLoadError;
 pub use load::load_game_params;
 pub use load::spawn_parse;
