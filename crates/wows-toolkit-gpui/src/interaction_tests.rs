@@ -622,6 +622,8 @@ fn the_chart_mode_toggle_is_single_select(cx: &mut TestAppContext) {
         let line = ("chart-mode", 0usize);
         let bar = ("chart-mode", 1usize);
 
+        assert!(window.try_find(line).is_none(), "the chart's controls live behind its settings menu");
+        window.click(("chart-settings", 0usize), cx);
         assert_eq!(window.find(line).selected(), Some(true), "a chart opens as a line");
 
         window.click(bar, cx);
@@ -640,6 +642,7 @@ fn switching_to_a_bar_chart_offers_win_rate_which_a_line_cannot_plot(cx: &mut Te
 
         // Win rate is the last statistic; a line chart does not offer it.
         let win_rate = ("chart-stat", ChartableStat::WinRate as usize);
+        window.click(("chart-settings", 0usize), cx);
         assert!(window.try_find(win_rate).is_none(), "a line chart cannot plot win rate");
 
         window.click(("chart-mode", 1usize), cx);
@@ -655,11 +658,11 @@ fn adding_a_chart_opens_another_pane_with_its_own_controls(cx: &mut TestAppConte
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Stats, cx);
         // The second pane's ids are offset by its id, so they do not collide.
-        let second_pane_line_mode = ("chart-mode", ChartMode::ALL.len());
-        assert!(window.try_find(second_pane_line_mode).is_none(), "only one chart is open to begin with");
+        let second_pane_settings = ("chart-settings", 1usize);
+        assert!(window.try_find(second_pane_settings).is_none(), "only one chart is open to begin with");
 
         window.click("stats-add-chart", cx);
-        assert!(window.try_find(second_pane_line_mode).is_some(), "the new pane brought its own controls");
+        assert!(window.try_find(second_pane_settings).is_some(), "the new pane brought its own controls");
     })
     .expect("the test window stays open");
 }
