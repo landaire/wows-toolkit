@@ -277,6 +277,9 @@ impl App {
         }
         settings.locale = Some(code.clone());
         settings_store::save(keys::LOCALE, &code, cx);
+        // `rust_i18n` keeps its locale per crate, so this crate's own chrome
+        // and the shared strings are set separately.
+        rust_i18n::set_locale(&code);
         wows_toolkit_viewmodel::set_locale(&code);
 
         let replay_settings = settings.replay.clone();
@@ -452,6 +455,7 @@ impl App {
         // The shared strings follow the saved language, and the combo shows
         // it, both from the moment the settings land.
         if let Some(code) = settings.locale.as_deref() {
+            rust_i18n::set_locale(code);
             wows_toolkit_viewmodel::set_locale(code);
         }
         let language_ix = language_index(settings.locale.as_deref());

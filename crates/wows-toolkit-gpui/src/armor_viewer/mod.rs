@@ -37,6 +37,7 @@
 // milestone, matching `replay_inspector::mod`'s own convention).
 #![allow(unused_imports)]
 
+pub mod analysis;
 pub mod assets;
 pub(crate) mod camo;
 pub mod catalog;

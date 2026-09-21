@@ -1,3 +1,9 @@
+// The path deliberately holds no locale files: pointed at the real catalogs,
+// `i18n!()` needs a stack frame larger than a thread gets by default (see the
+// same note in `wows_toolkit`'s lib.rs). `TranslationsBackend` supplies them,
+// parsed at startup.
+rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
+
 mod app;
 mod armor_viewer;
 mod dialog;

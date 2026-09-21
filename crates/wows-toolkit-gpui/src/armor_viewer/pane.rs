@@ -68,6 +68,14 @@ use super::assets::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
 use super::legend;
+use gpui_kit::component::popover::Popover;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::SelectEvent;
+use rust_i18n::t;
+use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
+
+use super::analysis;
+use super::analysis::PenetrationState;
 use super::legend::LegendDrag;
 use super::legend::LegendState;
 use super::load_ship;
@@ -149,6 +157,11 @@ pub struct ArmorViewerPane {
     /// changed its own (`on_viewport_event`). Off by default, matching the
     /// egui app's own `sync_options` default.
     sync_options: bool,
+    /// The penetration checker's own state, and whether its ship combo has
+    /// been filled from the catalog yet (which needs a window, so it happens
+    /// on the first render after the bundle arrives).
+    pen: PenetrationState,
+    pen_ships_filled: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -169,6 +182,9 @@ impl ArmorViewerPane {
         // pane) until some unrelated event happens to re-render this pane.
         let dock_sub = cx.observe(&dock, |_this, _dock, cx| cx.notify());
 
+        let pen = PenetrationState::new(window, cx);
+        let pen_ship_sub = cx.subscribe_in(&pen.ship_select, window, Self::on_pen_ship_chosen);
+
         let mut this = Self {
             sidebar,
             dock,
@@ -180,7 +196,10 @@ impl ArmorViewerPane {
             ship_load_generation: 0,
             mirror_cameras: false,
             sync_options: false,
+            pen,
+            pen_ships_filled: false,
             _subscriptions: vec![
+                pen_ship_sub,
                 ship_selected_sub,
                 compare_split_sub,
                 export_requested_sub,
@@ -271,6 +290,46 @@ impl ArmorViewerPane {
     }
 
     /// A change made in the sidebar's pane-sharing menu.
+    /// Resolves the ship the penetration checker's combo just picked into the
+    /// shells it brings, which is a GameParams walk rather than something to
+    /// redo per render.
+    fn on_pen_ship_chosen(
+        &mut self,
+        _state: &Entity<gpui_kit::component::select::SelectState<SearchableVec<super::analysis::ShipItem>>>,
+        event: &SelectEvent<SearchableVec<super::analysis::ShipItem>>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let SelectEvent::Confirm(Some(param_index)) = event else { return };
+        let BundleState::Ready(bundle) = &self.bundle else { return };
+        self.pen.ship = resolve_ship_shells(bundle.assets.metadata(), param_index.as_ref());
+        cx.notify();
+    }
+
+    /// Points the checker at the plate the pointer was last over, so opening
+    /// it right after a hover asks about that plate rather than the default.
+    fn seed_penetration_plate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((zone, thickness_mm)) = self.dock.read(cx).active_viewport().read(cx).last_plate() else {
+            return;
+        };
+        self.pen.plate = Some(zone);
+        let value = format!("{thickness_mm:.0}");
+        self.pen.thickness.update(cx, |state, cx| state.set_value(value, window, cx));
+        cx.notify();
+    }
+
+    /// The penetration checker's own state, which its popover reads.
+    pub(crate) fn penetration(&self) -> &PenetrationState {
+        &self.pen
+    }
+
+    /// The penetration checker's IFHE toggle, which its popover reaches
+    /// through the pane rather than owning state of its own.
+    pub(crate) fn set_pen_ifhe(&mut self, ifhe: bool, cx: &mut Context<Self>) {
+        self.pen.ifhe = ifhe;
+        cx.notify();
+    }
+
     fn on_common_settings(
         &mut self,
         _sidebar: &Entity<Sidebar>,
@@ -672,7 +731,17 @@ impl ArmorViewerPane {
 }
 
 impl Render for ArmorViewerPane {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The attacker combo is filled here rather than where the bundle
+        // lands, because `SelectState::set_items` wants a window.
+        if !self.pen_ships_filled
+            && let BundleState::Ready(bundle) = &self.bundle
+        {
+            let bundle = Arc::clone(bundle);
+            self.pen.set_catalog(&bundle.catalog, window, cx);
+            self.pen_ships_filled = true;
+        }
+
         let status_banner =
             self.status_text().map(|text| div().text_xs().text_color(crate::theme::text_dim()).child(text));
         // What the active pane is showing, so a comparison says which ship is
@@ -699,6 +768,32 @@ impl Render for ArmorViewerPane {
                     // The legend is closed from its own header; without this
                     // there is no way back to it (the egui display popover
                     // carries the same checkbox).
+                    // The egui app asks the same question from its Analysis
+                    // window's Penetration tab.
+                    .child(
+                        Popover::new("armor-analysis-popover")
+                            .on_open_change(cx.listener(|this, open: &bool, window, cx| {
+                                if *open {
+                                    this.seed_penetration_plate(window, cx);
+                                }
+                            }))
+                            .trigger(
+                                Button::new("armor-analysis-toggle")
+                                    .label(t!("ui.armor.pen.title").to_string())
+                                    .compact()
+                                    .xsmall()
+                                    .disabled(!self.ship_loaded)
+                                    .tooltip(t!("ui.armor.pen.title_tooltip").to_string()),
+                            )
+                            .content({
+                                let pane = cx.entity();
+                                move |_state, _window, cx| {
+                                    // Read the whole panel out before the
+                                    // builder takes `cx` mutably.
+                                    analysis::render_panel(&pane, cx)
+                                }
+                            }),
+                    )
                     .child(
                         Button::new("armor-legend-toggle")
                             .label("Legend")

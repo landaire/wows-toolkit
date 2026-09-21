@@ -29,6 +29,12 @@ wows-toolkit-config = { path = "../wows-toolkit-config" }
 # extraction, search), shared with the egui app so the two front ends cannot
 # drift apart on what they show.
 wows-toolkit-viewmodel = { path = "../wows-toolkit-viewmodel" }
+# `i18n!` generates its lookup per crate, so this front end's own chrome needs
+# its own invocation; the catalog behind it is parsed once per process
+# (`wt_translations::backend`). `wt-translations` also carries the language
+# list the settings tab offers.
+rust-i18n = { workspace = true }
+wt-translations = { workspace = true }
 # vfs-mmap: load.rs builds the game VFS directly from a live install
 # (wowsunpack::game_data::build_game_vfs_for_build) to run the background
 # replay parse; implies vfs + arc + parsing. rkyv: the on-disk GameParams
@@ -82,10 +88,6 @@ futures = "0.3"
 # The replays-directory watch behind "Autoload Latest Replay". Same version as
 # the egui app's, so both resolve one copy.
 notify = "8.2.0"
-# The language list the settings tab offers. The port's own strings are not
-# translated yet; what a language change reaches is the shared viewmodel's
-# strings and the game data's own names.
-wt-translations = { workspace = true }
 
 [dev-dependencies]
 # Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the

@@ -1,162 +1,29 @@
+//! Trajectory simulation through an armor model, and the comparison against
+//! what the server reported.
+//!
+//! The flat-penetration half lives in
+//! `wows_toolkit_viewmodel::armor::penetration`, which both front ends read;
+//! what is left here is tied to this crate's own `Vec3`.
+
 use crate::viewport_3d::Vec3;
 
 use std::collections::HashMap;
-use std::collections::HashSet;
-use std::sync::Arc;
 
-use wowsunpack::data::ResourceLoader;
-use wowsunpack::game_params::provider::GameMetadataProvider;
-use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Degrees;
-use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
-use wowsunpack::game_params::types::Param;
-use wowsunpack::game_params::types::ShellInfo;
 use wowsunpack::game_params::types::ShipModelDistance;
-use wowsunpack::game_params::types::Species;
 
 use wowsunpack::ballistics::is_overmatch;
 
-/// Penetration bonus Inertia Fuse for HE Shells grants.
-const IFHE_PENETRATION_MULTIPLIER: f32 = 1.25;
-
-/// Whether the captain's Inertia Fuse for HE Shells skill is applied.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Ifhe {
-    Applied,
-    NotApplied,
-}
-
-impl Ifhe {
-    pub fn from_enabled(enabled: bool) -> Self {
-        if enabled { Ifhe::Applied } else { Ifhe::NotApplied }
-    }
-}
-
-/// Position of a ship in the penetration comparison list.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct ComparisonShipIndex(usize);
-
-impl ComparisonShipIndex {
-    /// The ship a single-ship view (the replay armor viewer) reports against.
-    pub const ONLY: ComparisonShipIndex = ComparisonShipIndex(0);
-
-    pub fn new(index: usize) -> Self {
-        ComparisonShipIndex(index)
-    }
-
-    /// Slot this ship draws from in a fixed-size identity palette.
-    pub fn palette_slot(self, palette_len: usize) -> usize {
-        self.0 % palette_len
-    }
-}
-
-/// A ship added to the comparison list.
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub struct ComparisonShip {
-    pub param_index: String,
-    pub display_name: String,
-    pub tier: u32,
-    pub nation: String,
-    pub species: Species,
-    pub shells: Vec<ShellInfo>,
-}
-
-/// Check result for a single shell vs a single armor thickness.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PenResult {
-    /// Shell penetrates (HE/SAP pen at least the thickness, or AP overmatch).
-    Penetrates,
-    /// Shell does not penetrate.
-    Bounces,
-    /// Angle-dependent (AP without overmatch; can't determine at point-blank without angle).
-    AngleDependent,
-}
-
-/// HE penetration a shell brings to a plate, IFHE included.
-///
-/// `None` when the projectile carries no HE penetration value; there is no safe
-/// numeric default, since 0.0 would read as a shell that penetrates nothing.
-pub fn he_penetration(shell: &ShellInfo, ifhe: Ifhe) -> Option<Millimeters> {
-    let base = Millimeters::from(shell.he_pen_mm?);
-    Some(match ifhe {
-        Ifhe::Applied => base * IFHE_PENETRATION_MULTIPLIER,
-        Ifhe::NotApplied => base,
-    })
-}
-
-/// SAP penetration a shell brings to a plate.
-///
-/// `None` when the projectile carries no SAP penetration value.
-pub fn sap_penetration(shell: &ShellInfo) -> Option<Millimeters> {
-    shell.sap_pen_mm.map(Millimeters::from)
-}
-
-/// Check if a shell penetrates a given armor thickness at point-blank (no angle consideration).
-///
-/// Returns `None` for unknown ammo types (logged as a warning) and for shells
-/// whose penetration value is missing.
-pub fn check_penetration(shell: &ShellInfo, thickness: Millimeters, ifhe: Ifhe) -> Option<PenResult> {
-    let flat_penetration = match &shell.ammo_type {
-        AmmoType::HE => he_penetration(shell, ifhe)?,
-        AmmoType::SAP => sap_penetration(shell)?,
-        AmmoType::AP => {
-            return Some(if is_overmatch(shell.caliber, thickness) {
-                PenResult::Penetrates
-            } else {
-                PenResult::AngleDependent
-            });
-        }
-        AmmoType::Unknown(t) => {
-            tracing::warn!("Unknown ammo type '{}' for shell '{}', cannot check penetration", t, shell.name);
-            return None;
-        }
-    };
-
-    Some(if flat_penetration >= thickness { PenResult::Penetrates } else { PenResult::Bounces })
-}
-
-/// Resolve all unique shells for a ship by param_index.
-///
-/// Chain: ship param -> vehicle -> ShipConfigData.main_battery_ammo -> Projectile lookup.
-pub fn resolve_ship_shells(metadata: &GameMetadataProvider, param_index: &str) -> Option<ComparisonShip> {
-    let param: Arc<Param> = metadata.game_param_by_index(param_index)?;
-
-    let species = param.species()?.known().copied()?;
-    let vehicle = param.vehicle()?;
-    let tier = vehicle.level();
-    let nation = param.nation().to_string();
-
-    let display_name = metadata.localized_name_from_param(&param).unwrap_or_else(|| param.name().to_string());
-
-    // Get main battery ammo names from the config data
-    let config = vehicle.config_data()?;
-    let ammo_names: &HashSet<String> = &config.main_battery_ammo;
-
-    let mut shells: Vec<ShellInfo> = Vec::new();
-    let mut seen_names: HashSet<&String> = HashSet::new();
-
-    for ammo_name in ammo_names {
-        if !seen_names.insert(ammo_name) {
-            continue;
-        }
-        let ammo_param = metadata.game_param_by_name(ammo_name)?;
-        let projectile = ammo_param.projectile()?;
-        shells.push(projectile.to_shell_info(ammo_name.clone()));
-    }
-
-    // Sort shells: AP first, then HE, then SAP
-    shells.sort_by(|a, b| {
-        a.ammo_type
-            .sort_order()
-            .cmp(&b.ammo_type.sort_order())
-            .then(a.caliber.partial_cmp(&b.caliber).unwrap_or(std::cmp::Ordering::Equal))
-    });
-
-    Some(ComparisonShip { param_index: param_index.to_string(), display_name, tier, nation, species, shells })
-}
+pub use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
+pub use wows_toolkit_viewmodel::armor::penetration::ComparisonShipIndex;
+pub use wows_toolkit_viewmodel::armor::penetration::Ifhe;
+pub use wows_toolkit_viewmodel::armor::penetration::PenResult;
+pub use wows_toolkit_viewmodel::armor::penetration::check_penetration;
+pub use wows_toolkit_viewmodel::armor::penetration::he_penetration;
+pub use wows_toolkit_viewmodel::armor::penetration::resolve_ship_shells;
+pub use wows_toolkit_viewmodel::armor::penetration::sap_penetration;
 
 /// A single hit along a trajectory ray through the armor model.
 ///
