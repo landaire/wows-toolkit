@@ -76,7 +76,9 @@ enum DamageDirection {
 /// ribbons/damage-events under Name, Skills' build under Skills, the damage
 /// breakdowns under ActualDamage/ReceivedDamage, and the Potential/Spotting/
 /// Hits hover text under those columns. `all_rows` resolves a damage
-/// interaction's victim/attacker `db_id` into a ship name.
+/// interaction's victim/attacker `db_id` into a ship name, and `alt_held`
+/// turns the breakdown's percentages around.
+#[allow(clippy::too_many_arguments)]
 pub fn render_column_detail(
     ix: usize,
     col: ReplayColumn,
@@ -84,13 +86,18 @@ pub fn render_column_detail(
     all_rows: &[PlayerRow],
     icons: &IconCache,
     debug: bool,
+    alt_held: bool,
     cx: &App,
 ) -> Option<AnyElement> {
     match col {
         ReplayColumn::Name => render_name_section(ix, row, debug, icons),
         ReplayColumn::Skills => render_build_section(ix, row, debug, icons),
-        ReplayColumn::ActualDamage => render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, cx),
-        ReplayColumn::ReceivedDamage => render_damage_section(ix, row, all_rows, debug, DamageDirection::Received, cx),
+        ReplayColumn::ActualDamage => {
+            render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, alt_held, cx)
+        }
+        ReplayColumn::ReceivedDamage => {
+            render_damage_section(ix, row, all_rows, debug, DamageDirection::Received, alt_held, cx)
+        }
         ReplayColumn::PotentialDamage => render_nda_gated_hover(row.potential_damage_hover_text.as_deref(), row, debug),
         ReplayColumn::Hits => render_nda_gated_hover(row.hits_hover_text.as_deref(), row, debug),
         ReplayColumn::SpottingDamage => row.spotting_damage_hover_text.as_deref().map(multiline_body),
@@ -853,12 +860,14 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
 /// `received_damage_details`. No heading: each side sits under its own column
 /// (ActualDamage/ReceivedDamage), so the column header already names it, just
 /// as in egui.
+#[allow(clippy::too_many_arguments)]
 fn render_damage_section(
     ix: usize,
     row: &PlayerRow,
     all_rows: &[PlayerRow],
     debug: bool,
     direction: DamageDirection,
+    alt_held: bool,
     cx: &App,
 ) -> Option<AnyElement> {
     if row.should_hide_stats() && !debug {
@@ -894,7 +903,7 @@ fn render_damage_section(
             let Some(other) = all_rows.iter().find(|r| r.db_id == *account_id) else {
                 continue;
             };
-            let pct = interaction_percentage(interaction, direction);
+            let pct = interaction_percentage(interaction, direction, alt_held);
             col = col.child(div().id(("replay-interaction", ix * DETAIL_ID_STRIDE + idx)).text_xs().child(format!(
                 "{}: {} ({pct:.0}%)",
                 other.ship_name,
@@ -927,10 +936,15 @@ fn interaction_amount(interaction: &DamageInteraction, direction: DamageDirectio
     }
 }
 
-fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDirection) -> f64 {
-    match direction {
-        DamageDirection::Dealt => interaction.damage_dealt_percentage,
-        DamageDirection::Received => interaction.damage_received_percentage,
+/// The share this line is of a total. Normally of this row's own total; with
+/// alt down, of the other player's, which answers "how much of what they took
+/// was me" rather than "how much of my damage went there".
+fn interaction_percentage(interaction: &DamageInteraction, direction: DamageDirection, alt_held: bool) -> f64 {
+    match (direction, alt_held) {
+        (DamageDirection::Dealt, false) => interaction.damage_dealt_percentage,
+        (DamageDirection::Dealt, true) => interaction.damage_dealt_inverse_percentage,
+        (DamageDirection::Received, false) => interaction.damage_received_percentage,
+        (DamageDirection::Received, true) => interaction.damage_received_inverse_percentage,
     }
 }
 
@@ -1052,8 +1066,18 @@ mod tests {
 
         assert_eq!(interaction_amount(&i, DamageDirection::Dealt), 42_000);
         assert_eq!(interaction_amount(&i, DamageDirection::Received), 12_000);
-        assert!((interaction_percentage(&i, DamageDirection::Dealt) - 56.4).abs() < 1e-9);
-        assert!((interaction_percentage(&i, DamageDirection::Received) - 38.1).abs() < 1e-9);
+        assert!((interaction_percentage(&i, DamageDirection::Dealt, false) - 56.4).abs() < 1e-9);
+        assert!((interaction_percentage(&i, DamageDirection::Received, false) - 38.1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn alt_swaps_a_percentage_for_the_share_of_the_other_player_total() {
+        let mut i = interaction(42_000, 56.4, 12_000, 38.1);
+        i.damage_dealt_inverse_percentage = 71.2;
+        i.damage_received_inverse_percentage = 9.4;
+
+        assert!((interaction_percentage(&i, DamageDirection::Dealt, true) - 71.2).abs() < 1e-9);
+        assert!((interaction_percentage(&i, DamageDirection::Received, true) - 9.4).abs() < 1e-9);
     }
 
     fn skill_tier(skill_count: usize) -> SkillGridRow {

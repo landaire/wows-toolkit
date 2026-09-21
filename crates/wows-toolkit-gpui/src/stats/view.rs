@@ -40,6 +40,7 @@ use crate::ui::selectable;
 use super::chart_panel::StatsChartPanel;
 use super::load::SessionData;
 use super::overview::StatsOverviewPanel;
+use super::ships::ShipsPanelEvent;
 use super::ships::StatsShipsPanel;
 
 /// Games shown when the limit is switched on without a saved count. The egui
@@ -104,6 +105,7 @@ impl StatsView {
         let subscriptions = vec![
             cx.subscribe_in(&limit_input, window, Self::on_limit_step),
             cx.subscribe_in(&limit_input, window, Self::on_limit_changed),
+            cx.subscribe(&ships, Self::on_ships_event),
         ];
 
         Self {
@@ -181,6 +183,29 @@ impl StatsView {
             let cleared = crate::runtime::spawn(cx, async move { queries::clear_session_stats(&pool).await }).await;
             if let Ok(Err(err)) = cleared {
                 tracing::warn!("stats: the session was not cleared: {err}");
+            }
+        })
+        .detach();
+    }
+
+    /// Forgets one ship's games, which the Ships panel asks for but the tab
+    /// owns.
+    fn on_ships_event(&mut self, _panel: Entity<StatsShipsPanel>, event: &ShipsPanelEvent, cx: &mut Context<Self>) {
+        let ShipsPanelEvent::ClearShip(ship) = event;
+        let ship = *ship;
+
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.games.retain(|game| game.ship_id != ship);
+        self.available_modes = all_match_groups(&self.games).into_iter().collect();
+        self.push_filtered(cx);
+
+        cx.spawn(async move |_this, cx| {
+            let cleared = crate::runtime::spawn(cx, async move {
+                queries::clear_session_stats_for_ship(&pool, ship.raw() as i64).await
+            })
+            .await;
+            if let Ok(Err(err)) = cleared {
+                tracing::warn!("stats: the ship's games were not cleared: {err}");
             }
         })
         .detach();

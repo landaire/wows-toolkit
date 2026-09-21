@@ -57,7 +57,7 @@ kept so the next audit does not re-report them.
   stats).
 - The Actions menu is missing entirely: match timeline, open in game, replay
   controls, load other team perspective, hide my test-ship stats.
-- Alt-held inverse percentages in the damage breakdown are missing.
+- [done] Alt turns the damage breakdown's percentages around.
 - The Effective Fire Chance section of an expanded row is missing.
 - [done] Chat now copies its whole transcript and saves it to a file.
 - [done] A row's words are the preview popup's own caption, which goes up as
@@ -105,8 +105,8 @@ kept so the next audit does not re-report them.
 - [done] Filter changes are written back, so both front ends read the same
   values.
 - Chart panes and the dock layout are not persisted.
-- [done] The filter bar clears the whole session behind a two-press
-  confirm. Per ship is still missing.
+- [done] The filter bar clears the whole session and a ship's own row clears
+  that ship, both behind a two-press confirm (ctrl+click skips it).
 - Charts cannot be copied as an image.
 - Achievements draw a generic star, unsorted, with no description hover.
 - [done] The records name the ship that set them.
