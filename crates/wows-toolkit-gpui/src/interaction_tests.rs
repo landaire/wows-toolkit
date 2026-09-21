@@ -270,6 +270,7 @@ fn the_column_filters_popover_opens_and_toggles_only_the_column_clicked(cx: &mut
 /// load, which keeps these tests off the filesystem.
 fn test_settings() -> GpuiSettings {
     GpuiSettings {
+        theme: Default::default(),
         zoom: DEFAULT_ZOOM,
         wows_dir: String::new(),
         current_replay_path: PathBuf::new(),
@@ -828,4 +829,58 @@ fn the_parameter_dump_menu_is_refused_until_a_build_is_loaded(cx: &mut TestAppCo
         assert!(window.try_find("unpacker-dump-json").is_none(), "the menu does not open without a build");
     })
     .expect("the test window stays open");
+}
+
+/// The theme control switches the palette on screen, and the rating bands
+/// follow it: the egui app reads the same stored choice, so the two apps open
+/// in whichever theme was last picked in either.
+///
+/// The assertions read `Theme::global`, which is what the widgets draw from.
+/// A frame is rendered first so the zoom slider settles: the render path
+/// re-applies the theme when the slider and the stored zoom disagree, and
+/// that apply would otherwise stand in for the one the control is supposed to
+/// make.
+#[gpui_kit::test]
+fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
+    use gpui_kit::component::theme::Theme;
+    use gpui_kit::component::theme::ThemeMode;
+    use wows_replay_insights::personal_rating::PersonalRatingCategory;
+    use wows_toolkit_viewmodel::personal_rating::chip_text;
+    use wows_toolkit_viewmodel::settings::ThemeChoice;
+
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    let system = ("theme-choice", ThemeChoice::System as usize);
+    let dark = ("theme-choice", ThemeChoice::Dark as usize);
+    let light = ("theme-choice", ThemeChoice::Light as usize);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+        window.render_frame(cx);
+        window.render_frame(cx);
+        assert_eq!(window.find(system).selected(), Some(true), "an unset theme follows the desktop");
+
+        window.click(dark, cx);
+        assert_eq!(window.find(dark).selected(), Some(true));
+        assert_eq!(window.find(system).selected(), Some(false), "the choices are exclusive");
+        assert_eq!(Theme::global(cx).mode, ThemeMode::Dark, "the dark palette reached the widgets");
+        assert!(crate::theme::is_dark_mode(), "and the bands follow it");
+
+        window.click(light, cx);
+        assert_eq!(window.find(light).selected(), Some(true));
+        assert_eq!(Theme::global(cx).mode, ThemeMode::Light, "the light palette reached the widgets");
+        assert!(!crate::theme::is_dark_mode());
+    })
+    .expect("the test window stays open");
+
+    // The bands are the egui app's own two palettes, so a rating reads
+    // differently against each background rather than keeping one colour.
+    assert_ne!(
+        chip_text(PersonalRatingCategory::VeryGood, true),
+        chip_text(PersonalRatingCategory::VeryGood, false),
+        "a band has a palette per theme"
+    );
 }

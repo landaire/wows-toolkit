@@ -277,9 +277,9 @@ pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
         ColorRole::Player(kind) => player_color_kind_rgb(kind),
         // The band's text color, not its canonical hue: the hue is the chip
         // background, and reading it as text is the low-contrast case the
-        // solved table exists to fix. Dark, because this crate applies the
-        // egui dark theme; a light theme here needs `chip_text(.., false)`.
-        ColorRole::PrTier(category) => personal_rating::chip_text(category, true),
+        // solved table exists to fix. The band has one palette per theme, so
+        // it follows the one on screen.
+        ColorRole::PrTier(category) => personal_rating::chip_text(category, crate::theme::is_dark_mode()),
         ColorRole::PrTierTint(category) => personal_rating::chip_hue(category),
         ColorRole::CaptainPoints(tier) => match tier {
             CaptainPointsTier::Bad => 0xff8080,

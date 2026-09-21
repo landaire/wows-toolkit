@@ -447,23 +447,17 @@ impl Default for StatsFilterSettings {
     }
 }
 
-/// Which theme the app renders in.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub enum ThemeChoice {
-    /// Follow the desktop's light/dark preference.
-    #[default]
-    System,
-    Dark,
-    Light,
-}
+/// Which theme the app renders in. Shared with the GPUI port, which reads the
+/// same stored value.
+pub use wows_toolkit_viewmodel::settings::ThemeChoice;
 
-impl From<ThemeChoice> for egui::ThemePreference {
-    fn from(choice: ThemeChoice) -> Self {
-        match choice {
-            ThemeChoice::System => Self::System,
-            ThemeChoice::Dark => Self::Dark,
-            ThemeChoice::Light => Self::Light,
-        }
+/// What egui calls the same choice. A free function rather than a `From`
+/// impl: both types are foreign to this crate now that the choice is shared.
+pub fn egui_theme_preference(choice: ThemeChoice) -> egui::ThemePreference {
+    match choice {
+        ThemeChoice::System => egui::ThemePreference::System,
+        ThemeChoice::Dark => egui::ThemePreference::Dark,
+        ThemeChoice::Light => egui::ThemePreference::Light,
     }
 }
 
@@ -595,9 +589,9 @@ mod theme_choice_tests {
 
     #[test]
     fn maps_to_egui_theme_preference() {
-        assert_eq!(egui::ThemePreference::from(ThemeChoice::System), egui::ThemePreference::System);
-        assert_eq!(egui::ThemePreference::from(ThemeChoice::Dark), egui::ThemePreference::Dark);
-        assert_eq!(egui::ThemePreference::from(ThemeChoice::Light), egui::ThemePreference::Light);
+        assert_eq!(egui_theme_preference(ThemeChoice::System), egui::ThemePreference::System);
+        assert_eq!(egui_theme_preference(ThemeChoice::Dark), egui::ThemePreference::Dark);
+        assert_eq!(egui_theme_preference(ThemeChoice::Light), egui::ThemePreference::Light);
     }
 }
 

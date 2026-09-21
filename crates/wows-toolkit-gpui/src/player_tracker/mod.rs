@@ -1198,13 +1198,13 @@ fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], 
 /// uses. Absent when the service returned no rating for this player.
 fn rating_color(pr: Option<f64>) -> Option<Hsla> {
     let category = PersonalRatingCategory::from_pr(pr?);
-    Some(rgb(personal_rating::chip_text(category, true)).into())
+    Some(rgb(personal_rating::chip_text(category, crate::theme::is_dark_mode())).into())
 }
 
 /// A win rate's colour, from the band the rate itself falls in, so the
 /// number and its colour cannot disagree.
 fn band_color(band: Option<PersonalRatingCategory>) -> Option<Hsla> {
-    Some(rgb(personal_rating::chip_text(band?, true)).into())
+    Some(rgb(personal_rating::chip_text(band?, crate::theme::is_dark_mode())).into())
 }
 
 /// A stats cell: the value when the service answered with one, a dash when it
