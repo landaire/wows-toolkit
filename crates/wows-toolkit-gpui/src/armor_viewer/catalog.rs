@@ -19,7 +19,11 @@ pub struct ShipCatalog {
 }
 
 pub struct NationGroup {
+    /// The raw nation key (`usa`, `united_kingdom`), which is what the flag
+    /// icons and the tree's row ids are keyed on.
     pub nation: String,
+    /// The nation's name in the current locale, which is what the tree shows.
+    pub display_name: String,
     pub classes: Vec<ClassGroup>,
 }
 
@@ -89,6 +93,15 @@ const SHIP_SPECIES: &[Species] = &[
     Species::Auxiliary,
 ];
 
+/// A nation's name in the current locale.
+///
+/// The game keys these as `IDS_<NATION>`; an unknown one shows its raw key,
+/// which is what the egui app's own `translate_part` falls back to.
+fn nation_display_name(metadata: &GameMetadataProvider, nation: &str) -> String {
+    let key = format!("IDS_{}", nation.to_uppercase());
+    metadata.localized_name_from_id(&wowsunpack::data::TranslationKey::new(key)).unwrap_or_else(|| nation.to_string())
+}
+
 impl ShipCatalog {
     /// Build from GameMetadataProvider. Filters to only ship species.
     pub fn build(metadata: &GameMetadataProvider) -> Self {
@@ -135,11 +148,14 @@ impl ShipCatalog {
                     })
                     .collect();
                 classes.sort_by_key(|c| species_order(&c.species));
-                NationGroup { nation, classes }
+                let display_name = nation_display_name(metadata, &nation);
+                NationGroup { nation, display_name, classes }
             })
             .collect();
 
-        nations.sort_by(|a, b| a.nation.cmp(&b.nation));
+        // By the name shown, not the key behind it, matching the egui tree
+        // (`armor_viewer/ui/tab.rs:377`).
+        nations.sort_by(|a, b| a.display_name.cmp(&b.display_name));
 
         ShipCatalog { nations }
     }
