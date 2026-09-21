@@ -76,6 +76,11 @@ impl PreviewHover {
         shown.frames.at(shown.started.elapsed())
     }
 
+    /// The row under the pointer, whether or not its preview has baked yet.
+    pub fn watched_path(&self) -> Option<&std::path::Path> {
+        self.watched.as_ref().map(|(path, _)| path.as_path())
+    }
+
     /// Whether a preview is being baked for the watched row.
     pub fn is_baking(&self) -> bool {
         self.baking

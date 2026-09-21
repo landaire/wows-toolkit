@@ -13,32 +13,14 @@
 //! metadata only, no packet decryption/decompression, so this is safe to run
 //! for every file in the directory on every scan.
 //!
-//! **`ship`/`map` translation.** The scan itself only reads a replay's raw
-//! header fields -- the relation-0 vehicle's `shipId` (mirroring
-//! `Replay::player_vehicle`, `mod.rs:2576`) and the raw `mapName` key (e.g.
-//! `"spaces/00_CO_ocean"`) -- into `RawReplay`, never the preloaded game data
-//! (a header read must stay cheap; see `scan_replay_files`). `translate_replay`
-//! then resolves each `RawReplay` into a `ReplayLite` against `ReplayBrowser`'s
-//! `game_data` (the shared preloaded `GameMetadataProvider`, adopted via
-//! `set_game_data` once `load::GameDataStatus` reaches `Ready`), mirroring the
-//! egui app's `Replay::vehicle_name`/`map_name` (`mod.rs:2580`/`2592`)
-//! exactly: `vehicle_name` via `param_localization_id` + `localized_name_from_id`
-//! on the relation-0 vehicle's `shipId`, falling back to "Spectator" (the
-//! egui app's `t!("ui.replay.spectator")` value, hardcoded here since this
-//! crate has no i18n lookup wired -- see `panel.rs`'s equivalent hardcoded
-//! chat-tooltip string) when no vehicle or no translation resolves; `map_name`
-//! via `translate_map_name`. Before `game_data` is adopted (`None`), both fall
-//! back to the untranslated raw string -- exactly what `translate_map_name`
-//! itself falls back to when no translation is found, so this is the same
-//! text the egui app would show if translation were simply unavailable, not a
-//! new format.
-//!
-//! **`battle_result` is always `None` from this scan.** The egui app only
-//! learns a replay's win/loss/draw outcome after a full packet parse resolves
-//! the battle-result packet (`Replay::battle_result` reads `battle_report`/
-//! `ui_report`, both parse products); a header-only read cannot see it. Group
-//! win-rate labels and leaf colors are therefore blank/plain for every replay
-//! until Milestone 5's background parser (`load.rs`) fills a result in.
+//! **What a row says.** The scan reads only a replay's plaintext header, into
+//! the shared [`ListedReplay`]; `rebuild_tree` then assembles both of a row's
+//! lines from it exactly as the egui listing does
+//! (`wows_toolkit_viewmodel::listing_row`): the identity line against the
+//! loaded `GameMetadataProvider`, the stats line against the replay index's
+//! summary for that file. A file the index has not seen says so rather than
+//! showing blank figures, and the panel waits for the game data rather than
+//! listing raw ship and map ids (see `render`).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -63,6 +45,14 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::ReplayGrouping;
+use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_config::index::rows::RowSummary;
+use wows_toolkit_viewmodel::listing_row::LinePart;
+use wows_toolkit_viewmodel::listing_row::ListedReplay;
+use wows_toolkit_viewmodel::listing_row::hover_text;
+use wows_toolkit_viewmodel::listing_row::listed_row_identity;
+use wows_toolkit_viewmodel::listing_row::resolve_row_stats;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
 use wowsunpack::data::Version;
@@ -96,10 +86,7 @@ const SPECTATOR_LABEL: &str = "Spectator";
 /// yet loaded.
 struct RawReplay {
     path: PathBuf,
-    ship_id: Option<GameParamId>,
-    raw_ship: String,
-    raw_map: String,
-    game_time: String,
+    listed: ListedReplay,
 }
 
 /// A leaf's path and (usually absent, see the module doc) battle result,
@@ -108,7 +95,14 @@ struct RawReplay {
 #[derive(Clone)]
 struct LeafInfo {
     path: PathBuf,
-    battle_result: Option<BattleResult>,
+    /// The row's second line: damage, kills and the timestamp, in the pieces
+    /// it is drawn from (the glyphs go in the icon font).
+    stats: Rc<Vec<LinePart>>,
+    outcome: MatchOutcome,
+    in_division: bool,
+    /// What the hover popup says under the minimap, in the words the egui
+    /// tooltip uses.
+    hover: SharedString,
 }
 
 /// How far to the right of the pointer the hover preview sits, so it never
@@ -118,6 +112,14 @@ const PREVIEW_CURSOR_OFFSET: Pixels = px(24.);
 /// The preview's edge length. Square, as the minimap is; the egui app's own
 /// popup uses 384 (`preview_popup::PREVIEW_SIZE`).
 const PREVIEW_SIZE: f32 = 384.;
+
+/// Closes the identity line of a battle played in a division, the way the
+/// egui row does (`listing_row::row_layout_job`).
+const DIVISION_GLYPH: &str = wows_toolkit_viewmodel::glyphs::USERS_THREE;
+
+/// The egui semantic palette's `division` (`ui/theme/semantic.rs`), which is
+/// what tints that glyph there.
+const DIVISION_COLOR: u32 = 0xE5C158;
 
 /// Background scan progress, driving the panel's content below the header.
 enum ScanStatus {
@@ -162,10 +164,15 @@ pub struct ReplayBrowser {
     /// The most recently double-clicked leaf's path -- the "open" intent's
     /// minimal stand-in for Milestone 5's dock wiring (see the module doc).
     open_requested: Option<PathBuf>,
-    /// The shared preloaded game data (see `set_game_data`). Anything but
-    /// `Ready` translates every label to its untranslated raw fallback (see
-    /// `translate_replay`).
+    /// The shared preloaded game data (see `set_game_data`). Rows are named
+    /// against it, so the panel waits for it rather than listing raw ids.
     game_data: GameData,
+    /// What the replay index knows about each listed file: outcome, damage,
+    /// kills and division. Empty until the index answers (see
+    /// `load_summaries`), which is what leaves a row reading "not indexed".
+    summaries: HashMap<PathBuf, RowSummary>,
+    /// The locale the stats line's figures are grouped in.
+    locale: Option<String>,
     /// The build cache a hovered row's preview is baked against. Separate
     /// from `game_data`: that one is the currently installed build's metadata
     /// for naming rows, this one loads whichever build a replay was recorded
@@ -214,6 +221,8 @@ impl ReplayBrowser {
             selected_path: None,
             open_requested: None,
             game_data: GameData::Loading,
+            summaries: HashMap::new(),
+            locale: None,
             build_cache: None,
             preview: PreviewHover::default(),
             preview_anchor: Point::default(),
@@ -269,6 +278,53 @@ impl ReplayBrowser {
         self.build_cache = cache;
     }
 
+    /// The locale the rows' figures are grouped in.
+    pub fn set_locale(&mut self, locale: Option<String>, cx: &mut Context<Self>) {
+        if self.locale == locale {
+            return;
+        }
+        self.locale = locale;
+        self.rebuild_tree(cx);
+        cx.notify();
+    }
+
+    /// Reads what the replay index knows about the listed files.
+    ///
+    /// One query over the live source rather than one per row: a listing can
+    /// hold thousands of replays. A row with no summary reads as not indexed,
+    /// which is what the egui listing shows for the same file.
+    pub fn load_summaries(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        cx.spawn(async move |this, cx| {
+            let loaded = crate::runtime::spawn(cx, async move {
+                let Some(source) = query::live_source_id(&pool).await? else {
+                    return Ok(HashMap::new());
+                };
+                query::row_summaries_for_source(&pool, source).await
+            })
+            .await;
+
+            let summaries = match loaded {
+                Ok(Ok(summaries)) => summaries,
+                Ok(Err(err)) => {
+                    tracing::warn!("replay browser: the index summaries could not be read: {err}");
+                    return;
+                }
+                Err(err) => {
+                    tracing::warn!("replay browser: the index summaries did not load: {err}");
+                    return;
+                }
+            };
+
+            let _ = this.update(cx, |this, cx| {
+                this.summaries = summaries;
+                this.rebuild_tree(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// The pointer settled on a row: after the shared dwell, its battle plays
     /// back beside the listing.
     fn hover_leaf(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
@@ -316,13 +372,32 @@ impl ReplayBrowser {
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
-        let provider = self.game_data.provider();
-        let translated: Vec<ReplayLite> = self.files.iter().map(|raw| translate_replay(raw, provider)).collect();
-        let nodes = build_browser_tree(&translated, self.grouping);
+        let Some(provider) = self.game_data.provider() else {
+            // Every label would be a raw id; the panel waits instead (see
+            // `render`), so there is nothing worth building yet.
+            return;
+        };
+        let locale = self.locale.as_deref();
+        let translated: Vec<ReplayLite> = self
+            .files
+            .iter()
+            .map(|raw| ReplayLite {
+                path: raw.path.clone(),
+                identity: listed_row_identity(&raw.listed, provider),
+                stats: resolve_row_stats(None, self.summaries.get(&raw.path)),
+            })
+            .collect();
+        // The hover text is assembled per replay rather than per node: a leaf
+        // knows its path, and the tree nodes carry only what they draw.
+        let mut hover: HashMap<PathBuf, String> =
+            translated.iter().map(|r| (r.path.clone(), hover_text(&r.identity, &r.stats, locale))).collect();
+        let nodes = build_browser_tree(&translated, self.grouping, locale);
         let mut leaf_info = HashMap::new();
         let mut next_group_id = 0usize;
-        let items: Vec<TreeItem> =
-            nodes.into_iter().map(|node| node_to_tree_item(node, &mut next_group_id, &mut leaf_info)).collect();
+        let items: Vec<TreeItem> = nodes
+            .into_iter()
+            .map(|node| node_to_tree_item(node, &mut next_group_id, &mut leaf_info, &mut hover))
+            .collect();
         self.leaf_info = Rc::new(leaf_info);
         self.tree_state.update(cx, |state, cx| state.set_items(items, cx));
     }
@@ -351,32 +426,39 @@ fn node_to_tree_item(
     node: BrowserNode,
     next_group_id: &mut usize,
     leaf_info: &mut HashMap<SharedString, LeafInfo>,
+    hover: &mut HashMap<PathBuf, String>,
 ) -> TreeItem {
     match node {
         BrowserNode::Group { label, children } => {
             let id: SharedString = format!("replay-browser-group-{next_group_id}").into();
             *next_group_id += 1;
             let children: Vec<TreeItem> =
-                children.into_iter().map(|child| node_to_tree_item(child, next_group_id, leaf_info)).collect();
+                children.into_iter().map(|child| node_to_tree_item(child, next_group_id, leaf_info, hover)).collect();
             TreeItem::new(id, label).children(children).expanded(true)
         }
-        BrowserNode::Leaf { label, path, battle_result } => {
+        BrowserNode::Leaf { label, stats, path, outcome, in_division } => {
             let id: SharedString = path.to_string_lossy().into_owned().into();
-            leaf_info.insert(id.clone(), LeafInfo { path, battle_result });
+            let hover = hover.remove(&path).unwrap_or_default();
+            leaf_info.insert(
+                id.clone(),
+                LeafInfo { path, stats: Rc::new(stats), outcome, in_division, hover: hover.into() },
+            );
             TreeItem::new(id, label)
         }
     }
 }
 
-/// Maps a leaf's battle result to its label color: Win/Loss/Draw get the
+/// Maps a leaf's outcome to its label color: Win/Loss/Draw get the
 /// win/loss/draw palette (`table.rs::resolve_color`, the same one the player
-/// table uses), an unknown result (the common case for this milestone's
-/// header-only scan; see the module doc) is left uncolored.
-fn leaf_label_color(battle_result: Option<BattleResult>) -> Option<Hsla> {
-    let outcome = match battle_result? {
-        BattleResult::Win(_) => BattleOutcome::Win,
-        BattleResult::Loss(_) => BattleOutcome::Loss,
-        BattleResult::Draw => BattleOutcome::Draw,
+/// table uses), an outcome the index does not know is left uncolored --
+/// matching the egui row, which draws an `Unknown` outcome in the plain text
+/// colour (`listing_row::row_layout_job`).
+fn leaf_label_color(outcome: MatchOutcome) -> Option<Hsla> {
+    let outcome = match outcome {
+        MatchOutcome::Win => BattleOutcome::Win,
+        MatchOutcome::Loss => BattleOutcome::Loss,
+        MatchOutcome::Draw => BattleOutcome::Draw,
+        MatchOutcome::Unknown => return None,
     };
     Some(resolve_color(ColorRole::WinLoss(outcome)))
 }
@@ -392,20 +474,44 @@ fn render_browser_item(
     let is_folder = entry.is_folder();
     let leaf = (!is_folder).then(|| leaf_info.get(&item.id)).flatten();
 
-    let mut label_el = div().flex_1().overflow_hidden().text_ellipsis().whitespace_nowrap();
+    // Line one names the battle and is tinted by its outcome; line two, in
+    // de-emphasised text, reports it. The same two lines the egui row draws
+    // (`listing_row::row_layout_job`), as two elements rather than one
+    // layout job.
+    let mut identity_el = div().overflow_hidden().text_ellipsis().whitespace_nowrap();
     if let Some(leaf) = leaf {
-        label_el = label_el.when_some(leaf_label_color(leaf.battle_result), |el, color| el.text_color(color));
+        identity_el = identity_el.when_some(leaf_label_color(leaf.outcome), |el, color| el.text_color(color));
     }
-    label_el = label_el.child(item.label.clone());
+    let identity_el = h_flex().gap_1().items_center().child(identity_el.child(item.label.clone())).when_some(
+        leaf.filter(|leaf| leaf.in_division),
+        |row, _| {
+            row.child(crate::icons::icon(DIVISION_GLYPH).text_color(resolve_color(ColorRole::Fixed(DIVISION_COLOR))))
+        },
+    );
 
-    let mut row = h_flex().gap_1().items_center().pl(px(16.) * entry.depth());
+    let mut lines = v_flex().flex_1().overflow_hidden().child(identity_el);
+    if let Some(leaf) = leaf {
+        // The glyphs live in the icon font, the figures in the UI font, so
+        // the line is drawn from its pieces rather than as one string.
+        let stats =
+            h_flex().text_xs().opacity(0.6).overflow_hidden().children(leaf.stats.iter().map(|part| match part {
+                LinePart::Text(text) => div().whitespace_nowrap().child(text.clone()).into_any_element(),
+                LinePart::Glyph(glyph) => crate::icons::icon(glyph).into_any_element(),
+            }));
+        lines = lines.child(stats);
+    }
+
+    // The tree measures one row and gives every row that height, so the
+    // breathing room between a row's own two lines and the next row's has to
+    // come from the row itself.
+    let mut row = h_flex().gap_1().items_start().py_0p5().pl(px(16.) * entry.depth());
     if is_folder {
         let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
         row = row.child(Icon::new(chevron));
     } else {
         row = row.child(div().w(px(16.)));
     }
-    row = row.child(label_el);
+    row = row.child(lines);
 
     let mut list_item = ListItem::new(ix).selected(selected).child(row);
 
@@ -482,7 +588,7 @@ impl Render for ReplayBrowser {
         // at the pointer like the egui app's own hover popup
         // (`ui/replay_parser/preview_popup.rs`), and deferred so it paints
         // over the panel rather than inside its scroll area.
-        let preview_content: Option<AnyElement> = match self.preview.frame() {
+        let preview_map: Option<AnyElement> = match self.preview.frame() {
             Some(frame) => Some(img(frame).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)).into_any_element()),
             // A bake reads the replay and loads the build it was recorded on,
             // which takes seconds the first time; the egui popup says so with
@@ -498,18 +604,29 @@ impl Render for ReplayBrowser {
             ),
             None => None,
         };
-        let preview_popup = preview_content.map(|content| {
+        // Under the map: the detail the two drawn lines drop, in the words
+        // the egui tooltip uses (`listing_row::hover_text`).
+        let hover_text = self
+            .preview
+            .watched_path()
+            .and_then(|path| self.leaf_info.values().find(|leaf| leaf.path == path))
+            .map(|leaf| leaf.hover.clone());
+        let preview_popup = preview_map.map(|map| {
             let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
             deferred(
                 anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(
-                    div()
+                    v_flex()
+                        .gap_1()
                         .p_1()
                         .rounded(theme.radius)
                         .border_1()
                         .border_color(theme.border)
                         .bg(theme.background)
-                        .child(content),
+                        .child(map)
+                        .when_some(hover_text, |this, text| {
+                            this.child(div().max_w(px(PREVIEW_SIZE)).text_xs().child(text))
+                        }),
                 ),
             )
             .with_priority(1)
@@ -599,16 +716,7 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
         }
 
         match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => {
-                let ship_id = meta.vehicles.iter().find(|vehicle| vehicle.relation == 0).map(|vehicle| vehicle.shipId);
-                out.push(RawReplay {
-                    ship_id,
-                    raw_ship: meta.playerVehicle,
-                    raw_map: meta.mapName,
-                    game_time: meta.dateTime,
-                    path,
-                })
-            }
+            Ok(meta) => out.push(RawReplay { listed: ListedReplay::from_meta(&meta), path }),
             Err(err) => tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta"),
         }
     }
@@ -621,40 +729,6 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
 fn scan_replays_dir(wows_dir: &str) -> Vec<RawReplay> {
     let replays_dir = resolve_replays_dir(Path::new(wows_dir));
     scan_replay_files(&replays_dir)
-}
-
-/// Resolves one `RawReplay` into a `ReplayLite` against `provider` (the
-/// browser's currently adopted game data, `None` before `set_game_data` first
-/// sees `GameDataStatus::Ready` -- see the module doc). Mirrors the egui
-/// app's `Replay::vehicle_name`/`map_name` (`mod.rs:2580`/`2592`) exactly
-/// when `provider` is present; falls back to the untranslated raw fields
-/// otherwise.
-fn translate_replay(raw: &RawReplay, provider: Option<&GameMetadataProvider>) -> ReplayLite {
-    let ship = translate_ship_name(raw.ship_id, &raw.raw_ship, provider);
-    let map = match provider {
-        Some(provider) => translate_map_name(&raw.raw_map, provider),
-        None => raw.raw_map.clone(),
-    };
-    ReplayLite { path: raw.path.clone(), ship, map, game_time: raw.game_time.clone(), battle_result: None }
-}
-
-/// Mirrors `Replay::vehicle_name` (`mod.rs:2580`): resolves `ship_id`'s
-/// translation id via `param_localization_id`, then looks that id up in the
-/// provider's catalog via `localized_name_from_id`. Falls back to
-/// `SPECTATOR_LABEL` when `provider` is present but either `ship_id` is
-/// absent (no relation-0 vehicle in the replay's header) or no translation
-/// resolves, and to `raw_ship` when `provider` itself is not yet loaded.
-fn translate_ship_name(
-    ship_id: Option<GameParamId>,
-    raw_ship: &str,
-    provider: Option<&GameMetadataProvider>,
-) -> String {
-    let Some(provider) = provider else { return raw_ship.to_string() };
-    let Some(ship_id) = ship_id else { return SPECTATOR_LABEL.to_string() };
-    provider
-        .param_localization_id(ship_id)
-        .and_then(|translation_id| provider.localized_name_from_id(&TranslationKey::new(translation_id)))
-        .unwrap_or_else(|| SPECTATOR_LABEL.to_string())
 }
 
 #[cfg(test)]

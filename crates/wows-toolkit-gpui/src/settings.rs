@@ -34,6 +34,9 @@ pub struct GpuiSettings {
     pub twitch_token: Option<TwitchToken>,
     pub twitch_channel: String,
     pub wows_dir: String,
+    /// The locale the app reads numbers and dates in. `None` until one is
+    /// chosen, which formats as `en-US` (see `formatting::separate_number`).
+    pub locale: Option<String>,
     pub current_replay_path: PathBuf,
     pub replay: ReplaySettings,
     /// `AppPreferences.debug_mode` in the egui app: unhides NDA-hidden stats
@@ -76,6 +79,7 @@ impl GpuiSettings {
         let twitch_channel =
             queries::get_setting::<String>(pool, twitch_keys::MONITORED_CHANNEL).await.unwrap_or_default();
         let wows_dir = queries::get_setting::<String>(pool, keys::WOWS_DIR).await.unwrap_or_default();
+        let locale = queries::get_setting::<Option<String>>(pool, keys::LOCALE).await.flatten();
         let current_replay_path =
             queries::get_setting::<PathBuf>(pool, keys::CURRENT_REPLAY_PATH).await.unwrap_or_default();
         let replay = queries::get_setting::<ReplaySettings>(pool, keys::REPLAY_SETTINGS).await.unwrap_or_default();
@@ -104,6 +108,7 @@ impl GpuiSettings {
             twitch_token,
             twitch_channel,
             wows_dir,
+            locale,
             current_replay_path,
             replay,
             debug_mode,
