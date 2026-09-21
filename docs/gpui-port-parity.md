@@ -113,8 +113,12 @@ kept so the next audit does not re-report them.
   ctrl+click now selects a row and the stripe is under it.
 - Double-click adds a tab where egui replaces the focused one; "Open in New
   Tab" is the egui way to get a second tab.
-- No multi-selection, so no batch actions (render N, copy N, set as session
-  stats).
+- [done] Ctrl-clicking marks replays, and a marked row reads as selected. A
+  right-click on one offers the whole set: copy the files, copy the paths, or
+  play each back. Right-clicking a row outside the set acts on that row alone,
+  since the reader has moved on from the set.
+- Set as / Add to Session Stats is still not offered, for one replay or for a
+  set: the port has no session-stats writer.
 - The Actions menu is missing entirely: match timeline, open in game, replay
   controls, load other team perspective, hide my test-ship stats.
 - [done] Alt turns the damage breakdown's percentages around.
