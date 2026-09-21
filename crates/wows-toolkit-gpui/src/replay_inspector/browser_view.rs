@@ -598,7 +598,7 @@ fn render_browser_item(
         });
     }
 
-    list_item
+    crate::ui::tree_row(list_item, cx)
 }
 
 impl Render for ReplayBrowser {
