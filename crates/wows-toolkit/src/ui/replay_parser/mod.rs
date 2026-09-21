@@ -2772,17 +2772,13 @@ impl UiReport {
             };
 
             let is_win = matches!(battle_result, Some(BattleResult::Win(_)));
-            let frags = report.kills.unwrap_or(0);
-
-            let stats = crate::util::personal_rating::ShipBattleStats {
+            report.personal_rating = wows_replay_insights::personal_rating::rate_single_battle(
+                pr_data,
                 ship_id,
-                battles: 1,
-                damage: actual_damage,
-                wins: if is_win { 1 } else { 0 },
-                frags,
-            };
-
-            report.personal_rating = pr_data.calculate_pr(&[stats]);
+                actual_damage,
+                report.kills.unwrap_or(0),
+                is_win,
+            );
         }
     }
 }

@@ -31,7 +31,7 @@ use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedBuild;
 use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
-use wows_replay_insights::personal_rating::ShipBattleStats;
+use wows_replay_insights::personal_rating::rate_single_battle;
 use wows_replays::Rc as ReplayRc;
 use wows_replays::ReplayMeta;
 use wows_replays::analyzer::battle_controller::BattleResult;
@@ -461,15 +461,7 @@ impl ReplayReportModel {
                 continue;
             };
 
-            let stats = ShipBattleStats {
-                ship_id,
-                battles: 1,
-                damage: actual_damage,
-                wins: if is_win { 1 } else { 0 },
-                frags: row.kills.unwrap_or(0),
-            };
-
-            row.personal_rating = pr_data.calculate_pr(&[stats]);
+            row.personal_rating = rate_single_battle(pr_data, ship_id, actual_damage, row.kills.unwrap_or(0), is_win);
         }
     }
 }

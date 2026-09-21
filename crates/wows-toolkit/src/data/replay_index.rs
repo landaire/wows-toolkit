@@ -31,7 +31,6 @@ use crate::db::index::rows::VehicleRelation;
 use crate::ui::replay_parser::PlayerReport;
 use crate::ui::replay_parser::Replay;
 use crate::util::personal_rating::PersonalRatingData;
-use crate::util::personal_rating::ShipBattleStats;
 
 pub fn outcome_from(result: Option<&BattleResult>) -> MatchOutcome {
     match result {
@@ -292,15 +291,14 @@ pub async fn write_index(
 /// one shape is what stops a repaired row from disagreeing with a freshly
 /// indexed one.
 pub fn single_battle_pr(pr_data: &PersonalRatingData, inputs: &PrInputs) -> Option<f64> {
-    pr_data
-        .calculate_pr(&[ShipBattleStats {
-            ship_id: inputs.ship_id,
-            battles: 1,
-            damage: inputs.damage,
-            wins: u32::from(inputs.is_win),
-            frags: inputs.kills,
-        }])
-        .map(|result| result.pr)
+    wows_replay_insights::personal_rating::rate_single_battle(
+        pr_data,
+        inputs.ship_id,
+        inputs.damage,
+        inputs.kills,
+        inputs.is_win,
+    )
+    .map(|result| result.pr)
 }
 
 /// Fill the ratings a freshly mapped set of rows is missing, before it is
