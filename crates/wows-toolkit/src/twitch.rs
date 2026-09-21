@@ -1,11 +1,8 @@
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::str::FromStr;
 
 use jiff::Timestamp;
-use serde::Deserialize;
-use serde::Serialize;
 use twitch_api::HelixClient;
 use twitch_api::helix;
 use twitch_api::helix::chat::get_chatters;
@@ -13,79 +10,9 @@ use twitch_api::twitch_oauth2::TwitchToken;
 use twitch_api::twitch_oauth2::UserToken;
 use twitch_api::types::UserId;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Token {
-    username: String,
-    user_id: u64,
-    client_id: String,
-    oauth_token: String,
-}
-
-// TODO: some features here may be desired.
-#[allow(dead_code)]
-impl Token {
-    pub fn username(&self) -> &str {
-        &self.username
-    }
-
-    pub fn user_id(&self) -> u64 {
-        self.user_id
-    }
-
-    pub fn client_id(&self) -> &str {
-        &self.client_id
-    }
-
-    pub fn oauth_token(&self) -> &str {
-        &self.oauth_token
-    }
-}
-
-impl FromStr for Token {
-    type Err = ();
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let parts = s.split(';');
-        let mut username = None;
-        let mut user_id = None;
-        let mut client_id = None;
-        let mut oauth_token = None;
-
-        for part in parts {
-            if part.is_empty() {
-                continue;
-            }
-
-            let mut split = part.split('=');
-            let key = split.next().ok_or(())?;
-            let value = split.next().ok_or(())?;
-            match key {
-                "username" => {
-                    username = Some(value.to_string());
-                }
-                "user_id" => {
-                    user_id = Some(value.parse().map_err(|_| ())?);
-                }
-                "client_id" => {
-                    client_id = Some(value.to_string());
-                }
-                "oauth_token" => {
-                    oauth_token = Some(value.to_string());
-                }
-                _ => {
-                    return Err(());
-                }
-            }
-        }
-
-        Ok(Token {
-            username: username.ok_or(())?,
-            user_id: user_id.ok_or(())?,
-            client_id: client_id.ok_or(())?,
-            oauth_token: oauth_token.ok_or(())?,
-        })
-    }
-}
+/// The Twitch credential and the keys it is stored under, shared with the
+/// GPUI port so both front ends read one login.
+pub use wows_toolkit_viewmodel::twitch::Token;
 
 #[derive(Debug)]
 pub enum TwitchUpdate {

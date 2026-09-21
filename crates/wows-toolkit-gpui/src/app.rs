@@ -32,6 +32,8 @@ use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 use wows_toolkit_viewmodel::settings::keys;
+use wows_toolkit_viewmodel::twitch::Token as TwitchToken;
+use wows_toolkit_viewmodel::twitch::keys as twitch_keys;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AppTab {
@@ -75,7 +77,9 @@ impl AppTab {
 /// Load status of the settings snapshot fetched from the shared config DB.
 enum SettingsState {
     Loading,
-    Loaded(GpuiSettings),
+    /// Boxed: the settings are far larger than the other variants, and this
+    /// enum is a field of the app itself.
+    Loaded(Box<GpuiSettings>),
     Failed(String),
 }
 
@@ -90,6 +94,12 @@ pub struct App {
     /// changed from the Settings tab; a zoom change re-applies the theme, so
     /// it has to be kept rather than re-read.
     theme: ThemeChoice,
+    /// What the last credential paste did, shown beside the button. `None`
+    /// before anything has been pasted this session.
+    twitch_paste: Option<Result<String, String>>,
+    twitch_channel_input: Entity<InputState>,
+    /// The chat poll, owned so it stops with the app rather than outliving it.
+    _twitch_poll: Option<Task<()>>,
     zoom_slider: Entity<SliderState>,
     /// Replay Inspector tab: the file browser plus the per-replay dock.
     /// Starts its background directory scan once `apply_settings` knows the
@@ -145,6 +155,8 @@ impl App {
         let player_tracker = cx.new(|cx| PlayerTrackerView::new(window, cx));
         let search = cx.new(|cx| SearchView::new(window, cx));
         let wows_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("World of Warships directory"));
+        let twitch_channel_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder("Channel to watch (blank: your own)"));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
@@ -163,6 +175,9 @@ impl App {
 
         Self {
             theme: ThemeChoice::default(),
+            twitch_paste: None,
+            twitch_channel_input,
+            _twitch_poll: None,
             active_tab: AppTab::ReplayInspector,
             settings: SettingsState::Loading,
             zoom: DEFAULT_ZOOM,
@@ -226,7 +241,68 @@ impl App {
     /// Starts the Player Tracker's first index query, once the config
     /// database is open.
     pub fn start_player_tracker(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {
+        self.start_twitch_poll(pool.clone(), cx);
         self.player_tracker.update(cx, |tracker, cx| tracker.refresh(pool, cx));
+    }
+
+    /// Polls the watched channel's chat while a credential is stored.
+    ///
+    /// The observations go to the shared database, which is where the roster
+    /// chip reads them from and where the egui app writes its own. Without a
+    /// credential there is nothing to poll and the task is not started: the
+    /// chip then shows whatever the other app collected.
+    fn start_twitch_poll(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {
+        let Some(settings) = self.settings_mut() else { return };
+        let Some(token) = settings.twitch_token.clone() else { return };
+        let channel = settings.twitch_channel.clone();
+        let proxy = settings.proxy_url.clone();
+
+        self._twitch_poll = Some(cx.spawn(async move |_this, cx| {
+            let client = match crate::http::client(&proxy, reqwest::redirect::Policy::default()) {
+                Ok(client) => client,
+                Err(err) => {
+                    tracing::warn!("twitch: no client to poll with: {err}");
+                    return;
+                }
+            };
+
+            let session = match crate::runtime::spawn(cx, {
+                let client = client.clone();
+                async move { crate::twitch::Session::open(&token, &channel, client).await }
+            })
+            .await
+            {
+                Ok(Ok(session)) => session,
+                Ok(Err(err)) => {
+                    tracing::warn!("twitch: the stored credential is not usable: {err}");
+                    return;
+                }
+                Err(err) => {
+                    tracing::warn!("twitch: the credential check did not complete: {err}");
+                    return;
+                }
+            };
+            let session = std::sync::Arc::new(session);
+
+            loop {
+                let polled = crate::runtime::spawn(cx, {
+                    let session = std::sync::Arc::clone(&session);
+                    let pool = pool.clone();
+                    async move { session.poll_once(&pool, jiff::Timestamp::now()).await }
+                })
+                .await;
+
+                match polled {
+                    Ok(Ok(seen)) => tracing::debug!("twitch: recorded {seen} chat observation(s)"),
+                    // A poll that fails says nothing about the next one: the
+                    // channel may simply have gone offline.
+                    Ok(Err(err)) => tracing::warn!("twitch: a chat poll failed: {err}"),
+                    Err(err) => tracing::warn!("twitch: a chat poll did not complete: {err}"),
+                }
+
+                cx.background_executor().timer(crate::twitch::poll_interval()).await;
+            }
+        }));
     }
 
     /// Adopts the session statistics read from the config database. The
@@ -243,6 +319,8 @@ impl App {
     pub fn apply_settings(&mut self, settings: GpuiSettings, window: &mut Window, cx: &mut Context<Self>) {
         self.zoom = settings.zoom;
         self.theme = settings.theme;
+        let channel = settings.twitch_channel.clone();
+        self.twitch_channel_input.update(cx, |state, cx| state.set_value(channel, window, cx));
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
         let wows_dir = settings.wows_dir.clone();
@@ -273,7 +351,7 @@ impl App {
             unpacker.set_output_dir(output_dir, window, cx);
         });
         self.poll_armor_game_data(cx);
-        self.settings = SettingsState::Loaded(settings);
+        self.settings = SettingsState::Loaded(Box::new(settings));
     }
 
     /// Record that the DB load failed. Called once from `main.rs` in place of
@@ -391,6 +469,21 @@ impl App {
         settings_store::save(keys::PROXY_URL, &url, cx);
     }
 
+    /// What the last credential paste did. Test-only.
+    #[cfg(test)]
+    pub(crate) fn twitch_paste_outcome(&self) -> Option<Result<String, String>> {
+        self.twitch_paste.clone()
+    }
+
+    /// The stored Twitch credential. Test-only.
+    #[cfg(test)]
+    pub(crate) fn stored_twitch_token(&self) -> Option<&TwitchToken> {
+        match &self.settings {
+            SettingsState::Loaded(settings) => settings.twitch_token.as_ref(),
+            _ => None,
+        }
+    }
+
     fn settings_mut(&mut self) -> Option<&mut GpuiSettings> {
         match &mut self.settings {
             SettingsState::Loaded(settings) => Some(settings),
@@ -402,6 +495,33 @@ impl App {
     ///
     /// Edits take effect immediately and are written as they happen, as the
     /// egui settings tab does; there is no apply step to forget.
+    /// Reads a Twitch credential off the clipboard and stores it.
+    ///
+    /// The credential is pasted rather than obtained through a browser flow,
+    /// which is what the egui app does; what it reports back is which account
+    /// the credential belongs to, or which part of the paste was wrong.
+    fn paste_twitch_token(&mut self, cx: &mut Context<Self>) {
+        let pasted = cx.read_from_clipboard().and_then(|item| item.text());
+        let Some(pasted) = pasted else {
+            self.twitch_paste = Some(Err("The clipboard holds no text".to_string()));
+            cx.notify();
+            return;
+        };
+
+        match pasted.trim().parse::<TwitchToken>() {
+            Ok(token) => {
+                let who = token.username().to_string();
+                self.edit_setting(twitch_keys::TOKEN, cx, |settings| {
+                    settings.twitch_token = Some(token.clone());
+                    token
+                });
+                self.twitch_paste = Some(Ok(who));
+            }
+            Err(err) => self.twitch_paste = Some(Err(err.to_string())),
+        }
+        cx.notify();
+    }
+
     fn edit_setting<T: serde::Serialize>(
         &mut self,
         key: &'static str,
@@ -578,6 +698,35 @@ impl App {
                     .gap_1()
                     .child(div().text_sm().child("Proxy URL"))
                     .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full()),
+            )
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(div().text_sm().child("Twitch"))
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                Button::new("twitch-paste-token")
+                                    .label("Paste credential")
+                                    .compact()
+                                    .tooltip("Reads the credential from the clipboard")
+                                    .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
+                            )
+                            .child(
+                                div()
+                                    .w(px(220.))
+                                    .child(Input::new(&self.twitch_channel_input).id("twitch-channel").small()),
+                            ),
+                    )
+                    .when_some(self.twitch_paste.as_ref(), |this, outcome| {
+                        let (text, dimmed) = match outcome {
+                            Ok(who) => (format!("Signed in as {who}"), true),
+                            Err(why) => (why.clone(), false),
+                        };
+                        this.child(div().text_xs().when(dimmed, |this| this.opacity(0.6)).child(text))
+                    }),
             );
 
         let game = v_flex()

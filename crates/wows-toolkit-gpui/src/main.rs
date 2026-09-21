@@ -13,6 +13,7 @@ mod settings;
 mod settings_store;
 mod stats;
 mod theme;
+mod twitch;
 mod ui;
 mod unpacker;
 mod viewport;
