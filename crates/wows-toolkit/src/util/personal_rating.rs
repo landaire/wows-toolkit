@@ -109,22 +109,14 @@ mod tests {
 
     use super::*;
 
-    /// Path to the checked-in expected values fixture.
-    fn fixture_bytes() -> Vec<u8> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("tests")
-            .join("fixtures")
-            .join("pr_expected_values.json");
-        fs::read(&path).unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()))
+    /// The checked-in expected values, shipped by the viewmodel crate.
+    fn fixture_bytes() -> &'static [u8] {
+        wows_toolkit_viewmodel::personal_rating::EXPECTED_VALUES_FIXTURE
     }
 
     fn loaded_pr_data() -> PersonalRatingData {
         let mut pr = PersonalRatingData::new();
-        pr.load_from_bytes(&fixture_bytes()).expect("should parse expected values JSON");
+        pr.load_from_bytes(fixture_bytes()).expect("should parse expected values JSON");
         pr
     }
 

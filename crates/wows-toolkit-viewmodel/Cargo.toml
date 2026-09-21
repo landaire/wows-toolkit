@@ -10,6 +10,10 @@ license.workspace = true
 name = "wows_toolkit_viewmodel"
 path = "src/lib.rs"
 
+[features]
+# The shipped rating table, for the tests of crates that rate battles.
+test-support = []
+
 [dependencies]
 ciborium.workspace = true
 # HTML entities in game chat, which the export decodes before writing.

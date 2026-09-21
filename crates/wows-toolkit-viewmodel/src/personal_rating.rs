@@ -112,6 +112,11 @@ pub fn chip_text(category: PersonalRatingCategory, dark_mode: bool) -> u32 {
 /// The cache file, under the toolkit's storage directory.
 pub const EXPECTED_VALUES_FILENAME: &str = "pr_expected_values.json";
 
+/// The shipped expected-values table, for tests that want real figures rather
+/// than invented ones. Behind `test-support` so only a test build carries it.
+#[cfg(any(test, feature = "test-support"))]
+pub const EXPECTED_VALUES_FIXTURE: &[u8] = include_bytes!("../tests/fixtures/pr_expected_values.json");
+
 /// Where the expected values are cached.
 ///
 /// Falls back to a bare relative name when there is no storage directory,

@@ -825,17 +825,8 @@ mod rating_tests {
     /// The expected-values table the app ships, so a rating test runs against
     /// real figures rather than invented ones.
     fn fixture_table() -> PersonalRatingData {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("the crate sits under crates/")
-            .parent()
-            .expect("crates/ sits at the repository root")
-            .join("tests")
-            .join("fixtures")
-            .join("pr_expected_values.json");
-        let bytes = std::fs::read(&path).expect("the fixture is checked in");
         let mut table = PersonalRatingData::new();
-        table.load_from_bytes(&bytes).expect("the fixture parses");
+        table.load_from_bytes(crate::personal_rating::EXPECTED_VALUES_FIXTURE).expect("the fixture parses");
         table
     }
 

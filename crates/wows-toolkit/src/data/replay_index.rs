@@ -548,17 +548,9 @@ mod tests {
     const RATED_SHIP: u64 = 3_374_266_064;
 
     fn loaded_pr_data() -> PersonalRatingData {
-        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .unwrap()
-            .parent()
-            .unwrap()
-            .join("tests")
-            .join("fixtures")
-            .join("pr_expected_values.json");
-        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("missing fixture {}: {e}", path.display()));
         let mut pr = PersonalRatingData::new();
-        pr.load_from_bytes(&bytes).expect("fixture should parse");
+        pr.load_from_bytes(wows_toolkit_viewmodel::personal_rating::EXPECTED_VALUES_FIXTURE)
+            .expect("fixture should parse");
         pr
     }
 
