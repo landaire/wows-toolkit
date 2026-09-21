@@ -16,21 +16,73 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
 use wows_toolkit_config::index::query_ast::MatchExpr;
+use wows_toolkit_config::index::query_ast::Op;
+use wows_toolkit_config::index::query_text;
+use wows_toolkit_viewmodel::query_bar::label;
 use wows_toolkit_viewmodel::query_bar::label::NameCache;
 use wows_toolkit_viewmodel::query_bar::label::SegmentRole;
+use wows_toolkit_viewmodel::query_bar::select;
 use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::query_bar::tokens;
+use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use wows_toolkit_viewmodel::query_bar::tokens::TokenKind;
 
 /// How many completions the dropdown offers at once. The egui bar shows the
 /// same number before it scrolls.
 pub const MAX_SUGGESTIONS: usize = 8;
 
+/// Element ids are one range per pill, so a segment's id cannot collide with
+/// the next pill's. No term renders more than a field, an operator and a
+/// value.
+const SEGMENTS_PER_PILL: usize = 8;
+
+/// An operator a pill's operator segment may be changed to.
+pub struct OperatorChoice {
+    pub op: Op,
+    pub label: String,
+}
+
+/// The operators the term at `path` accepts, and which one it currently
+/// carries.
+///
+/// `None` for a path that names no single term, which is every path stopping
+/// on a roster quantifier with more than one leaf: there is no one operator
+/// to change.
+pub fn operator_choices(expr: &MatchExpr, path: &[usize]) -> Option<(Vec<OperatorChoice>, Op)> {
+    let (allowed, current) = select::term_op_at(expr, path)?;
+    let choices = allowed
+        .iter()
+        .copied()
+        .filter(|op| select::can_set_op(expr, path, *op))
+        .map(|op| OperatorChoice { op, label: label::op_label(op) })
+        .collect();
+    Some((choices, current))
+}
+
+/// `expr` with the operator at `path` changed, printed back as query text.
+///
+/// `None` when the edit does not apply, which is what `can_set_op` refuses:
+/// the bar then leaves the text alone rather than writing a query that says
+/// something else.
+pub fn with_operator(expr: &MatchExpr, path: &[usize], op: Op) -> Option<String> {
+    let mut edited = expr.clone();
+    select::set_op(&mut edited, path, op).then(|| query_text::print_query(&edited))
+}
+
 /// The parsed query as a row of pills.
 ///
 /// `None` when the query is empty or does not parse: there is nothing to read
 /// back, and the bar says so in its own way rather than drawing half a query.
-pub fn pill_strip(expr: &MatchExpr, cache: &NameCache, cx: &App) -> Option<AnyElement> {
+///
+/// `on_operator` is handed the path of a pill whose operator segment was
+/// clicked, together with the app it was clicked in, which is what opens the
+/// picker for it.
+pub fn pill_strip(
+    expr: &MatchExpr,
+    cache: &NameCache,
+    cx: &App,
+    on_operator: impl Fn(NodePath, &mut App) + Clone + 'static,
+) -> Option<AnyElement> {
     let stream = tokens::tokenize(expr, cache);
     if stream.is_empty() {
         return None;
@@ -52,15 +104,27 @@ pub fn pill_strip(expr: &MatchExpr, cache: &NameCache, cx: &App) -> Option<AnyEl
                     .rounded_sm()
                     .border_1()
                     .border_color(border);
-                for segment in segments {
+                for (part, segment) in segments.iter().enumerate() {
                     // The field and the operator are chrome around the value,
                     // which is the part the reader is looking for.
                     let dimmed = !matches!(segment.role, SegmentRole::Value);
+                    let is_operator = matches!(segment.role, SegmentRole::Operator);
+                    let path = token.path.clone();
+                    let open = on_operator.clone();
                     pill = pill.child(
                         div()
+                            .id(("search-pill-segment", index * SEGMENTS_PER_PILL + part))
+                            .test_support()
                             .text_xs()
                             .when(dimmed, |this| this.opacity(0.7))
                             .when(!dimmed, |this| this.font_weight(FontWeight::MEDIUM))
+                            // Only the operator is editable from the pill so
+                            // far; the rest reads back and is edited as text.
+                            .when(is_operator, |this| {
+                                this.cursor_pointer()
+                                    .underline()
+                                    .on_click(move |_event, _window, cx: &mut App| open(path.clone(), cx))
+                            })
                             .child(segment.text.clone()),
                     );
                 }
@@ -169,6 +233,33 @@ mod tests {
     #[test]
     fn no_more_than_the_dropdown_can_show_are_offered() {
         assert!(completions("").len() <= super::MAX_SUGGESTIONS);
+    }
+
+    /// The operator picker offers what the term accepts, and taking one
+    /// rewrites only that operator.
+    #[test]
+    fn an_operator_can_be_changed_from_its_pill() {
+        use wows_toolkit_config::index::query_text;
+        use wows_toolkit_viewmodel::query_bar::label::NameCache;
+        use wows_toolkit_viewmodel::query_bar::select;
+        use wows_toolkit_viewmodel::query_bar::tokens;
+
+        let expr = query_text::parse_query("build>9000000").expect("the fixture parses");
+        let cache = NameCache::default();
+        let path = select::pill_paths(&tokens::tokenize(&expr, &cache)).first().cloned().expect("one pill");
+
+        let (choices, current) = super::operator_choices(&expr, &path).expect("a single term has an operator");
+        assert!(choices.len() > 1, "there is something to change it to");
+        assert!(choices.iter().all(|choice| !choice.label.is_empty()), "every choice reads as something");
+
+        let other = choices.iter().find(|choice| choice.op != current).expect("another operator");
+        let rewritten = super::with_operator(&expr, &path, other.op).expect("the edit applies");
+
+        assert_ne!(rewritten, query_text::print_query(&expr), "the query changed");
+        assert!(rewritten.contains("build"), "and it is still the same term");
+        let reparsed = query_text::parse_query(&rewritten).expect("what it prints, it can read back");
+        let (_, op, _) = select::term_at(&reparsed, &path).expect("still one term");
+        assert_eq!(op, other.op, "the operator is the one taken");
     }
 
     /// Every category renders, so a new one cannot reach the screen as an

@@ -969,3 +969,57 @@ fn the_query_bar_offers_completions_and_takes_them(cx: &mut TestAppContext) {
     })
     .expect("the test window stays open");
 }
+
+/// A pill's operator segment opens a picker, and taking a different operator
+/// rewrites that term in the query without disturbing the rest of it.
+#[gpui_kit::test]
+fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+
+        window.click(SEARCH_QUERY, cx);
+        window.input("build>9000000", cx);
+        window.click("search-run", cx);
+        window.render_frame(cx);
+
+        // The query parsed, so it reads back as a pill.
+        assert!(window.try_find("search-pills").is_some(), "the query is drawn as pills");
+        assert!(window.try_find(("search-operator", 0usize)).is_none(), "no picker before one is asked for");
+
+        // The operator is the second segment of the first pill.
+        window.click(("search-pill-segment", 1usize), cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        assert!(
+            window.find(("search-operator-button", 0usize)).label().is_some(),
+            "the picker offers the operators this term takes, each reading as something"
+        );
+
+        // Whichever is not the current one is a real change.
+        let mut target = None;
+        for index in 0..4usize {
+            if let Some(found) = window.try_find(("search-operator", index))
+                && found.selected() == Some(false)
+            {
+                target = Some(index);
+                break;
+            }
+        }
+        let target = target.expect("there is another operator to take");
+
+        window.click(("search-operator", target), cx);
+        window.render_frame(cx);
+
+        let found = window.find(SEARCH_QUERY);
+        let rewritten = found.value().expect("the bar still holds a query");
+        assert!(rewritten.contains("build"), "the term survives the edit: {rewritten}");
+        assert_ne!(rewritten, "build>9000000", "and its operator changed");
+        assert!(window.try_find(("search-operator", 0usize)).is_none(), "the picker closes once taken");
+    })
+    .expect("the test window stays open");
+}
