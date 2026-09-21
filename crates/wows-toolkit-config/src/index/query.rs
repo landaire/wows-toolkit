@@ -878,6 +878,36 @@ pub async fn distinct_players(pool: &SqlitePool, filter: &MatchFilter) -> Result
         .collect()
 }
 
+/// The accounts among `names` the index has ever seen, keyed by the name
+/// matched, lower-cased.
+///
+/// Answers "have I met this player before" for a roster in hand. Scoped to
+/// the names asked about rather than walking the whole index, which on a
+/// large one is hundreds of thousands of rows for a question about two dozen
+/// people. An empty `names` asks nothing and queries nothing.
+pub async fn accounts_named(pool: &SqlitePool, names: &[String]) -> Result<HashMap<String, AccountId>, IndexError> {
+    if names.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut qb: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "SELECT DISTINCT v.account_id, v.player_name FROM indexed_vehicle v          WHERE v.account_id <> 0 AND v.player_name COLLATE NOCASE IN (",
+    );
+    let mut sep = qb.separated(", ");
+    for name in names {
+        sep.push_bind(name.clone());
+    }
+    qb.push(")");
+
+    let rows = qb.build().fetch_all(pool).await?;
+    rows.iter()
+        .map(|row| {
+            let name: String = row.try_get("player_name")?;
+            Ok((name.to_lowercase(), AccountId::from(row.try_get::<i64, _>("account_id")?)))
+        })
+        .collect()
+}
+
 /// Distinct self-perspective account ids across the index (`replay_record.self_account_id`).
 /// `filter.source_ids` scopes to groups; other filter fields are ignored here.
 pub async fn self_account_ids(pool: &SqlitePool, filter: &MatchFilter) -> Result<HashSet<AccountId>, IndexError> {
