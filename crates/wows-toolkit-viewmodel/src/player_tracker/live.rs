@@ -21,7 +21,12 @@ use wowsunpack::game_params::types::Species;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
 
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::match_stats::PlayerStatsOut;
 use crate::match_stats::Region;
+use crate::personal_rating::PersonalRatingCategory;
 
 /// The roster of the match currently in progress, captured from the game's
 /// `tempArenaInfo.json`.
@@ -227,6 +232,82 @@ pub fn build_name_index<'a>(
     }
 
     TrackedIndex { by_name, players }
+}
+
+/// Which scope a roster row's figures come from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WinRateMode {
+    /// The player's whole account.
+    #[default]
+    Overall,
+    /// Only the ship they are in this battle.
+    Ship,
+}
+
+impl WinRateMode {
+    pub const ALL: [WinRateMode; 2] = [Self::Overall, Self::Ship];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Overall => "Overall",
+            Self::Ship => "Ship",
+        }
+    }
+}
+
+/// How much of each player a roster row shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CurrentMatchViewMode {
+    /// One scope's figures, the one the mode selector names.
+    Compact,
+    /// Both scopes at once.
+    #[default]
+    Detailed,
+}
+
+impl CurrentMatchViewMode {
+    pub const ALL: [CurrentMatchViewMode; 2] = [Self::Compact, Self::Detailed];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Compact => "Compact",
+            Self::Detailed => "Detailed",
+        }
+    }
+}
+
+/// Which scopes a row draws, given the view mode and the selected scope.
+pub fn visible_stat_modes(view_mode: CurrentMatchViewMode, selected: WinRateMode) -> Vec<WinRateMode> {
+    match view_mode {
+        CurrentMatchViewMode::Compact => vec![selected],
+        CurrentMatchViewMode::Detailed => vec![WinRateMode::Overall, WinRateMode::Ship],
+    }
+}
+
+/// What one row shows, once the mode has chosen between the account and ship
+/// scopes. Every figure here belongs to the chosen scope, so a row can never
+/// pair one scope's number with another's. The band follows the rate that is
+/// actually shown, so the row colour and the number cannot disagree either.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct RowStats {
+    pub win_rate: Option<f64>,
+    pub battles: Option<i64>,
+    pub avg_damage: Option<i64>,
+    pub pr: Option<f64>,
+    pub band: Option<PersonalRatingCategory>,
+}
+
+/// One player's figures in `mode`'s scope.
+pub fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> RowStats {
+    let Some(stats) = stats else {
+        return RowStats::default();
+    };
+    let (win_rate, battles, avg_damage, pr) = match mode {
+        WinRateMode::Overall => (stats.overall_win_rate, stats.battles, stats.overall_avg_damage, stats.pr),
+        WinRateMode::Ship => (stats.ship_win_rate, stats.ship_battles, stats.ship_avg_damage, stats.ship_pr),
+    };
+
+    RowStats { win_rate, battles, avg_damage, pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
 }
 
 /// Orders one team the way the replay inspector orders players: ship class

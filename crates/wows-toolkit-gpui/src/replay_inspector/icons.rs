@@ -232,7 +232,10 @@ impl IconCache {
         }
     }
 
-    fn load_ship_class(&mut self, species: Species, tint: u32, vfs: &VfsPath, svg_renderer: &SvgRenderer) {
+    /// Loads one ship-class icon, tinted. `pub` so a surface with its own
+    /// rows (the Player Tracker's live roster) can fill the cache without
+    /// going through `populate_from_rows`, which expects replay rows.
+    pub fn load_ship_class(&mut self, species: Species, tint: u32, vfs: &VfsPath, svg_renderer: &SvgRenderer) {
         let Some(bytes) = GuiAsset::ShipClassIcon { species, state: ShipIconState::Alive }.read(vfs, None) else {
             return;
         };
