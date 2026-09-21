@@ -499,6 +499,9 @@ impl ArmorViewerPane {
         let generation = self.ship_load_generation;
 
         self.ship_load = ShipLoadState::Loading { display_name: display_name.clone() };
+        // The viewport shows nothing until a ship arrives, so it says what it
+        // is waiting for rather than inviting a selection already made.
+        target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(true, cx));
         cx.notify();
 
         let task = spawn_load_ship_armor(Arc::clone(&bundle), param_index.clone(), display_name.clone(), cx);
@@ -532,6 +535,7 @@ impl ArmorViewerPane {
                 self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
                 target_viewport.update(cx, |viewport, cx| {
+                    viewport.set_ship_loading(false, cx);
                     // Set before `show_armor`: a reload (Milestone 4 Task 8c)
                     // needs to know which bundle/param_index/display_name to
                     // re-export against, and `show_armor`'s own reset
@@ -543,6 +547,7 @@ impl ArmorViewerPane {
             }
             Err(e) => {
                 tracing::error!("armor viewer: failed to load {display_name}: {e}");
+                target_viewport.update(cx, |viewport, cx| viewport.set_ship_loading(false, cx));
                 self.ship_load = ShipLoadState::Failed { display_name, reason: e.to_string() };
             }
         }
