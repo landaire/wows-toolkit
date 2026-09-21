@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/wows-toolkit",
     "crates/wows-toolkit-config",
+    "crates/wows-toolkit-gpui",
     "crates/wows-toolkit-viewmodel",
     "crates/wows-core",
     "crates/wowsunpack",
@@ -19,9 +20,6 @@ members = [
     "crates/wows-battle-world",
     "build-support/buck/reindeer-features",
 ]
-# Separate cargo workspace: it resolves GPUI, which the shipping egui app must
-# not pull into its lockfile.
-exclude = ["crates/wows-toolkit-gpui"]
 
 [workspace.package]
 version = "1.0.2-beta2"

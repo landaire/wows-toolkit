@@ -5,10 +5,15 @@
 //! GPUI global; work is submitted to it and the result crosses back through
 //! GPUI's own background pool, where it can be awaited like any other `Task`.
 
+use gpui_kit::App;
 use gpui_kit::AppContext as _;
-use gpui_kit::{App, AsyncApp, Global, Task};
+use gpui_kit::AsyncApp;
+use gpui_kit::Global;
+use gpui_kit::Task;
 use std::future::Future;
-use tokio::runtime::{Builder, Handle, Runtime};
+use tokio::runtime::Builder;
+use tokio::runtime::Handle;
+use tokio::runtime::Runtime;
 use tokio::task::JoinHandle;
 
 /// Worker threads for the shared runtime. What is submitted here is sqlx and

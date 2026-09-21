@@ -1,5 +1,11 @@
-use gpui_kit::component::theme::{Theme, ThemeMode, ThemeTokens};
-use gpui_kit::{App, Window, WindowAppearance, px, rgb};
+use gpui_kit::App;
+use gpui_kit::Window;
+use gpui_kit::WindowAppearance;
+use gpui_kit::component::theme::Theme;
+use gpui_kit::component::theme::ThemeMode;
+use gpui_kit::component::theme::ThemeTokens;
+use gpui_kit::px;
+use gpui_kit::rgb;
 
 use wows_toolkit_viewmodel::settings::ThemeChoice;
 
