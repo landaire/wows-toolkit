@@ -4,6 +4,7 @@ mod http;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+mod minimap_preview;
 mod personal_rating;
 mod player_tracker;
 mod replay_inspector;

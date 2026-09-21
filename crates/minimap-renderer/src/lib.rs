@@ -14,6 +14,8 @@ pub mod error;
 pub mod map_data;
 pub mod panel_math;
 #[cfg(feature = "rendering")]
+pub mod preview;
+#[cfg(feature = "rendering")]
 pub mod renderer;
 #[cfg(feature = "rendering")]
 pub mod video;
