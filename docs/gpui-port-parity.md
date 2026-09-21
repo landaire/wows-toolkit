@@ -27,26 +27,21 @@ kept so the next audit does not re-report them.
   between it and the page.
 - [done] The unpacker listing had no column headers and one glyph for every
   file; it now names Name/Size/Type and tells the four file kinds apart.
-- Rows are laid out at `text_base` (16px) inside `ListItem`'s own `py_1 px_3`
-  while the app's body text is 12.5px, so tree rows draw larger and taller
-  than everything around them. Needs a `text_size` on the row plus an
-  override of the component's padding.
-- `.opacity(0.x)` stands in for a dim text tier at ~69 sites; `theme::
-  text_dim()` now exists and should replace them.
-- Popovers and inline panels are pinned to fixed widths (`QUEUE_POPOVER_WIDTH`,
-  the chart settings' 300px, the legend's 140px); most want `max_w` and
-  content sizing.
-- Inputs inside icon rows use `w_full()`, which overflows the row; they want
-  `flex_1().min_w(px(0.))`.
-- No separator primitive: 37 flush `border_b_1` calls against egui's 113
-  spaced `ui.separator()` calls.
+- [done] Tree rows draw at the body size and the body's own padding
+  (`ui::tree_row`).
+- [done] `.opacity(0.x)` stood in for a dim text tier; every text site now
+  takes `theme::text_dim()` or the new `theme::text_faint()`.
+- [done] The queue and dump popovers, the chart settings and the armor
+  legend size to their content between a floor and a cap.
+- [done] Inputs in an icon row take the space the icon leaves.
+- `ui::rule_v` now separates the groups in the stats filter bar and the
+  replay header; the other toolbars still run their controls together.
 - Conditional elements still shift the layout in the settings tab, the
   unpacker's queue bar and the search tab's hint and footer. The armor
   viewer's status strip and the search completions were fixed.
-- The Settings tab does not flag that it needs attention (invalid WoWs
-  directory, rejected Twitch token); egui tints the tab itself.
-- Charts have no vertical gridlines, no legend for bars, and value labels in
-  one tone rather than per series.
+- [done] The Settings tab tints itself when the WoWs directory is invalid.
+- [done] Charts draw both sets of gridlines, a legend, and value labels in
+  each series' own tone.
 
 ## Replay Inspector
 
@@ -64,17 +59,20 @@ kept so the next audit does not re-report them.
   controls, load other team perspective, hide my test-ship stats.
 - Alt-held inverse percentages in the damage breakdown are missing.
 - The Effective Fire Chance section of an expanded row is missing.
-- Chat has no Copy All and no Save To File.
-- A row's hover text is only reachable through the preview popup; with no
-  build loaded there is no hover at all.
+- [done] Chat now copies its whole transcript and saves it to a file.
+- [done] A row's words are the preview popup's own caption, which goes up as
+  soon as the row is hovered rather than waiting for a map.
 - The listing panel cannot be collapsed, and its width is fixed rather than
   fitted to the widest row.
-- Tree expansion and selection are wiped on every rebuild.
+- [done] Tree expansion and selection survive a rebuild.
+- [done] A dock holding several replays drew no tab bar, so only the last one
+  opened was reachable; every dock is skinned now.
 - The incomplete-results warning, the match-context line, the Twitch chip,
   the hidden-profile and disconnect glyphs, and the Skills tier-marker split
   are all missing.
 - Columns cannot be resized; the Name column has no wider range of its own.
-- "Autoload Latest Replay" is a dead control: no replays-directory watcher.
+- [done] The replays directory is watched; a finished match joins the
+  listing and, with the checkbox on, opens.
 
 ## Armor Viewer
 
@@ -90,7 +88,7 @@ kept so the next audit does not re-report them.
 - Splash/blast mode and the splash-box popover are absent.
 - Gap detection, "show hidden plates", the roll slider and the camera-rings
   section are absent.
-- The legend cannot be reopened once closed.
+- [done] The legend reopens from the pane's own strip.
 - Camo selection decodes on the UI thread.
 - Display settings, legend placement and export options are never persisted.
 - Part, material and nation names are shown untranslated.
@@ -104,16 +102,18 @@ kept so the next audit does not re-report them.
 - [done] Ship colours collided; they are spread now.
 - [done] Bar charts no longer pan or zoom, and the ship picker is sorted by
   name.
-- Filter changes are read at startup but never written back, so every filter
-  resets on restart and the egui app keeps showing its own older values.
+- [done] Filter changes are written back, so both front ends read the same
+  values.
 - Chart panes and the dock layout are not persisted.
-- No way to clear session stats, globally or per ship.
+- [done] The filter bar clears the whole session behind a two-press
+  confirm. Per ship is still missing.
 - Charts cannot be copied as an image.
 - Achievements draw a generic star, unsorted, with no description hover.
-- Best-frags and max-damage lines drop the ship that set them.
-- Session PR is plain text rather than a banded chip.
+- [done] The records name the ship that set them.
+- [done] The session rating is a banded chip.
 - The ships table ignores the locale for numbers and column headings.
-- The legend does not toggle series, and the chart has no title over the plot.
+- [done] The chart names itself over the plot. The legend still does not
+  toggle series.
 
 ## Player Tracker
 
@@ -133,7 +133,7 @@ kept so the next audit does not re-report them.
 - The roster's Encounters column is a static "met before" string.
 - Historical rows do not expand; notes are a separate bottom panel, and
   aliases and account ids are invisible.
-- The encounter-severity colour ramp is absent.
+- [done] Encounter counts carry the severity ramp.
 - Period, sort and filter are not persisted.
 - The sub-tabs cannot be split or docked.
 
@@ -145,7 +145,8 @@ kept so the next audit does not re-report them.
 - [done] Outcome and personal rating carry their colour; damage is grouped.
 - The tab never runs a query until Enter; egui opens showing everything and
   re-queries live.
-- Query text, sort order and operator preferences are not persisted.
+- [done] The tab opens on the query it was left with, and saves it back.
+  Sort order and operator preferences are still not persisted.
 - No structural editing: no selection, grouping, negate, delete, ungroup or
   connector flip, and no right-click menu on a pill.
 - No undo/redo in the bar, and no history recall on Up.
@@ -159,8 +160,7 @@ kept so the next audit does not re-report them.
 
 - [done] The listing has column headers, striped rows, file-kind glyphs, a
   chevron per directory and a folder glyph that follows the open state.
-- File rows have almost no context menu: no "View contents" for viewable
-  types, no "Extract as JSON".
+- [done] File rows offer View contents and Extract as JSON.
 - Content-search hits cannot be queued, revealed or inspected by offset.
 - Filter results do not reveal the file in the tree.
 - Extraction progress does not name the file being written.
@@ -171,10 +171,11 @@ kept so the next audit does not re-report them.
   disk usage, delete old versions, check for updates, validate, repair).
 - Automatic replay data export is not configurable.
 - No way to build or rebuild the replay index.
-- No language selector, although the locale is read and used.
+- [done] The language is chosen from a combo.
 - No Twitch "Get Token" link, and a stored credential is invisible.
-- Zoom is not saved.
+- [done] Zoom is saved.
+- [done] The Settings tab flags an invalid WoWs directory on the tab strip.
 - The WoWs directory field has no validation feedback and is not locked
   during a load.
-- `show_entity_id` and `auto_dump_game_data` have no controls.
+- [done] `show_entity_id` has a checkbox. `auto_dump_game_data` does not.
 - The collaboration section is absent.

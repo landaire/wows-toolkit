@@ -184,6 +184,9 @@ enum ScanError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayBrowserEvent {
     OpenReplay(PathBuf),
+    /// The game has just written a replay into the watched directory, and the
+    /// listing now holds it.
+    ReplayAppeared(PathBuf),
 }
 
 pub struct ReplayBrowser {
@@ -224,6 +227,9 @@ pub struct ReplayBrowser {
     /// Where the pointer was when it entered the previewed row, so the popup
     /// is anchored beside it like the egui app's own hover popup.
     preview_anchor: Point<Pixels>,
+    /// The watch on the replays directory. Held because dropping it stops the
+    /// watch; replaced whenever the directory changes.
+    watcher: Option<notify::RecommendedWatcher>,
 }
 
 /// What the browser can translate its labels with.
@@ -267,6 +273,7 @@ impl ReplayBrowser {
             build_cache: None,
             preview: PreviewHover::default(),
             preview_anchor: Point::default(),
+            watcher: None,
         }
     }
 
@@ -389,13 +396,87 @@ impl ReplayBrowser {
         cx.notify();
 
         cx.spawn(async move |this, cx| {
-            let files = cx.background_spawn(async move { scan_replays_dir(&wows_dir) }).await;
+            let replays_dir = resolve_replays_dir(Path::new(&wows_dir));
+            let scanned = replays_dir.clone();
+            let files = cx.background_spawn(async move { scan_replay_files(&scanned) }).await;
             let _ = this.update(cx, |this, cx| {
                 this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
                 this.files = files;
                 this.rebuild_tree(cx);
+                this.watch_replays_dir(replays_dir, cx);
                 cx.notify();
             });
+        })
+        .detach();
+    }
+
+    /// Watches the replays directory so a match the game has just written
+    /// joins the listing without a rescan, which is what makes "Autoload
+    /// Latest Replay" mean anything (the egui app's own watcher,
+    /// `tab_state.rs`).
+    fn watch_replays_dir(&mut self, replays_dir: PathBuf, cx: &mut Context<Self>) {
+        use notify::Watcher as _;
+
+        // Dropped before the new one is installed, so the old directory stops
+        // reporting rather than both being watched.
+        self.watcher = None;
+
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<PathBuf>();
+        let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
+            let Ok(event) = event else { return };
+            if !matches!(
+                event.kind,
+                notify::EventKind::Create(_)
+                    | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To))
+            ) {
+                return;
+            }
+            for path in event.paths {
+                if is_finished_replay(&path) {
+                    // The receiver is gone once the directory changes or the
+                    // app closes; this runs on notify's own thread, so a send
+                    // that fails is dropped rather than unwinding it.
+                    let _ = tx.unbounded_send(path);
+                }
+            }
+        });
+        let mut watcher = match watcher {
+            Ok(watcher) => watcher,
+            Err(err) => {
+                tracing::warn!(error = ?err, "replay browser: no filesystem watcher available");
+                return;
+            }
+        };
+        if let Err(err) = watcher.watch(&replays_dir, notify::RecursiveMode::NonRecursive) {
+            tracing::warn!(dir = %replays_dir.display(), error = ?err, "replay browser: the replays directory is not watchable");
+            return;
+        }
+        self.watcher = Some(watcher);
+
+        cx.spawn(async move |this, cx| {
+            while let Some(path) = futures::StreamExt::next(&mut rx).await {
+                // The game creates the file and then writes it, so the header
+                // is not there yet when the event arrives.
+                let read = path.clone();
+                let Some(raw) = cx.background_spawn(async move { read_replay_when_complete(&read) }).await else {
+                    continue;
+                };
+                let appeared = raw.path.clone();
+                let updated = this.update(cx, |this, cx| {
+                    if this.files.iter().any(|existing| existing.path == raw.path) {
+                        return false;
+                    }
+                    this.files.push(raw);
+                    this.status = ScanStatus::Loaded;
+                    this.rebuild_tree(cx);
+                    cx.emit(ReplayBrowserEvent::ReplayAppeared(appeared));
+                    cx.notify();
+                    true
+                });
+                if updated.is_err() {
+                    break;
+                }
+            }
         })
         .detach();
     }
@@ -592,11 +673,12 @@ fn render_browser_item(
     if let Some(leaf) = leaf {
         // The glyphs live in the icon font, the figures in the UI font, so
         // the line is drawn from its pieces rather than as one string.
-        let stats =
-            h_flex().text_xs().opacity(0.6).overflow_hidden().children(leaf.stats.iter().map(|part| match part {
+        let stats = h_flex().text_xs().text_color(crate::theme::text_dim()).overflow_hidden().children(
+            leaf.stats.iter().map(|part| match part {
                 LinePart::Text(text) => div().whitespace_nowrap().child(text.clone()).into_any_element(),
                 LinePart::Glyph(glyph) => crate::icons::icon(glyph).into_any_element(),
-            }));
+            }),
+        );
         lines = lines.child(stats);
     }
 
@@ -662,18 +744,28 @@ impl Render for ReplayBrowser {
             .child(div().flex_1().text_sm().font_weight(FontWeight::BOLD).child("Replays"));
 
         let body = match &self.status {
-            ScanStatus::Loading => div().p_2().text_sm().opacity(0.6).child("Scanning replays...").into_any_element(),
+            ScanStatus::Loading => div()
+                .p_2()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .child("Scanning replays...")
+                .into_any_element(),
             ScanStatus::Failed(reason) => {
-                div().p_2().text_sm().opacity(0.6).child(reason.to_string()).into_any_element()
+                div().p_2().text_sm().text_color(crate::theme::text_dim()).child(reason.to_string()).into_any_element()
             }
-            ScanStatus::Empty => div().p_2().text_sm().opacity(0.6).child("No replays found").into_any_element(),
+            ScanStatus::Empty => {
+                div().p_2().text_sm().text_color(crate::theme::text_dim()).child("No replays found").into_any_element()
+            }
             // Every row's ship and map name comes from the game data, so a
             // list built before it loads is a list of raw ids. The egui app
             // never shows that state: it builds its listing as part of the
             // same load (`task/replays.rs::load_wows_files`).
-            ScanStatus::Loaded if matches!(self.game_data, GameData::Loading) => {
-                div().p_2().text_sm().opacity(0.6).child("Loading game data...").into_any_element()
-            }
+            ScanStatus::Loaded if matches!(self.game_data, GameData::Loading) => div()
+                .p_2()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .child("Loading game data...")
+                .into_any_element(),
             ScanStatus::Loaded => {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
@@ -880,18 +972,51 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
     out
 }
 
-/// The full background-scan step: resolve the replays directory, then read
-/// every replay's header. Run on `cx.background_spawn` (see `start_scan`),
-/// never on the UI thread.
-fn scan_replays_dir(wows_dir: &str) -> Vec<RawReplay> {
-    let replays_dir = resolve_replays_dir(Path::new(wows_dir));
-    scan_replay_files(&replays_dir)
+/// Whether `path` names a replay the listing shows. `temp.wowsreplay` is the
+/// match in progress: it has no container or metadata until the battle ends,
+/// and the game renames it into place then.
+fn is_finished_replay(path: &Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
+        && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+}
+
+/// How long to keep retrying a replay the watcher has just reported, and how
+/// long to wait between attempts. The file appears before the game has
+/// finished writing its header, so the first read usually fails.
+const APPEARED_REPLAY_ATTEMPTS: usize = 10;
+const APPEARED_REPLAY_RETRY: std::time::Duration = std::time::Duration::from_millis(300);
+
+/// Reads the header of a replay the watcher reported, retrying while the game
+/// finishes writing it. `None` once the attempts run out, which is what a file
+/// that is not a replay after all looks like.
+fn read_replay_when_complete(path: &Path) -> Option<RawReplay> {
+    for attempt in 0..APPEARED_REPLAY_ATTEMPTS {
+        if attempt > 0 {
+            std::thread::sleep(APPEARED_REPLAY_RETRY);
+        }
+        if let Ok(meta) = ReplayFile::meta_from_file(path) {
+            return Some(RawReplay { listed: ListedReplay::from_meta(&meta), path: path.to_path_buf() });
+        }
+    }
+    tracing::warn!(path = %path.display(), "replay browser: a new replay never became readable");
+    None
 }
 
 #[cfg(test)]
 mod tests {
+    use super::is_finished_replay;
     use super::last_server_version;
     use super::resolve_replays_dir;
+    use std::path::Path;
+
+    #[test]
+    fn the_watcher_ignores_everything_but_a_finished_replay() {
+        assert!(is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland.wowsreplay")));
+        // The match in progress, which has no metadata until it ends.
+        assert!(!is_finished_replay(Path::new("replays/temp.wowsreplay")));
+        assert!(!is_finished_replay(Path::new("replays/tempArenaInfo.json")));
+        assert!(!is_finished_replay(Path::new("replays/20260818_132652_PWSD610-Smaland")));
+    }
 
     #[test]
     fn last_server_version_reads_the_node_contents() {

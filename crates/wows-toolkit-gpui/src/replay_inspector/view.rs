@@ -263,8 +263,17 @@ impl ReplayInspectorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let ReplayBrowserEvent::OpenReplay(path) = event;
-        self.open_replay(path.clone(), window, cx);
+        match event {
+            ReplayBrowserEvent::OpenReplay(path) => self.open_replay(path.clone(), window, cx),
+            // The game has just finished a match. The egui app opens it
+            // straight away when this is on, which is what the checkbox
+            // promises.
+            ReplayBrowserEvent::ReplayAppeared(path) => {
+                if self.auto_load_latest_replay {
+                    self.open_replay(path.clone(), window, cx);
+                }
+            }
+        }
     }
 
     /// Opens `path` in a dock tab. A repeat double-click on a replay that is
@@ -496,7 +505,7 @@ impl Render for ReplayInspectorView {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child("Select a replay"))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child("Select a replay"))
                 .into_any_element()
         };
 
@@ -505,7 +514,11 @@ impl Render for ReplayInspectorView {
         // which nothing else reports.
         let status_banner = match &self.game_data_status {
             GameDataStatus::Failed(reason) => Some(
-                div().text_xs().opacity(0.6).child(format!("Game data failed to load: {reason}")).into_any_element(),
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(format!("Game data failed to load: {reason}"))
+                    .into_any_element(),
             ),
             GameDataStatus::Loading | GameDataStatus::Ready(_) => None,
         };
@@ -520,7 +533,7 @@ impl Render for ReplayInspectorView {
         // collab session support in this port yet).
         let replay_header = h_flex()
             .flex_none()
-            .gap_3()
+            .gap_2()
             .items_center()
             .px_2()
             .py_1()
@@ -537,11 +550,12 @@ impl Render for ReplayInspectorView {
                 Checkbox::new("replay-header-auto-load-latest")
                     .label("Autoload Latest Replay")
                     .checked(self.auto_load_latest_replay)
-                    .tooltip("Not yet wired: toggling this has no effect until the replays-directory watcher is ported")
+                    .tooltip("Open a match as soon as the game finishes writing it")
                     .on_click(
                         cx.listener(|this, checked: &bool, _window, cx| this.set_auto_load_latest_replay(*checked, cx)),
                     ),
             )
+            .child(crate::ui::rule_v(cx))
             .child(
                 Select::new(&self.grouping_select)
                     .id("replay-header-grouping")

@@ -79,6 +79,9 @@ unidecode = "0.3"
 # Channels for streaming extraction progress from the background pool back to
 # the view. Already in the graph under GPUI; this names it directly.
 futures = "0.3"
+# The replays-directory watch behind "Autoload Latest Replay". Same version as
+# the egui app's, so both resolve one copy.
+notify = "8.2.0"
 # The language list the settings tab offers. The port's own strings are not
 # translated yet; what a language change reaches is the shared viewmodel's
 # strings and the game data's own names.
