@@ -8,6 +8,8 @@
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
 pub mod formatting;
+pub mod glyphs;
+pub mod listing_row;
 pub mod match_stats;
 pub mod personal_rating;
 pub mod player_tracker;
