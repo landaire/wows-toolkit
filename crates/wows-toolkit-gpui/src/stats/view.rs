@@ -35,6 +35,7 @@ use crate::ui::selectable;
 use super::chart_panel::StatsChartPanel;
 use super::load::SessionData;
 use super::overview::StatsOverviewPanel;
+use super::ships::StatsShipsPanel;
 
 /// Games shown when the limit is switched on without a saved count. The egui
 /// drag value opens at this and clamps to 1..=999.
@@ -52,6 +53,7 @@ pub struct StatsView {
     limit_input: Entity<InputState>,
     dock_area: Entity<DockArea>,
     overview: Entity<StatsOverviewPanel>,
+    ships: Entity<StatsShipsPanel>,
     /// One per open chart sub-tab. The egui tab opens with a chart alongside
     /// the overview and lets more be added.
     charts: Vec<Entity<StatsChartPanel>>,
@@ -70,6 +72,10 @@ impl StatsView {
         let dock_area = cx.new(|cx| DockArea::new("stats-dock", None, window, cx));
         dock_area.update(cx, |dock, cx| {
             dock.add_panel(overview.clone(), DockPlacement::Center, None, window, cx);
+        });
+        let ships = cx.new(StatsShipsPanel::new);
+        dock_area.update(cx, |dock, cx| {
+            dock.add_panel(ships.clone(), DockPlacement::Center, None, window, cx);
         });
         let first_chart = cx.new(|cx| StatsChartPanel::new(0, cx));
         dock_area.update(cx, |dock, cx| {
@@ -94,6 +100,7 @@ impl StatsView {
             limit_input,
             dock_area,
             overview,
+            ships,
             charts: vec![first_chart],
             next_chart_id: 1,
             personal_rating: None,
@@ -111,6 +118,7 @@ impl StatsView {
 
         let table = self.personal_rating.clone();
         self.overview.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
+        self.ships.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
         for chart in &self.charts {
             chart.update(cx, |panel, cx| panel.set_personal_rating(table.clone(), cx));
         }
@@ -125,6 +133,7 @@ impl StatsView {
     fn push_filtered(&mut self, cx: &mut Context<Self>) {
         let filtered = filter_games(&self.games, &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+        self.ships.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         for chart in &self.charts {
             chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         }

@@ -8,7 +8,6 @@ use egui_dock::tab_viewer::OnCloseResponse;
 
 use crate::app::ToolkitTabViewer;
 use crate::data::session_stats::DivisionFilter;
-use crate::data::session_stats::PerformanceInfo;
 use crate::data::session_stats::resolve_ship_name;
 use crate::data::wows_data::GameAsset;
 use crate::icons;
@@ -22,7 +21,20 @@ use rust_i18n::t;
 use std::cmp::Reverse;
 use std::sync::Arc;
 use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::stats::PerformanceInfo;
+use wows_toolkit_viewmodel::stats::PrStats;
+use wows_toolkit_viewmodel::stats::table as stats_table;
 use wowsunpack::game_params::provider::GameMetadataProvider;
+
+/// A column heading in the active locale.
+fn translated_column(column: stats_table::Column) -> String {
+    t!(column.translation_key()).into_owned()
+}
+
+/// A row label in the active locale.
+fn translated_label(label: stats_table::StatLabel) -> String {
+    t!(label.translation_key()).into_owned()
+}
 
 /// TabViewer for the stats sub-tabs (Overview / Charts).
 ///
@@ -388,28 +400,46 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
     ui.separator();
 
     ScrollArea::vertical().show(ui, |ui| {
-        // Collect per-ship PR stats (min/max/avg) before entering the mutable loop
-        let pr_stats_by_ship: std::collections::HashMap<GameParamId, crate::data::session_stats::PrStats> = {
+        // Rated before entering the mutable loop, which cannot hold the
+        // persisted state borrowed.
+        let pr_stats_by_ship: std::collections::HashMap<GameParamId, PrStats> = {
             let p = tab_state.persisted.read();
             let per_ship_games = p.session_stats.per_ship_limited_games();
             let mut games_by_ship: std::collections::HashMap<
                 GameParamId,
-                Vec<&crate::data::session_stats::PerGameStat>,
+                Vec<wows_toolkit_viewmodel::stats::PerGameStat>,
             > = std::collections::HashMap::new();
             for game in &per_ship_games {
-                games_by_ship.entry(game.ship_id).or_default().push(game);
+                games_by_ship.entry(game.ship_id).or_default().push(game.to_shared());
             }
             let pr_data = tab_state.personal_rating_data.read();
             games_by_ship
                 .into_iter()
                 .filter_map(|(id, games)| {
-                    crate::data::session_stats::PrStats::from_games(&games, &pr_data).map(|pr| (id, pr))
+                    let games: Vec<&wows_toolkit_viewmodel::stats::PerGameStat> = games.iter().collect();
+                    PrStats::from_games(&games, &pr_data).map(|pr| (id, pr))
                 })
                 .collect()
         };
 
-        let mut battle_results: Vec<(GameParamId, PerformanceInfo)> =
-            tab_state.persisted.read().session_stats.ship_stats_per_ship_limited().drain().collect();
+        let mut battle_results: Vec<(GameParamId, PerformanceInfo)> = {
+            let p = tab_state.persisted.read();
+            let per_ship_games = p.session_stats.per_ship_limited_games();
+            let mut games_by_ship: std::collections::HashMap<
+                GameParamId,
+                Vec<wows_toolkit_viewmodel::stats::PerGameStat>,
+            > = std::collections::HashMap::new();
+            for game in &per_ship_games {
+                games_by_ship.entry(game.ship_id).or_default().push(game.to_shared());
+            }
+            games_by_ship
+                .into_iter()
+                .map(|(id, games)| {
+                    let games: Vec<&wows_toolkit_viewmodel::stats::PerGameStat> = games.iter().collect();
+                    (id, PerformanceInfo::from_games(&games))
+                })
+                .collect()
+        };
         battle_results.sort_by(|a, b| b.1.last_played().cmp(a.1.last_played()));
         for (ship_id, perf_info) in &battle_results {
             if perf_info.win_rate().is_none() {
@@ -419,9 +449,6 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
             let ship_name = resolve_ship_name(*ship_id, provider_ref);
             let locale = tab_state.persisted.read().settings.app.locale.clone();
             let locale_ref2 = locale.as_deref();
-            let pr_data = tab_state.personal_rating_data.read();
-            let ship_pr = perf_info.calculate_pr(&pr_data);
-            drop(pr_data);
             let pr_stats = pr_stats_by_ship.get(ship_id);
 
             let wld = if perf_info.draws() > 0 {
@@ -429,58 +456,13 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
             } else {
                 format!("{}W/{}L", perf_info.wins(), perf_info.losses())
             };
-            let header = if let Some(ref pr) = ship_pr {
-                format!("{ship_name} {wld} ({:.0}%) - PR: {:.0}", perf_info.win_rate().unwrap(), pr.pr)
+            let header = if let Some(pr) = pr_stats {
+                format!("{ship_name} {wld} ({:.0}%) - PR: {:.0}", perf_info.win_rate().unwrap(), pr.average)
             } else {
                 format!("{ship_name} {wld} ({:.0}%)", perf_info.win_rate().unwrap())
             };
 
-            // Build table rows for copy-to-clipboard (label, min, max, total, avg)
-            let mut table_rows: Vec<[String; 5]> = Vec::new();
-            if let Some(pr) = pr_stats {
-                table_rows.push([
-                    t!("stat.personal_rating").into(),
-                    format!("{:.0}", pr.min),
-                    format!("{:.0}", pr.max),
-                    String::new(),
-                    format!("{:.0}", pr.avg),
-                ]);
-            }
-            table_rows.push([
-                t!("stat.damage").into(),
-                separate_number(perf_info.min_damage(), locale_ref2),
-                separate_number(perf_info.max_damage(), locale_ref2),
-                separate_number(perf_info.total_damage(), locale_ref2),
-                separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale_ref2),
-            ]);
-            table_rows.push([
-                t!("stat.spotting_damage").into(),
-                separate_number(perf_info.min_spotting_damage(), locale_ref2),
-                separate_number(perf_info.max_spotting_damage(), locale_ref2),
-                separate_number(perf_info.total_spotting_damage(), locale_ref2),
-                separate_number(perf_info.avg_spotting_damage().unwrap_or_default() as u64, locale_ref2),
-            ]);
-            table_rows.push([
-                t!("stat.frags").into(),
-                separate_number(perf_info.min_frags(), locale_ref2),
-                separate_number(perf_info.max_frags(), locale_ref2),
-                separate_number(perf_info.total_frags(), locale_ref2),
-                format!("{:.2}", perf_info.avg_frags().unwrap_or_default()),
-            ]);
-            table_rows.push([
-                t!("stat.raw_xp").into(),
-                separate_number(perf_info.min_xp(), locale_ref2),
-                separate_number(perf_info.max_xp(), locale_ref2),
-                separate_number(perf_info.total_xp(), locale_ref2),
-                separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale_ref2),
-            ]);
-            table_rows.push([
-                t!("stat.base_xp").into(),
-                separate_number(perf_info.min_win_adjusted_xp(), locale_ref2),
-                separate_number(perf_info.max_win_adjusted_xp(), locale_ref2),
-                separate_number(perf_info.total_win_adjusted_xp(), locale_ref2),
-                separate_number(perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64, locale_ref2),
-            ]);
+            let table_rows = stats_table::ship_rows(perf_info, pr_stats, locale_ref2);
 
             let collapsing_id = ui.make_persistent_id(("ship_stats_collapse", ship_id));
             egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), collapsing_id, false)
@@ -488,36 +470,16 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                     ui.label(&header);
                     ui.menu_button(icons::COPY, |ui| {
                         if ui.button(t!("ui.stats.copy_markdown")).clicked() {
-                            let mut md = format!("**{header}**\n\n");
-                            md.push_str(&format!(
-                                "| | {} | {} | {} | {} |\n",
-                                t!("ui.stats.table.min"),
-                                t!("ui.stats.table.max"),
-                                t!("ui.stats.table.total"),
-                                t!("ui.stats.table.average")
+                            ui.ctx().copy_text(stats_table::to_markdown(
+                                &header,
+                                &table_rows,
+                                translated_column,
+                                translated_label,
                             ));
-                            md.push_str("|---|---|---|---|---|\n");
-                            for row in &table_rows {
-                                md.push_str(&format!(
-                                    "| {} | {} | {} | {} | **{}** |\n",
-                                    row[0], row[1], row[2], row[3], row[4]
-                                ));
-                            }
-                            ui.ctx().copy_text(md);
                             ui.close();
                         }
                         if ui.button(t!("ui.stats.copy_csv")).clicked() {
-                            let mut csv = format!(
-                                ",{},{},{},{}\n",
-                                t!("ui.stats.table.min"),
-                                t!("ui.stats.table.max"),
-                                t!("ui.stats.table.total"),
-                                t!("ui.stats.table.average")
-                            );
-                            for row in &table_rows {
-                                csv.push_str(&format!("{},{},{},{},{}\n", row[0], row[1], row[2], row[3], row[4]));
-                            }
-                            ui.ctx().copy_text(csv);
+                            ui.ctx().copy_text(stats_table::to_csv(&table_rows, translated_column, translated_label));
                             ui.close();
                         }
                     });
@@ -539,67 +501,40 @@ fn build_stats_overview(tab_state: &mut crate::tab_state::TabState, ui: &mut egu
                         use crate::util::personal_rating::PersonalRatingCategory;
 
                         ui.strong("");
-                        ui.strong(t!("ui.stats.table.min"));
-                        ui.strong(t!("ui.stats.table.max"));
-                        ui.strong(t!("ui.stats.table.total"));
-                        ui.strong(t!("ui.stats.table.average"));
+                        for column in stats_table::COLUMNS {
+                            ui.strong(translated_column(column));
+                        }
                         ui.end_row();
 
-                        if let Some(pr) = pr_stats {
-                            ui.label(t!("stat.personal_rating"));
-                            let min_cat = PersonalRatingCategory::from_pr(pr.min);
-                            crate::ui::widgets::pr_chip(ui, min_cat, &format!("{:.0}", pr.min), false)
-                                .on_hover_text(min_cat.name());
-                            let max_cat = PersonalRatingCategory::from_pr(pr.max);
-                            crate::ui::widgets::pr_chip(ui, max_cat, &format!("{:.0}", pr.max), false)
-                                .on_hover_text(max_cat.name());
-                            ui.label("");
-                            let avg_cat = PersonalRatingCategory::from_pr(pr.avg);
-                            crate::ui::widgets::pr_chip(ui, avg_cat, &format!("{:.0}", pr.avg), true)
-                                .on_hover_text(avg_cat.name());
+                        for row in &table_rows {
+                            ui.label(translated_label(row.label));
+
+                            // The rating row is chipped by category rather than
+                            // printed plain, and carries no total to chip. The
+                            // category comes from the figure, not from the cell
+                            // text it was formatted into.
+                            if let (stats_table::StatLabel::PersonalRating, Some(rating)) = (row.label, pr_stats) {
+                                for (column, value) in
+                                    [(stats_table::Column::Min, rating.min), (stats_table::Column::Max, rating.max)]
+                                {
+                                    let category = PersonalRatingCategory::from_pr(value);
+                                    crate::ui::widgets::pr_chip(ui, category, row.cell(column), false)
+                                        .on_hover_text(category.name());
+                                }
+                                ui.label("");
+                                let category = PersonalRatingCategory::from_pr(rating.average);
+                                crate::ui::widgets::pr_chip(ui, category, row.cell(stats_table::Column::Average), true)
+                                    .on_hover_text(category.name());
+                                ui.end_row();
+                                continue;
+                            }
+
+                            ui.label(row.cell(stats_table::Column::Min));
+                            ui.label(row.cell(stats_table::Column::Max));
+                            ui.label(row.cell(stats_table::Column::Total));
+                            ui.strong(row.cell(stats_table::Column::Average));
                             ui.end_row();
                         }
-
-                        ui.label(t!("stat.damage"));
-                        ui.label(separate_number(perf_info.min_damage(), locale_ref2));
-                        ui.label(separate_number(perf_info.max_damage(), locale_ref2));
-                        ui.label(separate_number(perf_info.total_damage(), locale_ref2));
-                        ui.strong(separate_number(perf_info.avg_damage().unwrap_or_default() as u64, locale_ref2));
-                        ui.end_row();
-
-                        ui.label(t!("stat.spotting_damage"));
-                        ui.label(separate_number(perf_info.min_spotting_damage(), locale_ref2));
-                        ui.label(separate_number(perf_info.max_spotting_damage(), locale_ref2));
-                        ui.label(separate_number(perf_info.total_spotting_damage(), locale_ref2));
-                        ui.strong(separate_number(
-                            perf_info.avg_spotting_damage().unwrap_or_default() as u64,
-                            locale_ref2,
-                        ));
-                        ui.end_row();
-
-                        ui.label(t!("stat.frags"));
-                        ui.label(separate_number(perf_info.min_frags(), locale_ref2));
-                        ui.label(separate_number(perf_info.max_frags(), locale_ref2));
-                        ui.label(separate_number(perf_info.total_frags(), locale_ref2));
-                        ui.strong(format!("{:.2}", perf_info.avg_frags().unwrap_or_default()));
-                        ui.end_row();
-
-                        ui.label(t!("stat.raw_xp"));
-                        ui.label(separate_number(perf_info.min_xp(), locale_ref2));
-                        ui.label(separate_number(perf_info.max_xp(), locale_ref2));
-                        ui.label(separate_number(perf_info.total_xp(), locale_ref2));
-                        ui.strong(separate_number(perf_info.avg_xp().unwrap_or_default() as i64, locale_ref2));
-                        ui.end_row();
-
-                        ui.label(t!("stat.base_xp"));
-                        ui.label(separate_number(perf_info.min_win_adjusted_xp(), locale_ref2));
-                        ui.label(separate_number(perf_info.max_win_adjusted_xp(), locale_ref2));
-                        ui.label(separate_number(perf_info.total_win_adjusted_xp(), locale_ref2));
-                        ui.strong(separate_number(
-                            perf_info.avg_win_adjusted_xp().unwrap_or_default() as i64,
-                            locale_ref2,
-                        ));
-                        ui.end_row();
                     });
                 });
         }

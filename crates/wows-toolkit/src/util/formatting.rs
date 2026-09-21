@@ -4,10 +4,8 @@ use crate::ui::replay_parser::PlayerTintColor as _;
 use crate::ui::theme::semantic::semantic;
 use egui::Color32;
 use jiff::Timestamp;
-use language_tags::LanguageTag;
 use std::path::Path;
 use std::process::Command;
-use thousands::Separable;
 use tracing::debug;
 use wows_replay_insights::ResolvedBuild;
 use wows_replay_insights::build::wowssb;
@@ -26,16 +24,7 @@ pub fn replay_timestamp(replay_meta: &ReplayMeta) -> Timestamp {
     wows_replay_insights::battle_report::replay_timestamp(replay_meta)
 }
 
-pub fn separate_number<T: Separable>(num: T, locale: Option<&str>) -> String {
-    let language: LanguageTag = locale
-        .and_then(|locale| locale.replace('_', "-").parse().ok())
-        .unwrap_or_else(|| LanguageTag::parse("en-US").unwrap());
-
-    match language.primary_language() {
-        "fr" => num.separate_with_spaces(),
-        _ => num.separate_with_commas(),
-    }
-}
+pub use wows_toolkit_viewmodel::formatting::separate_number;
 
 pub fn player_color_for_team_relation(relation: Relation, visuals: &egui::Visuals) -> Color32 {
     crate::ui::replay_parser::PlayerTint::from_relation(relation).color(visuals)

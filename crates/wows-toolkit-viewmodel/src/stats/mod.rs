@@ -442,6 +442,23 @@ impl PerformanceInfo {
     pub fn avg_win_adjusted_xp(&self) -> Option<f64> {
         (self.total_games > 0).then(|| self.total_win_adjusted_xp as f64 / self.total_games as f64)
     }
+
+    /// This ship's rating over the games in view, from the summed battles
+    /// rather than the mean of their individual ratings.
+    ///
+    /// `None` when the ship is unknown, which is what a zero-game aggregate
+    /// carries, or when the table has no expected values for it.
+    pub fn personal_rating(&self, table: &PersonalRatingData) -> Option<PersonalRatingResult> {
+        let ship_id = self.ship_id?;
+        let stats = ShipBattleStats {
+            ship_id,
+            battles: self.total_games as u32,
+            damage: self.total_damage,
+            wins: self.wins as u32,
+            frags: self.total_frags,
+        };
+        table.calculate_pr(&[stats])
+    }
 }
 
 /// The session's rating across every ship played.
@@ -472,6 +489,45 @@ pub fn session_personal_rating(
 
     let stats: Vec<ShipBattleStats> = per_ship.into_values().collect();
     table.calculate_pr(&stats)
+}
+
+/// One ship's rating across the games in view: its worst, its best, and the
+/// rating of the aggregate.
+///
+/// `average` is the rating computed from the summed battles rather than the
+/// mean of the per-game ratings, which is the same formula the ship's header
+/// figure uses; averaging ratings would weight a one-shot game as heavily as
+/// a long one.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PrStats {
+    pub min: f64,
+    pub max: f64,
+    pub average: f64,
+}
+
+impl PrStats {
+    /// `None` when no game in `games` could be rated, which is also what a
+    /// missing expected-values table produces.
+    pub fn from_games(games: &[&PerGameStat], table: &PersonalRatingData) -> Option<Self> {
+        let ratings: Vec<f64> = games.iter().filter_map(|game| game.personal_rating(Some(table))).collect();
+        let min = ratings.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = ratings.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        if ratings.is_empty() {
+            return None;
+        }
+
+        let first = games.first()?;
+        let aggregate = ShipBattleStats {
+            ship_id: first.ship_id,
+            battles: games.len() as u32,
+            damage: games.iter().map(|game| game.damage).sum(),
+            wins: games.iter().filter(|game| game.is_win).count() as u32,
+            frags: games.iter().map(|game| game.frags).sum(),
+        };
+        let average = table.calculate_pr(&[aggregate])?.pr;
+
+        Some(Self { min, max, average })
+    }
 }
 
 /// Groups filtered games by ship, newest-played ship first -- the order the
@@ -699,7 +755,10 @@ mod tests {
 #[cfg(test)]
 mod rating_tests {
     use super::PerGameStat;
+    use super::PerformanceInfo;
+    use super::PrStats;
     use super::session_personal_rating;
+    use crate::personal_rating::PersonalRatingData;
 
     fn game() -> PerGameStat {
         PerGameStat {
@@ -720,6 +779,72 @@ mod rating_tests {
             match_group: "pvp".into(),
             achievements: Vec::new(),
         }
+    }
+
+    /// The expected-values table the app ships, so a rating test runs against
+    /// real figures rather than invented ones.
+    fn fixture_table() -> PersonalRatingData {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the crate sits under crates/")
+            .parent()
+            .expect("crates/ sits at the repository root")
+            .join("tests")
+            .join("fixtures")
+            .join("pr_expected_values.json");
+        let bytes = std::fs::read(&path).expect("the fixture is checked in");
+        let mut table = PersonalRatingData::new();
+        table.load_from_bytes(&bytes).expect("the fixture parses");
+        table
+    }
+
+    /// A ship the fixture carries expected values for.
+    const RATED_SHIP: u64 = 3374266064;
+
+    fn rated_game(damage: u64, frags: i64, win: bool) -> PerGameStat {
+        PerGameStat { ship_id: RATED_SHIP.into(), damage, frags, is_win: win, is_loss: !win, ..game() }
+    }
+
+    #[test]
+    fn a_ships_rating_spans_its_worst_and_best_game() {
+        let table = fixture_table();
+        let expected = table.get_ship_expected(RATED_SHIP.into()).expect("the fixture rates this ship");
+
+        let strong =
+            rated_game((expected.average_damage_dealt * 2.0) as u64, (expected.average_frags * 2.0) as i64, true);
+        let weak = rated_game((expected.average_damage_dealt * 0.5) as u64, 0, false);
+        let games = [&strong, &weak];
+
+        let stats = PrStats::from_games(&games, &table).expect("both games rate");
+
+        assert!(stats.max > stats.min, "the high-damage game rates higher");
+        assert!(stats.min <= stats.average && stats.average <= stats.max, "the aggregate sits between the two");
+    }
+
+    #[test]
+    fn a_ship_the_table_does_not_carry_has_no_rating() {
+        let table = PersonalRatingData::new();
+        let played = rated_game(100_000, 2, true);
+        assert!(PrStats::from_games(&[&played], &table).is_none());
+    }
+
+    #[test]
+    fn a_ships_aggregate_rating_comes_from_its_summed_battles() {
+        let table = fixture_table();
+        let strong = rated_game(120_000, 3, true);
+        let weak = rated_game(10_000, 0, false);
+        let info = PerformanceInfo::from_games(&[&strong, &weak]);
+
+        let aggregate = info.personal_rating(&table).expect("the fixture rates this ship");
+        let stats = PrStats::from_games(&[&strong, &weak], &table).expect("both games rate");
+
+        assert!((aggregate.pr - stats.average).abs() < 1e-9, "the table row and the header report one figure");
+    }
+
+    #[test]
+    fn a_ship_with_no_games_has_no_aggregate_rating() {
+        let info = PerformanceInfo::from_games(&[]);
+        assert!(info.personal_rating(&fixture_table()).is_none(), "no ship played, so nothing to rate");
     }
 
     #[test]

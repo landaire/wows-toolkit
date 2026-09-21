@@ -52,6 +52,7 @@ pub const BROADCAST: &str = "\u{E0F2}";
 pub const BROWSER: &str = "\u{E0F4}";
 pub const BUG: &str = "\u{E5F4}";
 pub const CAMERA: &str = "\u{E10E}";
+pub const CARET_DOWN: &str = "\u{E136}";
 pub const CARET_LEFT: &str = "\u{E138}";
 pub const CARET_RIGHT: &str = "\u{E13A}";
 pub const CASTLE_TURRET: &str = "\u{E9D0}";
