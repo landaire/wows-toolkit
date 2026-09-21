@@ -105,6 +105,10 @@ struct LeafInfo {
     hover: SharedString,
 }
 
+/// A row's height, in multiples of the theme's font size: the identity line,
+/// the smaller stats line under it, and a little space around both.
+const ROW_LINE_HEIGHTS: f32 = 2.8;
+
 /// How far to the right of the pointer the hover preview sits, so it never
 /// covers the row it belongs to.
 const PREVIEW_CURSOR_OFFSET: Pixels = px(24.);
@@ -469,6 +473,7 @@ fn render_browser_item(
     entry: &TreeEntry,
     selected: bool,
     leaf_info: &HashMap<SharedString, LeafInfo>,
+    row_height: Pixels,
 ) -> ListItem {
     let item = entry.item();
     let is_folder = entry.is_folder();
@@ -489,7 +494,7 @@ fn render_browser_item(
         },
     );
 
-    let mut lines = v_flex().flex_1().overflow_hidden().child(identity_el);
+    let mut lines = v_flex().flex_1().justify_center().overflow_hidden().child(identity_el);
     if let Some(leaf) = leaf {
         // The glyphs live in the icon font, the figures in the UI font, so
         // the line is drawn from its pieces rather than as one string.
@@ -501,10 +506,12 @@ fn render_browser_item(
         lines = lines.child(stats);
     }
 
-    // The tree measures one row and gives every row that height, so the
-    // breathing room between a row's own two lines and the next row's has to
-    // come from the row itself.
-    let mut row = h_flex().gap_1().items_start().py_0p5().pl(px(16.) * entry.depth());
+    // The tree is a uniform list: it measures one row and lays every row out
+    // at that height. A row taller than the first one would spill over its
+    // neighbour and leave the hover and selection highlights -- which are
+    // drawn at the measured height -- behind its text, so every row, group
+    // header included, declares the same height.
+    let mut row = h_flex().h(row_height).gap_1().items_center().pl(px(16.) * entry.depth());
     if is_folder {
         let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
         row = row.child(Icon::new(chevron));
@@ -533,7 +540,8 @@ fn render_browser_item(
 }
 
 impl Render for ReplayBrowser {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.preview.release_dropped(window);
         let border = cx.theme().border;
         let entity = cx.entity();
 
@@ -564,8 +572,11 @@ impl Render for ReplayBrowser {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
                 let context_menu_leaf_info = self.leaf_info.clone();
+                // Two lines of text plus the space around them, against the
+                // font the theme is currently drawing at.
+                let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
                 tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
-                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info)
+                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, row_height)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     if entry.is_folder() {
