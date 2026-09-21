@@ -116,6 +116,39 @@ pub struct PerGameStat {
 }
 
 impl PerGameStat {
+    /// The same game as the shared viewmodel records it, so logic that both
+    /// front ends run reads one type.
+    pub fn to_shared(&self) -> wows_toolkit_viewmodel::stats::PerGameStat {
+        wows_toolkit_viewmodel::stats::PerGameStat {
+            ship_name: self.ship_name.clone(),
+            ship_id: self.ship_id,
+            game_time: self.game_time.clone(),
+            sort_key: self.sort_key.clone(),
+            player_id: self.player_id,
+            damage: self.damage,
+            spotting_damage: self.spotting_damage,
+            frags: self.frags,
+            raw_xp: self.raw_xp,
+            base_xp: self.base_xp,
+            is_win: self.is_win,
+            is_loss: self.is_loss,
+            is_draw: self.is_draw,
+            is_div: self.is_div,
+            match_group: self.match_group.clone(),
+            achievements: self
+                .achievements
+                .iter()
+                .map(|achievement| wows_toolkit_viewmodel::stats::SerializableAchievement {
+                    game_param_id: achievement.game_param_id,
+                    display_name: achievement.display_name.clone(),
+                    description: achievement.description.clone(),
+                    icon_key: achievement.icon_key.clone(),
+                    count: achievement.count,
+                })
+                .collect(),
+        }
+    }
+
     /// Create a PerGameStat from a replay
     pub fn from_replay(replay: &Replay, metadata_provider: &GameMetadataProvider) -> Option<Self> {
         if replay.battle_results_are_pending() {
@@ -192,266 +225,9 @@ impl PerGameStat {
     }
 }
 
-/// Performance statistics for a single ship aggregated from multiple games
-#[derive(Default)]
-pub struct PerformanceInfo {
-    ship_id: Option<GameParamId>,
-    wins: usize,
-    losses: usize,
-    draws: usize,
-    total_frags: i64,
-    max_frags: i64,
-    total_damage: u64,
-    max_damage: u64,
-    total_games: usize,
-    max_xp: i64,
-    max_win_adjusted_xp: i64,
-    total_xp: i64,
-    total_win_adjusted_xp: i64,
-    min_frags: i64,
-    max_spotting_damage: u64,
-    min_spotting_damage: u64,
-    total_spotting_damage: u64,
-    min_xp: i64,
-    min_win_adjusted_xp: i64,
-    min_damage: u64,
-    /// The `game_time` of the most recent game for this ship.
-    last_played: String,
-}
-
-impl PerformanceInfo {
-    /// Create a PerformanceInfo by aggregating multiple PerGameStat instances
-    pub fn from_games(games: &[&PerGameStat]) -> Self {
-        let mut info = PerformanceInfo {
-            min_frags: i64::MAX,
-            min_damage: u64::MAX,
-            min_spotting_damage: u64::MAX,
-            min_xp: i64::MAX,
-            min_win_adjusted_xp: i64::MAX,
-            ..Default::default()
-        };
-
-        for game in games {
-            if info.ship_id.is_none() {
-                info.ship_id = Some(game.ship_id);
-            }
-
-            if game.is_win {
-                info.wins += 1;
-            } else if game.is_loss {
-                info.losses += 1;
-            } else if game.is_draw {
-                info.draws += 1;
-            }
-
-            info.total_frags += game.frags;
-            info.max_frags = info.max_frags.max(game.frags);
-            info.min_frags = info.min_frags.min(game.frags);
-
-            info.total_damage += game.damage;
-            info.max_damage = info.max_damage.max(game.damage);
-            info.min_damage = info.min_damage.min(game.damage);
-
-            info.total_spotting_damage += game.spotting_damage;
-            info.max_spotting_damage = info.max_spotting_damage.max(game.spotting_damage);
-            info.min_spotting_damage = info.min_spotting_damage.min(game.spotting_damage);
-
-            info.total_xp += game.raw_xp;
-            info.max_xp = info.max_xp.max(game.raw_xp);
-            info.min_xp = info.min_xp.min(game.raw_xp);
-
-            info.total_win_adjusted_xp += game.base_xp;
-            info.max_win_adjusted_xp = info.max_win_adjusted_xp.max(game.base_xp);
-            info.min_win_adjusted_xp = info.min_win_adjusted_xp.min(game.base_xp);
-
-            info.total_games += 1;
-
-            if game.sort_key > info.last_played {
-                info.last_played = game.sort_key.clone();
-            }
-        }
-
-        // Reset mins to 0 if no games were processed
-        if info.total_games == 0 {
-            info.min_frags = 0;
-            info.min_damage = 0;
-            info.min_spotting_damage = 0;
-            info.min_xp = 0;
-            info.min_win_adjusted_xp = 0;
-        }
-
-        info
-    }
-
-    pub fn ship_id(&self) -> Option<GameParamId> {
-        self.ship_id
-    }
-
-    pub fn wins(&self) -> usize {
-        self.wins
-    }
-
-    pub fn losses(&self) -> usize {
-        self.losses
-    }
-
-    pub fn draws(&self) -> usize {
-        self.draws
-    }
-
-    pub fn last_played(&self) -> &str {
-        &self.last_played
-    }
-
-    pub fn win_rate(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-
-        Some(self.wins as f64 / self.total_games as f64 * 100.0)
-    }
-
-    pub fn total_frags(&self) -> i64 {
-        self.total_frags
-    }
-
-    pub fn max_frags(&self) -> i64 {
-        self.max_frags
-    }
-
-    pub fn avg_frags(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_frags as f64 / self.total_games as f64)
-    }
-
-    pub fn max_damage(&self) -> u64 {
-        self.max_damage
-    }
-
-    pub fn avg_damage(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_damage as f64 / self.total_games as f64)
-    }
-
-    pub fn max_spotting_damage(&self) -> u64 {
-        self.max_spotting_damage
-    }
-
-    pub fn avg_spotting_damage(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_spotting_damage as f64 / self.total_games as f64)
-    }
-
-    pub fn max_xp(&self) -> i64 {
-        self.max_xp
-    }
-
-    pub fn avg_xp(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_xp as f64 / self.total_games as f64)
-    }
-
-    pub fn max_win_adjusted_xp(&self) -> i64 {
-        self.max_win_adjusted_xp
-    }
-
-    pub fn avg_win_adjusted_xp(&self) -> Option<f64> {
-        if self.total_games == 0 {
-            return None;
-        }
-        Some(self.total_win_adjusted_xp as f64 / self.total_games as f64)
-    }
-
-    pub fn min_damage(&self) -> u64 {
-        self.min_damage
-    }
-
-    pub fn total_damage(&self) -> u64 {
-        self.total_damage
-    }
-
-    pub fn min_spotting_damage(&self) -> u64 {
-        self.min_spotting_damage
-    }
-
-    pub fn total_spotting_damage(&self) -> u64 {
-        self.total_spotting_damage
-    }
-
-    pub fn min_frags(&self) -> i64 {
-        self.min_frags
-    }
-
-    pub fn min_xp(&self) -> i64 {
-        self.min_xp
-    }
-
-    pub fn total_xp(&self) -> i64 {
-        self.total_xp
-    }
-
-    pub fn min_win_adjusted_xp(&self) -> i64 {
-        self.min_win_adjusted_xp
-    }
-
-    pub fn total_win_adjusted_xp(&self) -> i64 {
-        self.total_win_adjusted_xp
-    }
-
-    /// Calculate Personal Rating for this ship's performance
-    pub fn calculate_pr(&self, pr_data: &PersonalRatingData) -> Option<PersonalRatingResult> {
-        let ship_id = self.ship_id?;
-        let stats = ShipBattleStats {
-            ship_id,
-            battles: self.total_games as u32,
-            damage: self.total_damage,
-            wins: self.wins as u32,
-            frags: self.total_frags,
-        };
-        pr_data.calculate_pr(&[stats])
-    }
-}
-
-/// Min/max/average Personal Rating computed from individual games.
-pub struct PrStats {
-    pub min: f64,
-    pub max: f64,
-    pub avg: f64,
-}
-
-impl PrStats {
-    /// Compute PR stats from a set of per-game stats.
-    /// `avg` is the aggregate PR (from totals), matching the header PR formula.
-    pub fn from_games(games: &[&PerGameStat], pr_data: &PersonalRatingData) -> Option<Self> {
-        let prs: Vec<f64> = games.iter().filter_map(|g| g.calculate_pr(Some(pr_data))).collect();
-        if prs.is_empty() {
-            return None;
-        }
-        let min = prs.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = prs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-
-        // Aggregate PR from totals (same formula as PerformanceInfo::calculate_pr)
-        let first = games.first()?;
-        let stats = ShipBattleStats {
-            ship_id: first.ship_id,
-            battles: games.len() as u32,
-            damage: games.iter().map(|g| g.damage).sum(),
-            wins: games.iter().filter(|g| g.is_win).count() as u32,
-            frags: games.iter().map(|g| g.frags).sum(),
-        };
-        let avg = pr_data.calculate_pr(&[stats])?.pr;
-
-        Some(PrStats { min, max, avg })
-    }
-}
+/// One ship aggregated over the games in view. Both front ends compute it,
+/// so it lives in the shared viewmodel.
+pub use wows_toolkit_viewmodel::stats::PerformanceInfo;
 
 /// A ship's localized display name from the provider, or `None` when there is
 /// no provider or it cannot name the ship. Callers that have another source to
@@ -594,9 +370,10 @@ impl SessionStats {
 
     /// Get aggregated ship statistics using per-ship count limits.
     pub fn ship_stats_per_ship_limited(&self) -> HashMap<GameParamId, PerformanceInfo> {
-        let per_game = self.per_ship_limited_games();
+        let per_game: Vec<wows_toolkit_viewmodel::stats::PerGameStat> =
+            self.per_ship_limited_games().into_iter().map(PerGameStat::to_shared).collect();
 
-        let mut by_ship: HashMap<GameParamId, Vec<&PerGameStat>> = HashMap::new();
+        let mut by_ship: HashMap<GameParamId, Vec<&wows_toolkit_viewmodel::stats::PerGameStat>> = HashMap::new();
         for game in &per_game {
             by_ship.entry(game.ship_id).or_default().push(game);
         }
@@ -809,106 +586,6 @@ mod tests {
         assert_eq!(match_group_display_name("pve"), "PvE");
         assert_eq!(match_group_display_name(""), "Unknown");
         assert_eq!(match_group_display_name("some_future_mode"), "some_future_mode");
-    }
-
-    // -- PerformanceInfo --
-
-    #[test]
-    fn performance_info_from_empty_games() {
-        let info = PerformanceInfo::from_games(&[]);
-        assert_eq!(info.wins(), 0);
-        assert_eq!(info.losses(), 0);
-        assert_eq!(info.draws(), 0);
-        assert_eq!(info.total_damage(), 0);
-        assert_eq!(info.min_damage(), 0);
-        assert!(info.win_rate().is_none());
-        assert!(info.avg_damage().is_none());
-    }
-
-    #[test]
-    fn performance_info_single_game() {
-        let game = pvp_win("Vermont", 3374266064, "13.02.2026 14:00:00", 120000, 3, 2500);
-        let info = PerformanceInfo::from_games(&[&game]);
-
-        assert_eq!(info.wins(), 1);
-        assert_eq!(info.losses(), 0);
-        assert_eq!(info.draws(), 0);
-        assert_eq!(info.total_damage(), 120000);
-        assert_eq!(info.max_damage(), 120000);
-        assert_eq!(info.min_damage(), 120000);
-        assert_eq!(info.total_frags(), 3);
-        assert_eq!(info.max_frags(), 3);
-        assert_eq!(info.min_frags(), 3);
-        assert_eq!(info.max_xp(), 2500);
-        assert_eq!(info.min_xp(), 2500);
-        assert!((info.win_rate().unwrap() - 100.0).abs() < f64::EPSILON);
-        assert!((info.avg_damage().unwrap() - 120000.0).abs() < f64::EPSILON);
-        assert!((info.avg_frags().unwrap() - 3.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn performance_info_multi_game_aggregation() {
-        let g1 = pvp_win("Vermont", 3374266064, "13.02.2026 14:00:00", 100000, 2, 2000);
-        let g2 = pvp_loss("Vermont", 3374266064, "13.02.2026 15:00:00", 50000, 0, 1000);
-        let g3 = pvp_win("Vermont", 3374266064, "13.02.2026 16:00:00", 200000, 5, 3000);
-        let info = PerformanceInfo::from_games(&[&g1, &g2, &g3]);
-
-        assert_eq!(info.wins(), 2);
-        assert_eq!(info.losses(), 1);
-        assert_eq!(info.total_damage(), 350000);
-        assert_eq!(info.max_damage(), 200000);
-        assert_eq!(info.min_damage(), 50000);
-        assert_eq!(info.total_frags(), 7);
-        assert_eq!(info.max_frags(), 5);
-        assert_eq!(info.min_frags(), 0);
-        assert_eq!(info.max_xp(), 3000);
-        assert_eq!(info.min_xp(), 1000);
-        assert!((info.win_rate().unwrap() - 66.66666666666667).abs() < 0.01);
-        assert!((info.avg_damage().unwrap() - 116666.666666).abs() < 1.0);
-    }
-
-    #[test]
-    fn performance_info_last_played() {
-        let g1 = pvp_win("Vermont", 1, "01.01.2025 10:00:00", 100000, 1, 1000);
-        let g2 = pvp_win("Vermont", 1, "13.02.2026 14:00:00", 100000, 1, 1000);
-        let info = PerformanceInfo::from_games(&[&g1, &g2]);
-        assert_eq!(info.last_played(), "2026-02-13 14:00:00");
-    }
-
-    #[test]
-    fn performance_info_draw_counted() {
-        let game =
-            make_game("Vermont", 1, "01.01.2025 10:00:00", 1, 50000, 1, 1000, 1000, false, false, true, false, "pvp");
-        let info = PerformanceInfo::from_games(&[&game]);
-        assert_eq!(info.draws(), 1);
-        assert_eq!(info.wins(), 0);
-        assert_eq!(info.losses(), 0);
-        assert!((info.win_rate().unwrap() - 0.0).abs() < f64::EPSILON);
-    }
-
-    #[test]
-    fn performance_info_calculate_pr() {
-        let pr = fixture_pr_data();
-        let ev = pr.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
-
-        let game = make_game(
-            "TestShip",
-            3374266064,
-            "13.02.2026 14:00:00",
-            1,
-            ev.average_damage_dealt as u64,
-            ev.average_frags as i64,
-            2000,
-            2000,
-            true,
-            false,
-            false,
-            false,
-            "pvp",
-        );
-        let info = PerformanceInfo::from_games(&[&game]);
-        let result = info.calculate_pr(&pr);
-        assert!(result.is_some(), "should calculate PR for performance info");
     }
 
     // -- SessionStats --
@@ -1270,57 +947,5 @@ mod tests {
 
         let result = ss.calculate_pr(&pr_data);
         assert!(result.is_some(), "session PR should be calculable");
-    }
-
-    // -- PrStats --
-
-    #[test]
-    fn pr_stats_from_games() {
-        let pr_data = fixture_pr_data();
-        let ev = pr_data.get_ship_expected(GameParamId::from(3374266064u64)).unwrap();
-
-        let g1 = make_game(
-            "TestShip",
-            3374266064,
-            "13.02.2026 14:00:00",
-            1,
-            (ev.average_damage_dealt * 2.0) as u64,
-            (ev.average_frags * 2.0) as i64,
-            3000,
-            3000,
-            true,
-            false,
-            false,
-            false,
-            "pvp",
-        );
-        let g2 = make_game(
-            "TestShip",
-            3374266064,
-            "13.02.2026 15:00:00",
-            1,
-            (ev.average_damage_dealt * 0.5) as u64,
-            0,
-            1000,
-            1000,
-            false,
-            true,
-            false,
-            false,
-            "pvp",
-        );
-
-        let refs: Vec<&PerGameStat> = vec![&g1, &g2];
-        let stats = PrStats::from_games(&refs, &pr_data).expect("should compute PR stats");
-        assert!(stats.max > stats.min, "high-damage game should have higher PR");
-        assert!(stats.avg > 0.0, "average PR should be positive");
-    }
-
-    #[test]
-    fn pr_stats_no_expected_values_returns_none() {
-        let pr_data = PersonalRatingData::new();
-        let game = pvp_win("Unknown", 9999999999, "13.02.2026 14:00:00", 100000, 2, 2000);
-        let refs: Vec<&PerGameStat> = vec![&game];
-        assert!(PrStats::from_games(&refs, &pr_data).is_none());
     }
 }

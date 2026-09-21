@@ -18,12 +18,14 @@ tracing = "0.1"
 glob.workspace = true
 pickled.workspace = true
 jiff.workspace = true
+language-tags = "0.3"
 # The Twitch login/in-game-name similarity rule.
 levenshtein = "1.0.5"
 regex = "1"
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+thousands = "0.2.0"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report"] }

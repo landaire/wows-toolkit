@@ -18,11 +18,11 @@ use wows_replays::types::GameParamId;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 
 use crate::data::session_stats::PerGameStat;
-use crate::data::session_stats::PerformanceInfo;
 use crate::data::session_stats::resolve_ship_name;
 use crate::tab_state::ChartableStat;
 use crate::util::personal_rating::PersonalRatingData;
 use crate::util::personal_rating::ShipBattleStats;
+use wows_toolkit_viewmodel::stats::PerformanceInfo;
 
 /// Generate a consistent color from a ship ID using its hash.
 /// Uses HSV with fixed saturation and value for good contrast.
@@ -311,7 +311,7 @@ pub fn render_bar_chart(
             ChartableStat::RawXp => perf_info.avg_xp().unwrap_or_default(),
             ChartableStat::BaseXp => perf_info.avg_win_adjusted_xp().unwrap_or_default(),
             ChartableStat::WinRate => perf_info.win_rate().unwrap_or_default(),
-            ChartableStat::PersonalRating => perf_info.calculate_pr(pr_data).map(|r| r.pr).unwrap_or_default(),
+            ChartableStat::PersonalRating => perf_info.personal_rating(pr_data).map(|r| r.pr).unwrap_or_default(),
         };
 
         let color = crate::ui::theme::contrast::readable_on(
