@@ -249,7 +249,9 @@ impl App {
         // already opened rather than a second copy.
         if let Some(game_data) = self.replay_inspector.read(cx).game_data() {
             let replay_dir = std::path::PathBuf::from(&settings.wows_dir).join("replays");
-            self.player_tracker.update(cx, |tracker, cx| tracker.watch_live_matches(replay_dir, game_data, cx));
+            let proxy_url = settings.proxy_url.clone();
+            self.player_tracker
+                .update(cx, |tracker, cx| tracker.watch_live_matches(replay_dir, game_data, proxy_url, cx));
         }
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
         // Seed the text fields so the tab opens showing what is saved.
