@@ -57,6 +57,31 @@ const SETTINGS_MAX_HEIGHT: Pixels = px(420.);
 /// Distinguishes one chart pane's element ids from another's.
 pub type ChartId = usize;
 
+/// One chart pane as a settings row remembers it.
+///
+/// The games themselves are not here: they come from the session, and a
+/// chart is a way of looking at them rather than a copy.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChartSettings {
+    #[serde(default)]
+    pub stat: ChartableStat,
+    #[serde(default)]
+    pub mode: ChartMode,
+    #[serde(default)]
+    pub running: bool,
+    #[serde(default)]
+    pub combined: bool,
+    #[serde(default)]
+    pub show_values: bool,
+    /// The chart's own narrowing, when it was taken off the tab's.
+    #[serde(default)]
+    pub own_filters: Option<StatsFilters>,
+    /// The ships plotted, when the reader picked them. Empty follows the
+    /// session, which is what a new chart does.
+    #[serde(default)]
+    pub selected_ships: Vec<u64>,
+}
+
 pub struct StatsChartPanel {
     id: ChartId,
     stat: ChartableStat,
@@ -97,7 +122,11 @@ pub struct StatsChartPanel {
     focus_handle: FocusHandle,
 }
 
+/// This chart was set up differently, so the tab writes the set back.
+pub struct ChartSettingsChanged;
+
 impl EventEmitter<PanelEvent> for StatsChartPanel {}
+impl EventEmitter<ChartSettingsChanged> for StatsChartPanel {}
 
 impl StatsChartPanel {
     pub fn new(id: ChartId, cx: &mut Context<Self>) -> Self {
@@ -140,6 +169,46 @@ impl StatsChartPanel {
 
     /// Adopts the games the filter bar selected. Both shapes are kept so
     /// switching mode does not need the tab to push the data again.
+    /// Says the chart is set up differently now, so the tab remembers it.
+    fn settings_changed(&self, cx: &mut Context<Self>) {
+        cx.emit(ChartSettingsChanged);
+    }
+
+    /// How this chart is currently set up.
+    pub fn settings(&self) -> ChartSettings {
+        ChartSettings {
+            stat: self.stat,
+            mode: self.mode,
+            running: self.running,
+            combined: self.combined,
+            show_values: self.show_values,
+            own_filters: self.own_filters.clone(),
+            selected_ships: if self.selection_touched {
+                self.selected_ships.iter().map(|id| id.raw()).collect()
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    /// Puts `settings` back on this chart.
+    ///
+    /// Called before the session is handed over, so the narrowing is in place
+    /// the first time the games are filtered.
+    pub fn apply_settings(&mut self, settings: ChartSettings, cx: &mut Context<Self>) {
+        self.stat = settings.stat;
+        self.mode = settings.mode;
+        self.running = settings.running;
+        self.combined = settings.combined;
+        self.show_values = settings.show_values;
+        self.own_filters = settings.own_filters;
+        if !settings.selected_ships.is_empty() {
+            self.selected_ships = settings.selected_ships.into_iter().map(GameParamId::from).collect();
+            self.selection_touched = true;
+        }
+        cx.notify();
+    }
+
     /// Adopts the whole session and the tab's filters.
     ///
     /// Both, not just the selection the tab made: a chart the reader has
@@ -175,12 +244,14 @@ impl StatsChartPanel {
     /// does not jump the moment the override is turned on.
     fn set_overrides_tab(&mut self, overrides: bool, cx: &mut Context<Self>) {
         self.own_filters = overrides.then(|| self.tab_filters.clone());
+        self.settings_changed(cx);
         self.rebuild(cx);
     }
 
     fn set_own_division(&mut self, division: DivisionFilter, cx: &mut Context<Self>) {
         let Some(filters) = self.own_filters.as_mut() else { return };
         filters.division = division;
+        self.settings_changed(cx);
         self.rebuild(cx);
     }
 
@@ -270,6 +341,7 @@ impl StatsChartPanel {
         self.mode = mode;
         self.settle_stat();
         self.view.reset();
+        self.settings_changed(cx);
         cx.notify();
     }
 
@@ -279,6 +351,7 @@ impl StatsChartPanel {
         }
         self.stat = stat;
         self.view.reset();
+        self.settings_changed(cx);
         cx.notify();
     }
 
@@ -290,6 +363,7 @@ impl StatsChartPanel {
         }
         self.settle_stat();
         self.view.reset();
+        self.settings_changed(cx);
         cx.notify();
     }
 
@@ -297,11 +371,13 @@ impl StatsChartPanel {
         self.running = running;
         self.settle_stat();
         self.view.reset();
+        self.settings_changed(cx);
         cx.notify();
     }
 
     fn set_show_values(&mut self, show: bool, cx: &mut Context<Self>) {
         self.show_values = show;
+        self.settings_changed(cx);
         cx.notify();
     }
 
@@ -319,18 +395,21 @@ impl StatsChartPanel {
         } else {
             self.selected_ships.push(ship);
         }
+        self.settings_changed(cx);
         cx.notify();
     }
 
     fn select_all_ships(&mut self, cx: &mut Context<Self>) {
         self.selection_touched = true;
         self.selected_ships = self.played.iter().map(|(id, _)| *id).collect();
+        self.settings_changed(cx);
         cx.notify();
     }
 
     fn select_no_ships(&mut self, cx: &mut Context<Self>) {
         self.selection_touched = true;
         self.selected_ships.clear();
+        self.settings_changed(cx);
         cx.notify();
     }
 
@@ -711,5 +790,42 @@ impl Render for StatsChartPanel {
                     .child(self.value_label()),
             )
             .child(div().flex_1().min_h(px(0.)).p_2().child(body))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChartSettings;
+    use wows_toolkit_viewmodel::stats::DivisionFilter;
+    use wows_toolkit_viewmodel::stats::GameLimit;
+    use wows_toolkit_viewmodel::stats::StatsFilters;
+    use wows_toolkit_viewmodel::stats::chart::ChartMode;
+    use wows_toolkit_viewmodel::stats::chart::ChartableStat;
+
+    /// A chart comes back set up the way it was left, override and ship
+    /// selection included.
+    #[test]
+    fn a_chart_round_trips_through_the_settings_row() {
+        let saved = ChartSettings {
+            stat: ChartableStat::Frags,
+            mode: ChartMode::Bar,
+            running: true,
+            combined: true,
+            show_values: true,
+            own_filters: Some(StatsFilters {
+                limit: GameLimit::Recent(25),
+                division: DivisionFilter::DivOnly,
+                game_modes: ["RandomBattle".to_string()].into_iter().collect(),
+            }),
+            selected_ships: vec![4288575440, 3541279184],
+        };
+
+        let json = serde_json::to_string(&saved).expect("a chart serializes");
+        let read: ChartSettings = serde_json::from_str(&json).expect("and reads back");
+        assert_eq!(read, saved);
+
+        // A row written before a field existed still reads, on the defaults.
+        let older: ChartSettings = serde_json::from_str("{}").expect("an empty row reads");
+        assert_eq!(older, ChartSettings::default());
     }
 }
