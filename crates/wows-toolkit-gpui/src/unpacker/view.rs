@@ -5,14 +5,17 @@
 //! when the install carries more than one build, and the package and
 //! assets.bin browsers are separate tabs of an inner dock.
 
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
+use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
@@ -23,6 +26,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::progress::Progress;
 use gpui_kit::component::searchable_list::SearchableListItem;
 use gpui_kit::component::searchable_list::SearchableVec;
@@ -58,6 +62,11 @@ use wows_toolkit_viewmodel::unpacker::search::compile_query;
 use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
 use wows_toolkit_viewmodel::unpacker::search::scan;
 use wows_toolkit_viewmodel::unpacker::viewer;
+
+/// The queue dropdown's box: wide enough for a full VFS path, and capped in
+/// height so a large queue scrolls rather than covering the browser.
+const QUEUE_POPOVER_WIDTH: Pixels = px(420.);
+const QUEUE_POPOVER_MAX_HEIGHT: Pixels = px(300.);
 
 /// One message from a running scan.
 enum SearchUpdate {
@@ -361,7 +370,15 @@ impl UnpackerView {
         match event {
             BrowserEvent::Extract(entries) => {
                 self.queue.push_listed_files(entries);
-                cx.notify();
+                self.publish_queue(cx);
+            }
+            BrowserEvent::Queue(path) => {
+                self.queue.push(path.clone());
+                self.publish_queue(cx);
+            }
+            BrowserEvent::Unqueue(path) => {
+                self.queue.remove(path);
+                self.publish_queue(cx);
             }
             BrowserEvent::Search { source, query, path_filter, files } => {
                 self.open_search(*source, query.clone(), path_filter.clone(), files.clone(), _window, cx);
@@ -533,9 +550,27 @@ impl UnpackerView {
         cx.notify();
     }
 
+    /// Drops one entry from the queue, from the queue popover's per-row
+    /// remove button.
+    fn remove_from_queue(&mut self, path: VfsPath, cx: &mut Context<Self>) {
+        self.queue.remove(&path);
+        self.publish_queue(cx);
+    }
+
     fn clear_queue(&mut self, cx: &mut Context<Self>) {
         self.queue.clear();
         self.extract_state = ExtractState::Idle;
+        self.publish_queue(cx);
+    }
+
+    /// Hands both browser panes the queued paths, so their listing rows show
+    /// what is queued. One shared set rather than a copy per pane: a path is
+    /// queued for the tab, not for the pane it was queued from.
+    fn publish_queue(&mut self, cx: &mut Context<Self>) {
+        let queued: Rc<HashSet<String>> =
+            Rc::new(self.queue.entries().iter().map(|path| path.as_str().to_string()).collect());
+        self.pkg_browser.update(cx, |pane, cx| pane.set_queued(queued.clone(), cx));
+        self.assets_browser.update(cx, |pane, cx| pane.set_queued(queued, cx));
         cx.notify();
     }
 
@@ -550,6 +585,7 @@ impl UnpackerView {
         let output_dir = extract_root(Path::new(&self.output_dir));
 
         let queued = self.queue.take();
+        self.publish_queue(cx);
         let prototypes = self.prototypes;
         let stop_flag = Arc::new(AtomicBool::new(false));
         self.stop_flag = stop_flag.clone();
@@ -595,6 +631,73 @@ impl UnpackerView {
         self.stop_flag.store(true, Ordering::Relaxed);
         cx.notify();
     }
+}
+
+/// The extraction queue dropdown, mirroring the egui app's queue button and
+/// its popup: the count on the trigger, one removable row per entry, and a
+/// "Clear all" that empties it. Paths read as the game's own `res/` layout,
+/// which is where they land on disk.
+fn queue_popover(view: Entity<UnpackerView>, entries: Vec<VfsPath>) -> impl IntoElement {
+    let label = match entries.len() {
+        0 => "Queue".to_string(),
+        count => format!("{count} queued"),
+    };
+    let trigger = Button::new("unpacker-queue-trigger").label(label).compact();
+
+    Popover::new("unpacker-queue").trigger(trigger).content(move |_state, _window, _cx| {
+        let view = view.clone();
+        let rows = entries.iter().cloned().map(|entry| queue_row(view.clone(), entry)).collect::<Vec<_>>();
+        let clear_view = view.clone();
+
+        v_flex()
+            .w(QUEUE_POPOVER_WIDTH)
+            .gap_1()
+            .p_1()
+            .child(
+                h_flex()
+                    .justify_between()
+                    .items_center()
+                    .child(div().text_xs().font_weight(FontWeight::BOLD).child("Extraction queue"))
+                    .child(Button::new("unpacker-queue-clear-all").label("Clear all").compact().on_click(
+                        move |_event, _window, cx: &mut App| {
+                            clear_view.update(cx, |this, cx| this.clear_queue(cx));
+                        },
+                    )),
+            )
+            // A plain scroll container, not the kit's `overflow_y_scrollbar`:
+            // the overlaid scrollbar keeps requesting frames, which leaves a
+            // headless test spinning on a popover that never settles.
+            .child(
+                v_flex()
+                    .id("unpacker-queue-list")
+                    .max_h(QUEUE_POPOVER_MAX_HEIGHT)
+                    .overflow_y_scroll()
+                    .gap_1()
+                    .children(rows),
+            )
+    })
+}
+
+/// One queued entry: its path and a button that drops it.
+fn queue_row(view: Entity<UnpackerView>, entry: VfsPath) -> impl IntoElement {
+    let path = entry.as_str().trim_start_matches('/').to_string();
+    let remove = entry.clone();
+
+    h_flex()
+        .gap_1()
+        .items_center()
+        .justify_between()
+        .child(div().flex_1().min_w(px(0.)).text_xs().truncate().child(format!("res/{path}")))
+        .child(
+            Button::new(SharedString::from(format!("unpacker-queue-remove-{path}")))
+                .icon(IconName::Close)
+                .compact()
+                .tooltip("Remove from the queue")
+                .on_click(move |_event, _window, cx: &mut App| {
+                    let remove = remove.clone();
+                    view.update(cx, |this, cx| this.remove_from_queue(remove, cx));
+                }),
+        )
 }
 
 impl Focusable for UnpackerView {
@@ -671,6 +774,8 @@ impl Render for UnpackerView {
                     })),
             );
 
+        let queue_popover = queue_popover(cx.entity(), self.queue.entries().to_vec());
+
         let queue_bar = h_flex()
             .flex_none()
             .gap_2()
@@ -679,7 +784,7 @@ impl Render for UnpackerView {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().text_xs().opacity(0.6).child(format!("{} queued", self.queue.len())))
+            .child(queue_popover)
             .when_some(running, |this, progress| {
                 this.child(
                     div()
