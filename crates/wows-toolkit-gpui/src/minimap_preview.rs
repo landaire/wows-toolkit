@@ -6,25 +6,117 @@
 //! [`wows_minimap_renderer::preview`], the same command set the egui popup
 //! paints and the video export encodes, rasterised to an image here because
 //! this front end has no painter of its own.
-//!
-//! Nothing draws these yet. Baking a track reads and parses the replay
-//! against its own build's game data, and that pipeline
-//! (`wows-toolkit`'s `replay::renderer::preview`) is still in the egui crate;
-//! it is free of egui but built on that crate's asset and build caches, so
-//! moving it is its own piece of work. Rasterising and frame timing are
-//! settled here so that move is the only thing left.
-#![allow(dead_code)]
 
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use image::RgbImage;
+use wows_battle_world::ids::ShotTracking;
+use wows_battle_world::merged::MergedReplays;
+use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
+use wows_minimap_renderer::frame_track::TrackSink;
+use wows_minimap_renderer::frame_track::bake_options;
+use wows_minimap_renderer::frame_track::build_frame_track;
 use wows_minimap_renderer::preview::PreviewRenderer;
+use wows_minimap_renderer::renderer::MinimapRenderer;
+use wows_replays::ReplayFile;
+use wows_replays::game_constants::GameConstants;
+use wowsunpack::data::ResourceLoader;
+use wowsunpack::data::Version;
+use wowsunpack::game_params::provider::GameMetadataProvider;
+use wowsunpack::vfs::VfsPath;
 
 /// How long each baked frame is shown. The bake keeps an evenly spaced subset
 /// of the battle, so this is a display rate rather than the replay's own
 /// clock.
 pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
+
+/// Why a preview could not be produced.
+#[derive(Debug, thiserror::Error)]
+pub enum PreviewError {
+    #[error("the replay could not be read")]
+    UnreadableReplay,
+    #[error("the replay reports an unreadable client version {raw:?}")]
+    UnknownBuild { raw: String },
+    #[error("this replay's build is not loaded: {reason}")]
+    NoGameData { reason: String },
+    #[error("the build ships no map info for {map:?}")]
+    NoMapInfo { map: String },
+    #[error("the preview was superseded")]
+    Cancelled,
+    #[error(transparent)]
+    Render(#[from] wows_minimap_renderer::preview::PreviewRenderError),
+}
+
+/// Reads the replay at `path` and bakes its preview against its own build.
+///
+/// The build is loaded through the shared cache, so a replay from a build
+/// already open costs nothing extra and one from a build that is not
+/// installed simply has no preview.
+pub fn bake_from_file(
+    path: &std::path::Path,
+    game_data: &crate::replay_inspector::GameDataCache,
+    cancel: &AtomicBool,
+) -> Result<PreviewFrames, PreviewError> {
+    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
+        .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+
+    // A replay whose header carries no build number names no build to load.
+    let build =
+        version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let loaded =
+        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+
+    bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel)
+}
+
+/// Bakes `replay` into the frames a preview plays, then rasterises them.
+///
+/// One forward pass over the battle, sampled by the shared [`TrackSink`], so
+/// the port shows the same track the egui app does. `cancel` is checked
+/// between the phases that cost anything: a preview the pointer has already
+/// left should not finish parsing a replay.
+pub fn bake(
+    replay: &ReplayFile,
+    provider: &GameMetadataProvider,
+    constants: &GameConstants,
+    vfs: &VfsPath,
+    version: Option<&Version>,
+    cancel: &AtomicBool,
+) -> Result<PreviewFrames, PreviewError> {
+    let cancelled = || cancel.load(std::sync::atomic::Ordering::Relaxed);
+    if cancelled() {
+        return Err(PreviewError::Cancelled);
+    }
+
+    let map_name = replay.meta.mapName.clone();
+    let map_info =
+        assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
+
+    let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+    let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
+    renderer.set_fonts(assets::load_game_fonts(vfs));
+
+    let mut session = MergedReplays::new(provider.entity_specs(), provider, constants, session_version, replay, &[])
+        .map_err(|_| PreviewError::UnreadableReplay)?;
+    // Tracked, not Untracked: the tracer commands come from `active_shots()`,
+    // which stays empty unless shot recording is on.
+    session.world_mut().set_shot_tracking(ShotTracking::Tracked);
+
+    let mut sink = TrackSink::new();
+    build_frame_track(&mut session, &mut renderer, 1.0 / SNAPSHOTS_PER_SECOND, cancel, &mut sink);
+    session.finish();
+
+    if cancelled() {
+        return Err(PreviewError::Cancelled);
+    }
+
+    let mut renderer = PreviewRenderer::new(vfs, version, &map_name)?;
+    Ok(PreviewFrames::render(&mut renderer, &sink.finish()))
+}
 
 /// A rendered preview: every frame as an image gpui can draw.
 pub struct PreviewFrames {
@@ -42,10 +134,10 @@ impl PreviewFrames {
         Self { frames }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.frames.is_empty()
-    }
-
+    /// How many frames the bake produced. Only the tests and the Search
+    /// tab's own test accessor read this back; what plays is decided by
+    /// [`Self::at`].
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.frames.len()
     }
@@ -111,7 +203,7 @@ mod tests {
     #[test]
     fn a_track_with_no_frames_shows_nothing() {
         let empty = frames(0);
-        assert!(empty.is_empty());
+        assert_eq!(empty.len(), 0);
         assert!(empty.at(Duration::ZERO).is_none());
     }
 

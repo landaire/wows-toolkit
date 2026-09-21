@@ -5,6 +5,11 @@
 //! deciding what a header click sorts by all live in the shared index, so this
 //! is the rendering and the wiring.
 
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
+
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -94,6 +99,14 @@ impl EventEmitter<SearchEvent> for SearchView {}
 /// pulling an unbounded set into memory.
 const RESULT_LIMIT: i64 = 500;
 
+/// One report of "the pointer is over this row" is worth this much dwell.
+/// gpui gives no hover duration, so the dwell is counted in reports; at the
+/// shared threshold a row needs a few of them before it previews.
+const HOVER_FRAME: std::time::Duration = std::time::Duration::from_millis(100);
+
+/// The preview's edge length. Square, as the minimap is.
+const PREVIEW_WIDTH: f32 = 240.;
+
 const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
 /// The open/copy pair at the end of each row, which the header reserves.
@@ -134,6 +147,16 @@ pub struct SearchView {
     /// `hits`. Checked once per result set rather than per row per frame: it
     /// is a syscall, and the answer only changes when the file does.
     on_disk: Vec<bool>,
+    /// How long the pointer has rested on a row, which is what decides when a
+    /// preview is worth baking. The rule is shared with the egui app.
+    dwell: wows_toolkit_viewmodel::preview_dwell::Dwell<PathBuf>,
+    /// The replay a preview is showing, its frames, and when it started
+    /// playing. `None` until one has been baked.
+    preview: Option<(PathBuf, crate::minimap_preview::PreviewFrames, std::time::Instant)>,
+    /// The bake in flight, held so moving to another row drops it.
+    _preview_bake: Option<Task<()>>,
+    /// Set when the bake in flight should stop: the pointer has moved on.
+    preview_cancel: Arc<AtomicBool>,
     /// Game data for resolving a result's ship name in the current locale,
     /// rather than the one it was indexed in. Shared with the replay
     /// inspector, which already holds it.
@@ -170,6 +193,10 @@ impl SearchView {
             state: SearchState::Idle,
             expr: None,
             on_disk: Vec::new(),
+            dwell: Default::default(),
+            preview: None,
+            _preview_bake: None,
+            preview_cancel: Arc::new(AtomicBool::new(false)),
             game_data: None,
             resolved_ships: HashMap::new(),
             game_mode_gap: None,
@@ -203,6 +230,81 @@ impl SearchView {
         self.editing = None;
         self.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
         self.run(cx);
+    }
+
+    /// What the preview is showing, if anything. Test-only.
+    #[cfg(test)]
+    pub(crate) fn preview_frame_count(&self) -> Option<usize> {
+        self.preview.as_ref().map(|(_, frames, _)| frames.len())
+    }
+
+    /// Whether a row is currently being dwelled on. Test-only.
+    #[cfg(test)]
+    pub(crate) fn is_dwelling(&self) -> bool {
+        self.dwell.is_watching()
+    }
+
+    /// Records that the pointer rested on `path` for another frame, and bakes
+    /// its preview once it has rested long enough.
+    ///
+    /// `elapsed` is how long since the last report, which is what the shared
+    /// dwell accumulates; gpui gives no hover duration of its own.
+    pub(crate) fn hover_row(&mut self, path: PathBuf, elapsed: std::time::Duration, cx: &mut Context<Self>) {
+        self.dwell.hover(path, elapsed);
+        let Some(wanted) = self.dwell.pending_request() else { return };
+        if self.preview.as_ref().is_some_and(|(shown, _, _)| shown == &wanted) {
+            return;
+        }
+        self.bake_preview(wanted, cx);
+    }
+
+    /// The pointer left the results, so nothing is dwelling and whatever was
+    /// baking is abandoned.
+    pub(crate) fn leave_rows(&mut self, cx: &mut Context<Self>) {
+        if !self.dwell.is_watching() && self.preview.is_none() {
+            return;
+        }
+        self.dwell.leave();
+        self.preview = None;
+        self.cancel_bake();
+        cx.notify();
+    }
+
+    fn cancel_bake(&mut self) {
+        self.preview_cancel.store(true, Ordering::Relaxed);
+        self.preview_cancel = Arc::new(AtomicBool::new(false));
+        self._preview_bake = None;
+    }
+
+    /// Bakes and rasterises `path`'s preview off the UI thread.
+    ///
+    /// The build the replay was recorded on has to be loaded for it, which is
+    /// the expensive half; a replay whose build is not installed simply shows
+    /// no preview rather than reporting an error over the results.
+    fn bake_preview(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+        self.cancel_bake();
+        let Some(game_data) = self.game_data.clone() else { return };
+        let cancel = Arc::clone(&self.preview_cancel);
+
+        self._preview_bake = Some(cx.spawn(async move |this, cx| {
+            let baked = crate::runtime::spawn(cx, {
+                let path = path.clone();
+                async move { crate::minimap_preview::bake_from_file(&path, &game_data, &cancel) }
+            })
+            .await;
+
+            let Ok(Ok(frames)) = baked else {
+                if let Ok(Err(err)) = baked {
+                    tracing::debug!("search: no preview for {}: {err}", path.display());
+                }
+                return;
+            };
+
+            let _ = this.update(cx, |this, cx| {
+                this.preview = Some((path, frames, std::time::Instant::now()));
+                cx.notify();
+            });
+        }));
     }
 
     /// Re-offers the completions when the bar text has changed since they
@@ -595,6 +697,8 @@ impl Render for SearchView {
             let Some(hit) = hits.get(ix) else {
                 return div().into_any_element();
             };
+            let path = hit.replay_path.clone();
+            let panel = entity.clone();
             h_flex()
                 .id(ix)
                 .w_full()
@@ -603,6 +707,19 @@ impl Render for SearchView {
                 .items_center()
                 .px_2()
                 .hover(|this| this.bg(hover_bg))
+                // gpui reports that the pointer is over the row, not for how
+                // long, so each report is one frame's worth of dwell.
+                .on_hover(move |hovered, _window, cx| {
+                    let path = path.clone();
+                    let hovered = *hovered;
+                    panel.update(cx, |this, cx| {
+                        if hovered {
+                            this.hover_row(path, HOVER_FRAME, cx);
+                        } else {
+                            this.leave_rows(cx);
+                        }
+                    });
+                })
                 .children(ResultColumn::all().into_iter().map(|column| {
                     div().w(column.width()).text_sm().truncate().child(match column {
                         ResultColumn::Sortable(column) => cell_text(hit, column),
@@ -618,6 +735,22 @@ impl Render for SearchView {
                 .child(row_actions(ix, hit, on_disk.get(ix).copied().unwrap_or(false), entity.clone()))
                 .into_any_element()
         };
+
+        // The dwelled row's battle, played back. Absent until the pointer has
+        // rested on a row whose build is loaded.
+        let preview = self.preview.as_ref().and_then(|(_, frames, started)| {
+            let frame = frames.at(started.elapsed())?;
+            Some(
+                div()
+                    .id("search-preview")
+                    .test_support()
+                    .flex_none()
+                    .p_1()
+                    .border_t_1()
+                    .border_color(border)
+                    .child(img(frame).w(px(PREVIEW_WIDTH)).h(px(PREVIEW_WIDTH))),
+            )
+        });
 
         let status = match &self.state {
             SearchState::Idle => Some("Type a query and press Enter".to_string()),
@@ -693,6 +826,7 @@ impl Render for SearchView {
             })
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
+            .when_some(preview, |this, preview| this.child(preview))
             .when_some(footer, |this, footer| this.child(footer))
     }
 }

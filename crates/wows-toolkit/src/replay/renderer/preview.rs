@@ -10,29 +10,17 @@ use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::renderer::MinimapRenderer;
-use wows_minimap_renderer::renderer::RenderOptions;
 use wows_replays::ReplayFile;
-use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 
 use super::RendererAssetCache;
 use super::RgbaAsset;
 use super::SNAPSHOTS_PER_SECOND;
-use super::frame_pass::FrameSink;
 use super::frame_pass::build_frame_track;
 use crate::data::wows_data::BuildDataCache;
 
-/// Wall-clock length of one full preview loop for a replay long enough to
-/// fill the frame budget.
-pub(crate) const PREVIEW_LOOP_SECS: f32 = 10.0;
-/// Display rate the popup advances the track at.
-pub(crate) const PREVIEW_FPS: f32 = 15.0;
-/// Frames retained per track. Battles shorter than
-/// `PREVIEW_MAX_FRAMES / SNAPSHOTS_PER_SECOND` seconds keep fewer and loop
-/// proportionally sooner, which is correct: a one-minute battle should not be
-/// stretched to ten seconds.
-pub(crate) const PREVIEW_MAX_FRAMES: usize = (PREVIEW_LOOP_SECS * PREVIEW_FPS) as usize;
+pub(crate) use wows_minimap_renderer::frame_track::PREVIEW_FPS;
 
 /// A decimated command track for one replay, played on loop by the inspector
 /// hover popup.
@@ -48,91 +36,6 @@ pub(crate) struct PreviewTrack {
     pub map_image: Option<Arc<RgbaAsset>>,
 }
 
-/// Retains a bounded, evenly spaced subset of the frames it is fed.
-pub(crate) struct TrackSink {
-    frames: Vec<Vec<DrawCommand>>,
-    /// The clock each retained frame arrived with. Only the alignment tests
-    /// read these back; the popup plays frames at a fixed display rate.
-    #[cfg(test)]
-    clocks: Vec<GameClock>,
-    /// Keep one frame in every `stride`. Doubles each time the budget fills.
-    stride: usize,
-    /// Source frames seen since the last frame was retained.
-    since_kept: usize,
-}
-
-impl TrackSink {
-    pub(crate) fn new() -> Self {
-        Self {
-            frames: Vec::with_capacity(PREVIEW_MAX_FRAMES * 2),
-            #[cfg(test)]
-            clocks: Vec::new(),
-            stride: 1,
-            since_kept: 0,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn stride(&self) -> usize {
-        self.stride
-    }
-
-    #[cfg(test)]
-    pub(crate) fn kept_clocks(&self) -> &[GameClock] {
-        &self.clocks
-    }
-
-    pub(crate) fn finish(
-        self,
-        map_name: String,
-        version: Option<Version>,
-        map_image: Option<Arc<RgbaAsset>>,
-    ) -> PreviewTrack {
-        PreviewTrack { frames: self.frames, map_name, version, map_image }
-    }
-
-    /// Drop every other retained frame, halving the track in place.
-    fn halve(&mut self) {
-        let mut keep = false;
-        self.frames.retain(|_| {
-            keep = !keep;
-            keep
-        });
-        #[cfg(test)]
-        {
-            let mut keep = false;
-            self.clocks.retain(|_| {
-                keep = !keep;
-                keep
-            });
-        }
-        self.stride *= 2;
-    }
-}
-
-impl FrameSink for TrackSink {
-    fn push(&mut self, _index: usize, clock: GameClock, commands: Vec<DrawCommand>) {
-        // Playback runs at a fixed display rate and never consults the clock;
-        // only the frame/clock alignment tests read it back.
-        #[cfg(not(test))]
-        let _ = clock;
-        if self.since_kept.is_multiple_of(self.stride) {
-            self.frames.push(commands);
-            #[cfg(test)]
-            self.clocks.push(clock);
-            if self.frames.len() > PREVIEW_MAX_FRAMES {
-                self.halve();
-            }
-        }
-        self.since_kept += 1;
-    }
-}
-
-/// Why a replay has no preview.
-///
-/// Each variant carries what the popup needs to say, so the popup never parses
-/// a formatted message back apart. `Display` is the log rendering; what the
-/// user reads comes from [`Self::key`] and the value the variant carries.
 #[derive(Debug, Clone, thiserror::Error)]
 pub(crate) enum PreviewError {
     // `Version` has no `Display` impl; `to_path()` is the same
@@ -178,30 +81,10 @@ impl PreviewError {
     }
 }
 
-/// What a preview track is baked with.
-///
-/// Wider than [`preview_options`](crate::ui::replay_parser::preview_popup::preview_options),
-/// the paint-time preset, so turning one of that preset's switches on does not
-/// invalidate cached tracks. It is not everything the renderer can emit: the
-/// panel commands (stats, rosters) carry a full roster per frame and position
-/// trails carry the whole match's position history per ship per frame, so
-/// baking either would cost tens of megabytes for one track. Widening this set
-/// changes what a cached track contains, so a track baked before the change
-/// cannot serve a preset that asks for the new class; the popup's presets are
-/// checked against this set by `paint_preset_asks_for_nothing_unbaked`.
-pub(crate) fn bake_options() -> RenderOptions {
-    RenderOptions {
-        show_kill_feed: true,
-        show_chat: true,
-        show_armament: true,
-        show_stats_panel: false,
-        show_team_rosters: false,
-        show_ship_config: false,
-        show_trails: false,
-        show_speed_trails: false,
-        ..RenderOptions::default()
-    }
-}
+/// The frame sampling and the options a preview bakes under, shared with the
+/// GPUI port so both bake the same track.
+use wows_minimap_renderer::frame_track::TrackSink;
+pub(crate) use wows_minimap_renderer::frame_track::bake_options;
 
 /// Bake a decimated preview track for `path` in a single forward pass.
 ///
@@ -281,7 +164,7 @@ pub(crate) fn bake_preview_track(
     if let Some(err) = cancelled() {
         return Err(err);
     }
-    Ok(sink.finish(map_name, version, map_image))
+    Ok(PreviewTrack { frames: sink.finish(), map_name, version, map_image })
 }
 
 /// Identifies a replay's preview. The mtime is part of the key so a replaced
@@ -706,72 +589,5 @@ mod cache_tests {
         }
         // The real track lands; the loop must start at its beginning.
         assert_eq!(cache.anim_index(&a, 5.0, 150), 0);
-    }
-}
-
-#[cfg(test)]
-mod track_tests {
-    use super::*;
-    use wows_minimap_renderer::draw_command::DrawCommand;
-    use wows_replays::types::ElapsedClock;
-
-    fn feed(sink: &mut TrackSink, count: usize) {
-        for i in 0..count {
-            sink.push(i, GameClock(i as f32), Vec::new());
-        }
-    }
-
-    fn tagged(index: usize) -> Vec<DrawCommand> {
-        vec![DrawCommand::Timer { time_remaining: Some(index as i64), elapsed: ElapsedClock(index as f32) }]
-    }
-
-    #[test]
-    fn a_short_replay_keeps_every_frame() {
-        let mut sink = TrackSink::new();
-        feed(&mut sink, 40);
-        let track = sink.finish("spaces/test".to_string(), None, None);
-        assert_eq!(track.frames.len(), 40);
-    }
-
-    #[test]
-    fn a_long_replay_is_decimated_to_the_budget() {
-        let mut sink = TrackSink::new();
-        feed(&mut sink, 1800);
-        let track = sink.finish("spaces/test".to_string(), None, None);
-        assert!(track.frames.len() <= PREVIEW_MAX_FRAMES, "kept {}", track.frames.len());
-        assert!(track.frames.len() > PREVIEW_MAX_FRAMES / 2, "kept too few: {}", track.frames.len());
-    }
-
-    #[test]
-    fn decimation_keeps_the_first_frame_and_reaches_the_end() {
-        let mut sink = TrackSink::new();
-        feed(&mut sink, 1800);
-        assert_eq!(sink.kept_clocks()[0], GameClock(0.0));
-        let last = *sink.kept_clocks().last().expect("a kept frame");
-        assert!(last.0 >= 1800.0 - sink.stride() as f32, "last kept clock {last:?}");
-    }
-
-    #[test]
-    fn an_empty_replay_yields_an_empty_track() {
-        let sink = TrackSink::new();
-        let track = sink.finish("spaces/test".to_string(), None, None);
-        assert!(track.frames.is_empty());
-    }
-
-    #[test]
-    fn every_retained_frame_keeps_the_clock_it_arrived_with() {
-        let mut sink = TrackSink::new();
-        for i in 0..1800 {
-            sink.push(i, GameClock(i as f32), tagged(i));
-        }
-        let clocks: Vec<GameClock> = sink.kept_clocks().to_vec();
-        let track = sink.finish("spaces/test".to_string(), None, None);
-        assert_eq!(track.frames.len(), clocks.len(), "frames and clocks diverged");
-        for (frame, clock) in track.frames.iter().zip(clocks.iter()) {
-            let DrawCommand::Timer { time_remaining: Some(index), .. } = frame[0] else {
-                panic!("expected a tagged Timer frame");
-            };
-            assert_eq!(index as f32, clock.0, "frame {index} was paired with clock {}", clock.0);
-        }
     }
 }
