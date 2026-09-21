@@ -49,6 +49,7 @@ use super::icons::IconCache;
 use super::model::MatchContext;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
+use super::model::SkillWarning;
 use super::sort::SortColumn;
 use super::sort::SortOrder;
 use super::sort::sort_rows;
@@ -183,7 +184,7 @@ fn measure_column_widths(
                 for row in &model.rows {
                     let cell = cell_value(row, col, debug);
                     let text_w = text_width(cell.text.into(), window, false);
-                    let marker_count = row.skill_warning as u32 + row.has_dazzle as u32 + row.has_ifa as u32;
+                    let marker_count = row.skill_warning.is_some() as u32 + row.has_dazzle as u32 + row.has_ifa as u32;
                     let mut row_w = if marker_count > 0 {
                         let markers_w =
                             marker_count as f32 * icon_default + marker_count.saturating_sub(1) as f32 * gap_0p5;
@@ -844,18 +845,26 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
         .map(resolve_color)
         .unwrap_or_else(|| resolve_color(ColorRole::CaptainPoints(CaptainPointsTier::Good)));
 
+    // The order the egui label builds: what the captain has, then what is
+    // wrong with the build.
     let mut markers = h_flex().flex_none().gap_0p5();
     let mut has_markers = false;
-    if row.skill_warning {
-        markers = markers.child(Icon::new(IconName::TriangleAlert).text_color(color));
-        has_markers = true;
-    }
     if row.has_dazzle {
         markers = markers.child(Icon::new(IconName::StarFill).text_color(color));
         has_markers = true;
     }
     if row.has_ifa {
         markers = markers.child(Icon::new(IconName::Bell).text_color(color));
+        has_markers = true;
+    }
+    if let Some(warning) = row.skill_warning {
+        // Two separate mistakes, so two separate glyphs: every point in tier
+        // 1 is a turret, nothing above tier 2 is a plain warning.
+        let glyph = match warning {
+            SkillWarning::TowerDefense => crate::icons::CASTLE_TURRET,
+            SkillWarning::NoHighTier => crate::icons::WARNING,
+        };
+        markers = markers.child(crate::icons::icon(glyph).text_color(color));
         has_markers = true;
     }
 

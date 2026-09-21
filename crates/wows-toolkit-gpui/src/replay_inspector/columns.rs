@@ -219,7 +219,7 @@ pub(crate) fn name_color_kind(row: &PlayerRow) -> PlayerColorKind {
 }
 
 fn captain_points_tier(row: &PlayerRow) -> CaptainPointsTier {
-    if row.skill_warning {
+    if row.skill_warning.is_some() {
         return CaptainPointsTier::Bad;
     }
     match row.skill_points {

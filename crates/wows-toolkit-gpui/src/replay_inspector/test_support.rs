@@ -89,7 +89,7 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
         num_tier_1_skills: 0,
         skill_label_text: "0pts (0 skills)".to_string(),
         skill_hover_text: None,
-        skill_warning: false,
+        skill_warning: None,
         has_dazzle: false,
         has_ifa: false,
         translated_build: None,

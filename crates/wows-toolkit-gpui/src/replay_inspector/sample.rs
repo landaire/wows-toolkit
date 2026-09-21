@@ -29,6 +29,7 @@ use super::model::ChatMessage;
 use super::model::MatchContext;
 use super::model::PlayerRow;
 use super::model::ReplayReportModel;
+use super::model::SkillWarning;
 
 /// A `PlayerRow` with every field at its absent/zero default, mirroring the
 /// test-only `base_row` fixture so the sample rows below can override just the
@@ -98,7 +99,7 @@ fn base_row(db_id: i64, team_id: i64, relation: Relation, is_self: bool) -> Play
         num_tier_1_skills: 0,
         skill_label_text: "0pts (0 skills)".to_string(),
         skill_hover_text: None,
-        skill_warning: false,
+        skill_warning: None,
         has_dazzle: false,
         has_ifa: false,
         translated_build: None,
@@ -397,7 +398,7 @@ pub fn sample_model() -> ReplayReportModel {
         PlayerRow {
             division_label: Some("(A)".to_string()),
             is_self_division_mate: true,
-            skill_warning: true,
+            skill_warning: Some(SkillWarning::TowerDefense),
             num_tier_1_skills: 6,
             ..stat_row(
                 3,
