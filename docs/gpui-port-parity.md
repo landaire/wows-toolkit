@@ -229,8 +229,10 @@ kept so the next audit does not re-report them.
   search.
 - No "find matches for this player/clan" action anywhere.
 - Roster rows have no action menu (wows-numbers, shipbuilds).
-- Team headings drop the player count, both team averages and the win/loss
-  colour.
+- [done] Each team is headed by its name, how many players are on it, and its
+  average win rate and personal rating in the band's colour. The averaging is
+  `wows_toolkit_viewmodel::player_tracker::live`, shared with the egui tab, so
+  the heading and the cells under it cannot disagree.
 - The roster's Encounters column is a static "met before" string.
 - Historical rows do not expand; notes are a separate bottom panel, and
   aliases and account ids are invisible.
