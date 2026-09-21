@@ -54,11 +54,9 @@ const SHIP_SEARCH: &str = "armor-sidebar-search";
 /// Unpacker tab controls (`unpacker::view`, `unpacker::browser`).
 const EXTRACT: &str = "unpacker-extract";
 const CANCEL: &str = "unpacker-cancel";
-const CLEAR_QUEUE: &str = "unpacker-clear-queue";
 const PKG_FILTER: &str = "unpacker-pkg-filter";
 const DUMP_PARAMS: &str = "unpacker-dump-params";
 const OUTPUT_DIR: &str = "unpacker-output-dir";
-const QUEUE_TRIGGER: &str = "unpacker-queue-trigger";
 const QUEUE_CLEAR_ALL: &str = "unpacker-queue-clear-all";
 
 /// Stats tab filter bar (`stats::view`).
@@ -379,11 +377,13 @@ fn the_unpacker_tab_reports_an_empty_extraction_queue_and_disables_its_actions(c
         show_tab(window, AppTab::Unpacker, cx);
 
         // Nothing queued, so every queue action is refused. Clicking anyway
-        // must leave the tab alone rather than starting a run.
-        for action in [EXTRACT, CANCEL, CLEAR_QUEUE] {
+        // must leave the panel alone rather than starting a run. Cancel is
+        // drawn only while a run is going, so an idle tab does not offer it.
+        assert!(window.try_find(CANCEL).is_none(), "cancel belongs to a run in progress");
+        for action in [EXTRACT, QUEUE_CLEAR_ALL] {
             window.click(action, cx);
         }
-        assert!(window.try_find(EXTRACT).is_some(), "the queue bar survives clicks on its disabled buttons");
+        assert!(window.try_find(EXTRACT).is_some(), "the queue panel survives clicks on its disabled buttons");
     })
     .expect("the test window stays open");
 }
@@ -472,10 +472,10 @@ fn the_unpacker_queue_dropdown_opens_and_offers_to_clear_the_queue(cx: &mut Test
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Unpacker, cx);
-        assert!(window.try_find(QUEUE_CLEAR_ALL).is_none(), "the dropdown starts closed");
-
-        window.click(QUEUE_TRIGGER, cx);
-        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "clicking the trigger opens the dropdown");
+        // The queue is a panel beside the listing, not a dropdown: what acts
+        // on it is on screen with it rather than behind a trigger.
+        assert!(window.try_find(QUEUE_CLEAR_ALL).is_some(), "the queue panel is open beside the listing");
+        assert!(window.try_find(OUTPUT_DIR).is_some(), "the destination is on the panel with the queue");
     })
     .expect("the test window stays open");
 }

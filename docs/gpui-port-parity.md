@@ -51,6 +51,23 @@ kept so the next audit does not re-report them.
 
 ## Replay Inspector
 
+- The replay renderer is absent wholesale: the tab-header Render button, the
+  row menu's Render Replay / Render to Video / Render to Clipboard, and the
+  playback viewport itself (transport, seek, speed, annotation toolbar, video
+  export). Six entry points in the egui app, none in the port.
+- "Copy Replay" puts the replay *files* on the clipboard in egui
+  (`arboard set().file_list`), so they paste into Explorer; the port copies
+  path text only.
+- Open in Game / Show Replay Controls (egui swaps the label on alt) are
+  missing from the row menu, and there is no confirmation-action pipeline.
+- Set as / Add to Session Stats for a single replay.
+- Date grouping buckets consecutive runs rather than folding by name, so an
+  out-of-order timestamp gives the same date twice; egui folds through a map.
+- The debug "Results (Mapped JSON)" viewer.
+- Ingest progress has no counts and no bar.
+- The listing has no keyboard: egui activates a row on Enter.
+- The collab session popover and the Tactics Board button.
+
 - [done] Re-opening an open replay did nothing; it now brings that tab
   forward.
 - [done] The listing's context menu had one item. It now offers Open, Copy
@@ -169,6 +186,12 @@ kept so the next audit does not re-report them.
 - [done] The listing has column headers, striped rows, file-kind glyphs, a
   chevron per directory and a folder glyph that follows the open state.
 - [done] File rows offer View contents and Extract as JSON.
+- [done] The queue is a panel beside the listing carrying every control that
+  acts on it (destination, decode-as-JSON, Extract, Cancel, Clear), so the
+  tab's chrome is one row rather than three, and a directory is ticked like a
+  file rather than pressed with a plus button.
+- [done] Starting an extraction no longer empties the queue, so a cancelled
+  or failed run does not cost every tick the reader made.
 - Content-search hits cannot be queued, revealed or inspected by offset.
 - Filter results do not reveal the file in the tree.
 - Extraction progress does not name the file being written.

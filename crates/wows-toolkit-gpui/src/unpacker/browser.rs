@@ -615,9 +615,12 @@ impl Render for BrowserPanel {
     }
 }
 
-/// One listing row's queue control. A file gets a checkbox, a directory a
-/// plus/remove button, matching the egui listing: a directory is queued whole
-/// rather than ticked like a single file.
+/// One listing row's queue control.
+///
+/// A checkbox whatever the row is: ticking a directory queues it whole, which
+/// is the only way a directory differs, and that is what the tooltip says. A
+/// row of checkboxes reads as one column of the same question, where a mix of
+/// checkboxes and plus buttons reads as two.
 fn queue_toggle(ix: usize, path: VfsPath, is_dir: bool, is_queued: bool, entity: Entity<BrowserPanel>) -> AnyElement {
     let emit = move |cx: &mut App| {
         let path = path.clone();
@@ -630,22 +633,13 @@ fn queue_toggle(ix: usize, path: VfsPath, is_dir: bool, is_queued: bool, entity:
         });
     };
 
-    if is_dir {
-        let (icon, tooltip) = if is_queued {
-            (IconName::Close, t!("ui.unpacker.remove_from_queue").into_owned())
-        } else {
-            (IconName::Plus, t!("ui.unpacker.queue_folder").into_owned())
-        };
-        return Button::new(("queue-toggle", ix))
-            .icon(icon)
-            .compact()
-            .tooltip(tooltip)
-            .on_click(move |_event, _window, cx: &mut App| emit(cx))
-            .into_any_element();
-    }
-
     Checkbox::new(("queue-toggle", ix))
         .checked(is_queued)
+        .tooltip(if is_dir {
+            t!("ui.unpacker.queue_folder").into_owned()
+        } else {
+            t!("ui.unpacker.queue_file").into_owned()
+        })
         .on_click(move |_checked: &bool, _window, cx: &mut App| emit(cx))
         .into_any_element()
 }
