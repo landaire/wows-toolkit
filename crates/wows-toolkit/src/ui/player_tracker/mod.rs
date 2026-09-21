@@ -49,21 +49,8 @@ use live::LiveIdentities;
 use live::LiveMatch;
 use live::ResolvedRoster;
 
-/// Which win rate the Current Match table shows. Drives the row banding and
-/// the battle counts with it, so a row never mixes account and ship scopes.
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum WinRateMode {
-    #[default]
-    Overall,
-    Ship,
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
-pub enum CurrentMatchViewMode {
-    Compact,
-    #[default]
-    Detailed,
-}
+pub use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
+pub use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 
 /// How far the current match's stats have got.
 #[derive(Debug, Clone, Default)]

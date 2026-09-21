@@ -50,6 +50,8 @@ use super::last_seen_text;
 use super::live::LiveRosterRow;
 use crate::ui::replay_parser::PlayerTintColor as _;
 use wows_toolkit_viewmodel::player_tracker::live::ClanColor as LiveClanColor;
+pub(crate) use wows_toolkit_viewmodel::player_tracker::live::row_stats;
+use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 
 const ROW_EDGE_PADDING_X: i8 = 10;
 const ROW_EDGE_PADDING_Y: i8 = 3;
@@ -318,38 +320,6 @@ struct TeamActions {
     copy_login: Option<String>,
     set_win_rate_mode: Option<WinRateMode>,
     set_view_mode: Option<CurrentMatchViewMode>,
-}
-
-/// What one row shows, once the mode has chosen between the account and ship
-/// scopes. Every figure here belongs to the chosen scope, so a row can never
-/// pair one scope's number with another's. The band follows the rate that is
-/// actually shown, so the row colour and the number cannot disagree either.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct RowStats {
-    pub win_rate: Option<f64>,
-    pub battles: Option<i64>,
-    pub avg_damage: Option<i64>,
-    pub pr: Option<f64>,
-    pub band: Option<PersonalRatingCategory>,
-}
-
-pub(crate) fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> RowStats {
-    let Some(stats) = stats else {
-        return RowStats::default();
-    };
-    let (win_rate, battles, avg_damage, pr) = match mode {
-        WinRateMode::Overall => (stats.overall_win_rate, stats.battles, stats.overall_avg_damage, stats.pr),
-        WinRateMode::Ship => (stats.ship_win_rate, stats.ship_battles, stats.ship_avg_damage, stats.ship_pr),
-    };
-
-    RowStats { win_rate, battles, avg_damage, pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
-}
-
-fn visible_stat_modes(view_mode: CurrentMatchViewMode, selected_mode: WinRateMode) -> Vec<WinRateMode> {
-    match view_mode {
-        CurrentMatchViewMode::Compact => vec![selected_mode],
-        CurrentMatchViewMode::Detailed => vec![WinRateMode::Overall, WinRateMode::Ship],
-    }
 }
 
 /// The width given to each team column when they sit side by side: half the

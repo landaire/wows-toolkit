@@ -22,6 +22,7 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -44,19 +45,27 @@ use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortOrder;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::player_tracker::clan_rows;
+use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
 use wows_toolkit_viewmodel::player_tracker::live::LiveRosterRow;
 use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
 use wows_toolkit_viewmodel::player_tracker::live::ResolvedRoster;
+use wows_toolkit_viewmodel::player_tracker::live::RowStats;
 use wows_toolkit_viewmodel::player_tracker::live::TrackedIndex;
+use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
+use wows_toolkit_viewmodel::player_tracker::live::row_stats;
+use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 use wows_toolkit_viewmodel::player_tracker::visible_players;
+use wowsunpack::game_params::types::Species;
 
 use crate::replay_inspector::GameDataCache;
+use crate::replay_inspector::IconCache;
 use crate::replay_inspector::LoadedGameData;
 use crate::replay_inspector::columns::ColorRole;
 use crate::replay_inspector::columns::PlayerColorKind;
+use crate::replay_inspector::columns::player_color_kind_rgb;
 use crate::replay_inspector::table::resolve_color;
 use crate::runtime;
 use crate::ui::selectable;
@@ -69,6 +78,7 @@ const MEMBERS_COLUMN_WIDTH: Pixels = px(120.);
 const SHIP_COLUMN_WIDTH: Pixels = px(130.);
 const MET_COLUMN_WIDTH: Pixels = px(80.);
 const STAT_COLUMN_WIDTH: Pixels = px(64.);
+const CLASS_COLUMN_WIDTH: Pixels = px(16.);
 
 /// Which table the tab is showing.
 ///
@@ -142,6 +152,14 @@ pub struct PlayerTrackerView {
     /// The replays directory being watched, so the scan knows where the live
     /// packet stream is.
     replay_dir: Option<PathBuf>,
+    /// Ship-class icons for the roster, decoded from the battle's own build.
+    /// Empty until that build's data loads; a row without one falls back to
+    /// its ship name alone, which is what an older client with no icon does.
+    icons: IconCache,
+    /// How much of each player the roster shows, and which scope its figures
+    /// come from when it shows one.
+    view_mode: CurrentMatchViewMode,
+    win_rate_mode: WinRateMode,
     /// The proxy the stats lookup goes through, as the settings hold it.
     /// Normalized and interpreted by `http::client`, which is where an unset
     /// or malformed value is decided.
@@ -189,6 +207,9 @@ impl PlayerTrackerView {
             live_identities: None,
             stats: StatsState::Idle,
             replay_dir: None,
+            icons: IconCache::new(),
+            view_mode: CurrentMatchViewMode::default(),
+            win_rate_mode: WinRateMode::default(),
             proxy_url: String::new(),
             _live_scan: None,
             _live_build_load: None,
@@ -378,6 +399,8 @@ impl PlayerTrackerView {
                 match loaded {
                     Ok(data) => {
                         this.live_metadata = Some(data);
+                        let svg_renderer = cx.svg_renderer();
+                        this.load_roster_icons(svg_renderer, cx);
                         this.start_live_scan(started_at, cx);
                     }
                     // The roster still lists names and relations; the ship
@@ -547,6 +570,35 @@ impl PlayerTrackerView {
         cx.notify();
     }
 
+    /// Decodes a ship-class icon for every class in the roster, tinted by the
+    /// relation the row is drawn in. One decode per class and tint, not one
+    /// per row.
+    fn load_roster_icons(&mut self, svg_renderer: gpui_kit::SvgRenderer, cx: &mut Context<Self>) {
+        let Some(metadata) = self.live_metadata.clone() else { return };
+        let Some(roster) = self.live_roster() else { return };
+
+        let vfs = metadata.vfs().clone();
+        let mut seen: HashSet<(Species, u32)> = HashSet::new();
+        for row in roster.friendly.iter().chain(roster.enemy.iter()) {
+            let Some(species) = row.species else { continue };
+            let tint = tint_rgb(row.tint);
+            if seen.insert((species, tint)) {
+                self.icons.load_ship_class(species, tint, &vfs, &svg_renderer);
+            }
+        }
+        cx.notify();
+    }
+
+    fn set_view_mode(&mut self, view_mode: CurrentMatchViewMode, cx: &mut Context<Self>) {
+        self.view_mode = view_mode;
+        cx.notify();
+    }
+
+    fn set_win_rate_mode(&mut self, win_rate_mode: WinRateMode, cx: &mut Context<Self>) {
+        self.win_rate_mode = win_rate_mode;
+        cx.notify();
+    }
+
     /// The Current Match body: the roster when a battle is under way, and
     /// what is missing when it is not.
     fn render_current_match(&self, cx: &mut Context<Self>) -> AnyElement {
@@ -559,12 +611,62 @@ impl PlayerTrackerView {
             (_, true, Some(_)) => None,
         };
 
+        // The mode selectors sit above the roster rather than in the tab's
+        // own toolbar: they say nothing about the tables beside it.
+        let entity = cx.entity();
+        let view_modes = CurrentMatchViewMode::ALL.map(|mode| {
+            let chosen = self.view_mode == mode;
+            let entity = entity.clone();
+            selectable(
+                ("tracker-view-mode", mode as usize),
+                chosen,
+                Button::new(("tracker-view-mode-button", mode as usize))
+                    .label(mode.label())
+                    .compact()
+                    .selected(chosen)
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        entity.update(cx, |this, cx| this.set_view_mode(mode, cx));
+                    }),
+            )
+        });
+        // Which scope the compact roster shows. Detailed shows both, so the
+        // selector would say nothing there.
+        let scope_modes = (self.view_mode == CurrentMatchViewMode::Compact).then(|| {
+            WinRateMode::ALL.map(|mode| {
+                let chosen = self.win_rate_mode == mode;
+                let entity = entity.clone();
+                selectable(
+                    ("tracker-win-rate-mode", mode as usize),
+                    chosen,
+                    Button::new(("tracker-win-rate-mode-button", mode as usize))
+                        .label(mode.label())
+                        .compact()
+                        .selected(chosen)
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            entity.update(cx, |this, cx| this.set_win_rate_mode(mode, cx));
+                        }),
+                )
+            })
+        });
+
+        let mode_bar = h_flex()
+            .flex_none()
+            .gap_1()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(border)
+            .children(view_modes)
+            .when_some(scope_modes, |this, modes| this.child(div().w(px(8.))).children(modes));
+
         if let Some(status) = status {
             return v_flex()
                 .size_full()
-                .items_center()
-                .justify_center()
-                .child(div().text_sm().opacity(0.6).child(status))
+                .child(mode_bar)
+                .child(
+                    v_flex().flex_1().items_center().justify_center().child(div().text_sm().opacity(0.6).child(status)),
+                )
                 .into_any_element();
         }
 
@@ -588,9 +690,12 @@ impl PlayerTrackerView {
             StatsState::Ready(players) => Some(players),
             _ => None,
         };
+        let modes = visible_stat_modes(self.view_mode, self.win_rate_mode);
+        let layout = RosterLayout { stats, icons: &self.icons, modes: &modes, border };
 
         v_flex()
             .size_full()
+            .child(mode_bar)
             .when_some(note, |this, note| {
                 this.child(div().flex_none().px_2().py_1().text_xs().opacity(0.6).child(note))
             })
@@ -599,9 +704,9 @@ impl PlayerTrackerView {
                     .flex_1()
                     .min_h(px(0.))
                     .items_start()
-                    .child(team_column("Allies", "ally", &roster.friendly, stats, border))
+                    .child(team_column("Allies", "ally", &roster.friendly, layout))
                     .child(div().w(px(1.)).h_full().bg(border))
-                    .child(team_column("Enemies", "enemy", &roster.enemy, stats, border)),
+                    .child(team_column("Enemies", "enemy", &roster.enemy, layout)),
             )
             .into_any_element()
     }
@@ -679,49 +784,69 @@ fn index_by_account(players: Vec<PlayerStatsOut>) -> HashMap<AccountId, PlayerSt
     players.into_iter().map(|player| (player.account_id, player)).collect()
 }
 
-/// A live roster row's colour. The same table the replay inspector's player
-/// names use, so one person reads the same in both tabs.
-fn tint_color(tint: PlayerTint) -> Hsla {
-    let kind = match tint {
+/// A live roster row's colour kind. The same table the replay inspector's
+/// player names use, so one person reads the same in both tabs.
+fn tint_kind(tint: PlayerTint) -> PlayerColorKind {
+    match tint {
         PlayerTint::SelfPlayer => PlayerColorKind::SelfPlayer,
         PlayerTint::Ally => PlayerColorKind::Ally,
         PlayerTint::Enemy => PlayerColorKind::Enemy,
         PlayerTint::DivisionMate => PlayerColorKind::DivisionMate,
         PlayerTint::Abuser => PlayerColorKind::Abuser,
-    };
-    resolve_color(ColorRole::Player(kind))
+    }
+}
+
+fn tint_color(tint: PlayerTint) -> Hsla {
+    resolve_color(ColorRole::Player(tint_kind(tint)))
+}
+
+/// The same colour packed, which is how an icon is tinted.
+fn tint_rgb(tint: PlayerTint) -> u32 {
+    player_color_kind_rgb(tint_kind(tint))
+}
+
+/// What a roster column draws, bundled so the row and header helpers stay
+/// under clippy's argument-count limit.
+#[derive(Clone, Copy)]
+struct RosterLayout<'a> {
+    stats: Option<&'a HashMap<AccountId, PlayerStatsOut>>,
+    icons: &'a IconCache,
+    /// The scopes each row shows, left to right.
+    modes: &'a [WinRateMode],
+    border: Hsla,
 }
 
 /// One team's roster column, with its own header row.
-fn team_column(
-    title: &'static str,
-    side: &'static str,
-    rows: &[LiveRosterRow],
-    stats: Option<&HashMap<AccountId, PlayerStatsOut>>,
-    border: Hsla,
-) -> AnyElement {
-    let header = h_flex()
+fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], layout: RosterLayout) -> AnyElement {
+    let mut header = h_flex()
         .w_full()
         .gap_2()
         .items_center()
         .px_2()
         .py_1()
         .border_b_1()
-        .border_color(border)
+        .border_color(layout.border)
         .text_xs()
         .font_weight(FontWeight::BOLD)
+        .child(div().flex_none().w(CLASS_COLUMN_WIDTH))
         .child(div().flex_1().min_w(px(0.)).child(title))
-        .child(div().w(SHIP_COLUMN_WIDTH).child("Ship"))
-        .child(div().w(STAT_COLUMN_WIDTH).child("Win rate"))
-        .child(div().w(STAT_COLUMN_WIDTH).child("PR"))
-        .child(div().w(STAT_COLUMN_WIDTH).child("Battles"))
-        .child(div().w(MET_COLUMN_WIDTH).child("Seen"));
+        .child(div().w(SHIP_COLUMN_WIDTH).child("Ship"));
+
+    // One group of columns per scope, so a detailed row reads
+    // "overall, then this ship" rather than interleaving the two.
+    for mode in layout.modes {
+        let scope = mode.label();
+        header = header
+            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} WR")))
+            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} PR")))
+            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} battles")));
+    }
 
     v_flex()
         .flex_1()
         .min_w(px(0.))
-        .child(header)
-        .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, stats)))
+        .child(header.child(div().w(MET_COLUMN_WIDTH).child("Seen")))
+        .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, layout)))
         .into_any_element()
 }
 
@@ -730,6 +855,12 @@ fn team_column(
 fn rating_color(pr: Option<f64>) -> Option<Hsla> {
     let category = PersonalRatingCategory::from_pr(pr?);
     Some(rgb(personal_rating::chip_text(category, true)).into())
+}
+
+/// A win rate's colour, from the band the rate itself falls in, so the
+/// number and its colour cannot disagree.
+fn band_color(band: Option<PersonalRatingCategory>) -> Option<Hsla> {
+    Some(rgb(personal_rating::chip_text(band?, true)).into())
 }
 
 /// A stats cell: the value when the service answered with one, a dash when it
@@ -750,14 +881,41 @@ fn stat_cell(text: Option<String>, color: Option<Hsla>, pending: bool) -> AnyEle
         .into_any_element()
 }
 
-/// One live roster entry: the player, their ship, and whether they have been
-/// met before.
-fn roster_row(
-    side: &'static str,
-    index: usize,
-    row: &LiveRosterRow,
-    stats: Option<&HashMap<AccountId, PlayerStatsOut>>,
-) -> AnyElement {
+/// The three cells one scope contributes to a row.
+fn scope_cells(stats: RowStats, hidden: bool, pending: bool) -> Vec<AnyElement> {
+    if hidden {
+        // The player hid their statistics; saying so once per scope beats
+        // three dashes that read as "the service had nothing".
+        return vec![
+            stat_cell(Some("hidden".to_string()), None, false),
+            stat_cell(None, None, false),
+            stat_cell(None, None, false),
+        ];
+    }
+
+    vec![
+        stat_cell(stats.win_rate.map(|rate| format!("{rate:.1}%")), band_color(stats.band), pending),
+        stat_cell(stats.pr.map(|pr| format!("{pr:.0}")), rating_color(stats.pr), pending),
+        stat_cell(stats.battles.map(|battles| battles.to_string()), None, pending),
+    ]
+}
+
+/// The row's ship-class glyph, tinted like its name. A fixed-width slot
+/// either way, so the names below it stay aligned while the icons load.
+fn class_icon(row: &LiveRosterRow, icons: &IconCache) -> AnyElement {
+    let slot = div().flex_none().w(CLASS_COLUMN_WIDTH).h(CLASS_COLUMN_WIDTH);
+    let Some(species) = row.species else {
+        return slot.into_any_element();
+    };
+    match icons.get(species, tint_rgb(row.tint)) {
+        Some(image) => slot.child(img(image).size_full()).into_any_element(),
+        None => slot.into_any_element(),
+    }
+}
+
+/// One live roster entry: the player, their ship, their figures in each
+/// visible scope, and whether they have been met before.
+fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: RosterLayout) -> AnyElement {
     let name = match row.clan.as_deref() {
         Some(clan) => format!("[{clan}] {}", row.name),
         None => row.name.clone(),
@@ -765,12 +923,12 @@ fn roster_row(
 
     // A row whose account the scan never named cannot be looked up at all,
     // which is a different absence from a player the service had no data for.
-    let player = row.account_id.and_then(|id| stats?.get(&id));
-    let pending = stats.is_none();
+    let player = row.account_id.and_then(|id| layout.stats?.get(&id));
+    let pending = layout.stats.is_none();
     let hidden = player.is_some_and(|player| player.status != PlayerStatsStatus::Ok);
-    let win_rate = player.and_then(|player| player.overall_win_rate).map(|rate| format!("{rate:.1}%"));
-    let pr = player.and_then(|player| player.pr);
-    let battles = player.and_then(|player| player.battles).map(|battles| battles.to_string());
+
+    let cells: Vec<AnyElement> =
+        layout.modes.iter().flat_map(|mode| scope_cells(row_stats(player, *mode), hidden, pending)).collect();
 
     h_flex()
         // Keyed by position as well as name: bots repeat names within a team.
@@ -782,6 +940,7 @@ fn roster_row(
         .gap_2()
         .items_center()
         .px_2()
+        .child(class_icon(row, layout.icons))
         .child(div().flex_1().min_w(px(0.)).text_sm().text_color(tint_color(row.tint)).truncate().child(name))
         .child(
             div()
@@ -791,9 +950,7 @@ fn roster_row(
                 .truncate()
                 .child(row.ship_name.clone().unwrap_or_else(|| "-".to_string())),
         )
-        .child(stat_cell(if hidden { Some("hidden".to_string()) } else { win_rate }, None, pending))
-        .child(stat_cell(pr.map(|pr| format!("{pr:.0}")), rating_color(pr), pending))
-        .child(stat_cell(battles, None, pending))
+        .children(cells)
         .child(div().w(MET_COLUMN_WIDTH).text_xs().opacity(0.6).child(if row.tracked.is_some() {
             "met before"
         } else {
@@ -1026,8 +1183,10 @@ mod tests {
     use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
     use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
     use wows_toolkit_viewmodel::match_stats::Region;
+    use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
     use wows_toolkit_viewmodel::player_tracker::live::LiveIdentity;
+    use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 
     /// A `tempArenaInfo.json` naming two players on opposite teams.
     const ARENA_INFO: &str = r#"{
@@ -1124,6 +1283,93 @@ mod tests {
                 Some("[WTK] Me"),
                 "the scan's clan tag reaches the name"
             );
+        })
+        .expect("the window is open");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The roster's ship-class icons come out of the battle's own build, so
+    /// this checks them against a real install rather than a fixture VFS.
+    /// Run with:
+    ///
+    /// ```text
+    /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture a_real_build_decodes_a_ship_class_icon
+    /// ```
+    #[gpui_kit::test]
+    #[ignore = "needs a local game install"]
+    fn a_real_build_decodes_a_ship_class_icon(cx: &mut TestAppContext) {
+        use wowsunpack::game_params::types::Species;
+
+        let wows_dir = std::env::var("WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR")
+            .expect("set WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR to a WoWs install directory");
+        let dir = std::path::PathBuf::from(&wows_dir);
+        let build = wowsunpack::game_data::list_available_builds(&dir)
+            .expect("the install lists its builds")
+            .into_iter()
+            .max()
+            .expect("the install has at least one build");
+
+        let game_data = GameDataCache::new(dir);
+        let loaded = game_data.get_or_load_build(build).expect("the build's game data loads");
+
+        cx.update(gpui_kit::init);
+        let renderer = cx.update(|cx| cx.svg_renderer());
+        let mut icons = crate::replay_inspector::IconCache::new();
+        let tint = super::tint_rgb(super::PlayerTint::Ally);
+        for species in [Species::Destroyer, Species::Cruiser, Species::Battleship, Species::AirCarrier] {
+            icons.load_ship_class(species, tint, loaded.vfs(), &renderer);
+            assert!(icons.get(species, tint).is_some(), "{species:?} has no class icon in build {build}");
+        }
+        println!("decoded {} tinted class icons from build {build}", icons.ship_class_count());
+    }
+
+    /// Compact shows one scope and offers to choose it; Detailed shows both
+    /// and so has nothing to choose.
+    #[gpui_kit::test]
+    async fn the_view_modes_change_which_scopes_the_roster_shows(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let dir = temp_dir("view-modes");
+        let window = cx.open_window(size(px(1200.), px(700.)), PlayerTrackerView::new);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+                tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
+            })
+            .expect("the window is open");
+
+        std::fs::write(dir.join(super::live::ARENA_INFO_FILE), ARENA_INFO).expect("the arena info is writable");
+        cx.wait_for(window.into(), Duration::from_secs(30), |window, cx| {
+            window.render_frame(cx);
+            window.try_find("tracker-roster-ally-0").is_some()
+        })
+        .await;
+
+        // Detailed is the default, and shows both scopes at once.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let detailed = ("tracker-view-mode", CurrentMatchViewMode::Detailed as usize);
+            assert_eq!(window.find(detailed).selected(), Some(true), "the roster opens detailed");
+            assert!(
+                window.try_find(("tracker-win-rate-mode", WinRateMode::Ship as usize)).is_none(),
+                "showing both scopes leaves nothing to choose between"
+            );
+        })
+        .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("tracker-view-mode", CurrentMatchViewMode::Compact as usize), cx);
+
+            let overall = ("tracker-win-rate-mode", WinRateMode::Overall as usize);
+            let ship = ("tracker-win-rate-mode", WinRateMode::Ship as usize);
+            assert_eq!(window.find(overall).selected(), Some(true), "compact opens on the account scope");
+
+            window.click(ship, cx);
+            assert_eq!(window.find(ship).selected(), Some(true));
+            assert_eq!(window.find(overall).selected(), Some(false), "one scope at a time");
         })
         .expect("the window is open");
 

@@ -45,6 +45,7 @@ pub use columns::cell_value;
 pub use columns::default_columns;
 pub use columns::separate_number;
 pub use debug_view::RawJsonPanel;
+pub use icons::IconCache;
 pub use load::GameDataCache;
 pub use load::GameDataStatus;
 pub use load::LoadedGameData;
