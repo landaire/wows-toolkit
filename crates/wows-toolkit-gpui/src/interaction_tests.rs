@@ -1037,6 +1037,93 @@ fn the_query_bar_offers_completions_and_takes_them(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// The results follow the query as it is typed, without Enter.
+///
+/// Driven with a query that cannot parse, because that verdict is reached
+/// from the text alone: it proves the run happened without needing an index
+/// to search.
+#[gpui_kit::test]
+fn the_results_follow_a_typed_query_without_enter(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.render_frame(cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("damage:>", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    // Typing does not re-query at once: a keystroke here is a round trip to
+    // the index.
+    cx.executor().advance_clock(std::time::Duration::from_millis(400));
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let reported = window.find("search-status").label().unwrap_or_default().to_string();
+        assert!(
+            reported.contains("did not parse"),
+            "the bar ran the query as it was typed, and says what it made of it; got {reported:?}"
+        );
+    })
+    .expect("the test window stays open");
+}
+
+/// Up in the bar recalls what was run before, and Down walks back out of the
+/// recall to the text it started from.
+#[gpui_kit::test]
+fn the_bar_recalls_what_was_run_before(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.render_frame(cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("outcome:win", cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // A second query, so the first is one step further back.
+        window.click(SEARCH_QUERY, cx);
+        window.press("ctrl-a", cx);
+        window.input("survived:false", cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        window.press("up", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(SEARCH_QUERY).value(),
+            Some("survived:false"),
+            "the first Up recalls the query that was just run"
+        );
+        window.press("up", cx);
+        window.render_frame(cx);
+        assert_eq!(window.find(SEARCH_QUERY).value(), Some("outcome:win"), "the second goes one further back");
+        window.press("down", cx);
+        window.press("down", cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(SEARCH_QUERY).value(),
+            Some("survived:false"),
+            "walking back out leaves the bar as it was found"
+        );
+    })
+    .expect("the test window stays open");
+}
+
 /// A pill's operator segment opens a picker, and taking a different operator
 /// rewrites that term in the query without disturbing the rest of it.
 #[gpui_kit::test]

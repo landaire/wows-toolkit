@@ -203,18 +203,24 @@ kept so the next audit does not re-report them.
   its values from the index.
 - [done] Completions are a dropdown, keyboard-navigable, sized to content.
 - [done] Outcome and personal rating carry their colour; damage is grouped.
-- The tab never runs a query until Enter; egui opens showing everything and
-  re-queries live.
+- [done] The tab opens showing everything and the results follow the query
+  as it is typed, after a short pause rather than per keystroke.
 - [done] The tab opens on the query it was left with, and saves it back.
   Sort order and operator preferences are still not persisted.
 - No structural editing: no selection, grouping, negate, delete, ungroup or
   connector flip, and no right-click menu on a pill.
-- No undo/redo in the bar, and no history recall on Up.
+- [done] Up and Down walk the queries that were run, and walking back out
+  restores the text the walk started from. The history is the `history` field
+  the egui settings row already declares (and never filled).
+- No undo/redo in the bar. The port's bar is a text input rather than the
+  egui pill editor, so this is the input's own undo, not an AST stack.
 - No date picker for timestamp values.
-- Rows cannot open the replay renderer, and a copied path reports nothing.
+- [done] A copied path reports itself.
+- Rows cannot open the replay renderer.
 - Results are fixed-width and unresizable.
 - A parse error replaces the results instead of marking the offending span.
-- The footer reports truncation one row too eagerly.
+- [done] The footer reports truncation on the right row; the query fetches
+  one past the limit itself, so the extra `+ 1` the port added is gone.
 
 ## Resource Unpacker
 
