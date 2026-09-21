@@ -196,7 +196,12 @@ kept so the next audit does not re-report them.
   app's `translate_part` does). The raw key stays the identity, so a
   `PlateKey` is unchanged.
 - The gizmo-snap animation does not mirror to the other panes.
-- Panes split horizontally only, and the last pane cannot be closed.
+- [done] Panes split horizontally only, and the last pane cannot be
+  closed. The common-settings menu now carries a "Stack panes" toggle
+  that lays the comparison panes out one above the other, and every pane
+  carries a close button; closing the only one replaces it with a fresh
+  empty pane, as the egui app does when its final dock tab is closed.
+  Dragging a pane to re-dock it elsewhere is still egui-only.
 - Ctrl+S and Ctrl+T accelerators are missing.
 
 ## Stats
