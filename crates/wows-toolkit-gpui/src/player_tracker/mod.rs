@@ -18,6 +18,7 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -25,6 +26,7 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::Instant;
 
 use jiff::Timestamp;
@@ -84,6 +86,11 @@ const MET_COLUMN_WIDTH: Pixels = px(80.);
 const STAT_COLUMN_WIDTH: Pixels = px(64.);
 const CLASS_COLUMN_WIDTH: Pixels = px(16.);
 const CHIP_COLUMN_WIDTH: Pixels = px(24.);
+/// How often the chat observations are re-read while a battle is under way.
+///
+/// The egui app's chat poll writes them every two minutes, so reading faster
+/// than that only repeats the same rows.
+const CHAT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Which table the tab is showing.
 ///
@@ -161,12 +168,19 @@ pub struct PlayerTrackerView {
     /// Read from the shared index, which the egui app's chat poll fills: a
     /// user who has connected Twitch there gets the chips here too.
     chat_observations: Vec<(String, Timestamp)>,
+    _chat_watch: Option<Task<()>>,
     /// Notes kept against the players met, keyed by account. Shared with the
     /// egui app through the `player_tracker_data` blob, so a note written in
     /// either is the note both show.
     tracked: HashMap<AccountId, TrackedPlayer>,
     /// The account whose note is open for editing, and the field holding it.
     editing_note: Option<AccountId>,
+    /// Why the last note did not save, shown beside the editor. `None` when
+    /// the last write succeeded, which is also the state before any write.
+    note_error: Option<String>,
+    /// Bumped per save so a slower earlier one cannot land over a later.
+    note_generation: u64,
+    _note_save: Option<Task<()>>,
     note_input: Entity<InputState>,
     /// Ship-class icons for the roster, decoded from the battle's own build.
     /// Empty until that build's data loads; a row without one falls back to
@@ -226,8 +240,12 @@ impl PlayerTrackerView {
             stats: StatsState::Idle,
             replay_dir: None,
             chat_observations: Vec::new(),
+            _chat_watch: None,
             tracked: HashMap::new(),
             editing_note: None,
+            note_error: None,
+            note_generation: 0,
+            _note_save: None,
             note_input,
             icons: IconCache::new(),
             view_mode: CurrentMatchViewMode::default(),
@@ -254,43 +272,58 @@ impl PlayerTrackerView {
 
     /// Queries the index for the current period. Called once the config
     /// database is open, and again whenever the period changes.
-    /// Reads the Twitch chat observations around this battle.
+    /// Reads the Twitch chat observations around this battle, and keeps
+    /// reading while the battle's window is still open.
     ///
-    /// Only the window the chip rule cares about is queried, so an index
-    /// holding a month of observations still answers in one small read.
-    fn look_up_chat_observations(&mut self, cx: &mut Context<Self>) {
-        let Some(live) = self.live_match.as_ref() else { return };
+    /// The writer is the egui app's chat poll, which records who was in chat
+    /// every couple of minutes; almost all of this battle's window is still
+    /// in the future when the battle starts, so a single read at that moment
+    /// would find nothing. The task ends with the battle, or when the window
+    /// closes.
+    fn watch_chat_observations(&mut self, started_at: Timestamp, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
 
-        let started_at = live.started_at;
         let start = started_at.as_second() + (twitch::WINDOW_BEFORE_MINUTES * 60.0) as i64;
         let end = started_at.as_second() + (twitch::WINDOW_AFTER_MINUTES * 60.0) as i64;
 
-        cx.spawn(async move |this, cx| {
-            let found = runtime::spawn(cx, async move { query::observations_in_window(&pool, start, end).await }).await;
+        self._chat_watch = Some(cx.spawn(async move |this, cx| {
+            loop {
+                let pool = pool.clone();
+                let found =
+                    runtime::spawn(cx, async move { query::observations_in_window(&pool, start, end).await }).await;
 
-            let _ = this.update(cx, |this, cx| {
-                if this.live_started_at() != Some(started_at) {
+                let still_current = this
+                    .update(cx, |this, cx| {
+                        if this.live_started_at() != Some(started_at) {
+                            return false;
+                        }
+                        match found {
+                            Ok(Ok(rows)) => {
+                                this.chat_observations = rows
+                                    .into_iter()
+                                    .filter_map(|(login, seen_at)| {
+                                        Timestamp::from_second(seen_at).ok().map(|seen_at| (login, seen_at))
+                                    })
+                                    .collect();
+                            }
+                            // The roster still lists everyone; only the chips
+                            // are missing.
+                            Ok(Err(err)) => tracing::warn!("player tracker: the chat lookup failed: {err}"),
+                            Err(err) => tracing::warn!("player tracker: the chat lookup did not complete: {err}"),
+                        }
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+
+                // Past the window there is nothing further to find, and the
+                // battle it belonged to is over.
+                if !still_current || Timestamp::now().as_second() > end {
                     return;
                 }
-                match found {
-                    Ok(Ok(rows)) => {
-                        this.chat_observations = rows
-                            .into_iter()
-                            .filter_map(|(login, seen_at)| {
-                                Timestamp::from_second(seen_at).ok().map(|seen_at| (login, seen_at))
-                            })
-                            .collect();
-                    }
-                    // The roster still lists everyone; only the chips are
-                    // missing.
-                    Ok(Err(err)) => tracing::warn!("player tracker: the chat lookup failed: {err}"),
-                    Err(err) => tracing::warn!("player tracker: the chat lookup did not complete: {err}"),
-                }
-                cx.notify();
-            });
-        })
-        .detach();
+                cx.background_executor().timer(CHAT_POLL_INTERVAL).await;
+            }
+        }));
     }
 
     /// Reads the notes the two apps share. Called once the config database
@@ -302,11 +335,26 @@ impl PlayerTrackerView {
                     .await;
 
             let Ok(Some(json)) = stored else { return };
-            let players = tracked::players_from_blob(&json);
-            let _ = this.update(cx, |this, cx| {
-                this.tracked = players;
-                cx.notify();
-            });
+            let modes = tracked::view_modes_from_blob(&json);
+            match tracked::players_from_blob(&json) {
+                Ok(players) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.tracked = players;
+                        this.win_rate_mode = modes.win_rate_mode;
+                        this.view_mode = modes.current_match_view_mode;
+                        cx.notify();
+                    });
+                }
+                // Left unloaded rather than shown as empty: a write from here
+                // would then replace the players it could not read.
+                Err(err) => {
+                    let _ = this.update(cx, |this, cx| {
+                        this.note_error = Some(err.to_string());
+                        cx.notify();
+                    });
+                    tracing::warn!("player tracker: the stored players could not be read: {err}");
+                }
+            }
         })
         .detach();
     }
@@ -360,6 +408,12 @@ impl PlayerTrackerView {
     }
 
     fn store_note(&mut self, account: AccountId, note: String, cx: &mut Context<Self>) {
+        // An empty note about a player nothing else is recorded for is not
+        // an entry worth creating.
+        if note.is_empty() && !self.tracked.contains_key(&account) {
+            return;
+        }
+
         // The name the index knows, so a note written here is legible in the
         // egui tab's own list, which keys its rows on the stored name.
         let facet = self.players.iter().find(|facet| facet.account_id == account);
@@ -376,24 +430,32 @@ impl PlayerTrackerView {
 
         let Some(pool) = crate::settings_store::pool(cx) else { return };
         let players = self.tracked.clone();
-        cx.spawn(async move |_this, cx| {
-            let written = runtime::spawn(cx, async move {
-                // Read-modify-write: the blob carries the egui app's own
-                // fields, which a rebuild from this side would drop.
-                let existing = queries::get_setting::<String>(&pool, tracked::SETTING_KEY).await.unwrap_or_default();
-                let blob = tracked::blob_with_players(&existing, &players)?;
-                queries::set_setting(&pool, tracked::SETTING_KEY, &blob)
-                    .await
-                    .map_err(|err| tracked::BlobError::Encode(serde_json::Error::io(std::io::Error::other(err))))
-            })
-            .await;
+        // Bumped per write so a slower earlier save cannot land over a later
+        // one; the snapshot each carries is whole, so the last write wins.
+        self.note_generation = self.note_generation.wrapping_add(1);
+        let generation = self.note_generation;
 
-            if let Ok(Err(err)) = written {
-                tracing::warn!("player tracker: the note was not saved: {err}");
-            }
-        })
-        .detach();
-        cx.notify();
+        self._note_save = Some(cx.spawn(async move |this, cx| {
+            let written = runtime::spawn(cx, async move { write_notes(&pool, &players).await }).await;
+
+            let failed = match written {
+                Ok(Ok(())) => None,
+                Ok(Err(err)) => Some(err.to_string()),
+                Err(err) => Some(err.to_string()),
+            };
+            let _ = this.update(cx, |this, cx| {
+                if this.note_generation != generation {
+                    return;
+                }
+                if let Some(reason) = failed {
+                    tracing::warn!("player tracker: the note was not saved: {reason}");
+                    this.note_error = Some(reason);
+                } else {
+                    this.note_error = None;
+                }
+                cx.notify();
+            });
+        }));
     }
 
     /// Looks up which of this battle's players the index has met before.
@@ -541,12 +603,19 @@ impl PlayerTrackerView {
         cx.notify();
 
         self.look_up_met_before(cx);
-        self.look_up_chat_observations(cx);
+
+        if let Some(started_at) = started_at {
+            self.watch_chat_observations(started_at, cx);
+        }
 
         let (Some(started_at), Some(build)) = (started_at, build) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
 
         if self.live_metadata_build == Some(build) && self.live_metadata.is_some() {
+            // The build is loaded, but this battle's roster can carry a class
+            // the last one did not.
+            let svg_renderer = cx.svg_renderer();
+            self.load_roster_icons(svg_renderer, cx);
             self.start_live_scan(started_at, cx);
             return;
         }
@@ -594,6 +663,7 @@ impl PlayerTrackerView {
     fn clear_live_match_data(&mut self) {
         self.met_before.clear();
         self.chat_observations.clear();
+        self._chat_watch = None;
         self.live_identities = None;
         self.stats = StatsState::Idle;
         self._live_scan = None;
@@ -758,12 +828,36 @@ impl PlayerTrackerView {
 
     fn set_view_mode(&mut self, view_mode: CurrentMatchViewMode, cx: &mut Context<Self>) {
         self.view_mode = view_mode;
+        self.store_view_modes(cx);
         cx.notify();
     }
 
     fn set_win_rate_mode(&mut self, win_rate_mode: WinRateMode, cx: &mut Context<Self>) {
         self.win_rate_mode = win_rate_mode;
+        self.store_view_modes(cx);
         cx.notify();
+    }
+
+    /// Saves the roster's view settings where the egui app keeps its own, so
+    /// the mode chosen in one is the mode the other opens on.
+    fn store_view_modes(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let modes = tracked::ViewModes { win_rate_mode: self.win_rate_mode, current_match_view_mode: self.view_mode };
+
+        cx.spawn(async move |_this, cx| {
+            let written = runtime::spawn(cx, async move {
+                let existing: Option<String> =
+                    queries::try_get_setting(&pool, tracked::SETTING_KEY).await.map_err(NoteError::Read)?;
+                let blob = tracked::blob_with_view_modes(existing.as_deref().unwrap_or_default(), modes)?;
+                queries::set_setting(&pool, tracked::SETTING_KEY, &blob).await.map_err(NoteError::Write)
+            })
+            .await;
+
+            if let Ok(Err(err)) = written {
+                tracing::warn!("player tracker: the view settings were not saved: {err}");
+            }
+        })
+        .detach();
     }
 
     /// The Current Match body: the roster when a battle is under way, and
@@ -979,6 +1073,31 @@ fn tint_rgb(tint: PlayerTint) -> u32 {
     player_color_kind_rgb(tint_kind(tint))
 }
 
+/// Why a note could not be saved.
+#[derive(Debug, thiserror::Error)]
+enum NoteError {
+    #[error("the stored players could not be read, so they were left alone")]
+    Read(#[source] wows_toolkit_config::queries::SettingError),
+    #[error(transparent)]
+    Blob(#[from] tracked::BlobError),
+    #[error("the players could not be written")]
+    Write(#[source] sqlx::Error),
+}
+
+/// Replaces the stored players with `players`, keeping every other field the
+/// blob carries.
+///
+/// A read that fails leaves the blob alone: the alternative is writing this
+/// app's snapshot over a tracker it could not see, which loses every
+/// encounter and note the other app recorded.
+async fn write_notes(pool: &SqlitePool, players: &HashMap<AccountId, TrackedPlayer>) -> Result<(), NoteError> {
+    let existing: Option<String> =
+        queries::try_get_setting(pool, tracked::SETTING_KEY).await.map_err(NoteError::Read)?;
+
+    let blob = tracked::blob_with_players(existing.as_deref().unwrap_or_default(), players)?;
+    queries::set_setting(pool, tracked::SETTING_KEY, &blob).await.map_err(NoteError::Write)
+}
+
 /// One player row's note affordance: the note itself as a tooltip when there
 /// is one, and a button that opens the editor either way.
 fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Entity<PlayerTrackerView>) -> AnyElement {
@@ -1036,6 +1155,7 @@ fn team_column(title: &'static str, side: &'static str, rows: &[LiveRosterRow], 
         header = header
             .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} WR")))
             .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} PR")))
+            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} dmg")))
             .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} battles")));
     }
 
@@ -1078,21 +1198,26 @@ fn stat_cell(text: Option<String>, color: Option<Hsla>, pending: bool) -> AnyEle
         .into_any_element()
 }
 
-/// The three cells one scope contributes to a row.
-fn scope_cells(stats: RowStats, hidden: bool, pending: bool) -> Vec<AnyElement> {
-    if hidden {
-        // The player hid their statistics; saying so once per scope beats
-        // three dashes that read as "the service had nothing".
-        return vec![
-            stat_cell(Some("hidden".to_string()), None, false),
-            stat_cell(None, None, false),
-            stat_cell(None, None, false),
-        ];
+/// The cells one scope contributes to a row.
+fn scope_cells(stats: RowStats, status: PlayerStatsStatus, pending: bool) -> Vec<AnyElement> {
+    // A player who hid their statistics is a different answer from one the
+    // service had nothing for, and both differ from one it could not reach.
+    let note = match status {
+        PlayerStatsStatus::Ok => None,
+        PlayerStatsStatus::Hidden => Some("hidden"),
+        PlayerStatsStatus::Unavailable => Some("n/a"),
+        PlayerStatsStatus::Unknown => Some("?"),
+    };
+    if let Some(note) = note {
+        let mut cells = vec![stat_cell(Some(note.to_string()), None, false)];
+        cells.extend((0..3).map(|_| stat_cell(None, None, false)));
+        return cells;
     }
 
     vec![
         stat_cell(stats.win_rate.map(|rate| format!("{rate:.1}%")), band_color(stats.band), pending),
         stat_cell(stats.pr.map(|pr| format!("{pr:.0}")), rating_color(stats.pr), pending),
+        stat_cell(stats.avg_damage.map(|damage| damage.to_string()), None, pending),
         stat_cell(stats.battles.map(|battles| battles.to_string()), None, pending),
     ]
 }
@@ -1140,7 +1265,13 @@ fn class_icon(row: &LiveRosterRow, icons: &IconCache) -> AnyElement {
         return slot.into_any_element();
     };
     match icons.get(species, tint_rgb(row.tint)) {
-        Some(image) => slot.child(img(image).size_full()).into_any_element(),
+        Some(image) => {
+            let class = SharedString::from(row.species_text.clone().unwrap_or_else(|| format!("{species:?}")));
+            slot.id(SharedString::from(format!("tracker-class-{}", row.name)))
+                .child(img(image).size_full())
+                .tooltip(move |window, cx| Tooltip::new(class.clone()).build(window, cx))
+                .into_any_element()
+        }
         None => slot.into_any_element(),
     }
 }
@@ -1157,10 +1288,10 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
     // which is a different absence from a player the service had no data for.
     let player = row.account_id.and_then(|id| layout.stats?.get(&id));
     let pending = layout.stats.is_none();
-    let hidden = player.is_some_and(|player| player.status != PlayerStatsStatus::Ok);
+    let status = player.map_or(PlayerStatsStatus::Ok, |player| player.status);
 
     let cells: Vec<AnyElement> =
-        layout.modes.iter().flat_map(|mode| scope_cells(row_stats(player, *mode), hidden, pending)).collect();
+        layout.modes.iter().flat_map(|mode| scope_cells(row_stats(player, *mode), status, pending)).collect();
 
     h_flex()
         // Keyed by position as well as name: bots repeat names within a team.
@@ -1426,6 +1557,16 @@ impl Render for PlayerTrackerView {
                         ))),
                 )
                 .child(Input::new(&self.note_input).id("tracker-note-input").w_full())
+                .when_some(self.note_error.clone(), |this, reason| {
+                    this.child(
+                        div()
+                            .id("tracker-note-error")
+                            .test_support()
+                            .text_xs()
+                            .text_color(rgb(0xff8080))
+                            .child(format!("Not saved: {reason}")),
+                    )
+                })
         });
 
         v_flex()

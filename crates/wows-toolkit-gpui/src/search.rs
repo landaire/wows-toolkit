@@ -29,9 +29,14 @@ use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 
+use std::collections::HashMap;
+
+use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::search as search_hint;
+use wows_toolkit_viewmodel::search as ship_display;
 use wows_toolkit_viewmodel::search::ship_display_name;
 
+use crate::replay_inspector::GameDataCache;
 use crate::runtime;
 use crate::ui::selectable;
 
@@ -88,6 +93,8 @@ const RESULT_LIMIT: i64 = 500;
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
+/// The open/copy pair at the end of each row, which the header reserves.
+const ACTIONS_COLUMN_WIDTH: Pixels = px(72.);
 
 /// Where the tab is in running a query.
 enum SearchState {
@@ -108,8 +115,23 @@ pub struct SearchView {
     /// The query the current results came from, so the game-mode hint knows
     /// whether this search filters on one.
     expr: Option<wows_toolkit_config::index::query_ast::MatchExpr>,
+    /// Whether each result's replay is still on disk, positionally against
+    /// `hits`. Checked once per result set rather than per row per frame: it
+    /// is a syscall, and the answer only changes when the file does.
+    on_disk: Vec<bool>,
+    /// Game data for resolving a result's ship name in the current locale,
+    /// rather than the one it was indexed in. Shared with the replay
+    /// inspector, which already holds it.
+    game_data: Option<GameDataCache>,
+    /// Ship names resolved for the results on screen, keyed by the build they
+    /// were resolved against. Resolved once per search rather than per frame:
+    /// each name is a provider lookup, and a build load is expensive.
+    resolved_ships: HashMap<(u32, GameParamId), String>,
     /// How many indexed matches carry no game mode. `None` until asked.
     game_mode_gap: Option<i64>,
+    /// Whether a count is in flight, so concurrent searches do not each start
+    /// another scan.
+    gap_lookup_running: bool,
     /// Bumped per run so a slower earlier query cannot overwrite a later one.
     generation: u64,
     list_state: ListState,
@@ -128,7 +150,11 @@ impl SearchView {
             hits: Vec::new(),
             state: SearchState::Idle,
             expr: None,
+            on_disk: Vec::new(),
+            game_data: None,
+            resolved_ships: HashMap::new(),
             game_mode_gap: None,
+            gap_lookup_running: false,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
@@ -143,23 +169,24 @@ impl SearchView {
         }
     }
 
-    /// Parses the query text and searches the index with it.
-    ///
-    /// An empty query matches everything, which is how the egui bar opens; a
-    /// query that does not parse reports where rather than searching for it
-    /// literally.
     /// Asks the index how many matches carry no game mode, so a query that
-    /// filters on one can say what it cannot see. Asked once per session:
-    /// the answer only changes when the index is rebuilt.
+    /// filters on one can say what it cannot see.
+    ///
+    /// Asked per search rather than once: ingest appends to the index while
+    /// the app runs, so a latched count would keep showing a hint the user
+    /// has already acted on, or keep hiding one that has since applied. One
+    /// lookup at a time, since each is a scan.
     fn look_up_game_mode_gap(&mut self, cx: &mut Context<Self>) {
-        if self.game_mode_gap.is_some() {
+        if self.gap_lookup_running {
             return;
         }
         let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.gap_lookup_running = true;
 
         cx.spawn(async move |this, cx| {
             let found = runtime::spawn(cx, async move { query::matches_missing_game_mode_count(&pool).await }).await;
             let _ = this.update(cx, |this, cx| {
+                this.gap_lookup_running = false;
                 match found {
                     Ok(Ok(count)) => this.game_mode_gap = Some(count),
                     // The results still stand; only the hint is missing.
@@ -172,9 +199,69 @@ impl SearchView {
         .detach();
     }
 
+    /// Adopts the game data the replay inspector opened, so results can be
+    /// named in the current locale.
+    pub fn set_game_data(&mut self, game_data: Option<GameDataCache>, cx: &mut Context<Self>) {
+        self.game_data = game_data;
+        self.resolved_ships.clear();
+        cx.notify();
+    }
+
+    /// Resolves each result's ship name against its own build.
+    ///
+    /// Only builds already loaded are asked: a search can span years of
+    /// replays, and loading every build they were recorded on would cost more
+    /// than the names are worth. A build that is not loaded leaves its rows
+    /// on the name stored when they were indexed.
+    fn resolve_ship_names(&mut self, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else { return };
+
+        let wanted: Vec<(u32, GameParamId)> = self
+            .hits
+            .iter()
+            .filter_map(|hit| Some((hit.version_build?, hit.self_ship_id?)))
+            .filter(|key| !self.resolved_ships.contains_key(key))
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+
+        cx.spawn(async move |this, cx| {
+            let resolved = cx
+                .background_spawn(async move {
+                    let mut resolved = HashMap::new();
+                    for (build, ship_id) in wanted {
+                        let Some(loaded) = game_data.loaded_build(build) else { continue };
+                        if let Some(name) = ship_display::try_resolve_ship_name(ship_id, Some(loaded.provider())) {
+                            resolved.insert((build, ship_id), name);
+                        }
+                    }
+                    resolved
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.resolved_ships.extend(resolved);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Parses the query text and searches the index with it.
+    ///
+    /// An empty query matches everything, which is how the egui bar opens; a
+    /// query that does not parse reports where rather than searching for it
+    /// literally.
     fn run(&mut self, cx: &mut Context<Self>) {
+        // Bumped first: every exit below changes what is on screen, and a
+        // search already in flight must not land over it.
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+
         let Some(pool) = crate::settings_store::pool(cx) else {
             self.state = SearchState::Failed("the replay index is not open".to_string());
+            self.expr = None;
             cx.notify();
             return;
         };
@@ -184,14 +271,16 @@ impl SearchView {
             Ok(expr) => expr,
             Err(err) => {
                 self.state = SearchState::Invalid(err.to_string());
+                // The hint above the table reads this; a query that did not
+                // parse filters on nothing.
+                self.expr = None;
                 self.hits.clear();
+                self.on_disk.clear();
                 self.sync_rows(cx);
                 return;
             }
         };
 
-        self.generation = self.generation.wrapping_add(1);
-        let generation = self.generation;
         self.state = SearchState::Running;
         self.expr = Some(expr.clone());
         self.look_up_game_mode_gap(cx);
@@ -219,7 +308,9 @@ impl SearchView {
                     Ok(Err(err)) => this.state = SearchState::Failed(err.to_string()),
                     Err(err) => this.state = SearchState::Failed(err.to_string()),
                 }
+                this.on_disk = this.hits.iter().map(|hit| hit.replay_path.is_file()).collect();
                 this.sync_rows(cx);
+                this.resolve_ship_names(cx);
             });
         })
         .detach();
@@ -275,14 +366,17 @@ fn outcome_label(outcome: MatchOutcome) -> &'static str {
 /// One result's actions: open the replay in the inspector, and copy its
 /// path. A replay the index knows about but that is no longer on disk cannot
 /// be opened, and says so rather than failing on click.
-fn row_actions(ix: usize, hit: &MatchHit, search: Entity<SearchView>) -> AnyElement {
+///
+/// `exists` is checked when the results land rather than here: this runs per
+/// row per frame, and the check is a syscall.
+fn row_actions(ix: usize, hit: &MatchHit, exists: bool, search: Entity<SearchView>) -> AnyElement {
     let path = hit.replay_path.clone();
-    let exists = path.exists();
     let open_path = path.clone();
     let copy_path = path.clone();
 
     h_flex()
         .flex_none()
+        .w(ACTIONS_COLUMN_WIDTH)
         .gap_1()
         .items_center()
         .child(
@@ -376,6 +470,8 @@ impl Render for SearchView {
             );
 
         let hits = self.hits.clone();
+        let on_disk = self.on_disk.clone();
+        let resolved = self.resolved_ships.clone();
         let entity = cx.entity();
         let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| {
             let Some(hit) = hits.get(ix) else {
@@ -392,13 +488,16 @@ impl Render for SearchView {
                 .children(ResultColumn::all().into_iter().map(|column| {
                     div().w(column.width()).text_sm().truncate().child(match column {
                         ResultColumn::Sortable(column) => cell_text(hit, column),
-                        // No live provider here: the port's index rows carry
-                        // the name recorded when the match was indexed, which
-                        // is what a build no longer installed leaves behind.
-                        ResultColumn::Ship => ship_display_name(hit, None).unwrap_or_else(|| "-".to_string()),
+                        // The name this match's own build resolves when that
+                        // build is loaded, else the one stored at index time.
+                        ResultColumn::Ship => {
+                            let live =
+                                hit.version_build.zip(hit.self_ship_id).and_then(|key| resolved.get(&key)).cloned();
+                            ship_display_name(hit, live).unwrap_or_else(|| "-".to_string())
+                        }
                     })
                 }))
-                .child(row_actions(ix, hit, entity.clone()))
+                .child(row_actions(ix, hit, on_disk.get(ix).copied().unwrap_or(false), entity.clone()))
                 .into_any_element()
         };
 
@@ -419,9 +518,12 @@ impl Render for SearchView {
             .filter(|(expr, missing)| search_hint::game_mode_gap_applies(*missing, expr))
             .map(|(_, missing)| {
                 if missing == 1 {
-                    "1 indexed match has no recorded game mode and cannot match this query.".to_string()
+                    "1 indexed match has no recorded game mode and cannot match this query. Re-index to fill it in."
+                        .to_string()
                 } else {
-                    format!("{missing} indexed matches have no recorded game mode and cannot match this query.")
+                    format!(
+                        "{missing} indexed matches have no recorded game mode and cannot match this query.                          Re-index to fill them in."
+                    )
                 }
             });
 
@@ -465,7 +567,9 @@ impl Render for SearchView {
                         .px_2()
                         .py_1()
                         .text_xs()
-                        .opacity(0.7)
+                        // The colour the egui hint uses: this is a warning
+                        // about results the query cannot reach, not a note.
+                        .text_color(rgb(0xe8a54a))
                         .child(hint),
                 )
             })

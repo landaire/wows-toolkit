@@ -116,29 +116,62 @@ pub const SETTING_KEY: &str = "player_tracker_data";
 
 /// The players a stored blob carries.
 ///
-/// A blob that does not parse yields none rather than failing: the tracker is
-/// an annotation over the replay index, and losing the annotations is better
-/// than refusing to open the tab.
-pub fn players_from_blob(json: &str) -> HashMap<AccountId, TrackedPlayer> {
+/// A blob that does not parse is reported rather than read as empty: a reader
+/// may show nothing, but a writer that rewrites what it read must not turn an
+/// unreadable blob into an empty one.
+pub fn players_from_blob(json: &str) -> Result<HashMap<AccountId, TrackedPlayer>, BlobError> {
     #[derive(Deserialize)]
     struct Blob {
         #[serde(default)]
         tracked_players: HashMap<AccountId, TrackedPlayer>,
     }
 
-    match serde_json::from_str::<Blob>(json) {
-        Ok(blob) => blob.tracked_players,
-        Err(err) => {
-            tracing::warn!("player tracker: the stored players could not be read: {err}");
-            HashMap::new()
+    serde_json::from_str::<Blob>(json).map(|blob| blob.tracked_players).map_err(BlobError::Decode)
+}
+
+/// The Current Match view settings the blob carries.
+///
+/// Read and written the same way the players are, so the mode chosen in one
+/// app is the mode the other opens on.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+pub struct ViewModes {
+    #[serde(default)]
+    pub win_rate_mode: crate::player_tracker::live::WinRateMode,
+    #[serde(default)]
+    pub current_match_view_mode: crate::player_tracker::live::CurrentMatchViewMode,
+}
+
+/// The view settings a stored blob carries, or the defaults when it has none.
+pub fn view_modes_from_blob(json: &str) -> ViewModes {
+    serde_json::from_str(json).unwrap_or_default()
+}
+
+/// `json` with the view settings replaced, keeping every other field.
+pub fn blob_with_view_modes(json: &str, modes: ViewModes) -> Result<String, BlobError> {
+    let mut blob = if json.trim().is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        match serde_json::from_str(json).map_err(BlobError::Decode)? {
+            serde_json::Value::Object(map) => serde_json::Value::Object(map),
+            _ => return Err(BlobError::NotAnObject),
         }
-    }
+    };
+
+    let object = blob.as_object_mut().ok_or(BlobError::NotAnObject)?;
+    object.insert("win_rate_mode".to_string(), serde_json::to_value(modes.win_rate_mode).map_err(BlobError::Encode)?);
+    object.insert(
+        "current_match_view_mode".to_string(),
+        serde_json::to_value(modes.current_match_view_mode).map_err(BlobError::Encode)?,
+    );
+    serde_json::to_string(&blob).map_err(BlobError::Encode)
 }
 
 #[derive(Debug, thiserror::Error)]
 pub enum BlobError {
     #[error("the stored tracker is not a JSON object")]
     NotAnObject,
+    #[error("the stored tracker could not be read")]
+    Decode(#[source] serde_json::Error),
     #[error("the players could not be encoded")]
     Encode(#[source] serde_json::Error),
 }
@@ -149,10 +182,17 @@ pub enum BlobError {
 /// both front ends and each knows fields the other does not, so a writer that
 /// rebuilt it from its own struct would drop them.
 pub fn blob_with_players(json: &str, players: &HashMap<AccountId, TrackedPlayer>) -> Result<String, BlobError> {
-    let mut blob: serde_json::Value = match serde_json::from_str(json) {
-        Ok(serde_json::Value::Object(map)) => serde_json::Value::Object(map),
-        // No usable blob yet: a fresh one carrying only what is being written.
-        _ => serde_json::Value::Object(serde_json::Map::new()),
+    // An empty string is genuinely nothing stored yet, which a fresh object
+    // is the right answer to. Anything else that does not read as an object
+    // is a blob this writer must not replace: the fields it cannot see are
+    // the other front end's.
+    let mut blob = if json.trim().is_empty() {
+        serde_json::Value::Object(serde_json::Map::new())
+    } else {
+        match serde_json::from_str(json).map_err(BlobError::Decode)? {
+            serde_json::Value::Object(map) => serde_json::Value::Object(map),
+            _ => return Err(BlobError::NotAnObject),
+        }
     };
 
     let object = blob.as_object_mut().ok_or(BlobError::NotAnObject)?;
@@ -179,7 +219,7 @@ mod tests {
         let players: HashMap<_, _> = [player(1, "Harvey635", "camps")].into_iter().collect();
         let blob = blob_with_players("{}", &players).expect("the blob encodes");
 
-        let read = players_from_blob(&blob);
+        let read = players_from_blob(&blob).expect("the blob reads back");
         assert_eq!(read.len(), 1);
         assert_eq!(read[&AccountId(1)].notes, "camps");
     }
@@ -195,13 +235,35 @@ mod tests {
 
         assert_eq!(value.get("show_division_mates").and_then(|v| v.as_bool()), Some(true));
         assert_eq!(value.get("player_filter").and_then(|v| v.as_str()), Some("abc"));
-        assert_eq!(players_from_blob(&written).len(), 1);
+        assert_eq!(players_from_blob(&written).expect("the blob reads back").len(), 1);
+    }
+
+    /// An unreadable blob is reported: a writer that took it for an empty
+    /// one would replace every player it could not see.
+    #[test]
+    fn the_view_modes_round_trip_beside_the_players() {
+        use crate::player_tracker::live::CurrentMatchViewMode;
+        use crate::player_tracker::live::WinRateMode;
+
+        let players: HashMap<_, _> = [player(1, "Someone", "note")].into_iter().collect();
+        let blob = blob_with_players("{}", &players).expect("the blob encodes");
+        let modes =
+            ViewModes { win_rate_mode: WinRateMode::Ship, current_match_view_mode: CurrentMatchViewMode::Compact };
+
+        let written = blob_with_view_modes(&blob, modes).expect("the blob encodes");
+        let read = view_modes_from_blob(&written);
+
+        assert_eq!(read.win_rate_mode, WinRateMode::Ship);
+        assert_eq!(read.current_match_view_mode, CurrentMatchViewMode::Compact);
+        assert_eq!(players_from_blob(&written).expect("the blob reads back").len(), 1, "the players survive");
     }
 
     #[test]
-    fn an_unreadable_blob_yields_no_players_rather_than_failing() {
-        assert!(players_from_blob("not json").is_empty());
-        assert!(players_from_blob(r#"{"tracked_players": 7}"#).is_empty());
+    fn an_unreadable_blob_is_reported_rather_than_read_as_empty() {
+        assert!(players_from_blob("not json").is_err());
+        assert!(players_from_blob(r#"{"tracked_players": 7}"#).is_err());
+        assert!(blob_with_players("not json", &HashMap::new()).is_err());
+        assert!(blob_with_players("[1, 2]", &HashMap::new()).is_err());
     }
 
     /// A first write with nothing stored yet still produces a usable blob.
@@ -210,6 +272,6 @@ mod tests {
         let players: HashMap<_, _> = [player(3, "New", "first note")].into_iter().collect();
         let written = blob_with_players("", &players).expect("the blob encodes");
 
-        assert_eq!(players_from_blob(&written)[&AccountId(3)].notes, "first note");
+        assert_eq!(players_from_blob(&written).expect("the blob reads back")[&AccountId(3)].notes, "first note");
     }
 }

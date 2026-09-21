@@ -65,13 +65,22 @@ pub(crate) enum MatchStatsState {
     Failed(String),
 }
 
+/// Every stored field defaults: the GPUI port writes this same blob to
+/// annotate players, and a field it does not carry must cost that field
+/// rather than the whole tracker. Without defaults a missing key fails the
+/// whole deserialize, and the periodic save then writes an empty tracker over
+/// every player and note.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
+    #[serde(default)]
     pub(crate) tracked_players: HashMap<AccountId, TrackedPlayer>,
+    #[serde(default)]
     pub filter_time_period: TimePeriod,
+    #[serde(default)]
     pub(crate) sort_order: SortedBy,
     #[serde(default)]
     pub(crate) clan_sort_order: ClanSortedBy,
+    #[serde(default)]
     pub(crate) player_filter: String,
 
     /// Whether the Historical and Clans tables count the encounters marked in
@@ -462,6 +471,26 @@ impl ToolkitTabViewer<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The GPUI port writes this blob carrying only the players; the whole
+    /// tracker must still deserialize from it, or the next periodic save
+    /// writes an empty one over everything.
+    #[test]
+    fn a_blob_carrying_only_players_still_reads_as_a_tracker() {
+        use std::collections::HashMap;
+        use wows_toolkit_viewmodel::player_tracker::tracked;
+
+        let mut players = HashMap::new();
+        players.insert(
+            AccountId(7),
+            TrackedPlayer { db_id: AccountId(7), notes: "camps".to_string(), ..TrackedPlayer::default() },
+        );
+        let blob = tracked::blob_with_players("", &players).expect("the blob encodes");
+
+        let tracker: PlayerTracker = serde_json::from_str(&blob).expect("the tracker reads back");
+        assert_eq!(tracker.tracked_players.len(), 1, "the players survive");
+        assert_eq!(tracker.tracked_players[&AccountId(7)].notes, "camps");
+    }
 
     fn live_match_at(started_at: Timestamp) -> LiveMatch {
         LiveMatch { started_at, build: None, players: Vec::new() }

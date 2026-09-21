@@ -54,6 +54,11 @@ mod tests {
         let exported = export_match(&replay, false);
         assert!(!exported.vehicles.is_empty(), "a real match exports its vehicles");
 
+        // Rated through the report, so the export carries what the table
+        // shows rather than a column of nulls.
+        let rated = exported.vehicles.iter().filter(|vehicle| vehicle.personal_rating.is_some()).count();
+        println!("{rated} of {} vehicles carry a personal rating", exported.vehicles.len());
+
         let rated = exported.vehicles.iter().filter(|vehicle| vehicle.server_results.is_some()).count();
         println!("exported {} vehicles, {rated} with server results", exported.vehicles.len());
         assert!(rated > 0, "a finished match carries server results");

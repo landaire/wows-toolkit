@@ -249,6 +249,20 @@ impl GameDataCache {
         Self { wows_dir, loaded: Arc::new(Mutex::new(HashMap::new())) }
     }
 
+    /// `build`'s game data if it is already loaded, without loading it.
+    ///
+    /// For a caller that would like a name but will not pay a build load for
+    /// it: the Search tab's results can span years of replays, and loading
+    /// every build they were recorded on to label a column would cost far
+    /// more than the labels are worth.
+    pub fn loaded_build(&self, build: u32) -> Option<Arc<LoadedGameData>> {
+        let slot = {
+            let guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            Arc::clone(guard.get(&build)?)
+        };
+        slot.get()?.as_ref().ok().cloned()
+    }
+
     /// Returns `build`'s cached game data, loading and caching it first if
     /// this is the first replay on that build. Checks `build` is actually
     /// installed before attempting the (expensive) VFS build, so a replay
@@ -464,9 +478,14 @@ fn parse_replay(
 
     let report = world.into_report();
     let raw_results_json = report.battle_results().map(pretty_json_or_raw);
-    let normalized =
+    let mut normalized =
         NormalizedBattleReport::from_battle_report(&report, meta, loaded.provider.as_ref(), &constants_json);
-    let mut model = ReplayReportModel::from_normalized(
+    // Rated before anything reads it, so the table, the badge and the export
+    // all carry the same numbers.
+    if let Some(table) = personal_rating {
+        normalized.populate_personal_ratings(table);
+    }
+    let model = ReplayReportModel::from_normalized(
         &normalized,
         meta,
         loaded.provider.as_ref(),
@@ -474,9 +493,6 @@ fn parse_replay(
         report.game_chat(),
         report.players(),
     );
-    if let Some(table) = personal_rating {
-        model.populate_personal_ratings(table);
-    }
     let export = ExportedMatch::new(&normalized, report.players(), report.game_chat(), true);
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 

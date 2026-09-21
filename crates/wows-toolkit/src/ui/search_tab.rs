@@ -501,12 +501,6 @@ fn collect_ids(expr: &MatchExpr, ships: &mut Vec<GameParamId>, players: &mut Vec
     }
 }
 
-/// True when the tree names `MatchField::GameMode` anywhere, structurally --
-/// a walk over the AST, not a substring search over the printed query -- so a
-/// free-text term that happens to contain the literal word "game-mode" does
-/// not count. `GameMode` is a match-level field, not a roster one, so this
-/// only has to descend through `MatchTerm::Roster` far enough to say it holds
-/// none, never into the `RosterExpr` itself.
 pub use wows_toolkit_viewmodel::search::game_mode_gap_applies as game_mode_gap_hint_relevant;
 
 /// The hint's text, singular at exactly one so it never reads "1 indexed
@@ -958,12 +952,6 @@ fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: 
     }
 }
 
-/// The name stored on the roster row, when it names anything.
-///
-/// Rejected when empty, and when it is the bare id `UiReport::refresh_translations`
-/// writes for a ship its own provider could not name: taking that would render a
-/// naked number in the cell for good, even once a provider that can name the ship
-/// is loaded.
 use wows_toolkit_viewmodel::search::ship_display_name;
 
 /// What a table pass asked to open, given the two paths it reports.

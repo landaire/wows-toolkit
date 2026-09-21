@@ -2760,33 +2760,18 @@ impl UiReport {
         }
     }
 
-    /// Populate Personal Rating for all players using the provided PR data
+    /// Rates every player, and carries the ratings onto the rows the table
+    /// draws.
+    ///
+    /// The report is rated rather than the rows, so the export writes the
+    /// same numbers the table shows; the rows then read them back.
     pub fn populate_personal_ratings(&mut self, pr_data: &crate::util::personal_rating::PersonalRatingData) {
-        for report in &mut self.player_reports {
-            if report.personal_rating.is_some() {
-                continue;
+        self.normalized.populate_personal_ratings(pr_data);
+
+        for (report, np) in self.player_reports.iter_mut().zip(self.normalized.players.iter()) {
+            if report.personal_rating.is_none() {
+                report.personal_rating = np.personal_rating.clone();
             }
-
-            let Some(player) = Some(report.player()) else {
-                continue;
-            };
-
-            let ship_id = player.vehicle().id();
-            let battle_result = self.battle_result;
-
-            // We need actual damage, kills, and win/loss for a single battle
-            let Some(actual_damage) = report.actual_damage else {
-                continue;
-            };
-
-            let is_win = matches!(battle_result, Some(BattleResult::Win(_)));
-            report.personal_rating = wows_replay_insights::personal_rating::rate_single_battle(
-                pr_data,
-                ship_id,
-                actual_damage,
-                report.kills.unwrap_or(0),
-                is_win,
-            );
         }
     }
 }
