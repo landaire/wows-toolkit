@@ -146,11 +146,38 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
 pub struct ChatPanel {
     messages: Vec<ChatMessage>,
     scroll: ScrollHandle,
+    /// The name a saved log is offered under, built from the battle the way
+    /// the egui chat window builds it.
+    title: String,
 }
 
 impl ChatPanel {
-    pub fn new(messages: Vec<ChatMessage>, _cx: &mut Context<Self>) -> Self {
-        Self { messages, scroll: ScrollHandle::new() }
+    pub fn new(messages: Vec<ChatMessage>, title: String, _cx: &mut Context<Self>) -> Self {
+        Self { messages, scroll: ScrollHandle::new(), title }
+    }
+
+    /// The whole log as one block of text, in the same per-message format the
+    /// copy button beside each line writes.
+    fn transcript(&self) -> String {
+        self.messages.iter().map(copy_text).collect::<Vec<_>>().join("\n")
+    }
+
+    fn copy_all(&self, cx: &mut Context<Self>) {
+        cx.write_to_clipboard(ClipboardItem::new_string(self.transcript()));
+    }
+
+    /// Asks where to write the log and writes it there.
+    fn save_to_file(&self, cx: &mut Context<Self>) {
+        let transcript = self.transcript();
+        let asked = crate::dialog::save_file(Some("Save game chat"), &format!("{} - Game Chat.txt", self.title), None);
+        cx.spawn(async move |_this, cx| {
+            let Some(path) = asked.await else { return };
+            let written = cx.background_spawn(async move { std::fs::write(&path, transcript) }).await;
+            if let Err(err) = written {
+                tracing::warn!("replay chat: the log was not saved: {err}");
+            }
+        })
+        .detach();
     }
 }
 
@@ -164,7 +191,33 @@ impl Render for ChatPanel {
                 .children(self.messages.iter().enumerate().map(|(ix, message)| render_message(ix, message, border))),
         );
 
-        div().relative().size_full().child(rows).child(Scrollbar::vertical(&self.scroll))
+        // What the egui chat window offers above its log.
+        let toolbar = h_flex()
+            .flex_none()
+            .gap_1()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(border)
+            .child(
+                Button::new("chat-copy-all")
+                    .icon(IconName::Copy)
+                    .label("Copy all")
+                    .compact()
+                    .on_click(cx.listener(|this, _event, _window, cx| this.copy_all(cx))),
+            )
+            .child(
+                Button::new("chat-save")
+                    .label("Save to file")
+                    .compact()
+                    .on_click(cx.listener(|this, _event, _window, cx| this.save_to_file(cx))),
+            );
+
+        v_flex()
+            .size_full()
+            .child(toolbar)
+            .child(div().relative().flex_1().min_h(px(0.)).child(rows).child(Scrollbar::vertical(&self.scroll)))
     }
 }
 

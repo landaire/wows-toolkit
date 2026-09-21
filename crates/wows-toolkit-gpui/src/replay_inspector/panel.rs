@@ -305,7 +305,8 @@ impl ReplayPanel {
             if ship_name.is_empty() { model.map.clone() } else { format!("{ship_name} - {}", model.map) }.into();
         let battle_result = model.battle_result;
         let chat = std::mem::take(&mut model.chat);
-        let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, cx)));
+        let chat_title = title.to_string();
+        let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, chat_title, cx)));
         let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
         self._table_subscription = Some(cx.subscribe(&table, Self::on_table_event));
         let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), cx));
