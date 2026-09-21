@@ -8,6 +8,7 @@
 pub mod match_stats;
 pub mod personal_rating;
 pub mod player_tracker;
+pub mod replay_export;
 pub mod settings;
 pub mod stats;
 pub mod unpacker;

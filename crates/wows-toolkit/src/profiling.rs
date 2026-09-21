@@ -110,7 +110,7 @@ impl StageTimings {
 /// personal-rating state are empty: neither is populated during a normal load
 /// either, and the sender is a dead end because the UI report only uses it to
 /// queue follow-up work.
-fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
+pub(crate) fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
     let (tx, rx) = egui_inbox::UiInbox::channel();
     // Leaking the receiver keeps sends from failing; nothing consumes them.
     std::mem::forget(rx);
@@ -128,10 +128,24 @@ fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
     }
 }
 
+/// Loads one replay end to end, the way a double-click does.
+///
+/// `Err` carries the reason it was skipped. Shared with the export's
+/// equivalence test, which needs a real `UiReport` and has the same
+/// build-resolution and version-matching requirements.
+pub(crate) fn load_one(path: &Path, deps: &ReplayDependencies) -> Result<Replay, String> {
+    let mut timings = StageTimings::default();
+    load_timed(path, deps, &mut timings)
+}
+
 /// Time one replay end to end. `Err` carries a reason the replay was skipped.
 fn time_one(path: &Path, deps: &ReplayDependencies) -> Result<StageTimings, String> {
     let mut t = StageTimings::default();
+    load_timed(path, deps, &mut t)?;
+    Ok(t)
+}
 
+fn load_timed(path: &Path, deps: &ReplayDependencies, t: &mut StageTimings) -> Result<Replay, String> {
     let start = Instant::now();
     let bytes = std::fs::read(path).map_err(|e| format!("read failed: {e}"))?;
     t.read = start.elapsed();
@@ -205,7 +219,7 @@ fn time_one(path: &Path, deps: &ReplayDependencies) -> Result<StageTimings, Stri
         return Err("ui report was not built".to_string());
     }
 
-    Ok(t)
+    Ok(replay)
 }
 
 fn ms(d: Duration) -> f64 {

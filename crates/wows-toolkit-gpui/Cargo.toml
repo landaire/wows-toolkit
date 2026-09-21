@@ -45,8 +45,11 @@ tokio = { version = "1", features = ["rt-multi-thread"] }
 # fetches this crate makes. Matches the egui app's feature set so both resolve
 # one copy.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls-native-roots"] }
-# CBOR is what the match-stats service speaks.
+# CBOR is what the match-stats service speaks, and one of the replay
+# export formats.
 ciborium = "0.2"
+# The replay export's spreadsheet format.
+csv = "1"
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
 # The recent-games input accepts digits only, which NumberInput takes as a
 # pattern.

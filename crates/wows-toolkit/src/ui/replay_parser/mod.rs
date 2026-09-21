@@ -21,15 +21,11 @@ use std::path::PathBuf;
 
 pub use models::Achievement;
 pub use models::ClanColor;
-pub use models::Damage;
 pub use models::DamageInteraction;
-pub use models::Hits;
 pub use models::PlayerReport;
 pub use models::PlayerTint;
 pub use models::PlayerTintColor;
-pub use models::PotentialDamage;
 pub use models::SkillInfo;
-pub use models::TranslatedBuild;
 pub use models::ship_class_icon_from_species;
 use rust_i18n::t;
 pub use sorting::ReplayColumn;
@@ -79,8 +75,10 @@ use crate::task::ToastMessage;
 use crate::task::replays::IngestStage;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::update_background_task;
+use wows_replay_insights::battle_report::NormalizedBattleReport;
+
 use crate::util::replay_export::FlattenedVehicle;
-use crate::util::replay_export::Match;
+use crate::util::replay_export::export_match;
 
 use damage_types::*;
 use egui::Color32;
@@ -741,6 +739,10 @@ pub struct UiReport {
     /// packet was never observed (spectator recordings, truncated captures).
     report_salt: u64,
     player_reports: Vec<PlayerReport>,
+    /// The report every per-player number above was read from. Kept because
+    /// the export writes from it rather than from the presentation rebuilt
+    /// over it, so the two cannot drift.
+    normalized: NormalizedBattleReport,
     sorted: bool,
     is_row_expanded: BTreeMap<u64, bool>,
     wows_data: SharedBuildData,
@@ -1170,6 +1172,7 @@ impl UiReport {
             version: report.version(),
             report_salt: NEXT_REPORT_SALT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             player_reports,
+            normalized,
             self_player,
             replay_sort: Arc::clone(&deps.replay_sort),
             wows_data: Arc::clone(wows_data),
@@ -2684,6 +2687,11 @@ impl UiReport {
         &self.player_reports
     }
 
+    /// The report this was built from, which the export writes.
+    pub fn normalized(&self) -> &NormalizedBattleReport {
+        &self.normalized
+    }
+
     pub fn battle_result(&self) -> Option<BattleResult> {
         self.battle_result
     }
@@ -3676,7 +3684,7 @@ impl ToolkitTabViewer<'_> {
                         && let Ok(mut file) = std::fs::File::create(path)
                     {
                         let transformed_results =
-                            Match::new(replay_file, self.tab_state.persisted.read().settings.app.debug_mode);
+                            export_match(replay_file, self.tab_state.persisted.read().settings.app.debug_mode);
                         let result = match format {
                             ReplayExportFormat::Json => serde_json::to_writer(&mut file, &transformed_results)
                                 .map_err(|e| Box::new(e) as Box<dyn std::error::Error>),
