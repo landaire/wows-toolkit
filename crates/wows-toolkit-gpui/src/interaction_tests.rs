@@ -24,7 +24,6 @@ use wows_toolkit_config::index::query::SortColumn as SearchSortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
-use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 
 use wows_toolkit_config::ReplayGrouping;
@@ -965,10 +964,11 @@ fn the_query_bar_offers_completions_and_takes_them(cx: &mut TestAppContext) {
 
         window.click(("search-completion", 0usize), cx);
         window.render_frame(cx);
-        assert_eq!(
-            window.find(SEARCH_QUERY).value(),
-            Some(first.as_str()),
-            "taking it replaces the fragment rather than appending"
+        let taken = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
+        assert_ne!(taken, first, "what lands is the grammar, not the phrase the row is read as");
+        assert!(
+            wows_toolkit_config::index::query_text::parse_query(&taken).is_ok(),
+            "taking a suggestion leaves a query that parses, got {taken:?}"
         );
     })
     .expect("the test window stays open");

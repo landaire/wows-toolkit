@@ -25,6 +25,7 @@ use wows_toolkit_viewmodel::query_bar::label::NameCache;
 use wows_toolkit_viewmodel::query_bar::label::SegmentRole;
 use wows_toolkit_viewmodel::query_bar::select;
 use wows_toolkit_viewmodel::query_bar::suggest;
+use wows_toolkit_viewmodel::query_bar::suggest::SuggestionKind;
 use wows_toolkit_viewmodel::query_bar::suggest::TermField;
 use wows_toolkit_viewmodel::query_bar::tokens;
 use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
@@ -264,6 +265,7 @@ pub fn pill_strip(
 }
 
 /// One completion the bar is offering.
+#[derive(Clone)]
 pub struct Completion {
     /// What the row shows.
     pub label: String,
@@ -281,19 +283,33 @@ pub struct Completion {
 /// on a fresh query.
 pub fn completions(query: &str) -> Vec<Completion> {
     let fragment = suggest::active_fragment(query);
-    let prefix = &query[..suggest::active_fragment_start(query)];
     let all = suggest::static_suggestions();
+    // The bar keeps no record of which operator a field was last given, so a
+    // field is offered with the leading one it allows.
+    let prefs = OperatorPreferences::default();
 
     suggest::rank(fragment, &all)
         .into_iter()
         .take(MAX_SUGGESTIONS)
-        .map(|index| {
+        .filter_map(|index| {
             let suggestion = &all[index];
-            Completion {
+            // A suggestion is read as a phrase and written as grammar: the
+            // label says "Enemy ship", the query takes `enemy.ship:`.
+            let taken = match &suggestion.kind {
+                SuggestionKind::MatchField(field) => suggest::match_field_prefix(*field, &prefs)?,
+                SuggestionKind::RosterField { field, scope } => {
+                    suggest::roster_field_prefix(*field, scope.unwrap_or(suggest::Scope::Anyone), &prefs)?
+                }
+                SuggestionKind::Preset(key) => {
+                    let preset = suggest::PRESETS.iter().find(|preset| preset.key == *key)?;
+                    query_text::print_query(&(preset.build)())
+                }
+            };
+            Some(Completion {
                 label: suggestion.label.clone(),
                 context: category_label(suggestion.context),
-                replacement: format!("{prefix}{}", suggestion.label),
-            }
+                replacement: suggest::replace_active_fragment(query, &taken),
+            })
         })
         .collect()
 }
@@ -320,7 +336,8 @@ mod tests {
     ///
     /// The needle is taken from a real suggestion rather than written here,
     /// so the test does not quietly stop exercising anything when the
-    /// vocabulary changes.
+    /// vocabulary changes. What lands in the bar is the grammar the
+    /// suggestion stands for, not the phrase it is read as.
     #[test]
     fn a_completion_replaces_only_the_fragment_under_the_caret() {
         let first = suggest::static_suggestions().first().expect("there are suggestions").label.clone();
