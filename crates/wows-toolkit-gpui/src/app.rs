@@ -801,8 +801,15 @@ impl App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let SearchEvent::OpenReplay(path) = event;
-        self.open_replay_from_search(path.clone(), window, cx);
+        match event {
+            SearchEvent::OpenReplay(path) => self.open_replay_from_search(path.clone(), window, cx),
+            SearchEvent::RenderReplay(path) => {
+                let path = path.clone();
+                self.active_tab = AppTab::ReplayInspector;
+                self.replay_inspector.update(cx, |view, cx| view.render_replay(path, window, cx));
+                cx.notify();
+            }
+        }
     }
 
     /// Opens `path` in the Replay Inspector and brings that tab forward.
@@ -1153,18 +1160,34 @@ impl App {
             t!("ui.settings.wows.description").into_owned(),
             border,
             settings_form().child(
-                field().label(t!("ui.settings.wows.directory_hint").to_string()).child(
-                    h_flex()
-                        .gap_2()
-                        .child(div().flex_1().child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()))
-                        .child(
-                            Button::new("wows-dir-browse")
-                                .icon(IconName::FolderOpen)
-                                .label(t!("ui.settings.wows.browse").to_string())
-                                .compact()
-                                .on_click(cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx))),
-                        ),
-                ),
+                field()
+                    .label(t!("ui.settings.wows.directory_hint").to_string())
+                    // The tab strip already flags it; the field says it too,
+                    // because that is where the path is read and corrected.
+                    .when(self.wows_dir_invalid, |field| {
+                        field.description(t!("ui.messages.wows_dir_invalid").into_owned())
+                    })
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .when(self.wows_dir_invalid, |this| {
+                                        this.text_color(rgb(crate::theme::semantic().error))
+                                    })
+                                    .child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()),
+                            )
+                            .child(
+                                Button::new("wows-dir-browse")
+                                    .icon(IconName::FolderOpen)
+                                    .label(t!("ui.settings.wows.browse").to_string())
+                                    .compact()
+                                    .on_click(
+                                        cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx)),
+                                    ),
+                            ),
+                    ),
             ),
         );
 

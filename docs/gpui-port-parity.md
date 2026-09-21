@@ -268,7 +268,8 @@ kept so the next audit does not re-report them.
   egui pill editor, so this is the input's own undo, not an AST stack.
 - No date picker for timestamp values.
 - [done] A copied path reports itself.
-- Rows cannot open the replay renderer.
+- [done] A result row plays its replay back, in the viewport the Replay
+  Inspector opens.
 - Results are fixed-width and unresizable.
 - A parse error replaces the results instead of marking the offending span.
 - [done] The footer reports truncation on the right row; the query fetches
@@ -300,7 +301,7 @@ kept so the next audit does not re-report them.
   made of the stored credential.
 - [done] Zoom is saved.
 - [done] The Settings tab flags an invalid WoWs directory on the tab strip.
-- The WoWs directory field has no validation feedback and is not locked
-  during a load.
+- [done] The WoWs directory field tints and says so when the path is not an
+  install. It is still not locked while a load is running.
 - [done] `show_entity_id` has a checkbox. `auto_dump_game_data` does not.
 - The collaboration section is absent.
