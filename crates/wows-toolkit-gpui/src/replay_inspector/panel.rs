@@ -1026,6 +1026,45 @@ mod tests {
         .expect("the window is open");
     }
 
+    /// Dragging a column header's grip widens that column, and every row
+    /// follows it. A column nobody dragged keeps fitting its content.
+    #[gpui_kit::test]
+    fn dragging_a_header_grip_widens_that_column(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+
+        let grip = ("replay-header-grip", ReplayColumn::ShipName as usize);
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find(grip).bounds()
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let from = before.center();
+            window.drag(from, gpui_kit::point(from.x + px(60.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let after = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find(grip).bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            after.origin.x > before.origin.x,
+            "the grip moved right with the column it widens, from {:?} to {:?}",
+            before.origin.x,
+            after.origin.x
+        );
+    }
+
     /// The recording player's row carries the fire-chance block, and nobody
     /// else's does: the statistic is about the shells this client fired.
     #[gpui_kit::test]

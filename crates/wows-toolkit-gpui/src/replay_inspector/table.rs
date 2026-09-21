@@ -372,7 +372,43 @@ pub struct PlayerTable {
     /// `column_widths`. Keeps the (17-column x up-to-24-row) measurement pass
     /// off the per-frame path.
     widths_dirty: bool,
+    /// The width every column is drawn at: what was dragged, or what the
+    /// content measured. Rebuilt each render, so rows and header agree.
+    drawn_widths: Vec<Pixels>,
+    /// Widths the reader dragged a column to, by `ReplayColumn as usize`.
+    /// `None` leaves that column fitted to its content, which is what every
+    /// column does until one is dragged.
+    width_overrides: Vec<Option<Pixels>>,
+    /// Whether the saved widths have been read back yet. One shot, on the
+    /// first frame.
+    widths_loaded: bool,
+    /// The column being dragged and the width it had when the drag started,
+    /// so the new width follows the pointer's total travel rather than
+    /// accumulating per-frame deltas.
+    resizing: Option<ColumnDrag>,
 }
+
+/// A column-width drag in progress.
+#[derive(Clone, Copy)]
+struct ColumnDrag {
+    column: ReplayColumn,
+    pointer_start: Pixels,
+    width_start: Pixels,
+}
+
+/// The narrowest a dragged column may be made. Below this a column's own
+/// content is unreadable and its header is gone.
+const COLUMN_DRAG_MIN: Pixels = px(28.);
+
+/// The settings row the dragged column widths are kept in.
+///
+/// The port's own row, not one the egui app reads: its table carries explicit
+/// per-column ranges and keeps its widths in egui's own memory, so there is
+/// nothing shared to write to.
+const COLUMN_WIDTHS_KEY: &str = "replay_column_widths";
+
+/// The width of the strip on a header's trailing edge that starts a drag.
+const RESIZE_GRIP: Pixels = px(6.);
 
 impl PlayerTable {
     /// Builds the table for `model` and kicks off resolving every icon its
@@ -422,6 +458,10 @@ impl PlayerTable {
             selected: None,
             alt_held: false,
             column_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
+            drawn_widths: vec![px(COLUMN_MIN_WIDTH); ReplayColumn::ALL.len()],
+            widths_loaded: false,
+            width_overrides: vec![None; ReplayColumn::ALL.len()],
+            resizing: None,
             widths_dirty: true,
         }
     }
@@ -559,15 +599,114 @@ impl PlayerTable {
         cx.notify();
     }
 
+    /// The width `col` is drawn at: what the reader dragged it to, or what
+    /// its content measured.
+    fn width_of(&self, col: ReplayColumn) -> Pixels {
+        self.width_overrides[col as usize].unwrap_or(self.column_widths[col as usize])
+    }
+
+    /// Starts a width drag on `col` from the pointer's current position.
+    fn start_column_drag(&mut self, col: ReplayColumn, at: Pixels, cx: &mut Context<Self>) {
+        self.resizing = Some(ColumnDrag { column: col, pointer_start: at, width_start: self.width_of(col) });
+        cx.notify();
+    }
+
+    /// Follows a width drag. A no-op when nothing is being dragged, which is
+    /// every pointer move outside one.
+    fn drag_column(&mut self, at: Pixels, cx: &mut Context<Self>) {
+        let Some(drag) = self.resizing else { return };
+        let width = (drag.width_start + (at - drag.pointer_start)).max(COLUMN_DRAG_MIN);
+        self.width_overrides[drag.column as usize] = Some(width);
+        cx.notify();
+    }
+
+    /// Ends a width drag, keeping where it got to.
+    fn end_column_drag(&mut self, cx: &mut Context<Self>) {
+        if self.resizing.take().is_some() {
+            self.save_column_widths(cx);
+            cx.notify();
+        }
+    }
+
+    /// Writes the dragged widths back, so a table opened later opens at them.
+    ///
+    /// Read once per table, when it is first drawn. Two tables open at the
+    /// same time therefore keep their own widths until one of them is
+    /// reopened, which is the cost of not making every table listen to every
+    /// other one.
+    fn save_column_widths(&self, cx: &mut Context<Self>) {
+        let widths: Vec<Option<f32>> = self.width_overrides.iter().map(|width| width.map(f32::from)).collect();
+        crate::settings_store::save(COLUMN_WIDTHS_KEY, &widths, cx);
+    }
+
+    /// Reads the dragged widths back on the first frame, once the config
+    /// database is open. `new` runs before it is.
+    fn load_column_widths(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        cx.spawn(async move |this, cx| {
+            let stored = crate::runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY).await
+            })
+            .await;
+            let Ok(Some(widths)) = stored else { return };
+            let _ = this.update(cx, |this, cx| {
+                for (slot, width) in this.width_overrides.iter_mut().zip(widths) {
+                    // A width narrower than the grip would leave a column
+                    // that cannot be grabbed to widen again.
+                    *slot = width.map(|width| px(width).max(COLUMN_DRAG_MIN));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Puts `col` back on its content-fitted width.
+    fn reset_column_width(&mut self, col: ReplayColumn, cx: &mut Context<Self>) {
+        self.resizing = None;
+        if self.width_overrides[col as usize].take().is_some() {
+            self.save_column_widths(cx);
+            cx.notify();
+        }
+    }
+
     fn header_cell(&self, col: ReplayColumn, cx: &mut Context<Self>) -> AnyElement {
         let base = div()
-            .w(self.column_widths[col as usize])
+            .w(self.width_of(col))
             .flex_none()
             .px_1()
             .py_1()
             .font_weight(FontWeight::BOLD)
             .whitespace_nowrap()
             .overflow_hidden();
+
+        // The grip sits on the header's trailing edge, over the rule
+        // between this column and the next, which is where a reader reaches
+        // for it.
+        let grip = div()
+            .id(("replay-header-grip", col as usize))
+            .test_support()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .right_0()
+            .w(RESIZE_GRIP)
+            .cursor_col_resize()
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    // Double-clicking a grip puts that column back on its
+                    // content, which is the usual way out of a drag that
+                    // went too far.
+                    if event.click_count >= 2 {
+                        this.reset_column_width(col, cx);
+                        return;
+                    }
+                    this.start_column_drag(col, event.position.x, cx);
+                }),
+            );
+
+        let base = base.relative().child(grip);
 
         match column_sort(col) {
             None => base.child(column_label(col)).into_any_element(),
@@ -1170,7 +1309,14 @@ impl Render for PlayerTable {
 
         let sticky_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().take(STICKY_COLUMN_COUNT).collect();
         let scroll_columns: Vec<ReplayColumn> = self.model.columns.iter().copied().skip(STICKY_COLUMN_COUNT).collect();
-        let scroll_width: f32 = scroll_columns.iter().map(|col| self.column_widths[*col as usize].as_f32()).sum();
+        if !std::mem::replace(&mut self.widths_loaded, true) {
+            self.load_column_widths(cx);
+        }
+
+        // Resolved once per frame so the header, the rows and the scrolling
+        // section's total all read the same number.
+        self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.width_of(*col)).collect();
+        let scroll_width: f32 = scroll_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
 
         let header = h_flex()
             .w_full()
@@ -1204,7 +1350,7 @@ impl Render for PlayerTable {
                 sticky_columns: &sticky_columns,
                 scroll_columns: &scroll_columns,
                 scroll_width,
-                column_widths: &table.column_widths,
+                column_widths: &table.drawn_widths,
                 icons: &table.icons,
                 debug: table.debug,
                 h_scroll: &h_scroll,
@@ -1218,8 +1364,22 @@ impl Render for PlayerTable {
         };
 
         div()
+            .id("replay-table-root")
             .size_full()
             .relative()
+            // A width drag keeps following the pointer past the header's own
+            // bounds, which is where it goes the moment a column grows.
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                this.drag_column(event.position.x, cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
+            )
             .on_modifiers_changed(cx.listener(|this, event: &ModifiersChangedEvent, _window, cx| {
                 if this.alt_held == event.modifiers.alt {
                     return;

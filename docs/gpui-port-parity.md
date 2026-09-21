@@ -149,7 +149,15 @@ kept so the next audit does not re-report them.
 - [done] The Twitch chip, the hidden-profile eye and the disconnect glyph
   are drawn beside a name. The chip's candidates come from the same shared
   observation table the egui app writes.
-- Columns cannot be resized; the Name column has no wider range of its own.
+- [done] A column is resized by dragging the grip on its header's trailing
+  edge, and double-clicking that grip puts it back on its content. The egui
+  table gives the Name column a wider range than the rest because its columns
+  carry explicit ranges; here a column is content-fitted until it is dragged
+  and a drag has only a lower bound, so no column needs one.
+- [done] A dragged width is written back and read on the next table's first
+  frame. Two tables open at once keep their own widths until one is reopened;
+  the row is the port's own, since the egui table keeps its widths in egui's
+  memory.
 - [done] The replays directory is watched; a finished match joins the
   listing and, with the checkbox on, opens.
 
