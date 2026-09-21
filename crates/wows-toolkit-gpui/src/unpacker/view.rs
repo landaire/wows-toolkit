@@ -709,7 +709,10 @@ fn queue_popover(view: Entity<UnpackerView>, entries: Vec<VfsPath>) -> impl Into
         0 => "Queue".to_string(),
         count => format!("{count} queued"),
     };
-    let trigger = Button::new("unpacker-queue-trigger").label(label).compact();
+    let trigger = Button::new("unpacker-queue-trigger")
+        .child(crate::icons::icon(crate::icons::LIST_CHECKS))
+        .label(label)
+        .compact();
 
     Popover::new("unpacker-queue").trigger(trigger).content(move |_state, _window, _cx| {
         let view = view.clone();

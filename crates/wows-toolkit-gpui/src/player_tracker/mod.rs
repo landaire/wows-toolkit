@@ -986,7 +986,7 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
     let tooltip = note.cloned();
 
     Button::new(("tracker-note", ix))
-        .icon(if has_note { IconName::StarFill } else { IconName::Star })
+        .child(crate::icons::icon(crate::icons::NOTE_PENCIL).when(!has_note, |this| this.opacity(0.4)))
         .compact()
         .when_some(tooltip, |this, note| this.tooltip(SharedString::from(note)))
         .when(!has_note, |this| this.tooltip("Add a note about this player"))
@@ -1122,7 +1122,7 @@ fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ro
 
     slot.child(
         Button::new(SharedString::from(format!("tracker-twitch-{side}-{index}")))
-            .icon(IconName::Bell)
+            .child(crate::icons::icon(crate::icons::TWITCH_LOGO))
             .compact()
             .tooltip(SharedString::from(hover))
             .on_click(move |_event, _window, cx: &mut App| {

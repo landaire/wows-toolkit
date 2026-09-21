@@ -4,10 +4,9 @@
 //! error message. Mirrors the egui app's `ReplayTab`/`ReplayTabViewer`
 //! (`ui/replay_parser/mod.rs` ~120/4749): the tab title is "{ship} - {map}"
 //! once loaded, `t!("ui.replay.loading")`'s "Loading..." until then. The
-//! outcome row mirrors `build_replay_view`'s Row 1 (`mod.rs` ~2836-2852):
-//! Win/Loss/Draw label, colored `LIGHT_GREEN`/`LIGHT_RED`/`LIGHT_YELLOW`.
-//! `IconName` has no bundled trophy/sad-face/notches glyphs, so this uses the
-//! closest available icons (thumbs up/down, minus) instead.
+//! outcome row mirrors `build_replay_view`'s Row 1: the Win/Loss/Draw label
+//! with the same trophy/sad-face/notches glyph, drawn from the same Phosphor
+//! font the egui app uses (see `crate::icons`).
 //!
 //! Beside it sits the single-battle PR badge, showing what
 //! `populate_personal_ratings` scored this replay's own row, in that band's
@@ -66,6 +65,8 @@ use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
 use wowsunpack::vfs::VfsPath;
+
+use crate::icons;
 
 use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
@@ -389,10 +390,10 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
         return h_flex().into_any_element();
     };
 
-    let (icon, label, outcome) = match result {
-        BattleResult::Win(_) => (IconName::ThumbsUp, "Victory", BattleOutcome::Win),
-        BattleResult::Loss(_) => (IconName::ThumbsDown, "Defeat", BattleOutcome::Loss),
-        BattleResult::Draw => (IconName::Minus, "Draw", BattleOutcome::Draw),
+    let (glyph, label, outcome) = match result {
+        BattleResult::Win(_) => (icons::TROPHY, "Victory", BattleOutcome::Win),
+        BattleResult::Loss(_) => (icons::SMILEY_SAD, "Defeat", BattleOutcome::Loss),
+        BattleResult::Draw => (icons::NOTCHES, "Draw", BattleOutcome::Draw),
     };
     let color = resolve_color(ColorRole::WinLoss(outcome));
 
@@ -404,7 +405,7 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
         .py_1()
         .font_weight(FontWeight::BOLD)
         .text_color(color)
-        .child(Icon::new(icon))
+        .child(icons::icon(glyph))
         .child(label)
         .into_any_element()
 }
@@ -414,7 +415,7 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
 /// then.
 fn export_menu(panel: Entity<ReplayPanel>, can_export: bool) -> impl IntoElement {
     let trigger = Button::new("replay-export-trigger")
-        .icon(IconName::HardDrive)
+        .child(icons::icon(icons::DOWNLOAD_SIMPLE))
         .label("Export")
         .compact()
         .disabled(!can_export)
