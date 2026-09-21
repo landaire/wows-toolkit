@@ -3,6 +3,7 @@
 //! A line chart walks the games in order; a bar chart compares per-ship
 //! averages. Which statistic either plots is the same list in both front ends.
 
+use rust_i18n::t;
 use std::collections::HashMap;
 
 use serde::Deserialize;
@@ -39,16 +40,22 @@ impl ChartableStat {
         Self::WinRate,
     ];
 
-    pub fn label(self) -> &'static str {
+    /// The catalogue key this statistic's name lives under, so both front
+    /// ends name it the same way and in the reader's own language.
+    pub const fn translation_key(self) -> &'static str {
         match self {
-            Self::Damage => "Damage",
-            Self::SpottingDamage => "Spotting damage",
-            Self::Frags => "Frags",
-            Self::RawXp => "Raw XP",
-            Self::BaseXp => "Base XP",
-            Self::WinRate => "Win rate",
-            Self::PersonalRating => "Personal rating",
+            Self::Damage => "stat.damage",
+            Self::SpottingDamage => "stat.spotting_damage",
+            Self::Frags => "stat.frags",
+            Self::RawXp => "stat.raw_xp",
+            Self::BaseXp => "stat.base_xp",
+            Self::WinRate => "stat.win_rate",
+            Self::PersonalRating => "stat.personal_rating",
         }
+    }
+
+    pub fn label(self) -> String {
+        t!(self.translation_key()).into_owned()
     }
 
     /// Whether plotting this needs the expected-values table that personal

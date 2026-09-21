@@ -43,6 +43,18 @@ pub enum DivisionFilter {
 }
 
 impl DivisionFilter {
+    /// Every choice, in the order both filter bars list them.
+    pub const ALL: [DivisionFilter; 3] = [Self::All, Self::SoloOnly, Self::DivOnly];
+
+    /// The catalogue key this choice's name lives under.
+    pub const fn translation_key(self) -> &'static str {
+        match self {
+            Self::All => "ui.stats.div_all",
+            Self::SoloOnly => "ui.stats.div_solo",
+            Self::DivOnly => "ui.stats.div_div",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::All => "All",
@@ -189,8 +201,10 @@ impl SessionSummary {
     }
 }
 
-/// Totals each achievement across the filtered games, keeping the order it
-/// was first seen, which is how the egui overview accumulates them.
+/// Totals each achievement across the filtered games, most-earned first.
+///
+/// The order the egui roundup lists them in: the one earned twenty times is
+/// what a reader looks at, not whichever game happened to be read first.
 pub fn aggregate_achievements(games: &[&PerGameStat]) -> Vec<SerializableAchievement> {
     let mut totals: Vec<SerializableAchievement> = Vec::new();
     for game in games {
@@ -201,6 +215,10 @@ pub fn aggregate_achievements(games: &[&PerGameStat]) -> Vec<SerializableAchieve
             }
         }
     }
+    // Most-earned first, then by name, which is the order the egui roundup
+    // lists them in: the achievement earned twenty times is the one worth
+    // reading first.
+    totals.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.display_name.cmp(&b.display_name)));
     totals
 }
 
@@ -776,8 +794,10 @@ mod tests {
         assert_eq!(summary.total_frags, 7);
     }
 
+    /// Most-earned first is what the roundup reads down, so the count decides
+    /// the order rather than which game happened to be parsed first.
     #[test]
-    fn achievements_are_totalled_across_games_and_keep_first_seen_order() {
+    fn achievements_are_totalled_across_games_and_ordered_by_how_often_they_were_earned() {
         let mut first = result_of(true, false, false, 0, 0);
         first.achievements = vec![achievement(20, 1), achievement(10, 2)];
         let mut second = result_of(true, false, false, 0, 0);
@@ -788,8 +808,9 @@ mod tests {
         let totals = aggregate_achievements(&refs);
 
         assert_eq!(totals.len(), 2);
-        assert_eq!(totals[0].game_param_id, 20u64.into(), "first seen stays first");
-        assert_eq!(totals[1].count, 5, "the repeated achievement accumulates");
+        assert_eq!(totals[0].count, 5, "the repeated achievement accumulates and leads");
+        assert_eq!(totals[0].game_param_id, 10u64.into());
+        assert_eq!(totals[1].game_param_id, 20u64.into(), "the one earned once comes after");
     }
 }
 

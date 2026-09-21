@@ -675,7 +675,10 @@ fn adding_a_chart_opens_another_pane_with_its_own_controls(cx: &mut TestAppConte
         let second_pane_settings = ("chart-settings", 1usize);
         assert!(window.try_find(second_pane_settings).is_none(), "only one chart is open to begin with");
 
+        // Add-chart is a menu of statistics, so the chart opens on the one
+        // that was asked for rather than on a default to be changed after.
         window.click("stats-add-chart", cx);
+        window.click(("stats-add-chart-stat", ChartableStat::Frags as usize), cx);
         assert!(window.try_find(second_pane_settings).is_some(), "the new pane brought its own controls");
     })
     .expect("the test window stays open");

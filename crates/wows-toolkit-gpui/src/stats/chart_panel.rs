@@ -26,8 +26,11 @@ use std::sync::Arc;
 
 use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
+use wows_toolkit_viewmodel::stats::StatsFilters;
+use wows_toolkit_viewmodel::stats::all_match_groups;
 use wows_toolkit_viewmodel::stats::chart::ChartBar;
 use wows_toolkit_viewmodel::stats::chart::ChartMode;
 use wows_toolkit_viewmodel::stats::chart::ChartSeries;
@@ -35,6 +38,8 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::bar_chart_series;
 use wows_toolkit_viewmodel::stats::chart::line_chart_series;
 use wows_toolkit_viewmodel::stats::chart::ships_played;
+use wows_toolkit_viewmodel::stats::filter_games;
+use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::per_ship_performance;
 
 use crate::ui::selectable;
@@ -64,6 +69,15 @@ pub struct StatsChartPanel {
     /// Whether each point carries its own value.
     show_values: bool,
     games: Vec<PerGameStat>,
+    /// Every recorded game, before any narrowing, so an override can select
+    /// from the whole session rather than from the tab's selection.
+    all_games: Vec<PerGameStat>,
+    /// What the tab's filter bar currently says, followed unless this chart
+    /// has been taken off it.
+    tab_filters: StatsFilters,
+    /// This chart's own narrowing. `None` follows the tab, which is what a
+    /// new chart does; `Some` is an override the reader set here.
+    own_filters: Option<StatsFilters>,
     ships: Vec<(String, PerformanceInfo)>,
     /// The ships the games were played in, in the order first played: what
     /// the settings menu lists.
@@ -95,6 +109,9 @@ impl StatsChartPanel {
             combined: false,
             show_values: false,
             games: Vec::new(),
+            all_games: Vec::new(),
+            tab_filters: StatsFilters::default(),
+            own_filters: None,
             ships: Vec::new(),
             played: Vec::new(),
             selected_ships: Vec::new(),
@@ -123,10 +140,70 @@ impl StatsChartPanel {
 
     /// Adopts the games the filter bar selected. Both shapes are kept so
     /// switching mode does not need the tab to push the data again.
-    pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
-        self.ships = per_ship_performance(games);
+    /// Adopts the whole session and the tab's filters.
+    ///
+    /// Both, not just the selection the tab made: a chart the reader has
+    /// taken off the tab's filters narrows the session itself, and one that
+    /// has not needs the tab's answer.
+    pub fn set_games(&mut self, all_games: &[PerGameStat], tab_filters: &StatsFilters, cx: &mut Context<Self>) {
+        self.all_games = all_games.to_vec();
+        self.tab_filters = tab_filters.clone();
+        self.rebuild(cx);
+    }
+
+    /// Every match group the session holds, which is what an override can
+    /// narrow to.
+    fn offered_modes(&self) -> Vec<String> {
+        all_match_groups(&self.all_games).into_iter().collect()
+    }
+
+    /// The filters this chart is drawn under: its own if it has any, the
+    /// tab's otherwise.
+    fn active_filters(&self) -> &StatsFilters {
+        self.own_filters.as_ref().unwrap_or(&self.tab_filters)
+    }
+
+    /// Whether this chart narrows the session itself rather than following
+    /// the tab's filter bar.
+    fn overrides_tab(&self) -> bool {
+        self.own_filters.is_some()
+    }
+
+    /// Takes this chart off the tab's filters, or puts it back on them.
+    ///
+    /// Taking it off starts from what the tab currently says, so the plot
+    /// does not jump the moment the override is turned on.
+    fn set_overrides_tab(&mut self, overrides: bool, cx: &mut Context<Self>) {
+        self.own_filters = overrides.then(|| self.tab_filters.clone());
+        self.rebuild(cx);
+    }
+
+    fn set_own_division(&mut self, division: DivisionFilter, cx: &mut Context<Self>) {
+        let Some(filters) = self.own_filters.as_mut() else { return };
+        filters.division = division;
+        self.rebuild(cx);
+    }
+
+    fn toggle_own_mode(&mut self, mode: &str, cx: &mut Context<Self>) {
+        let Some(filters) = self.own_filters.as_mut() else { return };
+        if !filters.game_modes.remove(mode) {
+            filters.game_modes.insert(mode.to_string());
+        }
+        self.rebuild(cx);
+    }
+
+    fn clear_own_modes(&mut self, cx: &mut Context<Self>) {
+        let Some(filters) = self.own_filters.as_mut() else { return };
+        filters.game_modes.clear();
+        self.rebuild(cx);
+    }
+
+    /// Re-narrows the session and rebuilds everything drawn from it.
+    fn rebuild(&mut self, cx: &mut Context<Self>) {
+        let games = filter_games(&self.all_games, self.active_filters());
+        self.ships = per_ship_performance(&games);
         self.games = games.iter().map(|game| (*game).clone()).collect();
-        self.played = ships_played(games);
+        self.played = ships_played(&games);
         // Listed by name: a long session's picker has no other order anyone
         // could look a ship up in.
         self.played.sort_by(|left, right| left.1.cmp(&right.1));
@@ -196,7 +273,7 @@ impl StatsChartPanel {
         cx.notify();
     }
 
-    fn set_stat(&mut self, stat: ChartableStat, cx: &mut Context<Self>) {
+    pub(crate) fn set_stat(&mut self, stat: ChartableStat, cx: &mut Context<Self>) {
         if self.stat == stat {
             return;
         }
@@ -300,6 +377,9 @@ impl StatsChartPanel {
             (self.stat, self.mode, self.running, self.combined, self.show_values);
         let played = self.played.clone();
         let selected = self.selected_ships.clone();
+        let overrides = self.overrides_tab();
+        let active = self.active_filters().clone();
+        let modes = self.offered_modes();
 
         let trigger = Button::new(("chart-settings", id)).label(t!("ui.stats.settings").to_string()).compact();
         Popover::new(("chart-settings-menu", id)).trigger(trigger).content(move |_state, _window, _cx| {
@@ -347,6 +427,9 @@ impl StatsChartPanel {
                 })
                 .collect();
 
+            let filters_entity = entity.clone();
+            let division_entity = entity.clone();
+            let mode_filter_entity = entity.clone();
             let combined_entity = entity.clone();
             let running_entity = entity.clone();
             let values_entity = entity.clone();
@@ -413,6 +496,70 @@ impl StatsChartPanel {
                             values_entity.update(cx, |this, cx| this.set_show_values(checked, cx));
                         }),
                 )
+                // This chart's own narrowing, when it has been taken off
+                // the tab's bar. The tab's filters stay the default, so a
+                // reader who never opens this sees one set of filters.
+                .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.filters").to_string()))
+                .child({
+                    let entity = filters_entity.clone();
+                    Checkbox::new(("chart-own-filters", id))
+                        .label(t!("ui.stats.own_filters").to_string())
+                        .checked(overrides)
+                        .tooltip(t!("ui.stats.own_filters_tooltip").to_string())
+                        .on_click(move |checked, _window, cx| {
+                            let checked = *checked;
+                            entity.update(cx, |this, cx| this.set_overrides_tab(checked, cx));
+                        })
+                })
+                .when(overrides, |this| {
+                    let division_entity = division_entity.clone();
+                    let mode_entity = mode_filter_entity.clone();
+                    let all_modes_entity = mode_filter_entity.clone();
+                    this.child(h_flex().gap_1().flex_wrap().children(DivisionFilter::ALL.into_iter().map(
+                        move |offered| {
+                            let entity = division_entity.clone();
+                            let chosen = active.division == offered;
+                            Button::new(("chart-division", id * DivisionFilter::ALL.len() + offered as usize))
+                                .label(t!(offered.translation_key()).to_string())
+                                .compact()
+                                .selected(chosen)
+                                .on_click(move |_event, _window, cx| {
+                                    entity.update(cx, |this, cx| this.set_own_division(offered, cx));
+                                })
+                        },
+                    )))
+                    .when(modes.len() > 1, |this| {
+                        let modes = modes.clone();
+                        let chosen_modes = active.game_modes.clone();
+                        this.child(
+                            h_flex()
+                                .gap_1()
+                                .flex_wrap()
+                                .child(
+                                    Button::new(("chart-mode-all", id))
+                                        .label(t!("ui.stats.all_ships").to_string())
+                                        .compact()
+                                        .selected(chosen_modes.is_empty())
+                                        .on_click(move |_event, _window, cx| {
+                                            all_modes_entity.update(cx, |this, cx| this.clear_own_modes(cx));
+                                        }),
+                                )
+                                .children(modes.into_iter().enumerate().map(move |(ix, group)| {
+                                    let entity = mode_entity.clone();
+                                    let chosen = chosen_modes.contains(&group);
+                                    let picked = group.clone();
+                                    Button::new(("chart-mode-filter", id * 64 + ix))
+                                        .label(match_group_display_name(&group).to_string())
+                                        .compact()
+                                        .selected(chosen)
+                                        .on_click(move |_event, _window, cx| {
+                                            let picked = picked.clone();
+                                            entity.update(cx, |this, cx| this.toggle_own_mode(&picked, cx));
+                                        })
+                                })),
+                        )
+                    })
+                })
                 .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.stats.ships").to_string()))
                 .child(
                     h_flex()
