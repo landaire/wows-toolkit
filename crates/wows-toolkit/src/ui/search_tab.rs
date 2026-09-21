@@ -980,33 +980,7 @@ fn collect_roster_ids(expr: &RosterExpr, ships: &mut Vec<GameParamId>, players: 
 /// writes for a ship its own provider could not name: taking that would render a
 /// naked number in the cell for good, even once a provider that can name the ship
 /// is loaded.
-fn stored_ship_name(hit: &MatchHit, ship_id: GameParamId) -> Option<&str> {
-    let stored = hit.self_ship_name.as_deref()?;
-    if stored.is_empty() || stored == ship_id.to_string() {
-        return None;
-    }
-    Some(stored)
-}
-
-/// The display name for a hit's self ship, given whatever name the match's own
-/// build resolves for it (`live`) when that build's game data is loaded.
-///
-/// `live` wins. It is the same source every other surface names ships from, so
-/// preferring it keeps the tab in the app's current locale, while a stored name
-/// is frozen in whatever locale was active when the match was indexed. The
-/// stored name is the fallback for the case the whole fix exists for: a match
-/// whose build's game data is no longer installed. A bracketed id is the last
-/// resort when neither can name the ship.
-fn ship_display_name(hit: &MatchHit, live: Option<String>) -> Option<String> {
-    let ship_id = hit.self_ship_id?;
-    if let Some(live) = live {
-        return Some(live);
-    }
-    if let Some(stored) = stored_ship_name(hit, ship_id) {
-        return Some(stored.to_owned());
-    }
-    Some(format!("[{ship_id}]"))
-}
+use wows_toolkit_viewmodel::search::ship_display_name;
 
 /// What a table pass asked to open, given the two paths it reports.
 ///

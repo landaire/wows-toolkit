@@ -29,8 +29,48 @@ use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 
+use wows_toolkit_viewmodel::search::ship_display_name;
+
 use crate::runtime;
 use crate::ui::selectable;
+
+/// A column the results table draws.
+///
+/// The sortable ones are the shared `SortColumn`; Ship is drawn beside them
+/// and carries no sort, since the index has nothing to order it by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ResultColumn {
+    Sortable(SortColumn),
+    Ship,
+}
+
+impl ResultColumn {
+    /// The order the egui table lists them in: Ship sits after Mode.
+    fn all() -> Vec<ResultColumn> {
+        let mut columns = Vec::with_capacity(SortColumn::ALL.len() + 1);
+        for column in SortColumn::ALL {
+            columns.push(ResultColumn::Sortable(column));
+            if column == SortColumn::Mode {
+                columns.push(ResultColumn::Ship);
+            }
+        }
+        columns
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Sortable(column) => column.label(),
+            Self::Ship => "Ship",
+        }
+    }
+
+    fn width(self) -> Pixels {
+        match self {
+            Self::Sortable(column) => column_width(column),
+            Self::Ship => px(150.),
+        }
+    }
+}
 
 /// Raised for the app to act on.
 #[derive(Clone, Debug)]
@@ -268,14 +308,25 @@ impl Render for SearchView {
 
         let header =
             h_flex().flex_none().gap_2().items_center().px_2().py_1().border_b_1().border_color(border).children(
-                SortColumn::ALL.map(|column| {
-                    let active = self.sort.column == column;
+                ResultColumn::all().into_iter().map(|column| {
+                    let ResultColumn::Sortable(sortable) = column else {
+                        // Nothing to sort by, so the header is a label rather
+                        // than a control that would refuse every click.
+                        return div()
+                            .w(column.width())
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .child(column.label())
+                            .into_any_element();
+                    };
+
+                    let active = self.sort.column == sortable;
                     selectable(
-                        ("search-sort", column as usize),
+                        ("search-sort", sortable as usize),
                         active,
                         div()
-                            .id(("search-sort-button", column as usize))
-                            .w(column_width(column))
+                            .id(("search-sort-button", sortable as usize))
+                            .w(column.width())
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .child(h_flex().gap_1().items_center().child(column.label()).when(active, |this| {
@@ -284,8 +335,9 @@ impl Render for SearchView {
                                     SortDirection::Descending => IconName::SortDescending,
                                 }))
                             }))
-                            .on_click(cx.listener(move |this, _event, _window, cx| this.sort_by(column, cx))),
+                            .on_click(cx.listener(move |this, _event, _window, cx| this.sort_by(sortable, cx))),
                     )
+                    .into_any_element()
                 }),
             );
 
@@ -303,9 +355,15 @@ impl Render for SearchView {
                 .items_center()
                 .px_2()
                 .hover(|this| this.bg(hover_bg))
-                .children(
-                    SortColumn::ALL.map(|column| div().w(column_width(column)).text_sm().child(cell_text(hit, column))),
-                )
+                .children(ResultColumn::all().into_iter().map(|column| {
+                    div().w(column.width()).text_sm().truncate().child(match column {
+                        ResultColumn::Sortable(column) => cell_text(hit, column),
+                        // No live provider here: the port's index rows carry
+                        // the name recorded when the match was indexed, which
+                        // is what a build no longer installed leaves behind.
+                        ResultColumn::Ship => ship_display_name(hit, None).unwrap_or_else(|| "-".to_string()),
+                    })
+                }))
                 .child(row_actions(ix, hit, entity.clone()))
                 .into_any_element()
         };
