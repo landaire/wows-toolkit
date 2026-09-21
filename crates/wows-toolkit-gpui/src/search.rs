@@ -109,6 +109,15 @@ enum SearchState {
 
 pub struct SearchView {
     query_input: Entity<InputState>,
+    /// What the caret fragment may be completed to, and the bar text they
+    /// were built from. Refreshed in `render` when the two disagree rather
+    /// than from an input event: a completion taken by click changes the text
+    /// too, and one path that notices covers both.
+    completions: Vec<crate::search_pills::Completion>,
+    completion_source: String,
+    /// Names the pills read ids back as. Filled from the same lookups the
+    /// result table uses, so a pill and a row name a ship the same way.
+    name_cache: wows_toolkit_viewmodel::query_bar::label::NameCache,
     sort: SortSpec,
     hits: Vec<MatchHit>,
     state: SearchState,
@@ -146,6 +155,9 @@ impl SearchView {
 
         Self {
             query_input,
+            completions: Vec::new(),
+            completion_source: String::new(),
+            name_cache: Default::default(),
             sort: SortSpec::default(),
             hits: Vec::new(),
             state: SearchState::Idle,
@@ -160,6 +172,24 @@ impl SearchView {
             focus_handle: cx.focus_handle(),
             _subscriptions: vec![subscription],
         }
+    }
+
+    /// Puts `replacement` in the bar. What may follow it is re-offered by the
+    /// next render, which notices the text changed.
+    fn take_completion(&mut self, replacement: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.query_input.update(cx, |state, cx| state.set_value(replacement, window, cx));
+        cx.notify();
+    }
+
+    /// Re-offers the completions when the bar text has changed since they
+    /// were built.
+    fn refresh_completions(&mut self, cx: &mut Context<Self>) {
+        let text = self.query_input.read(cx).value().to_string();
+        if text == self.completion_source {
+            return;
+        }
+        self.completions = crate::search_pills::completions(&text);
+        self.completion_source = text;
     }
 
     /// Enter runs the query, as it does in the egui query bar.
@@ -414,17 +444,14 @@ fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
 
 impl Render for SearchView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.refresh_completions(cx);
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
 
-        let query_bar = h_flex()
-            .flex_none()
+        let entry_row = h_flex()
+            .w_full()
             .gap_2()
             .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
             .child(Icon::new(IconName::Search))
             .child(div().flex_1().child(Input::new(&self.query_input).id("search-query").small().w_full()))
             .child(
@@ -433,6 +460,40 @@ impl Render for SearchView {
                     .compact()
                     .on_click(cx.listener(|this, _event, _window, cx| this.run(cx))),
             );
+
+        // What the query the user typed actually says, read back through the
+        // same rules the egui bar draws its pills with.
+        let pills = self
+            .expr
+            .as_ref()
+            .and_then(|expr| crate::search_pills::pill_strip(expr, &self.name_cache, cx))
+            .map(|strip| div().id("search-pills").w_full().px(px(20.)).child(strip));
+
+        let completions = (!self.completions.is_empty()).then(|| {
+            h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(self.completions.iter().enumerate().map(
+                |(index, completion)| {
+                    let replacement = completion.replacement.clone();
+                    Button::new(("search-completion", index))
+                        .label(completion.label.clone())
+                        .compact()
+                        .tooltip(completion.context.clone())
+                        .on_click(cx.listener(move |this, _event, window, cx| {
+                            this.take_completion(replacement.clone(), window, cx)
+                        }))
+                },
+            ))
+        });
+
+        let query_bar = v_flex()
+            .flex_none()
+            .gap_1()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(border)
+            .child(entry_row)
+            .when_some(pills, |this, pills| this.child(pills))
+            .when_some(completions, |this, rows| this.child(rows));
 
         let header =
             h_flex().flex_none().gap_2().items_center().px_2().py_1().border_b_1().border_color(border).children(
