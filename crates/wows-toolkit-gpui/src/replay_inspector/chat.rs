@@ -24,14 +24,31 @@ use wows_replays::types::Relation;
 use super::columns::relation_color_rgb;
 use super::model::ChatMessage;
 
-/// No resolvable team relation: rendered gray, matching egui's `Color32::GRAY`
-/// fallback in `build_replay_chat_content`.
-const NO_RELATION_GRAY: u32 = 0x808080;
-const SELF_WHITE: u32 = 0xffffff;
-const ALLY_LIGHT_GREEN: u32 = 0x90ee90;
-const ENEMY_LIGHT_RED: u32 = 0xff8080;
-const DIVISION_GOLD: u32 = 0xffd700;
-const CHANNEL_ORANGE: u32 = 0xffa500;
+/// No resolvable team relation: the de-emphasised tone, which is what egui's
+/// `Color32::GRAY` fallback amounts to in `build_replay_chat_content`.
+fn no_relation_gray() -> u32 {
+    crate::theme::semantic().text_dim
+}
+
+fn self_color() -> u32 {
+    crate::theme::semantic().text_strong
+}
+
+fn ally_color() -> u32 {
+    crate::theme::semantic().chat_team
+}
+
+fn enemy_color() -> u32 {
+    crate::theme::semantic().loss
+}
+
+fn division_color() -> u32 {
+    crate::theme::semantic().chat_division
+}
+
+fn system_color() -> u32 {
+    crate::theme::semantic().chat_other
+}
 
 /// Sender-name color packed as `0xRRGGBB`: the self/ally/enemy triad via
 /// `relation_color_rgb` (the single source of truth for those three values),
@@ -41,7 +58,7 @@ const CHANNEL_ORANGE: u32 = 0xffa500;
 /// carries no `PartialEq` impl to test against directly.
 fn sender_color_rgb(relation: Option<Relation>) -> u32 {
     match relation {
-        None => NO_RELATION_GRAY,
+        None => no_relation_gray(),
         Some(r) => relation_color_rgb(r),
     }
 }
@@ -56,10 +73,10 @@ fn sender_color(relation: Option<Relation>) -> Hsla {
 /// this is split from the `Hsla`-returning `channel_color`.
 fn channel_color_rgb(channel: &ChatChannel) -> u32 {
     match channel {
-        ChatChannel::Division => DIVISION_GOLD,
-        ChatChannel::Global => SELF_WHITE,
-        ChatChannel::Team => ALLY_LIGHT_GREEN,
-        ChatChannel::System | ChatChannel::Unknown(_) => CHANNEL_ORANGE,
+        ChatChannel::Division => division_color(),
+        ChatChannel::Global => self_color(),
+        ChatChannel::Team => ally_color(),
+        ChatChannel::System | ChatChannel::Unknown(_) => system_color(),
     }
 }
 
@@ -163,16 +180,16 @@ mod tests {
     use wows_replays::types::GameClock;
     use wows_replays::types::Relation;
 
-    use super::ALLY_LIGHT_GREEN;
-    use super::CHANNEL_ORANGE;
     use super::ChatMessage;
-    use super::DIVISION_GOLD;
-    use super::ENEMY_LIGHT_RED;
-    use super::NO_RELATION_GRAY;
-    use super::SELF_WHITE;
+    use super::ally_color;
     use super::channel_color_rgb;
     use super::copy_text;
+    use super::division_color;
+    use super::no_relation_gray;
+    use super::relation_color_rgb;
+    use super::self_color;
     use super::sender_color_rgb;
+    use super::system_color;
 
     fn message(sender_relation: Option<Relation>, channel: ChatChannel, clan_tag: Option<&str>) -> ChatMessage {
         ChatMessage {
@@ -188,19 +205,22 @@ mod tests {
 
     #[test]
     fn sender_color_matches_relation_palette() {
-        assert_eq!(sender_color_rgb(None), NO_RELATION_GRAY);
-        assert_eq!(sender_color_rgb(Some(Relation::new(0))), SELF_WHITE);
-        assert_eq!(sender_color_rgb(Some(Relation::new(1))), ALLY_LIGHT_GREEN);
-        assert_eq!(sender_color_rgb(Some(Relation::new(2))), ENEMY_LIGHT_RED);
+        // A sender is coloured by relation, from the table the player list
+        // shares; only a message with no relation at all falls back here.
+        assert_eq!(sender_color_rgb(None), no_relation_gray());
+        for relation in [0, 1, 2] {
+            let relation = Relation::new(relation);
+            assert_eq!(sender_color_rgb(Some(relation)), relation_color_rgb(relation));
+        }
     }
 
     #[test]
     fn channel_color_matches_palette() {
-        assert_eq!(channel_color_rgb(&ChatChannel::Division), DIVISION_GOLD);
-        assert_eq!(channel_color_rgb(&ChatChannel::Global), SELF_WHITE);
-        assert_eq!(channel_color_rgb(&ChatChannel::Team), ALLY_LIGHT_GREEN);
-        assert_eq!(channel_color_rgb(&ChatChannel::System), CHANNEL_ORANGE);
-        assert_eq!(channel_color_rgb(&ChatChannel::Unknown("x".to_string())), CHANNEL_ORANGE);
+        assert_eq!(channel_color_rgb(&ChatChannel::Division), division_color());
+        assert_eq!(channel_color_rgb(&ChatChannel::Global), self_color());
+        assert_eq!(channel_color_rgb(&ChatChannel::Team), ally_color());
+        assert_eq!(channel_color_rgb(&ChatChannel::System), system_color());
+        assert_eq!(channel_color_rgb(&ChatChannel::Unknown("x".to_string())), system_color());
     }
 
     #[test]
