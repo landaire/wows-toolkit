@@ -1091,7 +1091,7 @@ mod tests {
             account_id: account,
             region: Some(Region::Eu),
             clan: Some("WTK".to_string()),
-            clan_color: 0,
+            clan_color: None,
         };
         let identities = LiveIdentities { by_name: [("me".to_string(), identity)].into_iter().collect() };
         let stats = vec![PlayerStatsOut {
