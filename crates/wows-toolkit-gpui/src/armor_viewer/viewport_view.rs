@@ -1955,6 +1955,10 @@ impl ViewportView {
                 let still_animating = this.update(cx, |this, cx| {
                     let still = this.viewport.camera.update_animation(1.0 / 60.0);
                     this.viewport.mark_dirty();
+                    // Every frame of the snap is a camera change, so a
+                    // mirrored pane follows the whole eased move rather than
+                    // sitting at the old orientation until the next drag.
+                    cx.emit(ViewportEvent::CameraChanged);
                     cx.notify();
                     still
                 });
