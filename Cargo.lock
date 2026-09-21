@@ -14582,6 +14582,7 @@ dependencies = [
  "image",
  "jiff",
  "nalgebra",
+ "notify 8.2.0",
  "pollster 0.4.0",
  "regex",
  "reqwest 0.12.28",
