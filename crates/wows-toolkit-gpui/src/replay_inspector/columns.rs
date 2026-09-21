@@ -163,19 +163,20 @@ impl CellValue {
     }
 }
 
-/// Packed `0xRRGGBB` color for the self/ally/enemy team-relation triad:
-/// self = white, ally = light green, enemy = light red. The single source of
-/// truth for these three values; `table.rs::resolve_color` (the
-/// `PlayerColorKind::SelfPlayer`/`Ally`/`Enemy` arms), `chat.rs`'s sender-name
-/// color, and `model.rs`'s clan-color fallback all resolve through this
-/// instead of each re-deriving the same three branches.
+/// Packed `0xRRGGBB` color for the self/ally/enemy team-relation triad.
+///
+/// The tones are the app's own (`crate::theme::semantic`), so they follow the
+/// palette on screen rather than being a second set of literals: self is
+/// emphasised body text, an ally reads as a win and an enemy as a loss, which
+/// is what the egui table colours them (`ui/replay_parser/models.rs`).
 pub(crate) fn relation_color_rgb(relation: Relation) -> u32 {
+    let semantic = crate::theme::semantic();
     if relation.is_self() {
-        0xffffff
+        semantic.text_strong
     } else if relation.is_ally() {
-        0x90ee90
+        semantic.win
     } else {
-        0xff8080
+        semantic.loss
     }
 }
 
@@ -188,8 +189,8 @@ pub(crate) fn player_color_kind_rgb(kind: PlayerColorKind) -> u32 {
         PlayerColorKind::SelfPlayer => relation_color_rgb(Relation::new(0)),
         PlayerColorKind::Ally => relation_color_rgb(Relation::new(1)),
         PlayerColorKind::Enemy => relation_color_rgb(Relation::new(2)),
-        PlayerColorKind::DivisionMate => 0xffd700,
-        PlayerColorKind::Abuser => 0xffc0cb,
+        PlayerColorKind::DivisionMate => crate::theme::semantic().division,
+        PlayerColorKind::Abuser => crate::theme::semantic().abuser,
     }
 }
 
