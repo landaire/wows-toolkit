@@ -10,6 +10,7 @@ mod live;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
@@ -20,6 +21,13 @@ use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::searchable_list::SearchableListItem;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::select::SelectEvent;
+use gpui_kit::component::select::SelectState;
+use gpui_kit::component::tab::Tab;
+use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -140,6 +148,30 @@ enum StatsState {
     Failed(String),
 }
 
+/// The period combo, and the menu under it.
+const PERIOD_COMBO_WIDTH: Pixels = px(150.);
+
+/// One entry in the period combo. A local newtype: `TimePeriod` is shared
+/// with the egui app and `SearchableListItem` is the component library's.
+#[derive(Clone)]
+struct PeriodItem(TimePeriod);
+
+impl SearchableListItem for PeriodItem {
+    type Value = TimePeriod;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(self.0.label())
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.0
+    }
+}
+
+fn period_index(period: TimePeriod) -> usize {
+    TimePeriod::ALL.iter().position(|offered| *offered == period).expect("TimePeriod::ALL lists every period")
+}
+
 /// Where the tab is in loading the index.
 enum LoadState {
     /// Before the config database is available.
@@ -222,6 +254,7 @@ pub struct PlayerTrackerView {
     live_metadata_build: Option<u32>,
     _live_watch: Option<Task<()>>,
     period: TimePeriod,
+    period_select: Entity<SelectState<SearchableVec<PeriodItem>>>,
     sort: Sort,
     clan_sort: ClanSort,
     filter_text: String,
@@ -247,6 +280,18 @@ pub struct PlayerTrackerView {
 impl PlayerTrackerView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by player or clan..."));
+        let periods = SearchableVec::new(TimePeriod::ALL.map(PeriodItem).to_vec());
+        let period_select = cx.new(|cx| {
+            SelectState::new(periods, Some(IndexPath::new(period_index(TimePeriod::default()))), window, cx)
+                .searchable(false)
+        });
+        // `Confirm(None)` is the cleared-selection case, which this combo
+        // cannot produce: it is not `.cleanable()` and always holds a period.
+        let period_chosen = cx.subscribe(&period_select, |this, _state, event, cx| {
+            let SelectEvent::Confirm(Some(period)) = event else { return };
+            let pool = crate::settings_store::pool(cx);
+            this.set_period(*period, pool, cx);
+        });
         let note_input = cx.new(|cx| InputState::new(window, cx).placeholder("Notes about this player..."));
         let subscription = cx.subscribe(&filter_input, Self::on_filter_event);
         let note_edited = cx.subscribe(&note_input, Self::on_note_edited);
@@ -282,6 +327,7 @@ impl PlayerTrackerView {
             stats_budget: live::StatsBudget::default(),
             _live_watch: None,
             period: TimePeriod::default(),
+            period_select,
             sort: Sort::default(),
             clan_sort: ClanSort::default(),
             filter_text: String::new(),
@@ -293,7 +339,7 @@ impl PlayerTrackerView {
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
-            _subscriptions: vec![subscription, note_edited],
+            _subscriptions: vec![subscription, note_edited, period_chosen],
         }
     }
 
@@ -1523,34 +1569,15 @@ impl Render for PlayerTrackerView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
-        let pool = crate::settings_store::pool(cx);
 
-        let sub_tabs = SubTab::ALL.map(|sub_tab| {
-            let chosen = self.sub_tab == sub_tab;
-            selectable(
-                ("tracker-subtab", sub_tab as usize),
-                chosen,
-                Button::new(("tracker-subtab-button", sub_tab as usize))
-                    .label(sub_tab.label())
-                    .compact()
-                    .selected(chosen)
-                    .on_click(cx.listener(move |this, _event, _window, cx| this.set_sub_tab(sub_tab, cx))),
-            )
-        });
-
-        let period_buttons = TimePeriod::ALL.map(|period| {
-            let chosen = self.period == period;
-            let pool = pool.clone();
-            selectable(
-                ("tracker-period", period as usize),
-                chosen,
-                Button::new(("tracker-period-button", period as usize))
-                    .label(period.label())
-                    .compact()
-                    .selected(chosen)
-                    .on_click(cx.listener(move |this, _event, _window, cx| this.set_period(period, pool.clone(), cx))),
-            )
-        });
+        // The three sections are tabs, as they are in the egui tab (which
+        // docks them), rather than a row of buttons.
+        let sub_tabs = TabBar::new("tracker-subtabs")
+            .selected_index(self.sub_tab as usize)
+            .children(SubTab::ALL.map(|sub_tab| Tab::new().label(sub_tab.label())))
+            .on_click(cx.listener(|this, ix: &usize, _window, cx| {
+                this.set_sub_tab(SubTab::ALL[*ix], cx);
+            }));
 
         let toolbar = h_flex()
             .flex_none()
@@ -1561,9 +1588,17 @@ impl Render for PlayerTrackerView {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .children(sub_tabs)
-            .child(div().w(px(8.)))
-            .children(period_buttons)
+            .child(
+                Select::new(&self.period_select)
+                    .id("tracker-period")
+                    .accessibility_label("Time period")
+                    .small()
+                    .w(PERIOD_COMBO_WIDTH)
+                    // The menu takes the width of the element the popup is
+                    // anchored to, which is the row this combo sits in rather
+                    // than the combo itself.
+                    .menu_width(PERIOD_COMBO_WIDTH),
+            )
             .child(
                 h_flex()
                     .gap_1()
@@ -1594,6 +1629,7 @@ impl Render for PlayerTrackerView {
                 .id("tracker-root")
                 .track_focus(&self.focus_handle)
                 .size_full()
+                .child(sub_tabs)
                 .child(toolbar)
                 .child(div().flex_1().min_h(px(0.)).child(self.render_current_match(cx)))
                 .into_any_element();
@@ -1792,6 +1828,7 @@ impl Render for PlayerTrackerView {
             .id("tracker-root")
             .track_focus(&self.focus_handle)
             .size_full()
+            .child(sub_tabs)
             .child(toolbar)
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
