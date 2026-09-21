@@ -114,7 +114,7 @@ def _unarchive_cmd(ext_type: str, exec_is_windows: bool, archive: Artifact, stri
             else []
         )
         return cmd_args(
-            "tar" if exec_is_windows else _nix_tool("tar"),
+            "%WINDIR%\\System32\\tar.exe" if exec_is_windows else _nix_tool("tar"),
             _TAR_FLAGS[ext_type] if exec_is_windows else _nix_tar_flags(ext_type),
             os_flags,
             "-x",
