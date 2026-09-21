@@ -64,12 +64,14 @@ struct ShipSection {
     csv: SharedString,
 }
 
-fn english_column(column: stats_table::Column) -> String {
-    column.english().to_string()
+/// A column heading in the reader's own language.
+fn column_heading(column: stats_table::Column) -> String {
+    t!(column.translation_key()).into_owned()
 }
 
-fn english_label(label: stats_table::StatLabel) -> String {
-    label.english().to_string()
+/// A statistic's name in the reader's own language.
+fn stat_heading(label: stats_table::StatLabel) -> String {
+    t!(label.translation_key()).into_owned()
 }
 
 pub struct StatsShipsPanel {
@@ -163,7 +165,10 @@ impl StatsShipsPanel {
                     Some(rating) => format!("{ship} {record} ({win_rate:.0}%) - PR: {:.0}", rating.average.pr),
                     None => format!("{ship} {record} ({win_rate:.0}%)"),
                 });
-                let rows = stats_table::ship_rows(&info, rating.as_ref(), None);
+                // Grouped the way the reader's language groups digits, as
+                // the egui table does.
+                let locale = wows_toolkit_viewmodel::locale();
+                let rows = stats_table::ship_rows(&info, rating.as_ref(), Some(&locale));
 
                 ShipSection {
                     ship_id,
@@ -171,10 +176,10 @@ impl StatsShipsPanel {
                     markdown: SharedString::from(stats_table::to_markdown(
                         &header,
                         &rows,
-                        english_column,
-                        english_label,
+                        column_heading,
+                        stat_heading,
                     )),
-                    csv: SharedString::from(stats_table::to_csv(&rows, english_column, english_label)),
+                    csv: SharedString::from(stats_table::to_csv(&rows, column_heading, stat_heading)),
                     header,
                     rows,
                     last_played: info.last_played().to_string(),

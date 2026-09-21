@@ -88,7 +88,10 @@ kept so the next audit does not re-report them.
   out-of-order timestamp no longer heads a second group with the same date.
 - [done] The debug "Mapped Results" viewer: the battle results with their
   positional arrays resolved to named fields, beside the raw payload.
-- Ingest progress has no counts and no bar.
+- The scan reports itself with a spinner, but not with counts or a bar:
+  the port scans in one pass where egui runs a staged ingest pipeline
+  (scanning, reading, downloading, loading data), which is what its counts
+  come from.
 - [done] Enter on the highlighted row opens it. The kit tree's own Confirm
   only expands a folder, so the listing catches the key itself.
 - The collab session popover and the Tactics Board button.
@@ -175,7 +178,8 @@ kept so the next audit does not re-report them.
   how often they were earned, and name themselves on hover.
 - [done] The records name the ship that set them.
 - [done] The session rating is a banded chip.
-- The ships table ignores the locale for numbers and column headings.
+- [done] The ships table translates its headings and groups its digits the
+  way the reader's language does.
 - [done] The chart names itself over the plot. The legend still does not
   toggle series.
 
@@ -239,7 +243,7 @@ kept so the next audit does not re-report them.
   or failed run does not cost every tick the reader made.
 - Content-search hits cannot be queued, revealed or inspected by offset.
 - Filter results do not reveal the file in the tree.
-- Extraction progress does not name the file being written.
+- [done] Extraction progress names the file it is writing, under the bar.
 
 ## Settings
 

@@ -849,10 +849,15 @@ impl Render for ReplayBrowser {
         );
 
         let body = match &self.status {
-            ScanStatus::Loading => div()
+            // A spinner beside the line, as the egui listing shows while it
+            // is reading the directory.
+            ScanStatus::Loading => h_flex()
                 .p_2()
+                .gap_2()
+                .items_center()
                 .text_sm()
                 .text_color(crate::theme::text_dim())
+                .child(Spinner::new())
                 .child(t!("ui.replay.scanning").to_string())
                 .into_any_element(),
             ScanStatus::Failed(reason) => {

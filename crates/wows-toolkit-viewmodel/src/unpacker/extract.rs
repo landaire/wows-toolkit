@@ -43,16 +43,19 @@ pub enum ExtractError {
 
 /// How far an extraction has got. `written` counts files finished, so it
 /// reaches `total` exactly when the run is done.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExtractProgress {
     pub written: usize,
     pub total: usize,
+    /// The file that was just written, which is what the egui progress bar
+    /// carries as its text.
+    pub file: String,
 }
 
 impl ExtractProgress {
     /// Fraction complete, for a progress bar. An empty queue reads as
     /// finished rather than dividing by zero.
-    pub fn fraction(self) -> f32 {
+    pub fn fraction(&self) -> f32 {
         if self.total == 0 { 1.0 } else { self.written as f32 / self.total as f32 }
     }
 }
@@ -162,7 +165,7 @@ pub fn extract_files(
             let json_path = destination.with_file_name(format!("{}.json", file.filename()));
             fs::write(&json_path, json).map_err(|source| ExtractError::Write { path: json_path.clone(), source })?;
             written += 1;
-            on_progress(ExtractProgress { written, total });
+            on_progress(ExtractProgress { written, total, file: json_path.display().to_string() });
             continue;
         }
 
@@ -174,7 +177,7 @@ pub fn extract_files(
             .map_err(|source| ExtractError::Write { path: destination.clone(), source })?;
 
         written += 1;
-        on_progress(ExtractProgress { written, total });
+        on_progress(ExtractProgress { written, total, file: destination.display().to_string() });
     }
 
     Ok(ExtractOutcome::Completed { written })
@@ -253,7 +256,13 @@ mod tests {
         assert_eq!(fs::read_to_string(out.join("res/content/a.xml")).unwrap(), "<a/>");
         assert_eq!(fs::read_to_string(out.join("res/content/b.txt")).unwrap(), "bee");
         assert_eq!(fs::read_to_string(out.join("res/top.txt")).unwrap(), "top");
-        assert_eq!(seen.last().copied(), Some(ExtractProgress { written: 3, total: 3 }));
+        let last = seen.last().expect("progress was reported");
+        assert_eq!((last.written, last.total), (3, 3));
+        assert!(
+            seen.iter().all(|report| !report.file.is_empty()),
+            "every report names the file it wrote, got {:?}",
+            seen.iter().map(|report| report.file.as_str()).collect::<Vec<_>>()
+        );
         let _ = fs::remove_dir_all(&out);
     }
 
@@ -312,7 +321,8 @@ mod tests {
 
     #[test]
     fn an_empty_queue_reports_a_complete_fraction_rather_than_dividing_by_zero() {
-        assert_eq!(ExtractProgress { written: 0, total: 0 }.fraction(), 1.0);
-        assert_eq!(ExtractProgress { written: 1, total: 4 }.fraction(), 0.25);
+        let at = |written, total| ExtractProgress { written, total, file: String::new() }.fraction();
+        assert_eq!(at(0, 0), 1.0);
+        assert_eq!(at(1, 4), 0.25);
     }
 }
