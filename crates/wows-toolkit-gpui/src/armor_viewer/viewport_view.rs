@@ -32,6 +32,7 @@ use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::slider::SliderEvent;
 use gpui_kit::component::slider::SliderState;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -272,10 +273,11 @@ pub struct ViewportView {
     /// initializing. `set_gpu` uploads this once the device becomes ready,
     /// then clears it.
     pending_armor: Option<Arc<LoadedShipArmor>>,
-    /// Whether a ship load is in flight, so the empty state can say so
-    /// rather than inviting a selection that has already been made. Set by
-    /// the pane (`set_ship_loading`), which owns the load.
-    ship_loading: bool,
+    /// The ship being loaded into this viewport, if one is. Set by the pane
+    /// (`set_ship_loading`), which owns the load; the viewport shows it in
+    /// place of whatever it was drawing, matching the egui pane
+    /// (`ui/tab.rs:2081`).
+    ship_loading: Option<SharedString>,
     /// The armor currently displayed, kept (beyond the initial upload) so a
     /// visibility change can re-upload without reloading the ship. `pub(crate)`
     /// so `popover.rs` can read it while building the popover's tree.
@@ -485,7 +487,7 @@ impl ViewportView {
             held_keys: HashSet::new(),
             key_ticking: false,
             pending_armor: None,
-            ship_loading: false,
+            ship_loading: None,
             current_armor: None,
             part_visibility: HashMap::new(),
             armor_all_visible: true,
@@ -824,9 +826,9 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Whether a ship load is in flight for this viewport, so the empty state
-    /// says so. Driven by the pane, which owns the load itself.
-    pub(crate) fn set_ship_loading(&mut self, loading: bool, cx: &mut Context<Self>) {
+    /// The ship being loaded into this viewport, if one is. Driven by the
+    /// pane, which owns the load itself.
+    pub(crate) fn set_ship_loading(&mut self, loading: Option<SharedString>, cx: &mut Context<Self>) {
         if self.ship_loading == loading {
             return;
         }
@@ -1723,11 +1725,10 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Confirms the export: closes the confirm panel, then opens a native
-    /// save-file dialog (blocking; same inline `rfd::FileDialog` pattern as
-    /// `replay_inspector::view::open_manually`) defaulted to
-    /// `{display_name}.glb`. A cancelled dialog is a no-op beyond closing the
-    /// panel. On a chosen path, builds `ShipExportOptions` from the
+    /// Confirms the export: closes the confirm panel, then asks where to write
+    /// `{display_name}.glb` (`crate::dialog`, which keeps the app drawing
+    /// while the dialog is open). A cancelled dialog is a no-op beyond
+    /// closing the panel. On a chosen path, builds `ShipExportOptions` from the
     /// SNAPSHOT taken when the panel opened (`export_confirm`, `load_ship::
     /// export_options_from_selection`) -- never from this pane's possibly-
     /// since-changed live hull/LOD/module selection, so the sidebar staying
@@ -1748,12 +1749,11 @@ impl ViewportView {
     pub(crate) fn confirm_export(&mut self, cx: &mut Context<Self>) {
         let Some(snapshot) = self.export_confirm.take() else { return };
         cx.notify();
-        let default_filename = load_ship::default_export_filename(&snapshot.display_name);
-        let Some(path) =
-            rfd::FileDialog::new().set_file_name(&default_filename).add_filter("glTF Binary", &["glb"]).save_file()
-        else {
-            return;
-        };
+        let asked = crate::dialog::save_file(
+            None,
+            &load_ship::default_export_filename(&snapshot.display_name),
+            Some(crate::dialog::GLB),
+        );
 
         let bundle = snapshot.bundle;
         let param_index = snapshot.param_index;
@@ -1764,11 +1764,15 @@ impl ViewportView {
             snapshot.selected_modules,
         );
 
-        cx.background_spawn(async move {
-            match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
-                Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
-                Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
-            }
+        cx.spawn(async move |_this, cx| {
+            let Some(path) = asked.await else { return };
+            cx.background_spawn(async move {
+                match load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path) {
+                    Ok(()) => tracing::info!("armor viewer: exported {display_name} to {}", path.display()),
+                    Err(e) => tracing::error!("armor viewer: failed to export {display_name}: {e}"),
+                }
+            })
+            .await;
         })
         .detach();
     }
@@ -1967,19 +1971,23 @@ impl Render for ViewportView {
         // Nothing is drawn until a ship is picked, so the viewport carries
         // the egui app's own two messages instead (`ui.armor.loading_armor`
         // and `ui.armor.select_ship`, hardcoded like the rest of this
-        // crate's strings -- see `replay_inspector::browser_view`).
-        let empty_state = self.current_armor.is_none().then(|| {
-            status.clone().unwrap_or_else(|| {
-                if self.ship_loading {
-                    "Loading ship...".to_string()
-                } else {
-                    "Select a ship from the list".to_string()
-                }
-            })
-        });
-        let image_child = match (empty_state, self.image.clone()) {
-            (None, Some(image)) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
-            (message, _) => h_flex()
+        // crate's strings -- see `replay_inspector::browser_view`). A load in
+        // flight replaces whatever is drawn, as it does in the egui pane, so
+        // the ship on screen is never mistaken for the one being loaded.
+        let loading_ship = self.ship_loading.clone();
+        let empty_state = (self.current_armor.is_none() && loading_ship.is_none())
+            .then(|| status.clone().unwrap_or_else(|| "Select a ship from the list".to_string()));
+        let image_child = match (loading_ship, empty_state, self.image.clone()) {
+            (Some(name), _, _) => h_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .gap_2()
+                .child(Spinner::new())
+                .child(div().text_sm().opacity(0.6).child(format!("Loading {name}...")))
+                .into_any_element(),
+            (None, None, Some(image)) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
+            (None, message, _) => h_flex()
                 .size_full()
                 .items_center()
                 .justify_center()
