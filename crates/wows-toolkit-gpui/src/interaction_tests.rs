@@ -932,3 +932,40 @@ fn a_pasted_twitch_credential_is_read_or_reported(cx: &mut TestAppContext) {
         })
         .expect("the test window stays open");
 }
+
+/// Typing offers completions from the same list the egui bar suggests from,
+/// and taking one replaces the fragment under the caret rather than appending
+/// to it.
+#[gpui_kit::test]
+fn the_query_bar_offers_completions_and_takes_them(cx: &mut TestAppContext) {
+    use wows_toolkit_viewmodel::query_bar::suggest;
+
+    // Typed from a real suggestion, so the test keeps exercising something
+    // when the vocabulary changes.
+    let first = suggest::static_suggestions().first().expect("there are suggestions").label.clone();
+    let needle: String = first.chars().take(3).collect();
+
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        assert!(window.try_find(("search-completion", 0usize)).is_none(), "nothing is offered before typing");
+
+        window.click(SEARCH_QUERY, cx);
+        window.input(&needle, cx);
+        assert_eq!(window.find(SEARCH_QUERY).value(), Some(needle.as_str()), "the text landed");
+        window.render_frame(cx);
+
+        let offered = window.find(("search-completion", 0usize));
+        assert_eq!(offered.label(), Some(first.as_str()), "the matching suggestion leads");
+
+        window.click(("search-completion", 0usize), cx);
+        window.render_frame(cx);
+        assert_eq!(
+            window.find(SEARCH_QUERY).value(),
+            Some(first.as_str()),
+            "taking it replaces the fragment rather than appending"
+        );
+    })
+    .expect("the test window stays open");
+}

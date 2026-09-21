@@ -9,6 +9,7 @@ mod player_tracker;
 mod replay_inspector;
 mod runtime;
 mod search;
+mod search_pills;
 mod settings;
 mod settings_store;
 mod stats;
