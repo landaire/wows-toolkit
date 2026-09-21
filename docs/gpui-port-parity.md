@@ -149,7 +149,12 @@ kept so the next audit does not re-report them.
   section are absent.
 - [done] The legend reopens from the pane's own strip.
 - Camo selection decodes on the UI thread.
-- Display settings, legend placement and export options are never persisted.
+- [done] Display settings and the legend's placement, visibility and
+  collapsed state are written back to the `armor_viewer_defaults` row the
+  viewer already reads at startup. Export options are still session-only.
+- The row's `hull_all_visible`, `armor_all_visible` and `show_splash_boxes`
+  are written back exactly as read: the port has no control for them, and the
+  row is shared with the egui app.
 - [done] Part, material and nation names are drawn in the reader's own
   language (`catalog::translate_part`, the same `IDS_<NAME>` lookup the egui
   app's `translate_part` does). The raw key stays the identity, so a
