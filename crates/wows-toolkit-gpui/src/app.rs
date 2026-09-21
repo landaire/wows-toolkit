@@ -251,11 +251,13 @@ impl App {
         &self.search
     }
 
-    /// Starts the Player Tracker's first index query, once the config
-    /// database is open.
+    /// Starts what the Player Tracker needs from the config database as soon
+    /// as it opens: the shared notes, and the Twitch chat poll. Its index
+    /// aggregates wait until the tab is first shown
+    /// (`PlayerTrackerView::load_index_once`).
     pub fn start_player_tracker(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {
         self.start_twitch_poll(pool.clone(), cx);
-        self.player_tracker.update(cx, |tracker, cx| tracker.refresh(pool, cx));
+        self.player_tracker.update(cx, |tracker, cx| tracker.load_notes(pool, cx));
     }
 
     /// Polls the watched channel's chat while a credential is stored.
@@ -883,6 +885,9 @@ impl Render for App {
             .on_click(cx.listener(|this, ix: &usize, _window, cx| {
                 this.active_tab = AppTab::ALL[*ix];
                 this.poll_armor_game_data(cx);
+                if this.active_tab == AppTab::PlayerTracker {
+                    this.player_tracker.update(cx, |tracker, cx| tracker.load_index_once(cx));
+                }
                 cx.notify();
             }));
 
