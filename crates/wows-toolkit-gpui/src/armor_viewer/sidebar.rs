@@ -19,10 +19,12 @@
 //! with no match anywhere inside them are omitted entirely, not merely
 //! collapsed.
 //!
-//! **Compare.** The header's "Compare" button emits [`CompareSplit`];
-//! `pane.rs` responds by adding a new (empty) pane to the dock and making it
-//! active, so the next ship picked here loads into it rather than replacing
-//! whatever the previously active pane was showing.
+//! **Compare.** A ship row's "Compare (split view)" item emits
+//! [`CompareSplit`] naming that ship, which `pane.rs` opens in a new pane
+//! beside the current one -- the egui sidebar's own right-click item. The
+//! header button emits the same event with no ship, which opens a copy of
+//! what is already showing, so the next ship picked here loads into the new
+//! pane rather than replacing the old one.
 //!
 //! **Export model (Milestone 5 Task 10).** Right-clicking a ship row shows
 //! an "Export model" item (via `gpui_kit::component::tree::Tree::context_menu`,
@@ -40,16 +42,19 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
@@ -72,10 +77,28 @@ pub struct ShipSelected {
     pub display_name: String,
 }
 
-/// Emitted when the user clicks the sidebar header's "Compare" button:
-/// `pane.rs` responds by adding a new pane to the dock (Milestone 5 Task 9b).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct CompareSplit;
+/// What the comparison panes share, and whether there is more than one pane
+/// to share it between.
+///
+/// Held here so the controls can sit beside the button that opens a pane;
+/// `ArmorViewerPane` owns the values and pushes them in ([`Sidebar::
+/// set_common`]), and a change made here comes back out as this same struct.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct CommonPaneSettings {
+    pub comparing: bool,
+    pub mirror_cameras: bool,
+    pub sync_options: bool,
+}
+
+/// Asks for a new comparison pane.
+///
+/// `ship` names the one to open in it, which is how the ship row's own
+/// "Compare (split view)" item works; the header button leaves it `None`,
+/// which opens a copy of the pane that is already showing.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct CompareSplit {
+    pub ship: Option<ExportModelRequested>,
+}
 
 /// Emitted when the user picks "Export model" from a ship row's right-click
 /// context menu (Milestone 5 Task 10): `pane.rs` responds by exporting this
@@ -85,6 +108,12 @@ pub struct ExportModelRequested {
     pub param_index: String,
     pub display_name: String,
 }
+
+/// What one level of the tree indents by, and the width its guide is drawn in.
+const INDENT: Pixels = px(16.);
+
+/// The pane-sharing menu's box.
+const COMMON_MENU_WIDTH: Pixels = px(220.);
 
 /// What a tree row id refers to, resolved once per `rebuild_tree` and
 /// consulted by the row renderer (icon choice) and the click handler (ship
@@ -104,9 +133,13 @@ pub struct Sidebar {
     /// per render -- mirrors `ReplayBrowser::leaf_info`'s `Rc` pointer-bump
     /// clone rationale.
     row_info: Rc<HashMap<SharedString, RowKind>>,
+    /// What the comparison panes share. Owned by `ArmorViewerPane`; kept here
+    /// so the header can draw it beside the button that opens a pane.
+    common: CommonPaneSettings,
     _subscriptions: Vec<Subscription>,
 }
 
+impl EventEmitter<CommonPaneSettings> for Sidebar {}
 impl EventEmitter<ShipSelected> for Sidebar {}
 impl EventEmitter<CompareSplit> for Sidebar {}
 impl EventEmitter<ExportModelRequested> for Sidebar {}
@@ -123,8 +156,72 @@ impl Sidebar {
             search_text: String::new(),
             tree_state,
             row_info: Rc::new(HashMap::new()),
+            common: CommonPaneSettings::default(),
             _subscriptions: vec![subscription],
         }
+    }
+
+    /// The header's pane-sharing menu: what every comparison pane follows.
+    ///
+    /// Always in the header, whether or not a comparison is open, so opening
+    /// one does not move the controls around it; the items are refused while
+    /// there is nothing to share with, which is what says they are for
+    /// comparing.
+    fn common_menu(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let common = self.common;
+        let entity = cx.entity();
+        Popover::new("armor-sidebar-common")
+            .trigger(
+                Button::new("armor-sidebar-common-trigger")
+                    .icon(IconName::Settings2)
+                    .compact()
+                    .tooltip("What the comparison panes share"),
+            )
+            .content(move |_state, _window, _cx| {
+                let mirror_entity = entity.clone();
+                let sync_entity = entity.clone();
+                v_flex()
+                    .w(COMMON_MENU_WIDTH)
+                    .gap_2()
+                    .p_2()
+                    .child(
+                        Checkbox::new("armor-pane-mirror-cameras")
+                            .label("Mirror cameras")
+                            .checked(common.mirror_cameras)
+                            .disabled(!common.comparing)
+                            .tooltip("Move every pane's camera together")
+                            .on_click(move |checked, _window, cx| {
+                                let mirror_cameras = *checked;
+                                mirror_entity.update(cx, |sidebar, cx| {
+                                    cx.emit(CommonPaneSettings { mirror_cameras, ..sidebar.common })
+                                });
+                            }),
+                    )
+                    .child(
+                        Checkbox::new("armor-pane-sync-options")
+                            .label("Sync settings")
+                            .checked(common.sync_options)
+                            .disabled(!common.comparing)
+                            .tooltip("Sync visibility and display settings across all panes")
+                            .on_click(move |checked, _window, cx| {
+                                let sync_options = *checked;
+                                sync_entity.update(cx, |sidebar, cx| {
+                                    cx.emit(CommonPaneSettings { sync_options, ..sidebar.common })
+                                });
+                            }),
+                    )
+                    .into_any_element()
+            })
+    }
+
+    /// Adopts what the panes currently share, so the header's own controls
+    /// report it.
+    pub fn set_common(&mut self, common: CommonPaneSettings, cx: &mut Context<Self>) {
+        if self.common == common {
+            return;
+        }
+        self.common = common;
+        cx.notify();
     }
 
     /// Adopts the loaded catalog/icons and rebuilds the tree. Called once the
@@ -234,16 +331,18 @@ fn render_sidebar_item(
     selected: bool,
     bundle: &ArmorAssetsBundle,
     row_info: &HashMap<SharedString, RowKind>,
+    cx: &App,
 ) -> ListItem {
     let item = entry.item();
     let kind = row_info.get(&item.id);
 
-    let mut row = h_flex().gap_1().items_center().pl(px(16.) * entry.depth());
+    // A guide per level, so a ship reads as belonging to the class above it.
+    let mut row = h_flex().gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if entry.is_folder() {
         let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
         row = row.child(Icon::new(chevron));
     } else {
-        row = row.child(div().w(px(16.)));
+        row = row.child(div().w(INDENT));
     }
 
     match kind {
@@ -294,9 +393,10 @@ impl Render for Sidebar {
                     .icon(IconName::LayoutDashboard)
                     .label("Compare")
                     .compact()
-                    .tooltip("Open a new comparison pane")
-                    .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(CompareSplit))),
-            );
+                    .tooltip("Open a new comparison pane, or right-click a ship to compare that one")
+                    .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(CompareSplit::default()))),
+            )
+            .child(self.common_menu(cx));
 
         let search_row = h_flex()
             .flex_none()
@@ -317,24 +417,29 @@ impl Render for Sidebar {
                 let row_info = self.row_info.clone();
                 let context_menu_entity = entity.clone();
                 let context_menu_row_info = self.row_info.clone();
-                tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
-                    render_sidebar_item(entity.clone(), ix, entry, selected, &bundle, &row_info)
+                tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
+                    render_sidebar_item(entity.clone(), ix, entry, selected, &bundle, &row_info, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
                     let Some(RowKind::Ship { param_index, display_name }) = context_menu_row_info.get(&entry.item().id)
                     else {
                         return menu;
                     };
-                    let param_index = param_index.clone();
-                    let display_name = display_name.clone();
+                    let ship =
+                        ExportModelRequested { param_index: param_index.clone(), display_name: display_name.clone() };
+                    let compare_ship = ship.clone();
+                    let compare_entity = context_menu_entity.clone();
                     let entity = context_menu_entity.clone();
-                    menu.item(PopupMenuItem::new("Export model").on_click(move |_event, _window, cx| {
-                        let request = ExportModelRequested {
-                            param_index: param_index.clone(),
-                            display_name: display_name.clone(),
-                        };
-                        entity.update(cx, |_sidebar, cx| cx.emit(request));
+                    menu.item(PopupMenuItem::new("Compare (split view)").on_click(move |_event, _window, cx| {
+                        let request = CompareSplit { ship: Some(compare_ship.clone()) };
+                        compare_entity.update(cx, |_sidebar, cx| cx.emit(request));
                     }))
+                    .item(PopupMenuItem::new("Export model").on_click(
+                        move |_event, _window, cx| {
+                            let request = ship.clone();
+                            entity.update(cx, |_sidebar, cx| cx.emit(request));
+                        },
+                    ))
                 })
                 .flex_1()
                 .into_any_element()

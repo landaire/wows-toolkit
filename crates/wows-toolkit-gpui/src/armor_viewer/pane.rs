@@ -70,12 +70,17 @@ use super::load_ship;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
+use super::sidebar::CommonPaneSettings;
 use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
 use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::ViewportEvent;
 use super::viewport_view::ViewportView;
+
+/// The status strip above the split. Fixed, so what it says never moves the
+/// viewport.
+const CHROME_HEIGHT: Pixels = px(20.);
 
 /// Sidebar width, matching the Replay Inspector's own browser sidebar
 /// (`replay_inspector::view::BROWSER_WIDTH`).
@@ -152,6 +157,7 @@ impl ArmorViewerPane {
         let ship_selected_sub = cx.subscribe_in(&sidebar, window, Self::on_sidebar_event);
         let compare_split_sub = cx.subscribe_in(&sidebar, window, Self::on_compare_split);
         let export_requested_sub = cx.subscribe_in(&sidebar, window, Self::on_export_model_requested);
+        let common_settings_sub = cx.subscribe_in(&sidebar, window, Self::on_common_settings);
         // `dock`'s own `cx.notify()` (add/close/activate pane) only
         // invalidates `ViewportDock`'s render; without this, the common-
         // settings toggle row below -- gated on `dock.panes().len() > 1` --
@@ -174,6 +180,7 @@ impl ArmorViewerPane {
                 ship_selected_sub,
                 compare_split_sub,
                 export_requested_sub,
+                common_settings_sub,
                 viewport_event_sub,
                 dock_sub,
             ],
@@ -248,10 +255,38 @@ impl ArmorViewerPane {
     /// silent), and copies its reload source so the new pane can
     /// independently switch hull/LOD/module afterward. If the active pane has
     /// no ship loaded yet, the new pane simply starts empty like before.
+    /// Tells the sidebar what the panes share, so its header's own menu
+    /// reports the current state.
+    fn push_common_settings(&self, cx: &mut Context<Self>) {
+        let common = CommonPaneSettings {
+            comparing: self.dock.read(cx).panes().len() > 1,
+            mirror_cameras: self.mirror_cameras,
+            sync_options: self.sync_options,
+        };
+        self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
+    }
+
+    /// A change made in the sidebar's pane-sharing menu.
+    fn on_common_settings(
+        &mut self,
+        _sidebar: &Entity<Sidebar>,
+        event: &CommonPaneSettings,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if event.mirror_cameras != self.mirror_cameras {
+            self.set_mirror_cameras(event.mirror_cameras, cx);
+        }
+        if event.sync_options != self.sync_options {
+            self.set_sync_options(event.sync_options, cx);
+        }
+        self.push_common_settings(cx);
+    }
+
     fn on_compare_split(
         &mut self,
         _sidebar: &Entity<Sidebar>,
-        _event: &CompareSplit,
+        event: &CompareSplit,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -292,6 +327,14 @@ impl ArmorViewerPane {
         }
 
         self.dock.update(cx, |dock, cx| dock.add_pane(viewport, cx));
+
+        // A compare asked for from a ship's own row opens that ship, rather
+        // than a copy of the pane it was asked from. The pane added above is
+        // the active one by now, so the load lands in it.
+        if let Some(ship) = &event.ship {
+            self.start_ship_load(ship.param_index.clone(), ship.display_name.clone(), cx);
+        }
+        self.push_common_settings(cx);
         cx.notify();
     }
 
@@ -626,49 +669,29 @@ impl ArmorViewerPane {
 
 impl Render for ArmorViewerPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let status_banner = self
-            .status_text()
-            .map(|text| h_flex().flex_none().px_2().py_1().child(div().text_xs().opacity(0.6).child(text)));
-
-        // Common-settings toggles (Milestone 5 Task 9c): only meaningful --
-        // and only shown -- once a second pane exists, matching the egui
-        // app's own `pane_count > 1` gate (`ui/tab.rs:307`).
-        let common_settings_row = (self.dock.read(cx).panes().len() > 1).then(|| {
-            let mirror_entity = cx.entity();
-            let sync_entity = cx.entity();
-            h_flex()
-                .flex_none()
-                .gap_3()
-                .items_center()
-                .px_2()
-                .py_1()
-                .border_b_1()
-                .border_color(cx.theme().border)
-                .child(
-                    Checkbox::new("armor-pane-mirror-cameras")
-                        .label("Mirror cameras")
-                        .checked(self.mirror_cameras)
-                        .on_click(move |checked, _window, cx| {
-                            let checked = *checked;
-                            mirror_entity.update(cx, |pane, cx| pane.set_mirror_cameras(checked, cx));
-                        }),
-                )
-                .child(
-                    Checkbox::new("armor-pane-sync-options")
-                        .label("Sync settings")
-                        .tooltip("Sync visibility and display settings across all panes")
-                        .checked(self.sync_options)
-                        .on_click(move |checked, _window, cx| {
-                            let checked = *checked;
-                            sync_entity.update(cx, |pane, cx| pane.set_sync_options(checked, cx));
-                        }),
-                )
-        });
+        let status_banner =
+            self.status_text().map(|text| div().text_xs().text_color(crate::theme::text_dim()).child(text));
+        // What the active pane is showing, so a comparison says which ship is
+        // in front of you rather than leaving the two panes unlabelled.
+        let shown_ship = self.dock.read(cx).active_viewport().read(cx).shown_ship_name();
 
         let content = v_flex()
             .size_full()
-            .when_some(common_settings_row, |this, row| this.child(row))
-            .when_some(status_banner, |this, banner| this.child(banner))
+            // A fixed strip, whether or not it has anything to say: a status
+            // line that comes and goes would shift the viewport under the
+            // pointer every time a catalog load finished.
+            .child(
+                h_flex()
+                    .flex_none()
+                    .h(CHROME_HEIGHT)
+                    .gap_2()
+                    .items_center()
+                    .px_2()
+                    .when_some(shown_ship, |this, name| {
+                        this.child(div().text_xs().font_weight(FontWeight::BOLD).child(name))
+                    })
+                    .when_some(status_banner, |this, banner| this.child(banner)),
+            )
             .child(
                 div().flex_1().min_h(px(0.)).child(
                     h_resizable("armor-viewer-split")
