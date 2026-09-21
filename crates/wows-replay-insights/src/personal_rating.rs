@@ -57,6 +57,22 @@ impl PersonalRatingResult {
     }
 }
 
+/// Rates one battle: the damage and frags a player recorded in it, and
+/// whether their team won.
+///
+/// The single-battle shape is what the replay inspector, the replay index and
+/// the live roster all rate against, so it lives here rather than being
+/// assembled at each call site where the three could drift.
+pub fn rate_single_battle(
+    table: &PersonalRatingData,
+    ship_id: GameParamId,
+    damage: u64,
+    frags: i64,
+    is_win: bool,
+) -> Option<PersonalRatingResult> {
+    table.calculate_pr(&[ShipBattleStats { ship_id, battles: 1, damage, wins: u32::from(is_win), frags }])
+}
+
 /// Statistics for a single ship used in PR calculation
 #[derive(Debug, Clone, Default)]
 pub struct ShipBattleStats {
