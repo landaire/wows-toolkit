@@ -72,10 +72,19 @@ kept so the next audit does not re-report them.
 
 ## Replay Inspector
 
-- The replay renderer is absent wholesale: the tab-header Render button, the
-  row menu's Render Replay / Render to Video / Render to Clipboard, and the
-  playback viewport itself (transport, seek, speed, annotation toolbar, video
-  export). Six entry points in the egui app, none in the port.
+- The replay renderer is partly there. "Render Replay" in the row menu opens
+  a playback viewport in a dock tab of its own: the battle is walked once in
+  the background, and the transport plays, pauses, seeks and runs at 0.5x to
+  8x with the game clock beside it.
+  - Frames are kept as draw commands and rasterised one at a time through
+    `PreviewRenderer`, the path the hover preview uses; the port has no
+    painter of its own, so it cannot convert commands to shapes the way the
+    egui renderer does. The track is bounded (`TrackSink`'s budget), so a
+    long battle is sampled more coarsely rather than costing more memory.
+  - Still absent: the tab-header Render button, Render to Video, Render to
+    Clipboard, the annotation toolbar, and video export. The panel commands
+    (stats, rosters) and position trails are outside `bake_options` and so
+    are not drawn.
 - [done] "Copy Replay" puts the replay files on the clipboard through
   `arboard`, so they paste into a file manager; "Copy Path" still copies the
   text. A group offers both.

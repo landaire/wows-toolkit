@@ -17,6 +17,7 @@ mod personal_rating;
 mod player_tracker;
 mod preview_hover;
 mod replay_inspector;
+mod replay_renderer;
 mod runtime;
 mod search;
 mod search_pills;
