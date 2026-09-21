@@ -260,6 +260,7 @@ impl Render for StatsShipsPanel {
                         .justify_start()
                         .child(
                             h_flex()
+                                .w_full()
                                 .gap_1()
                                 .items_center()
                                 // The caret is a glyph in the icon font, so it
