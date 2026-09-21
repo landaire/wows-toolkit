@@ -1253,17 +1253,22 @@ impl UiReport {
             (team_id, key, db_id)
         };
 
+        // The rows and the normalized report are positional counterparts, so
+        // one permutation moves both: the export then writes the order that
+        // is on screen rather than the order the replay was parsed in.
+        let mut order: Vec<usize> = (0..self.player_reports.len()).collect();
         match sort_order {
-            SortOrder::Desc(column) => {
-                self.player_reports.sort_unstable_by_key(|report| {
-                    let key = sort_key(report, &column);
-                    (key.0, Reverse(key.1), key.2)
-                });
-            }
+            SortOrder::Desc(column) => order.sort_unstable_by_key(|&index| {
+                let key = sort_key(&self.player_reports[index], &column);
+                (key.0, Reverse(key.1), key.2)
+            }),
             SortOrder::Asc(column) => {
-                self.player_reports.sort_unstable_by_key(|report| sort_key(report, &column));
+                order.sort_unstable_by_key(|&index| sort_key(&self.player_reports[index], &column));
             }
         }
+
+        permute(&mut self.player_reports, &order);
+        permute(&mut self.normalized.players, &order);
 
         self.sorted = true;
     }
@@ -2006,12 +2011,11 @@ impl UiReport {
                             }
 
                             // Stream sniper icon
-                            if let Some(candidates) = self.twitch_state.read().player_is_potential_stream_sniper(
+                            let candidates = self.twitch_state.read().player_is_potential_stream_sniper(
                                 player.initial_state().username(),
                                 self.match_timestamp,
-                            ) && let Some(login) =
-                                crate::ui::widgets::twitch_chip(ui, &candidates, self.match_timestamp)
-                            {
+                            );
+                            if let Some(login) = crate::ui::widgets::twitch_chip(ui, &candidates) {
                                 ui.ctx().copy_text(login);
                             }
 
@@ -2757,6 +2761,15 @@ impl UiReport {
             }
         }
     }
+}
+
+/// Reorders `items` so that position `i` holds what `order[i]` named.
+///
+/// `order` must be a permutation of `0..items.len()`, which is what a sort of
+/// the index range produces.
+fn permute<T>(items: &mut Vec<T>, order: &[usize]) {
+    let mut taken: Vec<Option<T>> = items.drain(..).map(Some).collect();
+    items.extend(order.iter().map(|&index| taken[index].take().expect("an index appears once in a permutation")));
 }
 
 impl egui_table::TableDelegate for UiReport {
@@ -7430,5 +7443,37 @@ mod alt_perspective_handoff_tests {
         drop(taken);
         assert_eq!(Arc::strong_count(&alt), 1, "the take leaves no copy of the alt in egui's store");
         assert!(take_alt_reparse(&ctx).is_none(), "a consumed request is not delivered a second time");
+    }
+}
+
+#[cfg(test)]
+mod permutation_tests {
+    use super::permute;
+
+    #[test]
+    fn a_permutation_moves_both_lists_the_same_way() {
+        let order = vec![2, 0, 1];
+
+        let mut rows = vec!["a", "b", "c"];
+        let mut normalized = vec![1, 2, 3];
+        permute(&mut rows, &order);
+        permute(&mut normalized, &order);
+
+        assert_eq!(rows, vec!["c", "a", "b"]);
+        assert_eq!(normalized, vec![3, 1, 2], "the counterpart list lands in the same order");
+    }
+
+    #[test]
+    fn an_identity_permutation_changes_nothing() {
+        let mut rows = vec!["a", "b", "c"];
+        permute(&mut rows, &[0, 1, 2]);
+        assert_eq!(rows, vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn an_empty_list_permutes_to_an_empty_list() {
+        let mut rows: Vec<&str> = Vec::new();
+        permute(&mut rows, &[]);
+        assert!(rows.is_empty());
     }
 }

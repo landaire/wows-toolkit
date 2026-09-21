@@ -10,8 +10,9 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use wows_replays::types::GameParamId;
+
 use gpui_kit::component::ActiveTheme;
-use gpui_kit::component::Disableable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::dock::BasePanel;
@@ -19,11 +20,12 @@ use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
-use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
+use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::PerformanceInfo;
@@ -37,39 +39,21 @@ const CELL_COLUMN_WIDTH: Pixels = px(110.);
 const COPY_MENU_WIDTH: Pixels = px(180.);
 
 /// One ship's section, built once per filter change rather than per frame.
+///
+/// The two clipboard documents are built here too: `Render` runs every frame
+/// and the popover that offers them is usually closed.
 struct ShipSection {
+    /// Element ids and the expansion set are keyed by this rather than by the
+    /// name, which is not unique across ships.
+    ship_id: GameParamId,
     ship: SharedString,
     /// The collapsed line: record, win rate, and the rating when there is one.
     header: SharedString,
     rows: Vec<stats_table::StatRow>,
     /// `sort_key` of this ship's most recent game, which orders the list.
     last_played: String,
-    /// The rating row's band, which colours its cells. Absent when the ship
-    /// could not be rated, in which case there is no rating row either.
-    rating: Option<PrStats>,
-}
-
-impl ShipSection {
-    /// The Markdown a copy writes, headed by the same line the section shows.
-    fn markdown(&self) -> String {
-        stats_table::to_markdown(&self.header, &self.rows, english_column, english_label)
-    }
-
-    fn csv(&self) -> String {
-        stats_table::to_csv(&self.rows, english_column, english_label)
-    }
-}
-
-/// The band a rating cell is coloured by. The total column carries no rating,
-/// so it carries no band either.
-fn rating_band(rating: PrStats, column: stats_table::Column) -> Option<PersonalRatingCategory> {
-    let value = match column {
-        stats_table::Column::Min => rating.min,
-        stats_table::Column::Max => rating.max,
-        stats_table::Column::Average => rating.average,
-        stats_table::Column::Total => return None,
-    };
-    Some(PersonalRatingCategory::from_pr(value))
+    markdown: SharedString,
+    csv: SharedString,
 }
 
 fn english_column(column: stats_table::Column) -> String {
@@ -82,9 +66,12 @@ fn english_label(label: stats_table::StatLabel) -> String {
 
 pub struct StatsShipsPanel {
     sections: Vec<ShipSection>,
-    /// Ships whose table is open. Keyed by name so the set survives a filter
-    /// change that reorders or drops ships.
-    expanded: HashSet<SharedString>,
+    /// Ships whose table is open, so the set survives a filter change that
+    /// reorders or drops ships.
+    expanded: HashSet<GameParamId>,
+    /// The games the filter bar selected, kept so the sections can be rebuilt
+    /// when the expected-values table arrives after them.
+    games: Vec<PerGameStat>,
     personal_rating: Option<Arc<PersonalRatingData>>,
     scroll: ScrollHandle,
     focus_handle: FocusHandle,
@@ -97,31 +84,46 @@ impl StatsShipsPanel {
         Self {
             sections: Vec::new(),
             expanded: HashSet::new(),
+            games: Vec::new(),
             personal_rating: None,
             scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
         }
     }
 
+    /// The expected-values table can arrive after the session, so the
+    /// sections are rebuilt rather than left showing no rating until the user
+    /// next touches a filter.
     pub fn set_personal_rating(&mut self, table: Option<Arc<PersonalRatingData>>, cx: &mut Context<Self>) {
         self.personal_rating = table;
+        self.rebuild();
         cx.notify();
     }
 
     /// Adopts the games the filter bar has already selected.
     pub fn set_games(&mut self, games: &[&PerGameStat], cx: &mut Context<Self>) {
-        let mut by_ship: BTreeMap<&str, Vec<&PerGameStat>> = BTreeMap::new();
-        for game in games {
-            by_ship.entry(game.ship_name.as_str()).or_default().push(game);
+        self.games = games.iter().map(|game| (*game).clone()).collect();
+        self.rebuild();
+        cx.notify();
+    }
+
+    fn rebuild(&mut self) {
+        // Grouped by id, not by name: two ships can carry one display name,
+        // and a rating is scored against a single ship's expected values.
+        let mut by_ship: BTreeMap<u64, Vec<&PerGameStat>> = BTreeMap::new();
+        for game in &self.games {
+            by_ship.entry(game.ship_id.raw()).or_default().push(game);
         }
 
         let mut sections: Vec<ShipSection> = by_ship
             .into_iter()
-            .filter_map(|(ship, games)| {
+            .map(|(ship_id, games)| {
+                let ship_id = GameParamId::from(ship_id);
                 let info = PerformanceInfo::from_games(&games);
-                // A ship whose games all lack a result has no record to show,
-                // which is the same line the egui section skips.
-                let win_rate = info.win_rate()?;
+                // A group exists only because a game created it, so there is
+                // always a win rate and always a name to read.
+                let win_rate = info.win_rate().unwrap_or_default();
+                let ship = games.first().map(|game| game.ship_name.as_str()).unwrap_or_default();
                 let rating = self.personal_rating.as_ref().and_then(|table| PrStats::from_games(&games, table));
 
                 let record = if info.draws() > 0 {
@@ -129,32 +131,39 @@ impl StatsShipsPanel {
                 } else {
                     format!("{}W/{}L", info.wins(), info.losses())
                 };
-                let header = match rating.as_ref() {
-                    Some(rating) => format!("{ship} {record} ({win_rate:.0}%) - PR: {:.0}", rating.average),
+                let header = SharedString::from(match rating.as_ref() {
+                    Some(rating) => format!("{ship} {record} ({win_rate:.0}%) - PR: {:.0}", rating.average.pr),
                     None => format!("{ship} {record} ({win_rate:.0}%)"),
-                };
+                });
+                let rows = stats_table::ship_rows(&info, rating.as_ref(), None);
 
-                Some(ShipSection {
+                ShipSection {
+                    ship_id,
                     ship: SharedString::from(ship.to_string()),
-                    header: SharedString::from(header),
-                    rows: stats_table::ship_rows(&info, rating.as_ref(), None),
+                    markdown: SharedString::from(stats_table::to_markdown(
+                        &header,
+                        &rows,
+                        english_column,
+                        english_label,
+                    )),
+                    csv: SharedString::from(stats_table::to_csv(&rows, english_column, english_label)),
+                    header,
+                    rows,
                     last_played: info.last_played().to_string(),
-                    rating,
-                })
+                }
             })
             .collect();
 
         // Most recently played first, which is the order the egui list opens
-        // in, with the name breaking a tie so the order is total.
-        sections.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.ship.cmp(&b.ship)));
+        // in, with the id breaking a tie so the order is total.
+        sections.sort_by(|a, b| b.last_played.cmp(&a.last_played).then_with(|| a.ship_id.raw().cmp(&b.ship_id.raw())));
 
         self.sections = sections;
-        cx.notify();
     }
 
-    fn toggle(&mut self, ship: &SharedString, cx: &mut Context<Self>) {
-        if !self.expanded.remove(ship) {
-            self.expanded.insert(ship.clone());
+    fn toggle(&mut self, ship_id: GameParamId, cx: &mut Context<Self>) {
+        if !self.expanded.remove(&ship_id) {
+            self.expanded.insert(ship_id);
         }
         cx.notify();
     }
@@ -194,7 +203,8 @@ impl Render for StatsShipsPanel {
         let entity = cx.entity();
 
         let sections = self.sections.iter().map(|section| {
-            let open = self.expanded.contains(&section.ship);
+            let open = self.expanded.contains(&section.ship_id);
+            let ship_id = section.ship_id;
             let ship = section.ship.clone();
             let panel = entity.clone();
 
@@ -208,18 +218,23 @@ impl Render for StatsShipsPanel {
                 .border_b_1()
                 .border_color(border)
                 .child(
-                    Button::new(SharedString::from(format!("ship-toggle-{ship}")))
+                    Button::new(SharedString::from(format!("ship-toggle-{ship_id}")))
                         .ghost()
                         .compact()
                         .flex_1()
                         .justify_start()
-                        .label(format!(
-                            "{} {}",
-                            if open { icons::CARET_DOWN } else { icons::CARET_RIGHT },
-                            section.header
-                        ))
+                        .child(
+                            h_flex()
+                                .gap_1()
+                                .items_center()
+                                // The caret is a glyph in the icon font, so it
+                                // goes through `icons::icon` rather than into a
+                                // label the UI font would render as a box.
+                                .child(icons::icon(if open { icons::CARET_DOWN } else { icons::CARET_RIGHT }))
+                                .child(div().text_sm().child(section.header.clone())),
+                        )
                         .on_click(move |_event, _window, cx: &mut App| {
-                            panel.update(cx, |this, cx| this.toggle(&ship, cx));
+                            panel.update(cx, |this, cx| this.toggle(ship_id, cx));
                         }),
                 )
                 .child(copy_menu(section));
@@ -231,9 +246,7 @@ impl Render for StatsShipsPanel {
                     }),
                 );
 
-                let rating = section.rating;
-                let rows = section.rows.iter().map(move |row| {
-                    let rated = row.label == stats_table::StatLabel::PersonalRating;
+                let rows = section.rows.iter().map(|row| {
                     h_flex()
                         .w_full()
                         .gap_2()
@@ -241,17 +254,22 @@ impl Render for StatsShipsPanel {
                         .py(px(1.))
                         .child(div().w(LABEL_COLUMN_WIDTH).text_sm().child(row.label.english()))
                         .children(stats_table::COLUMNS.map(|column| {
-                            // Each rating cell takes its band from its own
-                            // figure, not from the text it was formatted into.
-                            let band = rated.then(|| rating.and_then(|rating| rating_band(rating, column))).flatten();
+                            let cell = row.cell(column);
                             div()
+                                .id(SharedString::from(format!("ship-cell-{ship_id}-{column:?}-{:?}", row.label)))
                                 .w(CELL_COLUMN_WIDTH)
                                 .text_sm()
                                 .when(column == stats_table::Column::Average, |this| this.font_weight(FontWeight::BOLD))
-                                .when_some(band, |this, band| {
-                                    this.text_color(rgb(wows_toolkit_viewmodel::personal_rating::chip_text(band, true)))
+                                // A rating is coloured by the band it carries,
+                                // and names that band on hover as the egui chip
+                                // does. Dark only, like the rest of the port.
+                                .when_some(cell.rating.as_ref(), |this, rating| {
+                                    this.text_color(rgb(personal_rating::chip_text(rating.category, true))).tooltip({
+                                        let name = rating.category.name().to_string();
+                                        move |window, cx| Tooltip::new(name.clone()).build(window, cx)
+                                    })
                                 })
-                                .child(row.cell(column).to_string())
+                                .child(cell.text.clone())
                         }))
                 });
 
@@ -273,17 +291,16 @@ impl Render for StatsShipsPanel {
 
 /// The copy dropdown, writing the same two documents the egui menu does.
 fn copy_menu(section: &ShipSection) -> impl IntoElement {
-    let markdown = section.markdown();
-    let csv = section.csv();
-    let ship = section.ship.clone();
+    let markdown = section.markdown.clone();
+    let csv = section.csv.clone();
+    let ship_id = section.ship_id;
 
-    let trigger = Button::new(SharedString::from(format!("ship-copy-{ship}")))
+    let trigger = Button::new(SharedString::from(format!("ship-copy-{ship_id}")))
         .child(icons::icon(icons::COPY))
         .compact()
-        .disabled(false)
         .tooltip("Copy this table");
 
-    Popover::new(SharedString::from(format!("ship-copy-menu-{ship}"))).trigger(trigger).content(
+    Popover::new(SharedString::from(format!("ship-copy-menu-{ship_id}"))).trigger(trigger).content(
         move |_state, _window, _cx| {
             let markdown = markdown.clone();
             let csv = csv.clone();
@@ -291,16 +308,22 @@ fn copy_menu(section: &ShipSection) -> impl IntoElement {
                 .w(COPY_MENU_WIDTH)
                 .gap_1()
                 .p_1()
-                .child(Button::new("copy-markdown").label("Copy as Markdown").compact().on_click(
-                    move |_event, _window, cx: &mut App| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(markdown.clone()));
-                    },
-                ))
-                .child(Button::new("copy-csv").label("Copy as CSV").compact().on_click(
-                    move |_event, _window, cx: &mut App| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(csv.clone()));
-                    },
-                ))
+                .child(
+                    Button::new(SharedString::from(format!("copy-markdown-{ship_id}")))
+                        .label("Copy as Markdown")
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(markdown.to_string()));
+                        }),
+                )
+                .child(
+                    Button::new(SharedString::from(format!("copy-csv-{ship_id}")))
+                        .label("Copy as CSV")
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(csv.to_string()));
+                        }),
+                )
         },
     )
 }
@@ -320,10 +343,10 @@ mod tests {
     use wows_toolkit_viewmodel::stats::PerGameStat;
     use wows_toolkit_viewmodel::stats::table::StatLabel;
 
-    fn game(ship: &str, sort_key: &str, damage: u64, frags: i64, win: bool) -> PerGameStat {
+    fn game(ship: &str, ship_id: u64, sort_key: &str, damage: u64, frags: i64, win: bool) -> PerGameStat {
         PerGameStat {
             ship_name: ship.to_string(),
-            ship_id: 1u64.into(),
+            ship_id: ship_id.into(),
             game_time: sort_key.to_string(),
             sort_key: sort_key.to_string(),
             player_id: 1,
@@ -341,6 +364,9 @@ mod tests {
         }
     }
 
+    const YAMATO: u64 = 1;
+    const SHIMA: u64 = 2;
+
     /// The header is the line the egui section shows, and the ships are
     /// ordered by when they were last played.
     #[gpui_kit::test]
@@ -349,9 +375,9 @@ mod tests {
         let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
 
         let games = [
-            game("Yamato", "2026-02-13 14:00:00", 100_000, 2, true),
-            game("Yamato", "2026-02-13 15:00:00", 50_000, 0, false),
-            game("Shima", "2026-02-13 16:00:00", 70_000, 1, true),
+            game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
+            game("Yamato", YAMATO, "2026-02-13 15:00:00", 50_000, 0, false),
+            game("Shima", SHIMA, "2026-02-13 16:00:00", 70_000, 1, true),
         ];
 
         window
@@ -365,13 +391,36 @@ mod tests {
             .expect("the test window stays open");
     }
 
+    /// Two ships that share a display name stay two sections: the rating is
+    /// scored against one ship's expected values, so pooling them would rate
+    /// both as the first.
+    #[gpui_kit::test]
+    fn two_ships_sharing_a_name_stay_apart(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+
+        let games = [
+            game("Mikasa", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
+            game("Mikasa", SHIMA, "2026-02-13 15:00:00", 50_000, 0, false),
+        ];
+
+        window
+            .update(cx, |panel, _window, cx| {
+                let refs: Vec<&PerGameStat> = games.iter().collect();
+                panel.set_games(&refs, cx);
+
+                assert_eq!(panel.sections.len(), 2, "one section per ship, not per name");
+            })
+            .expect("the test window stays open");
+    }
+
     /// Without an expected-values table nothing rates, so the table opens on
     /// damage rather than on an invented rating row.
     #[gpui_kit::test]
     fn an_unrated_session_has_no_rating_row(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
-        let games = [game("Yamato", "2026-02-13 14:00:00", 100_000, 2, true)];
+        let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
             .update(cx, |panel, _window, cx| {
@@ -379,7 +428,6 @@ mod tests {
                 panel.set_games(&refs, cx);
 
                 let section = panel.sections.first().expect("the ship is listed");
-                assert!(section.rating.is_none(), "no table was handed over");
                 assert_eq!(section.rows[0].label, StatLabel::Damage);
             })
             .expect("the test window stays open");
@@ -391,8 +439,8 @@ mod tests {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
         let games = [
-            game("Yamato", "2026-02-13 14:00:00", 100_000, 2, true),
-            game("Shima", "2026-02-13 16:00:00", 70_000, 1, true),
+            game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true),
+            game("Shima", SHIMA, "2026-02-13 16:00:00", 70_000, 1, true),
         ];
 
         window
@@ -404,20 +452,20 @@ mod tests {
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("ship-toggle-Shima", cx);
+            window.click(format!("ship-toggle-{SHIMA}"), cx);
         })
         .expect("the test window stays open");
 
         window
             .update(cx, |panel, _window, _cx| {
-                assert!(panel.expanded.contains("Shima"), "the clicked ship opened");
-                assert!(!panel.expanded.contains("Yamato"), "its neighbour stayed closed");
+                assert!(panel.expanded.contains(&SHIMA.into()), "the clicked ship opened");
+                assert!(!panel.expanded.contains(&YAMATO.into()), "its neighbour stayed closed");
             })
             .expect("the test window stays open");
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            window.click("ship-toggle-Shima", cx);
+            window.click(format!("ship-toggle-{SHIMA}"), cx);
         })
         .expect("the test window stays open");
 
@@ -433,7 +481,7 @@ mod tests {
     fn the_copy_menu_writes_the_table_it_shows(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
-        let games = [game("Yamato", "2026-02-13 14:00:00", 100_000, 2, true)];
+        let games = [game("Yamato", YAMATO, "2026-02-13 14:00:00", 100_000, 2, true)];
 
         window
             .update(cx, |panel, _window, cx| {
@@ -441,13 +489,37 @@ mod tests {
                 panel.set_games(&refs, cx);
 
                 let section = panel.sections.first().expect("the ship is listed");
-                let markdown = section.markdown();
-                assert!(markdown.starts_with("**Yamato 1W/0L (100%)**"), "the copy carries the header line");
-                assert!(markdown.contains("| Damage | 100,000 | 100,000 | 100,000 | **100,000** |"));
+                assert!(section.markdown.starts_with("**Yamato 1W/0L (100%)**"), "the copy carries the header line");
+                assert!(section.markdown.contains("| Damage | 100,000 | 100,000 | 100,000 | **100,000** |"));
 
-                let csv = section.csv();
-                assert!(csv.starts_with(",Min,Max,Total,Average"));
-                assert!(csv.contains("Spotting Damage,10,000,10,000,10,000,10,000"));
+                assert!(section.csv.starts_with(",Min,Max,Total,Average"));
+                assert!(section.csv.contains("Spotting Damage,10,000,10,000,10,000,10,000"));
+            })
+            .expect("the test window stays open");
+    }
+
+    /// The expected-values table can land after the session; the sections
+    /// pick it up rather than waiting for the next filter change.
+    #[gpui_kit::test]
+    fn a_rating_table_arriving_late_still_rates_the_ships(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| StatsShipsPanel::new(cx));
+        let table = std::sync::Arc::new(crate::replay_inspector::test_support::fixture_personal_rating_data());
+        let rated_ship = crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
+        let games = [game("Yamato", rated_ship, "2026-02-13 14:00:00", 100_000, 2, true)];
+
+        window
+            .update(cx, |panel, _window, cx| {
+                let refs: Vec<&PerGameStat> = games.iter().collect();
+                panel.set_games(&refs, cx);
+                assert_eq!(panel.sections[0].rows[0].label, StatLabel::Damage, "nothing rates yet");
+
+                panel.set_personal_rating(Some(table.clone()), cx);
+                assert_eq!(
+                    panel.sections[0].rows[0].label,
+                    StatLabel::PersonalRating,
+                    "the late table reaches the rows"
+                );
             })
             .expect("the test window stays open");
     }

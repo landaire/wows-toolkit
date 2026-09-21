@@ -67,6 +67,48 @@ pub fn potential_stream_snipers<'a>(
     if results.is_empty() { None } else { Some(results) }
 }
 
+/// One chat login that plausibly names a player, and when it was seen.
+///
+/// `minutes` is each sighting measured from the battle start, so a negative
+/// figure is someone who was in chat before the battle began. Both front ends
+/// show these in the chip's hover text; the wording is each one's own.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SniperCandidate {
+    pub login: String,
+    pub minutes: Vec<i64>,
+}
+
+/// The chip's candidates for `ign`, alphabetical by login.
+///
+/// Alphabetical because the underlying match is a map with no stable order,
+/// and the chip names one login: without an order it would name a different
+/// one between frames. Empty when nothing matched, which is a row with no
+/// chip.
+pub fn sniper_candidates<'a>(
+    observations: impl Iterator<Item = (&'a str, Timestamp)>,
+    ign: &str,
+    match_timestamp: Timestamp,
+) -> Vec<SniperCandidate> {
+    let Some(found) = potential_stream_snipers(observations, ign, match_timestamp) else {
+        return Vec::new();
+    };
+
+    let mut candidates: Vec<SniperCandidate> = found
+        .into_iter()
+        .map(|(login, seen)| SniperCandidate {
+            login,
+            // A sighting this app cannot measure in minutes is reported as
+            // the battle start rather than dropped: it was still a sighting.
+            minutes: seen
+                .into_iter()
+                .map(|at| (at - match_timestamp).total(Unit::Minute).unwrap_or(0.0) as i64)
+                .collect(),
+        })
+        .collect();
+    candidates.sort_by(|a, b| a.login.cmp(&b.login));
+    candidates
+}
+
 /// Whether an observation at `seen_at` is close enough to a battle that
 /// started at `match_timestamp` to count.
 ///
@@ -143,6 +185,33 @@ mod tests {
 
         assert_eq!(found.len(), 1, "only the matching login is reported");
         assert_eq!(found["harvey635"], vec![at(5)], "only the observation inside the window counts");
+    }
+
+    #[test]
+    fn candidates_are_alphabetical_and_carry_each_sighting() {
+        let start = at(0);
+        let observations = [
+            ("harvey_635", at(3)),
+            ("harvey635", at(-1)),
+            ("harvey635", at(5)),
+            ("stranger", at(2)),
+            // Outside the window, so it is not a sighting at all.
+            ("harvey635", at(90)),
+        ];
+
+        let candidates = sniper_candidates(observations.iter().map(|(l, t)| (*l, *t)), "harvey635", start);
+
+        let logins: Vec<&str> = candidates.iter().map(|c| c.login.as_str()).collect();
+        assert_eq!(logins, vec!["harvey635", "harvey_635"], "alphabetical, and the stranger is left out");
+
+        let mut minutes = candidates[0].minutes.clone();
+        minutes.sort();
+        assert_eq!(minutes, vec![-1, 5], "each sighting inside the window, measured from the battle start");
+    }
+
+    #[test]
+    fn a_player_nobody_matched_gets_no_candidates() {
+        assert!(sniper_candidates([("stranger", at(1))].iter().map(|(l, t)| (*l, *t)), "harvey635", at(0)).is_empty());
     }
 
     #[test]

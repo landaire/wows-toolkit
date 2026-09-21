@@ -267,19 +267,19 @@ pub struct PerformanceInfo {
     draws: usize,
     total_games: usize,
     total_frags: i64,
-    max_frags: i64,
+    max_frags: Option<i64>,
     min_frags: Option<i64>,
     total_damage: u64,
-    max_damage: u64,
+    max_damage: Option<u64>,
     min_damage: Option<u64>,
     total_spotting_damage: u64,
-    max_spotting_damage: u64,
+    max_spotting_damage: Option<u64>,
     min_spotting_damage: Option<u64>,
     total_xp: i64,
-    max_xp: i64,
+    max_xp: Option<i64>,
     min_xp: Option<i64>,
     total_win_adjusted_xp: i64,
-    max_win_adjusted_xp: i64,
+    max_win_adjusted_xp: Option<i64>,
     min_win_adjusted_xp: Option<i64>,
     /// `sort_key` of the most recent game, so the column sorts chronologically.
     last_played: String,
@@ -303,24 +303,25 @@ impl PerformanceInfo {
             }
 
             info.total_frags += game.frags;
-            info.max_frags = info.max_frags.max(game.frags);
+            info.max_frags = Some(info.max_frags.map_or(game.frags, |max| max.max(game.frags)));
             info.min_frags = Some(info.min_frags.map_or(game.frags, |min| min.min(game.frags)));
 
             info.total_damage += game.damage;
-            info.max_damage = info.max_damage.max(game.damage);
+            info.max_damage = Some(info.max_damage.map_or(game.damage, |max| max.max(game.damage)));
             info.min_damage = Some(info.min_damage.map_or(game.damage, |min| min.min(game.damage)));
 
             info.total_spotting_damage += game.spotting_damage;
-            info.max_spotting_damage = info.max_spotting_damage.max(game.spotting_damage);
+            info.max_spotting_damage =
+                Some(info.max_spotting_damage.map_or(game.spotting_damage, |max| max.max(game.spotting_damage)));
             info.min_spotting_damage =
                 Some(info.min_spotting_damage.map_or(game.spotting_damage, |min| min.min(game.spotting_damage)));
 
             info.total_xp += game.raw_xp;
-            info.max_xp = info.max_xp.max(game.raw_xp);
+            info.max_xp = Some(info.max_xp.map_or(game.raw_xp, |max| max.max(game.raw_xp)));
             info.min_xp = Some(info.min_xp.map_or(game.raw_xp, |min| min.min(game.raw_xp)));
 
             info.total_win_adjusted_xp += game.base_xp;
-            info.max_win_adjusted_xp = info.max_win_adjusted_xp.max(game.base_xp);
+            info.max_win_adjusted_xp = Some(info.max_win_adjusted_xp.map_or(game.base_xp, |max| max.max(game.base_xp)));
             info.min_win_adjusted_xp = Some(info.min_win_adjusted_xp.map_or(game.base_xp, |min| min.min(game.base_xp)));
 
             info.total_games += 1;
@@ -367,7 +368,7 @@ impl PerformanceInfo {
         self.total_frags
     }
 
-    pub fn max_frags(&self) -> i64 {
+    pub fn max_frags(&self) -> Option<i64> {
         self.max_frags
     }
 
@@ -383,7 +384,7 @@ impl PerformanceInfo {
         self.total_damage
     }
 
-    pub fn max_damage(&self) -> u64 {
+    pub fn max_damage(&self) -> Option<u64> {
         self.max_damage
     }
 
@@ -399,7 +400,7 @@ impl PerformanceInfo {
         self.total_spotting_damage
     }
 
-    pub fn max_spotting_damage(&self) -> u64 {
+    pub fn max_spotting_damage(&self) -> Option<u64> {
         self.max_spotting_damage
     }
 
@@ -415,7 +416,7 @@ impl PerformanceInfo {
         self.total_xp
     }
 
-    pub fn max_xp(&self) -> i64 {
+    pub fn max_xp(&self) -> Option<i64> {
         self.max_xp
     }
 
@@ -431,7 +432,7 @@ impl PerformanceInfo {
         self.total_win_adjusted_xp
     }
 
-    pub fn max_win_adjusted_xp(&self) -> i64 {
+    pub fn max_win_adjusted_xp(&self) -> Option<i64> {
         self.max_win_adjusted_xp
     }
 
@@ -498,35 +499,43 @@ pub fn session_personal_rating(
 /// mean of the per-game ratings, which is the same formula the ship's header
 /// figure uses; averaging ratings would weight a one-shot game as heavily as
 /// a long one.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrStats {
-    pub min: f64,
-    pub max: f64,
-    pub average: f64,
+    pub min: PersonalRatingResult,
+    pub max: PersonalRatingResult,
+    pub average: PersonalRatingResult,
 }
 
 impl PrStats {
     /// `None` when no game in `games` could be rated, which is also what a
-    /// missing expected-values table produces.
+    /// missing expected-values table produces, and when the games name more
+    /// than one ship: the aggregate is scored against one ship's expected
+    /// values, so pooling two ships into it would rate them both as the
+    /// first.
     pub fn from_games(games: &[&PerGameStat], table: &PersonalRatingData) -> Option<Self> {
-        let ratings: Vec<f64> = games.iter().filter_map(|game| game.personal_rating(Some(table))).collect();
-        let min = ratings.iter().copied().fold(f64::INFINITY, f64::min);
-        let max = ratings.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        if ratings.is_empty() {
+        let first = games.first()?;
+        let ship_id = first.ship_id;
+        if games.iter().any(|game| game.ship_id != ship_id) {
             return None;
         }
 
-        let first = games.first()?;
+        let ratings: Vec<f64> = games.iter().filter_map(|game| game.personal_rating(Some(table))).collect();
+        if ratings.is_empty() {
+            return None;
+        }
+        let min = ratings.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = ratings.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+
         let aggregate = ShipBattleStats {
-            ship_id: first.ship_id,
+            ship_id,
             battles: games.len() as u32,
             damage: games.iter().map(|game| game.damage).sum(),
             wins: games.iter().filter(|game| game.is_win).count() as u32,
             frags: games.iter().map(|game| game.frags).sum(),
         };
-        let average = table.calculate_pr(&[aggregate])?.pr;
+        let average = table.calculate_pr(&[aggregate])?;
 
-        Some(Self { min, max, average })
+        Some(Self { min: PersonalRatingResult::new(min), max: PersonalRatingResult::new(max), average })
     }
 }
 
@@ -642,11 +651,43 @@ mod tests {
         assert_eq!(info.wins(), 1);
         assert_eq!(info.losses(), 1);
         assert_eq!(info.total_damage(), 150_000);
-        assert_eq!(info.max_damage(), 100_000);
+        assert_eq!(info.max_damage(), Some(100_000));
         assert_eq!(info.min_damage(), Some(50_000));
         assert_eq!(info.avg_damage(), Some(75_000.0));
         assert_eq!(info.win_rate(), Some(50.0));
         assert_eq!(info.last_played(), "2026-01-02 10:00:00");
+
+        // The other four statistics aggregate on the same rule; asserting
+        // damage alone would not catch one of them reading the wrong field.
+        assert_eq!(info.total_frags(), 2);
+        assert_eq!(info.max_frags(), Some(2));
+        assert_eq!(info.min_frags(), Some(0), "a frag-less game is a recorded zero, not an absent minimum");
+        assert_eq!(info.total_spotting_damage(), 15_000);
+        assert_eq!(info.max_spotting_damage(), Some(10_000));
+        assert_eq!(info.min_spotting_damage(), Some(5_000));
+        assert_eq!(info.total_xp(), 1_500);
+        assert_eq!(info.max_xp(), Some(1_000));
+        assert_eq!(info.min_xp(), Some(500));
+        assert_eq!(info.total_win_adjusted_xp(), 750);
+        assert_eq!(info.max_win_adjusted_xp(), Some(500));
+        assert_eq!(info.min_win_adjusted_xp(), Some(250));
+    }
+
+    /// A draw is neither a win nor a loss, but it is a game played: it counts
+    /// toward the win rate's denominator and shows in the record line.
+    #[test]
+    fn a_draw_is_counted_and_dilutes_the_win_rate() {
+        let mut drawn = game("Yamato", "2026-01-03 10:00:00", 60_000, 1, false, false, "pvp");
+        drawn.is_loss = false;
+        drawn.is_draw = true;
+
+        let info = PerformanceInfo::from_games(&[&drawn]);
+
+        assert_eq!(info.draws(), 1);
+        assert_eq!(info.wins(), 0);
+        assert_eq!(info.losses(), 0);
+        assert_eq!(info.total_games(), 1);
+        assert_eq!(info.win_rate(), Some(0.0), "a draw is a game played, not an absent one");
     }
 
     #[test]
@@ -817,8 +858,11 @@ mod rating_tests {
 
         let stats = PrStats::from_games(&games, &table).expect("both games rate");
 
-        assert!(stats.max > stats.min, "the high-damage game rates higher");
-        assert!(stats.min <= stats.average && stats.average <= stats.max, "the aggregate sits between the two");
+        assert!(stats.max.pr > stats.min.pr, "the high-damage game rates higher");
+        assert!(
+            stats.min.pr <= stats.average.pr && stats.average.pr <= stats.max.pr,
+            "the aggregate sits between the two"
+        );
     }
 
     #[test]
@@ -838,7 +882,7 @@ mod rating_tests {
         let aggregate = info.personal_rating(&table).expect("the fixture rates this ship");
         let stats = PrStats::from_games(&[&strong, &weak], &table).expect("both games rate");
 
-        assert!((aggregate.pr - stats.average).abs() < 1e-9, "the table row and the header report one figure");
+        assert!((aggregate.pr - stats.average.pr).abs() < 1e-9, "the table row and the header report one figure");
     }
 
     #[test]

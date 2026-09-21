@@ -8,6 +8,7 @@
 use super::PerformanceInfo;
 use super::PrStats;
 use crate::formatting::separate_number;
+use crate::personal_rating::PersonalRatingResult;
 
 /// Which statistic a row reports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -47,6 +48,9 @@ impl StatLabel {
 }
 
 /// Which figure a column reports.
+///
+/// The discriminants index [`StatRow::cells`], so this order is the order of
+/// a row's cells and of [`COLUMNS`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Column {
     Min,
@@ -78,39 +82,71 @@ impl Column {
 /// The columns, in the order the table lists them.
 pub const COLUMNS: [Column; 4] = [Column::Min, Column::Max, Column::Total, Column::Average];
 
-/// One statistic across a ship's games.
+/// One figure in the table.
 ///
-/// Every cell is already formatted: the columns mix thousands-separated
-/// counts and two-decimal averages, and which is which belongs with the
-/// statistic rather than with each front end's renderer. An empty cell is a
-/// figure that has no meaning here (a rating does not sum), not a missing one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct StatRow {
-    pub label: StatLabel,
-    pub min: String,
-    pub max: String,
-    pub total: String,
-    pub average: String,
+/// `text` is already formatted: the columns mix thousands-separated counts
+/// and two-decimal averages, and which is which belongs with the statistic
+/// rather than with each front end's renderer. Empty text is a figure that
+/// has no meaning here (a rating does not sum), not a missing one.
+///
+/// `rating` is the figure itself when the cell reports a personal rating, so
+/// a front end that colours ratings by band reads the band off the cell
+/// rather than deriving it again from the text it was formatted into.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Cell {
+    pub text: String,
+    pub rating: Option<PersonalRatingResult>,
 }
 
-impl StatRow {
-    pub fn cell(&self, column: Column) -> &str {
-        match column {
-            Column::Min => &self.min,
-            Column::Max => &self.max,
-            Column::Total => &self.total,
-            Column::Average => &self.average,
-        }
+impl Cell {
+    fn text(text: String) -> Self {
+        Self { text, rating: None }
+    }
+
+    fn rated(rating: &PersonalRatingResult) -> Self {
+        Self { text: format!("{:.0}", rating.pr), rating: Some(rating.clone()) }
     }
 }
 
-/// An absent minimum, which is what a ship with no games has.
-fn optional_u64(value: Option<u64>, locale: Option<&str>) -> String {
-    value.map(|value| separate_number(value, locale)).unwrap_or_default()
+/// One statistic across a ship's games, one cell per column.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatRow {
+    pub label: StatLabel,
+    pub cells: [Cell; 4],
 }
 
-fn optional_i64(value: Option<i64>, locale: Option<&str>) -> String {
-    value.map(|value| separate_number(value, locale)).unwrap_or_default()
+impl StatRow {
+    pub fn cell(&self, column: Column) -> &Cell {
+        &self.cells[column as usize]
+    }
+}
+
+/// An absent extreme, which is what a ship with no games has. The empty cell
+/// reads as "no figure" rather than as a zero that was never recorded.
+fn optional_u64(value: Option<u64>, locale: Option<&str>) -> Cell {
+    Cell::text(value.map(|value| separate_number(value, locale)).unwrap_or_default())
+}
+
+/// The same for a signed statistic.
+fn optional_i64(value: Option<i64>, locale: Option<&str>) -> Cell {
+    Cell::text(value.map(|value| separate_number(value, locale)).unwrap_or_default())
+}
+
+fn grouped_u64(value: u64, locale: Option<&str>) -> Cell {
+    Cell::text(separate_number(value, locale))
+}
+
+fn grouped_i64(value: i64, locale: Option<&str>) -> Cell {
+    Cell::text(separate_number(value, locale))
+}
+
+/// An average, empty when there were no games to average.
+fn average_u64(value: Option<f64>, locale: Option<&str>) -> Cell {
+    Cell::text(value.map(|value| separate_number(value as u64, locale)).unwrap_or_default())
+}
+
+fn average_i64(value: Option<f64>, locale: Option<&str>) -> Cell {
+    Cell::text(value.map(|value| separate_number(value as i64, locale)).unwrap_or_default())
 }
 
 /// The rows for one ship, in the order the egui table lists them.
@@ -124,49 +160,56 @@ pub fn ship_rows(info: &PerformanceInfo, rating: Option<&PrStats>, locale: Optio
     if let Some(rating) = rating {
         rows.push(StatRow {
             label: StatLabel::PersonalRating,
-            min: format!("{:.0}", rating.min),
-            max: format!("{:.0}", rating.max),
-            total: String::new(),
-            average: format!("{:.0}", rating.average),
+            cells: [Cell::rated(&rating.min), Cell::rated(&rating.max), Cell::default(), Cell::rated(&rating.average)],
         });
     }
 
     rows.push(StatRow {
         label: StatLabel::Damage,
-        min: optional_u64(info.min_damage(), locale),
-        max: separate_number(info.max_damage(), locale),
-        total: separate_number(info.total_damage(), locale),
-        average: info.avg_damage().map(|value| separate_number(value as u64, locale)).unwrap_or_default(),
+        cells: [
+            optional_u64(info.min_damage(), locale),
+            optional_u64(info.max_damage(), locale),
+            grouped_u64(info.total_damage(), locale),
+            average_u64(info.avg_damage(), locale),
+        ],
     });
     rows.push(StatRow {
         label: StatLabel::SpottingDamage,
-        min: optional_u64(info.min_spotting_damage(), locale),
-        max: separate_number(info.max_spotting_damage(), locale),
-        total: separate_number(info.total_spotting_damage(), locale),
-        average: info.avg_spotting_damage().map(|value| separate_number(value as u64, locale)).unwrap_or_default(),
+        cells: [
+            optional_u64(info.min_spotting_damage(), locale),
+            optional_u64(info.max_spotting_damage(), locale),
+            grouped_u64(info.total_spotting_damage(), locale),
+            average_u64(info.avg_spotting_damage(), locale),
+        ],
     });
     rows.push(StatRow {
         label: StatLabel::Frags,
-        min: optional_i64(info.min_frags(), locale),
-        max: separate_number(info.max_frags(), locale),
-        total: separate_number(info.total_frags(), locale),
-        // Two decimals: a frag average under one is the common case, and
-        // rounding it to a whole number would read as zero.
-        average: info.avg_frags().map(|value| format!("{value:.2}")).unwrap_or_default(),
+        cells: [
+            optional_i64(info.min_frags(), locale),
+            optional_i64(info.max_frags(), locale),
+            grouped_i64(info.total_frags(), locale),
+            // Two decimals: a frag average under one is the common case, and
+            // rounding it to a whole number would read as zero.
+            Cell::text(info.avg_frags().map(|value| format!("{value:.2}")).unwrap_or_default()),
+        ],
     });
     rows.push(StatRow {
         label: StatLabel::RawXp,
-        min: optional_i64(info.min_xp(), locale),
-        max: separate_number(info.max_xp(), locale),
-        total: separate_number(info.total_xp(), locale),
-        average: info.avg_xp().map(|value| separate_number(value as i64, locale)).unwrap_or_default(),
+        cells: [
+            optional_i64(info.min_xp(), locale),
+            optional_i64(info.max_xp(), locale),
+            grouped_i64(info.total_xp(), locale),
+            average_i64(info.avg_xp(), locale),
+        ],
     });
     rows.push(StatRow {
         label: StatLabel::BaseXp,
-        min: optional_i64(info.min_win_adjusted_xp(), locale),
-        max: separate_number(info.max_win_adjusted_xp(), locale),
-        total: separate_number(info.total_win_adjusted_xp(), locale),
-        average: info.avg_win_adjusted_xp().map(|value| separate_number(value as i64, locale)).unwrap_or_default(),
+        cells: [
+            optional_i64(info.min_win_adjusted_xp(), locale),
+            optional_i64(info.max_win_adjusted_xp(), locale),
+            grouped_i64(info.total_win_adjusted_xp(), locale),
+            average_i64(info.avg_win_adjusted_xp(), locale),
+        ],
     });
 
     rows
@@ -187,21 +230,33 @@ pub fn to_markdown(
         out.push_str(&format!(
             "| {} | {} | {} | {} | **{}** |\n",
             label(row.label),
-            row.min,
-            row.max,
-            row.total,
-            row.average
+            row.cell(Column::Min).text,
+            row.cell(Column::Max).text,
+            row.cell(Column::Total).text,
+            row.cell(Column::Average).text
         ));
     }
     out
 }
 
 /// The table as CSV, its first column unlabelled like the Markdown one.
+///
+/// Cells are written unquoted, so a locale that groups thousands with a comma
+/// splits a figure across two fields. That is what the egui app has always
+/// written and what anything already consuming this expects, so it is not
+/// changed here.
 pub fn to_csv(rows: &[StatRow], column: impl Fn(Column) -> String, label: impl Fn(StatLabel) -> String) -> String {
     let headings: Vec<String> = COLUMNS.iter().map(|c| column(*c)).collect();
     let mut out = format!(",{}\n", headings.join(","));
     for row in rows {
-        out.push_str(&format!("{},{},{},{},{}\n", label(row.label), row.min, row.max, row.total, row.average));
+        out.push_str(&format!(
+            "{},{},{},{},{}\n",
+            label(row.label),
+            row.cell(Column::Min).text,
+            row.cell(Column::Max).text,
+            row.cell(Column::Total).text,
+            row.cell(Column::Average).text
+        ));
     }
     out
 }
@@ -239,6 +294,10 @@ mod tests {
         ship_rows(&ships[0].1, None, None)
     }
 
+    fn text(rows: &[StatRow], label: StatLabel, column: Column) -> &str {
+        &rows.iter().find(|row| row.label == label).expect("the statistic is listed").cell(column).text
+    }
+
     fn english(label: StatLabel) -> String {
         label.english().to_string()
     }
@@ -251,19 +310,34 @@ mod tests {
     fn a_ships_rows_carry_its_span_and_its_average() {
         let rows = rows_for(&[game(10_000, 1, 1_000), game(30_000, 3, 3_000)]);
 
-        let damage = rows.iter().find(|row| row.label == StatLabel::Damage).expect("damage is listed");
-        assert_eq!(damage.min, "10,000");
-        assert_eq!(damage.max, "30,000");
-        assert_eq!(damage.total, "40,000");
-        assert_eq!(damage.average, "20,000");
+        assert_eq!(text(&rows, StatLabel::Damage, Column::Min), "10,000");
+        assert_eq!(text(&rows, StatLabel::Damage, Column::Max), "30,000");
+        assert_eq!(text(&rows, StatLabel::Damage, Column::Total), "40,000");
+        assert_eq!(text(&rows, StatLabel::Damage, Column::Average), "20,000");
+    }
+
+    /// Every statistic reports its own span, not just the one the damage row
+    /// exercises.
+    #[test]
+    fn each_statistic_spans_its_own_games() {
+        let rows = rows_for(&[game(10_000, 1, 1_000), game(30_000, 3, 3_000)]);
+
+        assert_eq!(text(&rows, StatLabel::SpottingDamage, Column::Min), "1,000");
+        assert_eq!(text(&rows, StatLabel::SpottingDamage, Column::Max), "3,000");
+        assert_eq!(text(&rows, StatLabel::Frags, Column::Min), "1");
+        assert_eq!(text(&rows, StatLabel::Frags, Column::Max), "3");
+        assert_eq!(text(&rows, StatLabel::Frags, Column::Total), "4");
+        assert_eq!(text(&rows, StatLabel::RawXp, Column::Min), "1,000");
+        assert_eq!(text(&rows, StatLabel::RawXp, Column::Max), "3,000");
+        assert_eq!(text(&rows, StatLabel::BaseXp, Column::Min), "500");
+        assert_eq!(text(&rows, StatLabel::BaseXp, Column::Max), "1,500");
     }
 
     /// A frag average under one must not round to zero.
     #[test]
     fn a_frag_average_keeps_two_decimals() {
         let rows = rows_for(&[game(1, 0, 1), game(1, 1, 1)]);
-        let frags = rows.iter().find(|row| row.label == StatLabel::Frags).expect("frags are listed");
-        assert_eq!(frags.average, "0.50");
+        assert_eq!(text(&rows, StatLabel::Frags, Column::Average), "0.50");
     }
 
     #[test]
@@ -274,9 +348,21 @@ mod tests {
 
         let rows = ship_rows(&ships[0].1, None, Some("fr"));
 
-        let damage = rows.iter().find(|row| row.label == StatLabel::Damage).expect("damage is listed");
-        assert_eq!(damage.min, "1 234 567");
-        assert_eq!(damage.total, "1 234 567");
+        assert_eq!(text(&rows, StatLabel::Damage, Column::Min), "1 234 567");
+        assert_eq!(text(&rows, StatLabel::Damage, Column::Total), "1 234 567");
+    }
+
+    /// A ship with no games reports no extreme rather than a zero it never
+    /// recorded.
+    #[test]
+    fn an_empty_aggregate_reports_no_extremes() {
+        let rows = ship_rows(&PerformanceInfo::default(), None, None);
+
+        for label in [StatLabel::Damage, StatLabel::Frags, StatLabel::RawXp, StatLabel::BaseXp] {
+            assert!(text(&rows, label, Column::Min).is_empty(), "{label:?} has no minimum");
+            assert!(text(&rows, label, Column::Max).is_empty(), "{label:?} has no maximum");
+            assert!(text(&rows, label, Column::Average).is_empty(), "{label:?} has no average");
+        }
     }
 
     #[test]
@@ -284,15 +370,44 @@ mod tests {
         let games = [game(1, 0, 1)];
         let refs: Vec<&PerGameStat> = games.iter().collect();
         let ships = per_ship_performance(&refs);
-        let rating = PrStats { min: 900.0, max: 2100.0, average: 1650.0 };
+        let rating = PrStats {
+            min: PersonalRatingResult::new(900.0),
+            max: PersonalRatingResult::new(2100.0),
+            average: PersonalRatingResult::new(1650.0),
+        };
 
         let rows = ship_rows(&ships[0].1, Some(&rating), None);
 
         assert_eq!(rows[0].label, StatLabel::PersonalRating);
-        assert_eq!(rows[0].min, "900");
-        assert_eq!(rows[0].max, "2100");
-        assert_eq!(rows[0].average, "1650");
-        assert!(rows[0].total.is_empty(), "a rating does not sum");
+        assert_eq!(rows[0].cell(Column::Min).text, "900");
+        assert_eq!(rows[0].cell(Column::Max).text, "2100");
+        assert_eq!(rows[0].cell(Column::Average).text, "1650");
+        assert!(rows[0].cell(Column::Total).text.is_empty(), "a rating does not sum");
+    }
+
+    /// The band a renderer colours by comes off the cell, so it cannot drift
+    /// from the figure printed in it.
+    #[test]
+    fn every_rating_cell_carries_its_own_band() {
+        let games = [game(1, 0, 1)];
+        let refs: Vec<&PerGameStat> = games.iter().collect();
+        let ships = per_ship_performance(&refs);
+        let rating = PrStats {
+            min: PersonalRatingResult::new(400.0),
+            max: PersonalRatingResult::new(2100.0),
+            average: PersonalRatingResult::new(1650.0),
+        };
+
+        let rows = ship_rows(&ships[0].1, Some(&rating), None);
+        let rating_row = &rows[0];
+
+        assert_eq!(rating_row.cell(Column::Min).rating.as_ref().map(|r| r.category), Some(rating.min.category));
+        assert_eq!(rating_row.cell(Column::Max).rating.as_ref().map(|r| r.category), Some(rating.max.category));
+        assert_ne!(rating.min.category, rating.max.category, "the fixture spans two bands");
+        assert!(rating_row.cell(Column::Total).rating.is_none(), "there is no total to band");
+
+        let damage = rows.iter().find(|row| row.label == StatLabel::Damage).expect("damage is listed");
+        assert!(damage.cells.iter().all(|cell| cell.rating.is_none()), "only ratings carry a band");
     }
 
     #[test]
@@ -304,6 +419,8 @@ mod tests {
         assert!(markdown.contains("| | Min | Max | Total | Average |"));
         assert!(markdown.contains("| Damage | 10,000 | 10,000 | 10,000 | **10,000** |"));
 
+        // Unquoted, so the grouped figures split across fields. That is what
+        // the egui app writes; see `to_csv`.
         let csv = to_csv(&rows, english_column, english);
         assert!(csv.starts_with(",Min,Max,Total,Average"));
         assert!(csv.contains("Damage,10,000,10,000,10,000,10,000"));

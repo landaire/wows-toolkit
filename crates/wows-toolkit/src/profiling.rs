@@ -125,7 +125,10 @@ pub(crate) fn headless_deps(build_cache: BuildDataCache) -> ReplayDependencies {
         background_task_sender: tx,
         is_debug_mode: false,
         // Loaded from the shared cache when there is one, so a headless load
-        // rates its players the way a real one does.
+        // rates its players the way a real one does. An empty table when
+        // there is no cache or it will not read: this path has no network and
+        // no user to tell, and an unrated report is what a first run produces
+        // anyway.
         personal_rating_data: Arc::new(RwLock::new(
             wows_toolkit_viewmodel::personal_rating::load_cached().unwrap_or_default(),
         )),
