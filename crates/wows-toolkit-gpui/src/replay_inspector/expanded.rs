@@ -43,6 +43,7 @@ use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
 use super::table::text_width;
+use wows_toolkit_viewmodel::fire_chance;
 
 /// Multiplier for a detail-list item's `ElementId`
 /// (`row_ix * DETAIL_ID_STRIDE + item_ix`), spacing rows apart enough that no
@@ -92,6 +93,7 @@ pub fn render_column_detail(
 ) -> Option<AnyElement> {
     match col {
         ReplayColumn::Name => render_name_section(ix, row, debug, icons),
+        ReplayColumn::Kills => render_fire_chance_section(ix, row, debug),
         ReplayColumn::Skills => render_build_section(ix, row, debug, icons),
         ReplayColumn::ActualDamage => {
             render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, alt_held, cx)
@@ -470,6 +472,86 @@ fn icon_label_row(
 /// RIBBON_MAIN_CALIBER one-off reorder), and the fires/floods/citadels/crits
 /// damage-event counts, NDA-gated. Mirrors `mod.rs`'s `ReplayColumn::Name`
 /// expanded arm.
+/// The effective-fire-chance block under the recording player's row.
+///
+/// Only that row carries a result, so every other expands to nothing here.
+/// The wording is `wows_toolkit_viewmodel::fire_chance`, shared with the egui
+/// block this mirrors (`ui/replay_parser/mod.rs`'s `render_fire_chance`).
+fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Option<AnyElement> {
+    let fire_chance = row.fire_chance.as_ref()?;
+
+    let mut col = v_flex().gap(px(3.)).child(section_heading(t!("ui.replay.sections.fire_chance").into_owned()));
+    if row.should_hide_stats() && !debug {
+        return Some(col.child(div().text_xs().child(t!("ui.replay.nda").into_owned())).into_any_element());
+    }
+
+    if fire_chance.eligible_hits == 0 {
+        // A total with nothing behind it would read as a real zero.
+        return Some(
+            col.child(
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned()),
+            )
+            .into_any_element(),
+        );
+    }
+
+    // Observed and expected sit together: comparing them is the point of the
+    // statistic, so they must not be split apart.
+    let mut headline = h_flex().gap_2().items_center().child(
+        h_flex()
+            .gap_1()
+            .items_center()
+            .font_weight(FontWeight::BOLD)
+            .text_xs()
+            .child(crate::icons::icon(crate::icons::FIRE))
+            .child(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits)),
+    );
+    if let Some(expected) = fire_chance::expected_fires_text(fire_chance) {
+        headline = headline.child(div().text_xs().text_color(crate::theme::text_dim()).child(expected));
+    }
+    col = col.child(headline).child(
+        div().text_xs().text_color(crate::theme::text_dim()).child(fire_chance::ships_text(fire_chance).into_owned()),
+    );
+
+    // One row per target ship, most-sampled first: a rate only means
+    // something inside a single victim, whose fire resistance is fixed.
+    let ships = fire_chance::sorted_per_ship(fire_chance);
+    if !ships.is_empty() {
+        col = col
+            .child(Separator::horizontal())
+            .child(section_heading(t!("ui.replay.sections.fire_chance_per_ship").into_owned()));
+        for (ship_ix, ship) in ships.iter().enumerate() {
+            col = col.child(
+                h_flex()
+                    .id(("replay-fire-chance-ship", row_ix * FIRE_CHANCE_SHIP_STRIDE + ship_ix))
+                    .gap_2()
+                    .items_center()
+                    .text_xs()
+                    .child(div().flex_none().w(FIRE_CHANCE_SHIP_WIDTH).child(ship.victim_ship_name.clone()))
+                    .child(
+                        div()
+                            .text_color(crate::theme::text_dim())
+                            .child(fire_chance::counts_text(ship.fires, ship.eligible_hits)),
+                    ),
+            );
+        }
+        if let Some(line) = fire_chance::no_target_ship_line(fire_chance) {
+            col = col.child(div().text_xs().text_color(crate::theme::text_faint()).child(line));
+        }
+    }
+
+    Some(col.into_any_element())
+}
+
+/// Room for a ship name beside its counts, so the two columns line up.
+const FIRE_CHANCE_SHIP_WIDTH: Pixels = px(160.);
+
+/// Keeps one row's per-ship element ids clear of the next row's.
+const FIRE_CHANCE_SHIP_STRIDE: usize = 64;
+
 fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &IconCache) -> Option<AnyElement> {
     let has_achievements = !row.achievements.is_empty();
     let has_ribbons = !row.ribbons.is_empty();

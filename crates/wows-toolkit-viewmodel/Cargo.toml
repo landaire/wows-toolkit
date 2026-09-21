@@ -40,7 +40,7 @@ thiserror.workspace = true
 thousands = "0.2.0"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
-wows-replay-insights = { workspace = true, features = ["arc", "battle-report"] }
+wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }
 wows-toolkit-config = { workspace = true }
 
 [dev-dependencies]

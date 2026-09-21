@@ -543,6 +543,7 @@ mod tests {
             game_type: "RandomBattle".to_string(),
             scenario: "Domination".to_string(),
             date_time: date_time.to_string(),
+            build: None,
         })
     }
 

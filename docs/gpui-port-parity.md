@@ -109,7 +109,16 @@ kept so the next audit does not re-report them.
 - The Actions menu is missing entirely: match timeline, open in game, replay
   controls, load other team perspective, hide my test-ship stats.
 - [done] Alt turns the damage breakdown's percentages around.
-- The Effective Fire Chance section of an expanded row is missing.
+- [done] The Effective Fire Chance block is under the recording player's row:
+  the counts, the expected figure beside them, the ships they cover, and a row
+  per target ship. The geometry resolution and the analysis call moved to
+  `wows_replay_insights::fire_chance::sections`, and the wording to
+  `wows_toolkit_viewmodel::fire_chance`, so the two apps share both. The cache
+  directory is the one the egui app already writes, so a build resolved by
+  either is not re-parsed by the other.
+- The block's deeper expanders are not ported: the formula listing, the
+  battle/ribbon tallies, and copy-to-clipboard. Their text builders are still
+  in the egui crate.
 - [done] Chat now copies its whole transcript and saves it to a file.
 - [done] A row's words are the preview popup's own caption, which goes up as
   soon as the row is hovered rather than waiting for a map.

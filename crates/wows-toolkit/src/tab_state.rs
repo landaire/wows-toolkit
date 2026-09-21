@@ -1348,7 +1348,7 @@ impl TabState {
     pub(crate) fn set_game_data_cache_dir(&mut self, dir: String) {
         self.persisted.write().settings.game.game_data_cache_dir = dir;
         self.game_data_cache_stats = None;
-        crate::ui::replay_parser::clear_fire_section_failures();
+        wows_replay_insights::fire_chance::sections::clear_fire_section_failures();
     }
 
     /// Clears all game-related state. Called when the WoWs directory changes
@@ -1373,7 +1373,7 @@ impl TabState {
         // Dropping the map drops which builds it could not resolve; the
         // fire-section record lives outside it and is cleared on its own.
         self.build_cache = None;
-        crate::ui::replay_parser::clear_fire_section_failures();
+        wows_replay_insights::fire_chance::sections::clear_fire_section_failures();
     }
 
     /// Whether `path` is a replay the game itself wrote, i.e. one inside the
@@ -1923,6 +1923,7 @@ mod tests {
             game_type: "RandomBattle".into(),
             scenario: "Domination".into(),
             date_time: "28.07.2026 14:23:05".into(),
+            build: None,
         })
     }
 

@@ -35,6 +35,7 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
         is_hidden_profile: false,
         connection: None,
         twitch_candidates: Vec::new(),
+        fire_chance: None,
         is_test_ship: false,
         manual_stat_hide_toggle: false,
         display_name: format!("Player{db_id}"),

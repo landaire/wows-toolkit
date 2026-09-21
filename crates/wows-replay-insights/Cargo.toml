@@ -35,6 +35,10 @@ serde_json = { workspace = true }
 [features]
 default = ["build", "arc"]
 build = []
+# Fire-section geometry read out of a build's own assets.bin, and the
+# effective-fire-chance result built on it. Needs the VFS to read the file
+# and the model parsers to make sense of it.
+fire-sections = ["build", "wowsunpack/vfs-mmap", "wowsunpack/models"]
 serde = ["dep:serde", "wows-core/serde"]
 # Forwards to wowsunpack/wows_replays so Arc-backed `Param` storage in the
 # provider matches the smart pointer this crate hands back. On by default
