@@ -311,6 +311,16 @@ no_defaults = "(no saved defaults)"
 [ui.app]
 debug_build = "Debug build"
 
+# -- Command palette --
+
+[ui.palette]
+title = "Commands"
+placeholder = "Type a command or search..."
+go_to = "Go to: %{tab}"
+set_theme = "Theme: %{theme}"
+games_i_died_in = "Games I died in"
+games_i_won = "Games I won"
+
 [ui.settings.twitch]
 heading = "Twitch Settings"
 description = "Connect to Twitch for chat integration and player tracking"

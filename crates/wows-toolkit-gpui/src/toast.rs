@@ -3,8 +3,8 @@
 //!
 //! The egui app reports these through `egui_notify` toasts: a path copied, a
 //! directory opened, a credential refused. A port that only logged them left
-//! the reader pressing a button and seeing nothing. `Root` already hosts the
-//! notification layer (`main.rs`), so this is only the wording and the level.
+//! the reader pressing a button and seeing nothing. `Root` holds the queue and
+//! `App::render` draws the layer, so this is only the wording and the level.
 
 use gpui_kit::Window;
 use gpui_kit::component::WindowExt as _;

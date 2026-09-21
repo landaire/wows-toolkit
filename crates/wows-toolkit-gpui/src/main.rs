@@ -12,6 +12,7 @@ mod icons;
 #[cfg(test)]
 mod interaction_tests;
 mod minimap_preview;
+mod palette;
 mod personal_rating;
 mod player_tracker;
 mod preview_hover;

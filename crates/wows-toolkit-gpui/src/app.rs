@@ -3,10 +3,14 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
+use gpui_kit::component::Root;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::command::Command;
+use gpui_kit::component::command::CommandState;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -24,8 +28,11 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
+use std::rc::Rc;
 
 use crate::armor_viewer::ArmorViewerPane;
+use crate::palette::PaletteAction;
+use crate::palette::PaletteEntry;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
@@ -205,6 +212,10 @@ pub struct App {
     /// What Twitch made of the stored credential, which is the only thing
     /// that can say whether it still works.
     twitch_status: TwitchStatus,
+    /// The command palette's own list and query state. Built once: what it
+    /// offers does not depend on what is on screen.
+    palette: Entity<CommandState>,
+    palette_entries: Rc<Vec<PaletteEntry>>,
     /// The Unpacker tab: build selector, VFS browsers and the extraction
     /// queue. Runs its own VFS load per build, independent of the replay
     /// inspector's game-data cache, since it needs only the package tree.
@@ -284,6 +295,8 @@ impl App {
             armor_game_data_requested: false,
             stats_game_data_requested: false,
             twitch_status: TwitchStatus::Unset,
+            palette: cx.new(|cx| CommandState::new(window, cx)),
+            palette_entries: Rc::new(crate::palette::entries()),
             unpacker,
             stats,
             player_tracker,
@@ -478,6 +491,79 @@ impl App {
                 cx.background_executor().timer(crate::twitch::poll_interval()).await;
             }
         }));
+    }
+
+    /// Adopts a theme: saved, and applied to what is on screen.
+    fn set_theme(&mut self, choice: ThemeChoice, window: &mut Window, cx: &mut Context<Self>) {
+        self.edit_setting(keys::THEME, cx, |settings| {
+            settings.theme = choice;
+            choice
+        });
+        self.theme = choice;
+        theme::apply_egui_theme(choice, self.zoom, window, cx);
+    }
+
+    /// Opens the command palette over the window.
+    pub(crate) fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let palette = self.palette.clone();
+        let entries = Rc::clone(&self.palette_entries);
+        let owner = cx.weak_entity();
+        // Focused once, when it is first drawn: the palette is a search field
+        // and a reader who opened it is about to type.
+        let focus_on_mount = std::rc::Rc::new(std::cell::Cell::new(true));
+
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let palette = palette.clone();
+            let entries = Rc::clone(&entries);
+            let owner = owner.clone();
+            let focus_on_mount = focus_on_mount.clone();
+            dialog.close_button(false).p_0().content(move |content, window, cx| {
+                if focus_on_mount.replace(false) {
+                    let palette = palette.clone();
+                    window.defer(cx, move |window, cx| {
+                        let handle = palette.read(cx).focus_handle(cx);
+                        handle.focus(window, cx);
+                    });
+                }
+                let owner = owner.clone();
+                let taken = Rc::clone(&entries);
+                content.child(
+                    Command::new(&palette)
+                        .bordered(false)
+                        .placeholder(t!("ui.palette.placeholder").to_string())
+                        .max_h(px(400.))
+                        .items(crate::palette::items(&entries))
+                        .on_confirm(move |index_path, window, cx| {
+                            let Some(entry) = taken.get(index_path.row) else { return };
+                            let action = entry.action.clone();
+                            let _ = owner.update(cx, |this, cx| this.run_palette_action(action, window, cx));
+                            window.close_all_dialogs(cx);
+                        }),
+                )
+            })
+        });
+    }
+
+    /// Does what a palette entry says.
+    pub(crate) fn run_palette_action(&mut self, action: PaletteAction, window: &mut Window, cx: &mut Context<Self>) {
+        match action {
+            PaletteAction::GoTo(tab) => {
+                self.active_tab = tab;
+                self.poll_armor_game_data(window, cx);
+                if tab == AppTab::PlayerTracker {
+                    self.player_tracker.update(cx, |tracker, cx| tracker.load_index_once(cx));
+                }
+            }
+            PaletteAction::SetTheme(choice) => self.set_theme(choice, window, cx),
+            PaletteAction::OpenReplayFile => {
+                self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
+            }
+            PaletteAction::SearchFor(query) => {
+                self.active_tab = AppTab::Search;
+                self.search.update(cx, |search, cx| search.run_query(query, window, cx));
+            }
+        }
+        cx.notify();
     }
 
     /// Twitch would not take the stored credential.
@@ -915,12 +1001,7 @@ impl App {
                             .compact()
                             .selected(theme_choice == choice)
                             .on_click(cx.listener(move |this, _event, window, cx| {
-                                this.edit_setting(keys::THEME, cx, |settings| {
-                                    settings.theme = choice;
-                                    choice
-                                });
-                                this.theme = choice;
-                                theme::apply_egui_theme(choice, this.zoom, window, cx);
+                                this.set_theme(choice, window, cx);
                             })),
                     )
                 })),
@@ -1149,6 +1230,10 @@ impl Render for App {
             settings_store::save(keys::ZOOM_FACTOR, &self.zoom, cx);
         }
 
+        let sheet_layer = Root::render_sheet_layer(window, cx);
+        let dialog_layer = Root::render_dialog_layer(window, cx);
+        let notification_layer = Root::render_notification_layer(window, cx);
+
         let active_ix = AppTab::ALL.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let danger = cx.theme().danger;
         let tabs = TabBar::new("app-tabs")
@@ -1215,11 +1300,19 @@ impl Render for App {
         v_flex()
             .id("app-root")
             .track_focus(&self.focus_handle)
+            .relative()
             .size_full()
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
-                if !event.is_held && modifiers.control && modifiers.shift && event.keystroke.key == "d" {
-                    this.toggle_debug_mode(cx);
+                if event.is_held || !modifiers.control {
+                    return;
+                }
+                match (modifiers.shift, event.keystroke.key.as_str()) {
+                    (true, "d") => this.toggle_debug_mode(cx),
+                    // Both of the two conventions, since the egui app answers
+                    // to ctrl+shift+p and every other application to ctrl+k.
+                    (true, "p") | (false, "k") => this.open_palette(window, cx),
+                    _ => {}
                 }
             }))
             .child(tabs)
@@ -1229,5 +1322,11 @@ impl Render for App {
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
             .child(div().flex_1().min_h(px(0.)).bg(cx.theme().background).child(body))
             .when(self.debug_mode, |this| this.child(debug_notice))
+            // Dialogs, sheets and toasts are held by `Root` but drawn by
+            // whoever renders the window's own view, so they go last and over
+            // everything else.
+            .children(sheet_layer)
+            .children(dialog_layer)
+            .children(notification_layer)
     }
 }

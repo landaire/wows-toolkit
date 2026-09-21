@@ -11,6 +11,7 @@
 use gpui_kit::AppContext;
 use gpui_kit::TestAppContext;
 use gpui_kit::WindowHandle;
+use gpui_kit::component::IndexPath;
 use gpui_kit::px;
 use gpui_kit::size;
 use gpui_kit::test::TestAppContextExt;
@@ -73,6 +74,10 @@ const TRACKER_PERIOD: &str = "tracker-period";
 /// addressed by index, in the order the panels were added.
 const DOCK_TABS: &str = "tab-bar";
 
+/// The command palette's own list, inside the dialog it opens in
+/// (`CommandState::render`'s root).
+const PALETTE: &str = "command";
+
 /// Search tab controls (`search`).
 const SEARCH_QUERY: &str = "search-query";
 
@@ -81,6 +86,25 @@ const SEARCH_QUERY: &str = "search-query";
 fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
     cx.update(gpui_kit::init);
     cx.open_window(size(px(1200.), px(800.)), App::new)
+}
+
+/// Opens the root view inside a `Root`, the way `main.rs` does.
+///
+/// `open_app` mounts the view bare, which is enough for anything that only
+/// reads the frame. Dialogs, notifications and text selection are hosted by
+/// `Root`, so whatever exercises those has to be mounted the way production
+/// mounts it.
+fn open_app_in_root(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::component::Root>, gpui_kit::Entity<App>) {
+    cx.update(gpui_kit::init);
+    let app = std::cell::RefCell::new(None);
+    let window = cx.open_window(size(px(1200.), px(800.)), |window, cx| {
+        let view = cx.new(|cx| App::new(window, cx));
+        *app.borrow_mut() = Some(view.clone());
+        let view: gpui_kit::AnyView = view.into();
+        gpui_kit::component::Root::new(view, window, cx)
+    });
+    let app = app.borrow_mut().take().expect("App::new ran inside the window builder");
+    (window, app)
 }
 
 fn tab_index(tab: AppTab) -> usize {
@@ -1176,6 +1200,90 @@ fn dragging_across_a_selectable_run_selects_its_text(cx: &mut TestAppContext) {
         assert!(
             "SELECTABLE".starts_with(&selected) || selected.starts_with('S'),
             "the selection is part of the run, got {selected:?}"
+        );
+    })
+    .expect("the test window stays open");
+}
+
+/// A toast reaches the screen.
+///
+/// Same layer question as the palette: `Root` holds the queue, the window's
+/// own view draws it. Without that child every toast in the app is silent.
+#[gpui_kit::test]
+fn a_toast_reaches_the_screen(cx: &mut TestAppContext) {
+    let (window, _app) = open_app_in_root(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("notification").is_none(), "nothing has been reported yet");
+        crate::toast::ok("copied", window, cx);
+    })
+    .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("notification").is_some(), "the toast is on screen");
+    })
+    .expect("the test window stays open");
+}
+
+/// The palette dialog reaches the screen.
+///
+/// The dialog is held by `Root` but drawn by the window's own view, so a view
+/// that forgets to draw the layer opens a palette nobody can see.
+#[gpui_kit::test]
+fn opening_the_palette_puts_its_search_field_on_screen(cx: &mut TestAppContext) {
+    let (window, app) = open_app_in_root(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(PALETTE).is_none(), "the palette is closed until it is opened");
+        app.update(cx, |app, cx| {
+            app.open_palette(window, cx);
+        });
+    })
+    .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(PALETTE).is_some(), "the palette is on screen");
+        assert!(window.try_find(IndexPath::new(0)).is_some(), "it is listing its entries");
+    })
+    .expect("the test window stays open");
+}
+
+/// Confirming a palette entry does what the entry says.
+///
+/// The dialog itself is the component library's; what this owns is the list
+/// and what each entry does, so that is what is driven here.
+#[gpui_kit::test]
+fn a_palette_entry_does_what_it_says(cx: &mut TestAppContext) {
+    use crate::palette::PaletteAction;
+
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.within(TAB_BAR).find(tab_index(AppTab::ReplayInspector)).selected(),
+            Some(true),
+            "the window opens on its replay tab"
+        );
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, window, cx| {
+            app.run_palette_action(PaletteAction::GoTo(AppTab::Stats), window, cx);
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.within(TAB_BAR).find(tab_index(AppTab::Stats)).selected(),
+            Some(true),
+            "going to a tab by name selects it"
         );
     })
     .expect("the test window stays open");
