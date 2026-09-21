@@ -1,0 +1,2 @@
+# Emits the codegen-workaround cfg for the rustc range the crate cares about.
+buildscript.run = true

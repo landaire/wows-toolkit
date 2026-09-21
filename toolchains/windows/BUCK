@@ -41,6 +41,15 @@ windows_resource(
     visibility = ["PUBLIC"],
 )
 
+windows_resource(
+    name = "gpui_app_resource",
+    src = "root//assets:wows_toolkit_gpui_rc",
+    resources = ["root//assets:wows_toolkit_gpui_manifest"],
+    tools = ":msvc_tools",
+    out = "wows_toolkit_gpui.res",
+    visibility = ["PUBLIC"],
+)
+
 wix_msi(
     name = "wows_toolkit_msi",
     tools = ":msvc_tools",

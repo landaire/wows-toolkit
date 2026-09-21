@@ -74,6 +74,13 @@ def native_buildscript_env():
     for var, key in [("AR", "ar"), ("CC", "cc"), ("CXX", "cxx"), ("NASM", "nasm")]:
         env[var] = _hermetic_tool(key)
 
+    # gpui's Windows backend compiles its HLSL with fxc, which it otherwise
+    # locates through the Windows SDK's registry entry. Absent on the Unix
+    # toolchains, where nothing in the graph compiles a shader.
+    fxc = read_root_config("hermetic_tools", "fxc")
+    if fxc != None:
+        env["GPUI_FXC_PATH"] = fxc
+
     # MSVC needs its header and library search paths passed explicitly; the Nix
     # toolchains encode theirs in the compiler wrapper.
     for var, key in [("INCLUDE", "include"), ("LIB", "lib")]:

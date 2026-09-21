@@ -13,3 +13,8 @@ vendor/index/
 # verify a fetch against and this archive is committed instead. scripts/
 # fetch-buck-deps.py fails with the name of any other crate that needs adding.
 !vendor/egui-notify-*.crate
+!vendor/gpui-base-*.crate
+!vendor/gpui-component-*.crate
+!vendor/gpui-component-macros-*.crate
+!vendor/gpui-kit-*.crate
+!vendor/gpui-kit-assets-*.crate

@@ -1,0 +1,2 @@
+# Writes the version-suffixed private module into OUT_DIR.
+buildscript.run = true

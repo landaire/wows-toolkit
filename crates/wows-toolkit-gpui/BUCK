@@ -1,0 +1,54 @@
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary")
+
+# Not wows_toolkit_gpui_bin: the target name is a path component of every
+# object file a release build writes, and the longest of those already sits
+# within a dozen characters of the 260 link.exe accepts.
+workspace_binary(
+    name = "gpui_bin",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "0.1.0",
+    crate_root = "src/main.rs",
+    deps = [
+        "//crates/minimap-renderer:wows_minimap_renderer",
+        "//crates/wows-battle-world:wows_battle_world",
+        "//crates/wows-replay-insights:wows_replay_insights",
+        "//crates/wows-replays:wows_replays",
+        "//crates/wows-toolkit-config:wows_toolkit_config",
+        "//crates/wows-toolkit-viewmodel:wows_toolkit_viewmodel",
+        "//crates/wowsunpack:wowsunpack",
+        "//third-party/rust:anyhow",
+        "//third-party/rust:bytemuck",
+        "//third-party/rust:ciborium",
+        "//third-party/rust:csv",
+        "//third-party/rust:escaper",
+        "//third-party/rust:futures",
+        "//third-party/rust:gettext",
+        "//third-party/rust:gpui-kit",
+        "//third-party/rust:image",
+        "//third-party/rust:jiff",
+        "//third-party/rust:nalgebra",
+        "//third-party/rust:pollster",
+        "//third-party/rust:regex",
+        "//third-party/rust:reqwest",
+        "//third-party/rust:rfd",
+        "//third-party/rust:serde",
+        "//third-party/rust:serde_json",
+        "//third-party/rust:sqlx",
+        "//third-party/rust:thiserror",
+        "//third-party/rust:tokio",
+        "//third-party/rust:tracing",
+        "//third-party/rust:tracing-subscriber",
+        "//third-party/rust:twitch_api",
+        "//third-party/rust:unidecode",
+        "//third-party/rust:wgpu",
+    ],
+    # gpui embeds its application manifest from its own build script, which
+    # shells out to an rc.exe it discovers from host state. Buck compiles the
+    # same manifest with the pinned rc.exe and links the result here instead.
+    rustc_flags = os_select(
+        macos = [],
+        linux = [],
+        windows = ["-Clink-arg=$(location toolchains//windows:gpui_app_resource)"],
+    ),
+)

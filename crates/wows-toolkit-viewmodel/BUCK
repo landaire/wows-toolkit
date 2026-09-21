@@ -1,0 +1,43 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+VIEWMODEL_DEPS = [
+    "//crates/wows-replay-insights:wows_replay_insights",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wows-toolkit-config:wows_toolkit_config",
+    "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-translations:wt_translations",
+    "//third-party/rust:ciborium",
+    "//third-party/rust:escaper",
+    "//third-party/rust:glob",
+    "//third-party/rust:jiff",
+    "//third-party/rust:language-tags",
+    "//third-party/rust:levenshtein",
+    "//third-party/rust:pickled",
+    "//third-party/rust:regex",
+    "//third-party/rust:rust-i18n",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:thiserror",
+    "//third-party/rust:thousands",
+    "//third-party/rust:tracing",
+]
+
+workspace_library(
+    name = "wows_toolkit_viewmodel",
+    crate = "wows_toolkit_viewmodel",
+    package = "wows-toolkit-viewmodel",
+    version = "0.1.0",
+    deps = VIEWMODEL_DEPS,
+)
+
+workspace_test(
+    name = "wows_toolkit_viewmodel_test",
+    crate = "wows_toolkit_viewmodel",
+    crate_root = "src/lib.rs",
+    package = "wows-toolkit-viewmodel",
+    version = "0.1.0",
+    # The date assertions read a fixed zone through ZoneGuard, which the config
+    # crate only compiles under test-support.
+    deps = [d for d in VIEWMODEL_DEPS if d != "//crates/wows-toolkit-config:wows_toolkit_config"] +
+           ["//crates/wows-toolkit-config:wows_toolkit_config_test_support"],
+)

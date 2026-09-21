@@ -5,7 +5,11 @@ workspace_library(
     crate = "wt_translations",
     package = "wt-translations",
     version = "0.16.0",
-    deps = ["//crates/wows-core:wows_core"],
+    deps = [
+        "//crates/wows-core:wows_core",
+        "//third-party/rust:rust-i18n",
+        "//third-party/rust:toml",
+    ],
 )
 
 workspace_test(
@@ -14,5 +18,9 @@ workspace_test(
     crate_root = "src/lib.rs",
     package = "wt-translations",
     version = "0.16.0",
-    deps = ["//crates/wows-core:wows_core"],
+    deps = [
+        "//crates/wows-core:wows_core",
+        "//third-party/rust:rust-i18n",
+        "//third-party/rust:toml",
+    ],
 )

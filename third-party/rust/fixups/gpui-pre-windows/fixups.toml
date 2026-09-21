@@ -1,0 +1,3 @@
+# Compiles the DirectX shaders with fxc. Only a release build needs them: with
+# debug assertions on the renderer compiles its HLSL at startup instead.
+buildscript.run = true

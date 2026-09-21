@@ -1,0 +1,10 @@
+// The application manifest gpui embeds itself under Cargo. Its build script
+// discovers rc.exe from host state, so the Buck build compiles this script with
+// the rc.exe pinned in toolchains/windows/toolchain-manifest.json instead.
+//
+// Without the manifest the process binds to ComCtl32 5.82, which exports no
+// TaskDialogIndirect, and the loader refuses to start the binary.
+
+#define RT_MANIFEST 24
+
+1 RT_MANIFEST "wows_toolkit_gpui.manifest.xml"

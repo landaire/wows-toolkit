@@ -1,0 +1,2 @@
+# An empty main; the build script exists only for its feature assertion.
+buildscript.run = false
