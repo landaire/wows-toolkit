@@ -396,6 +396,44 @@ fn the_session_rating_table_reaches_the_replay_inspector(cx: &mut TestAppContext
         .expect("the test window stays open");
 }
 
+/// A search result opens in the Replay Inspector rather than somewhere of
+/// the Search tab's own, and brings that tab forward.
+#[gpui_kit::test]
+fn opening_a_search_result_shows_the_replay_inspector(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        assert_eq!(
+            window.within(TAB_BAR).find(tab_index(AppTab::Search)).selected(),
+            Some(true),
+            "the search tab is showing"
+        );
+    })
+    .expect("the test window stays open");
+
+    // No WoWs directory in the test settings, so the inspector has no game
+    // data; the event still has to move the user to that tab.
+    window
+        .update(cx, |app, window, cx| {
+            app.open_replay_from_search(std::path::PathBuf::from("nonexistent.wowsreplay"), window, cx);
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert_eq!(
+            window.within(TAB_BAR).find(tab_index(AppTab::ReplayInspector)).selected(),
+            Some(true),
+            "opening a result moves to the inspector"
+        );
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn the_unpacker_shows_the_saved_extraction_directory(cx: &mut TestAppContext) {
     let window = open_app(cx);
