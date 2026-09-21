@@ -2019,8 +2019,13 @@ impl Render for ViewportView {
                 let _ = bounds;
             },
         )
+        // `inset_0`, not `size_full`: an absolute element with no insets is
+        // laid out at its static position, which is below the image it is
+        // meant to cover. That put the overlay (and with it the bounds the
+        // gizmo is drawn in and every pick is cast against) a whole viewport
+        // below the viewport.
         .absolute()
-        .size_full();
+        .inset_0();
 
         // Floating thickness tooltip, anchored near (not under) the cursor
         // and snapped back inside the window if it would overflow -- reuses
