@@ -433,7 +433,7 @@ impl ReplayReportModel {
         ReplayReportModel {
             self_team,
             rows,
-            battle_result: normalized.metadata.battle_result,
+            battle_result: normalized.metadata.resolved_battle_result(),
             columns: ReplayColumn::ALL.to_vec(),
             map: normalized.metadata.map.clone(),
             chat: Vec::new(),

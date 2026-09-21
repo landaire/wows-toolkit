@@ -63,6 +63,7 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::cache as game_params_cache;
@@ -406,7 +407,16 @@ fn pretty_json_or_raw(raw: &str) -> String {
 /// actually recorded on (never a "latest installed" guess; see the module
 /// doc). Synchronous and CPU-bound; callers run it off the UI thread (see
 /// [`spawn_parse`]).
-fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, ReplayLoadError> {
+///
+/// `personal_rating` is the expected-values table the per-row PR column is
+/// computed against; absent until it has been downloaded, in which case the
+/// column stays empty until [`ReplayReportModel::populate_personal_ratings`]
+/// is applied later (see `panel.rs::ReplayPanel::set_personal_rating`).
+fn parse_replay(
+    path: &Path,
+    game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
+) -> Result<ParsedReplay, ReplayLoadError> {
     let replay_file = ReplayFile::from_file(path).map_err(|report| {
         let is_io = matches!(report.current_context(), ParseError::Io(_));
         let message = format!("{report:?}");
@@ -441,7 +451,7 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, 
     let raw_results_json = report.battle_results().map(pretty_json_or_raw);
     let normalized =
         NormalizedBattleReport::from_battle_report(&report, meta, loaded.provider.as_ref(), &constants_json);
-    let model = ReplayReportModel::from_normalized(
+    let mut model = ReplayReportModel::from_normalized(
         &normalized,
         meta,
         loaded.provider.as_ref(),
@@ -449,6 +459,9 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, 
         report.game_chat(),
         report.players(),
     );
+    if let Some(table) = personal_rating {
+        model.populate_personal_ratings(table);
+    }
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 
     Ok(ParsedReplay { model, game_data: loaded, raw_metadata_json, raw_results_json })
@@ -458,8 +471,13 @@ fn parse_replay(path: &Path, game_data: &GameDataCache) -> Result<ParsedReplay, 
 /// (`cx.background_spawn`, not the tokio bridge -- this work is CPU-bound, not
 /// async I/O). `game_data` lazily loads and caches each replay's own build's
 /// data on first use.
-pub fn spawn_parse(path: PathBuf, game_data: GameDataCache, cx: &App) -> Task<Result<ParsedReplay, ReplayLoadError>> {
-    cx.background_spawn(async move { parse_replay(&path, &game_data) })
+pub fn spawn_parse(
+    path: PathBuf,
+    game_data: GameDataCache,
+    personal_rating: Option<Arc<PersonalRatingData>>,
+    cx: &App,
+) -> Task<Result<ParsedReplay, ReplayLoadError>> {
+    cx.background_spawn(async move { parse_replay(&path, &game_data, personal_rating.as_deref()) })
 }
 
 #[cfg(test)]
@@ -489,7 +507,11 @@ mod tests {
 
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
 
-        let parsed = parse_replay(Path::new(&replay_path), &game_data).expect("failed to parse the replay");
+        // The real cached expected-values table when there is one, so this
+        // also exercises the rating path end to end against real data.
+        let personal_rating = wows_toolkit_viewmodel::personal_rating::load_cached().ok();
+        let parsed = parse_replay(Path::new(&replay_path), &game_data, personal_rating.as_ref())
+            .expect("failed to parse the replay");
         let model = &parsed.model;
 
         assert!(!model.rows.is_empty(), "expected at least one player row");
@@ -504,6 +526,15 @@ mod tests {
         let any_nonzero_damage =
             model.rows.iter().any(|r| r.observed_damage > 0 || r.actual_damage.is_some_and(|d| d > 0));
         assert!(any_nonzero_damage, "expected at least one row with nonzero damage");
+
+        // A replay with no battle-results packet carries no actual damage,
+        // which is what a rating needs; the egui app leaves those unrated
+        // too, so only a replay with results is expected to rate.
+        if personal_rating.is_some() && parsed.raw_results_json.is_some() {
+            let rated = model.rows.iter().filter(|row| row.personal_rating.is_some()).count();
+            println!("{rated} of {} rows carry a personal rating", model.rows.len());
+            assert!(rated > 0, "a replay with results should rate at least one row");
+        }
     }
 
     /// A directory under the OS temp dir with an empty `bin/` subfolder, so

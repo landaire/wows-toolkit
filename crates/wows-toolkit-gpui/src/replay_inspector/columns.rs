@@ -89,6 +89,9 @@ pub enum ColorRole {
     Player(PlayerColorKind),
     /// Personal Rating tier tint.
     PrTier(PersonalRatingCategory),
+    /// A rating band's canonical hue, for the chip background behind
+    /// [`ColorRole::PrTier`] text.
+    PrTierTint(PersonalRatingCategory),
     /// Captain-points tier tint.
     CaptainPoints(CaptainPointsTier),
     /// Battle-outcome coloring (win/loss/draw), for the per-replay header.

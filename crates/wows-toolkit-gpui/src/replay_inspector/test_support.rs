@@ -17,6 +17,8 @@ use wows_replays::types::TeamId;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::types::Species;
 
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+
 use super::model::PlayerRow;
 
 /// A minimal `PlayerRow` with every field at its "absent/zero" default.
@@ -190,6 +192,7 @@ pub(crate) fn fixture_normalized_battle_report() -> NormalizedBattleReport {
             extra_duration: None,
             timestamp: jiff::Timestamp::UNIX_EPOCH,
             battle_result: None,
+            results_battle_result: None,
         },
         players: vec![self_player, enemy_player],
     }
@@ -222,3 +225,17 @@ pub(crate) fn fixture_replay_meta() -> ReplayMeta {
     }))
     .expect("fixture replay meta should deserialize")
 }
+
+/// A one-ship expected-values table, matching `wows_replay_insights`'s own
+/// fixture: playing exactly at these values scores 1150 (Average).
+pub(crate) fn fixture_personal_rating_data() -> PersonalRatingData {
+    let json = format!(
+        r#"{{"time":0,"data":{{"{FIXTURE_PR_SHIP_ID}":{{"average_damage_dealt":50000.0,"average_frags":1.0,"win_rate":50.0}}}}}}"#
+    );
+    let mut table = PersonalRatingData::new();
+    table.load_from_bytes(json.as_bytes()).expect("the fixture is valid JSON");
+    table
+}
+
+/// The only ship `fixture_personal_rating_data` carries expected values for.
+pub(crate) const FIXTURE_PR_SHIP_ID: u64 = 3374266064;

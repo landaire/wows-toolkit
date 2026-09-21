@@ -7,7 +7,6 @@ use std::sync::Arc;
 
 use sqlx::sqlite::SqlitePool;
 use wows_toolkit_config::queries;
-use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::GameLimit;
@@ -23,13 +22,16 @@ pub struct SessionData {
     pub games: Vec<PerGameStat>,
     pub filters: StatsFilters,
     /// The expected-values table personal rating is computed against.
-    /// Absent until the egui app has downloaded it; the port reads that same
-    /// cache rather than fetching a second copy.
+    /// Refreshed on the shared disk cache when it is missing or stale (see
+    /// `crate::personal_rating`), so the two apps keep one copy between them.
+    /// Absent when the fetch fails and there is no cache to fall back on.
     pub personal_rating: Option<Arc<PersonalRatingData>>,
 }
 
 impl SessionData {
-    pub async fn load(pool: &SqlitePool) -> Self {
+    /// `proxy_url` is the saved proxy setting, empty for a direct
+    /// connection; the expected-values refresh is the one network call here.
+    pub async fn load(pool: &SqlitePool, proxy_url: &str) -> Self {
         let games = match queries::get_all_session_stats(pool).await {
             Ok(rows) => rows.into_iter().map(PerGameStat::from_row).collect(),
             Err(err) => {
@@ -38,13 +40,7 @@ impl SessionData {
             }
         };
 
-        let personal_rating = match personal_rating::load_cached() {
-            Ok(table) => Some(Arc::new(table)),
-            Err(err) => {
-                tracing::info!("stats: personal rating is unavailable: {err}");
-                None
-            }
-        };
+        let personal_rating = crate::personal_rating::load_refreshed(proxy_url).await.map(Arc::new);
 
         Self { games, filters: load_filters(pool).await, personal_rating }
     }

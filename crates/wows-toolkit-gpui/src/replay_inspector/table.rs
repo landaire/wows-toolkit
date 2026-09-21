@@ -49,9 +49,11 @@ use super::model::ReplayReportModel;
 use super::sort::SortColumn;
 use super::sort::SortOrder;
 use super::sort::sort_rows;
-use wows_replay_insights::personal_rating::PersonalRatingCategory;
+use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replays::types::AccountId;
 use wows_replays::types::Relation;
+use wows_toolkit_viewmodel::personal_rating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wowsunpack::vfs::VfsPath;
 
 /// Overdraw for the virtualized list: how far past the viewport to render so
@@ -273,16 +275,12 @@ fn sort_caret_icon(order: SortOrder) -> IconName {
 pub(crate) fn resolve_color(role: ColorRole) -> Hsla {
     let packed = match role {
         ColorRole::Player(kind) => player_color_kind_rgb(kind),
-        ColorRole::PrTier(category) => match category {
-            PersonalRatingCategory::Bad => 0xff0000,
-            PersonalRatingCategory::BelowAverage => 0xfe7903,
-            PersonalRatingCategory::Average => 0xffc71f,
-            PersonalRatingCategory::Good => 0x44b300,
-            PersonalRatingCategory::VeryGood => 0x318000,
-            PersonalRatingCategory::Great => 0x02c9b3,
-            PersonalRatingCategory::Unicum => 0xd042f3,
-            PersonalRatingCategory::SuperUnicum => 0xa00dc5,
-        },
+        // The band's text color, not its canonical hue: the hue is the chip
+        // background, and reading it as text is the low-contrast case the
+        // solved table exists to fix. Dark, because this crate applies the
+        // egui dark theme; a light theme here needs `chip_text(.., false)`.
+        ColorRole::PrTier(category) => personal_rating::chip_text(category, true),
+        ColorRole::PrTierTint(category) => personal_rating::chip_hue(category),
         ColorRole::CaptainPoints(tier) => match tier {
             CaptainPointsTier::Bad => 0xff8080,
             CaptainPointsTier::Warning => 0xfcae1e,
@@ -424,6 +422,37 @@ impl PlayerTable {
         self.debug = debug;
         sort_rows(&mut self.model.rows, self.model.self_team, self.sort, self.debug);
         self.list_state.reset(self.model.rows.len());
+        self.widths_dirty = true;
+        cx.notify();
+    }
+
+    /// This replay's own Personal Rating: the rating on the row the recording
+    /// player occupies, which is what the outcome row's PR badge shows
+    /// (`panel.rs::personal_rating_badge`). `None` until an expected-values
+    /// table has been applied, or when the replay carries no self row.
+    pub fn self_personal_rating(&self) -> Option<PersonalRatingResult> {
+        self.model.rows.iter().find(|row| row.is_self)?.personal_rating.clone()
+    }
+
+    /// Fills in the Personal Rating column from an expected-values table that
+    /// arrived after the parse (see `panel.rs::ReplayPanel::set_personal_rating`).
+    /// Marks `widths_dirty` because the column was measured while every cell
+    /// held the "-" placeholder. Idempotent: `populate_personal_ratings`
+    /// skips rows that already carry a rating.
+    ///
+    /// Row order only changes when PR is the sort key, so only that case
+    /// resets the list; every other sort keeps the viewport where the reader
+    /// left it, since nobody asked for a scroll. Notifies rather than emits:
+    /// this runs inside the view's fan-out over its open panels, and an event
+    /// from here would re-enter the panel that owns this table.
+    pub fn populate_personal_ratings(&mut self, table: &PersonalRatingData, cx: &mut Context<Self>) {
+        self.model.populate_personal_ratings(table);
+        if self.sort.column() == SortColumn::PersonalRating {
+            sort_rows(&mut self.model.rows, self.model.self_team, self.sort, self.debug);
+            self.list_state.reset(self.model.rows.len());
+        } else {
+            self.list_state.remeasure_items(0..self.model.rows.len());
+        }
         self.widths_dirty = true;
         cx.notify();
     }

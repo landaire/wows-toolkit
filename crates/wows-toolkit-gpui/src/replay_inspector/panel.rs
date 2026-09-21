@@ -9,9 +9,15 @@
 //! `IconName` has no bundled trophy/sad-face/notches glyphs, so this uses the
 //! closest available icons (thumbs up/down, minus) instead.
 //!
+//! Beside it sits the single-battle PR badge, showing what
+//! `populate_personal_ratings` scored this replay's own row, in that band's
+//! chip colors (`build_replay_view`'s `pr_chip`). It deviates from that
+//! version in one respect: egui rates a replay whose results are missing as
+//! though it dealt zero damage (`to_battle_stats`'s `unwrap_or_default`),
+//! which reads as a real "Bad" rating for a battle whose damage is simply
+//! unknown. Unknown damage is left unrated here, so no badge appears.
+//!
 //! **Deferred**, not implemented in this milestone:
-//! - The single-battle PR badge (`PersonalRatingData::calculate_pr`) -- needs
-//!   PR reference data this loader does not fetch yet.
 //! - The export menu (JSON/CBOR/CSV via `util::replay_export`) -- that module
 //!   lives in the egui crate; porting it is out of scope here.
 //!
@@ -38,6 +44,7 @@
 //! and opens it as `SidePanel::RawPlayerMetadata`.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -53,6 +60,10 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wows_replays::analyzer::battle_controller::BattleResult;
+use wows_toolkit_viewmodel::personal_rating;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+use wows_toolkit_viewmodel::personal_rating::PersonalRatingResult;
+use wowsunpack::vfs::VfsPath;
 
 use super::chat::ChatPanel;
 use super::columns::BattleOutcome;
@@ -63,6 +74,7 @@ use super::load::GameDataCache;
 use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
 use super::load::spawn_parse;
+use super::model::ReplayReportModel;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
@@ -132,6 +144,12 @@ pub struct ReplayPanel {
     /// live afterward by `set_columns` (the header toolbar's column-filter
     /// checkboxes; see `view.rs`).
     columns: Vec<ReplayColumn>,
+    /// The expected-values table the Personal Rating column and the outcome
+    /// row's PR badge are computed against. Handed to `spawn_parse` so a
+    /// replay opened after the table loaded is rated as it parses, and kept
+    /// here so `set_personal_rating` can fill in a replay that was already
+    /// open when the table arrived.
+    personal_rating: Option<Arc<PersonalRatingData>>,
     _parse_task: Task<()>,
     /// Subscription to `table`'s `PlayerTableEvent`s, live once the replay
     /// finishes loading (`apply_result` creates both `table` and this
@@ -146,10 +164,11 @@ impl ReplayPanel {
         game_data: GameDataCache,
         debug: bool,
         columns: Vec<ReplayColumn>,
+        personal_rating: Option<Arc<PersonalRatingData>>,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
-        let parse_task = spawn_parse(path, game_data, cx);
+        let parse_task = spawn_parse(path, game_data, personal_rating.clone(), cx);
         let parse_task = cx.spawn(async move |this, cx| {
             let result = parse_task.await;
             let _ = this.update(cx, |this, cx| this.apply_result(result, cx));
@@ -161,6 +180,7 @@ impl ReplayPanel {
             side_panel: SidePanel::None,
             debug,
             columns,
+            personal_rating,
             _parse_task: parse_task,
             _table_subscription: None,
         }
@@ -192,36 +212,91 @@ impl ReplayPanel {
         }
     }
 
+    /// Applies an expected-values table that arrived after this tab opened
+    /// (`view.rs::ReplayInspectorView::set_personal_rating`). Remembered for
+    /// `apply_result` in case the parse has not finished yet, and pushed
+    /// straight into an already-loaded table otherwise. Idempotent: rows that
+    /// already carry a rating are left alone.
+    pub fn set_personal_rating(&mut self, table: Arc<PersonalRatingData>, cx: &mut Context<Self>) {
+        self.personal_rating = Some(table.clone());
+        if let LoadState::Loaded(loaded) = &self.state {
+            loaded.table.update(cx, |player_table, cx| player_table.populate_personal_ratings(&table, cx));
+            cx.notify();
+        }
+    }
+
     fn apply_result(&mut self, result: Result<ParsedReplay, ReplayLoadError>, cx: &mut Context<Self>) {
         self.state = match result {
-            Ok(ParsedReplay { mut model, game_data, raw_metadata_json, raw_results_json }) => {
-                model.columns = self.columns.clone();
-                let ship_name =
-                    model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
-                let title: SharedString =
-                    if ship_name.is_empty() { model.map.clone() } else { format!("{ship_name} - {}", model.map) }
-                        .into();
-                let battle_result = model.battle_result;
-                let chat = std::mem::take(&mut model.chat);
-                let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, cx)));
-                let vfs = game_data.vfs().clone();
-                let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
-                self._table_subscription = Some(cx.subscribe(&table, Self::on_table_event));
-                let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), cx));
-                let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), cx)));
-                LoadState::Loaded(LoadedReplay {
-                    title,
-                    battle_result,
-                    table,
-                    chat_panel,
-                    raw_metadata_panel,
-                    raw_results_panel,
-                    raw_player_metadata_panel: None,
-                })
+            Ok(ParsedReplay { model, game_data, raw_metadata_json, raw_results_json }) => {
+                self.loaded_state(model, game_data.vfs().clone(), raw_metadata_json, raw_results_json, cx)
             }
             Err(err) => LoadState::Failed(err),
         };
         cx.notify();
+    }
+
+    /// Builds the loaded state from a parsed model: the tab title, the player
+    /// table (subscribed to), and the chat/raw-JSON side panels. Split out of
+    /// `apply_result` so tests can reach it with a fabricated model and an
+    /// in-memory VFS, without a real replay and game install to parse.
+    fn loaded_state(
+        &mut self,
+        mut model: ReplayReportModel,
+        vfs: VfsPath,
+        raw_metadata_json: String,
+        raw_results_json: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> LoadState {
+        model.columns = self.columns.clone();
+        // The table may have arrived while this replay was parsing, in which
+        // case `spawn_parse` never saw it. Populating before `PlayerTable::new`
+        // keeps the PR column sortable from the first frame.
+        if let Some(table) = self.personal_rating.as_ref() {
+            model.populate_personal_ratings(table);
+        }
+        let ship_name = model.rows.iter().find(|row| row.is_self).map(|row| row.ship_name.clone()).unwrap_or_default();
+        let title: SharedString =
+            if ship_name.is_empty() { model.map.clone() } else { format!("{ship_name} - {}", model.map) }.into();
+        let battle_result = model.battle_result;
+        let chat = std::mem::take(&mut model.chat);
+        let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, cx)));
+        let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
+        self._table_subscription = Some(cx.subscribe(&table, Self::on_table_event));
+        let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), cx));
+        let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), cx)));
+
+        LoadState::Loaded(LoadedReplay {
+            title,
+            battle_result,
+            table,
+            chat_panel,
+            raw_metadata_panel,
+            raw_results_panel,
+            raw_player_metadata_panel: None,
+        })
+    }
+
+    /// A panel already showing `model`, with no parse behind it. Test-only:
+    /// production panels always reach this state through `apply_result`.
+    #[cfg(test)]
+    pub(crate) fn loaded_for_test(
+        model: ReplayReportModel,
+        personal_rating: Option<Arc<PersonalRatingData>>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut panel = Self {
+            focus_handle: cx.focus_handle(),
+            state: LoadState::Loading,
+            side_panel: SidePanel::None,
+            debug: false,
+            columns: model.columns.clone(),
+            personal_rating,
+            _parse_task: Task::ready(()),
+            _table_subscription: None,
+        };
+        let vfs: VfsPath = wowsunpack::vfs::MemoryFS::new().into();
+        panel.state = panel.loaded_state(model, vfs, String::from("{}"), None, cx);
+        panel
     }
 }
 
@@ -279,6 +354,44 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
         .into_any_element()
 }
 
+/// The PR badge's element id, so a test can assert on its presence and label.
+const PR_BADGE_ID: &str = "replay-personal-rating-badge";
+
+/// The badge's text, verbatim the egui `pr_chip` call's format string.
+fn personal_rating_label(rating: &PersonalRatingResult) -> String {
+    format!("PR: {:.0} ({})", rating.pr, rating.category.name())
+}
+
+/// The chip tint the egui `pr_chip` paints behind its text.
+const PR_CHIP_TINT: f32 = personal_rating::CHIP_TINT_ALPHA as f32 / 255.;
+
+/// The single-battle PR badge, mirroring the egui app's `pr_chip` call beside
+/// the outcome label: "PR: {score} ({band})" in the band's color over a faint
+/// tint of it. Renders nothing when no expected-values table has been applied
+/// yet, or when this replay's own row carries no rating, matching that call's
+/// `if let Some(pr_result)` gate.
+fn personal_rating_badge(rating: PersonalRatingResult) -> AnyElement {
+    let color = resolve_color(ColorRole::PrTier(rating.category));
+    let text = personal_rating_label(&rating);
+    let mut tint = resolve_color(ColorRole::PrTierTint(rating.category));
+    tint.a = PR_CHIP_TINT;
+
+    h_flex()
+        .id(PR_BADGE_ID)
+        .test_support()
+        .aria_label(text.clone())
+        .flex_none()
+        .items_center()
+        .px_2()
+        .py_1()
+        .rounded_sm()
+        .bg(tint)
+        .font_weight(FontWeight::BOLD)
+        .text_color(color)
+        .child(text)
+        .into_any_element()
+}
+
 /// One side-panel toggle button's static shape, bundled into a struct so
 /// `side_panel_button` stays under clippy's argument-count limit (mirrors
 /// `table.rs::RowLayout`'s reason for existing).
@@ -316,6 +429,7 @@ fn side_panel_button(spec: SidePanelButtonSpec, current: SidePanel, cx: &mut Con
 /// results-less replay has nothing to show.
 fn header_row(
     battle_result: Option<BattleResult>,
+    personal_rating: Option<PersonalRatingResult>,
     has_chat: bool,
     has_results: bool,
     debug: bool,
@@ -369,7 +483,15 @@ fn header_row(
         .items_center()
         .justify_between()
         .pr_2()
-        .child(outcome_badge(battle_result))
+        .gap_1()
+        .child(
+            h_flex()
+                .flex_none()
+                .items_center()
+                .gap_1()
+                .child(outcome_badge(battle_result))
+                .when_some(personal_rating, |this, rating| this.child(personal_rating_badge(rating))),
+        )
         .child(buttons)
         .into_any_element()
 }
@@ -413,6 +535,7 @@ impl Render for ReplayPanel {
                 let has_results = loaded.raw_results_panel.is_some();
                 let table = loaded.table.clone();
                 let battle_result = loaded.battle_result;
+                let personal_rating = loaded.table.read(cx).self_personal_rating();
                 let border = cx.theme().border;
 
                 let side_panel_entity: Option<AnyView> = match self.side_panel {
@@ -425,7 +548,15 @@ impl Render for ReplayPanel {
 
                 v_flex()
                     .size_full()
-                    .child(header_row(battle_result, has_chat, has_results, self.debug, self.side_panel, cx))
+                    .child(header_row(
+                        battle_result,
+                        personal_rating,
+                        has_chat,
+                        has_results,
+                        self.debug,
+                        self.side_panel,
+                        cx,
+                    ))
                     .child(
                         h_flex()
                             .flex_1()
@@ -448,5 +579,134 @@ impl Render for ReplayPanel {
         };
 
         v_flex().id("replay-panel").track_focus(&self.focus_handle).size_full().child(body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::AppContext;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt;
+    use std::sync::Arc;
+    use wows_replay_insights::personal_rating::PersonalRatingCategory;
+    use wows_replay_insights::personal_rating::PersonalRatingResult;
+    use wows_replays::analyzer::battle_controller::BattleResult;
+    use wows_replays::types::Relation;
+    use wows_replays::types::TeamId;
+    use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
+
+    use super::PR_BADGE_ID;
+    use super::ReplayPanel;
+    use super::personal_rating_label;
+    use crate::replay_inspector::columns::ReplayColumn;
+    use crate::replay_inspector::model::PlayerRow;
+    use crate::replay_inspector::model::ReplayReportModel;
+    use crate::replay_inspector::test_support::FIXTURE_PR_SHIP_ID;
+    use crate::replay_inspector::test_support::base_row;
+    use crate::replay_inspector::test_support::fixture_personal_rating_data;
+
+    /// A won battle whose self row dealt exactly the fixture's expected
+    /// damage and frags. The win carries the win-rate term to twice expected,
+    /// so the single battle scores 700 + 300 + 650 = 1650.
+    fn model_at_expected_values() -> ReplayReportModel {
+        let self_row = PlayerRow {
+            ship_id: Some(FIXTURE_PR_SHIP_ID.into()),
+            actual_damage: Some(50_000),
+            kills: Some(1),
+            ..base_row(1, Relation::new(0), true)
+        };
+        let enemy = PlayerRow { ship_id: None, ..base_row(2, Relation::new(2), false) };
+
+        ReplayReportModel {
+            self_team: TeamId::from(0i64),
+            rows: vec![self_row, enemy],
+            battle_result: Some(BattleResult::Win(0)),
+            columns: ReplayColumn::ALL.to_vec(),
+            map: "Ocean".to_string(),
+            chat: Vec::new(),
+        }
+    }
+
+    #[gpui_kit::test]
+    fn the_pr_badge_reports_the_self_rows_rating(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let table = Arc::new(fixture_personal_rating_data());
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), Some(table), cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(
+                window.find(PR_BADGE_ID).label(),
+                Some("PR: 1650 (Very Good)"),
+                "expected damage and frags plus the win scores 1650"
+            );
+        })
+        .expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn a_replay_with_no_rating_table_shows_no_pr_badge(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find(PR_BADGE_ID).is_none(),
+                "the egui app draws no chip when it cannot compute a rating"
+            );
+        })
+        .expect("the window is open");
+    }
+
+    #[gpui_kit::test]
+    fn a_rating_table_arriving_after_the_parse_still_fills_the_badge_in(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        });
+
+        let table = Arc::new(fixture_personal_rating_data());
+        window.update(cx, |panel, _window, cx| panel.set_personal_rating(table, cx)).expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find(PR_BADGE_ID).label(), Some("PR: 1650 (Very Good)"));
+        })
+        .expect("the window is open");
+    }
+
+    /// A table that names no ships rates nothing, so the badge stays away
+    /// rather than showing a rating computed against nothing.
+    #[gpui_kit::test]
+    fn a_table_with_no_expected_values_rates_nothing(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| panel.set_personal_rating(Arc::new(PersonalRatingData::new()), cx))
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find(PR_BADGE_ID).is_none(), "an empty table rates nothing");
+        })
+        .expect("the window is open");
+    }
+
+    #[test]
+    fn the_badge_label_matches_the_egui_chips_wording() {
+        let rating = PersonalRatingResult::new(1150.0);
+        assert_eq!(rating.category, PersonalRatingCategory::Average);
+        assert_eq!(personal_rating_label(&rating), "PR: 1150 (Average)");
+        assert_eq!(personal_rating_label(&PersonalRatingResult::new(2456.4)), "PR: 2456 (Super Unicum)");
     }
 }

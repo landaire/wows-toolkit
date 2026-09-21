@@ -221,8 +221,13 @@ impl App {
         self.player_tracker.update(cx, |tracker, cx| tracker.refresh(pool, cx));
     }
 
-    /// Adopts the session statistics read from the config database.
+    /// Adopts the session statistics read from the config database. The
+    /// expected-values table loaded alongside them also reaches the replay
+    /// inspector, which rates each replay's players against it.
     pub fn apply_session_stats(&mut self, data: SessionData, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(table) = data.personal_rating.clone() {
+            self.replay_inspector.update(cx, |view, cx| view.set_personal_rating(table, cx));
+        }
         self.stats.update(cx, |stats, cx| stats.apply_session(data, window, cx));
         cx.notify();
     }

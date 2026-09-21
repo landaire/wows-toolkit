@@ -95,6 +95,13 @@ impl PersonalRatingData {
         self.data.is_some()
     }
 
+    /// How many ships the table carries expected values for. Zero for a
+    /// loaded-but-empty payload, which rates nothing: `is_loaded` alone does
+    /// not say whether there is anything to rate against.
+    pub fn ship_count(&self) -> usize {
+        self.data.as_ref().map_or(0, |data| data.data.values().filter(|entry| entry.as_values().is_some()).count())
+    }
+
     /// Get expected values for a ship by its ID
     pub fn get_ship_expected(&self, ship_id: GameParamId) -> Option<&ShipExpectedValues> {
         self.data.as_ref()?.data.get(&ship_id.raw().to_string())?.as_values()
