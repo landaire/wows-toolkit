@@ -270,6 +270,7 @@ fn the_column_filters_popover_opens_and_toggles_only_the_column_clicked(cx: &mut
 /// load, which keeps these tests off the filesystem.
 fn test_settings() -> GpuiSettings {
     GpuiSettings {
+        locale: None,
         theme: Default::default(),
         twitch_token: None,
         twitch_channel: String::new(),

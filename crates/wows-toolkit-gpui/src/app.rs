@@ -342,9 +342,10 @@ impl App {
         let debug_mode = settings.debug_mode;
         let replay_settings = settings.replay.clone();
         let auto_load_latest_replay = settings.auto_load_latest_replay;
+        let locale = settings.locale.clone();
         self.debug_mode = debug_mode;
         self.replay_inspector.update(cx, |view, cx| {
-            view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, window, cx)
+            view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, locale, window, cx)
         });
         // The tracker watches the same install for a battle in progress, and
         // resolves its roster against the game data the replay inspector has
@@ -582,11 +583,13 @@ impl App {
         let replay_settings = settings.replay.clone();
         let debug_mode = settings.debug_mode;
         let auto_load = settings.auto_load_latest_replay;
+        let locale = settings.locale.clone();
         let proxy_url = settings.proxy_url.clone();
         let for_unpacker = path.clone();
         let for_tracker = path.clone();
-        self.replay_inspector
-            .update(cx, |view, cx| view.apply_settings(path, debug_mode, replay_settings, auto_load, window, cx));
+        self.replay_inspector.update(cx, |view, cx| {
+            view.apply_settings(path, debug_mode, replay_settings, auto_load, locale, window, cx)
+        });
         self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(for_unpacker, window, cx));
         self.watch_live_matches(&for_tracker, proxy_url, cx);
         let game_data = self.replay_inspector.read(cx).game_data();

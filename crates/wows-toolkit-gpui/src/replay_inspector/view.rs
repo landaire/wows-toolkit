@@ -187,9 +187,16 @@ impl ReplayInspectorView {
         debug_mode: bool,
         replay_settings: ReplaySettings,
         auto_load_latest_replay: bool,
+        locale: Option<String>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.browser.update(cx, |browser, cx| {
+            browser.set_locale(locale, cx);
+            // The listing's second line is what the index knows about each
+            // file, so it is read once the directory is known.
+            browser.load_summaries(cx);
+        });
         self.debug_mode = debug_mode;
         self.auto_load_latest_replay = auto_load_latest_replay;
         let grouping = replay_settings.grouping;
