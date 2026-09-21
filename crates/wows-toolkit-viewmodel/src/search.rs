@@ -4,6 +4,10 @@
 //! where the loaded game data comes from is not.
 
 use wows_replays::types::GameParamId;
+use wows_toolkit_config::index::query_ast::Expr;
+use wows_toolkit_config::index::query_ast::MatchExpr;
+use wows_toolkit_config::index::query_ast::MatchField;
+use wows_toolkit_config::index::query_ast::MatchTerm;
 use wows_toolkit_config::index::rows::MatchHit;
 use wowsunpack::data::ResourceLoader as _;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -111,5 +115,56 @@ mod tests {
     #[test]
     fn a_hit_with_no_ship_names_none() {
         assert_eq!(ship_display_name(&hit(None, Some("Whatever")), Some("Live".into())), None);
+    }
+}
+
+/// Whether a query filters on game mode at all.
+pub fn references_game_mode(expr: &MatchExpr) -> bool {
+    match expr {
+        Expr::Leaf(MatchTerm::Field(MatchField::GameMode, ..)) => true,
+        Expr::Leaf(_) => false,
+        other => other.children().iter().any(references_game_mode),
+    }
+}
+
+/// Whether a "some matches have no recorded game mode" hint belongs on
+/// screen.
+///
+/// Both conditions matter: some indexed match must be missing its game mode,
+/// *and* the query on screen must filter on it. A gap the query never asked
+/// about is not this user's problem right now, so it stays quiet. What the
+/// hint then says is each front end's own wording.
+pub fn game_mode_gap_applies(missing_count: i64, expr: &MatchExpr) -> bool {
+    missing_count > 0 && references_game_mode(expr)
+}
+
+#[cfg(test)]
+mod gap_hint_tests {
+    use super::*;
+    use wows_toolkit_config::index::query_text;
+
+    fn parse(query: &str) -> MatchExpr {
+        query_text::parse_query(query).expect("the fixture query parses")
+    }
+
+    #[test]
+    fn a_query_that_never_mentions_the_mode_stays_quiet() {
+        assert!(!game_mode_gap_applies(12, &parse("map:ocean")));
+    }
+
+    #[test]
+    fn a_full_index_stays_quiet_even_for_a_mode_query() {
+        assert!(!game_mode_gap_applies(0, &parse("mode:domination")));
+    }
+
+    #[test]
+    fn a_mode_query_over_a_gapped_index_gets_the_hint() {
+        assert!(game_mode_gap_applies(12, &parse("mode:domination")));
+        assert!(game_mode_gap_applies(1, &parse("mode:domination")));
+    }
+
+    #[test]
+    fn a_mode_term_nested_under_a_boolean_still_counts() {
+        assert!(game_mode_gap_applies(3, &parse("map:ocean AND mode:domination")));
     }
 }

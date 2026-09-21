@@ -20,7 +20,6 @@ use crate::db::index::query::SortSpec;
 use crate::db::index::query_ast::Expr;
 use crate::db::index::query_ast::MapCatalog;
 use crate::db::index::query_ast::MatchExpr;
-use crate::db::index::query_ast::MatchField;
 use crate::db::index::query_ast::MatchTerm;
 use crate::db::index::query_ast::RosterExpr;
 use crate::db::index::query_ast::Value;
@@ -508,27 +507,12 @@ fn collect_ids(expr: &MatchExpr, ships: &mut Vec<GameParamId>, players: &mut Vec
 /// not count. `GameMode` is a match-level field, not a roster one, so this
 /// only has to descend through `MatchTerm::Roster` far enough to say it holds
 /// none, never into the `RosterExpr` itself.
-fn references_game_mode(expr: &MatchExpr) -> bool {
-    match expr {
-        Expr::Leaf(MatchTerm::Field(MatchField::GameMode, ..)) => true,
-        Expr::Leaf(_) => false,
-        other => other.children().iter().any(references_game_mode),
-    }
-}
-
-/// Whether the re-index hint belongs on screen: some indexed match is
-/// missing its game mode, *and* the query on screen actually filters on it.
-/// A nonzero gap the current query never asked about is not this user's
-/// problem right now, so it stays quiet.
-fn game_mode_gap_hint_relevant(missing_count: i64, expr: &MatchExpr) -> bool {
-    missing_count > 0 && references_game_mode(expr)
-}
+pub use wows_toolkit_viewmodel::search::game_mode_gap_applies as game_mode_gap_hint_relevant;
 
 /// The hint's text, singular at exactly one so it never reads "1 indexed
-/// matches". Follows the same `count == 1` split the rest of the app uses
-/// (see `set_session_stats_one` / `set_session_stats_many` in
-/// `ui/replay_parser/mod.rs`); `rust_i18n`'s own key lookup has no built-in
-/// pluralisation, so the split has to happen here.
+/// matches". Follows the same `count == 1` split the rest of the app uses;
+/// `rust_i18n`'s own key lookup has no built-in pluralisation, so the split
+/// has to happen here.
 fn game_mode_gap_hint_text(missing_count: i64) -> std::borrow::Cow<'static, str> {
     if missing_count == 1 {
         t!("ui.search.game_mode_gap_hint_one")
@@ -1238,6 +1222,7 @@ mod tests {
     use crate::ui::theme::style::dark_style;
     use crate::ui::theme::style::light_style;
     use crate::util::personal_rating::PersonalRatingCategorySwatch;
+    use wows_toolkit_viewmodel::search::references_game_mode;
 
     fn row_key(i: usize) -> PreviewKey {
         PreviewKey { path: std::path::PathBuf::from(format!("row-{i}")), mtime_secs: 0 }

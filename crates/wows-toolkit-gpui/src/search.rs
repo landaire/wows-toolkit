@@ -29,6 +29,7 @@ use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 
+use wows_toolkit_viewmodel::search as search_hint;
 use wows_toolkit_viewmodel::search::ship_display_name;
 
 use crate::runtime;
@@ -104,6 +105,11 @@ pub struct SearchView {
     sort: SortSpec,
     hits: Vec<MatchHit>,
     state: SearchState,
+    /// The query the current results came from, so the game-mode hint knows
+    /// whether this search filters on one.
+    expr: Option<wows_toolkit_config::index::query_ast::MatchExpr>,
+    /// How many indexed matches carry no game mode. `None` until asked.
+    game_mode_gap: Option<i64>,
     /// Bumped per run so a slower earlier query cannot overwrite a later one.
     generation: u64,
     list_state: ListState,
@@ -121,6 +127,8 @@ impl SearchView {
             sort: SortSpec::default(),
             hits: Vec::new(),
             state: SearchState::Idle,
+            expr: None,
+            game_mode_gap: None,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
@@ -140,6 +148,30 @@ impl SearchView {
     /// An empty query matches everything, which is how the egui bar opens; a
     /// query that does not parse reports where rather than searching for it
     /// literally.
+    /// Asks the index how many matches carry no game mode, so a query that
+    /// filters on one can say what it cannot see. Asked once per session:
+    /// the answer only changes when the index is rebuilt.
+    fn look_up_game_mode_gap(&mut self, cx: &mut Context<Self>) {
+        if self.game_mode_gap.is_some() {
+            return;
+        }
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        cx.spawn(async move |this, cx| {
+            let found = runtime::spawn(cx, async move { query::matches_missing_game_mode_count(&pool).await }).await;
+            let _ = this.update(cx, |this, cx| {
+                match found {
+                    Ok(Ok(count)) => this.game_mode_gap = Some(count),
+                    // The results still stand; only the hint is missing.
+                    Ok(Err(err)) => tracing::warn!("search: the game-mode gap lookup failed: {err}"),
+                    Err(err) => tracing::warn!("search: the game-mode gap lookup did not complete: {err}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn run(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else {
             self.state = SearchState::Failed("the replay index is not open".to_string());
@@ -161,6 +193,8 @@ impl SearchView {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.state = SearchState::Running;
+        self.expr = Some(expr.clone());
+        self.look_up_game_mode_gap(cx);
         cx.notify();
 
         let sort = self.sort;
@@ -377,6 +411,20 @@ impl Render for SearchView {
             SearchState::Done => None,
         };
 
+        // Singular at exactly one, so it never reads "1 indexed matches".
+        let gap_hint = self
+            .expr
+            .as_ref()
+            .zip(self.game_mode_gap)
+            .filter(|(expr, missing)| search_hint::game_mode_gap_applies(*missing, expr))
+            .map(|(_, missing)| {
+                if missing == 1 {
+                    "1 indexed match has no recorded game mode and cannot match this query.".to_string()
+                } else {
+                    format!("{missing} indexed matches have no recorded game mode and cannot match this query.")
+                }
+            });
+
         let body: AnyElement = match status {
             Some(status) => v_flex()
                 .size_full()
@@ -408,6 +456,19 @@ impl Render for SearchView {
             .track_focus(&self.focus_handle)
             .size_full()
             .child(query_bar)
+            .when_some(gap_hint, |this, hint| {
+                this.child(
+                    div()
+                        .id("search-game-mode-gap")
+                        .test_support()
+                        .flex_none()
+                        .px_2()
+                        .py_1()
+                        .text_xs()
+                        .opacity(0.7)
+                        .child(hint),
+                )
+            })
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
             .when_some(footer, |this, footer| this.child(footer))
