@@ -40,6 +40,7 @@ use wows_toolkit_viewmodel::query_bar::tokens::NodePath;
 use std::collections::HashMap;
 
 use wows_replays::types::GameParamId;
+use wows_toolkit_viewmodel::formatting::separate_number;
 use wows_toolkit_viewmodel::search as search_hint;
 use wows_toolkit_viewmodel::search as ship_display;
 use wows_toolkit_viewmodel::search::ship_display_name;
@@ -110,8 +111,11 @@ const ACTIONS_COLUMN_WIDTH: Pixels = px(72.);
 /// Rows a value lookup offers, matching the egui bar's own limit.
 const VALUE_LIMIT: i64 = 50;
 /// How tall the completions dropdown grows before it scrolls, matching the
-/// egui bar's own cap.
+/// egui bar's own cap, and the width it is kept between so it neither reads
+/// as a strip nor spans the window.
 const COMPLETIONS_MAX_HEIGHT: f32 = 260.0;
+const COMPLETIONS_MIN_WIDTH: f32 = 260.0;
+const COMPLETIONS_MAX_WIDTH: f32 = 460.0;
 /// How long the caret sits still before its value lookup is sent.
 const VALUE_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(150);
 
@@ -719,10 +723,31 @@ fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
         SortColumn::Map => hit.map.clone(),
         SortColumn::Mode => hit.game_mode.clone(),
         SortColumn::Outcome => outcome_label(hit.outcome).to_string(),
-        SortColumn::Damage => hit.self_damage.map(|d| d.to_string()).unwrap_or_else(|| "-".into()),
+        // Grouped: a six-figure damage number is unreadable as a bare run of
+        // digits, and every other surface groups it.
+        SortColumn::Damage => hit.self_damage.map(|d| separate_number(d, None)).unwrap_or_else(|| "-".into()),
         SortColumn::Kills => hit.self_kills.map(|k| k.to_string()).unwrap_or_else(|| "-".into()),
         SortColumn::Pr => hit.self_pr.map(|pr| format!("{pr:.0}")).unwrap_or_else(|| "-".into()),
     }
+}
+
+/// The tone a battle result is read in, or none for a result the index does
+/// not know.
+fn outcome_color(outcome: MatchOutcome) -> Option<Hsla> {
+    let semantic = crate::theme::semantic();
+    let packed = match outcome {
+        MatchOutcome::Win => semantic.win,
+        MatchOutcome::Loss => semantic.loss,
+        MatchOutcome::Draw => semantic.draw,
+        MatchOutcome::Unknown => return None,
+    };
+    Some(rgb(packed).into())
+}
+
+/// The band a personal rating falls in, in that band's own text tone.
+fn rating_color(pr: f64) -> Hsla {
+    let category = wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory::from_pr(pr);
+    rgb(wows_toolkit_viewmodel::personal_rating::chip_text(category, crate::theme::is_dark_mode())).into()
 }
 
 impl Render for SearchView {
@@ -823,7 +848,7 @@ impl Render for SearchView {
                     .test_support()
                     .aria_label(completion.label.clone())
                     .w_full()
-                    .gap_2()
+                    .gap_4()
                     .items_center()
                     .justify_between()
                     .px_2()
@@ -864,7 +889,12 @@ impl Render for SearchView {
                             v_flex()
                                 .id("search-completions")
                                 .occlude()
-                                .w(bounds.size.width)
+                                // Sized to what it lists, not to the bar: a
+                                // dropdown as wide as the window puts its
+                                // breadcrumbs an inch from the text they
+                                // belong to.
+                                .min_w(px(COMPLETIONS_MIN_WIDTH))
+                                .max_w(px(COMPLETIONS_MAX_WIDTH))
                                 .max_h(px(COMPLETIONS_MAX_HEIGHT))
                                 .overflow_scroll()
                                 .p_1()
@@ -934,7 +964,7 @@ impl Render for SearchView {
         let on_disk = self.on_disk.clone();
         let resolved = self.resolved_ships.clone();
         let entity = cx.entity();
-        let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| {
+        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| {
             let Some(hit) = hits.get(ix) else {
                 return div().into_any_element();
             };
@@ -947,6 +977,7 @@ impl Render for SearchView {
                 .gap_2()
                 .items_center()
                 .px_2()
+                .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                 .hover(|this| this.bg(hover_bg))
                 .on_hover(move |hovered, _window, cx| {
                     let path = path.clone();
@@ -960,16 +991,30 @@ impl Render for SearchView {
                     });
                 })
                 .children(ResultColumn::all().into_iter().map(|column| {
-                    div().w(column.width()).text_sm().truncate().child(match column {
-                        ResultColumn::Sortable(column) => cell_text(hit, column),
-                        // The name this match's own build resolves when that
-                        // build is loaded, else the one stored at index time.
-                        ResultColumn::Ship => {
-                            let live =
-                                hit.version_build.zip(hit.self_ship_id).and_then(|key| resolved.get(&key)).cloned();
-                            ship_display_name(hit, live).unwrap_or_else(|| "-".to_string())
-                        }
-                    })
+                    // The outcome and the rating carry their meaning in
+                    // colour, as they do in the replay table and in the egui
+                    // results (`ui/search_tab.rs`).
+                    let tint = match column {
+                        ResultColumn::Sortable(SortColumn::Outcome) => outcome_color(hit.outcome),
+                        ResultColumn::Sortable(SortColumn::Pr) => hit.self_pr.map(rating_color),
+                        _ => None,
+                    };
+                    div()
+                        .w(column.width())
+                        .text_sm()
+                        .truncate()
+                        .when_some(tint, |el, color| el.text_color(color))
+                        .child(match column {
+                            ResultColumn::Sortable(column) => cell_text(hit, column),
+                            // The name this match's own build resolves when
+                            // that build is loaded, else the one stored at
+                            // index time.
+                            ResultColumn::Ship => {
+                                let live =
+                                    hit.version_build.zip(hit.self_ship_id).and_then(|key| resolved.get(&key)).cloned();
+                                ship_display_name(hit, live).unwrap_or_else(|| "-".to_string())
+                            }
+                        })
                 }))
                 .child(row_actions(ix, hit, on_disk.get(ix).copied().unwrap_or(false), entity.clone()))
                 .into_any_element()
