@@ -36,10 +36,13 @@ pub const PREVIEW_MAX_FRAMES: usize = (PREVIEW_LOOP_SECS * PREVIEW_FPS) as usize
 /// Retains a bounded, evenly spaced subset of the frames it is fed.
 pub struct TrackSink {
     frames: Vec<Vec<DrawCommand>>,
-    /// The clock each retained frame arrived with. Only the alignment tests
-    /// read these back; the popup plays frames at a fixed display rate.
-    #[cfg(test)]
+    /// The clock each retained frame arrived with. A hover preview plays at a
+    /// fixed display rate and never reads these; a playback viewport labels
+    /// its seek bar with them.
     clocks: Vec<GameClock>,
+    /// The most frames this sink will retain. Reaching it halves the track
+    /// and doubles the stride, so a long battle costs the same as a short one.
+    budget: usize,
     /// Keep one frame in every `stride`. Doubles each time the budget fills.
     stride: usize,
     /// Source frames seen since the last frame was retained.
@@ -53,11 +56,20 @@ impl Default for TrackSink {
 }
 
 impl TrackSink {
+    /// A sink sized for the hover preview's looping track.
     pub fn new() -> Self {
+        Self::with_budget(PREVIEW_MAX_FRAMES)
+    }
+
+    /// A sink that retains up to `budget` frames.
+    ///
+    /// A playback viewport wants far more of the battle than a hover preview
+    /// does, and is the only reason this is a parameter.
+    pub fn with_budget(budget: usize) -> Self {
         Self {
-            frames: Vec::with_capacity(PREVIEW_MAX_FRAMES * 2),
-            #[cfg(test)]
+            frames: Vec::with_capacity(budget.saturating_mul(2).min(4096)),
             clocks: Vec::new(),
+            budget: budget.max(1),
             stride: 1,
             since_kept: 0,
         }
@@ -68,7 +80,7 @@ impl TrackSink {
         self.stride
     }
 
-    #[cfg(test)]
+    /// The clock each retained frame was drawn at, oldest first.
     pub fn kept_clocks(&self) -> &[GameClock] {
         &self.clocks
     }
@@ -89,29 +101,21 @@ impl TrackSink {
             keep = !keep;
             keep
         });
-        #[cfg(test)]
-        {
-            let mut keep = false;
-            self.clocks.retain(|_| {
-                keep = !keep;
-                keep
-            });
-        }
+        let mut keep = false;
+        self.clocks.retain(|_| {
+            keep = !keep;
+            keep
+        });
         self.stride *= 2;
     }
 }
 
 impl FrameSink for TrackSink {
     fn push(&mut self, _index: usize, clock: GameClock, commands: Vec<DrawCommand>) {
-        // Playback runs at a fixed display rate and never consults the clock;
-        // only the frame/clock alignment tests read it back.
-        #[cfg(not(test))]
-        let _ = clock;
         if self.since_kept.is_multiple_of(self.stride) {
             self.frames.push(commands);
-            #[cfg(test)]
             self.clocks.push(clock);
-            if self.frames.len() > PREVIEW_MAX_FRAMES {
+            if self.frames.len() > self.budget {
                 self.halve();
             }
         }

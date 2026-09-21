@@ -47,6 +47,7 @@ use super::load::GameDataCache;
 use super::load::GameDataStatus;
 use super::load::spawn_startup_preload;
 use super::panel::ReplayPanel;
+use crate::replay_renderer::ReplayRendererPanel;
 
 /// Sidebar width for the file browser, matching the egui app's left panel.
 const BROWSER_WIDTH: Pixels = px(280.);
@@ -106,6 +107,9 @@ pub struct ReplayInspectorView {
     /// closed until the next open for that same path notices the weak
     /// handle no longer upgrades and replaces the entry.
     open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
+    /// The playback viewports open, one per replay, for the same reason
+    /// `open_panels` exists: a second ask brings the tab forward.
+    open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
     /// The expected-values table every replay tab rates its players against,
     /// loaded once per session beside the Stats tab's copy (`App::
     /// apply_session_stats`). Held here rather than fetched per tab so a
@@ -186,6 +190,7 @@ impl ReplayInspectorView {
             game_data_status: GameDataStatus::Loading,
             has_opened_replay: false,
             open_panels: HashMap::new(),
+            open_renderers: HashMap::new(),
             personal_rating: None,
             debug_mode: false,
             replay_settings: ReplaySettings::default(),
@@ -299,6 +304,7 @@ impl ReplayInspectorView {
     ) {
         match event {
             ReplayBrowserEvent::OpenReplay(path) => self.open_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
             // The game has just finished a match. The egui app opens it
             // straight away when this is on, which is what the checkbox
             // promises.
@@ -347,6 +353,42 @@ impl ReplayInspectorView {
             dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         self.has_opened_replay = true;
+        // A closed viewport leaves a dangling weak handle behind, and the
+        // map is only walked when one is asked for, so it is swept here.
+        self.open_renderers.retain(|_, panel| panel.upgrade().is_some());
+        cx.notify();
+    }
+
+    /// Opens a playback viewport on `path`, in a dock tab of its own.
+    ///
+    /// A second ask for the same replay brings the tab it is in forward
+    /// rather than baking the battle twice.
+    pub(crate) fn render_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else {
+            tracing::warn!(
+                path = %path.display(),
+                "replay inspector: render requested before the WoWs directory was known"
+            );
+            return;
+        };
+
+        if let Some(existing) = self.open_renderers.get(&path).and_then(|panel| panel.upgrade()) {
+            let id = PanelId::from(existing.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            cx.notify();
+            return;
+        }
+
+        let title: SharedString = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().into_owned())
+            .unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned())
+            .into();
+        let panel = cx.new(|cx| ReplayRendererPanel::new(path.clone(), title, game_data, window, cx));
+        self.open_renderers.insert(path, panel.downgrade());
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+        });
         cx.notify();
     }
 

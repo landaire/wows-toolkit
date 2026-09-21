@@ -598,6 +598,12 @@ victory = "Victory"
 defeat = "Defeat"
 draw = "Draw"
 
+[ui.replay.renderer]
+baking = "Reading the replay and walking the battle..."
+failed = "This replay could not be played back"
+play = "Play"
+pause = "Pause"
+
 [ui.replay.controls]
 window_title = "Replay Controls"
 unavailable = "Controls not available (commands.scheme.xml not found in game files)."

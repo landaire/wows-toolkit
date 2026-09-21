@@ -229,6 +229,8 @@ enum ScanError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayBrowserEvent {
     OpenReplay(PathBuf),
+    /// Play this replay's battle back on its minimap.
+    RenderReplay(PathBuf),
     /// The game has just written a replay into the watched directory, and the
     /// listing now holds it.
     ReplayAppeared(PathBuf),
@@ -918,6 +920,8 @@ impl Render for ReplayBrowser {
                     };
 
                     let open_path = leaf.path.clone();
+                    let render_path = leaf.path.clone();
+                    let render_entity = context_menu_entity.clone();
                     let copy_path = leaf.path.clone();
                     let copy_file = leaf.path.clone();
                     let in_game_path = leaf.path.clone();
@@ -927,6 +931,12 @@ impl Render for ReplayBrowser {
                         move |_event, _window, cx| {
                             let path = open_path.clone();
                             open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
+                        },
+                    ))
+                    .item(PopupMenuItem::new(t!("ui.replay.context.render_replay").into_owned()).on_click(
+                        move |_event, _window, cx| {
+                            let path = render_path.clone();
+                            render_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::RenderReplay(path)));
                         },
                     ))
                     .item(PopupMenuItem::new(t!("ui.replay.context.copy_replay").into_owned()).on_click(

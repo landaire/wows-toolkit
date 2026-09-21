@@ -87,6 +87,61 @@ pub fn bake_from_file(
     bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map, on_frame)
 }
 
+/// A battle walked once: every kept frame's draw commands, the clock each was
+/// drawn at, and the renderer they are rasterised through.
+pub type BakedTrack = (Vec<Vec<DrawCommand>>, Vec<wows_replays::types::GameClock>, PreviewRenderer);
+
+/// Walks `path`'s battle once, keeping the draw commands of up to `budget`
+/// frames and the renderer they are drawn through.
+///
+/// The same pass the hover preview makes, kept as commands rather than
+/// rasterised: a playback viewport draws one frame at a time and rasterising
+/// a whole battle up front would cost gigabytes. `frame_interval` is how much
+/// game time one frame covers; `budget` bounds the track, so a long battle is
+/// sampled more coarsely rather than costing more.
+pub fn bake_track(
+    path: &std::path::Path,
+    game_data: &crate::replay_inspector::GameDataCache,
+    cancel: &AtomicBool,
+    budget: usize,
+    frame_interval: f32,
+) -> Result<BakedTrack, PreviewError> {
+    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
+        .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let build =
+        version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let loaded =
+        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+
+    let provider = loaded.provider().as_ref();
+    let vfs = loaded.vfs();
+    let map_name = replay.meta.mapName.clone();
+    let map_info =
+        assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
+
+    let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+    let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
+    renderer.set_fonts(assets::load_game_fonts(vfs));
+    let target = PreviewRenderer::new(vfs, Some(&version), &map_name)?;
+
+    let mut session =
+        MergedReplays::new(provider.entity_specs(), provider, loaded.base_constants(), session_version, &replay, &[])
+            .map_err(|_| PreviewError::UnreadableReplay)?;
+    session.world_mut().set_shot_tracking(ShotTracking::Tracked);
+
+    let mut sink = TrackSink::with_budget(budget);
+    build_frame_track(&mut session, &mut renderer, frame_interval, cancel, &mut sink);
+    session.finish();
+
+    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+        return Err(PreviewError::Cancelled);
+    }
+
+    let clocks = sink.kept_clocks().to_vec();
+    Ok((sink.finish(), clocks, target))
+}
+
 /// The map `map_name` names, with nothing drawn over it.
 ///
 /// Rendered from whichever build is already open rather than the one the
