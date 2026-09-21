@@ -79,6 +79,20 @@ impl AppTab {
             AppTab::Settings => "Settings",
         }
     }
+
+    /// The glyph in front of the label, as the egui tab strip carries
+    /// (`app.rs`'s `icon_t` pairs).
+    pub fn glyph(self) -> &'static str {
+        match self {
+            AppTab::ReplayInspector => crate::icons::ARCHIVE,
+            AppTab::Stats => crate::icons::CHART_BAR,
+            AppTab::PlayerTracker => crate::icons::DETECTIVE,
+            AppTab::Search => crate::icons::MAGNIFYING_GLASS,
+            AppTab::ArmorViewer => crate::icons::SHIELD,
+            AppTab::Unpacker => crate::icons::ARCHIVE,
+            AppTab::Settings => crate::icons::GEAR_FINE,
+        }
+    }
 }
 
 /// Load status of the settings snapshot fetched from the shared config DB.
@@ -897,7 +911,9 @@ impl Render for App {
         let active_ix = AppTab::ALL.iter().position(|t| *t == self.active_tab).unwrap_or(0);
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
-            .children(AppTab::ALL.iter().map(|t| Tab::new().label(t.label())))
+            .children(AppTab::ALL.iter().map(|t| {
+                Tab::new().child(h_flex().gap_1().items_center().child(crate::icons::icon(t.glyph())).child(t.label()))
+            }))
             .on_click(cx.listener(|this, ix: &usize, _window, cx| {
                 this.active_tab = AppTab::ALL[*ix];
                 this.poll_armor_game_data(cx);
@@ -948,7 +964,11 @@ impl Render for App {
                 }
             }))
             .child(tabs)
-            .child(div().flex_1().child(body))
+            // The rule under the strip, in the tone meant to be seen: it is
+            // what separates the chrome from the page rather than two greys
+            // meeting.
+            .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
+            .child(div().flex_1().min_h(px(0.)).bg(cx.theme().background).child(body))
             .when(self.debug_mode, |this| this.child(debug_notice))
     }
 }
