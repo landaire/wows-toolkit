@@ -23,32 +23,18 @@ pub fn ship_class_icon_from_species(species: Species, wows_data: &BuildData) -> 
     wows_data.assets.ship_icons.get(&species).cloned()
 }
 
-/// What a player is, for colouring. Resolved to a colour at draw time so the
-/// scoreboard follows the active theme without rebuilding the report.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PlayerTint {
-    SelfPlayer,
-    Ally,
-    Enemy,
-    DivisionMate,
-    Abuser,
+/// What a player is, for colouring. The classification is shared with the
+/// GPUI port; only the colour it resolves to is an egui concern.
+pub use wows_toolkit_viewmodel::player_tracker::live::PlayerTint;
+
+/// A tint's colour under the active theme. An extension trait because the
+/// enum lives in the viewmodel and cannot carry an inherent egui method.
+pub trait PlayerTintColor {
+    fn color(self, visuals: &egui::Visuals) -> Color32;
 }
 
-impl PlayerTint {
-    /// Classifies by relation alone (self/ally/enemy). Division-mate and
-    /// abuser overrides are layered on top by the caller, since those are
-    /// stronger classifications than plain relation.
-    pub fn from_relation(relation: Relation) -> Self {
-        if relation.is_self() {
-            Self::SelfPlayer
-        } else if relation.is_ally() {
-            Self::Ally
-        } else {
-            Self::Enemy
-        }
-    }
-
-    pub fn color(self, visuals: &egui::Visuals) -> Color32 {
+impl PlayerTintColor for PlayerTint {
+    fn color(self, visuals: &egui::Visuals) -> Color32 {
         let sem = crate::ui::theme::semantic::semantic(visuals);
         match self {
             Self::SelfPlayer => sem.text_strong,
@@ -57,14 +43,6 @@ impl PlayerTint {
             Self::DivisionMate => sem.division,
             Self::Abuser => sem.abuser,
         }
-    }
-
-    /// Applies the abuser override on top of this (row) tint: abuser beats
-    /// everything else, including DivisionMate. This is the role the
-    /// player's name renders with; the row's other colours (stats, icon)
-    /// use the tint as-is, without this override.
-    pub fn with_abuser_override(self, is_abuser: bool) -> Self {
-        if is_abuser { Self::Abuser } else { self }
     }
 }
 

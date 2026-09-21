@@ -26,6 +26,7 @@ pub use models::DamageInteraction;
 pub use models::Hits;
 pub use models::PlayerReport;
 pub use models::PlayerTint;
+pub use models::PlayerTintColor;
 pub use models::PotentialDamage;
 pub use models::SkillInfo;
 pub use models::TranslatedBuild;
