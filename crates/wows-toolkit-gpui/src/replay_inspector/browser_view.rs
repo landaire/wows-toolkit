@@ -443,6 +443,11 @@ impl ReplayBrowser {
     /// updates; after that the first hover pays for the older build every
     /// session. Warming what the listing actually holds moves that cost off
     /// the first hover.
+    /// Whether the scan found no replay files at all.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
+
     fn warm_listed_build(&mut self, cx: &mut Context<Self>) {
         let Some(cache) = self.build_cache.clone() else { return };
         let Some(build) = most_common_build(&self.files) else { return };

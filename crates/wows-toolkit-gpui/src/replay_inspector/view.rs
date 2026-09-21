@@ -246,12 +246,27 @@ impl ReplayInspectorView {
         });
 
         let preload = spawn_startup_preload(PathBuf::from(&wows_dir), game_data, cx);
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let status = preload.await;
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.game_data_status = status.clone();
                 let browser = this.browser.clone();
                 browser.update(cx, |browser, cx| browser.set_game_data(&status, cx));
+                // What the egui app reports when the same load finishes
+                // (`app.rs`'s `GameDataLoaded`): the install is readable, and
+                // separately whether it has any replays to show.
+                match &status {
+                    GameDataStatus::Ready(_) => {
+                        crate::toast::ok(t!("ui.messages.game_data_loaded").to_string(), window, cx);
+                        if this.browser.read(cx).is_empty() {
+                            crate::toast::warn(t!("ui.messages.no_replays_detected").to_string(), window, cx);
+                        }
+                    }
+                    GameDataStatus::Failed(reason) => {
+                        crate::toast::failed(reason.clone(), window, cx);
+                    }
+                    GameDataStatus::Loading => {}
+                }
                 cx.notify();
             });
         })

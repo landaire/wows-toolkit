@@ -16,11 +16,13 @@ kept so the next audit does not re-report them.
   Caching `PreviewRenderer` per build and map is the fix. (Latency is no
   longer the reason to do it: measured, the asset load is 50 ms and the build
   load that dominated is now warmed at startup.)
-- The port raises no toasts where the egui app raises 88. A helper and the
-  Twitch, clipboard and chat-save messages are wired; the rest are not.
-  (`Root` holds the queue but the window's own view has to draw the layer,
-  which `App::render` now does; before that every toast and dialog was
-  silent.)
+- Toasts: `Root` holds the queue but the window's own view has to draw the
+  layer, which `App::render` now does; before that every toast and dialog was
+  silent. Wired: the game-data load and its empty-replays warning, an invalid
+  game directory, a failed replay parse, the Twitch credential, a copied
+  login, path and chat, a saved chat, and the armor export. The rest of the
+  egui app's 88 belong to features not ported yet (collab sessions, the
+  replay renderer, the game-data cache, constants, the updater).
 - [done] The command palette is `gpui_kit::component::command` over
   `palette.rs`, on ctrl+k and ctrl+shift+p. The egui palette's cascading
   sub-modes (search a player, a ship, a ship's armor) are not ported.

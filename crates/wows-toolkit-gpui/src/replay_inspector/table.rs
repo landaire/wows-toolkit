@@ -767,8 +767,9 @@ fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> 
         let login = first.login.clone();
         return Some(
             glyph
-                .on_click(move |_event, _window, cx| {
+                .on_click(move |_event, window, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
+                    crate::toast::ok(t!("ui.twitch.copied", name = login).into_owned(), window, cx);
                 })
                 .into_any_element(),
         );
@@ -784,8 +785,9 @@ fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> 
                 for login in &logins {
                     let login = login.clone();
                     menu = menu.item(PopupMenuItem::new(login.clone()).icon(IconName::Copy).on_click(
-                        move |_event, _window, cx| {
+                        move |_event, window, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
+                            crate::toast::ok(t!("ui.twitch.copied", name = login).into_owned(), window, cx);
                         },
                     ));
                 }

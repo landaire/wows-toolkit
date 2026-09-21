@@ -1507,8 +1507,9 @@ fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ro
     if candidates.len() == 1 {
         let login = first.login.clone();
         return slot
-            .child(trigger.on_click(move |_event, _window, cx: &mut App| {
-                cx.write_to_clipboard(ClipboardItem::new_string(login.clone()))
+            .child(trigger.on_click(move |_event, window, cx: &mut App| {
+                cx.write_to_clipboard(ClipboardItem::new_string(login.clone()));
+                crate::toast::ok(t!("ui.twitch.copied", name = login).into_owned(), window, cx);
             }))
             .into_any_element();
     }
@@ -1524,8 +1525,9 @@ fn twitch_chip(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ro
                         Button::new(SharedString::from(format!("tracker-twitch-pick-{side}-{index}-{slot_index}")))
                             .label(login)
                             .compact()
-                            .on_click(move |_event, _window, cx: &mut App| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()))
+                            .on_click(move |_event, window, cx: &mut App| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
+                                crate::toast::ok(t!("ui.twitch.copied", name = copied).into_owned(), window, cx);
                             })
                     },
                 ))

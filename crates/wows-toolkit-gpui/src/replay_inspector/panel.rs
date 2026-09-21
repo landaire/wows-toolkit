@@ -324,7 +324,13 @@ impl ReplayPanel {
                 self.export = Some(export);
                 self.loaded_state(model, game_data.vfs().clone(), raw_metadata_json, raw_results_json, window, cx)
             }
-            Err(err) => LoadState::Failed(err),
+            Err(err) => {
+                // The panel says what went wrong; the toast is so a reader
+                // who has moved on still learns it did, which is what the
+                // egui app reports here (`ui/replay_parser/mod.rs`).
+                crate::toast::failed(t!("ui.messages.replay_load_failed").to_string(), window, cx);
+                LoadState::Failed(err)
+            }
         };
         cx.notify();
     }
