@@ -13,6 +13,7 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -32,10 +33,11 @@ use std::time::Instant;
 
 use jiff::Timestamp;
 use sqlx::sqlite::SqlitePool;
-use wows_toolkit_viewmodel::player_tracker::ClanRow;
+use wows_toolkit_viewmodel::player_tracker::clans::ClanRow;
 
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::rows::ClanCorrection;
 use wows_toolkit_config::index::rows::PlayerFacet;
 use wows_toolkit_config::queries;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
@@ -48,7 +50,8 @@ use wows_toolkit_viewmodel::player_tracker::Sort;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortOrder;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
-use wows_toolkit_viewmodel::player_tracker::clan_rows;
+use wows_toolkit_viewmodel::player_tracker::clans::build_clan_breakdown;
+use wows_toolkit_viewmodel::player_tracker::clans::visible_clans;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
@@ -180,6 +183,14 @@ pub struct PlayerTrackerView {
     /// egui app through the `player_tracker_data` blob, so a note written in
     /// either is the note both show.
     tracked: HashMap<AccountId, TrackedPlayer>,
+    /// The index's latest clan per account, which wins over the tracker's
+    /// wherever the index knows the account, and the per-encounter
+    /// corrections for accounts whose clan at the time differed.
+    clan_latest: HashMap<AccountId, String>,
+    clan_corrections: Vec<ClanCorrection>,
+    /// Whether the clans table counts battles the user arranged. Stored in
+    /// the shared tracker blob, so the egui app opens on the same answer.
+    show_division_mates: bool,
     /// The account whose note is open for editing, and the field holding it.
     editing_note: Option<AccountId>,
     /// Why the last note did not save, shown beside the editor. `None` when
@@ -250,6 +261,9 @@ impl PlayerTrackerView {
             twitch_candidates: HashMap::new(),
             _chat_watch: None,
             tracked: HashMap::new(),
+            clan_latest: HashMap::new(),
+            clan_corrections: Vec::new(),
+            show_division_mates: false,
             editing_note: None,
             note_error: None,
             note_generation: 0,
@@ -350,6 +364,7 @@ impl PlayerTrackerView {
                         this.tracked = players;
                         this.win_rate_mode = modes.win_rate_mode;
                         this.view_mode = modes.current_match_view_mode;
+                        this.show_division_mates = modes.show_division_mates;
                         cx.notify();
                     });
                 }
@@ -499,11 +514,49 @@ impl PlayerTrackerView {
         .detach();
     }
 
+    /// Reads what the clans table needs from the replay index: the latest
+    /// clan per account, and the encounters whose clan at the time differed.
+    ///
+    /// Neither answer depends on the period or the division toggle, so this
+    /// runs with the refresh rather than per table rebuild. A failure leaves
+    /// the table counting on the tracker's own clan per player, which is the
+    /// same answer wherever the index has nothing fresher.
+    fn load_clan_inputs(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
+        let generation = self.generation;
+        cx.spawn(async move |this, cx| {
+            let found = runtime::spawn(cx, async move {
+                let filter = wows_toolkit_config::index::rows::MatchFilter::default();
+                let latest = query::distinct_players(&pool, &filter).await?;
+                let corrections = query::clan_history_corrections(&pool, &filter).await?;
+                Ok::<_, wows_toolkit_config::index::rows::IndexError>((latest, corrections))
+            })
+            .await;
+
+            let _ = this.update(cx, |this, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match found {
+                    Ok(Ok((latest, corrections))) => {
+                        this.clan_latest = latest.into_iter().map(|facet| (facet.account_id, facet.clan)).collect();
+                        this.clan_corrections = corrections;
+                        this.sync_rows(cx);
+                    }
+                    Ok(Err(err)) => tracing::warn!("player tracker: the clan inputs could not be read: {err}"),
+                    Err(err) => tracing::warn!("player tracker: the clan inputs did not load: {err}"),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     pub fn refresh(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.state = LoadState::Loading;
         self.load_tracked_players(pool.clone(), cx);
+        self.load_clan_inputs(pool.clone(), cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -542,8 +595,31 @@ impl PlayerTrackerView {
         visible_players(&self.players, &self.filter_text, self.sort)
     }
 
+    /// The clans table, counted over the tracked encounters.
+    ///
+    /// The index facets cannot answer this: they count rows in the replay
+    /// index, which carries no record of which battles the user arranged, so
+    /// a table built from them would ignore the division-mate toggle and
+    /// disagree with the egui app's figures.
     fn clans(&self) -> Vec<ClanRow> {
-        clan_rows(&self.players, &self.filter_text, self.clan_sort)
+        let since = self.period.earliest(Timestamp::now());
+        let rows = build_clan_breakdown(
+            &self.tracked,
+            &self.clan_latest,
+            &self.clan_corrections,
+            since,
+            self.show_division_mates,
+        );
+        visible_clans(rows, &self.filter_text, self.clan_sort)
+    }
+
+    fn set_show_division_mates(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_division_mates == show {
+            return;
+        }
+        self.show_division_mates = show;
+        self.store_view_modes(cx);
+        self.sync_rows(cx);
     }
 
     fn visible_len(&self) -> usize {
@@ -878,7 +954,11 @@ impl PlayerTrackerView {
     /// the mode chosen in one is the mode the other opens on.
     fn store_view_modes(&mut self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        let modes = tracked::ViewModes { win_rate_mode: self.win_rate_mode, current_match_view_mode: self.view_mode };
+        let modes = tracked::ViewModes {
+            win_rate_mode: self.win_rate_mode,
+            current_match_view_mode: self.view_mode,
+            show_division_mates: self.show_division_mates,
+        };
 
         cx.spawn(async move |_this, cx| {
             let written = runtime::spawn(cx, async move {
@@ -1436,7 +1516,21 @@ impl Render for PlayerTrackerView {
                     .items_center()
                     .child(Icon::new(IconName::Search))
                     .child(div().w(px(220.)).child(Input::new(&self.filter_input).id("tracker-filter").small())),
-            );
+            )
+            // Only the tables it filters offer it; the roster shows the
+            // battle in progress, which has no history to leave out.
+            .when(self.sub_tab != SubTab::CurrentMatch, |this| {
+                let show = self.show_division_mates;
+                this.child(
+                    Checkbox::new("tracker-show-division-mates")
+                        .label("Count division mates")
+                        .checked(show)
+                        .tooltip("Battles you arranged with someone inflate how often you have met them")
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            this.set_show_division_mates(!show, cx);
+                        })),
+                )
+            });
 
         // The Current Match roster is its own layout: two teams side by
         // side, each with its own header, so the shared table chrome below
@@ -1556,8 +1650,8 @@ impl Render for PlayerTrackerView {
                     .px_2()
                     .hover(|this| this.bg(hover_bg))
                     .child(div().w(CLAN_TAG_COLUMN_WIDTH).text_sm().child(row.clan.clone()))
-                    .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members_met.to_string()))
-                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(row.encounters.to_string()))
+                    .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))
+                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(row.matches.to_string()))
                     .into_any_element()
             }
         };
@@ -2082,5 +2176,69 @@ mod tests {
         .await;
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod clan_table_tests {
+    use gpui_kit::AppContext;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt;
+
+    use super::PlayerTrackerView;
+    use super::SubTab;
+    use jiff::Timestamp;
+    use std::collections::HashMap;
+    use wows_replays::types::AccountId;
+    use wows_replays::types::ArenaId;
+    use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
+
+    fn at(minute: i64) -> Timestamp {
+        Timestamp::from_second(1_700_000_000 + minute * 60).expect("a valid timestamp")
+    }
+
+    /// The clans table counts the tracked encounters, so the division-mate
+    /// toggle changes what it shows. Counting the replay index's rows instead
+    /// would ignore the toggle and disagree with the egui app.
+    #[gpui_kit::test]
+    fn the_division_toggle_changes_what_the_clans_table_counts(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        let mut player = TrackedPlayer { clan: "WTK".to_string(), ..TrackedPlayer::default() };
+        for (arena, minute) in [(1i64, 10i64), (2, 20)] {
+            player.arena_ids.insert(ArenaId::from(arena));
+            player.timestamps.insert(at(minute));
+        }
+        // One of the two was a battle the user arranged.
+        player.division_encounters.mark(ArenaId::from(2i64), at(20));
+        let tracked = HashMap::from([(AccountId(7), player)]);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.set_sub_tab(SubTab::Clans, cx);
+                tracker.seed_players_and_notes(Vec::new(), tracked, cx);
+
+                let rows = tracker.clans();
+                assert_eq!(rows.len(), 1, "the clan is listed from the tracked history");
+                assert_eq!(rows[0].matches, 1, "the arranged battle is left out by default");
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(window.find("tracker-show-division-mates").checked(), Some(false));
+            window.click("tracker-show-division-mates", cx);
+        })
+        .expect("the window is open");
+
+        window
+            .update(cx, |tracker, _window, _cx| {
+                assert!(tracker.show_division_mates, "the toggle flipped");
+                assert_eq!(tracker.clans()[0].matches, 2, "counting it back in adds the battle");
+            })
+            .expect("the window is open");
     }
 }
