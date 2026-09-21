@@ -23,6 +23,7 @@ use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use crate::armor_viewer::ArmorViewerPane;
 use crate::player_tracker::PlayerTrackerView;
@@ -74,16 +75,21 @@ impl AppTab {
         AppTab::Settings,
     ];
 
-    pub fn label(self) -> &'static str {
+    pub const fn label_key(self) -> &'static str {
         match self {
-            AppTab::ReplayInspector => "Replay Inspector",
-            AppTab::Stats => "Stats",
-            AppTab::PlayerTracker => "Player Tracker",
-            AppTab::Search => "Search",
-            AppTab::ArmorViewer => "Armor Viewer",
-            AppTab::Unpacker => "Unpacker",
-            AppTab::Settings => "Settings",
+            AppTab::ReplayInspector => "ui.tabs.replay_parser",
+            AppTab::Stats => "ui.tabs.stats",
+            AppTab::PlayerTracker => "ui.tabs.player_tracker",
+            AppTab::Search => "ui.tabs.search",
+            AppTab::ArmorViewer => "ui.tabs.armor_viewer",
+            AppTab::Unpacker => "ui.tabs.unpacker",
+            AppTab::Settings => "ui.tabs.settings",
         }
+    }
+
+    /// The tab's name in the reader's own language.
+    pub fn label(self) -> String {
+        t!(self.label_key()).into_owned()
     }
 
     /// The glyph in front of the label, as the egui tab strip carries
@@ -211,9 +217,10 @@ impl App {
         let stats = cx.new(|cx| StatsView::new(window, cx));
         let player_tracker = cx.new(|cx| PlayerTrackerView::new(window, cx));
         let search = cx.new(|cx| SearchView::new(window, cx));
-        let wows_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("World of Warships directory"));
-        let twitch_channel_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Channel to watch (blank: your own)"));
+        let wows_dir_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.settings.wows.directory_hint").to_string()));
+        let twitch_channel_input = cx
+            .new(|cx| InputState::new(window, cx).placeholder(t!("ui.settings.twitch.monitored_channel").to_string()));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
         let languages: SearchableVec<LanguageItem> =
             SearchableVec::new(wt_translations::SUPPORTED_LANGUAGES.iter().map(LanguageItem).collect::<Vec<_>>());
@@ -493,18 +500,18 @@ impl App {
     }
 }
 
-fn section_heading(title: &'static str, description: &'static str) -> impl IntoElement {
+fn section_heading(title: String, description: String) -> impl IntoElement {
     v_flex()
         .gap_1()
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(title))
         .child(div().text_xs().text_color(crate::theme::text_dim()).child(description))
 }
 
-fn settings_row(label: &'static str, value: String) -> impl IntoElement {
+fn settings_row(label: String, value: String) -> impl IntoElement {
     h_flex()
         .gap_2()
         .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(label))
-        .child(div().text_sm().child(if value.is_empty() { "(not set)".to_string() } else { value }))
+        .child(div().text_sm().child(if value.is_empty() { t!("ui.settings.not_set").into_owned() } else { value }))
 }
 
 impl App {
@@ -513,14 +520,11 @@ impl App {
             .gap_2()
             .items_center()
             .child(
-                div()
-                    .text_sm()
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child("Zoom Factor (Ctrl + and Ctrl - also changes this)"),
+                div().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("ui.settings.app.zoom_factor").to_string()),
             )
             .child(Slider::new(&self.zoom_slider).w(px(160.)))
             .child(div().text_sm().w(px(40.)).child(format!("{:.2}", self.zoom)))
-            .child(Button::new("reset-zoom").label("Reset").compact().on_click(cx.listener(
+            .child(Button::new("reset-zoom").label(t!("ui.buttons.reset").to_string()).compact().on_click(cx.listener(
                 |this, _event: &ClickEvent, window, cx| {
                     this.zoom = DEFAULT_ZOOM;
                     theme::apply_egui_theme(this.theme, this.zoom, window, cx);
@@ -741,14 +745,21 @@ impl App {
             SettingsState::Loading => {
                 return v_flex()
                     .p_4()
-                    .child(div().text_sm().text_color(crate::theme::text_dim()).child("Loading settings..."))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.settings.loading").to_string()),
+                    )
                     .into_any_element();
             }
             SettingsState::Failed(reason) => {
                 return v_flex()
                     .p_4()
                     .gap_1()
-                    .child(div().text_sm().font_weight(FontWeight::BOLD).child("Failed to load settings"))
+                    .child(
+                        div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.settings.load_failed").to_string()),
+                    )
                     .child(div().text_sm().text_color(crate::theme::text_dim()).child(reason.clone()))
                     .into_any_element();
             }
@@ -764,18 +775,21 @@ impl App {
 
         let application = v_flex()
             .gap_2()
-            .child(section_heading("Application Settings", "General application behavior and appearance"))
+            .child(section_heading(
+                t!("ui.settings.app.heading").into_owned(),
+                t!("ui.settings.app.description").into_owned(),
+            ))
             .child(
                 Button::new("open-data-dir")
                     .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
-                    .label("Open data directory")
+                    .label(t!("ui.settings.app.open_data_dir").to_string())
                     .compact()
-                    .tooltip("Where the settings database, the replay index and the cached game data live")
+                    .tooltip(t!("ui.settings.app.open_data_dir_tooltip").to_string())
                     .on_click(|_event, _window, _cx| open_data_directory()),
             )
             .child(
                 Checkbox::new("check-for-updates")
-                    .label("Check for updates at startup")
+                    .label(t!("ui.settings.app.check_for_updates").to_string())
                     .checked(check_for_updates)
                     .on_click(cx.listener(|this, checked: &bool, _window, cx| {
                         let checked = *checked;
@@ -785,28 +799,31 @@ impl App {
                         });
                     })),
             )
-            .child(Checkbox::new("enable-logging").label("Write a log file").checked(enable_logging).on_click(
-                cx.listener(|this, checked: &bool, _window, cx| {
-                    let checked = *checked;
-                    this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
-                        settings.enable_logging = checked;
-                        checked
-                    });
-                }),
-            ))
+            .child(
+                Checkbox::new("enable-logging")
+                    .label(t!("ui.settings.app.enable_logging").to_string())
+                    .checked(enable_logging)
+                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                        let checked = *checked;
+                        this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
+                            settings.enable_logging = checked;
+                            checked
+                        });
+                    })),
+            )
             .child(self.render_zoom_row(cx))
             .child(
-                v_flex().gap_1().child(div().text_sm().child("Language")).child(
+                v_flex().gap_1().child(div().text_sm().child(t!("ui.settings.app.language").to_string())).child(
                     Select::new(&self.language_select)
                         .id("settings-language")
-                        .accessibility_label("Language")
+                        .accessibility_label(t!("ui.settings.app.language").to_string())
                         .small()
                         .w(LANGUAGE_COMBO_WIDTH)
                         .menu_width(LANGUAGE_COMBO_WIDTH),
                 ),
             )
-            .child(v_flex().gap_1().child(div().text_sm().child("Theme")).child(h_flex().gap_2().children(
-                ThemeChoice::ALL.map(|choice| {
+            .child(v_flex().gap_1().child(div().text_sm().child(t!("ui.settings.app.theme").to_string())).child(
+                h_flex().gap_2().children(ThemeChoice::ALL.map(|choice| {
                     selectable(
                         ("theme-choice", choice as usize),
                         theme_choice == choice,
@@ -823,12 +840,12 @@ impl App {
                                 theme::apply_egui_theme(choice, this.zoom, window, cx);
                             })),
                     )
-                }),
-            )))
+                })),
+            ))
             .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_sm().child("Data sharing"))
+                    .child(div().text_sm().child(t!("ui.settings.app.data_sharing_mode").to_string()))
                     .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
                         selectable(
                             ("data-sharing", mode as usize),
@@ -851,22 +868,22 @@ impl App {
             .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_sm().child("Proxy URL"))
+                    .child(div().text_sm().child(t!("ui.settings.app.proxy_url").to_string()))
                     .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full()),
             )
             .child(
                 v_flex()
                     .gap_1()
-                    .child(div().text_sm().child("Twitch"))
+                    .child(div().text_sm().child(t!("ui.settings.twitch.heading").to_string()))
                     .child(
                         h_flex()
                             .gap_2()
                             .items_center()
                             .child(
                                 Button::new("twitch-paste-token")
-                                    .label("Paste credential")
+                                    .label(t!("ui.settings.twitch.paste_token_no_token").to_string())
                                     .compact()
-                                    .tooltip("Reads the credential from the clipboard")
+                                    .tooltip(t!("ui.settings.twitch.paste_token_tooltip").to_string())
                                     .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
                             )
                             .child(
@@ -888,7 +905,10 @@ impl App {
 
         let game = v_flex()
             .gap_2()
-            .child(section_heading("World of Warships Settings", "Path to your World of Warships installation"))
+            .child(section_heading(
+                t!("ui.settings.wows.heading").into_owned(),
+                t!("ui.settings.wows.description").into_owned(),
+            ))
             .child(
                 h_flex()
                     .gap_2()
@@ -897,7 +917,7 @@ impl App {
                     .child(
                         Button::new("wows-dir-browse")
                             .icon(IconName::FolderOpen)
-                            .label("Browse...")
+                            .label(t!("ui.settings.wows.cache.browse").to_string())
                             .compact()
                             .on_click(cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx))),
                     ),
@@ -905,21 +925,27 @@ impl App {
 
         let replay_section = v_flex()
             .gap_2()
-            .child(section_heading("Replay Settings", "Which columns appear in the replay results table"))
-            .child(settings_row("Current Replay Path", current_replay_path))
+            .child(section_heading(
+                t!("ui.settings.replay.heading").into_owned(),
+                t!("ui.settings.replay.description").into_owned(),
+            ))
+            .child(settings_row(t!("ui.settings.replay.current_path").into_owned(), current_replay_path))
             .child(
                 h_flex()
                     .flex_wrap()
                     .gap_4()
-                    .child(Checkbox::new("show-raw-xp").label("Show Raw XP").checked(replay.show_raw_xp).on_click(
-                        cx.listener(|this, checked: &bool, _window, cx| {
-                            let checked = *checked;
-                            this.edit_replay_settings(cx, |replay| replay.show_raw_xp = checked);
-                        }),
-                    ))
+                    .child(
+                        Checkbox::new("show-raw-xp")
+                            .label(t!("ui.settings.replay.show_raw_xp").to_string())
+                            .checked(replay.show_raw_xp)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                let checked = *checked;
+                                this.edit_replay_settings(cx, |replay| replay.show_raw_xp = checked);
+                            })),
+                    )
                     .child(
                         Checkbox::new("show-observed-damage")
-                            .label("Show Observed Damage")
+                            .label(t!("ui.settings.replay.show_observed_damage").to_string())
                             .checked(replay.show_observed_damage)
                             .on_click(cx.listener(|this, checked: &bool, _window, cx| {
                                 let checked = *checked;
@@ -928,22 +954,25 @@ impl App {
                     )
                     .child(
                         Checkbox::new("show-entity-id")
-                            .label("Show Entity ID")
+                            .label(t!("ui.settings.replay.show_entity_id").to_string())
                             .checked(replay.show_entity_id)
                             .on_click(cx.listener(|this, checked: &bool, _window, cx| {
                                 let checked = *checked;
                                 this.edit_replay_settings(cx, |replay| replay.show_entity_id = checked);
                             })),
                     )
-                    .child(Checkbox::new("show-heals").label("Show Heals").checked(replay.show_heals).on_click(
-                        cx.listener(|this, checked: &bool, _window, cx| {
-                            let checked = *checked;
-                            this.edit_replay_settings(cx, |replay| replay.show_heals = checked);
-                        }),
-                    ))
+                    .child(
+                        Checkbox::new("show-heals")
+                            .label(t!("ui.settings.replay.show_heals").to_string())
+                            .checked(replay.show_heals)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                let checked = *checked;
+                                this.edit_replay_settings(cx, |replay| replay.show_heals = checked);
+                            })),
+                    )
                     .child(
                         Checkbox::new("enable-replay-previews")
-                            .label("Hover a replay to preview it")
+                            .label(t!("ui.settings.replay.enable_previews").to_string())
                             .checked(replay.enable_replay_previews)
                             .on_click(cx.listener(|this, checked: &bool, _window, cx| {
                                 let checked = *checked;
@@ -956,32 +985,37 @@ impl App {
         // reports them rather than offering a second way to set them.
         let armor = v_flex()
             .gap_2()
-            .child(section_heading("Armor Viewer Defaults", "Saved defaults for the armor viewport"))
+            .child(section_heading(
+                t!("ui.settings.armor.heading").into_owned(),
+                t!("ui.settings.armor.description").into_owned(),
+            ))
             .child(match &settings.armor_defaults {
                 Some(defaults) => h_flex()
                     .gap_4()
                     .child(
                         Checkbox::new("armor-show-plate-edges")
-                            .label("Show Plate Edges")
+                            .label(t!("ui.armor.plate_edges").to_string())
                             .checked(defaults.show_plate_edges)
                             .disabled(true),
                     )
                     .child(
                         Checkbox::new("armor-show-waterline")
-                            .label("Show Waterline")
+                            .label(t!("ui.armor.waterline").to_string())
                             .checked(defaults.show_waterline)
                             .disabled(true),
                     )
                     .child(
                         Checkbox::new("armor-hull-opaque")
-                            .label("Hull Opaque")
+                            .label(t!("ui.armor.opaque_hull").to_string())
                             .checked(defaults.hull_opaque)
                             .disabled(true),
                     )
                     .into_any_element(),
-                None => {
-                    div().text_sm().text_color(crate::theme::text_dim()).child("(no saved defaults)").into_any_element()
-                }
+                None => div()
+                    .text_sm()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.settings.armor.no_defaults").to_string())
+                    .into_any_element(),
             });
 
         div()
@@ -1086,7 +1120,13 @@ impl Render for App {
             .px_2()
             .py_1()
             .child(Icon::new(IconName::TriangleAlert).text_color(warning_color))
-            .child(div().text_sm().font_weight(FontWeight::BOLD).text_color(warning_color).child("Debug build"))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(warning_color)
+                    .child(t!("ui.app.debug_build").to_string()),
+            )
             .child(Icon::new(IconName::TriangleAlert).text_color(warning_color));
 
         v_flex()

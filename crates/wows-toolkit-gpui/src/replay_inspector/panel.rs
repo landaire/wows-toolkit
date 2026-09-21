@@ -59,6 +59,7 @@ use gpui_kit::component::popover::Popover;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -411,10 +412,10 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
 fn export_menu(panel: Entity<ReplayPanel>, can_export: bool) -> impl IntoElement {
     let trigger = Button::new("replay-export-trigger")
         .child(icons::icon(icons::DOWNLOAD_SIMPLE))
-        .label("Export")
+        .label(t!("ui.replay.section_export").to_string())
         .compact()
         .disabled(!can_export)
-        .when(!can_export, |this| this.tooltip("The replay is still loading"));
+        .when(!can_export, |this| this.tooltip(t!("ui.replay.loading").to_string()));
 
     Popover::new("replay-export").trigger(trigger).content(move |_state, _window, _cx| {
         let panel = panel.clone();
@@ -441,11 +442,11 @@ enum ExportFormat {
 impl ExportFormat {
     const ALL: [ExportFormat; 3] = [Self::Json, Self::Cbor, Self::Csv];
 
-    fn label(self) -> &'static str {
+    fn label(self) -> String {
         match self {
-            Self::Json => "Export Results as JSON",
-            Self::Cbor => "Export Results as CBOR",
-            Self::Csv => "Export Results as CSV",
+            Self::Json => t!("ui.replay.export_results_json").into_owned(),
+            Self::Cbor => t!("ui.replay.export_results_cbor").into_owned(),
+            Self::Csv => t!("ui.replay.export_results_csv").into_owned(),
         }
     }
 
@@ -542,10 +543,10 @@ fn personal_rating_badge(rating: PersonalRatingResult) -> AnyElement {
 struct SidePanelButtonSpec {
     id: &'static str,
     icon: IconName,
-    label: &'static str,
+    label_key: &'static str,
     panel: SidePanel,
     enabled: bool,
-    disabled_tooltip: Option<&'static str>,
+    disabled_tooltip_key: Option<&'static str>,
 }
 
 /// One side-panel toggle button: selected while `spec.panel` is the active
@@ -556,11 +557,13 @@ fn side_panel_button(spec: SidePanelButtonSpec, current: SidePanel, cx: &mut Con
     let panel = spec.panel;
     Button::new(spec.id)
         .icon(spec.icon)
-        .label(spec.label)
+        .label(t!(spec.label_key).into_owned())
         .compact()
         .selected(current == panel)
         .disabled(!spec.enabled)
-        .when_some((!spec.enabled).then_some(spec.disabled_tooltip).flatten(), |this, tooltip| this.tooltip(tooltip))
+        .when_some((!spec.enabled).then_some(spec.disabled_tooltip_key).flatten(), |this, key| {
+            this.tooltip(t!(key).into_owned())
+        })
         .on_click(cx.listener(move |this, _event, _window, cx| this.toggle_side_panel(panel, cx)))
         .into_any_element()
 }
@@ -601,10 +604,10 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         SidePanelButtonSpec {
             id: "replay-chat-toggle",
             icon: IconName::PanelRight,
-            label: "Chat",
+            label_key: "ui.replay.chat",
             panel: SidePanel::Chat,
             enabled: has_chat,
-            disabled_tooltip: Some("No chat messages were sent in this replay"),
+            disabled_tooltip_key: Some("ui.replay.no_chat"),
         },
         side_panel,
         cx,
@@ -625,10 +628,10 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                 SidePanelButtonSpec {
                     id: "replay-debug-raw-metadata",
                     icon: IconName::File,
-                    label: "Raw Metadata",
+                    label_key: "ui.replay.debug.raw_metadata",
                     panel: SidePanel::RawMetadata,
                     enabled: true,
-                    disabled_tooltip: None,
+                    disabled_tooltip_key: None,
                 },
                 side_panel,
                 cx,
@@ -637,10 +640,10 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                 SidePanelButtonSpec {
                     id: "replay-debug-raw-results",
                     icon: IconName::File,
-                    label: "Raw Results",
+                    label_key: "ui.replay.debug.raw_results",
                     panel: SidePanel::RawResults,
                     enabled: has_results,
-                    disabled_tooltip: Some("This replay has no battle-results packet"),
+                    disabled_tooltip_key: Some("ui.replay.debug.no_results_packet"),
                 },
                 side_panel,
                 cx,

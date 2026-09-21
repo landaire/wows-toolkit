@@ -10,9 +10,11 @@ kept so the next audit does not re-report them.
 
 ## Shell and visual design
 
-- Every string the port draws is an English literal. The egui app translates
-  through `t!`; the port now has its own `i18n!` and the penetration checker
-  reads from the catalog, but the rest of its chrome does not.
+- [done] Every string the port draws was an English literal. The port has its
+  own `i18n!` now, a language change sets both its own locale and the shared
+  one, and its chrome reads from the same catalog the egui app does. A test
+  (`main.rs`'s `translation_keys`) fails on a key the catalog has no entry
+  for. What is left untranslated is log text and test fixtures.
 
 - [done] The palette was egui's stock greys rather than Graphite and Bone
   (`ui/theme/palette.rs`): one surface, one border, one text tone. The seven

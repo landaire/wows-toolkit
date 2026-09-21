@@ -36,6 +36,7 @@ use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_toolkit_config::queries::ArmorViewerDefaultsRow;
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -1990,8 +1991,8 @@ impl Render for ViewportView {
         self.redraw_if_needed(window);
 
         let status: Option<String> = match &self.gpu {
-            GpuState::Initializing => Some("Initializing 3D viewport...".to_string()),
-            GpuState::Failed(reason) => Some(format!("Armor viewport failed to initialize: {reason}")),
+            GpuState::Initializing => Some(t!("ui.armor.initializing").into_owned().to_string()),
+            GpuState::Failed(reason) => Some(t!("ui.armor.init_failed", reason = reason).to_string()),
             GpuState::Ready { .. } => None,
         };
         // Nothing is drawn until a ship is picked, so the viewport carries
@@ -2002,7 +2003,7 @@ impl Render for ViewportView {
         // the ship on screen is never mistaken for the one being loaded.
         let loading_ship = self.ship_loading.clone();
         let empty_state = (self.current_armor.is_none() && loading_ship.is_none())
-            .then(|| status.clone().unwrap_or_else(|| "Select a ship from the list".to_string()));
+            .then(|| status.clone().unwrap_or_else(|| t!("ui.armor.select_ship").into_owned()));
         let image_child = match (loading_ship, empty_state, self.image.clone()) {
             (Some(name), _, _) => h_flex()
                 .size_full()
@@ -2010,7 +2011,12 @@ impl Render for ViewportView {
                 .justify_center()
                 .gap_2()
                 .child(Spinner::new())
-                .child(div().text_sm().text_color(crate::theme::text_dim()).child(format!("Loading {name}...")))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.armor.loading_named_ship", ship = name).to_string()),
+                )
                 .into_any_element(),
             (None, None, Some(image)) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
             (None, message, _) => h_flex()
@@ -2021,7 +2027,7 @@ impl Render for ViewportView {
                     div()
                         .text_sm()
                         .text_color(crate::theme::text_dim())
-                        .child(message.or(status).unwrap_or_else(|| "Rendering...".to_string())),
+                        .child(message.or(status).unwrap_or_else(|| t!("ui.armor.rendering").into_owned())),
                 )
                 .into_any_element(),
         };
@@ -2121,7 +2127,7 @@ impl Render for ViewportView {
                         .border_color(border)
                         .rounded(radius)
                         .shadow_md()
-                        .child(div().font_weight(FontWeight::BOLD).child("Export Ship Model"))
+                        .child(div().font_weight(FontWeight::BOLD).child(t!("ui.armor.export_model").to_string()))
                         .child(div().text_sm().child(format!(
                             "Export {display_name} to a glTF Binary (.glb) file. These 3D models and textures are IP of Wargaming and any usage of these models should be in compliance with your local laws."
                         )))
@@ -2129,12 +2135,12 @@ impl Render for ViewportView {
                             h_flex()
                                 .gap_2()
                                 .justify_end()
-                                .child(Button::new("armor-export-confirm-cancel").label("Cancel").compact().on_click(
+                                .child(Button::new("armor-export-confirm-cancel").label(t!("ui.buttons.cancel").to_string()).compact().on_click(
                                     move |_, _window, cx| {
                                         cancel_entity.update(cx, |view, cx| view.cancel_export(cx));
                                     },
                                 ))
-                                .child(Button::new("armor-export-confirm-export").label("Export").compact().on_click(
+                                .child(Button::new("armor-export-confirm-export").label(t!("ui.armor.export_button").to_string()).compact().on_click(
                                     move |_, _window, cx| {
                                         confirm_entity.update(cx, |view, cx| view.confirm_export(cx));
                                     },

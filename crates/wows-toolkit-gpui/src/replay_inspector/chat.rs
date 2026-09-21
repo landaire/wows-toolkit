@@ -18,6 +18,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wows_replays::analyzer::battle_controller::ChatChannel;
 use wows_replays::types::Relation;
 
@@ -129,13 +130,18 @@ fn render_message(ix: usize, message: &ChatMessage, border: Hsla) -> impl IntoEl
                 )
                 .child(div().text_color(body_color).child(message.message.clone())),
         )
-        .child(div().absolute().top_1().right_1().invisible().group_hover(group_name, |this| this.visible()).child(
-            Button::new(("chat-copy", ix)).icon(IconName::Copy).ghost().xsmall().tooltip("Copy message").on_click(
-                move |_event, _window, cx: &mut App| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.clone()));
-                },
+        .child(
+            div().absolute().top_1().right_1().invisible().group_hover(group_name, |this| this.visible()).child(
+                Button::new(("chat-copy", ix))
+                    .icon(IconName::Copy)
+                    .ghost()
+                    .xsmall()
+                    .tooltip(t!("ui.replay.copy_message").to_string())
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_payload.clone()));
+                    }),
             ),
-        ))
+        )
 }
 
 /// One open replay's chat log view. `panel.rs` constructs this once the
@@ -169,7 +175,11 @@ impl ChatPanel {
     /// Asks where to write the log and writes it there.
     fn save_to_file(&self, cx: &mut Context<Self>) {
         let transcript = self.transcript();
-        let asked = crate::dialog::save_file(Some("Save game chat"), &format!("{} - Game Chat.txt", self.title), None);
+        let asked = crate::dialog::save_file(
+            Some(t!("ui.replay.chat_save_title").as_ref()),
+            &format!("{} - Game Chat.txt", self.title),
+            None,
+        );
         cx.spawn(async move |_this, cx| {
             let Some(path) = asked.await else { return };
             let written = cx.background_spawn(async move { std::fs::write(&path, transcript) }).await;
@@ -203,13 +213,13 @@ impl Render for ChatPanel {
             .child(
                 Button::new("chat-copy-all")
                     .icon(IconName::Copy)
-                    .label("Copy all")
+                    .label(t!("ui.replay.chat_copy_all").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event, _window, cx| this.copy_all(cx))),
             )
             .child(
                 Button::new("chat-save")
-                    .label("Save to file")
+                    .label(t!("ui.replay.chat_save_to_file").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event, _window, cx| this.save_to_file(cx))),
             );

@@ -37,6 +37,7 @@ use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use wowsunpack::export::camo_textures::CamoSchemeId;
 use wowsunpack::export::camo_textures::CamoSchemeInfo;
@@ -100,9 +101,9 @@ fn render_export_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
 
     Button::new("armor-export-trigger")
         .icon(IconName::HardDrive)
-        .label("Export")
+        .label(t!("ui.replay.section_export").to_string())
         .compact()
-        .tooltip("Export ship model to a glTF Binary (.glb) file")
+        .tooltip(t!("ui.armor.export_tooltip").to_string())
         .disabled(!has_armor)
         .on_click(move |_, _window, cx| {
             click_entity.update(cx, |view, cx| view.open_export_confirm(cx));
@@ -118,7 +119,7 @@ fn render_visibility_button(view: &ViewportView, entity: &Entity<ViewportView>) 
         .trigger(
             Button::new("armor-visibility-popover-trigger")
                 .icon(IconName::Eye)
-                .label("Visibility")
+                .label(t!("ui.armor.visibility").to_string())
                 .compact()
                 .disabled(!has_armor),
         )
@@ -153,7 +154,12 @@ fn render_popover_content(
     };
 
     let Some(armor) = armor else {
-        return div().text_sm().text_color(crate::theme::text_dim()).p_2().child("No ship loaded").into_any_element();
+        return div()
+            .text_sm()
+            .text_color(crate::theme::text_dim())
+            .p_2()
+            .child(t!("ui.armor.no_ship_loaded").to_string())
+            .into_any_element();
     };
 
     let warn = cx.theme().warning;
@@ -168,18 +174,25 @@ fn render_popover_content(
         .flex_none()
         .gap_2()
         .items_center()
-        .child(Button::new("armor-vis-all").label("All").compact().on_click(move |_, _window, cx| {
-            all_entity.update(cx, |view, cx| view.set_all_parts_visible(cx));
-        }))
-        .child(Button::new("armor-vis-none").label("None").compact().on_click(move |_, _window, cx| {
-            none_entity.update(cx, |view, cx| view.set_all_parts_hidden(cx));
-        }))
+        .child(Button::new("armor-vis-all").label(t!("ui.armor.all_btn").to_string()).compact().on_click(
+            move |_, _window, cx| {
+                all_entity.update(cx, |view, cx| view.set_all_parts_visible(cx));
+            },
+        ))
+        .child(Button::new("armor-vis-none").label(t!("ui.armor.none_btn").to_string()).compact().on_click(
+            move |_, _window, cx| {
+                none_entity.update(cx, |view, cx| view.set_all_parts_hidden(cx));
+            },
+        ))
         .when(has_plate_overrides, |row| {
-            row.child(Button::new("armor-vis-reset-plates").label("Reset plates").compact().on_click(
-                move |_, _window, cx| {
-                    reset_entity.update(cx, |view, cx| view.reset_plate_overrides(cx));
-                },
-            ))
+            row.child(
+                Button::new("armor-vis-reset-plates")
+                    .label(t!("ui.armor.reset_plates").to_string())
+                    .compact()
+                    .on_click(move |_, _window, cx| {
+                        reset_entity.update(cx, |view, cx| view.reset_plate_overrides(cx));
+                    }),
+            )
         });
 
     let mut tree = v_flex().gap_1();
@@ -223,9 +236,9 @@ fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
         .trigger(
             Button::new("armor-hull-visibility-popover-trigger")
                 .icon(IconName::Frame)
-                .label("Hull")
+                .label(t!("ui.armor.hull_toggle").to_string())
                 .compact()
-                .tooltip("Hull visibility")
+                .tooltip(t!("ui.armor.hull_tooltip").to_string())
                 .disabled(!has_armor),
         )
         .on_open_change(move |open, _window, cx| {
@@ -284,7 +297,12 @@ fn render_hull_popover_content(
     };
 
     let Some(armor) = armor else {
-        return div().text_sm().text_color(crate::theme::text_dim()).p_2().child("No ship loaded").into_any_element();
+        return div()
+            .text_sm()
+            .text_color(crate::theme::text_dim())
+            .p_2()
+            .child(t!("ui.armor.no_ship_loaded").to_string())
+            .into_any_element();
     };
 
     let warn = cx.theme().warning;
@@ -300,32 +318,39 @@ fn render_hull_popover_content(
         .flex_none()
         .gap_2()
         .items_center()
-        .child(Button::new("armor-hull-vis-all").label("All").compact().on_click(move |_, _window, cx| {
-            let names = all_names_for_all.clone();
-            all_entity.update(cx, |view, cx| {
-                view.mutate_hull_visibility(cx, |hull_visibility| {
-                    for name in names {
-                        hull_visibility.insert(name, true);
-                    }
-                })
-            });
-        }))
-        .child(Button::new("armor-hull-vis-none").label("None").compact().on_click(move |_, _window, cx| {
-            let names = all_names.clone();
-            none_entity.update(cx, |view, cx| {
-                view.mutate_hull_visibility(cx, |hull_visibility| {
-                    for name in names {
-                        hull_visibility.insert(name, false);
-                    }
-                })
-            });
-        }))
-        .child(Checkbox::new("armor-hull-vis-opaque").label("Opaque").checked(hull_opaque).on_click(
-            move |checked, _window, cx| {
-                let checked = *checked;
-                opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
+        .child(Button::new("armor-hull-vis-all").label(t!("ui.armor.all_btn").to_string()).compact().on_click(
+            move |_, _window, cx| {
+                let names = all_names_for_all.clone();
+                all_entity.update(cx, |view, cx| {
+                    view.mutate_hull_visibility(cx, |hull_visibility| {
+                        for name in names {
+                            hull_visibility.insert(name, true);
+                        }
+                    })
+                });
             },
-        ));
+        ))
+        .child(Button::new("armor-hull-vis-none").label(t!("ui.armor.none_btn").to_string()).compact().on_click(
+            move |_, _window, cx| {
+                let names = all_names.clone();
+                none_entity.update(cx, |view, cx| {
+                    view.mutate_hull_visibility(cx, |hull_visibility| {
+                        for name in names {
+                            hull_visibility.insert(name, false);
+                        }
+                    })
+                });
+            },
+        ))
+        .child(
+            Checkbox::new("armor-hull-vis-opaque")
+                .label(t!("ui.armor.opaque").to_string())
+                .checked(hull_opaque)
+                .on_click(move |checked, _window, cx| {
+                    let checked = *checked;
+                    opaque_entity.update(cx, |view, cx| view.set_hull_opaque(checked, cx));
+                }),
+        );
 
     let mut col = v_flex().w(px(260.)).gap_2().child(header);
 
@@ -379,7 +404,11 @@ fn render_hull_upgrade_row(
     selected_hull: &Option<String>,
 ) -> AnyElement {
     let stock_key = &armor.hull_upgrade_names[0].0;
-    let mut row = h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child("Hull:"));
+    let mut row = h_flex()
+        .gap_1()
+        .items_center()
+        .flex_wrap()
+        .child(div().text_sm().flex_none().child(t!("ui.armor.upgrade").to_string()));
     for (key, label) in &armor.hull_upgrade_names {
         let is_selected = selected_hull.as_ref().map(|sel| sel == key).unwrap_or(key == stock_key);
         let toggle_entity = entity.clone();
@@ -445,9 +474,13 @@ fn render_module_alternative_row(
 /// (`ViewportView::select_hull_lod`, which triggers a reload). Ports the egui
 /// `selectable_label` row (`tab.rs:3253-3264`).
 fn render_lod_row(entity: &Entity<ViewportView>, armor: &LoadedShipArmor, hull_lod: usize) -> AnyElement {
-    let mut row = h_flex().gap_1().items_center().flex_wrap().child(div().text_sm().flex_none().child("LOD:"));
+    let mut row = h_flex()
+        .gap_1()
+        .items_center()
+        .flex_wrap()
+        .child(div().text_sm().flex_none().child(t!("ui.armor.lod").to_string()));
     for i in 0..armor.hull_lod_count {
-        let label = if i == 0 { "0 (highest)".to_string() } else { i.to_string() };
+        let label = if i == 0 { t!("ui.armor.lod_highest").into_owned() } else { i.to_string() };
         let is_selected = hull_lod == i;
         let toggle_entity = entity.clone();
         row = row.child(
@@ -478,13 +511,15 @@ fn render_camo_picker(
     selected_camo: Option<CamoSchemeId>,
     expanded_camo_groups: &HashSet<String>,
 ) -> AnyElement {
-    let mut col = v_flex().gap_1().child(div().text_sm().font_weight(FontWeight::BOLD).child("Camouflage"));
+    let mut col = v_flex()
+        .gap_1()
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.camouflage").to_string()));
 
     let none_entity = entity.clone();
     col = col.child(
         ListItem::new("armor-camo-none")
             .selected(selected_camo.is_none())
-            .child(div().text_sm().child("Stock"))
+            .child(div().text_sm().child(t!("ui.armor.camo_none").to_string()))
             .on_click(move |_, _window, cx| {
                 none_entity.update(cx, |view, cx| view.select_camo(None, cx));
             }),
@@ -498,16 +533,16 @@ fn render_camo_picker(
     }
 
     for (origin, label) in [
-        (CamoOrigin::Universal, "Universal"),
-        (CamoOrigin::Expendable, "Expendable"),
-        (CamoOrigin::LegacyScan, "Other"),
+        (CamoOrigin::Universal, "ui.armor.camo_group_universal"),
+        (CamoOrigin::Expendable, "ui.armor.camo_group_expendable"),
+        (CamoOrigin::LegacyScan, "ui.armor.camo_group_other"),
     ] {
         let mut group: Vec<&CamoSchemeInfo> = armor.camo_scheme_infos.iter().filter(|i| i.origin == origin).collect();
         if group.is_empty() {
             continue;
         }
         group.sort_by_key(|i| i.display_name.to_lowercase());
-        col = col.child(render_camo_group(entity, label, &group, selected_camo, expanded_camo_groups));
+        col = col.child(render_camo_group(entity, &t!(label), &group, selected_camo, expanded_camo_groups));
     }
 
     col.into_any_element()
@@ -673,9 +708,9 @@ fn render_display_button(view: &ViewportView, entity: &Entity<ViewportView>) -> 
         .trigger(
             Button::new("armor-display-settings-popover-trigger")
                 .icon(IconName::Settings)
-                .label("Display")
+                .label(t!("ui.armor.display").to_string())
                 .compact()
-                .tooltip("Display settings")
+                .tooltip(t!("ui.armor.display_tooltip").to_string())
                 .disabled(!has_armor),
         )
         .content(move |_state, window, cx| render_display_popover_content(&content_entity, window, cx))
@@ -749,25 +784,29 @@ fn render_display_popover_content(
         .w(px(260.))
         .gap_2()
         .child(
-            Checkbox::new("armor-display-plate-edges").label("Plate Edges").checked(display.show_plate_edges).on_click(
-                move |checked, _window, cx| {
+            Checkbox::new("armor-display-plate-edges")
+                .label(t!("ui.armor.plate_edges").to_string())
+                .checked(display.show_plate_edges)
+                .on_click(move |checked, _window, cx| {
                     let checked = *checked;
                     edges_entity
                         .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_plate_edges = checked));
-                },
-            ),
+                }),
         )
-        .child(Checkbox::new("armor-display-waterline").label("Waterline").checked(display.show_waterline).on_click(
-            move |checked, _window, cx| {
-                let checked = *checked;
-                waterline_entity
-                    .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_waterline = checked));
-            },
-        ));
+        .child(
+            Checkbox::new("armor-display-waterline")
+                .label(t!("ui.armor.waterline").to_string())
+                .checked(display.show_waterline)
+                .on_click(move |checked, _window, cx| {
+                    let checked = *checked;
+                    waterline_entity
+                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_waterline = checked));
+                }),
+        );
 
     if display.show_waterline {
         col = col.child(div().pl(px(20.)).child(labeled_slider_row(
-            "Opacity",
+            t!("ui.armor.opacity").into_owned(),
             &waterline_slider,
             display.waterline_opacity,
             false,
@@ -775,18 +814,27 @@ fn render_display_popover_content(
     }
 
     col = col
-        .child(Checkbox::new("armor-display-zero-mm").label("0 mm Plates").checked(display.show_zero_mm).on_click(
-            move |checked, _window, cx| {
-                let checked = *checked;
-                zero_mm_entity.update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_zero_mm = checked));
-            },
+        .child(
+            Checkbox::new("armor-display-zero-mm")
+                .label(t!("ui.armor.zero_mm_plates").to_string())
+                .checked(display.show_zero_mm)
+                .on_click(move |checked, _window, cx| {
+                    let checked = *checked;
+                    zero_mm_entity
+                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_zero_mm = checked));
+                }),
+        )
+        .child(labeled_slider_row(
+            t!("ui.armor.armor_opacity").into_owned(),
+            &armor_slider,
+            display.armor_opacity,
+            false,
         ))
-        .child(labeled_slider_row("Armor Opacity", &armor_slider, display.armor_opacity, false))
         .child(div().h(px(1.)).bg(border))
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child("Hull Lighting"))
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.lighting").to_string()))
         .child(
             Checkbox::new("armor-display-lighting-enabled")
-                .label("Enable lighting")
+                .label(t!("ui.armor.lighting_enabled").to_string())
                 .checked(lighting.enabled)
                 .on_click(move |checked, _window, cx| {
                     let checked = *checked;
@@ -798,7 +846,7 @@ fn render_display_popover_content(
                 .gap_1()
                 .child(
                     Button::new("armor-lighting-preset-ingame")
-                        .label("In-Game")
+                        .label(t!("ui.armor.lighting_preset_ingame").to_string())
                         .compact()
                         .disabled(!lighting.enabled)
                         .on_click(move |_, _window, cx| {
@@ -808,7 +856,7 @@ fn render_display_popover_content(
                 )
                 .child(
                     Button::new("armor-lighting-preset-flat")
-                        .label("Flat")
+                        .label(t!("ui.armor.lighting_preset_flat").to_string())
                         .compact()
                         .disabled(!lighting.enabled)
                         .on_click(move |_, _window, cx| {
@@ -818,7 +866,7 @@ fn render_display_popover_content(
                 )
                 .child(
                     Button::new("armor-lighting-preset-studio")
-                        .label("Studio")
+                        .label(t!("ui.armor.lighting_preset_studio").to_string())
                         .compact()
                         .disabled(!lighting.enabled)
                         .on_click(move |_, _window, cx| {
@@ -827,13 +875,48 @@ fn render_display_popover_content(
                         }),
                 ),
         )
-        .child(labeled_slider_row("Flat (ambient)", &flat_slider, lighting.flat_intensity, !lighting.enabled))
-        .child(labeled_slider_row("Light intensity", &key_slider, lighting.key_intensity, !lighting.enabled))
-        .child(labeled_slider_row("Light azimuth", &azimuth_slider, lighting.azimuth_deg, !lighting.enabled))
-        .child(labeled_slider_row("Light elevation", &elevation_slider, lighting.elevation_deg, !lighting.enabled))
-        .child(labeled_slider_row("Rim", &rim_slider, lighting.rim_strength, !lighting.enabled))
-        .child(labeled_slider_row("Specular", &specular_slider, lighting.specular_strength, !lighting.enabled))
-        .child(labeled_slider_row("Shininess", &shininess_slider, lighting.shininess, !lighting.enabled));
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_flat").into_owned(),
+            &flat_slider,
+            lighting.flat_intensity,
+            !lighting.enabled,
+        ))
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_intensity").into_owned(),
+            &key_slider,
+            lighting.key_intensity,
+            !lighting.enabled,
+        ))
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_azimuth").into_owned(),
+            &azimuth_slider,
+            lighting.azimuth_deg,
+            !lighting.enabled,
+        ))
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_elevation").into_owned(),
+            &elevation_slider,
+            lighting.elevation_deg,
+            !lighting.enabled,
+        ))
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_rim").into_owned(),
+            &rim_slider,
+            lighting.rim_strength,
+            !lighting.enabled,
+        ))
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_specular").into_owned(),
+            &specular_slider,
+            lighting.specular_strength,
+            !lighting.enabled,
+        ))
+        .child(labeled_slider_row(
+            t!("ui.armor.lighting_shininess").into_owned(),
+            &shininess_slider,
+            lighting.shininess,
+            !lighting.enabled,
+        ));
 
     col.into_any_element()
 }
@@ -845,7 +928,7 @@ fn render_display_popover_content(
 /// matches the egui original's `ui.add_enabled_ui(pane.lighting.enabled, ..)`
 /// wrapping the lighting sliders (`tab.rs:5053`); always `false` for the
 /// waterline/armor-opacity rows, which aren't lighting-gated.
-fn labeled_slider_row(label: &'static str, slider: &Entity<SliderState>, value: f32, disabled: bool) -> AnyElement {
+fn labeled_slider_row(label: String, slider: &Entity<SliderState>, value: f32, disabled: bool) -> AnyElement {
     h_flex()
         .gap_2()
         .items_center()
@@ -903,7 +986,12 @@ fn render_zone_row(
             .child(chevron)
             .child(checkbox)
             .child(div().text_sm().child(zone.name.clone()))
-            .child(div().text_xs().text_color(crate::theme::text_faint()).child("(ctrl+click to solo)")),
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_faint())
+                    .child(t!("ui.armor.ctrl_click_solo").to_string()),
+            ),
     );
 
     let mut column = v_flex().gap_1().child(header);

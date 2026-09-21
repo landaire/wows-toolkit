@@ -13,6 +13,7 @@ use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
 
@@ -119,7 +120,7 @@ impl Render for FileViewerPanel {
                     div()
                         .text_sm()
                         .text_color(crate::theme::text_dim())
-                        .child(format!("Could not decode this image: {reason}")),
+                        .child(t!("ui.unpacker.image_decode_failed", reason = reason).to_string()),
                 )
                 .into_any_element(),
         };

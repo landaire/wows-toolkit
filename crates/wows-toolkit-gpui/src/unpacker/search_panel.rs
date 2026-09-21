@@ -20,6 +20,7 @@ use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use super::browser::BrowserSource;
 use wows_toolkit_viewmodel::unpacker::search::ContentSearchHit;
@@ -112,7 +113,7 @@ impl BasePanel for SearchPanel {
 
 impl Panel for SearchPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        SharedString::from(format!("Search: {}", self.query))
+        SharedString::from(t!("ui.unpacker.search_title", query = self.query).to_string())
     }
 }
 
@@ -133,7 +134,12 @@ impl Render for SearchPanel {
             .border_color(border)
             .child(Icon::new(IconName::Search))
             .child(div().text_sm().child(self.query.clone()))
-            .child(div().text_xs().text_color(crate::theme::text_dim()).child(format!("in {}", self.source.title())))
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.unpacker.search_in", source = self.source.title()).to_string()),
+            )
             .child(div().flex_1().text_xs().text_color(crate::theme::text_dim()).child(format!(
                 "{} hits, {} of {} files",
                 self.hits.len(),
@@ -145,7 +151,7 @@ impl Render for SearchPanel {
             })
             .child(
                 Button::new("unpacker-search-stop")
-                    .label("Stop")
+                    .label(t!("ui.buttons.stop").to_string())
                     .compact()
                     .disabled(!self.running)
                     .on_click(cx.listener(|this, _event, _window, cx| this.stop(cx))),
@@ -185,7 +191,9 @@ impl Render for SearchPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().text_color(crate::theme::text_dim()).child("No matches"))
+                .child(
+                    div().text_sm().text_color(crate::theme::text_dim()).child(t!("ui.search.no_matches").to_string()),
+                )
                 .into_any_element()
         } else {
             div()

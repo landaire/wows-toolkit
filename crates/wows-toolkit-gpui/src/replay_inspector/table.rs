@@ -31,6 +31,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use super::columns::BattleOutcome;
 use super::columns::CaptainPointsTier;
@@ -213,26 +214,31 @@ fn measure_column_widths(
 
 /// Header label for a column, matching the egui app's `ui.replay.column.*`
 /// English strings.
-fn column_label(col: ReplayColumn) -> &'static str {
+const fn column_label_key(col: ReplayColumn) -> &'static str {
     match col {
-        ReplayColumn::Actions => "Actions",
-        ReplayColumn::Name => "Player Name",
-        ReplayColumn::ShipName => "Ship Name",
-        ReplayColumn::Skills => "Skills",
-        ReplayColumn::PersonalRating => "PR",
-        ReplayColumn::BaseXp => "Base XP",
-        ReplayColumn::RawXp => "Raw XP",
-        ReplayColumn::Kills => "Kills",
-        ReplayColumn::ObservedDamage => "Observed Damage",
-        ReplayColumn::ActualDamage => "Actual Damage",
-        ReplayColumn::ReceivedDamage => "Received Damage",
-        ReplayColumn::SpottingDamage => "Spotting Damage",
-        ReplayColumn::PotentialDamage => "Potential Damage",
-        ReplayColumn::Hits => "Hits",
-        ReplayColumn::Heals => "Heals",
-        ReplayColumn::DistanceTraveled => "Distance Traveled",
-        ReplayColumn::TimeLived => "Time Lived",
+        ReplayColumn::Actions => "ui.replay.actions",
+        ReplayColumn::Name => "ui.replay.column.player_name",
+        ReplayColumn::ShipName => "ui.replay.column.ship_name",
+        ReplayColumn::Skills => "ui.replay.column.skills",
+        ReplayColumn::PersonalRating => "ui.replay.column.personal_rating",
+        ReplayColumn::BaseXp => "stat.base_xp",
+        ReplayColumn::RawXp => "stat.raw_xp",
+        ReplayColumn::Kills => "ui.replay.column.kills",
+        ReplayColumn::ObservedDamage => "ui.replay.column.observed_damage",
+        ReplayColumn::ActualDamage => "ui.replay.column.actual_damage",
+        ReplayColumn::ReceivedDamage => "ui.replay.column.received_damage",
+        ReplayColumn::SpottingDamage => "stat.spotting_damage",
+        ReplayColumn::PotentialDamage => "ui.replay.column.potential_damage",
+        ReplayColumn::Hits => "ui.replay.column.hits",
+        ReplayColumn::Heals => "ui.replay.column.heals",
+        ReplayColumn::DistanceTraveled => "ui.replay.column.distance_traveled",
+        ReplayColumn::TimeLived => "ui.replay.column.time_lived",
     }
+}
+
+/// The column's heading in the reader's own language.
+fn column_label(col: ReplayColumn) -> String {
+    t!(column_label_key(col)).into_owned()
 }
 
 /// The `SortColumn` a header click sorts by, or `None` for the columns the
@@ -800,21 +806,25 @@ fn build_actions_menu(
     if show_ship_config {
         let mut added_any = false;
         if let Some(url) = row.ship_config_url.clone() {
-            menu = menu.item(PopupMenuItem::link("Open Build in Browser", url.clone()));
+            menu = menu.item(PopupMenuItem::link(t!("ui.replay.build.open_in_browser").into_owned(), url.clone()));
             let copy_url = url;
-            menu = menu.item(PopupMenuItem::new("Copy Build Link").icon(IconName::Copy).on_click(
-                move |_event, _window, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
-                },
-            ));
+            menu = menu.item(
+                PopupMenuItem::new(t!("ui.replay.build.copy_link").into_owned()).icon(IconName::Copy).on_click(
+                    move |_event, _window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
+                    },
+                ),
+            );
             added_any = true;
         }
         if let Some(url) = row.short_ship_config_url.clone() {
-            menu = menu.item(PopupMenuItem::new("Copy Short Build Link").icon(IconName::Copy).on_click(
-                move |_event, _window, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
-                },
-            ));
+            menu = menu.item(
+                PopupMenuItem::new(t!("ui.replay.build.copy_short_link").into_owned()).icon(IconName::Copy).on_click(
+                    move |_event, _window, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                    },
+                ),
+            );
             added_any = true;
         }
         if added_any {
@@ -823,17 +833,19 @@ fn build_actions_menu(
     }
 
     if let Some(url) = row.wows_numbers_url.clone() {
-        menu = menu.item(PopupMenuItem::link("Open WoWs Numbers Page", url));
+        menu = menu.item(PopupMenuItem::link(t!("ui.replay.build.open_wows_numbers").into_owned(), url));
     }
 
     if debug && let Some(json) = row.raw_metadata_json.clone() {
         menu = menu.separator();
-        menu = menu.item(PopupMenuItem::new("View Raw Player Metadata").icon(IconName::File).on_click(
-            move |_event, _window, cx| {
-                let json = json.clone();
-                entity.update(cx, |_this, cx| cx.emit(PlayerTableEvent::ViewRawJson(json.into())));
-            },
-        ));
+        menu = menu.item(
+            PopupMenuItem::new(t!("ui.replay.debug.view_raw_metadata").into_owned()).icon(IconName::File).on_click(
+                move |_event, _window, cx| {
+                    let json = json.clone();
+                    entity.update(cx, |_this, cx| cx.emit(PlayerTableEvent::ViewRawJson(json.into())));
+                },
+            ),
+        );
     }
 
     menu

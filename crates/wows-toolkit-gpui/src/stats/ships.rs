@@ -25,6 +25,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 
 use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
@@ -225,12 +226,7 @@ impl Render for StatsShipsPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(crate::theme::text_dim())
-                        .child("No games recorded for the current filters"),
-                )
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(t!("ui.stats.no_games").to_string()))
                 .into_any_element();
         }
 
@@ -285,9 +281,9 @@ impl Render for StatsShipsPanel {
                         .compact()
                         .selected(armed)
                         .tooltip(if armed {
-                            "Press again to forget this ship's games"
+                            t!("ui.stats.clear_ship_confirm").into_owned()
                         } else {
-                            "Forget this ship's games (ctrl+click to skip the confirmation)"
+                            t!("ui.stats.remove_games_hint", ship = ship).into_owned()
                         })
                         .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
                             let skip_confirmation = event.modifiers().secondary();
@@ -359,7 +355,7 @@ fn copy_menu(section: &ShipSection) -> impl IntoElement {
     let trigger = Button::new(SharedString::from(format!("ship-copy-{ship_id}")))
         .child(icons::icon(icons::COPY))
         .compact()
-        .tooltip("Copy this table");
+        .tooltip(t!("ui.stats.copy_table").to_string());
 
     Popover::new(SharedString::from(format!("ship-copy-menu-{ship_id}"))).trigger(trigger).content(
         move |_state, _window, _cx| {
@@ -371,7 +367,7 @@ fn copy_menu(section: &ShipSection) -> impl IntoElement {
                 .p_1()
                 .child(
                     Button::new(SharedString::from(format!("copy-markdown-{ship_id}")))
-                        .label("Copy as Markdown")
+                        .label(t!("ui.stats.copy_markdown").to_string())
                         .compact()
                         .on_click(move |_event, _window, cx: &mut App| {
                             cx.write_to_clipboard(ClipboardItem::new_string(markdown.to_string()));
@@ -379,7 +375,7 @@ fn copy_menu(section: &ShipSection) -> impl IntoElement {
                 )
                 .child(
                     Button::new(SharedString::from(format!("copy-csv-{ship_id}")))
-                        .label("Copy as CSV")
+                        .label(t!("ui.stats.copy_csv").to_string())
                         .compact()
                         .on_click(move |_event, _window, cx: &mut App| {
                             cx.write_to_clipboard(ClipboardItem::new_string(csv.to_string()));

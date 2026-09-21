@@ -39,6 +39,7 @@ use gpui_kit::component::select::SelectState;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
 
 use super::browser::BrowserEvent;
@@ -179,7 +180,8 @@ impl UnpackerView {
         let build_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(false));
 
-        let output_dir_input = cx.new(|cx| InputState::new(window, cx).placeholder("Extract to"));
+        let output_dir_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.output_dir_hint").to_string()));
 
         let subscriptions = vec![
             cx.subscribe(&output_dir_input, Self::on_output_dir_edited),
@@ -695,10 +697,14 @@ impl UnpackerView {
 /// opening a menu whose every item would fail.
 fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoElement {
     let trigger = Button::new("unpacker-dump-params")
-        .label("Dump parameters")
+        .label(t!("ui.unpacker.dump_parameters").to_string())
         .compact()
         .disabled(!enabled)
-        .tooltip(if enabled { "Write this build's GameParams.data out" } else { "Load a build first" });
+        .tooltip(if enabled {
+            t!("ui.unpacker.dump_parameters_tooltip").into_owned()
+        } else {
+            t!("ui.unpacker.load_a_build").into_owned()
+        });
 
     Popover::new("unpacker-dump-params-menu").trigger(trigger).content(move |_state, _window, _cx| {
         let full = GameParamsFormat::ALL
@@ -717,9 +723,9 @@ fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoEl
             .max_w(DUMP_POPOVER_MAX_WIDTH)
             .gap_1()
             .p_1()
-            .child(div().text_xs().font_weight(FontWeight::BOLD).child("Whole tree"))
+            .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.unpacker.whole_tree").to_string()))
             .children(full)
-            .child(div().text_xs().font_weight(FontWeight::BOLD).child("Base parameters only"))
+            .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.unpacker.base_only").to_string()))
             .children(base)
     })
 }
@@ -741,8 +747,8 @@ fn dump_params_item(view: Entity<UnpackerView>, format: GameParamsFormat, base_o
 /// which is where they land on disk.
 fn queue_popover(view: Entity<UnpackerView>, entries: Vec<VfsPath>) -> impl IntoElement {
     let label = match entries.len() {
-        0 => "Queue".to_string(),
-        count => format!("{count} queued"),
+        0 => t!("ui.unpacker.queue").into_owned(),
+        count => t!("ui.unpacker.queued_count", count = count).into_owned(),
     };
     let trigger = Button::new("unpacker-queue-trigger")
         .child(crate::icons::icon(crate::icons::LIST_CHECKS))
@@ -762,12 +768,20 @@ fn queue_popover(view: Entity<UnpackerView>, entries: Vec<VfsPath>) -> impl Into
                 h_flex()
                     .justify_between()
                     .items_center()
-                    .child(div().text_xs().font_weight(FontWeight::BOLD).child("Extraction queue"))
-                    .child(Button::new("unpacker-queue-clear-all").label("Clear all").compact().on_click(
-                        move |_event, _window, cx: &mut App| {
-                            clear_view.update(cx, |this, cx| this.clear_queue(cx));
-                        },
-                    )),
+                    .child(
+                        div()
+                            .text_xs()
+                            .font_weight(FontWeight::BOLD)
+                            .child(t!("ui.unpacker.extraction_queue").to_string()),
+                    )
+                    .child(
+                        Button::new("unpacker-queue-clear-all")
+                            .label(t!("ui.unpacker.clear_all").to_string())
+                            .compact()
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                clear_view.update(cx, |this, cx| this.clear_queue(cx));
+                            }),
+                    ),
             )
             // A plain scroll container, not the kit's `overflow_y_scrollbar`:
             // the overlaid scrollbar keeps requesting frames, which leaves a
@@ -797,7 +811,7 @@ fn queue_row(view: Entity<UnpackerView>, entry: VfsPath) -> impl IntoElement {
             Button::new(SharedString::from(format!("unpacker-queue-remove-{path}")))
                 .icon(IconName::Close)
                 .compact()
-                .tooltip("Remove from the queue")
+                .tooltip(t!("ui.unpacker.remove_from_queue").to_string())
                 .on_click(move |_event, _window, cx: &mut App| {
                     let remove = remove.clone();
                     view.update(cx, |this, cx| this.remove_from_queue(remove, cx));
@@ -826,17 +840,25 @@ impl Render for UnpackerView {
                 .py_1()
                 .border_b_1()
                 .border_color(border)
-                .child(div().text_xs().text_color(crate::theme::text_dim()).child("Version"))
+                .child(
+                    div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.unpacker.version").to_string()),
+                )
                 .child(Select::new(&self.build_select).id("unpacker-build").small().w(px(160.)))
         });
 
         let status: Option<String> = match &self.extract_state {
             ExtractState::Idle => None,
-            ExtractState::Counting => Some("Counting files...".to_string()),
-            ExtractState::Running(progress) => Some(format!("Extracting {} of {}", progress.written, progress.total)),
-            ExtractState::Failed(reason) => Some(format!("Extraction failed: {reason}")),
-            ExtractState::Done(ExtractOutcome::Completed { written }) => Some(format!("Extracted {written} files")),
-            ExtractState::Done(ExtractOutcome::Stopped { written }) => Some(format!("Cancelled after {written} files")),
+            ExtractState::Counting => Some(t!("ui.unpacker.counting_files").into_owned()),
+            ExtractState::Running(progress) => {
+                Some(t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned())
+            }
+            ExtractState::Failed(reason) => Some(t!("ui.unpacker.extract_failed", reason = reason).into_owned()),
+            ExtractState::Done(ExtractOutcome::Completed { written }) => {
+                Some(t!("ui.unpacker.extracted", count = written).into_owned())
+            }
+            ExtractState::Done(ExtractOutcome::Stopped { written }) => {
+                Some(t!("ui.unpacker.cancelled", count = written).into_owned())
+            }
         };
         let running = match &self.extract_state {
             ExtractState::Running(progress) => Some(*progress),
@@ -848,9 +870,9 @@ impl Render for UnpackerView {
         // than only beside it.
         let queued = self.queue.len();
         let extract_label = match queued {
-            0 => "Extract".to_string(),
-            1 => "Extract 1 Item".to_string(),
-            count => format!("Extract {count} Items"),
+            0 => t!("ui.unpacker.extract").into_owned(),
+            1 => t!("ui.unpacker.extract_one").into_owned(),
+            count => t!("ui.unpacker.extract_many", count = count).into_owned(),
         };
 
         let output_bar = h_flex()
@@ -863,16 +885,16 @@ impl Render for UnpackerView {
             .border_color(border)
             .child(
                 Button::new("unpacker-browse-output")
-                    .label("Browse")
+                    .label(t!("ui.unpacker.browse").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event, window, cx| this.browse_for_output_dir(window, cx))),
             )
             .child(div().flex_1().min_w(px(0.)).child(Input::new(&self.output_dir_input).id("unpacker-output-dir")))
             .child(
                 Checkbox::new("unpacker-decode-prototypes")
-                    .label("Decode prototypes as JSON")
+                    .label(t!("ui.unpacker.decode_prototypes").to_string())
                     .checked(self.prototypes == PrototypeOutput::DecodeToJson)
-                    .tooltip("Write decodable assets.bin entries as readable JSON instead of their stored form")
+                    .tooltip(t!("ui.unpacker.decode_prototypes_tooltip").into_owned())
                     .on_click(cx.listener(|this, checked: &bool, _window, cx| {
                         this.prototypes = if *checked { PrototypeOutput::DecodeToJson } else { PrototypeOutput::Raw };
                         cx.notify();
@@ -905,12 +927,14 @@ impl Render for UnpackerView {
                     .label(extract_label)
                     .compact()
                     .disabled(self.queue.is_empty() || busy || self.output_dir.is_empty())
-                    .when(self.output_dir.is_empty(), |this| this.tooltip("Choose a directory to extract to first"))
+                    .when(self.output_dir.is_empty(), |this| {
+                        this.tooltip(t!("ui.unpacker.choose_directory").into_owned())
+                    })
                     .on_click(cx.listener(|this, _event, _window, cx| this.start_extraction(cx))),
             )
             .child(
                 Button::new("unpacker-cancel")
-                    .label("Cancel")
+                    .label(t!("ui.buttons.cancel").to_string())
                     .compact()
                     .disabled(!busy)
                     .on_click(cx.listener(|this, _event, _window, cx| this.cancel_extraction(cx))),
@@ -921,7 +945,7 @@ impl Render for UnpackerView {
             })
             .child(
                 Button::new("unpacker-clear-queue")
-                    .label("Clear")
+                    .label(t!("ui.stats.clear").to_string())
                     .compact()
                     .disabled(self.queue.is_empty())
                     .on_click(cx.listener(|this, _event, _window, cx| this.clear_queue(cx))),

@@ -40,6 +40,7 @@ use gpui_kit::component::tree::tree;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
 
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
@@ -71,11 +72,16 @@ impl BrowserSource {
         }
     }
 
-    pub fn title(self) -> &'static str {
+    pub const fn title_key(self) -> &'static str {
         match self {
-            Self::Pkg => "Packages",
-            Self::AssetsBin => "Assets.bin",
+            Self::Pkg => "ui.unpacker.packages",
+            Self::AssetsBin => "ui.unpacker.assets_bin",
         }
+    }
+
+    /// The listing's name in the reader's own language.
+    pub fn title(self) -> String {
+        t!(self.title_key()).into_owned()
     }
 }
 
@@ -158,9 +164,12 @@ pub struct BrowserPanel {
 impl BrowserPanel {
     pub fn new(source: BrowserSource, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
-        let filter_state = cx.new(|cx| InputState::new(window, cx).placeholder("Filter files..."));
-        let search_state = cx.new(|cx| InputState::new(window, cx).placeholder("Search in files..."));
-        let path_filter_state = cx.new(|cx| InputState::new(window, cx).placeholder("Path filter (glob)"));
+        let filter_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.filter_files").to_string()));
+        let search_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.search_hint").to_string()));
+        let path_filter_state =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.path_filter_hint").to_string()));
 
         let subscriptions = vec![
             cx.subscribe(&filter_state, Self::on_filter_event),
@@ -351,9 +360,9 @@ impl Panel for BrowserPanel {
 impl Render for BrowserPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let status = match &self.state {
-            PaneState::Empty => Some("No game data loaded".to_string()),
-            PaneState::Loading => Some("Loading...".to_string()),
-            PaneState::Failed(reason) => Some(format!("Failed to load: {reason}")),
+            PaneState::Empty => Some(t!("ui.unpacker.no_game_data").into_owned().to_string()),
+            PaneState::Loading => Some(t!("ui.replay.loading").into_owned().to_string()),
+            PaneState::Failed(reason) => Some(t!("ui.unpacker.load_failed", error = reason).to_string()),
             PaneState::Ready(_) => None,
         };
 
@@ -400,7 +409,7 @@ impl Render for BrowserPanel {
             .py_1()
             .border_t_1()
             .border_color(border)
-            .child(div().text_xs().font_weight(FontWeight::BOLD).child("Search in files"))
+            .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.unpacker.search_in_files").to_string()))
             .child(
                 h_flex().gap_1().items_center().child(Icon::new(IconName::Search)).child(
                     Input::new(&self.search_state)
@@ -418,7 +427,7 @@ impl Render for BrowserPanel {
             )
             .child(
                 Button::new(SharedString::from(format!("unpacker-{fragment}-search-run")))
-                    .label("Search")
+                    .label(t!("ui.tabs.search").to_string())
                     .compact()
                     .on_click(cx.listener(|this, _event, _window, cx| this.start_search(cx))),
             );
@@ -486,10 +495,12 @@ impl Render for BrowserPanel {
                             let path = view_path.clone();
                             let entity = view_entity.clone();
                             menu =
-                                menu.item(PopupMenuItem::new("View contents").on_click(move |_event, _window, cx| {
-                                    let path = path.clone();
-                                    entity.update(cx, |_this, cx| cx.emit(BrowserEvent::View { path }));
-                                }));
+                                menu.item(PopupMenuItem::new(t!("ui.unpacker.view_contents").into_owned()).on_click(
+                                    move |_event, _window, cx| {
+                                        let path = path.clone();
+                                        entity.update(cx, |_this, cx| cx.emit(BrowserEvent::View { path }));
+                                    },
+                                ));
                         }
                         if !decodable {
                             return menu;
@@ -498,16 +509,21 @@ impl Render for BrowserPanel {
                         let entity = json_entity.clone();
                         let extract_path = json_path.clone();
                         let extract_entity = json_entity.clone();
-                        menu.item(PopupMenuItem::new("View as JSON").on_click(move |_event, _window, cx| {
-                            let path = path.clone();
-                            entity.update(cx, |_this, cx| cx.emit(BrowserEvent::ViewAsJson { path }));
-                        }))
-                        .item(PopupMenuItem::new("Extract as JSON").on_click(
+                        menu.item(PopupMenuItem::new(t!("ui.unpacker.view_as_json").into_owned()).on_click(
                             move |_event, _window, cx| {
-                                let path = extract_path.clone();
-                                extract_entity.update(cx, |_this, cx| cx.emit(BrowserEvent::ExtractAsJson { path }));
+                                let path = path.clone();
+                                entity.update(cx, |_this, cx| cx.emit(BrowserEvent::ViewAsJson { path }));
                             },
                         ))
+                        .item(
+                            PopupMenuItem::new(t!("ui.unpacker.extract_as_json").into_owned()).on_click(
+                                move |_event, _window, cx| {
+                                    let path = extract_path.clone();
+                                    extract_entity
+                                        .update(cx, |_this, cx| cx.emit(BrowserEvent::ExtractAsJson { path }));
+                                },
+                            ),
+                        )
                     })
                     .into_any_element()
             }
@@ -528,9 +544,23 @@ impl Render for BrowserPanel {
             .border_color(border)
             .child(div().w(QUEUE_COLUMN_WIDTH))
             .child(div().w(GLYPH_COLUMN_WIDTH))
-            .child(div().flex_1().text_xs().font_weight(FontWeight::BOLD).child("Name"))
-            .child(div().w(SIZE_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Size"))
-            .child(div().w(TYPE_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Type"));
+            .child(
+                div().flex_1().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.unpacker.column.name").to_string()),
+            )
+            .child(
+                div()
+                    .w(SIZE_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.unpacker.column.size").to_string()),
+            )
+            .child(
+                div()
+                    .w(TYPE_COLUMN_WIDTH)
+                    .text_xs()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.unpacker.column.type_col").to_string()),
+            );
 
         let dim = crate::theme::text_dim();
         let listing_header = h_flex()
@@ -541,11 +571,17 @@ impl Render for BrowserPanel {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().flex_1().text_xs().text_color(dim).child(format!("{} items", rows.len())))
+            .child(
+                div()
+                    .flex_1()
+                    .text_xs()
+                    .text_color(dim)
+                    .child(t!("ui.unpacker.item_count", count = rows.len()).into_owned()),
+            )
             .child(
                 Button::new(SharedString::from(format!("unpacker-{fragment}-extract-listed")))
                     .icon(IconName::HardDrive)
-                    .label("Queue listed files")
+                    .label(t!("ui.unpacker.queue_all_files").to_string())
                     .compact()
                     .disabled(rows.is_empty())
                     .on_click(cx.listener(move |_this, _event, _window, cx| {
@@ -596,9 +632,9 @@ fn queue_toggle(ix: usize, path: VfsPath, is_dir: bool, is_queued: bool, entity:
 
     if is_dir {
         let (icon, tooltip) = if is_queued {
-            (IconName::Close, "Remove this folder from the queue")
+            (IconName::Close, t!("ui.unpacker.remove_from_queue").into_owned())
         } else {
-            (IconName::Plus, "Queue this folder")
+            (IconName::Plus, t!("ui.unpacker.queue_folder").into_owned())
         };
         return Button::new(("queue-toggle", ix))
             .icon(icon)
