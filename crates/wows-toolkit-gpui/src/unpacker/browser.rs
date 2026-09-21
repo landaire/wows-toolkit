@@ -318,6 +318,31 @@ impl BrowserPanel {
         self.rebuild_rows(cx);
     }
 
+    /// Shows `path`'s own directory in the tree, with the file among the
+    /// rows, and clears any filter that would hide it.
+    ///
+    /// Where a content-search hit came from, which the hit row itself cannot
+    /// say: it lists a path, not a place in the tree.
+    pub fn reveal(&mut self, path: &VfsPath, window: &mut Window, cx: &mut Context<Self>) {
+        let full = path.as_str().trim_start_matches('/').to_string();
+        let dir = match full.rfind('/') {
+            Some(at) => full[..at].to_string(),
+            // A file at the root belongs to the root, which is named by the
+            // empty string in the same way every other directory is named by
+            // its path.
+            None => String::new(),
+        };
+
+        // A filter is a reason a revealed row would not be in the listing.
+        if !self.filter_text.is_empty() {
+            self.filter_text.clear();
+            self.filter_state.update(cx, |state, cx| state.set_value(String::new(), window, cx));
+        }
+        self.selected_dir = Some(dir);
+        self.rebuild_rows(cx);
+        cx.notify();
+    }
+
     fn start_search(&mut self, cx: &mut Context<Self>) {
         let query = self.search_state.read(cx).value().trim().to_string();
         if query.is_empty() {
@@ -745,6 +770,35 @@ fn render_folder_row(
 
 #[cfg(test)]
 mod tests {
+
+    /// Revealing a file selects the directory it is in, so the tree shows the
+    /// rows it is among rather than the root.
+    #[gpui_kit::test]
+    fn revealing_a_file_selects_the_directory_it_is_in(cx: &mut TestAppContext) {
+        use wowsunpack::vfs::MemoryFS;
+        use wowsunpack::vfs::VfsPath;
+
+        cx.update(gpui_kit::init);
+        let window =
+            cx.open_window(size(px(800.), px(600.)), |window, cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
+
+        let root: VfsPath = MemoryFS::new().into();
+        let deep = root.join("res/content/gameplay/a.xml").expect("a valid path");
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.reveal(&deep, window, cx);
+                assert_eq!(panel.selected_dir.as_deref(), Some("res/content/gameplay"));
+
+                // A file at the root belongs to the root, not to a directory
+                // named by the whole path.
+                let shallow = root.join("top.txt").expect("a valid path");
+                panel.reveal(&shallow, window, cx);
+                assert_eq!(panel.selected_dir.as_deref(), Some(""));
+            })
+            .expect("the window is open");
+    }
+
     use gpui_kit::AppContext;
     use gpui_kit::TestAppContext;
     use gpui_kit::px;
