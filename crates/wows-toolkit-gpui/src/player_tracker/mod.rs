@@ -551,6 +551,29 @@ impl PlayerTrackerView {
         .detach();
     }
 
+    /// Reads the notes without touching the replay index: the shared notes
+    /// are what the replay inspector colours its rows from, so they are worth
+    /// reading at startup, while the index aggregates behind [`refresh`] are
+    /// not (see [`Self::load_index_once`]).
+    pub fn load_notes(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
+        self.load_tracked_players(pool, cx);
+    }
+
+    /// Runs the index queries the first time the tab is shown.
+    ///
+    /// They scan every indexed vehicle row, which is tens of seconds on a
+    /// large index, and they hold a connection from the shared pool while
+    /// they do. The egui app runs the same aggregate only on the Player
+    /// Tracker's own button press; running it at startup delayed everything
+    /// else the pool serves, up to the point of timing out the Twitch poll.
+    pub fn load_index_once(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.state, LoadState::Idle) {
+            return;
+        }
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.refresh(pool, cx);
+    }
+
     pub fn refresh(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
