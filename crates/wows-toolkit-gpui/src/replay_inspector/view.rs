@@ -317,8 +317,8 @@ impl ReplayInspectorView {
 
         let columns = default_columns(&self.replay_settings);
         let personal_rating = self.personal_rating.clone();
-        let panel =
-            cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, personal_rating, cx));
+        let panel = cx
+            .new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, personal_rating, window, cx));
         self.open_panels.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
@@ -382,7 +382,7 @@ impl ReplayInspectorView {
     /// the picked path opens through this port's own dock flow
     /// (`open_replay`) rather than the egui app's `parse_replay_from_path`
     /// background task. A cancelled dialog is a no-op.
-    fn open_manually(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_manually(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_file(None, Some(crate::dialog::REPLAYS));
         cx.spawn(async move |this, cx| {
             let Some(file) = asked.await else { return };

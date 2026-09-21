@@ -679,10 +679,8 @@ fn node_to_tree_item(
             let id: SharedString = path.to_string_lossy().into_owned().into();
             let hover = hover.remove(&path).unwrap_or_default();
             let under = vec![path.clone()];
-            leaf_info.insert(
-                id.clone(),
-                LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover },
-            );
+            leaf_info
+                .insert(id.clone(), LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover });
             (TreeItem::new(id, label), under)
         }
     }

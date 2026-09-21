@@ -176,13 +176,14 @@ impl ReplayPanel {
         debug: bool,
         columns: Vec<ReplayColumn>,
         personal_rating: Option<Arc<PersonalRatingData>>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let focus_handle = cx.focus_handle();
         let parse_task = spawn_parse(path, game_data, personal_rating.clone(), cx);
-        let parse_task = cx.spawn(async move |this, cx| {
+        let parse_task = cx.spawn_in(window, async move |this, cx| {
             let result = parse_task.await;
-            let _ = this.update(cx, |this, cx| this.apply_result(result, cx));
+            let _ = this.update_in(cx, |this, window, cx| this.apply_result(result, window, cx));
         });
 
         Self {
@@ -271,11 +272,16 @@ impl ReplayPanel {
         }
     }
 
-    fn apply_result(&mut self, result: Result<ParsedReplay, ReplayLoadError>, cx: &mut Context<Self>) {
+    fn apply_result(
+        &mut self,
+        result: Result<ParsedReplay, ReplayLoadError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.state = match result {
             Ok(ParsedReplay { model, export, game_data, raw_metadata_json, raw_results_json }) => {
                 self.export = Some(export);
-                self.loaded_state(model, game_data.vfs().clone(), raw_metadata_json, raw_results_json, cx)
+                self.loaded_state(model, game_data.vfs().clone(), raw_metadata_json, raw_results_json, window, cx)
             }
             Err(err) => LoadState::Failed(err),
         };
@@ -292,6 +298,7 @@ impl ReplayPanel {
         vfs: VfsPath,
         raw_metadata_json: String,
         raw_results_json: Option<String>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> LoadState {
         model.columns = self.columns.clone();
@@ -309,9 +316,9 @@ impl ReplayPanel {
         let chat_title = title.to_string();
         let chat_panel = (!chat.is_empty()).then(|| cx.new(|cx| ChatPanel::new(chat, chat_title, cx)));
         let table = cx.new(|cx| PlayerTable::new(model, vfs, self.debug, cx));
-        self._table_subscription = Some(cx.subscribe(&table, Self::on_table_event));
-        let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), cx));
-        let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), cx)));
+        self._table_subscription = Some(cx.subscribe_in(&table, window, Self::on_table_event));
+        let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), window, cx));
+        let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), window, cx)));
 
         LoadState::Loaded(LoadedReplay {
             title,
@@ -330,6 +337,7 @@ impl ReplayPanel {
     pub(crate) fn loaded_for_test(
         model: ReplayReportModel,
         personal_rating: Option<Arc<PersonalRatingData>>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
         let mut panel = Self {
@@ -347,7 +355,7 @@ impl ReplayPanel {
             _table_subscription: None,
         };
         let vfs: VfsPath = wowsunpack::vfs::MemoryFS::new().into();
-        panel.state = panel.loaded_state(model, vfs, String::from("{}"), None, cx);
+        panel.state = panel.loaded_state(model, vfs, String::from("{}"), None, window, cx);
         panel
     }
 }
@@ -682,10 +690,16 @@ impl ReplayPanel {
     /// Unlike `toggle_side_panel`, this always opens rather than toggling --
     /// clicking a different row's "View Raw Player Metadata" while the panel
     /// is already showing should swap its content, not close it.
-    fn on_table_event(&mut self, _table: Entity<PlayerTable>, event: &PlayerTableEvent, cx: &mut Context<Self>) {
+    fn on_table_event(
+        &mut self,
+        _table: &Entity<PlayerTable>,
+        event: &PlayerTableEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let PlayerTableEvent::ViewRawJson(json) = event;
         if let LoadState::Loaded(loaded) = &mut self.state {
-            loaded.raw_player_metadata_panel = Some(cx.new(|cx| RawJsonPanel::new(json.clone(), cx)));
+            loaded.raw_player_metadata_panel = Some(cx.new(|cx| RawJsonPanel::new(json.clone(), window, cx)));
         }
         self.side_panel = SidePanel::RawPlayerMetadata;
         cx.notify();
@@ -815,8 +829,8 @@ mod tests {
     #[gpui_kit::test]
     fn the_export_menu_opens_once_a_replay_has_loaded(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
-            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
         });
 
         cx.update_window(window.into(), |_, window, cx| {
@@ -866,8 +880,8 @@ mod tests {
     fn the_pr_badge_reports_the_self_rows_rating(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
         let table = Arc::new(fixture_personal_rating_data());
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
-            ReplayPanel::loaded_for_test(model_at_expected_values(), Some(table), cx)
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), Some(table), window, cx)
         });
 
         cx.update_window(window.into(), |_, window, cx| {
@@ -884,8 +898,8 @@ mod tests {
     #[gpui_kit::test]
     fn a_replay_with_no_rating_table_shows_no_pr_badge(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
-            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
         });
 
         cx.update_window(window.into(), |_, window, cx| {
@@ -901,8 +915,8 @@ mod tests {
     #[gpui_kit::test]
     fn a_rating_table_arriving_after_the_parse_still_fills_the_badge_in(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
-            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
         });
 
         let table = Arc::new(fixture_personal_rating_data());
@@ -920,8 +934,8 @@ mod tests {
     #[gpui_kit::test]
     fn a_table_with_no_expected_values_rates_nothing(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
-        let window = cx.open_window(size(px(900.), px(600.)), |_window, cx| {
-            ReplayPanel::loaded_for_test(model_at_expected_values(), None, cx)
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
         });
 
         window

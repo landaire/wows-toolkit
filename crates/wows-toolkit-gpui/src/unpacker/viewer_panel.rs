@@ -15,11 +15,16 @@ use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use rust_i18n::t;
 
+use gpui_kit::component::input::Editor;
+use gpui_kit::component::input::EditorState;
 use wows_toolkit_viewmodel::unpacker::viewer::ViewerContent;
+use wows_toolkit_viewmodel::unpacker::viewer::highlight_language;
 
 /// What the panel draws.
 enum Shown {
-    Text(SharedString),
+    /// A read-only editor, so the text is highlighted where a grammar covers
+    /// the format, and selectable and searchable either way.
+    Text(Entity<EditorState>),
     /// Decoded once on open; the atlas caches it by the image's own id.
     Image(Arc<RenderImage>),
     /// The bytes loaded but could not be decoded as an image.
@@ -36,9 +41,12 @@ pub struct FileViewerPanel {
 impl EventEmitter<PanelEvent> for FileViewerPanel {}
 
 impl FileViewerPanel {
-    pub fn new(title: SharedString, content: ViewerContent, cx: &mut Context<Self>) -> Self {
+    pub fn new(title: SharedString, content: ViewerContent, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let shown = match content {
-            ViewerContent::Plaintext { text, .. } => Shown::Text(text.into()),
+            ViewerContent::Plaintext { extension, text } => {
+                let language = highlight_language(&extension).unwrap_or("text");
+                Shown::Text(cx.new(|cx| EditorState::new(window, cx).language(language).default_value(text)))
+            }
             ViewerContent::Image { bytes } => match decode_image(&bytes) {
                 Ok(image) => Shown::Image(Arc::new(image)),
                 Err(reason) => Shown::Undecodable(reason),
@@ -94,16 +102,7 @@ impl Render for FileViewerPanel {
             .child(div().text_xs().text_color(crate::theme::text_dim()).child(self.title.clone()));
 
         let body: AnyElement = match &self.shown {
-            Shown::Text(text) => div()
-                .id("file-viewer-text")
-                .size_full()
-                .overflow_scroll()
-                .track_scroll(&self.scroll)
-                .p_2()
-                .font_family("monospace")
-                .text_xs()
-                .child(crate::ui::selectable_text("file-viewer-body", text.clone()))
-                .into_any_element(),
+            Shown::Text(state) => Editor::new(state).readonly(true).text_size(px(12.)).size_full().into_any_element(),
             Shown::Image(image) => div()
                 .id("file-viewer-image")
                 .size_full()

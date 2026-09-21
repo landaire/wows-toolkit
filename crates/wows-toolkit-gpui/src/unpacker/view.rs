@@ -532,7 +532,7 @@ impl UnpackerView {
         };
 
         let title = SharedString::from(path.as_str().trim_start_matches('/').to_string());
-        let panel = cx.new(|cx| FileViewerPanel::new(title, content, cx));
+        let panel = cx.new(|cx| FileViewerPanel::new(title, content, window, cx));
         self.dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
@@ -629,7 +629,7 @@ impl UnpackerView {
 
         let title = SharedString::from(format!("{} (JSON)", path.as_str().trim_start_matches('/')));
         let content = viewer::ViewerContent::Plaintext { extension: ".json".to_string(), text: json };
-        let panel = cx.new(|cx| FileViewerPanel::new(title, content, cx));
+        let panel = cx.new(|cx| FileViewerPanel::new(title, content, window, cx));
         self.dock_area.update(cx, |dock, cx| {
             dock.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });

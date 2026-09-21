@@ -1,7 +1,6 @@
 //! Small rendering helpers shared across the tabs.
 
 use gpui_kit::base::SelectableText;
-use gpui_kit::base::TextSelectionHandle;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
@@ -64,20 +63,6 @@ pub fn selectable(id: impl Into<ElementId>, selected: bool, control: impl IntoEl
 /// selection layer the runs register with (`main.rs`).
 pub fn selectable_text(id: impl Into<ElementId>, text: impl Into<SharedString>) -> SelectableText {
     SelectableText::new(id, text)
-}
-
-/// One run of a larger selectable document.
-///
-/// Runs sharing a handle select as one body of text in `order`, so dragging
-/// across several lines copies them in reading order rather than one at a
-/// time.
-pub fn selectable_run(
-    id: impl Into<ElementId>,
-    handle: &TextSelectionHandle,
-    order: u64,
-    text: impl Into<SharedString>,
-) -> SelectableText {
-    SelectableText::with_handle(id, handle.clone(), text).document_order(order)
 }
 
 /// The height a `Select` occupies in a row, by its size.
