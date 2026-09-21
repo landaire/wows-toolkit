@@ -195,6 +195,16 @@ impl ReplayInspectorView {
     /// startup preload of the current installed build through that same cache
     /// -- so a later `spawn_parse` for a replay on that build (see
     /// `panel.rs`) finds the slot already warm instead of reloading it.
+    /// Adopts a language without touching anything else.
+    ///
+    /// Separate from `apply_settings`: that one rebuilds the game-data cache
+    /// and rescans the directory, which a language change has no reason to
+    /// do, and which would strand every open panel on the discarded cache.
+    pub fn set_locale(&mut self, locale: Option<String>, cx: &mut Context<Self>) {
+        self.browser.update(cx, |browser, cx| browser.set_locale(locale, cx));
+        cx.notify();
+    }
+
     /// Called from `App::apply_settings`, which `main.rs` runs inside a
     /// `window.update`, so a `Window` is available for the grouping combo.
     pub fn apply_settings(&mut self, settings: InspectorSettings, window: &mut Window, cx: &mut Context<Self>) {
@@ -281,13 +291,8 @@ impl ReplayInspectorView {
     /// already open is a no-op rather than adding a second tab for it:
     /// `open_panels` tracks the live panel entity per path, checked here
     /// before creating a new one.
-    ///
-    /// This does not re-focus the existing tab on a repeat open --
-    /// gpui-component's `TabPanel::add_panel` only dedups new-panel adds by
-    /// entity id (so re-adding the same entity is already a no-op) and
-    /// exposes no public API to change which tab is active from outside the
-    /// crate (`TabPanel::set_active_ix` is private). Skipping the duplicate
-    /// is the "do not over-engineer" fallback the milestone brief calls for.
+    /// A repeat open brings that tab forward (`DockArea::select_panel`) rather
+    /// than leaving the reader on whichever tab was in front.
     ///
     /// `pub(crate)` so another tab can send a replay here: the Search tab's
     /// results open in this inspector rather than in one of their own.

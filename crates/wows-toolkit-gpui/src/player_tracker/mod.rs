@@ -1196,9 +1196,9 @@ impl PlayerTrackerView {
             // build that did not load is why they are unresolved, and saying
             // "loading" for it would never stop being wrong.
             StatsState::Failed(reason) => Some(t!("ui.player_tracker.stats_unavailable", reason = reason).to_string()),
-            _ if !roster.ships_resolved => Some(t!("ui.player_tracker.live_loading_build").into_owned().to_string()),
-            StatsState::Scanning => Some(t!("ui.player_tracker.stats_resolving").into_owned().to_string()),
-            StatsState::Fetching => Some(t!("ui.player_tracker.stats_fetching").into_owned().to_string()),
+            _ if !roster.ships_resolved => Some(t!("ui.player_tracker.live_loading_build").into_owned()),
+            StatsState::Scanning => Some(t!("ui.player_tracker.stats_resolving").into_owned()),
+            StatsState::Fetching => Some(t!("ui.player_tracker.stats_fetching").into_owned()),
             StatsState::Idle | StatsState::Ready(_) => None,
         };
         let stats = match &self.stats {
@@ -1841,15 +1841,15 @@ impl Render for PlayerTrackerView {
             _ => &self.state,
         };
         let status = match load_state {
-            LoadState::Idle => Some(t!("ui.player_tracker.waiting_for_index").into_owned().to_string()),
+            LoadState::Idle => Some(t!("ui.player_tracker.waiting_for_index").into_owned()),
             LoadState::Loading => match self.sub_tab {
-                SubTab::Clans => Some(t!("ui.player_tracker.loading_clans").into_owned().to_string()),
-                _ => Some(t!("ui.player_tracker.loading_players").into_owned().to_string()),
+                SubTab::Clans => Some(t!("ui.player_tracker.loading_clans").into_owned()),
+                _ => Some(t!("ui.player_tracker.loading_players").into_owned()),
             },
             LoadState::Failed(reason) => Some(t!("ui.player_tracker.index_failed", reason = reason).to_string()),
             LoadState::Loaded if self.visible_len() == 0 => match self.sub_tab {
-                SubTab::Players => Some(t!("ui.player_tracker.no_players").into_owned().to_string()),
-                SubTab::Clans => Some(t!("ui.player_tracker.clan_no_data").into_owned().to_string()),
+                SubTab::Players => Some(t!("ui.player_tracker.no_players").into_owned()),
+                SubTab::Clans => Some(t!("ui.player_tracker.clan_no_data").into_owned()),
                 SubTab::CurrentMatch => unreachable!("the roster returns above"),
             },
             LoadState::Loaded => None,

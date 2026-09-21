@@ -1000,6 +1000,12 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
 
 impl Render for PlayerTable {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // A window that is not active never sees the alt release, so the
+        // modifier is read back here rather than left latched at whatever it
+        // was when focus left.
+        if !window.is_window_active() && self.alt_held {
+            self.alt_held = false;
+        }
         if self.widths_dirty {
             self.column_widths = measure_column_widths(&self.model, self.debug, &self.expanded, window);
             self.widths_dirty = false;

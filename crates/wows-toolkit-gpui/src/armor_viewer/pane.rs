@@ -157,11 +157,8 @@ pub struct ArmorViewerPane {
     /// changed its own (`on_viewport_event`). Off by default, matching the
     /// egui app's own `sync_options` default.
     sync_options: bool,
-    /// The penetration checker's own state, and whether its ship combo has
-    /// been filled from the catalog yet (which needs a window, so it happens
-    /// on the first render after the bundle arrives).
+    /// The penetration checker's own state.
     pen: PenetrationState,
-    pen_ships_filled: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -197,7 +194,6 @@ impl ArmorViewerPane {
             mirror_cameras: false,
             sync_options: false,
             pen,
-            pen_ships_filled: false,
             _subscriptions: vec![
                 pen_ship_sub,
                 ship_selected_sub,
@@ -494,7 +490,7 @@ impl ArmorViewerPane {
     /// `GameParams` load for the same build. A no-op if a load already
     /// started (`apply_settings` can reasonably be called more than once by
     /// the app's own settings flow; only the first call should re-trigger).
-    pub fn load_game_data(&mut self, loaded: Arc<LoadedGameData>, cx: &mut Context<Self>) {
+    pub fn load_game_data(&mut self, loaded: Arc<LoadedGameData>, window: &mut Window, cx: &mut Context<Self>) {
         if !matches!(self.bundle, BundleState::NotStarted) {
             return;
         }
@@ -502,18 +498,26 @@ impl ArmorViewerPane {
         cx.notify();
 
         let task = spawn_load_armor_assets(loaded, cx);
-        cx.spawn(async move |this, cx| {
+        cx.spawn_in(window, async move |this, cx| {
             let result = task.await;
-            let _ = this.update(cx, |this, cx| this.apply_bundle_result(result, cx));
+            let _ = this.update_in(cx, |this, window, cx| this.apply_bundle_result(result, window, cx));
         })
         .detach();
     }
 
-    fn apply_bundle_result(&mut self, result: Result<ArmorAssetsBundle, ArmorAssetsError>, cx: &mut Context<Self>) {
+    fn apply_bundle_result(
+        &mut self,
+        result: Result<ArmorAssetsBundle, ArmorAssetsError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         match result {
             Ok(bundle) => {
                 let bundle = Arc::new(bundle);
                 self.sidebar.update(cx, |sidebar, cx| sidebar.set_bundle(Arc::clone(&bundle), cx));
+                // The attacker combo is filled the moment the catalog lands,
+                // not lazily in a render pass.
+                self.pen.set_catalog(&bundle.catalog, window, cx);
                 self.bundle = BundleState::Ready(bundle);
             }
             Err(e) => {
@@ -731,17 +735,7 @@ impl ArmorViewerPane {
 }
 
 impl Render for ArmorViewerPane {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // The attacker combo is filled here rather than where the bundle
-        // lands, because `SelectState::set_items` wants a window.
-        if !self.pen_ships_filled
-            && let BundleState::Ready(bundle) = &self.bundle
-        {
-            let bundle = Arc::clone(bundle);
-            self.pen.set_catalog(&bundle.catalog, window, cx);
-            self.pen_ships_filled = true;
-        }
-
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let status_banner =
             self.status_text().map(|text| div().text_xs().text_color(crate::theme::text_dim()).child(text));
         // What the active pane is showing, so a comparison says which ship is
@@ -765,9 +759,6 @@ impl Render for ArmorViewerPane {
                     })
                     .when_some(status_banner, |this, banner| this.child(banner))
                     .child(div().flex_1())
-                    // The legend is closed from its own header; without this
-                    // there is no way back to it (the egui display popover
-                    // carries the same checkbox).
                     // The egui app asks the same question from its Analysis
                     // window's Penetration tab.
                     .child(
@@ -794,6 +785,9 @@ impl Render for ArmorViewerPane {
                                 }
                             }),
                     )
+                    // The legend is closed from its own header; without this
+                    // there is no way back to it (the egui display popover
+                    // carries the same checkbox).
                     .child(
                         Button::new("armor-legend-toggle")
                             .label("Legend")
