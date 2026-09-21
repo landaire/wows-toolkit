@@ -124,6 +124,9 @@ impl StatsChartPanel {
         self.ships = per_ship_performance(games);
         self.games = games.iter().map(|game| (*game).clone()).collect();
         self.played = ships_played(games);
+        // Listed by name: a long session's picker has no other order anyone
+        // could look a ship up in.
+        self.played.sort_by(|left, right| left.1.cmp(&right.1));
         if !self.selection_touched {
             self.selected_ships = self.played.iter().map(|(id, _)| *id).collect();
         }
@@ -492,14 +495,20 @@ impl Render for StatsChartPanel {
                 .child(div().text_sm().opacity(0.6).child("Nothing to plot for the current filters"))
                 .into_any_element()
         } else {
+            // A bar chart is a comparison of whole bars, not a curve to be
+            // read into: the egui bar plot refuses drag, zoom and scroll for
+            // the same reason (`ui/session_stats_chart.rs`).
+            let pannable = self.mode == ChartMode::Line;
             div()
                 .id(("chart-surface", id))
                 .size_full()
-                .on_mouse_down(MouseButton::Left, cx.listener(Self::start_drag))
-                .on_mouse_move(cx.listener(Self::drag_view))
-                .on_mouse_up(MouseButton::Left, cx.listener(Self::end_drag))
-                .on_mouse_up_out(MouseButton::Left, cx.listener(Self::end_drag))
-                .on_scroll_wheel(cx.listener(Self::zoom_view))
+                .when(pannable, |this| {
+                    this.on_mouse_down(MouseButton::Left, cx.listener(Self::start_drag))
+                        .on_mouse_move(cx.listener(Self::drag_view))
+                        .on_mouse_up(MouseButton::Left, cx.listener(Self::end_drag))
+                        .on_mouse_up_out(MouseButton::Left, cx.listener(Self::end_drag))
+                        .on_scroll_wheel(cx.listener(Self::zoom_view))
+                })
                 .child(surface)
                 .into_any_element()
         };
