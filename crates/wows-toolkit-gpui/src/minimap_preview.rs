@@ -16,6 +16,7 @@ use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::frame_track::PREVIEW_FPS;
 use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
 use wows_minimap_renderer::frame_track::TrackSink;
 use wows_minimap_renderer::frame_track::bake_options;
@@ -31,8 +32,9 @@ use wowsunpack::vfs::VfsPath;
 
 /// How long each baked frame is shown. The bake keeps an evenly spaced subset
 /// of the battle, so this is a display rate rather than the replay's own
-/// clock.
-pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
+/// clock. Taken from the shared rate the egui popup repaints at, so the two
+/// play a track at the same speed.
+pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_nanos((1_000_000_000.0 / PREVIEW_FPS) as u64);
 
 /// Why a preview could not be produced.
 #[derive(Debug, thiserror::Error)]
@@ -56,10 +58,16 @@ pub enum PreviewError {
 /// The build is loaded through the shared cache, so a replay from a build
 /// already open costs nothing extra and one from a build that is not
 /// installed simply has no preview.
+///
+/// `on_map` is handed the map on its own, with nothing drawn over it, as soon
+/// as the art is loaded and before the battle is walked: the walk is the
+/// seconds of this, and the egui popup shows the map for all of them rather
+/// than an empty box (`ui/replay_parser/preview_popup.rs`).
 pub fn bake_from_file(
     path: &std::path::Path,
     game_data: &crate::replay_inspector::GameDataCache,
     cancel: &AtomicBool,
+    on_map: impl FnOnce(PreviewFrames),
 ) -> Result<PreviewFrames, PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
@@ -71,7 +79,7 @@ pub fn bake_from_file(
     let loaded =
         game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
 
-    bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel)
+    bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map)
 }
 
 /// Bakes `replay` into the frames a preview plays, then rasterises them.
@@ -87,6 +95,7 @@ pub fn bake(
     vfs: &VfsPath,
     version: Option<&Version>,
     cancel: &AtomicBool,
+    on_map: impl FnOnce(PreviewFrames),
 ) -> Result<PreviewFrames, PreviewError> {
     let cancelled = || cancel.load(std::sync::atomic::Ordering::Relaxed);
     if cancelled() {
@@ -100,6 +109,12 @@ pub fn bake(
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
     renderer.set_fonts(assets::load_game_fonts(vfs));
+
+    // Built before the battle is walked so the map can be shown during it; it
+    // is the same renderer the track is rasterised with afterwards.
+    let mut preview = PreviewRenderer::new(vfs, version, &map_name)?;
+    let nothing_drawn: Vec<DrawCommand> = Vec::new();
+    on_map(PreviewFrames::render(&mut preview, std::slice::from_ref(&nothing_drawn)));
 
     let mut session = MergedReplays::new(provider.entity_specs(), provider, constants, session_version, replay, &[])
         .map_err(|_| PreviewError::UnreadableReplay)?;
@@ -115,8 +130,7 @@ pub fn bake(
         return Err(PreviewError::Cancelled);
     }
 
-    let mut renderer = PreviewRenderer::new(vfs, version, &map_name)?;
-    Ok(PreviewFrames::render(&mut renderer, &sink.finish()))
+    Ok(PreviewFrames::render(&mut preview, &sink.finish()))
 }
 
 /// The edge length a preview's frames are rasterised and drawn at.
