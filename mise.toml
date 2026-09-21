@@ -101,9 +101,10 @@ run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
 description = "Cargo: runs the complete test suite, including what Buck cannot"
 # The GPUI port's tests each open a window and a graphics device. One per core
 # wedges the run on a machine with many of them: the harness reports a couple
-# of hundred tests and then sits at one busy core. Eight is enough to keep the
-# suite short and is well under where that starts.
-env = { RUST_TEST_THREADS = "8" }
+# of hundred tests and then sits at one busy core. How many it takes depends on
+# what else is running, and eight has stalled with the app itself open, so the
+# suite runs four at a time -- still a few seconds for the whole of it.
+env = { RUST_TEST_THREADS = "4" }
 run = "cargo test --workspace"
 
 [tasks.cargo-fix]
