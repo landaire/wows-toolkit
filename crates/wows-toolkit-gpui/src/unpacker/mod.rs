@@ -5,6 +5,7 @@
 //! are the GPUI rendering over it.
 
 pub mod browser;
+pub mod queue_panel;
 pub mod search_panel;
 pub mod view;
 pub mod viewer_panel;

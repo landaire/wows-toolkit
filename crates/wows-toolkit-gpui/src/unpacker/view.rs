@@ -15,22 +15,18 @@ use std::sync::atomic::Ordering;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
-use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
-use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::dock::DockSkin;
 use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
-use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::popover::Popover;
-use gpui_kit::component::progress::Progress;
 use gpui_kit::component::searchable_list::SearchableListItem;
 use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::Select;
@@ -45,6 +41,9 @@ use wowsunpack::vfs::VfsPath;
 use super::browser::BrowserEvent;
 use super::browser::BrowserPanel;
 use super::browser::BrowserSource;
+use super::queue_panel::QueueEvent;
+use super::queue_panel::QueuePanel;
+use super::queue_panel::QueueView;
 use super::search_panel::SearchPanel;
 use super::search_panel::SearchPanelEvent;
 use super::viewer_panel::FileViewerPanel;
@@ -68,10 +67,9 @@ use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
 use wows_toolkit_viewmodel::unpacker::search::scan;
 use wows_toolkit_viewmodel::unpacker::viewer;
 
-/// The queue dropdown's box: it takes the width its longest path wants, up to
-/// a cap that keeps it off the browser, and scrolls past the height cap.
-const QUEUE_POPOVER_MAX_WIDTH: Pixels = px(420.);
-const QUEUE_POPOVER_MAX_HEIGHT: Pixels = px(300.);
+/// How wide the queue panel opens beside the listing.
+const QUEUE_PANEL_WIDTH: Pixels = px(320.);
+/// The dump menu's box, sized to its longest entry.
 const DUMP_POPOVER_MAX_WIDTH: Pixels = px(220.);
 
 /// One message from a running scan.
@@ -143,6 +141,8 @@ pub struct UnpackerView {
     assets_browser: Entity<BrowserPanel>,
     /// Entries queued for extraction. The shared queue owns the rules about
     /// what queueing a listing means and about queueing the same entry twice.
+    /// The queue and every control that acts on it, beside the listing.
+    queue_panel: Entity<QueuePanel>,
     queue: ExtractQueue,
     extract_state: ExtractState,
     /// Set to stop an in-flight extraction; replaced per run.
@@ -169,7 +169,18 @@ impl UnpackerView {
         // than one panel; a bare one renders only the displayed panel.
         let (dock_area, _) = DockSkin::dock_area("unpacker-dock", None, window, cx);
 
+        let output_dir_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.output_dir_hint").to_string()));
+        let queue_panel = cx.new(|cx| QueuePanel::new(output_dir_input.clone(), cx));
+
         dock_area.update(cx, |dock, cx| {
+            dock.add_panel_view(
+                panel_handle(queue_panel.clone()),
+                DockPlacement::Right,
+                Some(QUEUE_PANEL_WIDTH),
+                window,
+                cx,
+            );
             dock.add_panel_view(panel_handle(pkg_browser.clone()), DockPlacement::Center, None, window, cx);
             dock.add_panel_view(panel_handle(assets_browser.clone()), DockPlacement::Center, None, window, cx);
             // Each add activates what it added, so the last one would be
@@ -180,10 +191,8 @@ impl UnpackerView {
         let build_select =
             cx.new(|cx| SelectState::new(SearchableVec::new(Vec::new()), None, window, cx).searchable(false));
 
-        let output_dir_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.unpacker.output_dir_hint").to_string()));
-
         let subscriptions = vec![
+            cx.subscribe_in(&queue_panel, window, Self::on_queue_event),
             cx.subscribe(&output_dir_input, Self::on_output_dir_edited),
             cx.subscribe_in(&pkg_browser, window, Self::on_browser_event),
             cx.subscribe_in(&assets_browser, window, Self::on_browser_event),
@@ -207,6 +216,7 @@ impl UnpackerView {
             dock_area,
             pkg_browser,
             assets_browser,
+            queue_panel,
             queue: ExtractQueue::new(),
             output_dir: String::new(),
             output_dir_input,
@@ -243,6 +253,24 @@ impl UnpackerView {
         self.output_dir = output_dir.clone();
         crate::settings_store::save(setting_keys::OUTPUT_DIR, &output_dir, cx);
         cx.notify();
+    }
+
+    /// Where a run has got to, in words. `None` before anything has run.
+    fn extract_status(&self) -> Option<String> {
+        match &self.extract_state {
+            ExtractState::Idle => None,
+            ExtractState::Counting => Some(t!("ui.unpacker.counting_files").into_owned()),
+            ExtractState::Running(progress) => {
+                Some(t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned())
+            }
+            ExtractState::Failed(reason) => Some(t!("ui.unpacker.extract_failed", reason = reason).into_owned()),
+            ExtractState::Done(ExtractOutcome::Completed { written }) => {
+                Some(t!("ui.unpacker.extracted", count = written).into_owned())
+            }
+            ExtractState::Done(ExtractOutcome::Stopped { written }) => {
+                Some(t!("ui.unpacker.cancelled", count = written).into_owned())
+            }
+        }
     }
 
     fn browse_for_output_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
@@ -621,6 +649,43 @@ impl UnpackerView {
         self.publish_queue(cx);
     }
 
+    /// What the reader asked of the queue panel.
+    fn on_queue_event(
+        &mut self,
+        _panel: &Entity<QueuePanel>,
+        event: &QueueEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            QueueEvent::Extract => self.start_extraction(cx),
+            QueueEvent::Cancel => self.cancel_extraction(cx),
+            QueueEvent::ClearAll => self.clear_queue(cx),
+            QueueEvent::Remove(path) => self.remove_from_queue(path.clone(), cx),
+            QueueEvent::Browse => self.browse_for_output_dir(window, cx),
+            QueueEvent::SetDecodePrototypes(on) => {
+                self.prototypes = if *on { PrototypeOutput::DecodeToJson } else { PrototypeOutput::Raw };
+                self.publish_queue(cx);
+            }
+        }
+    }
+
+    /// Redraws the queue panel from the tab's own state.
+    fn publish_queue_view(&mut self, cx: &mut Context<Self>) {
+        let view = QueueView {
+            entries: self.queue.entries().to_vec(),
+            progress: match &self.extract_state {
+                ExtractState::Running(progress) => Some((progress.written, progress.total)),
+                _ => None,
+            },
+            status: self.extract_status().map(SharedString::from),
+            busy: matches!(self.extract_state, ExtractState::Counting | ExtractState::Running(_)),
+            decode_prototypes: matches!(self.prototypes, PrototypeOutput::DecodeToJson),
+            has_output_dir: !self.output_dir.is_empty(),
+        };
+        self.queue_panel.update(cx, |panel, cx| panel.set_view(view, cx));
+    }
+
     /// Hands both browser panes the queued paths, so their listing rows show
     /// what is queued. One shared set rather than a copy per pane: a path is
     /// queued for the tab, not for the pane it was queued from.
@@ -629,6 +694,7 @@ impl UnpackerView {
             Rc::new(self.queue.entries().iter().map(|path| path.as_str().to_string()).collect());
         self.pkg_browser.update(cx, |pane, cx| pane.set_queued(queued.clone(), cx));
         self.assets_browser.update(cx, |pane, cx| pane.set_queued(queued, cx));
+        self.publish_queue_view(cx);
         cx.notify();
     }
 
@@ -642,8 +708,7 @@ impl UnpackerView {
         }
         let output_dir = extract_root(Path::new(&self.output_dir));
 
-        let queued = self.queue.take();
-        self.publish_queue(cx);
+        let queued = self.queue.entries().to_vec();
         let prototypes = self.prototypes;
         let stop_flag = Arc::new(AtomicBool::new(false));
         self.stop_flag = stop_flag.clone();
@@ -741,84 +806,6 @@ fn dump_params_item(view: Entity<UnpackerView>, format: GameParamsFormat, base_o
     )
 }
 
-/// The extraction queue dropdown, mirroring the egui app's queue button and
-/// its popup: the count on the trigger, one removable row per entry, and a
-/// "Clear all" that empties it. Paths read as the game's own `res/` layout,
-/// which is where they land on disk.
-fn queue_popover(view: Entity<UnpackerView>, entries: Vec<VfsPath>) -> impl IntoElement {
-    let label = match entries.len() {
-        0 => t!("ui.unpacker.queue").into_owned(),
-        count => t!("ui.unpacker.queued_count", count = count).into_owned(),
-    };
-    let trigger = Button::new("unpacker-queue-trigger")
-        .child(crate::icons::icon(crate::icons::LIST_CHECKS))
-        .label(label)
-        .compact();
-
-    Popover::new("unpacker-queue").trigger(trigger).content(move |_state, _window, _cx| {
-        let view = view.clone();
-        let rows = entries.iter().cloned().map(|entry| queue_row(view.clone(), entry)).collect::<Vec<_>>();
-        let clear_view = view.clone();
-
-        v_flex()
-            .max_w(QUEUE_POPOVER_MAX_WIDTH)
-            .gap_1()
-            .p_1()
-            .child(
-                h_flex()
-                    .justify_between()
-                    .items_center()
-                    .child(
-                        div()
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .child(t!("ui.unpacker.extraction_queue").to_string()),
-                    )
-                    .child(
-                        Button::new("unpacker-queue-clear-all")
-                            .label(t!("ui.unpacker.clear_all").to_string())
-                            .compact()
-                            .on_click(move |_event, _window, cx: &mut App| {
-                                clear_view.update(cx, |this, cx| this.clear_queue(cx));
-                            }),
-                    ),
-            )
-            // A plain scroll container, not the kit's `overflow_y_scrollbar`:
-            // the overlaid scrollbar keeps requesting frames, which leaves a
-            // headless test spinning on a popover that never settles.
-            .child(
-                v_flex()
-                    .id("unpacker-queue-list")
-                    .max_h(QUEUE_POPOVER_MAX_HEIGHT)
-                    .overflow_y_scroll()
-                    .gap_1()
-                    .children(rows),
-            )
-    })
-}
-
-/// One queued entry: its path and a button that drops it.
-fn queue_row(view: Entity<UnpackerView>, entry: VfsPath) -> impl IntoElement {
-    let path = entry.as_str().trim_start_matches('/').to_string();
-    let remove = entry.clone();
-
-    h_flex()
-        .gap_1()
-        .items_center()
-        .justify_between()
-        .child(div().flex_1().min_w(px(0.)).text_xs().truncate().child(format!("res/{path}")))
-        .child(
-            Button::new(SharedString::from(format!("unpacker-queue-remove-{path}")))
-                .icon(IconName::Close)
-                .compact()
-                .tooltip(t!("ui.unpacker.remove_from_queue").to_string())
-                .on_click(move |_event, _window, cx: &mut App| {
-                    let remove = remove.clone();
-                    view.update(cx, |this, cx| this.remove_from_queue(remove, cx));
-                }),
-        )
-}
-
 impl Focusable for UnpackerView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -836,10 +823,6 @@ impl Render for UnpackerView {
                 .flex_none()
                 .gap_2()
                 .items_center()
-                .px_2()
-                .py_1()
-                .border_b_1()
-                .border_color(border)
                 .child(
                     div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.unpacker.version").to_string()),
                 )
@@ -847,38 +830,13 @@ impl Render for UnpackerView {
                     crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT)
                         .child(Select::new(&self.build_select).id("unpacker-build").small()),
                 )
+                .child(crate::ui::rule_v(cx))
         });
 
-        let status: Option<String> = match &self.extract_state {
-            ExtractState::Idle => None,
-            ExtractState::Counting => Some(t!("ui.unpacker.counting_files").into_owned()),
-            ExtractState::Running(progress) => {
-                Some(t!("ui.unpacker.extracting", done = progress.written, total = progress.total).into_owned())
-            }
-            ExtractState::Failed(reason) => Some(t!("ui.unpacker.extract_failed", reason = reason).into_owned()),
-            ExtractState::Done(ExtractOutcome::Completed { written }) => {
-                Some(t!("ui.unpacker.extracted", count = written).into_owned())
-            }
-            ExtractState::Done(ExtractOutcome::Stopped { written }) => {
-                Some(t!("ui.unpacker.cancelled", count = written).into_owned())
-            }
-        };
-        let running = match &self.extract_state {
-            ExtractState::Running(progress) => Some(*progress),
-            _ => None,
-        };
-        let busy = running.is_some() || matches!(self.extract_state, ExtractState::Counting);
-
-        // The egui button carries the queue count in its own label rather
-        // than only beside it.
-        let queued = self.queue.len();
-        let extract_label = match queued {
-            0 => t!("ui.unpacker.extract").into_owned(),
-            1 => t!("ui.unpacker.extract_one").into_owned(),
-            count => t!("ui.unpacker.extract_many", count = count).into_owned(),
-        };
-
-        let output_bar = h_flex()
+        // One row of chrome: the build this listing is of, and the dump that
+        // acts on the build rather than on the queue. Everything that acts on
+        // the queue lives with the queue (`queue_panel.rs`).
+        let chrome = h_flex()
             .flex_none()
             .gap_2()
             .items_center()
@@ -886,81 +844,17 @@ impl Render for UnpackerView {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(
-                Button::new("unpacker-browse-output")
-                    .label(t!("ui.unpacker.browse").to_string())
-                    .compact()
-                    .on_click(cx.listener(|this, _event, window, cx| this.browse_for_output_dir(window, cx))),
-            )
-            .child(div().flex_1().min_w(px(0.)).child(Input::new(&self.output_dir_input).id("unpacker-output-dir")))
-            .child(
-                Checkbox::new("unpacker-decode-prototypes")
-                    .label(t!("ui.unpacker.decode_prototypes").to_string())
-                    .checked(self.prototypes == PrototypeOutput::DecodeToJson)
-                    .tooltip(t!("ui.unpacker.decode_prototypes_tooltip").into_owned())
-                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                        this.prototypes = if *checked { PrototypeOutput::DecodeToJson } else { PrototypeOutput::Raw };
-                        cx.notify();
-                    })),
-            );
-
-        let queue_popover = queue_popover(cx.entity(), self.queue.entries().to_vec());
-
-        let queue_bar = h_flex()
-            .flex_none()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
-            .child(queue_popover)
-            .when_some(running, |this, progress| {
-                this.child(
-                    div()
-                        .w(px(160.))
-                        .child(Progress::new("unpacker-extract-progress").value(progress.fraction() * 100.)),
-                )
-            })
-            .when_some(status, |this, status| {
-                this.child(div().flex_1().text_xs().text_color(crate::theme::text_dim()).child(status))
-            })
-            .child(
-                Button::new("unpacker-extract")
-                    .label(extract_label)
-                    .compact()
-                    .disabled(self.queue.is_empty() || busy || self.output_dir.is_empty())
-                    .when(self.output_dir.is_empty(), |this| {
-                        this.tooltip(t!("ui.unpacker.choose_directory").into_owned())
-                    })
-                    .on_click(cx.listener(|this, _event, _window, cx| this.start_extraction(cx))),
-            )
-            .child(
-                Button::new("unpacker-cancel")
-                    .label(t!("ui.buttons.cancel").to_string())
-                    .compact()
-                    .disabled(!busy)
-                    .on_click(cx.listener(|this, _event, _window, cx| this.cancel_extraction(cx))),
-            )
+            .when_some(version_bar, |this, bar| this.child(bar))
             .child(dump_params_popover(cx.entity(), self.package_vfs.is_some()))
             .when_some(self.dump_status.clone(), |this, status| {
                 this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
-            })
-            .child(
-                Button::new("unpacker-clear-queue")
-                    .label(t!("ui.stats.clear").to_string())
-                    .compact()
-                    .disabled(self.queue.is_empty())
-                    .on_click(cx.listener(|this, _event, _window, cx| this.clear_queue(cx))),
-            );
+            });
 
         v_flex()
             .id("unpacker-root")
             .track_focus(&self.focus_handle)
             .size_full()
-            .when_some(version_bar, |this, bar| this.child(bar))
-            .child(queue_bar)
-            .child(output_bar)
+            .child(chrome)
             .child(div().flex_1().min_h(px(0.)).child(self.dock_area.clone()))
     }
 }
