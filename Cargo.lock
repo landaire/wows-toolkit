@@ -11461,6 +11461,7 @@ dependencies = [
  "levenshtein",
  "pickled",
  "regex",
+ "rust-i18n",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -11470,6 +11471,7 @@ dependencies = [
  "wows-toolkit-config",
  "wows_replays",
  "wowsunpack",
+ "wt-translations",
 ]
 
 [[package]]
@@ -11743,6 +11745,8 @@ dependencies = [
 name = "wt-translations"
 version = "0.16.0"
 dependencies = [
+ "rust-i18n",
+ "toml 1.1.4+spec-1.1.0",
  "wows-core",
 ]
 

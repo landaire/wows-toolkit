@@ -9,3 +9,7 @@ description = "Translation key mappings, TextResolver trait, and language metada
 
 [dependencies]
 wows-core = { workspace = true }
+# The translation catalog is TOML, and `rust_i18n::Backend` is what serves it
+# to `t!` in every crate that translates.
+rust-i18n = { workspace = true }
+toml = { workspace = true }
