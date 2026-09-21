@@ -127,7 +127,6 @@ impl Panel for StatsOverviewPanel {
 impl Render for StatsOverviewPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
-        let radius = cx.theme().radius;
         let dim = crate::theme::text_dim();
         let summary = &self.computed.summary;
 
@@ -162,13 +161,14 @@ impl Render for StatsOverviewPanel {
             .border_color(border)
             .child(div().text_sm().font_weight(FontWeight::BOLD).child(record))
             .when_some(self.computed.personal_rating.as_ref(), |this, rating| {
+                // The band is the text's own colour over the panel, which is
+                // what `chip_text` is solved for; filling behind it with
+                // `chip_hue` would put one tone of a band on another.
                 let dark = crate::theme::is_dark_mode();
                 this.child(
                     div()
-                        .px_1()
-                        .rounded(radius)
-                        .bg(rgb(personal_rating::chip_hue(rating.category)))
                         .text_sm()
+                        .font_weight(FontWeight::BOLD)
                         .text_color(rgb(personal_rating::chip_text(rating.category, dark)))
                         .child(format!("PR {:.0} ({})", rating.pr, rating.category.name())),
                 )
@@ -203,7 +203,7 @@ impl Render for StatsOverviewPanel {
             .child(div().w(NUMBER_COLUMN_WIDTH).text_xs().font_weight(FontWeight::BOLD).child("Avg frags"));
 
         let ships: Vec<(String, PerformanceInfo)> = self.computed.ships.clone();
-        let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| {
+        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| {
             let Some((ship, info)) = ships.get(ix) else {
                 return div().into_any_element();
             };
@@ -214,6 +214,7 @@ impl Render for StatsOverviewPanel {
                 .gap_2()
                 .items_center()
                 .px_2()
+                .when_some(crate::ui::stripe(ix, cx), |row, color| row.bg(color))
                 .child(div().w(SHIP_COLUMN_WIDTH).text_sm().child(ship.clone()))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(info.total_games().to_string()))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_percent(info.win_rate())))
