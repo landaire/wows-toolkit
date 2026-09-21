@@ -2,6 +2,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
@@ -10,6 +11,11 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
+use gpui_kit::component::searchable_list::SearchableListItem;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::select::SelectEvent;
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::tab::Tab;
@@ -95,6 +101,31 @@ impl AppTab {
     }
 }
 
+/// The language combo, and the menu under it.
+const LANGUAGE_COMBO_WIDTH: Pixels = px(200.);
+
+/// One entry in the language combo. A local newtype: the language list is
+/// `wt_translations`' and `SearchableListItem` is the component library's.
+#[derive(Clone)]
+struct LanguageItem(&'static wt_translations::LanguageInfo);
+
+impl SearchableListItem for LanguageItem {
+    type Value = &'static str;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(self.0.native_name)
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.0.code
+    }
+}
+
+fn language_index(locale: Option<&str>) -> usize {
+    let code = locale.unwrap_or("en");
+    wt_translations::SUPPORTED_LANGUAGES.iter().position(|lang| lang.code == code).unwrap_or(0)
+}
+
 /// Load status of the settings snapshot fetched from the shared config DB.
 enum SettingsState {
     Loading,
@@ -107,9 +138,9 @@ enum SettingsState {
 pub struct App {
     active_tab: AppTab,
     settings: SettingsState,
-    /// Session-local zoom shown by the zoom slider. Seeded from `settings.zoom`
-    /// once the DB load completes, then updated live as the slider moves.
-    /// Never written back to the DB.
+    /// The zoom the slider shows. Seeded from `settings.zoom` once the DB
+    /// load completes, updated live as the slider moves, and written back so
+    /// it survives a restart the way the egui slider's does.
     zoom: f32,
     /// Which palette is on screen. Seeded from the shared setting, then
     /// changed from the Settings tab; a zoom change re-applies the theme, so
@@ -161,6 +192,11 @@ pub struct App {
     /// saved value can be shown when the tab first renders.
     wows_dir_input: Entity<InputState>,
     proxy_input: Entity<InputState>,
+    /// Backing state for the settings tab's language combo.
+    language_select: Entity<SelectState<SearchableVec<LanguageItem>>>,
+    /// Whether the directory in the field is one an install could be in. The
+    /// field says so, and the Settings tab itself carries the mark.
+    wows_dir_invalid: bool,
     settings_scroll: ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -179,6 +215,10 @@ impl App {
         let twitch_channel_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Channel to watch (blank: your own)"));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
+        let languages: SearchableVec<LanguageItem> =
+            SearchableVec::new(wt_translations::SUPPORTED_LANGUAGES.iter().map(LanguageItem).collect::<Vec<_>>());
+        let language_select =
+            cx.new(|cx| SelectState::new(languages, Some(IndexPath::new(language_index(None))), window, cx));
         let focus_handle = cx.focus_handle();
         window.focus(&focus_handle, cx);
 
@@ -193,6 +233,12 @@ impl App {
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
+        // `Confirm(None)` is the cleared-selection case, which this combo
+        // cannot produce: it always holds a language.
+        let language_chosen = cx.subscribe_in(&language_select, window, |this, _state, event, window, cx| {
+            let SelectEvent::Confirm(Some(code)) = event else { return };
+            this.set_locale((*code).to_string(), window, cx);
+        });
 
         Self {
             theme: ThemeChoice::default(),
@@ -214,9 +260,40 @@ impl App {
             search,
             wows_dir_input,
             proxy_input,
+            language_select,
+            wows_dir_invalid: false,
             settings_scroll: ScrollHandle::new(),
-            _subscriptions: vec![subscription, wows_dir_edited, proxy_edited, search_event],
+            _subscriptions: vec![subscription, wows_dir_edited, proxy_edited, search_event, language_chosen],
         }
+    }
+
+    /// Adopts a language: saved, applied to the catalogue every `t!` reads,
+    /// and pushed into the tabs that translate their own rows so they are
+    /// rebuilt in it rather than waiting for a restart.
+    fn set_locale(&mut self, code: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(settings) = self.settings_mut() else { return };
+        if settings.locale.as_deref() == Some(code.as_str()) {
+            return;
+        }
+        settings.locale = Some(code.clone());
+        settings_store::save(keys::LOCALE, &code, cx);
+        wows_toolkit_viewmodel::set_locale(&code);
+
+        let replay_settings = settings.replay.clone();
+        let wows_dir = settings.wows_dir.clone();
+        let debug_mode = settings.debug_mode;
+        let auto_load = settings.auto_load_latest_replay;
+        self.replay_inspector.update(cx, |view, cx| {
+            let settings = InspectorSettings {
+                wows_dir,
+                debug_mode,
+                replay_settings,
+                auto_load_latest_replay: auto_load,
+                locale: Some(code),
+            };
+            view.apply_settings(settings, window, cx);
+        });
+        cx.notify();
     }
 
     /// Forwards the replay inspector's preloaded game data to the Armor
@@ -372,6 +449,15 @@ impl App {
         let game_data = self.replay_inspector.read(cx).game_data();
         self.search.update(cx, |search, cx| search.set_game_data(game_data, cx));
         self.armor_pane.update(cx, |pane, cx| pane.apply_armor_defaults(settings.armor_defaults.as_ref(), cx));
+        // The shared strings follow the saved language, and the combo shows
+        // it, both from the moment the settings land.
+        if let Some(code) = settings.locale.as_deref() {
+            wows_toolkit_viewmodel::set_locale(code);
+        }
+        let language_ix = language_index(settings.locale.as_deref());
+        self.language_select
+            .update(cx, |state, cx| state.set_selected_index(Some(IndexPath::new(language_ix)), window, cx));
+
         // Seed the text fields so the tab opens showing what is saved.
         self.wows_dir_input.update(cx, |state, cx| state.set_value(settings.wows_dir.clone(), window, cx));
         self.proxy_input.update(cx, |state, cx| state.set_value(settings.proxy_url.clone(), window, cx));
@@ -434,6 +520,7 @@ impl App {
                 |this, _event: &ClickEvent, window, cx| {
                     this.zoom = DEFAULT_ZOOM;
                     theme::apply_egui_theme(this.theme, this.zoom, window, cx);
+                    settings_store::save(keys::ZOOM_FACTOR, &this.zoom, cx);
                     this.zoom_slider.update(cx, |slider, slider_cx| {
                         slider.set_value(DEFAULT_ZOOM, window, slider_cx);
                     });
@@ -593,6 +680,15 @@ impl App {
     /// Adopts a new game directory: saved, then pushed into the tabs that read
     /// it so they reload rather than keep showing the old install.
     fn apply_wows_dir(&mut self, path: String, window: &mut Window, cx: &mut Context<Self>) {
+        // A directory that is not there empties every tab that reads it, and
+        // the egui field says so rather than adopting it silently
+        // (`ui/settings_tab.rs`'s `wows_dir_invalid`).
+        self.wows_dir_invalid = !path.is_empty() && !std::path::Path::new(&path).join("bin").is_dir();
+        if self.wows_dir_invalid {
+            cx.notify();
+            return;
+        }
+
         let Some(settings) = self.settings_mut() else { return };
         if settings.wows_dir == path {
             return;
@@ -695,6 +791,16 @@ impl App {
                 }),
             ))
             .child(self.render_zoom_row(cx))
+            .child(
+                v_flex().gap_1().child(div().text_sm().child("Language")).child(
+                    Select::new(&self.language_select)
+                        .id("settings-language")
+                        .accessibility_label("Language")
+                        .small()
+                        .w(LANGUAGE_COMBO_WIDTH)
+                        .menu_width(LANGUAGE_COMBO_WIDTH),
+                ),
+            )
             .child(v_flex().gap_1().child(div().text_sm().child("Theme")).child(h_flex().gap_2().children(
                 ThemeChoice::ALL.map(|choice| {
                     selectable(
@@ -814,6 +920,15 @@ impl App {
                                 this.edit_replay_settings(cx, |replay| replay.show_observed_damage = checked);
                             })),
                     )
+                    .child(
+                        Checkbox::new("show-entity-id")
+                            .label("Show Entity ID")
+                            .checked(replay.show_entity_id)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                let checked = *checked;
+                                this.edit_replay_settings(cx, |replay| replay.show_entity_id = checked);
+                            })),
+                    )
                     .child(Checkbox::new("show-heals").label("Show Heals").checked(replay.show_heals).on_click(
                         cx.listener(|this, checked: &bool, _window, cx| {
                             let checked = *checked;
@@ -906,13 +1021,26 @@ impl Render for App {
         if (slider_zoom - self.zoom).abs() > f32::EPSILON {
             self.zoom = slider_zoom;
             theme::apply_egui_theme(self.theme, self.zoom, window, cx);
+            settings_store::save(keys::ZOOM_FACTOR, &self.zoom, cx);
         }
 
         let active_ix = AppTab::ALL.iter().position(|t| *t == self.active_tab).unwrap_or(0);
+        let danger = cx.theme().danger;
         let tabs = TabBar::new("app-tabs")
             .selected_index(active_ix)
             .children(AppTab::ALL.iter().map(|t| {
-                Tab::new().child(h_flex().gap_1().items_center().child(crate::icons::icon(t.glyph())).child(t.label()))
+                // A tab that needs looking at says so, which is how the egui
+                // strip reports an install it cannot read (`app.rs`'s
+                // `alert_tab_style`).
+                let attention = *t == AppTab::Settings && self.wows_dir_invalid;
+                Tab::new().child(
+                    h_flex()
+                        .gap_1()
+                        .items_center()
+                        .when(attention, |row| row.text_color(danger))
+                        .child(crate::icons::icon(t.glyph()))
+                        .child(t.label()),
+                )
             }))
             .on_click(cx.listener(|this, ix: &usize, _window, cx| {
                 this.active_tab = AppTab::ALL[*ix];
