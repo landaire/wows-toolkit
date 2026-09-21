@@ -11,6 +11,9 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::command::Command;
 use gpui_kit::component::command::CommandState;
+use gpui_kit::component::form::Form;
+use gpui_kit::component::form::field;
+use gpui_kit::component::form::v_form;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -132,6 +135,22 @@ impl AppTab {
 
 /// The language combo, and the menu under it.
 const LANGUAGE_COMBO_WIDTH: Pixels = px(200.);
+
+/// The label column in the settings form. Wide enough for the longest label
+/// the tab draws without wrapping it.
+const SETTINGS_LABEL_WIDTH: Pixels = px(260.);
+
+/// The corner a settings card is drawn with.
+const SECTION_RADIUS: Pixels = px(6.);
+
+/// The monitored-channel field: a Twitch login, not a sentence.
+const TWITCH_CHANNEL_WIDTH: Pixels = px(240.);
+
+/// Where a credential with the permissions this needs is issued.
+///
+/// Chatterino's login page, which is what the egui app opens: it mints a
+/// chat-scoped token, so the toolkit does not have to host a login of its own.
+const TWITCH_TOKEN_URL: &str = "https://chatterino.com/client_login";
 
 /// One entry in the language combo. A local newtype: the language list is
 /// `wt_translations`' and `SearchableListItem` is the component library's.
@@ -579,6 +598,34 @@ impl App {
     /// What the paste button says: what Twitch made of the stored credential,
     /// and what the last paste made of the clipboard. The egui settings tab
     /// names the same four states.
+    /// The glyph beside the token button, which is what the egui tab draws
+    /// next to the same label.
+    fn twitch_status_glyph(&self) -> &'static str {
+        if matches!(self.twitch_paste, Some(Err(_))) {
+            return crate::icons::X_CIRCLE;
+        }
+        match self.twitch_status {
+            TwitchStatus::Unset => crate::icons::WARNING,
+            // Nothing has been proven either way yet, so nothing is claimed.
+            TwitchStatus::Checking => crate::icons::CLOCK,
+            TwitchStatus::Accepted { .. } => crate::icons::CHECK_CIRCLE,
+            TwitchStatus::Refused => crate::icons::X_CIRCLE,
+        }
+    }
+
+    /// The tone that glyph is drawn in.
+    fn twitch_status_tone(&self) -> u32 {
+        if matches!(self.twitch_paste, Some(Err(_))) {
+            return crate::theme::semantic().error;
+        }
+        match self.twitch_status {
+            TwitchStatus::Unset => crate::theme::semantic().warn,
+            TwitchStatus::Checking => crate::theme::semantic().text_dim,
+            TwitchStatus::Accepted { .. } => crate::theme::semantic().ok,
+            TwitchStatus::Refused => crate::theme::semantic().error,
+        }
+    }
+
     fn twitch_paste_label_key(&self) -> &'static str {
         if matches!(self.twitch_paste, Some(Err(_))) {
             return "ui.settings.twitch.paste_token_invalid";
@@ -669,18 +716,45 @@ impl App {
     }
 }
 
-fn section_heading(title: String, description: String) -> impl IntoElement {
+/// One settings section: its glyph, name and purpose over a card holding the
+/// controls, which is the shape the egui tab draws with `section_header` and
+/// `ui.group`.
+fn settings_section(
+    glyph: &'static str,
+    title: String,
+    description: String,
+    border: Hsla,
+    body: impl IntoElement,
+) -> impl IntoElement {
     v_flex()
-        .gap_1()
-        .child(div().text_sm().font_weight(FontWeight::BOLD).child(title))
-        .child(div().text_xs().text_color(crate::theme::text_dim()).child(description))
+        .gap_2()
+        .child(
+            v_flex()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .gap_2()
+                        .child(crate::icons::icon(glyph).text_color(crate::theme::icon_accent()))
+                        .child(div().text_sm().font_weight(FontWeight::BOLD).child(title)),
+                )
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child(description)),
+        )
+        .child(
+            div()
+                .w_full()
+                .rounded(SECTION_RADIUS)
+                .border_1()
+                .border_color(border)
+                .bg(crate::theme::surface())
+                .p_3()
+                .child(body),
+        )
 }
 
-fn settings_row(label: String, value: String) -> impl IntoElement {
-    h_flex()
-        .gap_2()
-        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(label))
-        .child(div().text_sm().child(if value.is_empty() { t!("ui.settings.not_set").into_owned() } else { value }))
+/// The layout every section's controls share: one column, labels beside the
+/// control so the whole tab reads down a single edge.
+fn settings_form() -> Form {
+    v_form().label_layout(Axis::Horizontal).label_width(SETTINGS_LABEL_WIDTH).small()
 }
 
 impl App {
@@ -688,9 +762,6 @@ impl App {
         h_flex()
             .gap_2()
             .items_center()
-            .child(
-                div().text_sm().font_weight(FontWeight::SEMIBOLD).child(t!("ui.settings.app.zoom_factor").to_string()),
-            )
             .child(crate::ui::boxed(px(160.), crate::ui::SELECT_SMALL_HEIGHT).child(Slider::new(&self.zoom_slider)))
             .child(div().text_sm().w(px(40.)).child(format!("{:.2}", self.zoom)))
             .child(Button::new("reset-zoom").label(t!("ui.buttons.reset").to_string()).compact().on_click(cx.listener(
@@ -941,200 +1012,208 @@ impl App {
         let theme_choice = settings.theme;
         let replay = settings.replay.clone();
         let current_replay_path = settings.current_replay_path.display().to_string();
+        // Only the three flags are drawn, so the row itself does not have to
+        // outlive the borrow the listeners below need.
+        let armor_defaults = settings
+            .armor_defaults
+            .as_ref()
+            .map(|defaults| (defaults.show_plate_edges, defaults.show_waterline, defaults.hull_opaque));
+        let border = cx.theme().border;
 
-        let application = v_flex()
-            .gap_2()
-            .child(section_heading(
-                t!("ui.settings.app.heading").into_owned(),
-                t!("ui.settings.app.description").into_owned(),
-            ))
-            .child(
-                Button::new("open-data-dir")
-                    .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
-                    .label(t!("ui.settings.app.open_data_dir").to_string())
-                    .compact()
-                    .tooltip(t!("ui.settings.app.open_data_dir_tooltip").to_string())
-                    .on_click(|_event, _window, _cx| open_data_directory()),
-            )
-            .child(
-                Checkbox::new("check-for-updates")
-                    .label(t!("ui.settings.app.check_for_updates").to_string())
-                    .checked(check_for_updates)
-                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                        let checked = *checked;
-                        this.edit_setting(keys::CHECK_FOR_UPDATES, cx, |settings| {
-                            settings.check_for_updates = checked;
-                            checked
-                        });
-                    })),
-            )
-            .child(
-                Checkbox::new("enable-logging")
-                    .label(t!("ui.settings.app.enable_logging").to_string())
-                    .checked(enable_logging)
-                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                        let checked = *checked;
-                        this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
-                            settings.enable_logging = checked;
-                            checked
-                        });
-                    })),
-            )
-            .child(self.render_zoom_row(cx))
-            .child(
-                v_flex().gap_1().child(div().text_sm().child(t!("ui.settings.app.language").to_string())).child(
-                    Select::new(&self.language_select)
-                        .id("settings-language")
-                        .accessibility_label(t!("ui.settings.app.language").to_string())
-                        .small()
-                        .w(LANGUAGE_COMBO_WIDTH)
-                        .menu_width(LANGUAGE_COMBO_WIDTH),
-                ),
-            )
-            .child(v_flex().gap_1().child(div().text_sm().child(t!("ui.settings.app.theme").to_string())).child(
-                h_flex().gap_2().children(ThemeChoice::ALL.map(|choice| {
-                    selectable(
-                        ("theme-choice", choice as usize),
-                        theme_choice == choice,
-                        Button::new(("theme-choice-button", choice as usize))
-                            .label(choice.label())
-                            .compact()
-                            .selected(theme_choice == choice)
-                            .on_click(cx.listener(move |this, _event, window, cx| {
-                                this.set_theme(choice, window, cx);
-                            })),
-                    )
-                })),
-            ))
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(div().text_sm().child(t!("ui.settings.app.data_sharing_mode").to_string()))
-                    .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
+        let application = settings_section(
+            crate::icons::GEAR_FINE,
+            t!("ui.settings.app.heading").into_owned(),
+            t!("ui.settings.app.description").into_owned(),
+            border,
+            settings_form()
+                .child(
+                    field().label(t!("ui.settings.app.language").to_string()).child(
+                        crate::ui::boxed(LANGUAGE_COMBO_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                            Select::new(&self.language_select)
+                                .id("settings-language")
+                                .accessibility_label(t!("ui.settings.app.language").to_string())
+                                .small()
+                                .w(LANGUAGE_COMBO_WIDTH)
+                                .menu_width(LANGUAGE_COMBO_WIDTH),
+                        ),
+                    ),
+                )
+                .child(field().label(t!("ui.settings.app.theme").to_string()).child(h_flex().gap_2().children(
+                    ThemeChoice::ALL.map(|choice| {
                         selectable(
-                            ("data-sharing", mode as usize),
-                            data_sharing == mode,
-                            Button::new(("data-sharing-button", mode as usize))
-                                .label(mode.label())
+                            ("theme-choice", choice as usize),
+                            theme_choice == choice,
+                            Button::new(("theme-choice-button", choice as usize))
+                                .label(choice.label())
                                 .compact()
-                                .selected(data_sharing == mode)
-                                .tooltip(mode.description())
-                                .on_click(cx.listener(move |this, _event, _window, cx| {
-                                    this.edit_setting(keys::DATA_SHARING_MODE, cx, |settings| {
-                                        settings.data_sharing = mode;
-                                        mode
-                                    });
+                                .selected(theme_choice == choice)
+                                .on_click(cx.listener(move |this, _event, window, cx| {
+                                    this.set_theme(choice, window, cx);
                                 })),
                         )
-                    })))
-                    .child(div().text_xs().text_color(crate::theme::text_dim()).child(data_sharing.description())),
-            )
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(div().text_sm().child(t!("ui.settings.app.proxy_url").to_string()))
-                    .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full()),
-            )
-            .child(
-                v_flex()
-                    .gap_1()
-                    .child(div().text_sm().child(t!("ui.settings.twitch.heading").to_string()))
-                    .child(
-                        h_flex()
-                            .gap_2()
-                            .items_center()
-                            .child(
-                                Button::new("twitch-paste-token")
-                                    .label(t!(self.twitch_paste_label_key()).to_string())
+                    }),
+                )))
+                .child(field().label(t!("ui.settings.app.zoom_factor").to_string()).child(self.render_zoom_row(cx)))
+                .child(
+                    field()
+                        .label(t!("ui.settings.app.data_sharing_mode").to_string())
+                        .description(data_sharing.description())
+                        .child(h_flex().gap_2().children(DataSharingMode::ALL.map(|mode| {
+                            selectable(
+                                ("data-sharing", mode as usize),
+                                data_sharing == mode,
+                                Button::new(("data-sharing-button", mode as usize))
+                                    .label(mode.label())
                                     .compact()
-                                    .tooltip(t!("ui.settings.twitch.paste_token_tooltip").to_string())
-                                    .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
+                                    .selected(data_sharing == mode)
+                                    .tooltip(mode.description())
+                                    .on_click(cx.listener(move |this, _event, _window, cx| {
+                                        this.edit_setting(keys::DATA_SHARING_MODE, cx, |settings| {
+                                            settings.data_sharing = mode;
+                                            mode
+                                        });
+                                    })),
+                            )
+                        }))),
+                )
+                .child(
+                    field()
+                        .label(t!("ui.settings.app.proxy_url").to_string())
+                        .description(t!("ui.settings.app.proxy_url_hint").to_string())
+                        .child(Input::new(&self.proxy_input).id("proxy-url").small().w_full()),
+                )
+                .child(
+                    field().child(
+                        v_flex()
+                            .gap_2()
+                            .child(
+                                Checkbox::new("check-for-updates")
+                                    .label(t!("ui.settings.app.check_for_updates").to_string())
+                                    .checked(check_for_updates)
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        let checked = *checked;
+                                        this.edit_setting(keys::CHECK_FOR_UPDATES, cx, |settings| {
+                                            settings.check_for_updates = checked;
+                                            checked
+                                        });
+                                    })),
                             )
                             .child(
-                                div()
-                                    .w(px(220.))
-                                    .child(Input::new(&self.twitch_channel_input).id("twitch-channel").small()),
+                                Checkbox::new("enable-logging")
+                                    .label(t!("ui.settings.app.enable_logging").to_string())
+                                    .checked(enable_logging)
+                                    .tooltip(t!("ui.settings.app.enable_logging_tooltip").to_string())
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        let checked = *checked;
+                                        this.edit_setting(keys::ENABLE_LOGGING, cx, |settings| {
+                                            settings.enable_logging = checked;
+                                            checked
+                                        });
+                                    })),
                             ),
-                    )
-                    .when_some(self.twitch_paste.as_ref(), |this, outcome| {
-                        let (text, dimmed) = match outcome {
-                            Ok(who) => (format!("Signed in as {who}"), true),
-                            Err(why) => (why.clone(), false),
-                        };
-                        this.child(
-                            div().text_xs().when(dimmed, |this| this.text_color(crate::theme::text_dim())).child(text),
-                        )
-                    }),
-            );
-
-        let game = v_flex()
-            .gap_2()
-            .child(section_heading(
-                t!("ui.settings.wows.heading").into_owned(),
-                t!("ui.settings.wows.description").into_owned(),
-            ))
-            .child(
-                h_flex()
-                    .gap_2()
-                    .items_center()
-                    .child(div().flex_1().child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()))
-                    .child(
-                        Button::new("wows-dir-browse")
-                            .icon(IconName::FolderOpen)
-                            .label(t!("ui.settings.wows.browse").to_string())
-                            .compact()
-                            .on_click(cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx))),
                     ),
-            );
+                )
+                .child(
+                    field().child(
+                        h_flex().child(
+                            Button::new("open-data-dir")
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .child(crate::icons::icon(crate::icons::FOLDER_OPEN))
+                                        .child(t!("ui.settings.app.open_data_dir").to_string()),
+                                )
+                                .compact()
+                                .tooltip(t!("ui.settings.app.open_data_dir_tooltip").to_string())
+                                .on_click(|_event, _window, _cx| open_data_directory()),
+                        ),
+                    ),
+                ),
+        );
 
-        let replay_section = v_flex()
-            .gap_2()
-            .child(section_heading(
-                t!("ui.settings.replay.heading").into_owned(),
-                t!("ui.settings.replay.description").into_owned(),
-            ))
-            .child(settings_row(t!("ui.settings.replay.current_path").into_owned(), current_replay_path))
-            .child(
-                h_flex()
-                    .flex_wrap()
-                    .gap_4()
-                    .child(
-                        Checkbox::new("show-raw-xp")
-                            .label(t!("ui.settings.replay.show_raw_xp").to_string())
-                            .checked(replay.show_raw_xp)
-                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                let checked = *checked;
-                                this.edit_replay_settings(cx, |replay| replay.show_raw_xp = checked);
-                            })),
-                    )
-                    .child(
-                        Checkbox::new("show-observed-damage")
-                            .label(t!("ui.settings.replay.show_observed_damage").to_string())
-                            .checked(replay.show_observed_damage)
-                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                let checked = *checked;
-                                this.edit_replay_settings(cx, |replay| replay.show_observed_damage = checked);
-                            })),
-                    )
-                    .child(
-                        Checkbox::new("show-entity-id")
-                            .label(t!("ui.settings.replay.show_entity_id").to_string())
-                            .checked(replay.show_entity_id)
-                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                let checked = *checked;
-                                this.edit_replay_settings(cx, |replay| replay.show_entity_id = checked);
-                            })),
-                    )
-                    .child(
-                        Checkbox::new("show-heals")
-                            .label(t!("ui.settings.replay.show_heals").to_string())
-                            .checked(replay.show_heals)
-                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                let checked = *checked;
-                                this.edit_replay_settings(cx, |replay| replay.show_heals = checked);
-                            })),
-                    )
-                    .child(
+        let game = settings_section(
+            crate::icons::FOLDER_OPEN,
+            t!("ui.settings.wows.heading").into_owned(),
+            t!("ui.settings.wows.description").into_owned(),
+            border,
+            settings_form().child(
+                field().label(t!("ui.settings.wows.directory_hint").to_string()).child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().flex_1().child(Input::new(&self.wows_dir_input).id("wows-dir").small().w_full()))
+                        .child(
+                            Button::new("wows-dir-browse")
+                                .icon(IconName::FolderOpen)
+                                .label(t!("ui.settings.wows.browse").to_string())
+                                .compact()
+                                .on_click(cx.listener(|this, _event, window, cx| this.browse_for_wows_dir(window, cx))),
+                        ),
+                ),
+            ),
+        );
+
+        let replay_section = settings_section(
+            crate::icons::TABLE,
+            t!("ui.settings.replay.heading").into_owned(),
+            t!("ui.settings.replay.description").into_owned(),
+            border,
+            settings_form()
+                .child(field().label(t!("ui.settings.replay.current_path").to_string()).child(div().text_sm().child(
+                    crate::ui::selectable_text(
+                        "settings-current-replay-path",
+                        if current_replay_path.is_empty() {
+                            t!("ui.settings.not_set").into_owned()
+                        } else {
+                            current_replay_path
+                        },
+                    ),
+                )))
+                .child(
+                    field().child(
+                        h_flex()
+                            .flex_wrap()
+                            .gap_x_4()
+                            .gap_y_2()
+                            .child(
+                                Checkbox::new("show-raw-xp")
+                                    .label(t!("ui.settings.replay.show_raw_xp").to_string())
+                                    .checked(replay.show_raw_xp)
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        let checked = *checked;
+                                        this.edit_replay_settings(cx, |replay| replay.show_raw_xp = checked);
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("show-observed-damage")
+                                    .label(t!("ui.settings.replay.show_observed_damage").to_string())
+                                    .checked(replay.show_observed_damage)
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        let checked = *checked;
+                                        this.edit_replay_settings(cx, |replay| replay.show_observed_damage = checked);
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("show-entity-id")
+                                    .label(t!("ui.settings.replay.show_entity_id").to_string())
+                                    .checked(replay.show_entity_id)
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        let checked = *checked;
+                                        this.edit_replay_settings(cx, |replay| replay.show_entity_id = checked);
+                                    })),
+                            )
+                            .child(
+                                Checkbox::new("show-heals")
+                                    .label(t!("ui.settings.replay.show_heals").to_string())
+                                    .checked(replay.show_heals)
+                                    .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                        let checked = *checked;
+                                        this.edit_replay_settings(cx, |replay| replay.show_heals = checked);
+                                    })),
+                            ),
+                    ),
+                )
+                .child(
+                    field().description(t!("ui.settings.replay.enable_previews_tooltip").to_string()).child(
                         Checkbox::new("enable-replay-previews")
                             .label(t!("ui.settings.replay.enable_previews").to_string())
                             .checked(replay.enable_replay_previews)
@@ -1143,51 +1222,113 @@ impl App {
                                 this.edit_replay_settings(cx, |replay| replay.enable_replay_previews = checked);
                             })),
                     ),
-            );
+                ),
+        );
+
+        let twitch = settings_section(
+            crate::icons::BROADCAST,
+            t!("ui.settings.twitch.heading").into_owned(),
+            t!("ui.settings.twitch.description").into_owned(),
+            border,
+            settings_form()
+                .child(
+                    field().child(
+                        h_flex().child(
+                            Button::new("twitch-get-token")
+                                .child(
+                                    h_flex()
+                                        .gap_1()
+                                        .child(crate::icons::icon(crate::icons::BROWSER))
+                                        .child(t!("ui.settings.twitch.get_token").to_string()),
+                                )
+                                .compact()
+                                .tooltip(t!("ui.settings.twitch.get_token_tooltip").to_string())
+                                .on_click(|_event, _window, cx: &mut gpui_kit::App| cx.open_url(TWITCH_TOKEN_URL)),
+                        ),
+                    ),
+                )
+                .child(
+                    field()
+                        .when_some(self.twitch_paste.as_ref(), |this, outcome| match outcome {
+                            Ok(who) => this.description(t!("ui.settings.twitch.signed_in_as", who = who).into_owned()),
+                            Err(why) => this.description(why.clone()),
+                        })
+                        .child(
+                            h_flex().child(
+                                Button::new("twitch-paste-token")
+                                    .child(
+                                        h_flex()
+                                            .gap_1()
+                                            .child(crate::icons::icon(crate::icons::CLIPBOARD_TEXT))
+                                            .child(t!(self.twitch_paste_label_key()).to_string())
+                                            .child(
+                                                div()
+                                                    .text_color(rgb(self.twitch_status_tone()))
+                                                    .child(crate::icons::icon(self.twitch_status_glyph())),
+                                            ),
+                                    )
+                                    .compact()
+                                    .tooltip(t!("ui.settings.twitch.paste_token_tooltip").to_string())
+                                    .on_click(cx.listener(|this, _event, _window, cx| this.paste_twitch_token(cx))),
+                            ),
+                        ),
+                )
+                .child(
+                    field().label(t!("ui.settings.twitch.monitored_channel").to_string()).child(
+                        div()
+                            .w(TWITCH_CHANNEL_WIDTH)
+                            .child(Input::new(&self.twitch_channel_input).id("twitch-channel").small().w_full()),
+                    ),
+                ),
+        );
 
         // The viewport writes these itself when a pane changes, so the tab
         // reports them rather than offering a second way to set them.
-        let armor = v_flex()
-            .gap_2()
-            .child(section_heading(
-                t!("ui.settings.armor.heading").into_owned(),
-                t!("ui.settings.armor.description").into_owned(),
-            ))
-            .child(match &settings.armor_defaults {
-                Some(defaults) => h_flex()
-                    .gap_4()
-                    .child(
-                        Checkbox::new("armor-show-plate-edges")
-                            .label(t!("ui.armor.plate_edges").to_string())
-                            .checked(defaults.show_plate_edges)
-                            .disabled(true),
-                    )
-                    .child(
-                        Checkbox::new("armor-show-waterline")
-                            .label(t!("ui.armor.waterline").to_string())
-                            .checked(defaults.show_waterline)
-                            .disabled(true),
-                    )
-                    .child(
-                        Checkbox::new("armor-hull-opaque")
-                            .label(t!("ui.armor.opaque_hull").to_string())
-                            .checked(defaults.hull_opaque)
-                            .disabled(true),
-                    )
-                    .into_any_element(),
-                None => div()
-                    .text_sm()
-                    .text_color(crate::theme::text_dim())
-                    .child(t!("ui.settings.armor.no_defaults").to_string())
-                    .into_any_element(),
-            });
+        let armor = settings_section(
+            crate::icons::SHIELD,
+            t!("ui.settings.armor.heading").into_owned(),
+            t!("ui.settings.armor.description").into_owned(),
+            border,
+            settings_form().child(
+                field().child(match armor_defaults {
+                    Some((show_plate_edges, show_waterline, hull_opaque)) => h_flex()
+                        .gap_4()
+                        .child(
+                            Checkbox::new("armor-show-plate-edges")
+                                .label(t!("ui.armor.plate_edges").to_string())
+                                .checked(show_plate_edges)
+                                .disabled(true),
+                        )
+                        .child(
+                            Checkbox::new("armor-show-waterline")
+                                .label(t!("ui.armor.waterline").to_string())
+                                .checked(show_waterline)
+                                .disabled(true),
+                        )
+                        .child(
+                            Checkbox::new("armor-hull-opaque")
+                                .label(t!("ui.armor.opaque_hull").to_string())
+                                .checked(hull_opaque)
+                                .disabled(true),
+                        )
+                        .into_any_element(),
+                    None => div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.settings.armor.no_defaults").to_string())
+                        .into_any_element(),
+                }),
+            ),
+        );
 
         div()
             .id("settings-scroll")
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.settings_scroll)
-            .child(v_flex().gap_4().p_4().child(application).child(game).child(replay_section).child(armor))
+            .child(
+                v_flex().gap_6().p_4().child(application).child(game).child(replay_section).child(twitch).child(armor),
+            )
             .into_any_element()
     }
 }

@@ -332,6 +332,7 @@ paste_token_valid = "Paste Token (Token Valid)"
 paste_token_unvalidated = "Checking token"
 paste_token_invalid = "Paste Token (Token Invalid / Expired)"
 monitored_channel = "Monitored Channel (Default to Self)"
+signed_in_as = "Signed in as %{who}"
 
 # -- Replay Inspector --
 
