@@ -433,6 +433,10 @@ pub struct ParsedReplay {
     /// replay carries no battle-results packet (e.g. the player left before
     /// the server sent one).
     pub raw_results_json: Option<String>,
+    /// The same results with their positional arrays resolved to named
+    /// fields, for the debug-mode mapped viewer. `None` for the same reason
+    /// the raw payload is.
+    pub mapped_results_json: Option<String>,
 }
 
 /// Pretty-prints `raw` as JSON when it parses, falling back to the original
@@ -493,6 +497,13 @@ fn parse_replay(
 
     let report = world.into_report();
     let raw_results_json = report.battle_results().map(pretty_json_or_raw);
+    // What the egui debug menu calls "Battle Results: Mapped JSON": the same
+    // resolution the normalized report reads its per-player figures through.
+    let mapped_results_json = report
+        .battle_results()
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+        .map(|raw| wows_replay_insights::battle_report::resolve_battle_results(raw, &constants_json))
+        .and_then(|resolved| serde_json::to_string_pretty(&resolved).ok());
     let mut normalized =
         NormalizedBattleReport::from_battle_report(&report, meta, loaded.provider.as_ref(), &constants_json);
     // Rated before anything reads it, so the table, the badge and the export
@@ -511,7 +522,7 @@ fn parse_replay(
     let export = ExportedMatch::new(&normalized, report.players(), report.game_chat(), true);
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 
-    Ok(ParsedReplay { model, export, game_data: loaded, raw_metadata_json, raw_results_json })
+    Ok(ParsedReplay { model, export, game_data: loaded, raw_metadata_json, raw_results_json, mapped_results_json })
 }
 
 /// Parses `path` into a [`ParsedReplay`] on the background executor

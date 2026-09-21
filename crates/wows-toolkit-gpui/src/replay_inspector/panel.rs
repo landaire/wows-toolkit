@@ -105,11 +105,27 @@ enum SidePanel {
     Chat,
     RawMetadata,
     RawResults,
+    /// The same results with their positional arrays resolved to named
+    /// fields, which is what the egui debug menu's "Battle Results: Mapped
+    /// JSON" opens.
+    MappedResults,
     /// The Actions menu's "View Raw Player Metadata" item (`table.rs`'s
     /// `PlayerTableEvent::ViewRawJson`); backed by
     /// `LoadedReplay::raw_player_metadata_panel`, rebuilt with the clicked
     /// row's JSON each time the event fires (see `on_table_event`).
     RawPlayerMetadata,
+}
+
+/// The payloads the debug-mode viewers show, bundled so the loaded-state
+/// builder takes one argument for them rather than three.
+struct DebugPayloads {
+    raw_metadata_json: String,
+    /// `None` when the replay carries no battle-results packet (the player
+    /// left before the server sent one).
+    raw_results_json: Option<String>,
+    /// `None` for the same reason, and also when the resolution produced
+    /// nothing readable.
+    mapped_results_json: Option<String>,
 }
 
 /// A loaded replay's tab title and outcome, plus the real player table, the
@@ -127,12 +143,15 @@ struct LoadedReplay {
     chat_panel: Option<Entity<ChatPanel>>,
     raw_metadata_panel: Entity<RawJsonPanel>,
     raw_results_panel: Option<Entity<RawJsonPanel>>,
+    mapped_results_panel: Option<Entity<RawJsonPanel>>,
     raw_player_metadata_panel: Option<Entity<RawJsonPanel>>,
 }
 
 enum LoadState {
     Loading,
-    Loaded(LoadedReplay),
+    // Boxed because a loaded replay carries the whole presentation model and
+    // every side panel, which a loading or failed one does not.
+    Loaded(Box<LoadedReplay>),
     Failed(ReplayLoadError),
 }
 
@@ -212,7 +231,9 @@ impl ReplayPanel {
     /// leaving it stranded open with no way to reopen it.
     pub fn set_debug(&mut self, debug: bool, cx: &mut Context<Self>) {
         self.debug = debug;
-        if !debug && matches!(self.side_panel, SidePanel::RawMetadata | SidePanel::RawResults) {
+        if !debug
+            && matches!(self.side_panel, SidePanel::RawMetadata | SidePanel::RawResults | SidePanel::MappedResults)
+        {
             self.side_panel = SidePanel::None;
         }
         if let LoadState::Loaded(loaded) = &self.state {
@@ -324,9 +345,10 @@ impl ReplayPanel {
         cx: &mut Context<Self>,
     ) {
         self.state = match result {
-            Ok(ParsedReplay { model, export, game_data, raw_metadata_json, raw_results_json }) => {
+            Ok(ParsedReplay { model, export, game_data, raw_metadata_json, raw_results_json, mapped_results_json }) => {
                 self.export = Some(export);
-                self.loaded_state(model, game_data.vfs().clone(), raw_metadata_json, raw_results_json, window, cx)
+                let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
+                self.loaded_state(model, game_data.vfs().clone(), payloads, window, cx)
             }
             Err(err) => {
                 // The panel says what went wrong; the toast is so a reader
@@ -347,11 +369,11 @@ impl ReplayPanel {
         &mut self,
         mut model: ReplayReportModel,
         vfs: VfsPath,
-        raw_metadata_json: String,
-        raw_results_json: Option<String>,
+        payloads: DebugPayloads,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> LoadState {
+        let DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json } = payloads;
         model.columns = self.columns.clone();
         // The table may have arrived while this replay was parsing, in which
         // case `spawn_parse` never saw it. Populating before `PlayerTable::new`
@@ -372,16 +394,19 @@ impl ReplayPanel {
         self._table_subscription = Some(cx.subscribe_in(&table, window, Self::on_table_event));
         let raw_metadata_panel = cx.new(|cx| RawJsonPanel::new(raw_metadata_json.into(), window, cx));
         let raw_results_panel = raw_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), window, cx)));
+        let mapped_results_panel =
+            mapped_results_json.map(|json| cx.new(|cx| RawJsonPanel::new(json.into(), window, cx)));
 
-        LoadState::Loaded(LoadedReplay {
+        LoadState::Loaded(Box::new(LoadedReplay {
             title,
             battle_result,
             table,
             chat_panel,
             raw_metadata_panel,
             raw_results_panel,
+            mapped_results_panel,
             raw_player_metadata_panel: None,
-        })
+        }))
     }
 
     /// A panel already showing `model`, with no parse behind it. Test-only:
@@ -408,7 +433,9 @@ impl ReplayPanel {
             _table_subscription: None,
         };
         let vfs: VfsPath = wowsunpack::vfs::MemoryFS::new().into();
-        panel.state = panel.loaded_state(model, vfs, String::from("{}"), None, window, cx);
+        let payloads =
+            DebugPayloads { raw_metadata_json: String::from("{}"), raw_results_json: None, mapped_results_json: None };
+        panel.state = panel.loaded_state(model, vfs, payloads, window, cx);
         panel
     }
 }
@@ -642,6 +669,9 @@ struct HeaderState {
     personal_rating: Option<PersonalRatingResult>,
     has_chat: bool,
     has_results: bool,
+    /// Whether the results resolved into their named form, which is a
+    /// separate viewer from the raw payload.
+    has_mapped_results: bool,
     /// Whether the parse has produced a document to export yet.
     can_export: bool,
     export_status: Option<String>,
@@ -700,6 +730,7 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         personal_rating,
         has_chat,
         has_results,
+        has_mapped_results,
         can_export,
         export_status,
         debug,
@@ -749,6 +780,18 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                     label_key: "ui.replay.debug.raw_results",
                     panel: SidePanel::RawResults,
                     enabled: has_results,
+                    disabled_tooltip_key: Some("ui.replay.debug.no_results_packet"),
+                },
+                side_panel,
+                cx,
+            ))
+            .child(side_panel_button(
+                SidePanelButtonSpec {
+                    id: "replay-debug-mapped-results",
+                    icon: IconName::File,
+                    label_key: "ui.replay.debug.mapped_results",
+                    panel: SidePanel::MappedResults,
+                    enabled: has_mapped_results,
                     disabled_tooltip_key: Some("ui.replay.debug.no_results_packet"),
                 },
                 side_panel,
@@ -839,6 +882,7 @@ impl Render for ReplayPanel {
             LoadState::Loaded(loaded) => {
                 let has_chat = loaded.chat_panel.is_some();
                 let has_results = loaded.raw_results_panel.is_some();
+                let has_mapped_results = loaded.mapped_results_panel.is_some();
                 let table = loaded.table.clone();
                 let battle_result = loaded.battle_result;
                 let personal_rating = loaded.table.read(cx).self_personal_rating();
@@ -850,6 +894,7 @@ impl Render for ReplayPanel {
                     SidePanel::Chat => loaded.chat_panel.clone().map(|panel| panel.into()),
                     SidePanel::RawMetadata => Some(loaded.raw_metadata_panel.clone().into()),
                     SidePanel::RawResults => loaded.raw_results_panel.clone().map(|panel| panel.into()),
+                    SidePanel::MappedResults => loaded.mapped_results_panel.clone().map(|panel| panel.into()),
                     SidePanel::RawPlayerMetadata => loaded.raw_player_metadata_panel.clone().map(|panel| panel.into()),
                 };
 
@@ -863,6 +908,7 @@ impl Render for ReplayPanel {
                             personal_rating,
                             has_chat,
                             has_results,
+                            has_mapped_results,
                             can_export: self.export.is_some(),
                             export_status: self.export_status.clone(),
                             debug: self.debug,

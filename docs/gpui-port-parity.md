@@ -86,7 +86,8 @@ kept so the next audit does not re-report them.
 - Set as / Add to Session Stats for a single replay.
 - [done] Date grouping folds by date rather than by consecutive run, so an
   out-of-order timestamp no longer heads a second group with the same date.
-- The debug "Results (Mapped JSON)" viewer.
+- [done] The debug "Mapped Results" viewer: the battle results with their
+  positional arrays resolved to named fields, beside the raw payload.
 - Ingest progress has no counts and no bar.
 - [done] Enter on the highlighted row opens it. The kit tree's own Confirm
   only expands a folder, so the listing catches the key itself.
