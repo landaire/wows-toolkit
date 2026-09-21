@@ -82,6 +82,21 @@ pub fn bake_from_file(
     bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map)
 }
 
+/// The map `map_name` names, with nothing drawn over it.
+///
+/// Rendered from whichever build is already open rather than the one the
+/// replay was recorded on: loading that build is the slow half of a preview,
+/// and the map is what the hover needs on screen first. `None` when no build
+/// is open yet, or when the open one ships no art for that map -- a preview
+/// that was recorded on a build with a map since removed then waits for its
+/// own bake, which carries the art it was recorded against.
+pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCache) -> Option<PreviewFrames> {
+    let loaded = game_data.newest_loaded()?;
+    let mut renderer = PreviewRenderer::new(loaded.vfs(), None, map_name).ok()?;
+    let nothing_drawn: Vec<DrawCommand> = Vec::new();
+    Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
+}
+
 /// Bakes `replay` into the frames a preview plays, then rasterises them.
 ///
 /// One forward pass over the battle, sampled by the shared [`TrackSink`], so

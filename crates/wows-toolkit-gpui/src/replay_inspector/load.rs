@@ -263,6 +263,21 @@ impl GameDataCache {
         slot.get()?.as_ref().ok().cloned()
     }
 
+    /// The newest build already open, whatever the caller was asking about.
+    ///
+    /// For drawing a map before a replay has been read: map art is the live
+    /// install's for all but a removed map, and a hover has to put something
+    /// on screen long before the build a replay was recorded on could be
+    /// loaded. `None` before the startup preload has finished, which is the
+    /// case a caller shows nothing for rather than waiting.
+    pub fn newest_loaded(&self) -> Option<Arc<LoadedGameData>> {
+        let builds: Vec<u32> = {
+            let guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            guard.keys().copied().collect()
+        };
+        builds.into_iter().max().and_then(|build| self.loaded_build(build))
+    }
+
     /// Returns `build`'s cached game data, loading and caching it first if
     /// this is the first replay on that build. Checks `build` is actually
     /// installed before attempting the (expensive) VFS build, so a replay

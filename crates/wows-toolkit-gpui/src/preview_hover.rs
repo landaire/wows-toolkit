@@ -125,6 +125,7 @@ impl PreviewHover {
     pub fn enter<V: Render>(
         &mut self,
         path: PathBuf,
+        map_name: Option<String>,
         game_data: Option<GameDataCache>,
         cx: &mut Context<V>,
         field: fn(&mut V) -> &mut Self,
@@ -155,7 +156,7 @@ impl PreviewHover {
                 if this.dwell.pending_request().as_deref() != Some(path.as_path()) {
                     return;
                 }
-                this.bake(path, game_data, cx, field);
+                this.bake(path, map_name, game_data, cx, field);
             });
         }));
     }
@@ -197,6 +198,7 @@ impl PreviewHover {
     fn bake<V: Render>(
         &mut self,
         path: PathBuf,
+        map_name: Option<String>,
         game_data: GameDataCache,
         cx: &mut Context<V>,
         field: fn(&mut V) -> &mut Self,
@@ -205,6 +207,23 @@ impl PreviewHover {
         cx.notify();
         let cancel = Arc::clone(&self.cancel);
         self._bake = Some(cx.spawn(async move |view, cx| {
+            // The map, from a build that is already open. This is the first
+            // thing on screen: it costs one image decode, where the track
+            // costs a replay read and possibly a build load.
+            if let Some(name) = map_name {
+                let game_data = game_data.clone();
+                let drawn =
+                    cx.background_executor().spawn(async move { crate::minimap_preview::map_frame(&name, &game_data) });
+                if let Some(frames) = drawn.await {
+                    let _ = view.update(cx, |view, cx| {
+                        let this = field(view);
+                        this.drop_shown();
+                        this.shown = Some(Shown { frames, started: Instant::now() });
+                        cx.notify();
+                    });
+                }
+            }
+
             let (map_tx, map_rx) = futures::channel::oneshot::channel();
             let baked = crate::runtime::spawn(cx, {
                 let path = path.clone();
@@ -215,12 +234,16 @@ impl PreviewHover {
                 }
             });
 
-            // The map stands in for the preview while the battle is walked,
-            // which is the slow half; the track replaces it below.
+            // The bake's own map, drawn from the build the replay was
+            // recorded on. Only wanted when the stage above had no build open
+            // or no art for this map; otherwise the map is already showing and
+            // restarting it would stutter.
             if let Ok(map) = map_rx.await {
                 let _ = view.update(cx, |view, cx| {
                     let this = field(view);
-                    this.drop_shown();
+                    if this.shown.is_some() {
+                        return;
+                    }
                     this.shown = Some(Shown { frames: map, started: Instant::now() });
                     cx.notify();
                 });

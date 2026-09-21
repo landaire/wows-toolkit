@@ -31,9 +31,11 @@ use std::sync::Arc;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
@@ -95,6 +97,9 @@ struct RawReplay {
 #[derive(Clone)]
 struct LeafInfo {
     path: PathBuf,
+    /// The map as the replay names it, so the hover can draw the map before
+    /// the replay has been read.
+    map_name: String,
     /// The row's second line: damage, kills and the timestamp, in the pieces
     /// it is drawn from (the glyphs go in the icon font).
     stats: Rc<Vec<LinePart>>,
@@ -334,7 +339,8 @@ impl ReplayBrowser {
     fn hover_leaf(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
         self.preview_anchor = position;
         let cache = self.build_cache.clone();
-        self.preview.enter(path, cache, cx, |browser| &mut browser.preview);
+        let map_name = self.leaf_info.values().find(|leaf| leaf.path == path).map(|leaf| leaf.map_name.clone());
+        self.preview.enter(path, map_name, cache, cx, |browser| &mut browser.preview);
     }
 
     /// Kicks off the background directory scan for `wows_dir`. Safe to call
@@ -387,6 +393,7 @@ impl ReplayBrowser {
             .iter()
             .map(|raw| ReplayLite {
                 path: raw.path.clone(),
+                map_name: raw.listed.map_name.clone(),
                 identity: listed_row_identity(&raw.listed, provider),
                 stats: resolve_row_stats(None, self.summaries.get(&raw.path)),
             })
@@ -440,12 +447,12 @@ fn node_to_tree_item(
                 children.into_iter().map(|child| node_to_tree_item(child, next_group_id, leaf_info, hover)).collect();
             TreeItem::new(id, label).children(children).expanded(true)
         }
-        BrowserNode::Leaf { label, stats, path, outcome, in_division } => {
+        BrowserNode::Leaf { label, stats, path, map_name, outcome, in_division } => {
             let id: SharedString = path.to_string_lossy().into_owned().into();
             let hover = hover.remove(&path).unwrap_or_default();
             leaf_info.insert(
                 id.clone(),
-                LeafInfo { path, stats: Rc::new(stats), outcome, in_division, hover: hover.into() },
+                LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover: hover.into() },
             );
             TreeItem::new(id, label)
         }
@@ -599,21 +606,36 @@ impl Render for ReplayBrowser {
         // at the pointer like the egui app's own hover popup
         // (`ui/replay_parser/preview_popup.rs`), and deferred so it paints
         // over the panel rather than inside its scroll area.
-        let preview_map: Option<AnyElement> = match self.preview.frame() {
-            Some(frame) => Some(img(frame).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)).into_any_element()),
-            // A bake reads the replay and loads the build it was recorded on,
-            // which takes seconds the first time; the egui popup says so with
-            // a spinner over the map (`preview_popup.rs`), and so does this.
-            None if self.preview.is_baking() => Some(
+        // A bake reads the replay and loads the build it was recorded on,
+        // which takes seconds the first time. The map goes up first, from a
+        // build already open, with the spinner over it until the battle is
+        // ready to play -- the same two stages the egui popup shows
+        // (`preview_popup.rs`).
+        let baking = self.preview.is_baking();
+        let preview_map: Option<AnyElement> = match (self.preview.frame(), baking) {
+            (Some(frame), baking) => Some(
+                div()
+                    .relative()
+                    .w(px(PREVIEW_SIZE))
+                    .h(px(PREVIEW_SIZE))
+                    .child(img(frame).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
+                    .when(baking, |this| {
+                        this.child(
+                            h_flex().absolute().inset_0().items_center().justify_center().child(Spinner::new().large()),
+                        )
+                    })
+                    .into_any_element(),
+            ),
+            (None, true) => Some(
                 h_flex()
                     .w(px(PREVIEW_SIZE))
                     .h(px(PREVIEW_SIZE))
                     .items_center()
                     .justify_center()
-                    .child(div().text_sm().opacity(0.6).child("Loading preview..."))
+                    .child(Spinner::new().large())
                     .into_any_element(),
             ),
-            None => None,
+            (None, false) => None,
         };
         // Under the map: the detail the two drawn lines drop, in the words
         // the egui tooltip uses (`listing_row::hover_text`).

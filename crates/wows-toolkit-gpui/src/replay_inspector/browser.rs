@@ -27,6 +27,10 @@ use wows_toolkit_viewmodel::listing_row::stats_line_parts;
 #[derive(Debug, Clone)]
 pub struct ReplayLite {
     pub path: PathBuf,
+    /// The map as the replay names it (`spaces/ocean`), which is what the
+    /// hover preview loads its art by. The translated name the row draws is
+    /// in `identity`.
+    pub map_name: String,
     /// What the row names: ship, map, scenario, mode and timestamp, already
     /// translated against the loaded build.
     pub identity: RowIdentity,
@@ -50,6 +54,8 @@ pub enum BrowserNode {
         /// this front end keeps its icons in a font of their own.
         stats: Vec<LinePart>,
         path: PathBuf,
+        /// The map as the replay names it, for the hover preview's art.
+        map_name: String,
         outcome: MatchOutcome,
         in_division: bool,
     },
@@ -79,6 +85,7 @@ fn leaf(r: &ReplayLite, grouping: ReplayGrouping, locale: Option<&str>) -> Brows
         label: identity_line(&r.identity, grouping),
         stats: stats_line_parts(&r.identity, &r.stats, grouping, locale),
         path: r.path.clone(),
+        map_name: r.map_name.clone(),
         outcome: r.stats.outcome,
         in_division: r.stats.in_division,
     }
@@ -162,6 +169,7 @@ mod tests {
 
     fn replay(path: &str, ship: &str, map: &str, game_time: &str, outcome: MatchOutcome) -> ReplayLite {
         ReplayLite {
+            map_name: map.to_string(),
             path: PathBuf::from(path),
             identity: RowIdentity {
                 ship: ship.to_string(),
