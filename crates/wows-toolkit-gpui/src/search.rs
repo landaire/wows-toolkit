@@ -96,6 +96,9 @@ pub enum SearchEvent {
 
 impl EventEmitter<SearchEvent> for SearchView {}
 
+/// The settings row both front ends keep the query bar's state in.
+const SEARCH_SETTINGS_KEY: &str = "search";
+
 /// Results asked for per run. The egui table pages the same way rather than
 /// pulling an unbounded set into memory.
 const RESULT_LIMIT: i64 = 500;
@@ -253,6 +256,12 @@ pub struct SearchView {
     resolved_ships: HashMap<(u32, GameParamId), String>,
     /// How many indexed matches carry no game mode. `None` until asked.
     game_mode_gap: Option<i64>,
+    /// Whether the last run had more matches than it asked for.
+    truncated: bool,
+    /// Whether the saved query has been read and run. The tab opens showing
+    /// what the query bar was left holding, the way the egui tab does, rather
+    /// than an empty page with an instruction on it.
+    opened: bool,
     /// Whether a count is in flight, so concurrent searches do not each start
     /// another scan.
     gap_lookup_running: bool,
@@ -292,6 +301,8 @@ impl SearchView {
             game_data: None,
             resolved_ships: HashMap::new(),
             game_mode_gap: None,
+            truncated: false,
+            opened: false,
             gap_lookup_running: false,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
@@ -513,6 +524,65 @@ impl SearchView {
         .detach();
     }
 
+    /// Reads the query the bar was last left holding and runs it.
+    ///
+    /// The row is the egui tab's own (`search`), so both front ends reopen on
+    /// the same query; only that field is written back, leaving the saved
+    /// searches, the history and the column set the egui tab keeps there
+    /// untouched.
+    fn open_saved_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.opened {
+            return;
+        }
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.opened = true;
+
+        cx.spawn(async move |this, cx| {
+            let stored = runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY).await
+            })
+            .await;
+            let query = stored
+                .ok()
+                .flatten()
+                .and_then(|value| value.get("query").and_then(|query| query.as_str()).map(str::to_owned))
+                .unwrap_or_default();
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                if !query.is_empty() {
+                    this.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
+                }
+                // An empty query matches everything, which is the page the
+                // egui tab opens on.
+                this.completions_open = false;
+                this.run(cx);
+            });
+        })
+        .detach();
+        let _ = window;
+    }
+
+    /// Writes the query text back into the shared row, keeping every other
+    /// field the egui tab stores beside it.
+    fn save_query(&self, text: String, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        cx.spawn(async move |_this, cx| {
+            let _ = runtime::spawn(cx, async move {
+                let mut stored =
+                    wows_toolkit_config::queries::get_setting::<serde_json::Value>(&pool, SEARCH_SETTINGS_KEY)
+                        .await
+                        .unwrap_or_else(|| serde_json::json!({}));
+                if let Some(object) = stored.as_object_mut() {
+                    object.insert("query".to_string(), serde_json::Value::String(text));
+                }
+                let json = stored.to_string();
+                wows_toolkit_config::queries::set_setting_raw(&pool, SEARCH_SETTINGS_KEY, &json).await
+            })
+            .await;
+        })
+        .detach();
+    }
+
     /// Adopts the game data the replay inspector opened, so results can be
     /// named in the current locale.
     pub fn set_game_data(&mut self, game_data: Option<GameDataCache>, cx: &mut Context<Self>) {
@@ -592,6 +662,7 @@ impl SearchView {
             }
         };
         self.expr = Some(expr.clone());
+        self.save_query(text.clone(), cx);
 
         let Some(pool) = crate::settings_store::pool(cx) else {
             self.state = SearchState::Failed("the replay index is not open".to_string());
@@ -609,7 +680,10 @@ impl SearchView {
                 // The map catalog only resolves friendly map names; an empty
                 // one still searches, it just cannot match a map by label.
                 let ctx = CompileCtx::default();
-                query::search_by_ast(&pool, &expr, &ctx, RESULT_LIMIT, sort).await
+                // One more than the limit: a set of exactly the limit is a
+                // complete answer, and reporting it as truncated would be a
+                // lie. The extra row is dropped below.
+                query::search_by_ast(&pool, &expr, &ctx, RESULT_LIMIT + 1, sort).await
             })
             .await;
 
@@ -618,7 +692,9 @@ impl SearchView {
                     return;
                 }
                 match found {
-                    Ok(Ok(hits)) => {
+                    Ok(Ok(mut hits)) => {
+                        this.truncated = hits.len() as i64 > RESULT_LIMIT;
+                        hits.truncate(RESULT_LIMIT as usize);
                         this.hits = hits;
                         this.state = SearchState::Done;
                     }
@@ -753,6 +829,7 @@ fn rating_color(pr: f64) -> Hsla {
 impl Render for SearchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.preview.release_dropped(window);
+        self.open_saved_query(window, cx);
         self.refresh_bar(cx);
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
@@ -1075,7 +1152,7 @@ impl Render for SearchView {
         };
 
         let footer = matches!(self.state, SearchState::Done).then(|| {
-            let capped = self.hits.len() as i64 == RESULT_LIMIT;
+            let capped = self.truncated;
             h_flex().flex_none().px_2().py_1().border_t_1().border_color(border).child(
                 div().text_xs().opacity(0.6).child(if capped {
                     format!("First {RESULT_LIMIT} matches")

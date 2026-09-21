@@ -29,6 +29,7 @@ use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::all_match_groups;
 use wows_toolkit_viewmodel::stats::filter_games;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
+use wows_toolkit_viewmodel::stats::setting_keys;
 
 use crate::ui::selectable;
 
@@ -130,7 +131,13 @@ impl StatsView {
     }
 
     /// Recomputes the filtered set once and hands it to every panel.
+    /// Applies the filters to every panel, and writes them back.
+    ///
+    /// The rows are the egui tab's own, so a session filtered in one app
+    /// opens filtered the same way in the other; every path that changes a
+    /// filter goes through here, so none of them can forget to save.
     fn push_filtered(&mut self, cx: &mut Context<Self>) {
+        self.save_filters(cx);
         let filtered = filter_games(&self.games, &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         self.ships.update(cx, |panel, cx| panel.set_games(&filtered, cx));
@@ -138,6 +145,20 @@ impl StatsView {
             chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         }
         cx.notify();
+    }
+
+    /// Writes the filter bar's state to the rows `load::load_filters` reads.
+    fn save_filters(&self, cx: &mut Context<Self>) {
+        let (limit_enabled, count) = match self.filters.limit {
+            GameLimit::All => (false, None),
+            GameLimit::Recent(count) => (true, Some(count)),
+        };
+        crate::settings_store::save(setting_keys::LIMIT_ENABLED, &limit_enabled, cx);
+        if let Some(count) = count {
+            crate::settings_store::save(setting_keys::GAME_COUNT, &count, cx);
+        }
+        crate::settings_store::save(setting_keys::DIVISION_FILTER, &self.filters.division, cx);
+        crate::settings_store::save(setting_keys::GAME_MODE_FILTER, &self.filters.game_modes, cx);
     }
 
     /// Opens another chart sub-tab, seeded with what is on screen now.
