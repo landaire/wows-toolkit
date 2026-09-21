@@ -826,6 +826,12 @@ impl ViewportView {
         cx.notify();
     }
 
+    /// The ship this viewport is showing, if any. Read by the pane's chrome,
+    /// which names it.
+    pub(crate) fn shown_ship_name(&self) -> Option<SharedString> {
+        self.reload_source.as_ref().map(|source| SharedString::from(source.display_name.clone()))
+    }
+
     /// The ship being loaded into this viewport, if one is. Driven by the
     /// pane, which owns the load itself.
     pub(crate) fn set_ship_loading(&mut self, loading: Option<SharedString>, cx: &mut Context<Self>) {
@@ -868,7 +874,11 @@ impl ViewportView {
         self.viewport.clear_dirty();
     }
 
+    /// Where the navigation gizmo sits, or `None` while there is no ship for
+    /// it to orient -- it is not drawn then, so nothing may be aimed at it
+    /// either.
     fn gizmo_rect(&self) -> Option<ViewRect> {
+        self.current_armor.as_ref()?;
         self.last_bounds.map(|b| gizmo::gizmo_rect(view_rect_from_bounds(b)))
     }
 
@@ -2001,6 +2011,10 @@ impl Render for ViewportView {
         };
 
         let camera_snapshot = self.viewport.camera.clone();
+        // The gizmo orients a model; with none loaded there is nothing for it
+        // to orient, and the egui pane draws it inside the has-a-ship branch
+        // only (`ui/tab.rs`'s `draw_gizmo` call).
+        let gizmo_drawn = self.current_armor.is_some();
         let hover = self.gizmo_hover;
         let weak = cx.weak_entity();
         let overlay = canvas(
@@ -2015,7 +2029,9 @@ impl Render for ViewportView {
                 bounds
             },
             move |bounds, bounds_again, window, cx| {
-                draw_gizmo_overlay(bounds_again, &camera_snapshot, hover, window, cx);
+                if gizmo_drawn {
+                    draw_gizmo_overlay(bounds_again, &camera_snapshot, hover, window, cx);
+                }
                 let _ = bounds;
             },
         )
