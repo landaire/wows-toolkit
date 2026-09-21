@@ -135,6 +135,16 @@ pub struct ReplayInspectorView {
     _subscriptions: Vec<Subscription>,
 }
 
+/// What the replay inspector takes from the app's settings.
+pub struct InspectorSettings {
+    pub wows_dir: String,
+    pub debug_mode: bool,
+    pub replay_settings: ReplaySettings,
+    pub auto_load_latest_replay: bool,
+    /// The locale the listing's figures are grouped in.
+    pub locale: Option<String>,
+}
+
 impl ReplayInspectorView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let browser = cx.new(ReplayBrowser::new);
@@ -181,16 +191,8 @@ impl ReplayInspectorView {
     /// `panel.rs`) finds the slot already warm instead of reloading it.
     /// Called from `App::apply_settings`, which `main.rs` runs inside a
     /// `window.update`, so a `Window` is available for the grouping combo.
-    pub fn apply_settings(
-        &mut self,
-        wows_dir: String,
-        debug_mode: bool,
-        replay_settings: ReplaySettings,
-        auto_load_latest_replay: bool,
-        locale: Option<String>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    pub fn apply_settings(&mut self, settings: InspectorSettings, window: &mut Window, cx: &mut Context<Self>) {
+        let InspectorSettings { wows_dir, debug_mode, replay_settings, auto_load_latest_replay, locale } = settings;
         self.browser.update(cx, |browser, cx| {
             browser.set_locale(locale, cx);
             // The listing's second line is what the index knows about each

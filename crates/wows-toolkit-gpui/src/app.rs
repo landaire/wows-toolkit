@@ -21,6 +21,7 @@ use gpui_kit::*;
 use crate::armor_viewer::ArmorViewerPane;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
+use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::search::SearchEvent;
 use crate::search::SearchView;
@@ -345,7 +346,8 @@ impl App {
         let locale = settings.locale.clone();
         self.debug_mode = debug_mode;
         self.replay_inspector.update(cx, |view, cx| {
-            view.apply_settings(wows_dir, debug_mode, replay_settings, auto_load_latest_replay, locale, window, cx)
+            let settings = InspectorSettings { wows_dir, debug_mode, replay_settings, auto_load_latest_replay, locale };
+            view.apply_settings(settings, window, cx)
         });
         // The tracker watches the same install for a battle in progress, and
         // resolves its roster against the game data the replay inspector has
@@ -588,7 +590,14 @@ impl App {
         let for_unpacker = path.clone();
         let for_tracker = path.clone();
         self.replay_inspector.update(cx, |view, cx| {
-            view.apply_settings(path, debug_mode, replay_settings, auto_load, locale, window, cx)
+            let settings = InspectorSettings {
+                wows_dir: path,
+                debug_mode,
+                replay_settings,
+                auto_load_latest_replay: auto_load,
+                locale,
+            };
+            view.apply_settings(settings, window, cx)
         });
         self.unpacker.update(cx, |unpacker, cx| unpacker.apply_settings(for_unpacker, window, cx));
         self.watch_live_matches(&for_tracker, proxy_url, cx);
