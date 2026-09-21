@@ -23,6 +23,7 @@ mod settings;
 mod settings_store;
 mod stats;
 mod theme;
+mod toast;
 mod twitch;
 mod ui;
 mod unpacker;
