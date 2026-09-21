@@ -1,6 +1,7 @@
 mod app;
 mod armor_viewer;
 mod http;
+mod icons;
 #[cfg(test)]
 mod interaction_tests;
 mod personal_rating;
@@ -57,6 +58,7 @@ fn main() {
     let app = gpui_kit::platform::application().with_assets(Assets);
     app.run(move |cx| {
         gpui_kit::component::init(cx);
+        icons::register_font(cx);
         if let Err(err) = runtime::init(cx) {
             tracing::error!("failed to start the tokio runtime: {err}");
         }
