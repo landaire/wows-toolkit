@@ -563,13 +563,17 @@ impl App {
         cx.notify();
     }
 
-    fn browse_for_wows_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(picked) = rfd::FileDialog::new().set_title("World of Warships directory").pick_folder() else {
-            return;
-        };
-        let path = picked.to_string_lossy().into_owned();
-        self.wows_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
-        self.apply_wows_dir(path, window, cx);
+    fn browse_for_wows_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_folder("World of Warships directory");
+        cx.spawn(async move |this, cx| {
+            let Some(picked) = asked.await else { return };
+            let path = picked.to_string_lossy().into_owned();
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.wows_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
+                this.apply_wows_dir(path, window, cx);
+            });
+        })
+        .detach();
     }
 
     /// Adopts a new game directory: saved, then pushed into the tabs that read

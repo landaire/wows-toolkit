@@ -1,5 +1,6 @@
 mod app;
 mod armor_viewer;
+mod dialog;
 mod http;
 mod icons;
 #[cfg(test)]

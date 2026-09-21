@@ -235,13 +235,17 @@ impl UnpackerView {
         cx.notify();
     }
 
-    fn browse_for_output_dir(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(picked) = rfd::FileDialog::new().set_title("Extract to").pick_folder() else {
-            return;
-        };
-        let picked = picked.to_string_lossy().into_owned();
-        self.output_dir_input.update(cx, |state, cx| state.set_value(picked.clone(), window, cx));
-        self.store_output_dir(picked, cx);
+    fn browse_for_output_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_folder("Extract to");
+        cx.spawn(async move |this, cx| {
+            let Some(picked) = asked.await else { return };
+            let picked = picked.to_string_lossy().into_owned();
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.output_dir_input.update(cx, |state, cx| state.set_value(picked.clone(), window, cx));
+                this.store_output_dir(picked, cx);
+            });
+        })
+        .detach();
     }
 
     /// Adopts the WoWs directory, enumerates its builds and loads the newest.
@@ -517,18 +521,15 @@ impl UnpackerView {
         // the raw pickled tree and has no meaning for them.
         let base_only = base_only && !format.is_minimal();
         let stem = if format.is_minimal() { "MinGameParams" } else { "GameParams" };
-        let Some(path) = rfd::FileDialog::new()
-            .set_title("Save game parameters")
-            .set_file_name(format!("{stem}.{}", format.extension()))
-            .save_file()
-        else {
-            return;
-        };
-
-        self.dump_status = Some("Writing...".to_string());
-        cx.notify();
+        let asked =
+            crate::dialog::save_file(Some("Save game parameters"), &format!("{stem}.{}", format.extension()), None);
 
         cx.spawn(async move |this, cx| {
+            let Some(path) = asked.await else { return };
+            let _ = this.update(cx, |this, cx| {
+                this.dump_status = Some("Writing...".to_string());
+                cx.notify();
+            });
             let written = cx
                 .background_spawn(async move {
                     if format.is_minimal() {
