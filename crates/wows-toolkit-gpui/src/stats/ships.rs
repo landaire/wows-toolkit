@@ -179,6 +179,12 @@ impl BasePanel for StatsShipsPanel {
     fn panel_name(&self) -> &'static str {
         "StatsShipsPanel"
     }
+
+    /// Not closable, for the same reason the Overview is not: nothing reopens
+    /// it, and the egui tab's per-ship table is always there.
+    fn closable(&self, _cx: &App) -> bool {
+        false
+    }
 }
 
 impl Panel for StatsShipsPanel {

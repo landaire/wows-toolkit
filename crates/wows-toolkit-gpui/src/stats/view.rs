@@ -12,6 +12,9 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockSkin;
+use gpui_kit::component::dock::PanelId;
+use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
@@ -74,17 +77,22 @@ pub struct StatsView {
 impl StatsView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let overview = cx.new(StatsOverviewPanel::new);
-        let dock_area = cx.new(|cx| DockArea::new("stats-dock", None, window, cx));
+        // The skinned area is what draws a tab bar over a group holding more
+        // than one panel; a bare one renders only the displayed panel.
+        let (dock_area, _) = DockSkin::dock_area("stats-dock", None, window, cx);
         dock_area.update(cx, |dock, cx| {
-            dock.add_panel(overview.clone(), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(overview.clone()), DockPlacement::Center, None, window, cx);
         });
         let ships = cx.new(StatsShipsPanel::new);
         dock_area.update(cx, |dock, cx| {
-            dock.add_panel(ships.clone(), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(ships.clone()), DockPlacement::Center, None, window, cx);
         });
         let first_chart = cx.new(|cx| StatsChartPanel::new(0, cx));
         dock_area.update(cx, |dock, cx| {
-            dock.add_panel(first_chart.clone(), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(first_chart.clone()), DockPlacement::Center, None, window, cx);
+            // Each add activates what it added, so the chart would be showing;
+            // the egui tab opens on its overview.
+            dock.select_panel(PanelId::from(overview.entity_id()), window, cx);
         });
 
         let limit_input = cx.new(|cx| {
@@ -206,7 +214,7 @@ impl StatsView {
         });
 
         self.dock_area.update(cx, |dock, cx| {
-            dock.add_panel(chart.clone(), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(chart.clone()), DockPlacement::Center, None, window, cx);
         });
         self.charts.push(chart);
         cx.notify();

@@ -22,6 +22,9 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockSkin;
+use gpui_kit::component::dock::PanelId;
+use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -161,11 +164,16 @@ impl UnpackerView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let pkg_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::Pkg, window, cx));
         let assets_browser = cx.new(|cx| BrowserPanel::new(BrowserSource::AssetsBin, window, cx));
-        let dock_area = cx.new(|cx| DockArea::new("unpacker-dock", None, window, cx));
+        // The skinned area is what draws a tab bar over a group holding more
+        // than one panel; a bare one renders only the displayed panel.
+        let (dock_area, _) = DockSkin::dock_area("unpacker-dock", None, window, cx);
 
         dock_area.update(cx, |dock, cx| {
-            dock.add_panel(pkg_browser.clone(), DockPlacement::Center, None, window, cx);
-            dock.add_panel(assets_browser.clone(), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(pkg_browser.clone()), DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(assets_browser.clone()), DockPlacement::Center, None, window, cx);
+            // Each add activates what it added, so the last one would be
+            // showing; the packages listing is the one the tab opens on.
+            dock.select_panel(PanelId::from(pkg_browser.entity_id()), window, cx);
         });
 
         let build_select =
@@ -414,7 +422,7 @@ impl UnpackerView {
         let stop_flag = Arc::new(AtomicBool::new(false));
         let panel = cx.new(|cx| SearchPanel::new(query.into(), source, stop_flag.clone(), cx));
         self.dock_area.update(cx, |dock, cx| {
-            dock.add_panel(panel.clone(), DockPlacement::Bottom, None, window, cx);
+            dock.add_panel_view(panel_handle(panel.clone()), DockPlacement::Bottom, None, window, cx);
         });
         self.search_subscriptions.push(cx.subscribe_in(&panel, window, Self::on_search_panel_event));
 
@@ -496,7 +504,7 @@ impl UnpackerView {
         let title = SharedString::from(path.as_str().trim_start_matches('/').to_string());
         let panel = cx.new(|cx| FileViewerPanel::new(title, content, cx));
         self.dock_area.update(cx, |dock, cx| {
-            dock.add_panel(panel, DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         cx.notify();
     }
@@ -593,7 +601,7 @@ impl UnpackerView {
         let content = viewer::ViewerContent::Plaintext { extension: ".json".to_string(), text: json };
         let panel = cx.new(|cx| FileViewerPanel::new(title, content, cx));
         self.dock_area.update(cx, |dock, cx| {
-            dock.add_panel(panel, DockPlacement::Center, None, window, cx);
+            dock.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         cx.notify();
     }

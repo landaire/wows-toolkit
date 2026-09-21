@@ -70,6 +70,11 @@ const TRACKER_FILTER: &str = "tracker-filter";
 const TRACKER_SUBTABS: &str = "tracker-subtabs";
 const TRACKER_PERIOD: &str = "tracker-period";
 
+/// The tab strip a dock draws over a group holding more than one panel
+/// (gpui-component's `TabGroupSkin::render_tabs`). Tabs inside it are
+/// addressed by index, in the order the panels were added.
+const DOCK_TABS: &str = "tab-bar";
+
 /// Search tab controls (`search`).
 const SEARCH_QUERY: &str = "search-query";
 
@@ -612,12 +617,19 @@ fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// Brings the Stats tab's first chart to the front. The tab opens on its
+/// overview, so a chart's own controls are behind its dock tab.
+fn show_first_chart(window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+    window.within(DOCK_TABS).click(2usize, cx);
+}
+
 #[gpui_kit::test]
 fn the_chart_mode_toggle_is_single_select(cx: &mut TestAppContext) {
     let window = open_app(cx);
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Stats, cx);
+        show_first_chart(window, cx);
 
         // The first chart pane is id 0, so its mode ids start at 0.
         let line = ("chart-mode", 0usize);
@@ -640,6 +652,7 @@ fn switching_to_a_bar_chart_offers_win_rate_which_a_line_cannot_plot(cx: &mut Te
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Stats, cx);
+        show_first_chart(window, cx);
 
         // Win rate is the last statistic; a line chart does not offer it.
         let win_rate = ("chart-stat", ChartableStat::WinRate as usize);
@@ -1079,4 +1092,43 @@ fn a_result_row_previews_only_after_the_pointer_settles(cx: &mut TestAppContext)
             });
         })
         .expect("the test window stays open");
+}
+
+/// A dock whose group holds several panels draws a tab strip over them. Without
+/// it only the panel added last is reachable, which is what hid the Stats tab's
+/// overview and per-ship table.
+#[gpui_kit::test]
+fn the_stats_dock_puts_its_panels_on_tabs(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Stats, cx);
+        assert_eq!(
+            window.within(DOCK_TABS).find(0usize).selected(),
+            Some(true),
+            "the tab opens on its overview, as the egui tab does"
+        );
+
+        window.within(DOCK_TABS).click(2usize, cx);
+        assert_eq!(window.within(DOCK_TABS).find(2usize).selected(), Some(true));
+        assert!(
+            window.try_find(("chart-settings", 0usize)).is_some(),
+            "the third tab is the first chart, and its controls are on screen"
+        );
+    })
+    .expect("the test window stays open");
+}
+
+/// The Unpacker's two listings are tabs of one group, and it opens on the
+/// packages one rather than on whichever was added last.
+#[gpui_kit::test]
+fn the_unpacker_dock_opens_on_the_package_listing(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Unpacker, cx);
+        assert_eq!(window.within(DOCK_TABS).find(0usize).selected(), Some(true));
+        assert_eq!(window.within(DOCK_TABS).find(1usize).selected(), Some(false));
+    })
+    .expect("the test window stays open");
 }

@@ -37,7 +37,6 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::spinner::Spinner;
-use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
@@ -490,13 +489,6 @@ impl ReplayBrowser {
     }
 }
 
-/// Converts one `BrowserNode` into a `TreeItem`, assigning group ids from
-/// `next_group_id` (group labels are not always unique -- see
-/// `browser.rs::build_date_groups`'s out-of-order-run doc -- so an
-/// incrementing counter is the only reliable id source) and recording every
-/// leaf's path/battle_result into `leaf_info`, keyed by the leaf's id (its
-/// full path string, which is unique per file). Groups default to expanded
-/// so the browser is immediately useful without an extra click per group.
 /// Re-closes the groups the user had closed, by label.
 fn restore_expansion(item: TreeItem, closed: &HashSet<SharedString>) -> TreeItem {
     if !item.is_folder() {
@@ -507,6 +499,14 @@ fn restore_expansion(item: TreeItem, closed: &HashSet<SharedString>) -> TreeItem
     TreeItem::new(item.id.clone(), item.label.clone()).children(children).expanded(expanded)
 }
 
+/// Converts one `BrowserNode` into a `TreeItem`, assigning group ids from
+/// `next_group_id` (group labels are not always unique -- see
+/// `browser.rs::build_date_groups`'s out-of-order-run doc -- so an
+/// incrementing counter is the only reliable id source) and recording every
+/// leaf's path/battle_result into `leaf_info`, keyed by the leaf's id (its
+/// full path string, which is unique per file). Groups default to expanded
+/// so the browser is immediately useful without an extra click per group.
+///
 /// Builds one tree row, and reports the replays under it so a group's menu
 /// can act on all of them.
 fn node_to_tree_item(
@@ -626,10 +626,9 @@ fn render_browser_item(
         ListItem::new(ix).selected(selected).when_some(striped, |item, color| item.bg(color)).child(row);
 
     if let Some(leaf) = leaf {
-        // What the row says in words, whether or not a preview can be baked
-        // for it: the egui row's own `on_hover_text` fallback.
-        let hover_text = leaf.hover.clone();
-        list_item = list_item.tooltip(move |window, cx| Tooltip::new(hover_text.clone()).build(window, cx));
+        // No tooltip here: the hover popup carries the same words under the
+        // map, and the egui row shows one or the other, never both
+        // (`replay_parser/mod.rs`'s `on_hover_ui` / `on_hover_text` arms).
         let path = leaf.path.clone();
         let hover_browser = browser.clone();
         let hover_path = path.clone();
@@ -767,7 +766,9 @@ impl Render for ReplayBrowser {
             .watched_path()
             .and_then(|path| self.leaf_info.values().find(|leaf| leaf.path == path))
             .map(|leaf| leaf.hover.clone());
-        let preview_popup = preview_map.map(|map| {
+        // The popup is what a hovered row says, so it goes up as soon as the
+        // row is known -- with the map once there is one.
+        let preview_popup = (preview_map.is_some() || hover_text.is_some()).then(|| {
             let theme = cx.theme();
             let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
             deferred(
@@ -779,7 +780,7 @@ impl Render for ReplayBrowser {
                         .border_1()
                         .border_color(theme.border)
                         .bg(theme.background)
-                        .child(map)
+                        .children(preview_map)
                         .when_some(hover_text, |this, text| {
                             this.child(div().max_w(px(PREVIEW_SIZE)).text_xs().child(text))
                         }),

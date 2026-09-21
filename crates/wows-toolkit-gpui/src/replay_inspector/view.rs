@@ -18,7 +18,9 @@ use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockSkin;
 use gpui_kit::component::dock::PanelId;
+use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::resizable::h_resizable;
@@ -149,7 +151,9 @@ pub struct InspectorSettings {
 impl ReplayInspectorView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let browser = cx.new(ReplayBrowser::new);
-        let dock_area = cx.new(|cx| DockArea::new("replay-inspector-dock", None, window, cx));
+        // The skinned area is what draws a tab bar over a group holding more
+        // than one panel; a bare one renders only the displayed panel.
+        let (dock_area, _) = DockSkin::dock_area("replay-inspector-dock", None, window, cx);
         let subscription = cx.subscribe_in(&browser, window, Self::on_browser_event);
 
         let items = SearchableVec::new(GROUPINGS.map(GroupingItem).to_vec());
@@ -302,7 +306,7 @@ impl ReplayInspectorView {
             cx.new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, personal_rating, cx));
         self.open_panels.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
-            dock_area.add_panel(panel, DockPlacement::Center, None, window, cx);
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         self.has_opened_replay = true;
         cx.notify();

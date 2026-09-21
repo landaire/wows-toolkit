@@ -47,8 +47,6 @@ pub fn build_url(build: &ResolvedBuild, build_name: &str, referrer: Option<&str>
         "BuildVersion": BUILD_VERSION,
     });
 
-    println!("{}", serde_json::to_string_pretty(&payload).unwrap());
-
     let json_blob = serde_json::to_string(&payload).expect("serialize ship config");
     let mut deflated = Vec::new();
     {
