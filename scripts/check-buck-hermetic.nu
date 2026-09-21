@@ -3,7 +3,11 @@
 # Any of these appearing in an action command or environment means the action can
 # reach outside the declared inputs: a Cargo invocation, a download rule, a cache
 # directory, a network client, or a tool resolved through PATH by bare name.
-const PROHIBITED = '(^|[[:space:]"])([^[:space:]"]+/)?cargo([[:space:]"]|$)|http_(archive|file)\(|git_(fetch|repository)\(|(^|[[:space:]"])(PATH|CARGO_HOME|RUSTUP_HOME|SCCACHE_DIR|CCACHE_DIR|XDG_CACHE_HOME)=|/(\.cargo|\.cache)(/|[[:space:]",]|$)|(^|[[:space:]"])(curl|wget|ftp|git|ssh|nc)([[:space:]"]|$)|(^|[[:space:]"])(python|python3|bash|sh|clang|clang\+\+|gcc|g\+\+|cc|c\+\+|ld|ar|tar|unzip|mkdir)([[:space:]"]|$)'
+#
+# An assignment has to carry a value to count: the Windows toolchain's compiler
+# wrappers open with `set "PATH="`, which clears the variable rather than
+# handing the action one.
+const PROHIBITED = '(^|[[:space:]"])([^[:space:]"]+/)?cargo([[:space:]"]|$)|http_(archive|file)\(|git_(fetch|repository)\(|(^|[[:space:]"])(PATH|CARGO_HOME|RUSTUP_HOME|SCCACHE_DIR|CCACHE_DIR|XDG_CACHE_HOME)=[^\\"[:space:]]|/(\.cargo|\.cache)(/|[[:space:]",]|$)|(^|[[:space:]"])(curl|wget|ftp|git|ssh|nc)([[:space:]"]|$)|(^|[[:space:]"])(python|python3|bash|sh|clang|clang\+\+|gcc|g\+\+|cc|c\+\+|ld|ar|tar|unzip|mkdir)([[:space:]"]|$)'
 
 # A tool named by absolute path is pinned only if it comes from the toolchain
 # root. System paths are as ambient as a bare name: /bin/sh is a different
