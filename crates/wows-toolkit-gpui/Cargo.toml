@@ -39,6 +39,10 @@ wowsunpack = { path = "../wowsunpack", default-features = false, features = ["ar
 wows_replays = { path = "../wows-replays", default-features = false, features = ["arc", "parsing", "vfs"] }
 wows-replay-insights = { path = "../wows-replay-insights", default-features = false, features = ["arc", "battle-report", "wowssb"] }
 wows-battle-world = { path = "../wows-battle-world", default-features = false }
+# The hover preview rasterises the same draw commands the egui popup paints
+# and the video export encodes, rather than this crate growing a second
+# minimap renderer.
+wows_minimap_renderer = { path = "../minimap-renderer", default-features = false, features = ["rendering"] }
 serde_json = "1"
 tokio = { version = "1", features = ["rt-multi-thread"] }
 # The personal-rating refresh and the live match-stats lookup, the two network
