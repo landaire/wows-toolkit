@@ -94,6 +94,8 @@ impl ResultColumn {
 pub enum SearchEvent {
     /// Open this replay in the Replay Inspector.
     OpenReplay(std::path::PathBuf),
+    /// Play this replay's battle back on its minimap.
+    RenderReplay(std::path::PathBuf),
 }
 
 impl EventEmitter<SearchEvent> for SearchView {}
@@ -111,7 +113,7 @@ const PREVIEW_WIDTH: f32 = 240.;
 const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
 /// The open/copy pair at the end of each row, which the header reserves.
-const ACTIONS_COLUMN_WIDTH: Pixels = px(72.);
+const ACTIONS_COLUMN_WIDTH: Pixels = px(104.);
 
 /// Queries the bar remembers. Older ones fall off the end rather than the
 /// row growing without bound.
@@ -917,6 +919,8 @@ fn outcome_label(outcome: MatchOutcome) -> String {
 fn row_actions(ix: usize, hit: &MatchHit, exists: bool, search: Entity<SearchView>) -> AnyElement {
     let path = hit.replay_path.clone();
     let open_path = path.clone();
+    let render_path = path.clone();
+    let render_search = search.clone();
     let copy_path = path.clone();
 
     h_flex()
@@ -937,6 +941,17 @@ fn row_actions(ix: usize, hit: &MatchHit, exists: bool, search: Entity<SearchVie
                 .on_click(move |_event, _window, cx: &mut App| {
                     let open_path = open_path.clone();
                     search.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(open_path)));
+                }),
+        )
+        .child(
+            Button::new(("search-render", ix))
+                .icon(IconName::Play)
+                .compact()
+                .disabled(!exists)
+                .tooltip(t!("ui.replay.context.render_replay").to_string())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    let render_path = render_path.clone();
+                    render_search.update(cx, |_this, cx| cx.emit(SearchEvent::RenderReplay(render_path)));
                 }),
         )
         .child(
