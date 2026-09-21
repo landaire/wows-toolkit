@@ -21,6 +21,7 @@ use gpui_kit::component::input::StepAction;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
+use wows_toolkit_config::queries;
 
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::GameLimit;
@@ -61,6 +62,9 @@ pub struct StatsView {
     /// Ids are never reused, so a closed chart's element ids cannot collide
     /// with a later one's.
     next_chart_id: usize,
+    /// Whether the clear button has been pressed once and is waiting to be
+    /// confirmed.
+    clear_armed: bool,
     /// Handed to every panel so the rating is computed against one table.
     personal_rating: Option<std::sync::Arc<wows_toolkit_viewmodel::personal_rating::PersonalRatingData>>,
     focus_handle: FocusHandle,
@@ -104,6 +108,7 @@ impl StatsView {
             ships,
             charts: vec![first_chart],
             next_chart_id: 1,
+            clear_armed: false,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -145,6 +150,32 @@ impl StatsView {
             chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         }
         cx.notify();
+    }
+
+    /// Forgets every recorded game, once the button has been pressed twice.
+    ///
+    /// The first press arms it and says so; the second empties the table the
+    /// session is kept in and the panels reading from it.
+    fn clear_session(&mut self, cx: &mut Context<Self>) {
+        if !self.clear_armed {
+            self.clear_armed = true;
+            cx.notify();
+            return;
+        }
+        self.clear_armed = false;
+
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.games.clear();
+        self.available_modes.clear();
+        self.push_filtered(cx);
+
+        cx.spawn(async move |_this, cx| {
+            let cleared = crate::runtime::spawn(cx, async move { queries::clear_session_stats(&pool).await }).await;
+            if let Ok(Err(err)) = cleared {
+                tracing::warn!("stats: the session was not cleared: {err}");
+            }
+        })
+        .detach();
     }
 
     /// Writes the filter bar's state to the rows `load::load_filters` reads.
@@ -350,6 +381,20 @@ impl Render for StatsView {
                     .label("Add chart")
                     .compact()
                     .on_click(cx.listener(|this, _event, window, cx| this.add_chart(window, cx))),
+            )
+            .child(div().flex_1())
+            // Two presses rather than a dialog: the first says what the second
+            // will do, and clicking anything else forgets it. The egui tab
+            // asks the same question through its confirm panel.
+            .child(
+                Button::new("stats-clear")
+                    .child(crate::icons::icon(crate::icons::ERASER))
+                    .label(if self.clear_armed { "Clear every game?" } else { "Clear" })
+                    .compact()
+                    .selected(self.clear_armed)
+                    .disabled(self.games.is_empty())
+                    .tooltip("Forget every recorded game")
+                    .on_click(cx.listener(|this, _event, _window, cx| this.clear_session(cx))),
             );
 
         v_flex()

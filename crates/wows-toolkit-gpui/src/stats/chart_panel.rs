@@ -459,7 +459,6 @@ impl Render for StatsChartPanel {
             .border_b_1()
             .border_color(border)
             .child(self.settings_menu(cx))
-            .child(div().text_sm().child(self.value_label()))
             .child(div().flex_1())
             .when(!self.view.is_default(), |this| {
                 this.child(Button::new(("chart-reset-view", id)).label("Reset view").compact().xsmall().on_click(
@@ -513,6 +512,21 @@ impl Render for StatsChartPanel {
                 .into_any_element()
         };
 
-        v_flex().size_full().child(toolbar).child(div().flex_1().min_h(px(0.)).p_2().child(body))
+        v_flex()
+            .size_full()
+            .child(toolbar)
+            .child(
+                // Titled over the plot, centred, the way the egui chart heads
+                // its own group.
+                div()
+                    .flex_none()
+                    .w_full()
+                    .py_1()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .text_center()
+                    .child(self.value_label()),
+            )
+            .child(div().flex_1().min_h(px(0.)).p_2().child(body))
     }
 }
