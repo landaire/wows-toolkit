@@ -149,6 +149,20 @@ enum StatsState {
     Failed(String),
 }
 
+/// The tone a number of encounters is read in, or none for a number not
+/// worth marking (`wows_toolkit_viewmodel::player_tracker::
+/// encounter_severity`).
+fn severity_color(times: usize) -> Option<Hsla> {
+    let semantic = crate::theme::semantic();
+    let packed = match wows_toolkit_viewmodel::player_tracker::encounter_severity(times) {
+        wows_toolkit_viewmodel::player_tracker::EncounterSeverity::None => return None,
+        wows_toolkit_viewmodel::player_tracker::EncounterSeverity::Noted => semantic.division,
+        wows_toolkit_viewmodel::player_tracker::EncounterSeverity::Warned => semantic.warn,
+        wows_toolkit_viewmodel::player_tracker::EncounterSeverity::Heavy => semantic.loss,
+    };
+    Some(rgb(packed).into())
+}
+
 /// What the name filter is given: enough to read a name in.
 const FILTER_WIDTH: Pixels = px(220.);
 
@@ -1182,7 +1196,15 @@ impl PlayerTrackerView {
             _ => None,
         };
         let modes = visible_stat_modes(self.view_mode, self.win_rate_mode);
-        let layout = RosterLayout { stats, icons: &self.icons, twitch: &self.twitch_candidates, modes: &modes, border };
+        let layout = RosterLayout {
+            stats,
+            met: &self.tracked,
+            count_division_mates: self.show_division_mates,
+            icons: &self.icons,
+            twitch: &self.twitch_candidates,
+            modes: &modes,
+            border,
+        };
 
         v_flex()
             .size_full()
@@ -1343,6 +1365,11 @@ fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Enti
 #[derive(Clone, Copy)]
 struct RosterLayout<'a> {
     stats: Option<&'a HashMap<AccountId, PlayerStatsOut>>,
+    /// Everyone met before, so a roster row can say how often rather than
+    /// only that it happened.
+    met: &'a HashMap<AccountId, TrackedPlayer>,
+    /// Whether battles the user arranged count towards that number.
+    count_division_mates: bool,
     icons: &'a IconCache,
     /// The chip's candidates per roster name; a name that is absent has no
     /// chip.
@@ -1550,6 +1577,15 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
     let cells: Vec<AnyElement> =
         layout.modes.iter().flat_map(|mode| scope_cells(row_stats(player, *mode), status, pending)).collect();
 
+    // How many battles this player has been met in, counted the way the
+    // tables beside it count: the division toggle hides the ones the user
+    // arranged.
+    let met = row
+        .tracked
+        .and_then(|account| layout.met.get(&account))
+        .map(|tracked| tracked.visible_arena_ids(layout.count_division_mates).count())
+        .unwrap_or_default();
+
     h_flex()
         // Keyed by position as well as name: bots repeat names within a team.
         .id(SharedString::from(format!("tracker-roster-{side}-{index}")))
@@ -1572,11 +1608,17 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
                 .child(row.ship_name.clone().unwrap_or_else(|| "-".to_string())),
         )
         .children(cells)
-        .child(div().w(MET_COLUMN_WIDTH).text_xs().opacity(0.6).child(if row.tracked.is_some() {
-            "met before"
-        } else {
-            ""
-        }))
+        // How often this player has been met, in the tone that number
+        // deserves -- the egui roster's own column, where the port had a
+        // static "met before" string.
+        .child(
+            div()
+                .w(MET_COLUMN_WIDTH)
+                .text_xs()
+                .when_some(severity_color(met), |el, color| el.text_color(color))
+                .when(met == 0, |el| el.text_color(crate::theme::text_dim()))
+                .child(if met == 0 { String::new() } else { separate_number(met as i64, None) }),
+        )
         .into_any_element()
 }
 
@@ -1742,7 +1784,13 @@ impl Render for PlayerTrackerView {
                     .hover(|this| this.bg(hover_bg))
                     .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.latest_name.clone()))
                     .child(div().w(CLAN_COLUMN_WIDTH).text_sm().opacity(0.8).child(row.clan.clone()))
-                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(row.match_count.to_string()))
+                    .child(
+                        div()
+                            .w(COUNT_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.match_count as usize), |el, color| el.text_color(color))
+                            .child(separate_number(row.match_count, None)),
+                    )
                     .child(note_cell(ix, row.account_id, notes.get(&row.account_id), tracker.clone()))
                     .into_any_element()
             }
