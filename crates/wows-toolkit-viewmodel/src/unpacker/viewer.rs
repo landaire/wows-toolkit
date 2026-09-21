@@ -173,3 +173,41 @@ mod prototype_tests {
         assert!(matches!(error, ViewerError::NotDecodable { .. }));
     }
 }
+
+/// The highlighter grammar a file extension is read with.
+///
+/// `None` leaves the text unhighlighted, which is right for a format no
+/// grammar covers: a wrong grammar colours the file misleadingly. The game
+/// ships far more XML than anything else and no XML grammar exists, so that
+/// one is read as HTML, which shares the tag and attribute shapes the
+/// highlighting is for.
+pub fn highlight_language(extension: &str) -> Option<&'static str> {
+    match extension.trim_start_matches('.').to_ascii_lowercase().as_str() {
+        "json" => Some("json"),
+        "md" => Some("markdown"),
+        "xml" | "html" | "htm" | "svg" => Some("html"),
+        "js" => Some("javascript"),
+        "ts" => Some("typescript"),
+        "lua" => Some("lua"),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod highlight_tests {
+    use super::highlight_language;
+
+    #[test]
+    fn a_format_with_a_grammar_is_named_and_one_without_is_left_alone() {
+        assert_eq!(highlight_language(".json"), Some("json"));
+        assert_eq!(highlight_language("json"), Some("json"));
+        assert_eq!(highlight_language(".JSON"), Some("json"));
+        // XML has no grammar of its own; HTML shares its shapes.
+        assert_eq!(highlight_language(".xml"), Some("html"));
+        // A log or a bare text file is left unhighlighted rather than read
+        // with a grammar that does not describe it.
+        assert_eq!(highlight_language(".log"), None);
+        assert_eq!(highlight_language(".cfg"), None);
+        assert_eq!(highlight_language(""), None);
+    }
+}
