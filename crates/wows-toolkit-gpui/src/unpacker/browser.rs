@@ -679,7 +679,7 @@ fn render_folder_row(
         .child(Icon::new(folder).text_color(crate::theme::icon_accent()))
         .child(div().text_sm().child(item.label.clone()));
 
-    let list_item = ListItem::new(ix).selected(selected).child(row);
+    let list_item = crate::ui::tree_row(ListItem::new(ix).selected(selected).child(row), cx);
     match row_paths.get(&item.id).cloned() {
         Some(path) => list_item.on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
             panel.update(cx, |this, cx| this.select_dir(path.clone(), cx));

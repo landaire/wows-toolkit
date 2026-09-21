@@ -372,7 +372,7 @@ fn render_sidebar_item(
         });
     }
 
-    list_item
+    crate::ui::tree_row(list_item, cx)
 }
 
 impl Render for Sidebar {

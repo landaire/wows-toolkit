@@ -2,6 +2,7 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::list::ListItem;
 use gpui_kit::*;
 
 /// The background for row `index` of a list or table, or `None` for the rows
@@ -28,6 +29,18 @@ pub fn indent_guides(depth: usize, indent: Pixels, cx: &App) -> impl IntoElement
         // where the next level's rows begin.
         div().w(indent).h_full().flex_none().border_r_1().border_color(color)
     }))
+}
+
+/// The metrics every tree row is drawn at.
+///
+/// `ListItem` renders at `text_base` (a full rem, 16px) inside its own
+/// `py_1 px_3`, while the app's body text is `theme.font_size` (12.5px). A
+/// tree left at those defaults draws a quarter larger than the panel around
+/// it and a third taller than it needs to be, which is what made the
+/// listings look padded out. The component applies its own style last, so
+/// setting these on the item wins.
+pub fn tree_row(item: ListItem, cx: &App) -> ListItem {
+    item.text_size(cx.theme().font_size).py_0().px_1()
 }
 
 /// Wraps a control that shows a selected state so the selection is announced.
