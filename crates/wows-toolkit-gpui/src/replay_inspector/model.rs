@@ -30,6 +30,7 @@ use wows_replay_insights::battle_report::PotentialDamage;
 use wows_replay_insights::battle_report::RECEIVED_DAMAGE_DESCRIPTIONS;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedBuild;
+use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::personal_rating::PersonalRatingData;
 use wows_replay_insights::personal_rating::PersonalRatingResult;
 use wows_replay_insights::personal_rating::rate_single_battle;
@@ -229,6 +230,12 @@ pub struct PlayerRow {
     pub is_hidden_profile: bool,
     /// What this player's connection did, when that is worth reporting.
     pub connection: Option<ConnectionNote>,
+    /// The recording player's effective fire chance. `None` on every other
+    /// row, and on the self row until
+    /// [`ReplayReportModel::set_fire_chance`] runs: the analysis needs
+    /// the raw battle report and the build's own `assets.bin`, neither
+    /// of which a `NormalizedPlayer` carries.
+    pub fire_chance: Option<EffectiveFireChance>,
     /// Twitch logins that were in the monitored channel's chat around this
     /// battle and plausibly name this player. Empty until
     /// [`ReplayReportModel::populate_twitch_candidates`] runs, which needs
@@ -511,6 +518,15 @@ impl ReplayReportModel {
 
             row.personal_rating = rate_single_battle(pr_data, ship_id, actual_damage, row.kills.unwrap_or(0), is_win);
         }
+    }
+
+    /// Puts the recording player's effective fire chance on their own row.
+    ///
+    /// Only the self row carries one: the statistic is about the shells this
+    /// client fired, and a replay observes nobody else's.
+    pub fn set_fire_chance(&mut self, fire_chance: Option<EffectiveFireChance>) {
+        let Some(row) = self.rows.iter_mut().find(|row| row.is_self) else { return };
+        row.fire_chance = fire_chance;
     }
 
     /// Flags the rows whose names plausibly appeared in the monitored
@@ -862,6 +878,7 @@ impl PlayerRow {
             short_ship_config_url: None,
             wows_numbers_url: None,
             raw_metadata_json: None,
+            fire_chance: None,
             is_hidden_profile: np.is_hidden_profile,
             connection: np.connection.clone(),
             twitch_candidates: Vec::new(),

@@ -38,12 +38,10 @@ use wt_translations::keys;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::io::BufWriter;
 use std::io::Write;
 
 use std::sync::Arc;
-use std::sync::LazyLock;
 use std::sync::Weak;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
@@ -453,278 +451,6 @@ fn resolve_battle_results(results: serde_json::Value, constants: &serde_json::Va
     wows_replay_insights::battle_report::resolve_battle_results(results, constants)
 }
 
-/// Why fire-section geometry could not be read from the game install.
-#[derive(Debug, thiserror::Error)]
-enum FireSectionSourceError {
-    #[error("could not resolve assets.bin's path in the game vfs: {0}")]
-    Path(String),
-    #[error("could not open assets.bin: {0}")]
-    Open(String),
-    #[error("could not read assets.bin: {0}")]
-    Read(#[from] std::io::Error),
-    #[error("could not parse assets.bin: {0}")]
-    Parse(String),
-}
-
-/// Where fire-section geometry comes from for one game build.
-///
-/// The whole batch of hulls is resolved in one call because opening the source
-/// means parsing a ~178 MB `assets.bin`, which is the cost worth paying once.
-trait FireSectionSource {
-    /// Geometry for the hulls in `wanted`, keyed by hull model path. A hull the
-    /// source has no geometry for is absent from the map; `Err` means the
-    /// source itself could not be read, which is true of builds shipping no
-    /// `assets.bin` at all.
-    fn resolve_all(
-        &self,
-        wanted: &[(&str, usize)],
-    ) -> Result<HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry>, FireSectionSourceError>;
-}
-
-/// The real source: `content/assets.bin` out of a resolved build's game data.
-struct GameDataFireSections<'a> {
-    wows_data: &'a crate::data::wows_data::BuildData,
-}
-
-impl FireSectionSource for GameDataFireSections<'_> {
-    fn resolve_all(
-        &self,
-        wanted: &[(&str, usize)],
-    ) -> Result<HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry>, FireSectionSourceError> {
-        let bytes = open_assets_bin(self.wows_data)?;
-        let db = wowsunpack::models::assets_bin::parse_assets_bin(&bytes)
-            .map_err(|error| FireSectionSourceError::Parse(error.to_string()))?;
-        let self_id_index = db.build_self_id_index();
-        let mut resolved = HashMap::new();
-        for &(path, nodes) in wanted {
-            match wowsunpack::models::fire_nodes::resolve_fire_sections(&db, &self_id_index, path, nodes) {
-                Ok(geom) => {
-                    resolved.insert(path.to_string(), geom);
-                }
-                Err(error) => tracing::debug!(hull = path, %error, "fire-section geometry unresolved"),
-            }
-        }
-        Ok(resolved)
-    }
-}
-
-/// Fire-section lookups that came back empty for a reason that holds until the
-/// build's game data changes. The on-disk [`FireSectionCache`] stores what
-/// resolved; without this, what did not resolve is retried for every replay.
-///
-/// [`FireSectionCache`]: wowsunpack::models::fire_nodes_cache::FireSectionCache
-#[derive(Default)]
-struct FireSectionFailures {
-    /// Builds whose `assets.bin` could not be read or parsed. Builds older than
-    /// the file itself ship none at all.
-    no_source: HashSet<u32>,
-    /// Hulls a readable `assets.bin` held no geometry for, per build.
-    unresolvable_hulls: HashMap<u32, HashSet<String>>,
-}
-
-impl FireSectionFailures {
-    fn has_no_source(&self, build: u32) -> bool {
-        self.no_source.contains(&build)
-    }
-
-    fn note_no_source(&mut self, build: u32) {
-        self.no_source.insert(build);
-    }
-
-    fn hull_is_unresolvable(&self, build: u32, hull_model_path: &str) -> bool {
-        self.unresolvable_hulls.get(&build).is_some_and(|hulls| hulls.contains(hull_model_path))
-    }
-
-    fn note_unresolvable_hull(&mut self, build: u32, hull_model_path: &str) {
-        self.unresolvable_hulls.entry(build).or_default().insert(hull_model_path.to_string());
-    }
-
-    /// Downloading a build's data can supply the `assets.bin` that was missing,
-    /// so nothing recorded against it survives the download.
-    fn forget_build(&mut self, build: u32) {
-        self.no_source.remove(&build);
-        self.unresolvable_hulls.remove(&build);
-    }
-
-    fn clear(&mut self) {
-        self.no_source.clear();
-        self.unresolvable_hulls.clear();
-    }
-}
-
-/// Process-wide: these failures are facts about the game data on disk, not
-/// about any one replay or report.
-static FIRE_SECTION_FAILURES: LazyLock<RwLock<FireSectionFailures>> = LazyLock::new(RwLock::default);
-
-/// Let `build` be probed for fire-section geometry again, after its game data
-/// was downloaded.
-pub(crate) fn forget_fire_section_failures(build: u32) {
-    FIRE_SECTION_FAILURES.write().forget_build(build);
-}
-
-/// Let every build be probed for fire-section geometry again, after the game
-/// directory or the game data cache directory changed.
-pub(crate) fn clear_fire_section_failures() {
-    FIRE_SECTION_FAILURES.write().clear();
-}
-
-/// Read `content/assets.bin` from the resolved build's game data.
-fn open_assets_bin(wows_data: &crate::data::wows_data::BuildData) -> Result<Vec<u8>, FireSectionSourceError> {
-    let assets_path =
-        wows_data.vfs.join("content/assets.bin").map_err(|e| FireSectionSourceError::Path(e.to_string()))?;
-    let mut file = assets_path.open_file().map_err(|e| FireSectionSourceError::Open(e.to_string()))?;
-    let mut bytes = Vec::new();
-    std::io::Read::read_to_end(&mut file, &mut bytes)?;
-    Ok(bytes)
-}
-
-/// Resolve fire-section geometry for every hull among `victims`, backed by a
-/// per-build on-disk cache so `assets.bin` is parsed once per hull per game
-/// build rather than once per replay.
-///
-/// A hull that fails to resolve, or an unreadable/unparseable `assets.bin`,
-/// simply has no entry in the returned map: `analyze` treats a missing
-/// geometry as `NoSectionGeometry` for that victim rather than the whole
-/// statistic failing. `cache_dir` being `None` (the cache location could not
-/// be resolved) is the same story: resolution still runs, it just is not
-/// persisted.
-fn resolve_fire_section_geometry(
-    wows_data: &crate::data::wows_data::BuildData,
-    cache_dir: Option<&std::path::Path>,
-    build_number: u32,
-    victims: &HashMap<wows_replays::types::EntityId, wows_replay_insights::fire_chance::analysis::VictimContext>,
-) -> HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry> {
-    let mut expected_nodes: HashMap<&str, usize> = HashMap::new();
-    for victim in victims.values() {
-        expected_nodes.entry(victim.hull_model_path.as_str()).or_insert_with(|| victim.hull_section_count());
-    }
-
-    resolve_fire_section_geometry_from(
-        &GameDataFireSections { wows_data },
-        &FIRE_SECTION_FAILURES,
-        cache_dir,
-        build_number,
-        &expected_nodes,
-    )
-}
-
-/// [`resolve_fire_section_geometry`] against a given source and failure record,
-/// with the hulls already reduced to one entry per hull model path.
-fn resolve_fire_section_geometry_from(
-    source: &dyn FireSectionSource,
-    failures: &RwLock<FireSectionFailures>,
-    cache_dir: Option<&std::path::Path>,
-    build_number: u32,
-    expected_nodes: &HashMap<&str, usize>,
-) -> HashMap<String, wowsunpack::models::fire_nodes::FireSectionGeometry> {
-    let mut cache =
-        cache_dir.map(|dir| wowsunpack::models::fire_nodes_cache::FireSectionCache::load(dir, build_number));
-    let mut resolved = HashMap::new();
-    let mut misses = Vec::new();
-    for (&path, &nodes) in expected_nodes {
-        match cache.as_ref().and_then(|cache| cache.get(path, nodes)) {
-            Some(geom) => {
-                resolved.insert(path.to_string(), geom);
-            }
-            None => misses.push((path, nodes)),
-        }
-    }
-
-    {
-        let failures = failures.read();
-        misses.retain(|(path, _)| !failures.hull_is_unresolvable(build_number, path));
-        if misses.is_empty() || failures.has_no_source(build_number) {
-            return resolved;
-        }
-    }
-
-    let mut stored = false;
-    match source.resolve_all(&misses) {
-        Ok(mut geometries) => {
-            for (path, nodes) in misses {
-                let Some(geom) = geometries.remove(path) else {
-                    failures.write().note_unresolvable_hull(build_number, path);
-                    continue;
-                };
-                if let Some(cache) = cache.as_mut() {
-                    match cache.insert(path, nodes, &geom) {
-                        Ok(()) => stored = true,
-                        Err(error) => tracing::warn!(
-                            hull = path,
-                            %error,
-                            "freshly resolved fire-section geometry disagreed with the cache"
-                        ),
-                    }
-                }
-                resolved.insert(path.to_string(), geom);
-            }
-        }
-        Err(error) => {
-            match error {
-                FireSectionSourceError::Parse(_) => {
-                    tracing::warn!(%error, "could not parse assets.bin for fire-section geometry")
-                }
-                _ => tracing::debug!(%error, "assets.bin unavailable for fire-section geometry"),
-            }
-            failures.write().note_no_source(build_number);
-        }
-    }
-
-    if stored
-        && let (Some(cache), Some(dir)) = (&cache, cache_dir)
-        && let Err(error) = cache.save(dir)
-    {
-        tracing::warn!(%error, "could not save fire-section cache");
-    }
-
-    resolved
-}
-
-/// Compute effective fire chance for the recording player of `report`.
-///
-/// `None` whenever the underlying facts do not resolve: no self vehicle, no
-/// resolvable build, an unresolved secondary battery, or no victim hull with
-/// fire-section geometry. A result with no eligible hits is still `Some`, and
-/// the render path shows it as an unknown rate rather than a zero one. Never
-/// panics: an unreadable
-/// `assets.bin` degrades to a geometry lookup that always misses, which
-/// `analyze` reports as no result rather than an approximation.
-fn compute_fire_chance(
-    report: &BattleReport,
-    params: &GameMetadataProvider,
-    wows_data: &crate::data::wows_data::BuildData,
-    deps: &crate::data::wows_data::ReplayDependencies,
-) -> Option<wows_replay_insights::fire_chance::analysis::EffectiveFireChance> {
-    let resolved = match wows_replay_insights::fire_chance::resolve::resolve_fire_chance_input(report, params) {
-        Ok(resolved) => resolved,
-        Err(error) => {
-            tracing::debug!(%error, "fire chance input did not resolve");
-            return None;
-        }
-    };
-
-    let build_number = wows_data.build_number;
-    let cache_dir = crate::task::replays::game_data_dump_base_with_override(deps.build_cache.game_data_cache_dir())
-        .map(|base| base.join("fire_sections").join(build_number.to_string()));
-
-    let geometry_map = resolve_fire_section_geometry(wows_data, cache_dir.as_deref(), build_number, resolved.victims());
-    let geometry = |path: &str| geometry_map.get(path).cloned();
-
-    let input = resolved.input(report, params, &geometry);
-    let result = wows_replay_insights::fire_chance::analysis::analyze(&input);
-    if let Some(result) = &result {
-        tracing::debug!(
-            eligible_hits = result.eligible_hits,
-            set_fire_ribbons = result.set_fire_ribbons,
-            fires = result.fires,
-            unattributed_fires = result.unattributed_fires,
-            unattributed_reasons = ?result.unattributed_reasons,
-            "computed effective fire chance"
-        );
-    }
-    result
-}
-
 #[allow(non_camel_case_types)]
 pub struct UiReport {
     match_timestamp: Timestamp,
@@ -801,10 +527,18 @@ impl UiReport {
         // Computed once for the recording player and attached only to that
         // player's report below: `analyze` already refuses any other attacker,
         // so per-player computation would be wasted work.
-        let self_fire_chance = crate::timed_stage!(
-            "compute_fire_chance",
-            compute_fire_chance(report, metadata_provider, &wows_data_inner, deps)
-        );
+        let self_fire_chance = crate::timed_stage!("compute_fire_chance", {
+            let cache_dir =
+                crate::task::replays::game_data_dump_base_with_override(deps.build_cache.game_data_cache_dir())
+                    .map(|base| base.join("fire_sections").join(wows_data_inner.build_number.to_string()));
+            wows_replay_insights::fire_chance::sections::compute_fire_chance(
+                report,
+                metadata_provider,
+                &wows_data_inner.vfs,
+                wows_data_inner.build_number,
+                cache_dir.as_deref(),
+            )
+        });
 
         let resolved_results: Option<serde_json::Value> = crate::timed_stage!(
             "resolve_battle_results",
@@ -1768,7 +1502,7 @@ impl UiReport {
                             ui,
                             RichText::new(wt_translations::icon_t(
                                 icons::FIRE,
-                                &fire_chance_counts_text(fire_chance.fires, fire_chance.eligible_hits),
+                                &wows_toolkit_viewmodel::fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits),
                             ))
                             .strong(),
                         );
@@ -1783,7 +1517,7 @@ impl UiReport {
                             );
                         }
                     });
-                    plain(ui, RichText::new(fire_chance_ships_text(fire_chance)).weak());
+                    plain(ui, RichText::new(wows_toolkit_viewmodel::fire_chance::ships_text(fire_chance)).weak());
                 }
             })
             .response
@@ -1826,7 +1560,7 @@ impl UiReport {
                     .spacing([12.0, 2.0])
                     .striped(true)
                     .show(ui, |ui| {
-                        for ship in sorted_per_ship(fire_chance) {
+                        for ship in wows_toolkit_viewmodel::fire_chance::sorted_per_ship(fire_chance) {
                             ui.label(self.localize_ship_name(ship));
                             match ship.rate() {
                                 Some(rate) => ui.label(format!("{:.1}%", rate * 100.0)),
@@ -1846,7 +1580,7 @@ impl UiReport {
                                 ui.label("");
                                 ui.weak(wt_translations::icon_t(
                                     icons::FIRE,
-                                    &fire_chance_counts_text(ship.fires, ship.eligible_hits),
+                                    &wows_toolkit_viewmodel::fire_chance::counts_text(ship.fires, ship.eligible_hits),
                                 ));
                                 ui.label("");
                                 ui.end_row();
@@ -1855,7 +1589,7 @@ impl UiReport {
                         // The rows do not otherwise add up to the totals above
                         // them, because a hit keyed to our own ship or to a
                         // player whose hull never resolved has no row to sit in.
-                        if let Some(line) = fire_chance_no_target_ship_line(fire_chance) {
+                        if let Some(line) = wows_toolkit_viewmodel::fire_chance::no_target_ship_line(fire_chance) {
                             ui.weak(line);
                             ui.label("");
                             ui.label("");
@@ -1940,7 +1674,7 @@ impl UiReport {
     /// everything either expander can show, whether or not it is open.
     fn fire_chance_copy_text(&self, fire_chance: &EffectiveFireChance) -> String {
         let mut lines = vec![t!("ui.replay.sections.fire_chance").into_owned()];
-        lines.extend(fire_chance_headline_lines(fire_chance));
+        lines.extend(wows_toolkit_viewmodel::fire_chance::headline_lines(fire_chance));
         lines.push(String::new());
         lines.push(self.fire_chance_breakdown_text(fire_chance));
         lines.join("\n")
@@ -6067,100 +5801,6 @@ fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], loc
         .join("\n")
 }
 
-/// Sample-count headline for the effective-fire-chance block: fires and
-/// eligible hits summed over every target ship, and how many ships those
-/// totals cover.
-///
-/// Counts, not a rate. Fire resistance is a property of the victim, so a rate
-/// only means something inside one target ship's row, where the victim's
-/// `burnProb` coefficient and node probabilities are fixed. Reducing several
-/// ships to one percentage would need a weighting between a ship hit twice and
-/// one hit eighty times, and no weighting is the right one. Zero eligible hits
-/// says so in words rather than showing a total nothing stands behind.
-fn fire_chance_headline_text(fire_chance: &EffectiveFireChance) -> String {
-    if fire_chance.eligible_hits == 0 {
-        return t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned();
-    }
-    format!(
-        "{}   {}",
-        fire_chance_counts_text(fire_chance.fires, fire_chance.eligible_hits),
-        fire_chance_ships_text(fire_chance),
-    )
-}
-
-/// "across N target ships", with its own singular form. The translation layer
-/// carries no plural machinery, so a count of one takes a separate key the way
-/// the session-stats labels do.
-fn fire_chance_ships_text(fire_chance: &EffectiveFireChance) -> Cow<'static, str> {
-    let ships = fire_chance.ships_with_trials();
-    if ships == 1 {
-        return t!("ui.replay.sections.fire_chance_ships_one");
-    }
-    t!("ui.replay.sections.fire_chance_ships", ships = ships)
-}
-
-/// The headline plus the optional "expected" line beneath it, shared verbatim
-/// for the copy-to-clipboard and hover text. The on-screen block lays the same
-/// figures out with egui widgets instead, so this is the plain-text form.
-///
-/// The expected line renders `expected_fires`, a count of fires, which is what
-/// the observed fire count above it is comparable against.
-fn fire_chance_headline_lines(fire_chance: &EffectiveFireChance) -> Vec<String> {
-    let mut lines = vec![fire_chance_headline_text(fire_chance)];
-    if fire_chance.eligible_hits > 0
-        && let Some(expected) = fire_chance.expected_fires
-    {
-        let text = t!("ui.replay.sections.fire_chance_expected_fires", fires = format!("{expected:.1}"));
-        lines.push(format!("  {text}"));
-    }
-    lines
-}
-
-/// `per_ship`, sorted by eligible hits descending, for both the expander and
-/// the copy-to-clipboard breakdown.
-fn sorted_per_ship(fire_chance: &EffectiveFireChance) -> Vec<&PerShipFireChance> {
-    let mut ships: Vec<&PerShipFireChance> = fire_chance.per_ship.iter().collect();
-    ships.sort_by_key(|s| std::cmp::Reverse(s.eligible_hits));
-    ships
-}
-
-/// "N fires / M eligible hits", the counts a rate stands on. Both figures carry
-/// their unit, because a bare pair of numbers says nothing about which is which;
-/// the on-screen form puts a flame in front of the first as well.
-///
-/// The denominator says "eligible hits" rather than "hits" so it reads as the
-/// same figure the breakdown's `eligible` row states, which is what it is. A
-/// bare "hits" there invites the reader to compare it against the hits on the
-/// ship, which is a different and larger number.
-fn fire_chance_counts_text(fires: u32, hits: u32) -> String {
-    format!("{} / {}", fire_chance_fires_text(fires), fire_chance_eligible_hits_text(hits))
-}
-
-/// "N fires", with its own singular form. The translation layer carries no
-/// plural machinery, so a count of one takes a separate key throughout, the way
-/// the target-ship count does.
-fn fire_chance_fires_text(fires: u32) -> Cow<'static, str> {
-    if fires == 1 {
-        return t!("ui.replay.sections.fire_chance_fires_one");
-    }
-    t!("ui.replay.sections.fire_chance_fires", fires = fires)
-}
-
-/// "N eligible hits", with its own singular form.
-fn fire_chance_eligible_hits_text(hits: u32) -> Cow<'static, str> {
-    if hits == 1 {
-        return t!("ui.replay.sections.fire_chance_eligible_hits_one");
-    }
-    t!("ui.replay.sections.fire_chance_eligible_hits", hits = hits)
-}
-
-/// The unit a count in the breakdown's left column carries, singular at one.
-/// The count itself is printed apart from the label so a column of them lines
-/// up, which is why these keys are bare nouns.
-fn fire_chance_count_label(count: u32, plural: &'static str, singular: &'static str) -> Cow<'static, str> {
-    t!(if count == 1 { singular } else { plural })
-}
-
 /// One target-ship row in plain text, the header of that ship's breakdown. The
 /// on-screen expander lays the same figures out as a grid. This is the only
 /// place a percentage is stated, because the victim's fire resistance is fixed
@@ -6169,7 +5809,7 @@ fn fire_chance_count_label(count: u32, plural: &'static str, singular: &'static 
 /// matching per-hit chance so the two are comparable.
 fn fire_chance_per_ship_line(ship: &PerShipFireChance, localize_ship: &dyn Fn(&PerShipFireChance) -> String) -> String {
     let rate_text = match ship.rate() {
-        Some(rate) => format!("{:.1}%  {}", rate * 100.0, fire_chance_counts_text(ship.fires, ship.eligible_hits)),
+        Some(rate) => format!("{:.1}%  {}", rate * 100.0, wows_toolkit_viewmodel::fire_chance::counts_text(ship.fires, ship.eligible_hits)),
         None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
     };
     match ship.expected_rate() {
@@ -6338,7 +5978,7 @@ fn fire_chance_tally_rows(tally: &FireChanceTally<'_>, heads: &[TallyRow]) -> Ve
     rows.push(TallyRow::new(
         0,
         tally.he_hits_on_a_ship,
-        fire_chance_count_label(
+        wows_toolkit_viewmodel::fire_chance::count_label(
             tally.he_hits_on_a_ship,
             "ui.replay.sections.fire_chance_he_hits",
             "ui.replay.sections.fire_chance_he_hits_one",
@@ -6386,7 +6026,7 @@ fn fire_chance_battle_tally_rows(fire_chance: &EffectiveFireChance) -> Vec<Tally
     let fired = TallyRow::new(
         0,
         fire_chance.he_shells_fired,
-        fire_chance_count_label(
+        wows_toolkit_viewmodel::fire_chance::count_label(
             fire_chance.he_shells_fired,
             "ui.replay.sections.fire_chance_shells_fired",
             "ui.replay.sections.fire_chance_shells_fired_one",
@@ -6414,7 +6054,7 @@ fn fire_chance_ribbon_rows(fire_chance: &EffectiveFireChance) -> Vec<TallyRow> {
         TallyRow::new(
             0,
             fire_chance.set_fire_ribbons,
-            fire_chance_count_label(
+            wows_toolkit_viewmodel::fire_chance::count_label(
                 fire_chance.set_fire_ribbons,
                 "ui.replay.sections.fire_chance_ribbons",
                 "ui.replay.sections.fire_chance_ribbons_one",
@@ -6468,38 +6108,17 @@ fn fire_chance_per_ship_lines(
         return Vec::new();
     }
     let mut lines = vec![t!("ui.replay.sections.fire_chance_per_ship").into_owned()];
-    for ship in sorted_per_ship(fire_chance) {
+    for ship in wows_toolkit_viewmodel::fire_chance::sorted_per_ship(fire_chance) {
         lines.push(format!("  {}", fire_chance_per_ship_line(ship, localize_ship)));
         lines.extend(fire_chance_rows_to_lines(&fire_chance_tally_rows(&ship.into(), &[]), "    "));
     }
     // Without this the rows silently fail to add up to the aggregate: a hit keyed
     // to the recording player's own ship, or to a player whose hull never
     // resolved, has no row to sit in.
-    if let Some(line) = fire_chance_no_target_ship_line(fire_chance) {
+    if let Some(line) = wows_toolkit_viewmodel::fire_chance::no_target_ship_line(fire_chance) {
         lines.push(format!("  {line}"));
     }
     lines
-}
-
-/// "N HE hits not attributable to a target ship", or `None` when every HE hit
-/// on a ship landed on one the breakdown has a row for.
-///
-/// Derived here rather than read off the analysis, because the analysis reports
-/// the remainder over every hit of ours and this listing is HE-only: a hit keyed
-/// to our own ship or to a player whose hull never resolved is counted in the
-/// aggregate HE line and carried by no row, and this is exactly that difference.
-fn fire_chance_no_target_ship_line(fire_chance: &EffectiveFireChance) -> Option<String> {
-    let in_rows: u32 = fire_chance.per_ship.iter().map(|ship| ship.he_hits_on_a_ship).sum();
-    let hits = fire_chance.he_hits_on_a_ship.saturating_sub(in_rows);
-    if hits == 0 {
-        return None;
-    }
-    let label = fire_chance_count_label(
-        hits,
-        "ui.replay.sections.fire_chance_no_target_ship",
-        "ui.replay.sections.fire_chance_no_target_ship_one",
-    );
-    Some(format!("{hits} {label}"))
 }
 
 /// Presentation view of a normalized per-victim interaction: the numeric fields
@@ -6734,7 +6353,7 @@ mod fire_chance_render_tests {
     fn headline_shows_counts_and_the_ships_they_cover() {
         let mut fc = fixture(63, 9, Some(6.3));
         fc.per_ship = vec![ship("Zao", 40, 6, None), ship("Iowa", 23, 3, None)];
-        let headline = fire_chance_headline_text(&fc);
+        let headline = wows_toolkit_viewmodel::fire_chance::headline_text(&fc);
         assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
         assert_eq!(headline, "9 fires / 63 hits that could have started one   across 2 target ships");
     }
@@ -6746,7 +6365,7 @@ mod fire_chance_render_tests {
         let mut fc = fixture(63, 9, Some(6.3));
         fc.per_ship = vec![ship("Zao", 63, 9, None)];
         assert_eq!(
-            fire_chance_headline_lines(&fc),
+            wows_toolkit_viewmodel::fire_chance::headline_lines(&fc),
             vec![
                 "9 fires / 63 hits that could have started one   across 1 target ship".to_owned(),
                 "  expected 6.3 fires".to_owned()
@@ -6760,7 +6379,7 @@ mod fire_chance_render_tests {
     #[test]
     fn headline_over_zero_eligible_hits_shows_no_expected_line() {
         let fc = fixture(0, 0, Some(0.0));
-        assert_eq!(fire_chance_headline_lines(&fc), vec!["no hits that could have started a fire".to_owned()]);
+        assert_eq!(wows_toolkit_viewmodel::fire_chance::headline_lines(&fc), vec!["no hits that could have started a fire".to_owned()]);
     }
 
     /// Zero eligible hits is unknown, not zero: this must never render as a
@@ -6768,7 +6387,7 @@ mod fire_chance_render_tests {
     #[test]
     fn headline_over_zero_eligible_hits_shows_no_totals() {
         let fc = fixture(0, 0, None);
-        let headline = fire_chance_headline_text(&fc);
+        let headline = wows_toolkit_viewmodel::fire_chance::headline_text(&fc);
         assert!(!headline.contains('%'), "expected no percentage in {headline:?}");
         assert_eq!(headline, "no hits that could have started a fire");
     }
@@ -6920,8 +6539,8 @@ mod fire_chance_render_tests {
     /// One fire is one fire, not "1 fires", and one hit is one hit.
     #[test]
     fn counts_of_one_are_singular() {
-        assert_eq!(fire_chance_counts_text(1, 1), "1 fire / 1 hit that could have started one");
-        assert_eq!(fire_chance_counts_text(0, 2), "0 fires / 2 hits that could have started one");
+        assert_eq!(wows_toolkit_viewmodel::fire_chance::counts_text(1, 1), "1 fire / 1 hit that could have started one");
+        assert_eq!(wows_toolkit_viewmodel::fire_chance::counts_text(0, 2), "0 fires / 2 hits that could have started one");
     }
 
     /// The same shape over a real match's counts, taken from
@@ -7086,7 +6705,7 @@ mod fire_chance_render_tests {
     fn sorted_per_ship_orders_by_eligible_hits_descending() {
         let mut fc = fixture(23, 3, None);
         fc.per_ship = vec![ship("Iowa", 11, 1, None), ship("Zao", 12, 2, None)];
-        let names: Vec<&str> = sorted_per_ship(&fc).into_iter().map(|s| s.victim_ship_name.as_str()).collect();
+        let names: Vec<&str> = wows_toolkit_viewmodel::fire_chance::sorted_per_ship(&fc).into_iter().map(|s| s.victim_ship_name.as_str()).collect();
         assert_eq!(names, vec!["Zao", "Iowa"]);
     }
 
@@ -7184,163 +6803,6 @@ mod fire_chance_render_tests {
         let lines = fire_chance_formula_lines(&formula_fixture(Some(0.12), formula), &no_localization);
         assert_eq!(lines[1], "    base burnProb 12.0%");
         assert_eq!(lines[2], format!("  x {name}    1.00"));
-    }
-}
-
-#[cfg(test)]
-mod fire_section_failure_tests {
-    use std::cell::Cell;
-    use std::cell::RefCell;
-
-    use wowsunpack::game_params::types::Meters;
-    use wowsunpack::models::fire_nodes::FireSectionGeometry;
-
-    use super::FireSectionFailures;
-    use super::FireSectionSource;
-    use super::FireSectionSourceError;
-    use super::HashMap;
-    use super::RwLock;
-    use super::resolve_fire_section_geometry_from;
-
-    /// A stand-in for one build's `assets.bin` that records what was asked of
-    /// it. `hulls` is what it has geometry for; `None` is a build shipping no
-    /// `assets.bin` at all, which is the case that fills the user's log.
-    struct CountingSource {
-        hulls: Option<Vec<&'static str>>,
-        opens: Cell<u32>,
-        asked: RefCell<Vec<String>>,
-    }
-
-    impl CountingSource {
-        fn without_assets_bin() -> CountingSource {
-            CountingSource { hulls: None, opens: Cell::new(0), asked: RefCell::new(Vec::new()) }
-        }
-
-        fn with_hulls(hulls: &[&'static str]) -> CountingSource {
-            CountingSource { hulls: Some(hulls.to_vec()), opens: Cell::new(0), asked: RefCell::new(Vec::new()) }
-        }
-
-        fn opens(&self) -> u32 {
-            self.opens.get()
-        }
-
-        fn times_asked_for(&self, hull: &str) -> usize {
-            self.asked.borrow().iter().filter(|asked| *asked == hull).count()
-        }
-    }
-
-    impl FireSectionSource for CountingSource {
-        fn resolve_all(
-            &self,
-            wanted: &[(&str, usize)],
-        ) -> Result<HashMap<String, FireSectionGeometry>, FireSectionSourceError> {
-            self.opens.set(self.opens.get() + 1);
-            let Some(hulls) = &self.hulls else {
-                return Err(FireSectionSourceError::Open("no such file".to_string()));
-            };
-            let mut resolved = HashMap::new();
-            for &(path, nodes) in wanted {
-                self.asked.borrow_mut().push(path.to_string());
-                if hulls.contains(&path) {
-                    resolved.insert(path.to_string(), geometry(nodes));
-                }
-            }
-            Ok(resolved)
-        }
-    }
-
-    fn geometry(nodes: usize) -> FireSectionGeometry {
-        FireSectionGeometry::from_longitudinal((0..nodes).map(|i| Meters::from(-(i as f32))).collect())
-            .expect("a small node count is a valid geometry")
-    }
-
-    fn hulls(entries: &[(&'static str, usize)]) -> HashMap<&'static str, usize> {
-        entries.iter().copied().collect()
-    }
-
-    /// The on-disk cache only holds what resolved, so a build with no
-    /// `assets.bin` leaves every hull a miss and re-opens the file for every
-    /// replay unless the failure itself is remembered.
-    #[test]
-    fn a_build_without_assets_bin_is_only_probed_once() {
-        let source = CountingSource::without_assets_bin();
-        let failures = RwLock::new(FireSectionFailures::default());
-        let wanted = hulls(&[("iowa.model", 4)]);
-
-        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
-        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
-
-        assert_eq!(source.opens(), 1, "the second replay of this build must not re-open assets.bin");
-    }
-
-    /// One build's missing `assets.bin` says nothing about another build's.
-    /// A record that is not per build silently drops fire chance for every
-    /// build the user does have data for.
-    #[test]
-    fn a_build_with_assets_bin_is_still_probed() {
-        let missing = CountingSource::without_assets_bin();
-        let present = CountingSource::with_hulls(&["iowa.model"]);
-        let failures = RwLock::new(FireSectionFailures::default());
-        let wanted = hulls(&[("iowa.model", 4)]);
-
-        assert!(resolve_fire_section_geometry_from(&missing, &failures, None, 111, &wanted).is_empty());
-
-        let resolved = resolve_fire_section_geometry_from(&present, &failures, None, 222, &wanted);
-        assert!(resolved.contains_key("iowa.model"), "a build that has assets.bin still resolves");
-        assert_eq!(present.opens(), 1);
-    }
-
-    /// A hull a readable `assets.bin` has no geometry for is permanently
-    /// unresolvable for that build, and every replay featuring that ship would
-    /// otherwise walk the path store for it again.
-    #[test]
-    fn an_unresolvable_hull_is_not_retried_for_every_replay() {
-        let source = CountingSource::with_hulls(&["iowa.model"]);
-        let failures = RwLock::new(FireSectionFailures::default());
-        let wanted = hulls(&[("iowa.model", 4), ("ghost.model", 3)]);
-
-        let first = resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
-        assert!(first.contains_key("iowa.model"));
-        assert!(!first.contains_key("ghost.model"));
-
-        let second = resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
-        assert!(second.contains_key("iowa.model"), "the resolvable hull is still resolved");
-
-        assert_eq!(source.times_asked_for("ghost.model"), 1, "the unresolvable hull is asked for once");
-        assert_eq!(source.times_asked_for("iowa.model"), 2, "the resolvable hull is not swept up in the record");
-    }
-
-    /// The app tells the user to download the build's data and then downloads
-    /// it. A record surviving that leaves fire chance permanently off for a
-    /// build whose `assets.bin` is now on disk.
-    #[test]
-    fn downloading_a_builds_data_lets_it_be_probed_again() {
-        let source = CountingSource::without_assets_bin();
-        let failures = RwLock::new(FireSectionFailures::default());
-        let wanted = hulls(&[("iowa.model", 4)]);
-
-        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
-        assert_eq!(source.opens(), 1);
-
-        failures.write().forget_build(111);
-
-        assert!(resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted).is_empty());
-        assert_eq!(source.opens(), 2, "the download must buy the build a second probe");
-    }
-
-    /// Pointing the app at different game data invalidates every record, hull
-    /// records included.
-    #[test]
-    fn clearing_the_record_lets_an_unresolvable_hull_be_probed_again() {
-        let source = CountingSource::with_hulls(&[]);
-        let failures = RwLock::new(FireSectionFailures::default());
-        let wanted = hulls(&[("ghost.model", 3)]);
-
-        resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
-        failures.write().clear();
-        resolve_fire_section_geometry_from(&source, &failures, None, 111, &wanted);
-
-        assert_eq!(source.times_asked_for("ghost.model"), 2);
     }
 }
 

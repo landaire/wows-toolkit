@@ -85,6 +85,7 @@ use super::model::separate_number;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
+use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_toolkit_config::index::query;
 use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
@@ -345,10 +346,18 @@ impl ReplayPanel {
         cx: &mut Context<Self>,
     ) {
         self.state = match result {
-            Ok(ParsedReplay { model, export, game_data, raw_metadata_json, raw_results_json, mapped_results_json }) => {
+            Ok(ParsedReplay {
+                model,
+                export,
+                game_data,
+                raw_metadata_json,
+                raw_results_json,
+                mapped_results_json,
+                fire_chance,
+            }) => {
                 self.export = Some(export);
                 let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
-                self.loaded_state(model, game_data.vfs().clone(), payloads, window, cx)
+                self.loaded_state(model, game_data.vfs().clone(), fire_chance, payloads, window, cx)
             }
             Err(err) => {
                 // The panel says what went wrong; the toast is so a reader
@@ -369,12 +378,14 @@ impl ReplayPanel {
         &mut self,
         mut model: ReplayReportModel,
         vfs: VfsPath,
+        fire_chance: Option<EffectiveFireChance>,
         payloads: DebugPayloads,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> LoadState {
         let DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json } = payloads;
         model.columns = self.columns.clone();
+        model.set_fire_chance(fire_chance);
         // The table may have arrived while this replay was parsing, in which
         // case `spawn_parse` never saw it. Populating before `PlayerTable::new`
         // keeps the PR column sortable from the first frame.
@@ -435,7 +446,7 @@ impl ReplayPanel {
         let vfs: VfsPath = wowsunpack::vfs::MemoryFS::new().into();
         let payloads =
             DebugPayloads { raw_metadata_json: String::from("{}"), raw_results_json: None, mapped_results_json: None };
-        panel.state = panel.loaded_state(model, vfs, payloads, window, cx);
+        panel.state = panel.loaded_state(model, vfs, None, payloads, window, cx);
         panel
     }
 }
@@ -1013,6 +1024,58 @@ mod tests {
             }
         })
         .expect("the window is open");
+    }
+
+    /// The recording player's row carries the fire-chance block, and nobody
+    /// else's does: the statistic is about the shells this client fired.
+    #[gpui_kit::test]
+    fn the_fire_chance_block_is_on_the_recording_player_s_row(cx: &mut TestAppContext) {
+        use std::collections::BTreeMap;
+        use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
+
+        let fire_chance = EffectiveFireChance {
+            he_shells_fired: 120,
+            hits: 60,
+            narrowed: BTreeMap::new(),
+            he_hits_on_a_ship: 40,
+            hits_without_a_target_ship: 0,
+            not_applicable: 0,
+            eligible_hits: 40,
+            fires: 3,
+            expected_fires: Some(4.2),
+            per_ship: Vec::new(),
+            exclusions: BTreeMap::new(),
+            section_predictions: Vec::new(),
+            set_fire_ribbons: 3,
+            unattributed_fires: 0,
+            unattributed_reasons: BTreeMap::new(),
+            formula_base: Some(0.12),
+            formula: Vec::new(),
+        };
+
+        let mut model = model_at_expected_values();
+        model.set_fire_chance(Some(fire_chance));
+
+        let on_self = model.rows.iter().filter(|row| row.fire_chance.is_some()).count();
+        assert_eq!(on_self, 1, "exactly one row carries the statistic");
+        let carried = model
+            .rows
+            .iter()
+            .find(|row| row.is_self)
+            .and_then(|row| row.fire_chance.as_ref())
+            .expect("on the self row");
+
+        // The block's own wording, which is the shared reading of the result.
+        let counts = wows_toolkit_viewmodel::fire_chance::counts_text(carried.fires, carried.eligible_hits);
+        assert!(counts.contains("3 fires"), "got {counts:?}");
+        assert!(counts.contains("40 hits"), "got {counts:?}");
+        assert_eq!(
+            wows_toolkit_viewmodel::fire_chance::expected_fires_text(carried).as_deref(),
+            Some("expected 4.2 fires")
+        );
+
+        // The panel draws it without a window of its own to open.
+        let _ = cx;
     }
 
     /// The line under the header names the match, and a replay with no

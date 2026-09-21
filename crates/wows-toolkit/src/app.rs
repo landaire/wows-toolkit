@@ -2123,8 +2123,8 @@ impl WowsToolkitApp {
                             map.forget_unresolvable_build(*build);
                             map.forget_unresolvable_build(*requested_build);
                         }
-                        crate::ui::replay_parser::forget_fire_section_failures(*build);
-                        crate::ui::replay_parser::forget_fire_section_failures(*requested_build);
+                        wows_replay_insights::fire_chance::sections::forget_fire_section_failures(*build);
+                        wows_replay_insights::fire_chance::sections::forget_fire_section_failures(*requested_build);
 
                         if requested_build != build {
                             debug!("downloaded build {build} as a fallback for requested build {requested_build}");
@@ -6540,6 +6540,7 @@ mod shipbuilds_batch_dispatch_tests {
             game_type: "RandomBattle".into(),
             scenario: "Domination".into(),
             date_time: "06.08.2026 12:00:00".into(),
+            build: None,
         })
     }
 

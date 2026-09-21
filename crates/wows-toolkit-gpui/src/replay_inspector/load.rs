@@ -58,6 +58,7 @@ use serde_json::Value;
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replays::ParseError;
 use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
@@ -437,6 +438,19 @@ pub struct ParsedReplay {
     /// fields, for the debug-mode mapped viewer. `None` for the same reason
     /// the raw payload is.
     pub mapped_results_json: Option<String>,
+    /// The recording player's effective fire chance, when the facts behind it
+    /// resolve. See
+    /// [`wows_replay_insights::fire_chance::sections::compute_fire_chance`].
+    pub fire_chance: Option<EffectiveFireChance>,
+}
+
+/// Where the fire-section cache lives for `build`.
+///
+/// The same directory the egui app writes, so a build resolved by one app is
+/// not re-parsed by the other. `None` when there is no storage directory, in
+/// which case resolution still runs and simply is not persisted.
+fn fire_section_cache_dir(build: u32) -> Option<std::path::PathBuf> {
+    wows_toolkit_config::storage_dir().map(|dir| dir.join("game_data").join("fire_sections").join(build.to_string()))
 }
 
 /// Pretty-prints `raw` as JSON when it parses, falling back to the original
@@ -519,10 +533,30 @@ fn parse_replay(
         report.game_chat(),
         report.players(),
     );
+    // Reading the build's assets.bin is the expensive half, which is why the
+    // result is cached per build on disk. A build that ships none simply has
+    // no fire chance rather than failing the parse.
+    let cache_dir = fire_section_cache_dir(build);
+    let fire_chance = wows_replay_insights::fire_chance::sections::compute_fire_chance(
+        &report,
+        loaded.provider.as_ref(),
+        loaded.vfs(),
+        build,
+        cache_dir.as_deref(),
+    );
+
     let export = ExportedMatch::new(&normalized, report.players(), report.game_chat(), true);
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
 
-    Ok(ParsedReplay { model, export, game_data: loaded, raw_metadata_json, raw_results_json, mapped_results_json })
+    Ok(ParsedReplay {
+        model,
+        export,
+        game_data: loaded,
+        raw_metadata_json,
+        raw_results_json,
+        mapped_results_json,
+        fire_chance,
+    })
 }
 
 /// Parses `path` into a [`ParsedReplay`] on the background executor
