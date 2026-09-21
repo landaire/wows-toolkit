@@ -23,6 +23,7 @@
 //! listing raw ship and map ids (see `render`).
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -36,6 +37,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::spinner::Spinner;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeItem;
 use gpui_kit::component::tree::TreeState;
@@ -443,7 +445,36 @@ impl ReplayBrowser {
             .collect();
         self.leaf_info = Rc::new(leaf_info);
         self.group_children = Rc::new(group_children);
-        self.tree_state.update(cx, |state, cx| state.set_items(items, cx));
+
+        // A rebuild is a re-translation or a fresh scan of the same replays,
+        // not a new listing: a group the user closed stays closed and the row
+        // they were on stays selected. Groups are keyed by label, since their
+        // ids are positional and a rebuild renumbers them.
+        let (closed, selected) = self.tree_state.read_with(cx, |state, _cx| {
+            let mut closed: HashSet<SharedString> = HashSet::new();
+            let mut selected = None;
+            for ix in 0.. {
+                let Some(entry) = state.entry(ix) else { break };
+                if entry.is_folder() && !entry.is_expanded() {
+                    closed.insert(entry.item().label.clone());
+                }
+                if state.selected_index() == Some(ix) {
+                    selected = Some(entry.item().id.clone());
+                }
+            }
+            (closed, selected)
+        });
+        let items = items.into_iter().map(|item| restore_expansion(item, &closed)).collect::<Vec<_>>();
+
+        self.tree_state.update(cx, |state, cx| {
+            state.set_items(items, cx);
+            if let Some(selected) = selected {
+                let ix = (0..)
+                    .take_while(|ix| state.entry(*ix).is_some())
+                    .find(|ix| state.entry(*ix).map(|entry| entry.item().id.clone()) == Some(selected.clone()));
+                state.set_selected_index(ix, cx);
+            }
+        });
     }
 
     /// Handles a click on a leaf's rendered item: any click records the
@@ -466,6 +497,16 @@ impl ReplayBrowser {
 /// leaf's path/battle_result into `leaf_info`, keyed by the leaf's id (its
 /// full path string, which is unique per file). Groups default to expanded
 /// so the browser is immediately useful without an extra click per group.
+/// Re-closes the groups the user had closed, by label.
+fn restore_expansion(item: TreeItem, closed: &HashSet<SharedString>) -> TreeItem {
+    if !item.is_folder() {
+        return item;
+    }
+    let expanded = !closed.contains(&item.label);
+    let children: Vec<TreeItem> = item.children.iter().cloned().map(|child| restore_expansion(child, closed)).collect();
+    TreeItem::new(item.id.clone(), item.label.clone()).children(children).expanded(expanded)
+}
+
 /// Builds one tree row, and reports the replays under it so a group's menu
 /// can act on all of them.
 fn node_to_tree_item(
@@ -585,6 +626,10 @@ fn render_browser_item(
         ListItem::new(ix).selected(selected).when_some(striped, |item, color| item.bg(color)).child(row);
 
     if let Some(leaf) = leaf {
+        // What the row says in words, whether or not a preview can be baked
+        // for it: the egui row's own `on_hover_text` fallback.
+        let hover_text = leaf.hover.clone();
+        list_item = list_item.tooltip(move |window, cx| Tooltip::new(hover_text.clone()).build(window, cx));
         let path = leaf.path.clone();
         let hover_browser = browser.clone();
         let hover_path = path.clone();
