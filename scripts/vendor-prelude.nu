@@ -10,6 +10,20 @@
 # It is vendored rather than used as a bundled external cell because the patches
 # below cannot be applied to a bundled cell.
 
+def patch_all [file: path, from: string, to: string, expected: int] {
+    let text = (open --raw $file)
+    let occurrences = ($text | split row $from | length) - 1
+    if $occurrences == $expected {
+        $text | str replace --all $from $to | save -f $file
+        return
+    }
+    if $occurrences == 0 and ($text | str contains $to) {
+        print $"Skipping ($file): already upstream."
+        return
+    }
+    error make {msg: $"Expected ($expected) occurrences of the patch site in ($file), found ($occurrences)."}
+}
+
 def patch [file: path, from: string, to: string] {
     let text = (open --raw $file)
     let occurrences = ($text | split row $from | length) - 1
@@ -102,6 +116,19 @@ patch $unarchive 'return cmd_args(archive, format = "unzip {}"), bool(strip_pref
         return cmd_args(archive, format = unzip + " {}"), bool(strip_prefix)')
 patch $unarchive 'mkdir = "mkdir -p {}"' 'mkdir = _nix_tool("mkdir") + " -p {}"'
 patch $unarchive 'interpreter = ["/bin/sh"]' 'interpreter = [_nix_tool("bash")]'
+
+# Two configured targets of one rule produce byte-identical outputs for several
+# of these files, and a content-based path is then the same path for both. On
+# Windows the two actions racing to write it fail with a sharing violation
+# ("Binary being executed, please close the process first"), which is what a
+# build spanning both a transitioned and an untransitioned configuration does
+# constantly. The classic per-target paths cost some cache sharing and keep the
+# build from failing.
+patch "prelude/decls/rust_rules.bzl" '"use_content_based_paths": attrs.bool(default = True),' '"use_content_based_paths": attrs.bool(default = False),'
+patch "prelude/decls/cxx_common.bzl" '"use_content_based_paths": attrs.bool(default = True),' '"use_content_based_paths": attrs.bool(default = False),'
+# The build-script rule declares its own outputs content-based whatever the
+# rule attribute says.
+patch_all "prelude/rust/cargo_buildscript.bzl" "has_content_based_path = True" "has_content_based_path = False" 6
 
 let version = (^buck2 --version | str trim)
 $"Expanded from the bundled prelude of: ($version)

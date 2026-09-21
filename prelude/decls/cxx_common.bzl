@@ -483,7 +483,7 @@ def _use_content_based_paths_arg():
     return {
         # Use content-based paths by default for compile action; targets may opt out
         # explicitly.
-        "use_content_based_paths": attrs.bool(default = True),
+        "use_content_based_paths": attrs.bool(default = False),
     }
 
 def _expect_eligible_for_dedupe_arg():
