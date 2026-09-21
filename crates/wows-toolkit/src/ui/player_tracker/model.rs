@@ -1,5 +1,4 @@
 use std::collections::BTreeMap;
-use std::collections::BTreeSet;
 use std::collections::HashSet;
 use std::hash::Hash;
 
@@ -12,8 +11,6 @@ use jiff::tz::TimeZone;
 use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
-use wows_replays::types::AccountId;
-use wows_replays::types::ArenaId;
 
 use crate::icons;
 use crate::ui::theme::semantic::SemanticExt;
@@ -207,99 +204,7 @@ pub(crate) fn row_offset(
         + row_nr as f32 * row_height
 }
 
-/// The encounters in which a tracked player shared your division.
-///
-/// Marked under both keys the encounter counts are taken with: distinct arena
-/// for the all-time count, distinct timestamp for the in-range one. A tracked
-/// player's `arena_ids` and `timestamps` are unpaired sets, so a mark recorded
-/// under only one of them would leave the two column families disagreeing about
-/// which encounters are hidden.
-///
-/// Both sets are private so [`mark`](Self::mark) is the only way to add to
-/// either: nothing outside this module can write one key and forget the other.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct DivisionEncounters {
-    #[serde(default)]
-    arena_ids: BTreeSet<ArenaId>,
-    #[serde(default)]
-    timestamps: BTreeSet<Timestamp>,
-}
-
-impl DivisionEncounters {
-    /// Record one encounter as a division one, under both keys at once.
-    ///
-    /// Returns whether either set gained the encounter, which is what tells a
-    /// caller a first marking from a re-parse of a battle already marked. It is
-    /// not a claim that both sets grew: two battles sharing a timestamp add the
-    /// second arena without adding a second timestamp.
-    pub(crate) fn mark(&mut self, arena_id: ArenaId, timestamp: Timestamp) -> bool {
-        let arena_is_new = self.arena_ids.insert(arena_id);
-        let timestamp_is_new = self.timestamps.insert(timestamp);
-        arena_is_new || timestamp_is_new
-    }
-
-    fn hides_arena(&self, arena_id: &ArenaId) -> bool {
-        self.arena_ids.contains(arena_id)
-    }
-
-    fn hides_timestamp(&self, timestamp: &Timestamp) -> bool {
-        self.timestamps.contains(timestamp)
-    }
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct TrackedPlayer {
-    pub(crate) last_name: String,
-    pub(crate) db_id: AccountId,
-    pub(crate) names: HashSet<String>,
-    pub(crate) clan_id: i64,
-    pub(crate) clan: String,
-    pub(crate) timestamps: BTreeSet<Timestamp>,
-    pub(crate) arena_ids: BTreeSet<ArenaId>,
-    #[serde(default)]
-    pub(crate) notes: String,
-    /// Which of this player's encounters were division ones. Per encounter, not
-    /// per account: divisioning with someone once hides those battles and
-    /// leaves every other meeting with them on the tables.
-    #[serde(default)]
-    pub(crate) division_encounters: DivisionEncounters,
-}
-
-impl TrackedPlayer {
-    /// The battles this player was met in that the division-mate toggle leaves
-    /// visible, keyed by arena. Drives the all-time counts.
-    pub(crate) fn visible_arena_ids(&self, show_division_mates: bool) -> impl Iterator<Item = ArenaId> + '_ {
-        self.arena_ids
-            .iter()
-            .copied()
-            .filter(move |arena_id| show_division_mates || !self.division_encounters.hides_arena(arena_id))
-    }
-
-    /// The same encounters keyed by timestamp, which is what the in-range counts
-    /// dedup on. Filtered against the marks recorded under the same key, so the
-    /// two families always hide the same battles.
-    ///
-    /// Assumes distinct battles carry distinct replay timestamps, which the
-    /// whole timestamp-keyed side of the tracker rests on. Where two battles do
-    /// share one, they already counted as a single encounter here; a division
-    /// mark on that timestamp additionally hides both of them from the in-range
-    /// counts while the arena key hides only the battle actually marked.
-    pub(crate) fn visible_timestamps(
-        &self,
-        show_division_mates: bool,
-    ) -> impl DoubleEndedIterator<Item = Timestamp> + '_ {
-        self.timestamps
-            .iter()
-            .copied()
-            .filter(move |timestamp| show_division_mates || !self.division_encounters.hides_timestamp(timestamp))
-    }
-
-    /// The most recent visible encounter, or `None` when every encounter with
-    /// this player was a division one and the toggle is off.
-    pub(crate) fn last_visible_timestamp(&self, show_division_mates: bool) -> Option<Timestamp> {
-        self.visible_timestamps(show_division_mates).next_back()
-    }
-}
+pub use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum TimePeriod {
@@ -532,6 +437,8 @@ mod tests {
     use std::path::Path;
     use std::path::PathBuf;
 
+    use wows_replays::types::AccountId;
+    use wows_replays::types::ArenaId;
     use wows_replays::types::GameParamId;
 
     use super::*;

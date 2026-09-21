@@ -34,6 +34,7 @@ use wows_toolkit_viewmodel::player_tracker::ClanRow;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::PlayerFacet;
+use wows_toolkit_config::queries;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::personal_rating;
@@ -57,6 +58,8 @@ use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
+use wows_toolkit_viewmodel::player_tracker::tracked;
+use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_players;
 use wowsunpack::game_params::types::Species;
 
@@ -152,6 +155,13 @@ pub struct PlayerTrackerView {
     /// The replays directory being watched, so the scan knows where the live
     /// packet stream is.
     replay_dir: Option<PathBuf>,
+    /// Notes kept against the players met, keyed by account. Shared with the
+    /// egui app through the `player_tracker_data` blob, so a note written in
+    /// either is the note both show.
+    tracked: HashMap<AccountId, TrackedPlayer>,
+    /// The account whose note is open for editing, and the field holding it.
+    editing_note: Option<AccountId>,
+    note_input: Entity<InputState>,
     /// Ship-class icons for the roster, decoded from the battle's own build.
     /// Empty until that build's data loads; a row without one falls back to
     /// its ship name alone, which is what an older client with no icon does.
@@ -195,7 +205,9 @@ pub struct PlayerTrackerView {
 impl PlayerTrackerView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("Filter by player or clan..."));
+        let note_input = cx.new(|cx| InputState::new(window, cx).placeholder("Notes about this player..."));
         let subscription = cx.subscribe(&filter_input, Self::on_filter_event);
+        let note_edited = cx.subscribe(&note_input, Self::on_note_edited);
 
         Self {
             sub_tab: SubTab::Players,
@@ -207,6 +219,9 @@ impl PlayerTrackerView {
             live_identities: None,
             stats: StatsState::Idle,
             replay_dir: None,
+            tracked: HashMap::new(),
+            editing_note: None,
+            note_input,
             icons: IconCache::new(),
             view_mode: CurrentMatchViewMode::default(),
             win_rate_mode: WinRateMode::default(),
@@ -226,12 +241,108 @@ impl PlayerTrackerView {
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
-            _subscriptions: vec![subscription],
+            _subscriptions: vec![subscription, note_edited],
         }
     }
 
     /// Queries the index for the current period. Called once the config
     /// database is open, and again whenever the period changes.
+    /// Reads the notes the two apps share. Called once the config database
+    /// is open.
+    fn load_tracked_players(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let stored =
+                runtime::spawn(cx, async move { queries::get_setting::<String>(&pool, tracked::SETTING_KEY).await })
+                    .await;
+
+            let Ok(Some(json)) = stored else { return };
+            let players = tracked::players_from_blob(&json);
+            let _ = this.update(cx, |this, cx| {
+                this.tracked = players;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Seeds the players the index returned and the notes kept against them.
+    /// Test-only: production loads both from the database.
+    #[cfg(test)]
+    pub(crate) fn seed_players_and_notes(
+        &mut self,
+        players: Vec<PlayerFacet>,
+        tracked: HashMap<AccountId, TrackedPlayer>,
+        cx: &mut Context<Self>,
+    ) {
+        self.players = players;
+        self.tracked = tracked;
+        self.state = LoadState::Loaded;
+        self.sync_rows(cx);
+    }
+
+    /// The note kept against `account`, as the tab holds it. Test-only.
+    #[cfg(test)]
+    pub(crate) fn note_for(&self, account: AccountId) -> Option<&str> {
+        self.tracked.get(&account).map(|player| player.notes.as_str())
+    }
+
+    /// Opens `account`'s note for editing, seeding the field with what is
+    /// stored.
+    fn edit_note(&mut self, account: AccountId, window: &mut Window, cx: &mut Context<Self>) {
+        let note = self.tracked.get(&account).map(|player| player.notes.clone()).unwrap_or_default();
+        self.note_input.update(cx, |state, cx| state.set_value(note, window, cx));
+        self.editing_note = Some(account);
+        cx.notify();
+    }
+
+    /// Saved on blur or Enter rather than per keystroke, so a half-typed note
+    /// never reaches the database.
+    fn on_note_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let Some(account) = self.editing_note else { return };
+        let note = state.read(cx).value().to_string();
+        self.store_note(account, note, cx);
+    }
+
+    fn store_note(&mut self, account: AccountId, note: String, cx: &mut Context<Self>) {
+        // The name the index knows, so a note written here is legible in the
+        // egui tab's own list, which keys its rows on the stored name.
+        let facet = self.players.iter().find(|facet| facet.account_id == account);
+        let entry = self.tracked.entry(account).or_insert_with(|| TrackedPlayer {
+            db_id: account,
+            last_name: facet.map(|facet| facet.latest_name.clone()).unwrap_or_default(),
+            clan: facet.map(|facet| facet.clan.clone()).unwrap_or_default(),
+            ..TrackedPlayer::default()
+        });
+        if entry.notes == note {
+            return;
+        }
+        entry.notes = note;
+
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let players = self.tracked.clone();
+        cx.spawn(async move |_this, cx| {
+            let written = runtime::spawn(cx, async move {
+                // Read-modify-write: the blob carries the egui app's own
+                // fields, which a rebuild from this side would drop.
+                let existing = queries::get_setting::<String>(&pool, tracked::SETTING_KEY).await.unwrap_or_default();
+                let blob = tracked::blob_with_players(&existing, &players)?;
+                queries::set_setting(&pool, tracked::SETTING_KEY, &blob)
+                    .await
+                    .map_err(|err| tracked::BlobError::Encode(serde_json::Error::io(std::io::Error::other(err))))
+            })
+            .await;
+
+            if let Ok(Err(err)) = written {
+                tracing::warn!("player tracker: the note was not saved: {err}");
+            }
+        })
+        .detach();
+        cx.notify();
+    }
+
     /// Looks up which of this battle's players the index has met before.
     ///
     /// Asks about the two dozen names in hand rather than reading every
@@ -268,6 +379,7 @@ impl PlayerTrackerView {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.state = LoadState::Loading;
+        self.load_tracked_players(pool.clone(), cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -805,6 +917,23 @@ fn tint_rgb(tint: PlayerTint) -> u32 {
     player_color_kind_rgb(tint_kind(tint))
 }
 
+/// One player row's note affordance: the note itself as a tooltip when there
+/// is one, and a button that opens the editor either way.
+fn note_cell(ix: usize, account: AccountId, note: Option<&String>, tracker: Entity<PlayerTrackerView>) -> AnyElement {
+    let has_note = note.is_some();
+    let tooltip = note.cloned();
+
+    Button::new(("tracker-note", ix))
+        .icon(if has_note { IconName::StarFill } else { IconName::Star })
+        .compact()
+        .when_some(tooltip, |this, note| this.tooltip(SharedString::from(note)))
+        .when(!has_note, |this| this.tooltip("Add a note about this player"))
+        .on_click(move |_event, window, cx: &mut App| {
+            tracker.update(cx, |this, cx| this.edit_note(account, window, cx));
+        })
+        .into_any_element()
+}
+
 /// What a roster column draws, bundled so the row and header helpers stay
 /// under clippy's argument-count limit.
 #[derive(Clone, Copy)]
@@ -1090,6 +1219,13 @@ impl Render for PlayerTrackerView {
         let players = self.rows();
         let clans = self.clans();
         let sub_tab = self.sub_tab;
+        let notes: HashMap<AccountId, String> = self
+            .tracked
+            .iter()
+            .filter(|(_, player)| !player.notes.is_empty())
+            .map(|(id, player)| (*id, player.notes.clone()))
+            .collect();
+        let tracker = cx.entity();
         let render_row = move |ix: usize, _window: &mut Window, _cx: &mut App| match sub_tab {
             SubTab::Players => {
                 let Some(row) = players.get(ix) else {
@@ -1106,6 +1242,7 @@ impl Render for PlayerTrackerView {
                     .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.latest_name.clone()))
                     .child(div().w(CLAN_COLUMN_WIDTH).text_sm().opacity(0.8).child(row.clan.clone()))
                     .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(row.match_count.to_string()))
+                    .child(note_cell(ix, row.account_id, notes.get(&row.account_id), tracker.clone()))
                     .into_any_element()
             }
             SubTab::CurrentMatch => unreachable!("the roster returns above"),
@@ -1155,6 +1292,38 @@ impl Render for PlayerTrackerView {
                 .into_any_element(),
         };
 
+        // The note editor sits below the table rather than over it: the row
+        // it belongs to stays visible while the note is written.
+        let note_editor = self.editing_note.map(|account| {
+            let name = self
+                .players
+                .iter()
+                .find(|facet| facet.account_id == account)
+                .map(|facet| facet.latest_name.clone())
+                .unwrap_or_default();
+
+            v_flex()
+                .flex_none()
+                .gap_1()
+                .px_2()
+                .py_1()
+                .border_t_1()
+                .border_color(border)
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .items_center()
+                        .child(div().text_xs().font_weight(FontWeight::BOLD).child(format!("Notes: {name}")))
+                        .child(Button::new("tracker-note-close").label("Close").compact().on_click(cx.listener(
+                            |this, _event, _window, cx| {
+                                this.editing_note = None;
+                                cx.notify();
+                            },
+                        ))),
+                )
+                .child(Input::new(&self.note_input).id("tracker-note-input").w_full())
+        });
+
         v_flex()
             .id("tracker-root")
             .track_focus(&self.focus_handle)
@@ -1162,6 +1331,7 @@ impl Render for PlayerTrackerView {
             .child(toolbar)
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
+            .when_some(note_editor, |this, editor| this.child(editor))
             .into_any_element()
     }
 }
@@ -1287,6 +1457,54 @@ mod tests {
         .expect("the window is open");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A note opens for editing from its row, and what is typed is what the
+    /// tab holds afterwards.
+    #[gpui_kit::test]
+    fn a_players_note_opens_from_its_row_and_keeps_what_is_typed(cx: &mut TestAppContext) {
+        use wows_toolkit_config::index::rows::PlayerFacet;
+        use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        let account = AccountId(7);
+        let players = vec![PlayerFacet {
+            account_id: account,
+            latest_name: "Harvey635".to_string(),
+            clan: "WTK".to_string(),
+            match_count: 3,
+        }];
+        let tracked = [(account, TrackedPlayer { notes: "camps the spawn".to_string(), ..TrackedPlayer::default() })]
+            .into_iter()
+            .collect();
+
+        window
+            .update(cx, |tracker, _window, cx| tracker.seed_players_and_notes(players, tracked, cx))
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("tracker-note-input").is_none(), "the editor opens from a row");
+            window.click(("tracker-note", 0usize), cx);
+            assert_eq!(
+                window.find("tracker-note-input").value(),
+                Some("camps the spawn"),
+                "the editor opens on the stored note"
+            );
+        })
+        .expect("the window is open");
+
+        window
+            .update(cx, |tracker, _window, cx| tracker.store_note(account, "divisions with a CV".to_string(), cx))
+            .expect("the window is open");
+
+        window
+            .update(cx, |tracker, _window, _cx| {
+                assert_eq!(tracker.note_for(account), Some("divisions with a CV"));
+            })
+            .expect("the window is open");
     }
 
     /// The roster's ship-class icons come out of the battle's own build, so

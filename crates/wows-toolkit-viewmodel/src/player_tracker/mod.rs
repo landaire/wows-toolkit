@@ -5,6 +5,7 @@
 //! shows of them, the same way in both front ends.
 
 pub mod live;
+pub mod tracked;
 
 use jiff::Timestamp;
 use jiff::ToSpan;
