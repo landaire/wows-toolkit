@@ -109,6 +109,8 @@ pub enum BrowserEvent {
     View { path: VfsPath },
     /// Decode this assets.bin prototype and show the JSON.
     ViewAsJson { path: VfsPath },
+    /// Decode this assets.bin prototype and write the JSON to a file.
+    ExtractAsJson { path: VfsPath },
     /// Add one entry to the extraction queue.
     Queue(VfsPath),
     /// Drop one entry from the extraction queue.
@@ -439,6 +441,9 @@ impl Render for BrowserPanel {
                 // Only an assets.bin prototype the decoder understands offers
                 // the JSON view.
                 let decodable = !is_dir && decodable_prototype(&row.label).is_some();
+                let viewable = !is_dir && is_viewable(&row.label);
+                let view_path = path.clone();
+                let view_entity = entity.clone();
                 let json_path = path.clone();
                 let json_entity = entity.clone();
                 let is_queued = queued.contains(path.as_str());
@@ -470,16 +475,37 @@ impl Render for BrowserPanel {
                             }
                         });
                     })
-                    .context_menu(move |menu, _window, _cx| {
+                    .context_menu(move |mut menu, _window, _cx| {
+                        // A file the viewer understands opens in it, whatever
+                        // kind it is; a prototype the decoder understands
+                        // additionally reads and writes as JSON, which is the
+                        // set the egui listing offers (`ui/file_unpacker.rs`).
+                        if viewable {
+                            let path = view_path.clone();
+                            let entity = view_entity.clone();
+                            menu =
+                                menu.item(PopupMenuItem::new("View contents").on_click(move |_event, _window, cx| {
+                                    let path = path.clone();
+                                    entity.update(cx, |_this, cx| cx.emit(BrowserEvent::View { path }));
+                                }));
+                        }
                         if !decodable {
                             return menu;
                         }
                         let path = json_path.clone();
                         let entity = json_entity.clone();
+                        let extract_path = json_path.clone();
+                        let extract_entity = json_entity.clone();
                         menu.item(PopupMenuItem::new("View as JSON").on_click(move |_event, _window, cx| {
                             let path = path.clone();
                             entity.update(cx, |_this, cx| cx.emit(BrowserEvent::ViewAsJson { path }));
                         }))
+                        .item(PopupMenuItem::new("Extract as JSON").on_click(
+                            move |_event, _window, cx| {
+                                let path = extract_path.clone();
+                                extract_entity.update(cx, |_this, cx| cx.emit(BrowserEvent::ExtractAsJson { path }));
+                            },
+                        ))
                     })
                     .into_any_element()
             }
@@ -634,6 +660,15 @@ const INDENT: Pixels = px(16.);
 /// The two columns the listing header has to line its labels up with.
 const QUEUE_COLUMN_WIDTH: Pixels = px(20.);
 const GLYPH_COLUMN_WIDTH: Pixels = px(16.);
+
+/// Whether the file viewer has anything to show for this name.
+///
+/// The same extensions the egui listing offers "View Contents" for; the
+/// viewer itself decides what it makes of the bytes.
+fn is_viewable(label: &str) -> bool {
+    let extension = label.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+    matches!(extension.as_str(), "xml" | "json" | "txt" | "cfg" | "log" | "csv" | "md" | "jpg" | "jpeg" | "png" | "svg")
+}
 
 /// The glyph for a listing row: a directory, or the kind of file its name
 /// says it is, from the same four the egui listing tells apart

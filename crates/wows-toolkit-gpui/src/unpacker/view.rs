@@ -391,6 +391,7 @@ impl UnpackerView {
             }
             BrowserEvent::View { path } => self.open_viewer(path.clone(), _window, cx),
             BrowserEvent::ViewAsJson { path } => self.open_json_viewer(path.clone(), _window, cx),
+            BrowserEvent::ExtractAsJson { path } => self.extract_as_json(path.clone(), cx),
         }
     }
 
@@ -546,6 +547,31 @@ impl UnpackerView {
                 this.dump_status = Some(match written {
                     Ok(()) => "Parameters written".to_string(),
                     Err(err) => format!("{err}"),
+                });
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Decodes an assets.bin prototype and writes the JSON where the user
+    /// asks, which is what the egui listing's own item does.
+    fn extract_as_json(&mut self, path: VfsPath, cx: &mut Context<Self>) {
+        let name = path.filename();
+        let stem = name.rsplit_once('.').map(|(stem, _)| stem.to_string()).unwrap_or(name);
+        let asked = crate::dialog::save_file(Some("Extract as JSON"), &format!("{stem}.json"), None);
+        cx.spawn(async move |this, cx| {
+            let Some(target) = asked.await else { return };
+            let written = cx
+                .background_spawn(async move {
+                    let json = viewer::decode_to_json(&path).map_err(|err| err.to_string())?;
+                    std::fs::write(&target, json).map_err(|err| err.to_string())
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.dump_status = Some(match written {
+                    Ok(()) => "Prototype written".to_string(),
+                    Err(err) => err,
                 });
                 cx.notify();
             });
