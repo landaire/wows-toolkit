@@ -53,6 +53,7 @@ use wows_toolkit_viewmodel::unpacker::extract::expand_to_files;
 use wows_toolkit_viewmodel::unpacker::extract::extract_files;
 use wows_toolkit_viewmodel::unpacker::extract::extract_root;
 use wows_toolkit_viewmodel::unpacker::game_params;
+use wows_toolkit_viewmodel::unpacker::game_params::GameParamsDumpError;
 use wows_toolkit_viewmodel::unpacker::game_params::GameParamsFormat;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
@@ -67,6 +68,7 @@ use wows_toolkit_viewmodel::unpacker::viewer;
 /// height so a large queue scrolls rather than covering the browser.
 const QUEUE_POPOVER_WIDTH: Pixels = px(420.);
 const QUEUE_POPOVER_MAX_HEIGHT: Pixels = px(300.);
+const DUMP_POPOVER_WIDTH: Pixels = px(220.);
 
 /// One message from a running scan.
 enum SearchUpdate {
@@ -505,9 +507,19 @@ impl UnpackerView {
             cx.notify();
             return;
         };
+        let Some(build) = self.selected_build else {
+            self.dump_status = Some("No build is loaded".to_string());
+            cx.notify();
+            return;
+        };
+        // The minimal formats write the toolkit's own decoded set, which is
+        // the same file for the whole tree; "base parameters only" is a cut of
+        // the raw pickled tree and has no meaning for them.
+        let base_only = base_only && !format.is_minimal();
+        let stem = if format.is_minimal() { "MinGameParams" } else { "GameParams" };
         let Some(path) = rfd::FileDialog::new()
             .set_title("Save game parameters")
-            .set_file_name(format!("GameParams.{}", format.extension()))
+            .set_file_name(format!("{stem}.{}", format.extension()))
             .save_file()
         else {
             return;
@@ -517,8 +529,17 @@ impl UnpackerView {
         cx.notify();
 
         cx.spawn(async move |this, cx| {
-            let written =
-                cx.background_spawn(async move { game_params::dump_pickled(&vfs, &path, format, base_only) }).await;
+            let written = cx
+                .background_spawn(async move {
+                    if format.is_minimal() {
+                        let params = crate::replay_inspector::load_game_params(&vfs, build.0)
+                            .map_err(|err| GameParamsDumpError::Decode(err.to_string()))?;
+                        game_params::write_value(&params, &path, format)
+                    } else {
+                        game_params::dump_pickled(&vfs, &path, format, base_only)
+                    }
+                })
+                .await;
 
             let _ = this.update(cx, |this, cx| {
                 this.dump_status = Some(match written {
@@ -631,6 +652,52 @@ impl UnpackerView {
         self.stop_flag.store(true, Ordering::Relaxed);
         cx.notify();
     }
+}
+
+/// The parameters-dump dropdown, mirroring the egui app's "Dump Game Params"
+/// menu: each of the four formats, and the same four again limited to the
+/// base entry. A disabled trigger says the build has no VFS yet rather than
+/// opening a menu whose every item would fail.
+fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoElement {
+    let trigger = Button::new("unpacker-dump-params")
+        .label("Dump parameters")
+        .compact()
+        .disabled(!enabled)
+        .tooltip(if enabled { "Write this build's GameParams.data out" } else { "Load a build first" });
+
+    Popover::new("unpacker-dump-params-menu").trigger(trigger).content(move |_state, _window, _cx| {
+        let full = GameParamsFormat::ALL
+            .into_iter()
+            .map(|format| dump_params_item(view.clone(), format, false))
+            .collect::<Vec<_>>();
+        // The base-entry cut only applies to the raw tree, so the minimal
+        // formats are not offered a second time here.
+        let base = GameParamsFormat::ALL
+            .into_iter()
+            .filter(|format| !format.is_minimal())
+            .map(|format| dump_params_item(view.clone(), format, true))
+            .collect::<Vec<_>>();
+
+        v_flex()
+            .w(DUMP_POPOVER_WIDTH)
+            .gap_1()
+            .p_1()
+            .child(div().text_xs().font_weight(FontWeight::BOLD).child("Whole tree"))
+            .children(full)
+            .child(div().text_xs().font_weight(FontWeight::BOLD).child("Base parameters only"))
+            .children(base)
+    })
+}
+
+/// One dump-menu entry.
+fn dump_params_item(view: Entity<UnpackerView>, format: GameParamsFormat, base_only: bool) -> impl IntoElement {
+    let id = format!("unpacker-dump-{}{}", if base_only { "base-" } else { "" }, format.label().replace(' ', "-"));
+
+    Button::new(SharedString::from(id.to_lowercase())).label(format.label()).compact().on_click(
+        move |_event, _window, cx: &mut App| {
+            view.update(cx, |this, cx| this.dump_game_params(format, base_only, cx));
+        },
+    )
 }
 
 /// The extraction queue dropdown, mirroring the egui app's queue button and
@@ -808,28 +875,7 @@ impl Render for UnpackerView {
                     .disabled(!busy)
                     .on_click(cx.listener(|this, _event, _window, cx| this.cancel_extraction(cx))),
             )
-            .child(
-                Button::new("unpacker-dump-params")
-                    .label("Dump parameters")
-                    .compact()
-                    .disabled(self.package_vfs.is_none())
-                    .tooltip("Write this build's GameParams.data out as JSON")
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        this.dump_game_params(GameParamsFormat::Json, false, cx)
-                    })),
-            )
-            .child(
-                Button::new("unpacker-dump-base-params")
-                    .label("Dump base parameters")
-                    .compact()
-                    .disabled(self.package_vfs.is_none())
-                    .tooltip("Write only the base entry of GameParams.data as JSON")
-                    .on_click(
-                        cx.listener(|this, _event, _window, cx| {
-                            this.dump_game_params(GameParamsFormat::Json, true, cx)
-                        }),
-                    ),
-            )
+            .child(dump_params_popover(cx.entity(), self.package_vfs.is_some()))
             .when_some(self.dump_status.clone(), |this, status| this.child(div().text_xs().opacity(0.6).child(status)))
             .child(
                 Button::new("unpacker-clear-queue")

@@ -48,6 +48,7 @@ pub use debug_view::RawJsonPanel;
 pub use load::GameDataCache;
 pub use load::GameDataStatus;
 pub use load::ReplayLoadError;
+pub use load::load_game_params;
 pub use load::spawn_parse;
 pub use load::spawn_startup_preload;
 pub use model::ChatMessage;

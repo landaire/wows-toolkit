@@ -58,7 +58,6 @@ const CANCEL: &str = "unpacker-cancel";
 const CLEAR_QUEUE: &str = "unpacker-clear-queue";
 const PKG_FILTER: &str = "unpacker-pkg-filter";
 const DUMP_PARAMS: &str = "unpacker-dump-params";
-const DUMP_BASE_PARAMS: &str = "unpacker-dump-base-params";
 const OUTPUT_DIR: &str = "unpacker-output-dir";
 const QUEUE_TRIGGER: &str = "unpacker-queue-trigger";
 const QUEUE_CLEAR_ALL: &str = "unpacker-queue-clear-all";
@@ -768,7 +767,7 @@ fn the_clans_table_keeps_its_own_sort(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
-fn the_parameter_dump_buttons_are_refused_until_a_build_is_loaded(cx: &mut TestAppContext) {
+fn the_parameter_dump_menu_is_refused_until_a_build_is_loaded(cx: &mut TestAppContext) {
     let window = open_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
@@ -778,11 +777,10 @@ fn the_parameter_dump_buttons_are_refused_until_a_build_is_loaded(cx: &mut TestA
         show_tab(window, AppTab::Unpacker, cx);
 
         // No game directory in the test settings, so no build is loaded and
-        // clicking either dump must not open a file dialog.
-        for dump in [DUMP_PARAMS, DUMP_BASE_PARAMS] {
-            window.click(dump, cx);
-        }
-        assert!(window.try_find(DUMP_PARAMS).is_some(), "the queue bar survives the refused clicks");
+        // the dump menu must stay shut rather than offering formats that
+        // would all fail.
+        window.click(DUMP_PARAMS, cx);
+        assert!(window.try_find("unpacker-dump-json").is_none(), "the menu does not open without a build");
     })
     .expect("the test window stays open");
 }

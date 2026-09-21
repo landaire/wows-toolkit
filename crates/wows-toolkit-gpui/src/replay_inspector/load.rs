@@ -69,6 +69,7 @@ use wowsunpack::data::Version;
 use wowsunpack::game_params::cache as game_params_cache;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
+use wowsunpack::game_params::types::Param;
 use wowsunpack::vfs::VfsPath;
 
 use super::model::ReplayReportModel;
@@ -187,23 +188,32 @@ impl LoadedGameData {
     /// not fatal, since the freshly parsed provider is still usable this
     /// session.
     fn load_provider(vfs: &VfsPath, build: u32) -> Result<GameMetadataProvider, ReplayLoadError> {
-        let cache_path = game_params_bin_path(build);
-
-        if let Some(params) = game_params_cache::load(&cache_path) {
-            tracing::debug!(build, path = %cache_path.display(), "loaded GameParams from disk cache");
-            return GameMetadataProvider::from_params_with_vfs(params, vfs)
-                .map_err(|e| ReplayLoadError::GameData(e.to_string()));
-        }
-
-        tracing::info!(build, "no GameParams disk cache; parsing from game files");
-        let provider = GameMetadataProvider::from_vfs(vfs).map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-        let params: Vec<_> = provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
-        if let Err(e) = game_params_cache::save(&cache_path, &params) {
-            tracing::warn!(build, path = %cache_path.display(), error = %e, "failed to write GameParams disk cache");
-        }
-
-        Ok(provider)
+        GameMetadataProvider::from_params_with_vfs(load_game_params(vfs, build)?, vfs)
+            .map_err(|e| ReplayLoadError::GameData(e.to_string()))
     }
+}
+
+/// `build`'s decoded game parameters, preferring the on-disk cache (see the
+/// module doc) over a full VFS parse. A cache miss (first load ever for this
+/// build, on either app) parses from the VFS and writes the cache for next
+/// time; a write failure is logged but not fatal, since the freshly parsed
+/// parameters are still usable this session.
+pub fn load_game_params(vfs: &VfsPath, build: u32) -> Result<Vec<Param>, ReplayLoadError> {
+    let cache_path = game_params_bin_path(build);
+
+    if let Some(params) = game_params_cache::load(&cache_path) {
+        tracing::debug!(build, path = %cache_path.display(), "loaded GameParams from disk cache");
+        return Ok(params);
+    }
+
+    tracing::info!(build, "no GameParams disk cache; parsing from game files");
+    let provider = GameMetadataProvider::from_vfs(vfs).map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+    let params: Vec<_> = provider.params().iter().map(|param| Arc::unwrap_or_clone(Arc::clone(param))).collect();
+    if let Err(e) = game_params_cache::save(&cache_path, &params) {
+        tracing::warn!(build, path = %cache_path.display(), error = %e, "failed to write GameParams disk cache");
+    }
+
+    Ok(params)
 }
 
 /// One build's load outcome, filled in exactly once. `Arc`-shared so every
@@ -535,6 +545,42 @@ mod tests {
             println!("{rated} of {} rows carry a personal rating", model.rows.len());
             assert!(rated > 0, "a replay with results should rate at least one row");
         }
+    }
+
+    /// Loads a real install's decoded parameters and writes them out in the
+    /// minimal format, which is what the Unpacker's dump menu does. Needs a
+    /// local game install. Run with:
+    ///
+    /// ```text
+    /// WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR="E:\WoWs\World_of_Warships" \
+    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture the_minimal_parameter_dump_writes_a_real_installs_parameters
+    /// ```
+    #[test]
+    #[ignore = "needs a local game install; see the doc comment for the run command"]
+    fn the_minimal_parameter_dump_writes_a_real_installs_parameters() {
+        use wows_toolkit_viewmodel::unpacker::game_params;
+
+        let wows_dir = std::env::var("WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR")
+            .expect("set WOWS_REPLAY_INSPECTOR_LOAD_TEST_DIR to a WoWs install directory");
+        let dir = PathBuf::from(&wows_dir);
+        let build = wowsunpack::game_data::list_available_builds(&dir)
+            .expect("the install lists its builds")
+            .into_iter()
+            .max()
+            .expect("the install has at least one build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build).expect("the build's VFS opens");
+
+        let params = load_game_params(&vfs, build).expect("the build's parameters load");
+        assert!(!params.is_empty(), "a real install decodes to at least one parameter");
+
+        let out = std::env::temp_dir().join(format!("wt-gpui-minparams-{}.json", std::process::id()));
+        game_params::write_value(&params, &out, game_params::GameParamsFormat::MinimalJson)
+            .expect("the minimal dump writes");
+
+        let written = std::fs::metadata(&out).expect("the dump exists").len();
+        println!("wrote {} parameters as {written} bytes of minimal JSON", params.len());
+        assert!(written > 0, "the dump is not empty");
+        let _ = std::fs::remove_file(&out);
     }
 
     /// A directory under the OS temp dir with an empty `bin/` subfolder, so
