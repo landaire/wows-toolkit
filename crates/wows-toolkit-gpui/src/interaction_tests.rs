@@ -1030,26 +1030,30 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_result_row_previews_only_after_the_pointer_settles(cx: &mut TestAppContext) {
     use std::path::PathBuf;
-    use std::time::Duration;
     use wows_toolkit_viewmodel::preview_dwell::DWELL;
 
     let window = open_app(cx);
+    let row = PathBuf::from("does-not-exist.wowsreplay");
 
     window
         .update(cx, |app, _window, cx| {
             app.search().update(cx, |search, cx| {
-                let row = PathBuf::from("does-not-exist.wowsreplay");
-
-                // Crossing the row is not dwelling on it.
-                search.hover_row(row.clone(), Duration::from_millis(50), cx);
+                search.hover_row(row.clone(), cx);
                 assert!(search.is_dwelling(), "the row is being watched");
                 assert_eq!(search.preview_frame_count(), None, "but nothing is baked yet");
+            });
+        })
+        .expect("the test window stays open");
 
-                // Settling on it asks for a preview. No game data is loaded
-                // here, so the bake finds no build and produces nothing --
-                // which is the point: the row must not be left showing a
-                // stale preview from elsewhere.
-                search.hover_row(row, DWELL, cx);
+    // Settling on the row asks for a preview. No game data is loaded here, so
+    // the bake finds no build and produces nothing -- which is the point: the
+    // row must not be left showing a stale preview from elsewhere.
+    cx.executor().advance_clock(DWELL * 2);
+    cx.run_until_parked();
+
+    window
+        .update(cx, |app, _window, cx| {
+            app.search().update(cx, |search, cx| {
                 assert_eq!(search.preview_frame_count(), None);
 
                 search.leave_rows(cx);

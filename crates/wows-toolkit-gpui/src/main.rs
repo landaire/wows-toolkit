@@ -7,6 +7,7 @@ mod interaction_tests;
 mod minimap_preview;
 mod personal_rating;
 mod player_tracker;
+mod preview_hover;
 mod replay_inspector;
 mod runtime;
 mod search;

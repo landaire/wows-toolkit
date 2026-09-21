@@ -203,6 +203,7 @@ impl ReplayInspectorView {
             self.browser.update(cx, |browser, cx| {
                 browser.start_scan(wows_dir, cx);
                 browser.set_game_data(&status, cx);
+                browser.set_build_cache(None);
             });
             return;
         }
@@ -214,6 +215,9 @@ impl ReplayInspectorView {
         self.browser.update(cx, |browser, cx| {
             browser.start_scan(wows_dir.clone(), cx);
             browser.set_game_data(&status, cx);
+            // The listing's hover previews bake against whichever build a
+            // replay was recorded on, which is what this cache loads.
+            browser.set_build_cache(Some(game_data.clone()));
         });
 
         let preload = spawn_startup_preload(PathBuf::from(&wows_dir), game_data, cx);

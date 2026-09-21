@@ -74,6 +74,9 @@ use super::browser::ReplayLite;
 use super::browser::build_browser_tree;
 use super::columns::BattleOutcome;
 use super::columns::ColorRole;
+use crate::preview_hover::PreviewHover;
+
+use super::load::GameDataCache;
 use super::load::GameDataStatus;
 use super::table::resolve_color;
 
@@ -107,6 +110,14 @@ struct LeafInfo {
     path: PathBuf,
     battle_result: Option<BattleResult>,
 }
+
+/// How far to the right of the pointer the hover preview sits, so it never
+/// covers the row it belongs to.
+const PREVIEW_CURSOR_OFFSET: Pixels = px(24.);
+
+/// The preview's edge length. Square, as the minimap is; the egui app's own
+/// popup uses 384 (`preview_popup::PREVIEW_SIZE`).
+const PREVIEW_SIZE: f32 = 384.;
 
 /// Background scan progress, driving the panel's content below the header.
 enum ScanStatus {
@@ -151,10 +162,42 @@ pub struct ReplayBrowser {
     /// The most recently double-clicked leaf's path -- the "open" intent's
     /// minimal stand-in for Milestone 5's dock wiring (see the module doc).
     open_requested: Option<PathBuf>,
-    /// The shared preloaded game data, once `load::GameDataStatus` reaches
-    /// `Ready` (see `set_game_data`). `None` translates every label to its
-    /// untranslated raw fallback (see `translate_replay`).
-    game_data: Option<Arc<GameMetadataProvider>>,
+    /// The shared preloaded game data (see `set_game_data`). Anything but
+    /// `Ready` translates every label to its untranslated raw fallback (see
+    /// `translate_replay`).
+    game_data: GameData,
+    /// The build cache a hovered row's preview is baked against. Separate
+    /// from `game_data`: that one is the currently installed build's metadata
+    /// for naming rows, this one loads whichever build a replay was recorded
+    /// on.
+    build_cache: Option<GameDataCache>,
+    /// Hover-to-preview: the same behaviour the Search tab has, over the
+    /// listing's own rows (`preview_hover`).
+    preview: PreviewHover,
+    /// Where the pointer was when it entered the previewed row, so the popup
+    /// is anchored beside it like the egui app's own hover popup.
+    preview_anchor: Point<Pixels>,
+}
+
+/// What the browser can translate its labels with.
+///
+/// `Loading` and `Unavailable` both mean "no provider", but they are not the
+/// same to the reader: the first resolves on its own, so the panel waits
+/// rather than showing a list of raw ship and map ids, while the second never
+/// will, so the raw ids are all there is to show.
+enum GameData {
+    Loading,
+    Unavailable,
+    Ready(Arc<GameMetadataProvider>),
+}
+
+impl GameData {
+    fn provider(&self) -> Option<&GameMetadataProvider> {
+        match self {
+            GameData::Ready(provider) => Some(provider),
+            GameData::Loading | GameData::Unavailable => None,
+        }
+    }
 }
 
 impl EventEmitter<ReplayBrowserEvent> for ReplayBrowser {}
@@ -170,7 +213,10 @@ impl ReplayBrowser {
             leaf_info: Rc::new(HashMap::new()),
             selected_path: None,
             open_requested: None,
-            game_data: None,
+            game_data: GameData::Loading,
+            build_cache: None,
+            preview: PreviewHover::default(),
+            preview_anchor: Point::default(),
         }
     }
 
@@ -199,21 +245,36 @@ impl ReplayBrowser {
     /// `Arc` identity), so polling the same settled status repeatedly does
     /// not re-rebuild the tree for nothing.
     pub fn set_game_data(&mut self, status: &GameDataStatus, cx: &mut Context<Self>) {
-        let new_provider = match status {
-            GameDataStatus::Ready(loaded) => Some(Arc::clone(loaded.provider())),
-            GameDataStatus::Loading | GameDataStatus::Failed(_) => None,
+        let new_state = match status {
+            GameDataStatus::Ready(loaded) => GameData::Ready(Arc::clone(loaded.provider())),
+            GameDataStatus::Loading => GameData::Loading,
+            GameDataStatus::Failed(_) => GameData::Unavailable,
         };
-        let unchanged = match (&self.game_data, &new_provider) {
-            (Some(current), Some(new)) => Arc::ptr_eq(current, new),
-            (None, None) => true,
+        let unchanged = match (&self.game_data, &new_state) {
+            (GameData::Ready(current), GameData::Ready(new)) => Arc::ptr_eq(current, new),
+            (GameData::Loading, GameData::Loading) | (GameData::Unavailable, GameData::Unavailable) => true,
             _ => false,
         };
         if unchanged {
             return;
         }
-        self.game_data = new_provider;
+        self.game_data = new_state;
         self.rebuild_tree(cx);
         cx.notify();
+    }
+
+    /// Adopts the build cache a hovered row's preview is baked against. The
+    /// inspector owns it; the browser only reads it.
+    pub fn set_build_cache(&mut self, cache: Option<GameDataCache>) {
+        self.build_cache = cache;
+    }
+
+    /// The pointer settled on a row: after the shared dwell, its battle plays
+    /// back beside the listing.
+    fn hover_leaf(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.preview_anchor = position;
+        let cache = self.build_cache.clone();
+        self.preview.enter(path, cache, cx, |browser| &mut browser.preview);
     }
 
     /// Kicks off the background directory scan for `wows_dir`. Safe to call
@@ -255,7 +316,7 @@ impl ReplayBrowser {
     }
 
     fn rebuild_tree(&mut self, cx: &mut Context<Self>) {
-        let provider = self.game_data.as_deref();
+        let provider = self.game_data.provider();
         let translated: Vec<ReplayLite> = self.files.iter().map(|raw| translate_replay(raw, provider)).collect();
         let nodes = build_browser_tree(&translated, self.grouping);
         let mut leaf_info = HashMap::new();
@@ -350,6 +411,13 @@ fn render_browser_item(
 
     if let Some(leaf) = leaf {
         let path = leaf.path.clone();
+        let hover_browser = browser.clone();
+        let hover_path = path.clone();
+        list_item = list_item.on_mouse_enter(move |event: &MouseMoveEvent, _window, cx: &mut App| {
+            let path = hover_path.clone();
+            let position = event.position;
+            hover_browser.update(cx, |browser, cx| browser.hover_leaf(path, position, cx));
+        });
         list_item = list_item.on_click(move |event: &ClickEvent, _window, cx: &mut App| {
             browser.update(cx, |browser, cx| browser.handle_leaf_click(path.clone(), event.click_count(), cx));
         });
@@ -379,6 +447,13 @@ impl Render for ReplayBrowser {
                 div().p_2().text_sm().opacity(0.6).child(reason.to_string()).into_any_element()
             }
             ScanStatus::Empty => div().p_2().text_sm().opacity(0.6).child("No replays found").into_any_element(),
+            // Every row's ship and map name comes from the game data, so a
+            // list built before it loads is a list of raw ids. The egui app
+            // never shows that state: it builds its listing as part of the
+            // same load (`task/replays.rs::load_wows_files`).
+            ScanStatus::Loaded if matches!(self.game_data, GameData::Loading) => {
+                div().p_2().text_sm().opacity(0.6).child("Loading game data...").into_any_element()
+            }
             ScanStatus::Loaded => {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
@@ -403,7 +478,62 @@ impl Render for ReplayBrowser {
             }
         };
 
-        v_flex().size_full().child(header).child(div().flex_1().min_h(px(0.)).child(body))
+        // The hovered row's battle, played back beside the listing. Anchored
+        // at the pointer like the egui app's own hover popup
+        // (`ui/replay_parser/preview_popup.rs`), and deferred so it paints
+        // over the panel rather than inside its scroll area.
+        let preview_content: Option<AnyElement> = match self.preview.frame() {
+            Some(frame) => Some(img(frame).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)).into_any_element()),
+            // A bake reads the replay and loads the build it was recorded on,
+            // which takes seconds the first time; the egui popup says so with
+            // a spinner over the map (`preview_popup.rs`), and so does this.
+            None if self.preview.is_baking() => Some(
+                h_flex()
+                    .w(px(PREVIEW_SIZE))
+                    .h(px(PREVIEW_SIZE))
+                    .items_center()
+                    .justify_center()
+                    .child(div().text_sm().opacity(0.6).child("Loading preview..."))
+                    .into_any_element(),
+            ),
+            None => None,
+        };
+        let preview_popup = preview_content.map(|content| {
+            let theme = cx.theme();
+            let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
+            deferred(
+                anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(
+                    div()
+                        .p_1()
+                        .rounded(theme.radius)
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .child(content),
+                ),
+            )
+            .with_priority(1)
+        });
+
+        v_flex()
+            .size_full()
+            .child(header)
+            .child(
+                div()
+                    .id("replay-browser-rows")
+                    .flex_1()
+                    .min_h(px(0.))
+                    // The rows themselves start a preview; leaving them all
+                    // ends it, which is what the pointer crossing out of the
+                    // listing means.
+                    .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                        if !*hovered {
+                            this.preview.leave(cx);
+                        }
+                    }))
+                    .child(body),
+            )
+            .when_some(preview_popup, |this, popup| this.child(popup))
     }
 }
 
