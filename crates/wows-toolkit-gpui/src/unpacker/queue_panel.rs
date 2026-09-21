@@ -37,6 +37,9 @@ pub struct QueueView {
     pub entries: Vec<VfsPath>,
     /// Absent while nothing is running.
     pub progress: Option<(usize, usize)>,
+    /// The file the run is writing now, which is what the egui progress bar
+    /// carries as its text.
+    pub writing: Option<SharedString>,
     pub status: Option<SharedString>,
     pub busy: bool,
     pub decode_prototypes: bool,
@@ -250,6 +253,18 @@ impl Render for QueuePanel {
             .when_some(self.view.progress, |this, (done, total)| {
                 let fraction = if total == 0 { 0.0 } else { (done as f32 / total as f32) * 100.0 };
                 this.child(Progress::new("unpacker-extract-progress").value(fraction))
+            })
+            .when_some(self.view.writing.clone(), |this, writing| {
+                this.child(
+                    div()
+                        .id("unpacker-extract-file")
+                        .text_xs()
+                        .text_color(crate::theme::text_faint())
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .child(writing),
+                )
             });
 
         v_flex()

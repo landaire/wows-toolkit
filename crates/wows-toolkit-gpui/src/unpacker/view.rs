@@ -678,6 +678,10 @@ impl UnpackerView {
                 ExtractState::Running(progress) => Some((progress.written, progress.total)),
                 _ => None,
             },
+            writing: match &self.extract_state {
+                ExtractState::Running(progress) => Some(SharedString::from(progress.file.clone())),
+                _ => None,
+            },
             status: self.extract_status().map(SharedString::from),
             busy: matches!(self.extract_state, ExtractState::Counting | ExtractState::Running(_)),
             decode_prototypes: matches!(self.prototypes, PrototypeOutput::DecodeToJson),
