@@ -65,8 +65,10 @@ impl PreviewRenderer {
             // which a preview does not show.
             HashMap::new(),
             HashMap::new(),
-            assets::load_death_cause_icons(vfs, 0, version),
-            assets::load_powerup_icons(vfs, 0, version),
+            // The kill feed draws these, at the same size the CPU renderer's
+            // own target uses (`main.rs`). Zero would resize them to nothing.
+            assets::load_death_cause_icons(vfs, assets::ICON_SIZE, version),
+            assets::load_powerup_icons(vfs, assets::ICON_SIZE, version),
         );
 
         Ok(Self { target })

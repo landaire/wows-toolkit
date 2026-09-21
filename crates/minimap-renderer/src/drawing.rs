@@ -87,10 +87,14 @@ fn pixmap_to_rgb(pm: &Pixmap) -> RgbImage {
 }
 
 /// Convert an RGBA image to a tiny-skia Pixmap (premultiplied alpha).
-fn rgba_to_pixmap(img: &RgbaImage) -> Pixmap {
+///
+/// `None` for an image with no pixels, which is what an asset that failed to
+/// load leaves behind: a frame missing one icon is worth more than a panic in
+/// whatever thread is drawing it.
+fn rgba_to_pixmap(img: &RgbaImage) -> Option<Pixmap> {
     let w = img.width();
     let h = img.height();
-    let mut pm = Pixmap::new(w, h).expect("failed to create pixmap");
+    let mut pm = Pixmap::new(w, h)?;
     let data = pm.data_mut();
     for y in 0..h {
         for x in 0..w {
@@ -104,7 +108,7 @@ fn rgba_to_pixmap(img: &RgbaImage) -> Pixmap {
             data[idx + 3] = px[3];
         }
     }
-    pm
+    Some(pm)
 }
 
 // ── Paint helpers ──────────────────────────────────────────────────────────
@@ -527,7 +531,7 @@ fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alph
 fn draw_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32) {
     let iw = icon.width();
     let ih = icon.height();
-    let icon_pm = rgba_to_pixmap(icon);
+    let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
     let tx = x - iw as f32 / 2.0;
     let ty = y - ih as f32 / 2.0;
     let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
@@ -1369,7 +1373,7 @@ fn hp_bar_color_lerp(fraction: f32) -> [u8; 3] {
 
 /// Draw an RGBA image at a non-centered position (top-left corner).
 fn draw_icon_at(pm: &mut Pixmap, icon: &RgbaImage, x: i32, y: i32) {
-    let icon_pm = rgba_to_pixmap(icon);
+    let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
     pm.draw_pixmap(x, y, icon_pm.as_ref(), &PixmapPaint::default(), Transform::identity(), None);
 }
 
