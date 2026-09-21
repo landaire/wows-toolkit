@@ -211,7 +211,7 @@ impl Sidebar {
             }
 
             items.push(
-                TreeItem::new(nation_id, nation.nation.clone())
+                TreeItem::new(nation_id, nation.display_name.clone())
                     .children(class_items)
                     .expanded(searching && nation_has_match),
             );
