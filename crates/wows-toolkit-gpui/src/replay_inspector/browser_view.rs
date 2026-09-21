@@ -110,9 +110,36 @@ struct LeafInfo {
     hover: SharedString,
 }
 
+/// Writes `paths` to the clipboard, one per line.
+fn copy_paths(paths: &[PathBuf], cx: &mut App) {
+    let text = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
+    cx.write_to_clipboard(ClipboardItem::new_string(text));
+}
+
+/// Opens the system file manager with `path` selected.
+///
+/// Best effort: a file manager that is not there, or refuses, leaves a log
+/// line rather than an error the listing would have to carry.
+fn reveal_in_file_manager(path: &std::path::Path) {
+    #[cfg(target_os = "windows")]
+    let command = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    #[cfg(target_os = "macos")]
+    let command = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let command = std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn();
+
+    if let Err(err) = command {
+        tracing::warn!("replay listing: {} could not be shown in the file manager: {err}", path.display());
+    }
+}
+
 /// A row's height, in multiples of the theme's font size: the identity line,
 /// the smaller stats line under it, and a little space around both.
 const ROW_LINE_HEIGHTS: f32 = 2.8;
+
+/// What one level of the tree indents by, and the width the guide for it is
+/// drawn in.
+const INDENT: Pixels = px(16.);
 
 /// How far to the right of the pointer the hover preview sits, so it never
 /// covers the row it belongs to.
@@ -168,6 +195,9 @@ pub struct ReplayBrowser {
     /// of the map itself, which would otherwise deep-clone every leaf's
     /// owned `PathBuf` on every render of the browser.
     leaf_info: Rc<HashMap<SharedString, LeafInfo>>,
+    /// Every replay under each group row, so a group's menu can act on all
+    /// of them. Built with `leaf_info` and replaced with it.
+    group_children: Rc<HashMap<SharedString, Vec<PathBuf>>>,
     /// The most recently single- or double-clicked leaf's path.
     selected_path: Option<PathBuf>,
     /// The most recently double-clicked leaf's path -- the "open" intent's
@@ -227,6 +257,7 @@ impl ReplayBrowser {
             tree_state,
             status: ScanStatus::Loading,
             leaf_info: Rc::new(HashMap::new()),
+            group_children: Rc::new(HashMap::new()),
             selected_path: None,
             open_requested: None,
             game_data: GameData::Loading,
@@ -404,12 +435,14 @@ impl ReplayBrowser {
             translated.iter().map(|r| (r.path.clone(), hover_text(&r.identity, &r.stats, locale))).collect();
         let nodes = build_browser_tree(&translated, self.grouping, locale);
         let mut leaf_info = HashMap::new();
+        let mut group_children = HashMap::new();
         let mut next_group_id = 0usize;
         let items: Vec<TreeItem> = nodes
             .into_iter()
-            .map(|node| node_to_tree_item(node, &mut next_group_id, &mut leaf_info, &mut hover))
+            .map(|node| node_to_tree_item(node, &mut next_group_id, &mut leaf_info, &mut group_children, &mut hover).0)
             .collect();
         self.leaf_info = Rc::new(leaf_info);
+        self.group_children = Rc::new(group_children);
         self.tree_state.update(cx, |state, cx| state.set_items(items, cx));
     }
 
@@ -433,28 +466,40 @@ impl ReplayBrowser {
 /// leaf's path/battle_result into `leaf_info`, keyed by the leaf's id (its
 /// full path string, which is unique per file). Groups default to expanded
 /// so the browser is immediately useful without an extra click per group.
+/// Builds one tree row, and reports the replays under it so a group's menu
+/// can act on all of them.
 fn node_to_tree_item(
     node: BrowserNode,
     next_group_id: &mut usize,
     leaf_info: &mut HashMap<SharedString, LeafInfo>,
+    group_children: &mut HashMap<SharedString, Vec<PathBuf>>,
     hover: &mut HashMap<PathBuf, String>,
-) -> TreeItem {
+) -> (TreeItem, Vec<PathBuf>) {
     match node {
         BrowserNode::Group { label, children } => {
             let id: SharedString = format!("replay-browser-group-{next_group_id}").into();
             *next_group_id += 1;
-            let children: Vec<TreeItem> =
-                children.into_iter().map(|child| node_to_tree_item(child, next_group_id, leaf_info, hover)).collect();
-            TreeItem::new(id, label).children(children).expanded(true)
+            let mut under = Vec::new();
+            let children: Vec<TreeItem> = children
+                .into_iter()
+                .map(|child| {
+                    let (item, paths) = node_to_tree_item(child, next_group_id, leaf_info, group_children, hover);
+                    under.extend(paths);
+                    item
+                })
+                .collect();
+            group_children.insert(id.clone(), under.clone());
+            (TreeItem::new(id, label).children(children).expanded(true), under)
         }
         BrowserNode::Leaf { label, stats, path, map_name, outcome, in_division } => {
             let id: SharedString = path.to_string_lossy().into_owned().into();
             let hover = hover.remove(&path).unwrap_or_default();
+            let under = vec![path.clone()];
             leaf_info.insert(
                 id.clone(),
                 LeafInfo { path, map_name, stats: Rc::new(stats), outcome, in_division, hover: hover.into() },
             );
-            TreeItem::new(id, label)
+            (TreeItem::new(id, label), under)
         }
     }
 }
@@ -481,6 +526,7 @@ fn render_browser_item(
     selected: bool,
     leaf_info: &HashMap<SharedString, LeafInfo>,
     row_height: Pixels,
+    cx: &App,
 ) -> ListItem {
     let item = entry.item();
     let is_folder = entry.is_folder();
@@ -518,16 +564,25 @@ fn render_browser_item(
     // neighbour and leave the hover and selection highlights -- which are
     // drawn at the measured height -- behind its text, so every row, group
     // header included, declares the same height.
-    let mut row = h_flex().h(row_height).gap_1().items_center().pl(px(16.) * entry.depth());
+    // The indent is drawn rather than merely left blank: a guide per level
+    // is what tells a deep row which group it belongs to, the way the egui
+    // listing's tree lines do.
+    let mut row =
+        h_flex().h(row_height).gap_1().items_center().child(crate::ui::indent_guides(entry.depth(), INDENT, cx));
     if is_folder {
         let chevron = if entry.is_expanded() { IconName::ChevronDown } else { IconName::ChevronRight };
         row = row.child(Icon::new(chevron));
     } else {
-        row = row.child(div().w(px(16.)));
+        row = row.child(div().w(INDENT));
     }
     row = row.child(lines);
 
-    let mut list_item = ListItem::new(ix).selected(selected).child(row);
+    // Groups keep the panel's own background so they read as headers; the
+    // replays under them alternate, which is what makes a long date group
+    // scannable (`ui::stripe`).
+    let striped = (!is_folder).then(|| crate::ui::stripe(ix, cx)).flatten();
+    let mut list_item =
+        ListItem::new(ix).selected(selected).when_some(striped, |item, color| item.bg(color)).child(row);
 
     if let Some(leaf) = leaf {
         let path = leaf.path.clone();
@@ -579,23 +634,46 @@ impl Render for ReplayBrowser {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
                 let context_menu_leaf_info = self.leaf_info.clone();
+                let context_menu_children = self.group_children.clone();
+                let context_menu_entity = entity.clone();
                 // Two lines of text plus the space around them, against the
                 // font the theme is currently drawing at.
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
-                tree(&self.tree_state, move |ix, entry, selected, _window, _cx| {
-                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, row_height)
+                tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
+                    render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, row_height, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
-                    if entry.is_folder() {
-                        return menu;
-                    }
                     let Some(leaf) = context_menu_leaf_info.get(&entry.item().id) else {
-                        return menu;
+                        // A group: its own menu copies the paths of every
+                        // replay under it, which is what a batch action on a
+                        // date or a ship starts from.
+                        let paths: Vec<PathBuf> =
+                            context_menu_children.get(&entry.item().id).map(|paths| paths.to_vec()).unwrap_or_default();
+                        if paths.is_empty() {
+                            return menu;
+                        }
+                        let label = format!("Copy {} paths", paths.len());
+                        return menu.item(PopupMenuItem::new(label).on_click(move |_event, _window, cx| {
+                            copy_paths(&paths, cx);
+                        }));
                     };
-                    let path = leaf.path.clone();
-                    menu.item(PopupMenuItem::new("Copy Path").on_click(move |_event, _window, cx| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(path.to_string_lossy().into_owned()));
+
+                    let open_path = leaf.path.clone();
+                    let copy_path = leaf.path.clone();
+                    let reveal_path = leaf.path.clone();
+                    let open_entity = context_menu_entity.clone();
+                    menu.item(PopupMenuItem::new("Open").on_click(move |_event, _window, cx| {
+                        let path = open_path.clone();
+                        open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
                     }))
+                    .item(PopupMenuItem::new("Copy path").on_click(move |_event, _window, cx| {
+                        copy_paths(std::slice::from_ref(&copy_path), cx);
+                    }))
+                    .item(PopupMenuItem::new("Show in file explorer").on_click(
+                        move |_event, _window, _cx| {
+                            reveal_in_file_manager(&reveal_path);
+                        },
+                    ))
                 })
                 .flex_1()
                 .into_any_element()
