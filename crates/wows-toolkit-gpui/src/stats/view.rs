@@ -42,6 +42,8 @@ use wows_toolkit_viewmodel::stats::setting_keys;
 
 use crate::ui::selectable;
 
+use super::chart_panel::ChartSettings;
+use super::chart_panel::ChartSettingsChanged;
 use super::chart_panel::StatsChartPanel;
 use super::load::SessionData;
 use super::overview::StatsOverviewPanel;
@@ -79,10 +81,65 @@ pub struct StatsView {
     /// Handed to every panel so the rating is computed against one table.
     personal_rating: Option<std::sync::Arc<wows_toolkit_viewmodel::personal_rating::PersonalRatingData>>,
     focus_handle: FocusHandle,
+    /// Whether the saved charts have been read back yet. One shot, on the
+    /// first frame.
+    charts_loaded: bool,
     _subscriptions: Vec<Subscription>,
 }
 
+/// The settings row the Stats tab keeps its charts in.
+const CHARTS_SETTINGS_KEY: &str = "stats_charts";
+
 impl StatsView {
+    /// Writes the open charts back to the settings row, so the tab reopens
+    /// with the charts it was left with rather than one default chart.
+    ///
+    /// The whole set is written on every change: a chart's place in the dock
+    /// is what its index means, so there is nothing smaller to write.
+    /// A chart was set up differently, so the set is written back.
+    fn on_chart_settings_changed(
+        &mut self,
+        _chart: Entity<StatsChartPanel>,
+        _event: &ChartSettingsChanged,
+        cx: &mut Context<Self>,
+    ) {
+        self.save_charts(cx);
+    }
+
+    fn save_charts(&self, cx: &mut Context<Self>) {
+        let settings: Vec<ChartSettings> = self.charts.iter().map(|chart| chart.read(cx).settings()).collect();
+        crate::settings_store::save(CHARTS_SETTINGS_KEY, &settings, cx);
+    }
+
+    /// Reopens the charts the tab was left with.
+    ///
+    /// The first chart is already open, so it takes the first saved setting
+    /// and the rest are added beside it. A row with nothing in it leaves that
+    /// one chart on its defaults, which is what a first run shows.
+    fn load_charts(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        cx.spawn_in(window, async move |this, cx| {
+            let stored = crate::runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<Vec<ChartSettings>>(&pool, CHARTS_SETTINGS_KEY).await
+            })
+            .await;
+            let Ok(Some(saved)) = stored else { return };
+            let _ = this.update_in(cx, |this, window, cx| {
+                let mut saved = saved.into_iter();
+                if let Some(first) = saved.next()
+                    && let Some(chart) = this.charts.first().cloned()
+                {
+                    chart.update(cx, |panel, cx| panel.apply_settings(first, cx));
+                }
+                for settings in saved {
+                    this.add_chart_with(settings, window, cx);
+                }
+                this.push_filtered(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let overview = cx.new(StatsOverviewPanel::new);
         // The skinned area is what draws a tab bar over a group holding more
@@ -113,6 +170,7 @@ impl StatsView {
             cx.subscribe_in(&limit_input, window, Self::on_limit_step),
             cx.subscribe_in(&limit_input, window, Self::on_limit_changed),
             cx.subscribe(&ships, Self::on_ships_event),
+            cx.subscribe(&first_chart, Self::on_chart_settings_changed),
         ];
 
         Self {
@@ -129,6 +187,7 @@ impl StatsView {
             clear_error: None,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
+            charts_loaded: false,
             _subscriptions: subscriptions,
         }
     }
@@ -179,8 +238,13 @@ impl StatsView {
     /// them. A closed chart left here would keep its own copy of every
     /// filtered game and be handed each new one forever.
     fn drop_closed_charts(&mut self, cx: &mut Context<Self>) {
+        let before = self.charts.len();
         let dock = self.dock_area.read(cx);
         self.charts.retain(|chart| dock.panel(PanelId::from(chart.entity_id())).is_some());
+        // A chart that was closed is one the tab must not reopen.
+        if self.charts.len() != before {
+            self.save_charts(cx);
+        }
     }
 
     /// Forgets every recorded game, once the button has been pressed twice.
@@ -275,17 +339,26 @@ impl StatsView {
     /// it opens: a new chart that always plotted damage meant opening one,
     /// finding its settings and changing it every time.
     fn add_chart(&mut self, stat: ChartableStat, window: &mut Window, cx: &mut Context<Self>) {
+        self.add_chart_with(ChartSettings { stat, ..ChartSettings::default() }, window, cx);
+        self.save_charts(cx);
+    }
+
+    /// Opens a chart already set up the way `settings` says.
+    fn add_chart_with(&mut self, settings: ChartSettings, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.next_chart_id;
         self.next_chart_id += 1;
 
         let chart = cx.new(|cx| StatsChartPanel::new(id, cx));
+        self._subscriptions.push(cx.subscribe(&chart, Self::on_chart_settings_changed));
         let table = self.personal_rating.clone();
         let games = self.games.clone();
         let filters = self.filters.clone();
         chart.update(cx, |panel, cx| {
+            // Before the session, so the narrowing is in place the first time
+            // the games are filtered.
+            panel.apply_settings(settings, cx);
             panel.set_personal_rating(table, cx);
             panel.set_games(&games, &filters, cx);
-            panel.set_stat(stat, cx);
         });
 
         self.dock_area.update(cx, |dock, cx| {
@@ -406,7 +479,12 @@ impl Focusable for StatsView {
 }
 
 impl Render for StatsView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Read on the first frame rather than in `new`, which runs before the
+        // config database is open.
+        if !std::mem::replace(&mut self.charts_loaded, true) {
+            self.load_charts(window, cx);
+        }
         let border = cx.theme().border;
         let limited = matches!(self.filters.limit, GameLimit::Recent(_));
 

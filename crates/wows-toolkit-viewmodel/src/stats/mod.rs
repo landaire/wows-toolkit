@@ -235,7 +235,7 @@ pub mod setting_keys {
 ///
 /// An enum rather than a count plus an `enabled` flag, which admits the
 /// meaningless "disabled, 25 games" pairing the egui settings carry.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GameLimit {
     #[default]
     All,
@@ -243,7 +243,7 @@ pub enum GameLimit {
 }
 
 /// Everything the shared filter bar controls.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct StatsFilters {
     pub limit: GameLimit,
     pub division: DivisionFilter,

@@ -187,7 +187,10 @@ kept so the next audit does not re-report them.
   English literals.
 - [done] Filter changes are written back, so both front ends read the same
   values.
-- Chart panes and the dock layout are not persisted.
+- [done] The open charts are kept in a settings row: each one's statistic,
+  mode, rolling/combined/value toggles, its own filter override and its ship
+  selection. Closing one drops it from the row. The dock's pane geometry is
+  still not kept; only which charts exist and how each is set up.
 - [done] The filter bar clears the whole session and a ship's own row clears
   that ship, both behind a two-press confirm (ctrl+click skips it).
 - Charts cannot be copied as an image.
