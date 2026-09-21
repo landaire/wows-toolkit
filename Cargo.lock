@@ -11454,13 +11454,16 @@ name = "wows-toolkit-viewmodel"
 version = "0.1.0"
 dependencies = [
  "ciborium",
+ "escaper",
  "glob",
  "jiff",
+ "levenshtein",
  "pickled",
  "regex",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
+ "tracing",
  "wows-replay-insights",
  "wows-toolkit-config",
  "wows_replays",
