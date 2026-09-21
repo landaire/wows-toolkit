@@ -45,6 +45,36 @@ async fn the_ship_lookup_reads_its_covering_index_rather_than_the_table() {
     assert!(detail.contains("idx_vehicle_ship_name"), "the ship lookup reads something else now: {detail}");
 }
 
+/// The Player Tracker's all-time table aggregates every account in the index.
+/// Its plan has to read the covering index for both the counting pass and the
+/// per-account last-seen lookup: going to the table for either is the
+/// difference between six seconds and twenty-three on an imported library.
+#[tokio::test]
+async fn the_player_aggregate_reads_its_covering_index() {
+    let pool = SqlitePoolOptions::new().max_connections(1).connect("sqlite::memory:").await.unwrap();
+    sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+    let plan: Vec<(i64, i64, i64, String)> = sqlx::query_as(
+        "EXPLAIN QUERY PLAN \
+         SELECT v.account_id, \
+                (SELECT v2.player_name FROM indexed_vehicle v2 JOIN indexed_match m2 ON m2.arena_id = v2.arena_id \
+                   WHERE v2.account_id = v.account_id ORDER BY m2.timestamp DESC LIMIT 1) AS latest_name, \
+                COUNT(DISTINCT v.arena_id) AS match_count \
+           FROM indexed_vehicle v WHERE v.account_id <> 0 GROUP BY v.account_id",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+
+    let detail = plan.iter().map(|(_, _, _, detail)| detail.as_str()).collect::<Vec<_>>().join("; ");
+    assert!(detail.contains("idx_vehicle_account_seen"), "the account aggregate reads something else now: {detail}");
+    assert_eq!(
+        detail.matches("idx_vehicle_account_seen").count(),
+        2,
+        "the per-account last-seen lookup reads the table again: {detail}"
+    );
+}
+
 #[test]
 fn outcome_and_relation_roundtrip_db_strings() {
     for o in [MatchOutcome::Win, MatchOutcome::Loss, MatchOutcome::Draw, MatchOutcome::Unknown] {
