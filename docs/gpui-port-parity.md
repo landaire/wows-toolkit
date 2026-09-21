@@ -150,7 +150,10 @@ kept so the next audit does not re-report them.
 - [done] The legend reopens from the pane's own strip.
 - Camo selection decodes on the UI thread.
 - Display settings, legend placement and export options are never persisted.
-- Part, material and nation names are shown untranslated.
+- [done] Part, material and nation names are drawn in the reader's own
+  language (`catalog::translate_part`, the same `IDS_<NAME>` lookup the egui
+  app's `translate_part` does). The raw key stays the identity, so a
+  `PlateKey` is unchanged.
 - The gizmo-snap animation does not mirror to the other panes.
 - Panes split horizontally only, and the last pane cannot be closed.
 - Ctrl+S and Ctrl+T accelerators are missing.

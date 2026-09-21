@@ -93,13 +93,15 @@ const SHIP_SPECIES: &[Species] = &[
     Species::Auxiliary,
 ];
 
-/// A nation's name in the current locale.
+/// An armor part, material or nation name in the current locale.
 ///
-/// The game keys these as `IDS_<NATION>`; an unknown one shows its raw key,
-/// which is what the egui app's own `translate_part` falls back to.
-fn nation_display_name(metadata: &GameMetadataProvider, nation: &str) -> String {
-    let key = format!("IDS_{}", nation.to_uppercase());
-    metadata.localized_name_from_id(&wowsunpack::data::TranslationKey::new(key)).unwrap_or_else(|| nation.to_string())
+/// The game keys all three as `IDS_<NAME>`; an unknown one shows its raw key,
+/// which is what the egui app's own `translate_part` falls back to. The raw
+/// key stays the identity everywhere else (a `PlateKey` is built from it), so
+/// this is only for what is drawn.
+pub fn translate_part(metadata: &GameMetadataProvider, name: &str) -> String {
+    let key = format!("IDS_{}", name.to_uppercase());
+    metadata.localized_name_from_id(&wowsunpack::data::TranslationKey::new(key)).unwrap_or_else(|| name.to_string())
 }
 
 impl ShipCatalog {
@@ -148,7 +150,7 @@ impl ShipCatalog {
                     })
                     .collect();
                 classes.sort_by_key(|c| species_order(&c.species));
-                let display_name = nation_display_name(metadata, &nation);
+                let display_name = translate_part(metadata, &nation);
                 NationGroup { nation, display_name, classes }
             })
             .collect();

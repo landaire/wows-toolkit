@@ -4,13 +4,8 @@
 //! `render_browser_item`-style pattern of a side id->metadata map consulted
 //! by the row renderer.
 //!
-//! **Parity note.** The egui app sorts nations by their *translated* display
-//! name and labels each nation row with that translation
-//! (`armor_viewer/ui/tab.rs:330-337`, via a `IDS_{NATION}` lookup). This
-//! port has no IDS_ translation lookup wired anywhere yet (see
-//! `replay_inspector::browser_view`'s own documented convention for the same
-//! gap), so nation rows show the raw catalog key and sort by it -- exactly
-//! what `ShipCatalog::build` already produces (`catalog.rs`'s `nations.sort_by`).
+//! Nation rows are labelled and sorted by the translated name the catalog
+//! resolves (`catalog::translate_part`), as the egui sidebar does.
 //!
 //! **Expand behavior.** Matches the egui app's `egui_ltreeview` usage
 //! (`tab.rs:404-447`, `default_open(searching)`): every nation/class row is
