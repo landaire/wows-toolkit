@@ -99,6 +99,11 @@ run = "cargo clippy --workspace --all-targets --all-features -- -D warnings"
 
 [tasks.cargo-test]
 description = "Cargo: runs the complete test suite, including what Buck cannot"
+# The GPUI port's tests each open a window and a graphics device. One per core
+# wedges the run on a machine with many of them: the harness reports a couple
+# of hundred tests and then sits at one busy core. Eight is enough to keep the
+# suite short and is well under where that starts.
+env = { RUST_TEST_THREADS = "8" }
 run = "cargo test --workspace"
 
 [tasks.cargo-fix]
