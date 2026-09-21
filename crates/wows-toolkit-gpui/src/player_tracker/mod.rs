@@ -233,6 +233,10 @@ pub struct PlayerTrackerView {
     /// lower-cased name. Looked up per battle, all-time.
     met_before: HashMap<String, AccountId>,
     state: LoadState,
+    /// Where the Clans table is in reading its own two all-time aggregates,
+    /// which are far heavier than the period-filtered player query and so are
+    /// read only once that table is shown (see [`Self::load_clan_inputs`]).
+    clan_state: LoadState,
     /// Bumped per query so a slower earlier period cannot overwrite a later.
     generation: u64,
     list_state: ListState,
@@ -285,6 +289,7 @@ impl PlayerTrackerView {
             players: Vec::new(),
             met_before: HashMap::new(),
             state: LoadState::Idle,
+            clan_state: LoadState::Idle,
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
@@ -518,11 +523,18 @@ impl PlayerTrackerView {
     /// clan per account, and the encounters whose clan at the time differed.
     ///
     /// Neither answer depends on the period or the division toggle, so this
-    /// runs with the refresh rather than per table rebuild. A failure leaves
-    /// the table counting on the tracker's own clan per player, which is the
-    /// same answer wherever the index has nothing fresher.
+    /// runs per refresh rather than per table rebuild. A failure leaves the
+    /// table counting on the tracker's own clan per player, which is the same
+    /// answer wherever the index has nothing fresher.
+    ///
+    /// Both queries are all-time whole-index scans -- tens of seconds on an
+    /// established install -- and the config pool hands out one connection at
+    /// a time, so running them with every refresh queued the Players table's
+    /// own (period-filtered, near-instant) query behind them. They run when
+    /// the Clans table is shown instead: see [`Self::load_clan_inputs_if_shown`].
     fn load_clan_inputs(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
         let generation = self.generation;
+        self.clan_state = LoadState::Loading;
         cx.spawn(async move |this, cx| {
             let found = runtime::spawn(cx, async move {
                 let filter = wows_toolkit_config::index::rows::MatchFilter::default();
@@ -540,10 +552,17 @@ impl PlayerTrackerView {
                     Ok(Ok((latest, corrections))) => {
                         this.clan_latest = latest.into_iter().map(|facet| (facet.account_id, facet.clan)).collect();
                         this.clan_corrections = corrections;
+                        this.clan_state = LoadState::Loaded;
                         this.sync_rows(cx);
                     }
-                    Ok(Err(err)) => tracing::warn!("player tracker: the clan inputs could not be read: {err}"),
-                    Err(err) => tracing::warn!("player tracker: the clan inputs did not load: {err}"),
+                    Ok(Err(err)) => {
+                        tracing::warn!("player tracker: the clan inputs could not be read: {err}");
+                        this.clan_state = LoadState::Failed(err.to_string());
+                    }
+                    Err(err) => {
+                        tracing::warn!("player tracker: the clan inputs did not load: {err}");
+                        this.clan_state = LoadState::Failed(err.to_string());
+                    }
                 }
                 cx.notify();
             });
@@ -578,8 +597,9 @@ impl PlayerTrackerView {
         self.generation = self.generation.wrapping_add(1);
         let generation = self.generation;
         self.state = LoadState::Loading;
+        self.clan_state = LoadState::Idle;
         self.load_tracked_players(pool.clone(), cx);
-        self.load_clan_inputs(pool.clone(), cx);
+        self.load_clan_inputs_if_shown(cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -919,7 +939,18 @@ impl PlayerTrackerView {
             return;
         }
         self.sub_tab = sub_tab;
+        self.load_clan_inputs_if_shown(cx);
         self.sync_rows(cx);
+    }
+
+    /// Starts the clans table's own index reads, if that table is the one on
+    /// screen and they have not been read for this refresh yet.
+    fn load_clan_inputs_if_shown(&mut self, cx: &mut Context<Self>) {
+        if self.sub_tab != SubTab::Clans || !matches!(self.clan_state, LoadState::Idle) {
+            return;
+        }
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.load_clan_inputs(pool, cx);
     }
 
     fn sort_clans_by(&mut self, column: ClanSortColumn, cx: &mut Context<Self>) {
@@ -1679,9 +1710,18 @@ impl Render for PlayerTrackerView {
             }
         };
 
-        let status = match &self.state {
+        // The clans table reads its own aggregates, so it reports on those
+        // rather than on the player query it does not draw from.
+        let load_state = match self.sub_tab {
+            SubTab::Clans => &self.clan_state,
+            _ => &self.state,
+        };
+        let status = match load_state {
             LoadState::Idle => Some("Waiting for the replay index".to_string()),
-            LoadState::Loading => Some("Loading players...".to_string()),
+            LoadState::Loading => match self.sub_tab {
+                SubTab::Clans => Some("Loading clans...".to_string()),
+                _ => Some("Loading players...".to_string()),
+            },
             LoadState::Failed(reason) => Some(format!("Could not read the index: {reason}")),
             LoadState::Loaded if self.visible_len() == 0 => match self.sub_tab {
                 SubTab::Players => Some("No players indexed for this period".to_string()),
