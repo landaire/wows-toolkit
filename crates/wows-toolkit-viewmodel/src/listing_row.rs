@@ -37,6 +37,12 @@ pub struct ListedReplay {
     pub scenario: String,
     /// Raw `dd.mm.yyyy HH:MM:SS` from the replay meta.
     pub date_time: String,
+    /// The build the replay was recorded on, from
+    /// `ReplayMeta::clientVersionFromExe`. `None` when the header names none
+    /// or names one that will not parse. Read so a listing can warm the
+    /// build its replays actually need, which is not always the installed
+    /// one.
+    pub build: Option<u32>,
 }
 
 impl ListedReplay {
@@ -47,6 +53,9 @@ impl ListedReplay {
             game_type: meta.gameType.clone().unwrap_or_default(),
             scenario: meta.scenario.clone(),
             date_time: meta.dateTime.clone(),
+            build: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
+                .and_then(|version| version.build)
+                .map(|build| build.get()),
         }
     }
 
@@ -61,6 +70,9 @@ impl ListedReplay {
             game_type: meta.gameType.clone().map(std::borrow::Cow::into_owned).unwrap_or_default(),
             scenario: meta.scenario.clone().into_owned(),
             date_time: meta.dateTime.clone().into_owned(),
+            build: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
+                .and_then(|version| version.build)
+                .map(|build| build.get()),
         }
     }
 }
@@ -283,6 +295,13 @@ fn stats_words(stats: &RowStats, when: &str, locale: Option<&str>) -> String {
 /// member has a clan and bare `Name` otherwise. `None` when there are no
 /// mates, so the tooltip never shows an empty division line.
 fn division_line(stats: &RowStats) -> Option<String> {
+    let members = division_members(stats)?;
+    Some(t!("ui.replay.row_division", members = members).to_string())
+}
+
+/// The division mates, `[CLAN] Name` per member where there is a clan and a
+/// bare name otherwise. `None` when the row has no mates.
+fn division_members(stats: &RowStats) -> Option<String> {
     if stats.division_mates.is_empty() {
         return None;
     }
@@ -292,7 +311,66 @@ fn division_line(stats: &RowStats) -> Option<String> {
         .map(|m| if m.clan.is_empty() { m.player_name.clone() } else { format!("[{}] {}", m.clan, m.player_name) })
         .collect::<Vec<_>>()
         .join(", ");
-    Some(t!("ui.replay.row_division", members = members).to_string())
+    Some(members)
+}
+
+/// One labelled fact about a replay, for a hover that lays them out rather
+/// than running them together.
+///
+/// The label is already translated: a caller draws the pair, it does not
+/// decide what either side says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HoverFact {
+    pub label: String,
+    pub value: String,
+}
+
+/// What a row's hover says, one labelled fact per line.
+///
+/// The two drawn lines omit the scenario and the game mode to keep the panel
+/// narrow, and the second draws icons rather than words, so the hover is
+/// where both kinds of detail live. A fact with nothing to say is left out
+/// rather than shown empty: an unindexed replay has no damage to report, and
+/// a row with no division mates has no division.
+pub fn hover_facts(identity: &RowIdentity, stats: &RowStats, locale: Option<&str>) -> Vec<HoverFact> {
+    let fact = |key: &str, value: String| HoverFact { label: t!(key).into_owned(), value };
+
+    let mut facts =
+        vec![fact("ui.replay.hover.ship", identity.ship.clone()), fact("ui.replay.hover.map", identity.map.clone())];
+
+    // The scenario and the mode name the same match from two angles
+    // ("Domination", "Random Battle"); one line reads as one fact.
+    let mode = match (identity.scenario.is_empty(), identity.mode.is_empty()) {
+        (false, false) => format!("{} - {}", identity.scenario, identity.mode),
+        (false, true) => identity.scenario.clone(),
+        (true, false) => identity.mode.clone(),
+        (true, true) => String::new(),
+    };
+    if !mode.is_empty() {
+        facts.push(fact("ui.replay.hover.mode", mode));
+    }
+    facts.push(fact("ui.replay.hover.played", identity.date_time.clone()));
+
+    if !stats.known {
+        facts.push(fact("ui.replay.hover.result", t!("ui.replay.hover_not_indexed").into_owned()));
+        return facts;
+    }
+
+    if let Some(damage) = stats.damage {
+        facts.push(fact("ui.replay.hover.damage", separate_number(damage, locale)));
+    }
+    if let Some(kills) = stats.kills {
+        facts.push(fact("ui.replay.hover.kills", kills.to_string()));
+    }
+    match stats.survived {
+        Some(true) => facts.push(fact("ui.replay.hover.result", t!("ui.replay.hover_survived").into_owned())),
+        Some(false) => facts.push(fact("ui.replay.hover.result", t!("ui.replay.hover_sunk").into_owned())),
+        None => {}
+    }
+    if let Some(division) = division_members(stats) {
+        facts.push(fact("ui.replay.hover.division", division));
+    }
+    facts
 }
 
 /// Hover text for a row. The two drawn lines omit scenario and game mode to
