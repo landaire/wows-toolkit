@@ -50,10 +50,10 @@ use crate::data::settings::SavedRenderOptions;
 use crate::data::wows_data::SharedBuildData;
 use crate::icons;
 
-use crate::util::controls::CommandGroup;
 /// Approximate number of frame snapshots per second of game time.
 /// Controls the granularity of seeking in the replay.
 pub(crate) use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
+use wows_toolkit_viewmodel::controls::CommandGroup;
 const PLAYBACK_SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 use crate::replay::minimap_view::Annotation;
 use crate::replay::minimap_view::AnnotationState;

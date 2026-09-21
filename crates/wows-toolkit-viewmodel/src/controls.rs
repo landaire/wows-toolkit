@@ -1,3 +1,9 @@
+//! The replay keyboard reference, read from the game's own
+//! `system/data/commands.scheme.xml`.
+//!
+//! Both front ends show the same groups, so the parse lives here and neither
+//! re-derives which commands a replay viewer can actually use.
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -42,7 +48,7 @@ fn should_exclude_command(tag_name: &str) -> bool {
 
 /// Parse `system/data/commands.scheme.xml` from raw bytes into grouped commands
 /// relevant for replay/spectator usage.
-pub(crate) fn parse_commands_scheme(data: &[u8]) -> Vec<CommandGroup> {
+pub fn parse_commands_scheme(data: &[u8]) -> Vec<CommandGroup> {
     let text = String::from_utf8_lossy(data);
     let doc = match roxmltree::Document::parse(&text) {
         Ok(doc) => doc,

@@ -5939,7 +5939,7 @@ impl ToolkitTabViewer<'_> {
                 if file.read_to_end(&mut buf).is_err() || buf.is_empty() {
                     return None;
                 }
-                let groups = crate::util::controls::parse_commands_scheme(&buf);
+                let groups = wows_toolkit_viewmodel::controls::parse_commands_scheme(&buf);
                 (!groups.is_empty()).then_some(groups)
             });
             self.tab_state.replay_controls_cache = result;

@@ -14572,6 +14572,7 @@ name = "wows-toolkit-gpui"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "arboard",
  "bytemuck",
  "ciborium",
  "csv",
@@ -14620,6 +14621,7 @@ dependencies = [
  "levenshtein",
  "pickled",
  "regex",
+ "roxmltree 0.21.1",
  "rust-i18n 3.1.5",
  "serde",
  "serde_json",

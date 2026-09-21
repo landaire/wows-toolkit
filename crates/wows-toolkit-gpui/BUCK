@@ -19,6 +19,7 @@ workspace_binary(
         "//crates/wowsunpack:wowsunpack",
         "//crates/wt-translations:wt_translations",
         "//third-party/rust:anyhow",
+        "//third-party/rust:arboard",
         "//third-party/rust:bytemuck",
         "//third-party/rust:ciborium",
         "//third-party/rust:csv",

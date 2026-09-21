@@ -76,14 +76,16 @@ kept so the next audit does not re-report them.
   row menu's Render Replay / Render to Video / Render to Clipboard, and the
   playback viewport itself (transport, seek, speed, annotation toolbar, video
   export). Six entry points in the egui app, none in the port.
-- "Copy Replay" puts the replay *files* on the clipboard in egui
-  (`arboard set().file_list`), so they paste into Explorer; the port copies
-  path text only.
-- Open in Game / Show Replay Controls (egui swaps the label on alt) are
-  missing from the row menu, and there is no confirmation-action pipeline.
+- [done] "Copy Replay" puts the replay files on the clipboard through
+  `arboard`, so they paste into a file manager; "Copy Path" still copies the
+  text. A group offers both.
+- [done] Open in Game (behind a confirmation) and Show Replay Controls are in
+  the row menu. Both are listed rather than swapped on alt, and the controls
+  parse moved to `wows_toolkit_viewmodel::controls` so the two apps read the
+  same scheme.
 - Set as / Add to Session Stats for a single replay.
-- Date grouping buckets consecutive runs rather than folding by name, so an
-  out-of-order timestamp gives the same date twice; egui folds through a map.
+- [done] Date grouping folds by date rather than by consecutive run, so an
+  out-of-order timestamp no longer heads a second group with the same date.
 - The debug "Results (Mapped JSON)" viewer.
 - Ingest progress has no counts and no bar.
 - The listing has no keyboard: egui activates a row on Enter.

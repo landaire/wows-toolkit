@@ -15,6 +15,8 @@ path = "src/lib.rs"
 test-support = []
 
 [dependencies]
+# The game's own commands.scheme.xml, for the replay keyboard reference.
+roxmltree = { workspace = true }
 ciborium.workspace = true
 # HTML entities in game chat, which the export decodes before writing.
 escaper = "0.1.1"

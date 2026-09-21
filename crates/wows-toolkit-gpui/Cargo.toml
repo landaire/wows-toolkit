@@ -88,6 +88,10 @@ futures = "0.3"
 # The replays-directory watch behind "Autoload Latest Replay". Same version as
 # the egui app's, so both resolve one copy.
 notify = "8.2.0"
+# A file-list clipboard payload, which GPUI's own clipboard has no format for:
+# "Copy Replay" puts the file on the clipboard so it pastes into a file
+# manager, not its path as text. Same version as the egui app's.
+arboard = "3.6.1"
 
 [dev-dependencies]
 # Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the
