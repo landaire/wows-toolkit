@@ -244,6 +244,22 @@ impl IconCache {
         }
     }
 
+    /// Loads the art for a set of achievements, for a surface that lists them
+    /// without a player table behind it (the Stats roundup).
+    pub fn populate_achievements(
+        &mut self,
+        achievements: &[wows_toolkit_viewmodel::stats::SerializableAchievement],
+        vfs: &VfsPath,
+        svg_renderer: &SvgRenderer,
+    ) {
+        let _ = svg_renderer;
+        let mut keys_seen: HashSet<String> = HashSet::new();
+        for earned in achievements {
+            let key = format!("achievement:{}", earned.icon_key);
+            self.load_keyed(&mut keys_seen, vfs, key, GuiAsset::Achievement(&earned.icon_key));
+        }
+    }
+
     fn load_keyed(&mut self, keys_seen: &mut HashSet<String>, vfs: &VfsPath, key: String, asset: GuiAsset<'_>) {
         if !keys_seen.insert(key.clone()) {
             return;

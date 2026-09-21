@@ -12,7 +12,12 @@ use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
+use wowsunpack::vfs::VfsPath;
+
+use crate::replay_inspector::icons::IconCache;
+use gpui_kit::SvgRenderer;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
@@ -36,6 +41,9 @@ const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
 const SHIP_COLUMN_WIDTH: Pixels = px(200.);
 const NUMBER_COLUMN_WIDTH: Pixels = px(96.);
+/// One achievement's column, at the size the egui roundup draws them.
+const ACHIEVEMENT_COLUMN_WIDTH: Pixels = px(56.);
+const ACHIEVEMENT_ICON_SIZE: Pixels = px(48.);
 
 /// What the panel shows, recomputed when the games or the filters change.
 #[derive(Default)]
@@ -48,6 +56,10 @@ struct Computed {
 }
 
 pub struct StatsOverviewPanel {
+    /// Achievement art from the installed build, keyed as `IconCache` keys
+    /// them. Absent until the tab is handed game data, which is when the
+    /// generic glyph gives way to the real icon.
+    icons: IconCache,
     /// The name each ship in the session goes by, for the records that name
     /// only an id.
     ship_names: HashMap<GameParamId, String>,
@@ -63,6 +75,7 @@ impl EventEmitter<PanelEvent> for StatsOverviewPanel {}
 impl StatsOverviewPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
+            icons: IconCache::new(),
             ship_names: HashMap::new(),
             computed: Computed::default(),
             personal_rating: None,
@@ -70,6 +83,15 @@ impl StatsOverviewPanel {
             scroll: ScrollHandle::new(),
             focus_handle: cx.focus_handle(),
         }
+    }
+
+    /// Loads the art for the achievements on screen from `vfs`.
+    ///
+    /// Driven by the tab, which gets the build from the replay inspector
+    /// rather than opening a second one.
+    pub fn set_game_data(&mut self, vfs: &VfsPath, svg: &SvgRenderer, cx: &mut Context<Self>) {
+        self.icons.populate_achievements(&self.computed.achievements, vfs, svg);
+        cx.notify();
     }
 
     /// Adopts the games the filter bar has already selected. Filtering happens
@@ -282,19 +304,38 @@ impl Render for StatsOverviewPanel {
                         .child(t!("ui.replay.sections.achievements").to_string()),
                 )
                 .child(div().id("stats-achievements").overflow_y_scroll().track_scroll(&self.scroll).child(
-                    h_flex().flex_wrap().gap_2().children(self.computed.achievements.iter().map(|earned| {
-                        h_flex()
-                            .gap_1()
-                            .items_center()
-                            .child(Icon::new(IconName::Star))
-                            .child(div().text_xs().child(earned.display_name.clone()))
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .text_color(crate::theme::text_dim())
-                                    .child(format!("x{}", earned.count)),
-                            )
-                    })),
+                    h_flex().flex_wrap().gap_3().children(self.computed.achievements.iter().enumerate().map(
+                        |(ix, earned)| {
+                            let art = self.icons.get_keyed(&format!("achievement:{}", earned.icon_key));
+                            let hover = if earned.description.is_empty() {
+                                earned.display_name.clone()
+                            } else {
+                                format!("{}: {}", earned.display_name, earned.description)
+                            };
+                            v_flex()
+                                .id(("stats-achievement", ix))
+                                .w(ACHIEVEMENT_COLUMN_WIDTH)
+                                .items_center()
+                                .gap_0()
+                                .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+                                .child(match art {
+                                    Some(image) => {
+                                        img(image).w(ACHIEVEMENT_ICON_SIZE).h(ACHIEVEMENT_ICON_SIZE).into_any_element()
+                                    }
+                                    None => Icon::new(IconName::Star).into_any_element(),
+                                })
+                                .child(
+                                    div().text_xs().font_weight(FontWeight::BOLD).child(format!("x{}", earned.count)),
+                                )
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(crate::theme::text_dim())
+                                        .truncate()
+                                        .child(earned.display_name.clone()),
+                                )
+                        },
+                    )),
                 ))
         });
 

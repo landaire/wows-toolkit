@@ -10,6 +10,11 @@ kept so the next audit does not re-report them.
 
 ## Shell and visual design
 
+- A hover preview costs ~740 MB of steady-state memory after sweeping a few
+  dozen rows: the renderer's whole asset set is loaded from the VFS twice per
+  hover and never cached, and one baked track is kept for a return visit.
+  Caching `PreviewRenderer` per build and map is the fix.
+
 - [done] Every string the port draws was an English literal. The port has its
   own `i18n!` now, a language change sets both its own locale and the shared
   one, and its chrome reads from the same catalog the egui app does. A test
@@ -127,13 +132,21 @@ kept so the next audit does not re-report them.
 - [done] Ship colours collided; they are spread now.
 - [done] Bar charts no longer pan or zoom, and the ship picker is sorted by
   name.
+- [done] Add-chart is a menu of statistics, so a chart opens on the one asked
+  for rather than on a default to be changed afterwards.
+- [done] A chart can be taken off the tab's filter bar and narrow the session
+  itself (division and mode), which is the per-pane override the tab lacked.
+  The Overview and Ships panels still follow the bar only.
+- [done] Chart statistic names read from the catalogue rather than being
+  English literals.
 - [done] Filter changes are written back, so both front ends read the same
   values.
 - Chart panes and the dock layout are not persisted.
 - [done] The filter bar clears the whole session and a ship's own row clears
   that ship, both behind a two-press confirm (ctrl+click skips it).
 - Charts cannot be copied as an image.
-- Achievements draw a generic star, unsorted, with no description hover.
+- [done] Achievements draw their own art from the installed build, ordered by
+  how often they were earned, and name themselves on hover.
 - [done] The records name the ship that set them.
 - [done] The session rating is a banded chip.
 - The ships table ignores the locale for numbers and column headings.

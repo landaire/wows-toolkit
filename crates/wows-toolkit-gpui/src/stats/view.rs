@@ -6,9 +6,11 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
+use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
@@ -21,11 +23,13 @@ use gpui_kit::component::input::InputState;
 use gpui_kit::component::input::NumberInput;
 use gpui_kit::component::input::NumberInputEvent;
 use gpui_kit::component::input::StepAction;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_toolkit_config::queries;
+use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 
 use wows_toolkit_viewmodel::stats::DivisionFilter;
 use wows_toolkit_viewmodel::stats::GameLimit;
@@ -161,8 +165,10 @@ impl StatsView {
         let filtered = filter_games(&self.games, &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
         self.ships.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+        // A chart gets the whole session and the bar's answer: one that has
+        // been taken off the bar narrows the session itself.
         for chart in &self.charts {
-            chart.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+            chart.update(cx, |panel, cx| panel.set_games(&self.games, &self.filters, cx));
         }
         cx.notify();
     }
@@ -216,6 +222,12 @@ impl StatsView {
         cx.notify();
     }
 
+    /// Hands the roundup the build's art for its achievements.
+    pub fn set_game_data(&mut self, vfs: &wowsunpack::vfs::VfsPath, cx: &mut Context<Self>) {
+        let svg = gpui_kit::SvgRenderer::new(cx.asset_source().clone());
+        self.overview.update(cx, |panel, cx| panel.set_game_data(vfs, &svg, cx));
+    }
+
     /// Forgets one ship's games, which the Ships panel asks for but the tab
     /// owns.
     fn on_ships_event(&mut self, _panel: Entity<StatsShipsPanel>, event: &ShipsPanelEvent, cx: &mut Context<Self>) {
@@ -257,17 +269,23 @@ impl StatsView {
         crate::settings_store::save(setting_keys::GAME_MODE_FILTER, &self.filters.game_modes, cx);
     }
 
-    /// Opens another chart sub-tab, seeded with what is on screen now.
-    fn add_chart(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// Opens another chart sub-tab plotting `stat`.
+    ///
+    /// The statistic is chosen when the chart is asked for rather than after
+    /// it opens: a new chart that always plotted damage meant opening one,
+    /// finding its settings and changing it every time.
+    fn add_chart(&mut self, stat: ChartableStat, window: &mut Window, cx: &mut Context<Self>) {
         let id = self.next_chart_id;
         self.next_chart_id += 1;
 
         let chart = cx.new(|cx| StatsChartPanel::new(id, cx));
-        let filtered = filter_games(&self.games, &self.filters);
         let table = self.personal_rating.clone();
+        let games = self.games.clone();
+        let filters = self.filters.clone();
         chart.update(cx, |panel, cx| {
             panel.set_personal_rating(table, cx);
-            panel.set_games(&filtered, cx);
+            panel.set_games(&games, &filters, cx);
+            panel.set_stat(stat, cx);
         });
 
         self.dock_area.update(cx, |dock, cx| {
@@ -358,6 +376,29 @@ impl StatsView {
     }
 }
 
+/// The Add-chart control: a menu of statistics, so the chart opens on the one
+/// that was asked for.
+fn add_chart_menu(view: Entity<StatsView>) -> impl IntoElement {
+    let trigger =
+        Button::new("stats-add-chart").icon(IconName::Plus).label(t!("ui.stats.add_chart").to_string()).compact();
+
+    Popover::new("stats-add-chart-menu").trigger(trigger).content(move |_state, _window, _cx| {
+        let view = view.clone();
+        v_flex().min_w(px(180.)).gap_0().p_1().children(ChartableStat::ALL.into_iter().map(move |stat| {
+            let view = view.clone();
+            Button::new(("stats-add-chart-stat", stat as usize))
+                .label(t!(stat.translation_key()).to_string())
+                .ghost()
+                .compact()
+                .justify_start()
+                .w_full()
+                .on_click(move |_event, window, cx: &mut App| {
+                    view.update(cx, |this, cx| this.add_chart(stat, window, cx));
+                })
+        }))
+    })
+}
+
 impl Focusable for StatsView {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -446,12 +487,7 @@ impl Render for StatsView {
             .children(division_buttons)
             .when_some(mode_row, |this, row| this.child(crate::ui::rule_v(cx)).child(row))
             .child(crate::ui::rule_v(cx))
-            .child(
-                Button::new("stats-add-chart")
-                    .label(t!("ui.stats.add_chart").to_string())
-                    .compact()
-                    .on_click(cx.listener(|this, _event, window, cx| this.add_chart(window, cx))),
-            )
+            .child(add_chart_menu(cx.entity()))
             .child(div().flex_1())
             .when_some(self.clear_error.clone(), |this, reason| {
                 this.child(div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason))

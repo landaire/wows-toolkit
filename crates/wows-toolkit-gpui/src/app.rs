@@ -184,6 +184,8 @@ pub struct App {
     /// `replay_inspector` game-data observer (`Self::new`) triggers it
     /// exactly once -- see `Self::poll_armor_game_data`.
     armor_game_data_requested: bool,
+    /// Whether the Stats roundup has been handed the build's art.
+    stats_game_data_requested: bool,
     /// The Unpacker tab: build selector, VFS browsers and the extraction
     /// queue. Runs its own VFS load per build, independent of the replay
     /// inspector's game-data cache, since it needs only the package tree.
@@ -261,6 +263,7 @@ impl App {
             focus_handle,
             armor_pane,
             armor_game_data_requested: false,
+            stats_game_data_requested: false,
             unpacker,
             stats,
             player_tracker,
@@ -312,6 +315,22 @@ impl App {
         }
     }
 
+    /// Hands the Stats roundup the build's art, once, so its achievements
+    /// draw their own icons rather than a generic glyph.
+    ///
+    /// The same `LoadedGameData` the replay inspector already opened; this
+    /// never starts a load of its own.
+    fn poll_stats_game_data(&mut self, cx: &mut Context<Self>) {
+        if self.stats_game_data_requested {
+            return;
+        }
+        let GameDataStatus::Ready(loaded) = self.replay_inspector.read(cx).game_data_status() else {
+            return;
+        };
+        self.stats_game_data_requested = true;
+        self.stats.update(cx, |stats, cx| stats.set_game_data(loaded.vfs(), cx));
+    }
+
     /// Forwards the replay inspector's preloaded game data to the Armor
     /// Viewer pane the first time BOTH it has reached `GameDataStatus::Ready`
     /// AND the Armor Viewer tab has been opened, so `ArmorViewerPane::
@@ -327,6 +346,7 @@ impl App {
     /// redundantly but harmlessly, from `apply_settings` in case the
     /// observer's first notification races the settings load.
     fn poll_armor_game_data(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.poll_stats_game_data(cx);
         if self.armor_game_data_requested {
             return;
         }
