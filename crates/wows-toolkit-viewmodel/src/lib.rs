@@ -7,6 +7,20 @@
 
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
+/// Sets the language every `t!` in this crate reads.
+///
+/// `rust_i18n` keeps its locale per crate, so a front end setting its own
+/// does not reach the shared strings; this is how a language change gets
+/// here. The languages themselves are `wt_translations::SUPPORTED_LANGUAGES`.
+pub fn set_locale(code: &str) {
+    rust_i18n::set_locale(code);
+}
+
+/// The language this crate is currently translating into.
+pub fn locale() -> String {
+    rust_i18n::locale().to_string()
+}
+
 pub mod formatting;
 pub mod glyphs;
 pub mod listing_row;
