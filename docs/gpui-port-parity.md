@@ -113,8 +113,10 @@ kept so the next audit does not re-report them.
 - [done] Tree expansion and selection survive a rebuild.
 - [done] A dock holding several replays drew no tab bar, so only the last one
   opened was reachable; every dock is skinned now.
-- The incomplete-results warning, the match-context line and the Skills
-  tier-marker split are still missing.
+- [done] The incomplete-results warning and the match-context line (who was
+  recording, the battle type, the build, the mode, the map, and each side's
+  damage) are under the header.
+- The Skills tier-marker split is still missing.
 - [done] The Twitch chip, the hidden-profile eye and the disconnect glyph
   are drawn beside a name. The chip's candidates come from the same shared
   observation table the egui app writes.

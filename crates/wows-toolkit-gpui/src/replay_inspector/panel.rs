@@ -45,6 +45,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
@@ -56,6 +57,7 @@ use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -77,7 +79,9 @@ use super::load::GameDataCache;
 use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
 use super::load::spawn_parse;
+use super::model::MatchContext;
 use super::model::ReplayReportModel;
+use super::model::separate_number;
 use super::table::PlayerTable;
 use super::table::PlayerTableEvent;
 use super::table::resolve_color;
@@ -645,6 +649,51 @@ struct HeaderState {
     side_panel: SidePanel,
 }
 
+/// The subdued line under the header: who was recording, which match, and
+/// what each side dealt.
+///
+/// Mirrors the egui app's Row 2, down to the interpunct between the fields
+/// and the win/loss tones on the two damage figures.
+fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyElement {
+    let (friendly, enemy) = team_damage;
+    let dim = crate::theme::text_dim();
+    let separator = || div().flex_none().text_xs().text_color(dim).child(SEPARATOR);
+    let field = |text: String| div().flex_none().text_xs().text_color(dim).child(text);
+
+    // The clan tag reads as part of the name, so it sits against it rather
+    // than as a field of its own.
+    let who = match context.clan_tag.as_ref() {
+        Some(clan) => format!("{clan} {}", context.player_name),
+        None => context.player_name.clone(),
+    };
+
+    let mut line = h_flex().id("replay-match-context").test_support().flex_none().items_center().gap_1().px_2().pb_1();
+    let mut drawn = 0usize;
+    for text in [&who, &context.game_type, &context.version, &context.game_mode, &context.map] {
+        if text.is_empty() {
+            continue;
+        }
+        if drawn > 0 {
+            line = line.child(separator());
+        }
+        line = line.child(field(text.clone()));
+        drawn += 1;
+    }
+
+    line.child(separator())
+        .child(field(t!("ui.replay.team_damage").into_owned()))
+        .child(
+            div().flex_none().text_xs().text_color(rgb(crate::theme::semantic().win)).child(separate_number(friendly)),
+        )
+        .child(field(" : ".to_string()))
+        .child(div().flex_none().text_xs().text_color(rgb(crate::theme::semantic().loss)).child(separate_number(enemy)))
+        .child(field(format!(" ({})", separate_number(friendly + enemy))))
+        .into_any_element()
+}
+
+/// What the egui line puts between its fields.
+const SEPARATOR: &str = "-";
+
 fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
     let HeaderState {
         battle_result,
@@ -718,6 +767,26 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                 .flex_none()
                 .items_center()
                 .gap_1()
+                // A replay recorded before the battle ended carries no
+                // results, so every server figure in the table is absent
+                // rather than zero. Said up front, as the egui app does.
+                .when(!has_results, |this| {
+                    this.child(
+                        h_flex()
+                            .id("replay-incomplete-results")
+                            .test_support()
+                            .gap_1()
+                            .items_center()
+                            .text_sm()
+                            .font_weight(FontWeight::BOLD)
+                            .text_color(rgb(crate::theme::semantic().warn))
+                            .child(crate::icons::icon(crate::icons::INFO))
+                            .child(t!("ui.replay.incomplete_results").into_owned())
+                            .tooltip(|window, cx| {
+                                Tooltip::new(t!("ui.replay.incomplete_results_tooltip").into_owned()).build(window, cx)
+                            }),
+                    )
+                })
                 .child(outcome_badge(battle_result))
                 .when_some(personal_rating, |this, rating| this.child(personal_rating_badge(rating))),
         )
@@ -773,6 +842,7 @@ impl Render for ReplayPanel {
                 let table = loaded.table.clone();
                 let battle_result = loaded.battle_result;
                 let personal_rating = loaded.table.read(cx).self_personal_rating();
+                let team_damage = loaded.table.read(cx).team_damage();
                 let border = cx.theme().border;
 
                 let side_panel_entity: Option<AnyView> = match self.side_panel {
@@ -782,6 +852,8 @@ impl Render for ReplayPanel {
                     SidePanel::RawResults => loaded.raw_results_panel.clone().map(|panel| panel.into()),
                     SidePanel::RawPlayerMetadata => loaded.raw_player_metadata_panel.clone().map(|panel| panel.into()),
                 };
+
+                let context_line = match_context_line(loaded.table.read(cx).match_context(), team_damage);
 
                 v_flex()
                     .size_full()
@@ -798,6 +870,7 @@ impl Render for ReplayPanel {
                         },
                         cx,
                     ))
+                    .child(context_line)
                     .child(
                         h_flex()
                             .flex_1()
@@ -825,6 +898,7 @@ impl Render for ReplayPanel {
 
 #[cfg(test)]
 mod tests {
+    use super::MatchContext;
     use gpui_kit::AppContext;
     use gpui_kit::TestAppContext;
     use gpui_kit::px;
@@ -871,6 +945,7 @@ mod tests {
             map: "Ocean".to_string(),
             chat: Vec::new(),
             timestamp: jiff::Timestamp::UNIX_EPOCH,
+            context: MatchContext::default(),
         }
     }
 
@@ -890,6 +965,34 @@ mod tests {
             for format in ExportFormat::ALL {
                 assert!(window.try_find(format.id()).is_some(), "{} is offered", format.label());
             }
+        })
+        .expect("the window is open");
+    }
+
+    /// The line under the header names the match, and a replay with no
+    /// results in it says so rather than showing an empty table of figures.
+    #[gpui_kit::test]
+    fn the_header_names_the_match_and_flags_missing_results(cx: &mut TestAppContext) {
+        let mut model = model_at_expected_values();
+        model.context = MatchContext {
+            clan_tag: Some("[RAIN]".to_string()),
+            player_name: "gapedd".to_string(),
+            game_type: "Random Battle".to_string(),
+            version: "15.7.0".to_string(),
+            game_mode: "Domination".to_string(),
+            map: "Two Brothers".to_string(),
+        };
+
+        cx.update(gpui_kit::init);
+        let window = cx
+            .open_window(size(px(1400.), px(600.)), |window, cx| ReplayPanel::loaded_for_test(model, None, window, cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-match-context").is_some(), "the match-context line is drawn");
+            // `loaded_for_test` carries no results payload, which is the
+            // pending case.
+            assert!(window.try_find("replay-incomplete-results").is_some(), "and the missing results are flagged");
         })
         .expect("the window is open");
     }
