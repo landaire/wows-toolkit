@@ -41,9 +41,11 @@ use crate::ui::selectable;
 use super::plot;
 use super::plot::PlotView;
 
-/// The settings menu's box. Wide enough for a ship name, capped so a session
-/// spanning dozens of ships scrolls rather than covering the plot.
-const SETTINGS_WIDTH: Pixels = px(300.);
+/// The settings menu's box. Wide enough for a ship name, and no wider than a
+/// menu needs to be; a session spanning dozens of ships scrolls rather than
+/// covering the plot.
+const SETTINGS_MIN_WIDTH: Pixels = px(240.);
+const SETTINGS_MAX_WIDTH: Pixels = px(320.);
 const SETTINGS_MAX_HEIGHT: Pixels = px(420.);
 
 /// Distinguishes one chart pane's element ids from another's.
@@ -367,7 +369,8 @@ impl StatsChartPanel {
                 .collect();
 
             v_flex()
-                .w(SETTINGS_WIDTH)
+                .min_w(SETTINGS_MIN_WIDTH)
+                .max_w(SETTINGS_MAX_WIDTH)
                 .max_h(SETTINGS_MAX_HEIGHT)
                 .gap_2()
                 .p_2()
@@ -491,7 +494,12 @@ impl Render for StatsChartPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child("Nothing to plot for the current filters"))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child("Nothing to plot for the current filters"),
+                )
                 .into_any_element()
         } else {
             // A bar chart is a comparison of whole bars, not a curve to be

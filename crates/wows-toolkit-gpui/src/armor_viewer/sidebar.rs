@@ -407,10 +407,15 @@ impl Render for Sidebar {
             .border_b_1()
             .border_color(border)
             .child(Icon::new(IconName::Search))
-            .child(Input::new(&self.search_state).id("armor-sidebar-search").small().w_full());
+            .child(Input::new(&self.search_state).id("armor-sidebar-search").small().flex_1().min_w(px(0.)));
 
         let body: AnyElement = match &self.bundle {
-            None => div().p_2().text_sm().opacity(0.6).child("Loading ship catalog...").into_any_element(),
+            None => div()
+                .p_2()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .child("Loading ship catalog...")
+                .into_any_element(),
             Some(bundle) => {
                 let entity = cx.entity();
                 let bundle = bundle.clone();

@@ -614,7 +614,9 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         .flex_none()
         .items_center()
         .gap_1()
-        .when_some(export_status, |this, status| this.child(div().text_xs().opacity(0.6).child(status)))
+        .when_some(export_status, |this, status| {
+            this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
+        })
         .child(export_menu(cx.entity(), can_export))
         .child(chat_button);
     if debug {
@@ -690,12 +692,14 @@ impl ReplayPanel {
 impl Render for ReplayPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.state {
-            LoadState::Loading => div().p_2().text_sm().opacity(0.6).child(LOADING_TITLE).into_any_element(),
+            LoadState::Loading => {
+                div().p_2().text_sm().text_color(crate::theme::text_dim()).child(LOADING_TITLE).into_any_element()
+            }
             LoadState::Failed(err) => v_flex()
                 .p_2()
                 .gap_1()
                 .child(div().text_sm().font_weight(FontWeight::BOLD).child(FAILED_TITLE))
-                .child(div().text_sm().opacity(0.6).child(err.to_string()))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(err.to_string()))
                 .into_any_element(),
             LoadState::Loaded(loaded) => {
                 let has_chat = loaded.chat_panel.is_some();

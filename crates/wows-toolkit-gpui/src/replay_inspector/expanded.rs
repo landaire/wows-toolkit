@@ -25,6 +25,7 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use wows_replay_insights::battle_report::AchievementResult;
 use wows_replay_insights::battle_report::ConsumableResult;
@@ -698,8 +699,7 @@ fn empty_slot_box() -> AnyElement {
         .flex()
         .items_center()
         .justify_center()
-        .opacity(0.3)
-        .child(div().text_xs().child("-"))
+        .child(div().text_xs().text_color(crate::theme::text_faint()).child("-"))
         .into_any_element()
 }
 
@@ -750,7 +750,8 @@ fn captain_skill_grid_view(row_ix: usize, rows: &[SkillGridRow], icons: &IconCac
     for row in rows {
         let mut line = h_flex().gap_1().items_center();
         let cost_label = row.point_cost.map(|c| c.get().to_string()).unwrap_or_default();
-        line = line.child(div().w(px(14.)).flex_none().text_xs().opacity(0.6).child(cost_label));
+        line =
+            line.child(div().w(px(14.)).flex_none().text_xs().text_color(crate::theme::text_dim()).child(cost_label));
         for skill in &row.skills {
             line = line.child(skill_cell(row_ix, skill_idx, skill, icons));
             skill_idx += 1;
@@ -780,8 +781,7 @@ fn skill_cell(row_ix: usize, idx: usize, skill: &SkillGridSkill, icons: &IconCac
                 Some(c) => format!("({}) {display_name}", c.get()),
                 None => display_name,
             };
-            let text = div().text_xs().child(label);
-            if skill.learned { text } else { text.opacity(0.5) }
+            div().text_xs().when(!skill.learned, |this| this.text_color(crate::theme::text_faint())).child(label)
         }
     };
     el.id(("replay-skill", row_ix * DETAIL_ID_STRIDE + idx))

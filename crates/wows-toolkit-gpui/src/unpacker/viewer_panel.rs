@@ -90,7 +90,7 @@ impl Render for FileViewerPanel {
             .py_1()
             .border_b_1()
             .border_color(border)
-            .child(div().text_xs().opacity(0.6).child(self.title.clone()));
+            .child(div().text_xs().text_color(crate::theme::text_dim()).child(self.title.clone()));
 
         let body: AnyElement = match &self.shown {
             Shown::Text(text) => div()
@@ -115,7 +115,12 @@ impl Render for FileViewerPanel {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child(format!("Could not decode this image: {reason}")))
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(crate::theme::text_dim())
+                        .child(format!("Could not decode this image: {reason}")),
+                )
                 .into_any_element(),
         };
 

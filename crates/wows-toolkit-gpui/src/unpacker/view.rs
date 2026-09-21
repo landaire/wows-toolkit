@@ -67,11 +67,11 @@ use wows_toolkit_viewmodel::unpacker::search::files_to_scan;
 use wows_toolkit_viewmodel::unpacker::search::scan;
 use wows_toolkit_viewmodel::unpacker::viewer;
 
-/// The queue dropdown's box: wide enough for a full VFS path, and capped in
-/// height so a large queue scrolls rather than covering the browser.
-const QUEUE_POPOVER_WIDTH: Pixels = px(420.);
+/// The queue dropdown's box: it takes the width its longest path wants, up to
+/// a cap that keeps it off the browser, and scrolls past the height cap.
+const QUEUE_POPOVER_MAX_WIDTH: Pixels = px(420.);
 const QUEUE_POPOVER_MAX_HEIGHT: Pixels = px(300.);
-const DUMP_POPOVER_WIDTH: Pixels = px(220.);
+const DUMP_POPOVER_MAX_WIDTH: Pixels = px(220.);
 
 /// One message from a running scan.
 enum SearchUpdate {
@@ -714,7 +714,7 @@ fn dump_params_popover(view: Entity<UnpackerView>, enabled: bool) -> impl IntoEl
             .collect::<Vec<_>>();
 
         v_flex()
-            .w(DUMP_POPOVER_WIDTH)
+            .max_w(DUMP_POPOVER_MAX_WIDTH)
             .gap_1()
             .p_1()
             .child(div().text_xs().font_weight(FontWeight::BOLD).child("Whole tree"))
@@ -755,7 +755,7 @@ fn queue_popover(view: Entity<UnpackerView>, entries: Vec<VfsPath>) -> impl Into
         let clear_view = view.clone();
 
         v_flex()
-            .w(QUEUE_POPOVER_WIDTH)
+            .max_w(QUEUE_POPOVER_MAX_WIDTH)
             .gap_1()
             .p_1()
             .child(
@@ -826,7 +826,7 @@ impl Render for UnpackerView {
                 .py_1()
                 .border_b_1()
                 .border_color(border)
-                .child(div().text_xs().opacity(0.6).child("Version"))
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child("Version"))
                 .child(Select::new(&self.build_select).id("unpacker-build").small().w(px(160.)))
         });
 
@@ -897,7 +897,9 @@ impl Render for UnpackerView {
                         .child(Progress::new("unpacker-extract-progress").value(progress.fraction() * 100.)),
                 )
             })
-            .when_some(status, |this, status| this.child(div().flex_1().text_xs().opacity(0.6).child(status)))
+            .when_some(status, |this, status| {
+                this.child(div().flex_1().text_xs().text_color(crate::theme::text_dim()).child(status))
+            })
             .child(
                 Button::new("unpacker-extract")
                     .label(extract_label)
@@ -914,7 +916,9 @@ impl Render for UnpackerView {
                     .on_click(cx.listener(|this, _event, _window, cx| this.cancel_extraction(cx))),
             )
             .child(dump_params_popover(cx.entity(), self.package_vfs.is_some()))
-            .when_some(self.dump_status.clone(), |this, status| this.child(div().text_xs().opacity(0.6).child(status)))
+            .when_some(self.dump_status.clone(), |this, status| {
+                this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
+            })
             .child(
                 Button::new("unpacker-clear-queue")
                     .label("Clear")

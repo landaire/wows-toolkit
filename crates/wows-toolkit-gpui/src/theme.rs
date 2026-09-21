@@ -101,6 +101,9 @@ pub struct Semantic {
     pub ok: u32,
     pub text_strong: u32,
     pub text_dim: u32,
+    /// Below dim: grammar punctuation and hints that are there to be found,
+    /// not read.
+    pub text_faint: u32,
     /// Division mates, and the tint for affordance icons such as folders.
     pub division: u32,
     pub icon_accent: u32,
@@ -122,6 +125,7 @@ pub const DARK_SEMANTIC: Semantic = Semantic {
     ok: 0x6fd98a,
     text_strong: 0xe8e5dc,
     text_dim: 0x7c7c6e,
+    text_faint: 0x5c5c52,
     division: 0xe5c158,
     icon_accent: 0xe5c158,
     abuser: 0xf09bc0,
@@ -140,6 +144,7 @@ pub const LIGHT_SEMANTIC: Semantic = Semantic {
     ok: 0x106c34,
     text_strong: 0x0a0a08,
     text_dim: 0x78766f,
+    text_faint: 0x9b9890,
     division: 0x775800,
     icon_accent: 0x775800,
     abuser: 0xa33270,
@@ -268,6 +273,11 @@ pub fn icon_accent() -> Hsla {
 /// the body tone with opacity.
 pub fn text_dim() -> Hsla {
     rgb(semantic().text_dim).into()
+}
+
+/// Below [`text_dim`]: grammar punctuation and hints.
+pub fn text_faint() -> Hsla {
+    rgb(semantic().text_faint).into()
 }
 
 /// Whether what is on screen right now is the dark palette.

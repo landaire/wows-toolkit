@@ -1998,7 +1998,7 @@ impl Render for ViewportView {
                 .justify_center()
                 .gap_2()
                 .child(Spinner::new())
-                .child(div().text_sm().opacity(0.6).child(format!("Loading {name}...")))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(format!("Loading {name}...")))
                 .into_any_element(),
             (None, None, Some(image)) => img(image).object_fit(ObjectFit::Fill).size_full().into_any_element(),
             (None, message, _) => h_flex()
@@ -2008,7 +2008,7 @@ impl Render for ViewportView {
                 .child(
                     div()
                         .text_sm()
-                        .opacity(0.6)
+                        .text_color(crate::theme::text_dim())
                         .child(message.or(status).unwrap_or_else(|| "Rendering...".to_string())),
                 )
                 .into_any_element(),

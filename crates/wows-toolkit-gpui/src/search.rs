@@ -1141,7 +1141,7 @@ impl Render for SearchView {
                 .size_full()
                 .items_center()
                 .justify_center()
-                .child(div().text_sm().opacity(0.6).child(status))
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
                 .into_any_element(),
             None => div()
                 .relative()
@@ -1154,7 +1154,7 @@ impl Render for SearchView {
         let footer = matches!(self.state, SearchState::Done).then(|| {
             let capped = self.truncated;
             h_flex().flex_none().px_2().py_1().border_t_1().border_color(border).child(
-                div().text_xs().opacity(0.6).child(if capped {
+                div().text_xs().text_color(crate::theme::text_dim()).child(if capped {
                     format!("First {RESULT_LIMIT} matches")
                 } else {
                     format!("{} matches", self.hits.len())
