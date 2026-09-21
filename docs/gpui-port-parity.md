@@ -88,7 +88,8 @@ kept so the next audit does not re-report them.
   out-of-order timestamp no longer heads a second group with the same date.
 - The debug "Results (Mapped JSON)" viewer.
 - Ingest progress has no counts and no bar.
-- The listing has no keyboard: egui activates a row on Enter.
+- [done] Enter on the highlighted row opens it. The kit tree's own Confirm
+  only expands a folder, so the listing catches the key itself.
 - The collab session popover and the Tactics Board button.
 
 - [done] Re-opening an open replay did nothing; it now brings that tab
@@ -116,7 +117,9 @@ kept so the next audit does not re-report them.
 - [done] The incomplete-results warning and the match-context line (who was
   recording, the battle type, the build, the mode, the map, and each side's
   damage) are under the header.
-- The Skills tier-marker split is still missing.
+- [done] The Skills cell tells the two captain mistakes apart: a turret for
+  every point in tier 1, a warning for nothing above tier 2, with what the
+  captain has (Dazzle, IFA) drawn ahead of them as the egui label orders it.
 - [done] The Twitch chip, the hidden-profile eye and the disconnect glyph
   are drawn beside a name. The chip's candidates come from the same shared
   observation table the egui app writes.

@@ -885,7 +885,7 @@ impl Render for ReplayBrowser {
                 // Two lines of text plus the space around them, against the
                 // font the theme is currently drawing at.
                 let row_height = cx.theme().font_size * ROW_LINE_HEIGHTS;
-                tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
+                let listing = tree(&self.tree_state, move |ix, entry, selected, _window, cx| {
                     render_browser_item(entity.clone(), ix, entry, selected, &leaf_info, row_height, cx)
                 })
                 .context_menu(move |_ix, entry, menu, _window, _cx| {
@@ -981,9 +981,26 @@ impl Render for ReplayBrowser {
                             },
                         ))
                     })
-                })
-                .flex_1()
-                .into_any_element()
+                });
+
+                // Enter on a highlighted replay opens it, which is what the
+                // egui listing does. The tree's own Confirm only expands a
+                // folder, so a leaf would otherwise answer to nothing.
+                v_flex()
+                    .id("replay-listing-keys")
+                    .size_full()
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, _window, cx| {
+                        if event.is_held || event.keystroke.key != "enter" {
+                            return;
+                        }
+                        let Some(id) = this.tree_state.read(cx).selected_item().map(|item| item.id.clone()) else {
+                            return;
+                        };
+                        let Some(leaf) = this.leaf_info.get(&id) else { return };
+                        cx.emit(ReplayBrowserEvent::OpenReplay(leaf.path.clone()));
+                    }))
+                    .child(listing.flex_1())
+                    .into_any_element()
             }
         };
 

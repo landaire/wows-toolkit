@@ -171,10 +171,10 @@ pub struct PlayerRow {
     /// text; see `has_dazzle`/`has_ifa`.
     pub skill_label_text: String,
     pub skill_hover_text: Option<String>,
-    /// True for the "tower defense" (all tier-1 skills) and "no skills above
-    /// tier 2" cases, which force the label to the "bad" color regardless of
-    /// point tier. Mirrors `util::colorize_captain_points`.
-    pub skill_warning: bool,
+    /// What is wrong with this captain's skills, when something is. Either
+    /// case forces the label to the "bad" colour regardless of point tier.
+    /// Mirrors `util::colorize_captain_points`.
+    pub skill_warning: Option<SkillWarning>,
     /// Learned captain skills include Dazzle. Mirrors the `has_dazzle` scan
     /// in `util::colorize_captain_points`; the render layer (Milestone 2)
     /// prepends a star glyph when true.
@@ -531,10 +531,22 @@ impl ReplayReportModel {
 
 const NUM_SKILLS_IN_TIER: usize = 6;
 
+/// What is wrong with a captain's skills, when something is.
+///
+/// Two separate cases in `util::colorize_captain_points`, each with its own
+/// glyph: they are different mistakes and the table says which.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillWarning {
+    /// Every point spent in tier 1.
+    TowerDefense,
+    /// Points spent, but none above tier 2.
+    NoHighTier,
+}
+
 struct SkillLabel {
     text: String,
     hover: Option<String>,
-    warning: bool,
+    warning: Option<SkillWarning>,
 }
 
 /// Ported from `util::colorize_captain_points`: text/hover/warning only, no
@@ -564,7 +576,7 @@ fn build_skill_label(
         } else {
             format!("{default_text} and has {}", extra_hover_text.join(", "))
         };
-        return SkillLabel { text, hover: Some(hover), warning: true };
+        return SkillLabel { text, hover: Some(hover), warning: Some(SkillWarning::TowerDefense) };
     }
 
     if highest_tier <= 2 && skill_points >= 6 {
@@ -574,12 +586,12 @@ fn build_skill_label(
         } else {
             format!("{default_text} and has {}", extra_hover_text.join(", "))
         };
-        return SkillLabel { text, hover: Some(hover), warning: true };
+        return SkillLabel { text, hover: Some(hover), warning: Some(SkillWarning::NoHighTier) };
     }
 
     let hover =
         if extra_hover_text.is_empty() { None } else { Some(format!("Player has {}", extra_hover_text.join(", "))) };
-    SkillLabel { text, hover, warning: false }
+    SkillLabel { text, hover, warning: None }
 }
 
 /// Whether the learned captain skills include Dazzle / Incoming Fire Alert,
@@ -930,6 +942,25 @@ mod tests {
 
         let self_test_ship = PlayerRow { is_test_ship: true, ..test_support::base_row(1, Relation::new(0), true) };
         assert!(!self_test_ship.should_hide_stats(), "self player's own test ship is never hidden");
+    }
+
+    /// The two skill mistakes are told apart, because the table draws a
+    /// different glyph for each.
+    #[test]
+    fn a_captain_s_two_skill_mistakes_are_reported_separately() {
+        use super::SkillWarning;
+
+        // Six skills, all tier 1.
+        let tower = build_skill_label(6, 6, 1, 6, false, false);
+        assert_eq!(tower.warning, Some(SkillWarning::TowerDefense));
+
+        // Points spent, nothing above tier 2.
+        let shallow = build_skill_label(10, 5, 2, 0, false, false);
+        assert_eq!(shallow.warning, Some(SkillWarning::NoHighTier));
+
+        // A build with neither problem.
+        let fine = build_skill_label(21, 7, 4, 1, false, false);
+        assert_eq!(fine.warning, None);
     }
 
     /// A login close enough to a name, seen inside the window, flags that
