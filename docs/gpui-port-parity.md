@@ -264,8 +264,12 @@ kept so the next audit does not re-report them.
   change, so the two cannot disagree. A player the index names but the
   tracker never recorded keeps the index's own count for the period and shows
   a dash where the all-time figure would be.
-- The clans table is missing four columns, the member list and the clan
-  search.
+- The clans table's four missing columns are drawn: Encounters in Time
+  Range, Sightings (with the in-range figure on hover), Last Encountered, and
+  the tag now carries the severity tint. Every heading reads from the same
+  `ui.player_tracker.column.*` keys the egui table uses, and the three new
+  sorts are in the shared `ClanSortColumn`. The member list and the clan
+  search are still missing.
 - No "find matches for this player/clan" action anywhere.
 - [done] A roster row's menu links the player to wows-numbers and to
   shipbuilds. The URL builders moved to

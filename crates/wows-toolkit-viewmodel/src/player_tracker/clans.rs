@@ -155,6 +155,9 @@ pub fn visible_clans(rows: Vec<ClanRow>, needle: &str, sort: super::ClanSort) ->
             ClanSortColumn::Clan => a.clan.to_lowercase().cmp(&b.clan.to_lowercase()),
             ClanSortColumn::Members => a.members.len().cmp(&b.members.len()),
             ClanSortColumn::Encounters => a.matches.cmp(&b.matches),
+            ClanSortColumn::EncountersInRange => a.matches_in_range.cmp(&b.matches_in_range),
+            ClanSortColumn::Sightings => a.sightings.cmp(&b.sightings),
+            ClanSortColumn::LastEncountered => a.last_seen.cmp(&b.last_seen),
         };
         sort.order.apply(ordering).then_with(|| a.clan.cmp(&b.clan))
     });

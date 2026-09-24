@@ -1397,6 +1397,31 @@ fn last_seen_cell(ix: usize, last_seen: Option<jiff::Timestamp>) -> AnyElement {
         .into_any_element()
 }
 
+/// What each clans column is drawn at.
+fn clan_column_width(column: ClanSortColumn) -> Pixels {
+    match column {
+        ClanSortColumn::Clan => CLAN_TAG_COLUMN_WIDTH,
+        ClanSortColumn::Members => MEMBERS_COLUMN_WIDTH,
+        ClanSortColumn::Encounters => COUNT_COLUMN_WIDTH,
+        ClanSortColumn::EncountersInRange => RANGE_COUNT_COLUMN_WIDTH,
+        ClanSortColumn::Sightings => COUNT_COLUMN_WIDTH,
+        ClanSortColumn::LastEncountered => LAST_SEEN_COLUMN_WIDTH,
+    }
+}
+
+/// How many of the clan's players were met, counted per battle. The hover
+/// says how many of those fall in the period on screen.
+fn sightings_cell(ix: usize, sightings: usize, in_range: usize) -> AnyElement {
+    let hover = t!("ui.player_tracker.clan_sightings_hover", range = in_range).into_owned();
+    div()
+        .id(("tracker-clan-sightings", ix))
+        .w(COUNT_COLUMN_WIDTH)
+        .text_sm()
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+        .child(separate_number(sightings as i64, None))
+        .into_any_element()
+}
+
 /// Renders a header cell, with the arrow on whichever column is active.
 ///
 /// Shared by both tables: they sort different columns, but a header behaves
@@ -1965,16 +1990,12 @@ impl Render for PlayerTrackerView {
                 .enumerate()
                 .map(|(index, column)| {
                     let column = *column;
-                    let width = match column {
-                        ClanSortColumn::Clan => CLAN_TAG_COLUMN_WIDTH,
-                        ClanSortColumn::Members => MEMBERS_COLUMN_WIDTH,
-                        ClanSortColumn::Encounters => COUNT_COLUMN_WIDTH,
-                    };
+                    let width = clan_column_width(column);
                     sort_header(
                         HeaderCell {
                             id_prefix: "tracker-clan-sort",
                             index,
-                            label: column.label().into(),
+                            label: t!(column.label_key()).into_owned().into(),
                             width,
                             active: self.clan_sort.column == column,
                             order: self.clan_sort.order,
@@ -2063,9 +2084,26 @@ impl Render for PlayerTrackerView {
                     .px_2()
                     .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
-                    .child(div().w(CLAN_TAG_COLUMN_WIDTH).text_sm().child(row.clan.clone()))
+                    // The tag and both battle counts read in the tone the
+                    // in-range count deserves, as the egui table's do.
+                    .child(
+                        div()
+                            .w(CLAN_TAG_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
+                            .child(row.clan.clone()),
+                    )
                     .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))
-                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(row.matches.to_string()))
+                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(separate_number(row.matches as i64, None)))
+                    .child(
+                        div()
+                            .w(RANGE_COUNT_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
+                            .child(separate_number(row.matches_in_range as i64, None)),
+                    )
+                    .child(sightings_cell(ix, row.sightings, row.sightings_in_range))
+                    .child(last_seen_cell(ix, Some(row.last_seen)))
                     .into_any_element()
             }
         };
