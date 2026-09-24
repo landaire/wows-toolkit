@@ -21,6 +21,9 @@
 //! egui app's own icon-texture-missing fallback branches.
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::separator::Separator;
 use gpui_kit::component::tooltip::Tooltip;
@@ -33,6 +36,7 @@ use wows_replay_insights::battle_report::ConsumableResult;
 use wows_replay_insights::battle_report::DamageInteraction;
 use wows_replay_insights::battle_report::RibbonResult;
 use wows_replay_insights::battle_report::TranslatedModule;
+use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wowsunpack::game_params::skill_grid_data::SkillGridRow;
 use wowsunpack::game_params::skill_grid_data::SkillGridSkill;
 use wowsunpack::game_types::ChargeCount;
@@ -512,9 +516,29 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
     if let Some(expected) = fire_chance::expected_fires_text(fire_chance) {
         headline = headline.child(div().text_xs().text_color(crate::theme::text_dim()).child(expected));
     }
+    headline = headline.child(copy_breakdown_button(row_ix, fire_chance));
     col = col.child(headline).child(
         div().text_xs().text_color(crate::theme::text_dim()).child(fire_chance::ships_text(fire_chance).into_owned()),
     );
+
+    // The attacker-side formula: the shell's own chance and every modifier
+    // that moved it. Monospace, because the columns are padded to line up.
+    let formula = fire_chance::fire_chance_formula_lines(fire_chance, &raw_source);
+    if !formula.is_empty() {
+        col = col.child(Separator::horizontal()).child(
+            v_flex().font_family("monospace").children(formula.into_iter().map(|line| div().text_xs().child(line))),
+        );
+    }
+
+    // What became of the shells, and then of the fire ribbons themselves. The
+    // egui block keeps these behind a second collapse; here the whole block
+    // is already behind the row's own expansion.
+    col =
+        col.child(Separator::horizontal()).child(tally_block(&fire_chance::fire_chance_battle_tally_rows(fire_chance)));
+    let ribbons = fire_chance::fire_chance_ribbon_rows(fire_chance);
+    if !ribbons.is_empty() {
+        col = col.child(tally_block(&ribbons));
+    }
 
     // One row per target ship, most-sampled first: a rate only means
     // something inside a single victim, whose fire resistance is fixed.
@@ -545,6 +569,62 @@ fn render_fire_chance_section(row_ix: usize, row: &PlayerRow, debug: bool) -> Op
 
     Some(col.into_any_element())
 }
+
+/// A count-and-label listing: counts in a column of their own, labels
+/// indented by the depth they sit at.
+fn tally_block(rows: &[fire_chance::TallyRow]) -> AnyElement {
+    v_flex()
+        .gap_px()
+        .children(rows.iter().map(|row| {
+            h_flex()
+                .gap_2()
+                .items_start()
+                .text_xs()
+                .child(div().flex_none().w(TALLY_COUNT_WIDTH).text_right().child(separate_number(row.count)))
+                .child(
+                    div()
+                        .pl(px(row.depth as f32 * 12.))
+                        .when(row.depth > 0, |cell| cell.text_color(crate::theme::text_dim()))
+                        .child(row.label.to_string()),
+                )
+        }))
+        .into_any_element()
+}
+
+/// The whole breakdown on the clipboard, which is what the egui headline does
+/// when it is clicked.
+fn copy_breakdown_button(row_ix: usize, fire_chance: &EffectiveFireChance) -> AnyElement {
+    let text = fire_chance::copy_text(fire_chance, &raw_source, &raw_ship_name);
+    Button::new(("replay-fire-chance-copy", row_ix))
+        .child(crate::icons::icon(crate::icons::COPY))
+        .compact()
+        .ghost()
+        .xsmall()
+        .tooltip(t!("ui.replay.sections.fire_chance_click_to_copy").into_owned())
+        .on_click(move |_event, window, cx: &mut App| {
+            cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(text.clone()));
+            crate::toast::ok(t!("ui.replay.sections.fire_chance_copied").into_owned(), window, cx);
+        })
+        .into_any_element()
+}
+
+/// A modifier's raw source identifier, unresolved.
+///
+/// The egui block resolves it against the build's own upgrade, signal and
+/// skill names; that lookup needs the metadata provider, which the expanded
+/// renderer is not handed.
+fn raw_source(source: &str) -> String {
+    source.to_owned()
+}
+
+/// A victim's internal ship name, which is what the per-ship rows above
+/// already show for the same reason.
+fn raw_ship_name(ship: &wows_replay_insights::fire_chance::analysis::PerShipFireChance) -> String {
+    ship.victim_ship_name.clone()
+}
+
+/// Room for the widest count a tally row states.
+const TALLY_COUNT_WIDTH: Pixels = px(44.);
 
 /// Room for a ship name beside its counts, so the two columns line up.
 const FIRE_CHANCE_SHIP_WIDTH: Pixels = px(160.);
