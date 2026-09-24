@@ -1245,7 +1245,7 @@ fn render_plate_row(
     plate_visibility: &HashMap<PlateKey, bool>,
     warn: Hsla,
 ) -> AnyElement {
-    let key: PlateKey = (zone_name.to_string(), part_name.to_string(), thickness_tenths);
+    let key = PlateKey { zone: zone_name.to_string(), material_name: part_name.to_string(), thickness_tenths };
     let plate_visible = !plate_explicitly_hidden(plate_visibility, &key);
     let thickness_mm = thickness_tenths as f32 / 10.0;
     let color = swatch_color(thickness_to_color(thickness_mm));

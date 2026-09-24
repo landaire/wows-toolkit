@@ -62,7 +62,11 @@ pub fn tooltip_for_hit<'a>(
 /// (same formula, different source struct: a tooltip instead of the raw
 /// `ArmorTriangleInfo`) and the egui app's own inline derivation (`tab.rs:5334-5335`).
 pub fn plate_key_of(tooltip: &ArmorTriangleTooltip) -> PlateKey {
-    (tooltip.zone.clone(), tooltip.material_name.clone(), (tooltip.thickness_mm * 10.0).round() as i32)
+    PlateKey {
+        zone: tooltip.zone.clone(),
+        material_name: tooltip.material_name.clone(),
+        thickness_tenths: (tooltip.thickness_mm * 10.0).round() as i32,
+    }
 }
 
 /// Uploads one overlay mesh containing every visible triangle whose plate key
@@ -257,7 +261,10 @@ mod tests {
     #[test]
     fn plate_key_of_rounds_thickness_to_tenths_of_a_mm() {
         let tooltip = test_tooltip("Citadel", "Cit_Belt", 32.04, vec![32.04]);
-        assert_eq!(plate_key_of(&tooltip), ("Citadel".to_string(), "Cit_Belt".to_string(), 320));
+        assert_eq!(
+            plate_key_of(&tooltip),
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 }
+        );
     }
 
     #[test]

@@ -1519,7 +1519,11 @@ impl ViewportView {
                     for p in &z.parts {
                         this.part_visibility.insert((z.name.clone(), p.name.clone()), on);
                         for &t in &p.plates {
-                            this.plate_visibility.remove(&(z.name.clone(), p.name.clone(), t));
+                            this.plate_visibility.remove(&PlateKey {
+                                zone: z.name.clone(),
+                                material_name: p.name.clone(),
+                                thickness_tenths: t,
+                            });
                         }
                     }
                 }
@@ -1530,7 +1534,11 @@ impl ViewportView {
                 this.part_visibility.insert((zone.clone(), p.name.clone()), checked);
                 if checked {
                     for &t in &p.plates {
-                        this.plate_visibility.remove(&(zone.clone(), p.name.clone(), t));
+                        this.plate_visibility.remove(&PlateKey {
+                            zone: zone.clone(),
+                            material_name: p.name.clone(),
+                            thickness_tenths: t,
+                        });
                     }
                 }
             }
@@ -2326,7 +2334,7 @@ impl Render for ViewportView {
             .when_some(export_overlay, |this, o| this.child(o))
             .context_menu(move |mut menu, _window, _cx| {
                 let Some(hover) = hovered_for_menu.clone() else { return menu };
-                let (zone, material, thickness_tenths) = hover.key.clone();
+                let PlateKey { zone, material_name: material, thickness_tenths } = hover.key.clone();
                 let thickness_mm = thickness_tenths as f32 / 10.0;
 
                 let toggle_key = hover.key.clone();
@@ -2616,13 +2624,17 @@ mod all_visible_tests {
         let parts = HashMap::from([(("Zone".to_string(), "Part".to_string()), false)]);
         assert!(!all_visible(&HashMap::new(), &parts, &HashMap::new()).armor);
 
-        let plates: HashMap<PlateKey, bool> = HashMap::from([(("Zone".to_string(), "Part".to_string(), 0), true)]);
+        let plates: HashMap<PlateKey, bool> = HashMap::from([(
+            PlateKey { zone: "Zone".to_string(), material_name: "Part".to_string(), thickness_tenths: 0 },
+            true,
+        )]);
         assert!(!all_visible(&HashMap::new(), &HashMap::new(), &plates).armor);
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::PlateKey;
     use std::collections::HashMap;
 
     use super::Axis;
@@ -2715,7 +2727,10 @@ mod tests {
         let mut part_visibility = HashMap::new();
         part_visibility.insert(("Citadel".to_string(), "Belt".to_string()), false);
         let mut plate_visibility = HashMap::new();
-        plate_visibility.insert(("Citadel".to_string(), "Belt".to_string(), 200), true);
+        plate_visibility.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Belt".to_string(), thickness_tenths: 200 },
+            true,
+        );
         let mut hull_visibility = HashMap::new();
         hull_visibility.insert("Deck".to_string(), true);
         SyncedSettings {

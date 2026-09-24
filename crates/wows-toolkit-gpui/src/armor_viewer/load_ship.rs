@@ -52,11 +52,21 @@ use wowsunpack::game_params::types::Vehicle;
 
 use crate::viewport::types::Vec3;
 
-/// Key identifying a specific plate: (zone, material_name, thickness in
-/// tenths of mm). Matches the egui app's `PlateKey` (`armor_viewer/state.rs`);
-/// the thickness discriminator ensures plate-boundary edges stop at real
-/// thickness changes.
-pub type PlateKey = (String, String, i32);
+/// Which plate a triangle belongs to.
+///
+/// Carries the same three values the egui app's `PlateKey`
+/// (`armor_viewer/state.rs`) does, named rather than positional: the two
+/// strings are interchangeable to the compiler and only the field name says
+/// which is the zone. The thickness discriminator is what makes a
+/// plate-boundary edge stop at a real thickness change.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PlateKey {
+    pub zone: String,
+    pub material_name: String,
+    /// Thickness in tenths of a millimetre, so plates that differ only below
+    /// a tenth read as one plate.
+    pub thickness_tenths: i32,
+}
 
 /// A material/part within an armor zone, with its sorted unique plate
 /// thicknesses. Ports `armor_viewer::state::ZonePart` verbatim.
