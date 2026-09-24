@@ -506,4 +506,11 @@ kept so the next audit does not re-report them.
 - [done] The WoWs directory field tints and says so when the path is not an
   install. It is still not locked while a load is running.
 - [done] `show_entity_id` has a checkbox. `auto_dump_game_data` does not.
-- The collaboration section is absent.
+- [done] The collaboration section is absent. The Settings tab carries it:
+  the session display name, the peer-to-peer address warning suppression, and
+  the auto-open toggle, written to the same three rows the egui tab reads. The
+  name is the one the session popover hosts and joins under, seeded from the
+  stored value and written back from either place, so it does not drift
+  between the two. The auto-open toggle is stored and shown but acts on
+  nothing yet: the windows it governs are the shared replay viewports this
+  port does not open.

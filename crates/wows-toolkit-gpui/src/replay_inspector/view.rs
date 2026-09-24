@@ -166,6 +166,10 @@ pub struct InspectorSettings {
     pub auto_load_latest_replay: bool,
     /// The locale the listing's figures are grouped in.
     pub locale: Option<String>,
+    /// The name a session appears under, as the Settings tab stores it. The
+    /// popover writes the same row back, so a name set in either holds in
+    /// both.
+    pub collab_display_name: String,
 }
 
 /// A replay setting this tab owns was changed here, so the app writes the
@@ -254,7 +258,20 @@ impl ReplayInspectorView {
     /// Called from `App::apply_settings`, which `main.rs` runs inside a
     /// `window.update`, so a `Window` is available for the grouping combo.
     pub fn apply_settings(&mut self, settings: InspectorSettings, window: &mut Window, cx: &mut Context<Self>) {
-        let InspectorSettings { wows_dir, debug_mode, replay_settings, auto_load_latest_replay, locale } = settings;
+        let InspectorSettings {
+            wows_dir,
+            debug_mode,
+            replay_settings,
+            auto_load_latest_replay,
+            locale,
+            collab_display_name,
+        } = settings;
+        // Seeded rather than overwritten: a name typed into the popover and
+        // not yet saved is the reader's most recent word on it.
+        if self.collab.display_name.is_empty() {
+            self.collab.display_name = collab_display_name.clone();
+            self.collab_name.update(cx, |state, cx| state.set_value(collab_display_name, window, cx));
+        }
         self.browser.update(cx, |browser, cx| {
             browser.set_locale(locale, cx);
             // The listing's second line is what the index knows about each
@@ -827,6 +844,7 @@ impl Render for ReplayInspectorView {
         // popover -- in the same left-to-right order. The Tactics Board
         // button that header also carries is not ported: it opens a board
         // this app has no drawing surface for.
+        self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
         // draw rather than left to grow for as long as the session runs.
@@ -953,6 +971,7 @@ mod tests {
             replay_settings: Default::default(),
             auto_load_latest_replay: false,
             locale: None,
+            collab_display_name: String::new(),
         }
     }
 

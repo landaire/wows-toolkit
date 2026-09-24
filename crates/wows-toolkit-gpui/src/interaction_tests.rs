@@ -351,6 +351,9 @@ fn test_settings() -> GpuiSettings {
         auto_dump_game_data: false,
         game_data_cache_dir: String::new(),
         game_data_repo_commit: None,
+        collab_display_name: String::new(),
+        suppress_p2p_ip_warning: false,
+        disable_auto_open_session_windows: false,
     }
 }
 
