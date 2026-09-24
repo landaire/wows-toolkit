@@ -143,6 +143,7 @@ pub(crate) fn base_normalized_player(db_id: i64, relation: Relation, is_self: bo
         heal_count: None,
         personal_rating: None,
         time_lived_secs: None,
+        survived: Some(true),
     }
 }
 

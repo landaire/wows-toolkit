@@ -390,6 +390,9 @@ impl ReplayPanel {
                 mapped_results_json,
                 fire_chance,
                 session_stat: _,
+                // The index reads this from its own pass over the directory,
+                // not from a replay opened for reading.
+                indexable: _,
             }) => {
                 self.export = Some(export);
                 self.write_auto_export(cx);

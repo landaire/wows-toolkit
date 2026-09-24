@@ -64,6 +64,8 @@ use wows_replays::ReplayFile;
 use wows_replays::analyzer::Analyzer;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
+use wows_replays::types::ArenaId;
+use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
@@ -418,6 +420,9 @@ fn load_versioned_constants(build: u32) -> Value {
 /// itself used, so resolving icons never triggers a second game-data load.
 pub struct ParsedReplay {
     pub model: ReplayReportModel,
+    /// The battle as the replay index reads it, kept from this parse so
+    /// indexing does not walk the packets a second time.
+    pub indexable: IndexableBattle,
     /// The match as the Export menu writes it, kept in its debug form: the
     /// debug toggle is a runtime one, so an ordinary export strips a copy
     /// rather than reparsing.
@@ -446,6 +451,25 @@ pub struct ParsedReplay {
     /// This battle as the Stats tab records it. `None` when the replay names
     /// no recording player.
     pub session_stat: Option<PerGameStat>,
+}
+
+/// What the replay index needs from one parsed battle.
+///
+/// The figures themselves are all on [`NormalizedBattleReport`]; what is
+/// beside it here is what the battle report carries and the normalized form
+/// does not.
+pub struct IndexableBattle {
+    pub normalized: NormalizedBattleReport,
+    pub arena_id: ArenaId,
+    /// The mode's numeric id, when the table recognises it. `None` for one it
+    /// does not, which the re-index hint counts.
+    pub game_mode_id: Option<i32>,
+    pub version_build: Option<u32>,
+    /// The ship the recording player was in.
+    pub self_ship_id: Option<GameParamId>,
+    /// Whether the server results are still to come, which is ordinary for a
+    /// replay of a battle that has only just ended.
+    pub results_pending: bool,
 }
 
 /// Where the fire-section cache lives for `build`.
@@ -558,8 +582,20 @@ pub(crate) fn parse_replay(
             .map(|param| param.id())
     });
 
+    let indexable = IndexableBattle {
+        arena_id: report.arena_id(),
+        game_mode_id: report.game_mode_id().known().map(|mode| mode.id()),
+        version_build: version.build_number(),
+        self_ship_id: normalized.players.iter().find(|player| player.is_self).map(|player| player.ship_id),
+        // The results are pending when the packet stream carries none, which
+        // is what a replay of a battle that just ended looks like.
+        results_pending: report.battle_results().is_none(),
+        normalized,
+    };
+
     Ok(ParsedReplay {
         model,
+        indexable,
         session_stat,
         export,
         game_data: loaded,

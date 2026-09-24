@@ -32,6 +32,7 @@ workspace_binary(
         "//third-party/rust:humansize",
         "//third-party/rust:image",
         "//third-party/rust:jiff",
+        "//third-party/rust:sqlx",
         "//third-party/rust:nalgebra",
         "//third-party/rust:parking_lot",
         "//third-party/rust:notify",

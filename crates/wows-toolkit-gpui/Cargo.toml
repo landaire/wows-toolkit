@@ -113,3 +113,6 @@ jiff = "0.2"
 # reads or writes the running user's own data.
 wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
 tempfile = "3"
+# Setting an mtime explicitly, so a test can order two files written in the
+# same moment.
+filetime = "0.2"
