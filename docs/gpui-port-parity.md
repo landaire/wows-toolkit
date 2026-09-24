@@ -97,10 +97,13 @@ kept so the next audit does not re-report them.
   out-of-order timestamp no longer heads a second group with the same date.
 - [done] The debug "Mapped Results" viewer: the battle results with their
   positional arrays resolved to named fields, beside the raw payload.
-- The scan reports itself with a spinner, but not with counts or a bar:
-  the port scans in one pass where egui runs a staged ingest pipeline
-  (scanning, reading, downloading, loading data), which is what its counts
-  come from.
+- [done] The scan reports itself with a spinner, but not with counts or a
+  bar. The walk that finds the candidate files is separated from the meta
+  reads, so the listing says which replay of how many it is reading and draws
+  a bar across them. The scan reports itself over a channel rather than being
+  polled on a timer, so nothing ticks once it is over. The port still scans in one pass where egui runs a
+  staged ingest pipeline (scanning, reading, downloading, loading data), so
+  the downloading and data-loading stages have no counts of their own.
 - [done] Enter on the highlighted row opens it. The kit tree's own Confirm
   only expands a folder, so the listing catches the key itself.
 - The collab session popover and the Tactics Board button.
@@ -111,8 +114,12 @@ kept so the next audit does not re-report them.
   path and Show in file explorer, and a group offers Copy N paths.
 - [done] Rows carried no striping and the table had no row selection;
   ctrl+click now selects a row and the stripe is under it.
-- Double-click adds a tab where egui replaces the focused one; "Open in New
-  Tab" is the egui way to get a second tab.
+- [done] Double-click adds a tab where egui replaces the focused one; "Open
+  in New Tab" is the egui way to get a second tab. A plain open now takes the
+  place of the replay tab on screen and the row menu carries "Open in New
+  Tab". Which tab is replaced is read off the dock's own layout (the active
+  tab of its group); with more than one group showing a replay, the one this
+  view last opened or brought forward wins.
 - [done] Ctrl-clicking marks replays, and a marked row reads as selected. A
   right-click on one offers the whole set: copy the files, copy the paths, or
   play each back. Right-clicking a row outside the set acts on that row alone,
@@ -181,8 +188,10 @@ kept so the next audit does not re-report them.
   comparison list, the server-vs-simulation report) is still absent.
 - Shell trajectory mode is absent.
 - Splash/blast mode and the splash-box popover are absent.
-- Gap detection, "show hidden plates", the roll slider and the camera-rings
-  section are absent.
+- Gap detection, "show hidden plates" and the camera-rings section are
+  absent. The roll slider is in the display popover: it heels the hull over
+  through the same range the egui slider offers, leaving the waterline and
+  the other world-space overlays level.
 - [done] The legend reopens from the pane's own strip.
 - [done] Camo selection decodes on the UI thread. Picking a scheme now
   decodes and composites it on a background thread and applies the result
