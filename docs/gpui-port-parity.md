@@ -100,7 +100,12 @@ kept so the next audit does not re-report them.
   the row menu. Both are listed rather than swapped on alt, and the controls
   parse moved to `wows_toolkit_viewmodel::controls` so the two apps read the
   same scheme.
-- Set as / Add to Session Stats for a single replay.
+- [done] Set as / Add to Session Stats for a single replay, and for a
+  marked set. The battle is read off the parsed report by
+  `wows_toolkit_viewmodel::stats::PerGameStat::from_report` and written
+  to the `session_stats` table both apps read, keyed on the battle's own
+  time and account so re-adding a replay refreshes its row rather than
+  counting the battle twice.
 - [done] Date grouping folds by date rather than by consecutive run, so an
   out-of-order timestamp no longer heads a second group with the same date.
 - [done] The debug "Mapped Results" viewer: the battle results with their
@@ -132,8 +137,11 @@ kept so the next audit does not re-report them.
   right-click on one offers the whole set: copy the files, copy the paths, or
   play each back. Right-clicking a row outside the set acts on that row alone,
   since the reader has moved on from the set.
-- Set as / Add to Session Stats is still not offered, for one replay or for a
-  set: the port has no session-stats writer.
+- [done] Set as / Add to Session Stats is still not offered, for one replay
+  or for a set: the port has no session-stats writer. It has one now. The
+  egui app rewrites the whole table when it saves, so a battle recorded here
+  while it is running is lost on its next save; started afterwards, it reads
+  what the port wrote.
 - [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match

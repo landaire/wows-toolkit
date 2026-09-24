@@ -330,6 +330,9 @@ impl ReplayInspectorView {
         match event {
             ReplayBrowserEvent::OpenReplay(path) => self.open_replay(path.clone(), window, cx),
             ReplayBrowserEvent::OpenReplayInNewTab(path) => self.open_replay_in_new_tab(path.clone(), window, cx),
+            ReplayBrowserEvent::SessionStats { paths, replace } => {
+                self.record_session_stats(paths.clone(), *replace, cx)
+            }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
             // The game has just finished a match. The egui app opens it
             // straight away when this is on, which is what the checkbox
@@ -440,6 +443,69 @@ impl ReplayInspectorView {
 
         let current = self.current_replay.as_ref();
         showing.iter().find(|shown| Some(&shown.path) == current).cloned().or_else(|| showing.into_iter().next())
+    }
+
+    /// Records `paths` in the Stats tab's session.
+    ///
+    /// Each replay is parsed on the background executor, as opening it would
+    /// be: the figures a session row carries come from the battle results,
+    /// which are only in the file. A replay that will not parse is logged and
+    /// skipped rather than taking the rest of the set down with it.
+    ///
+    /// `replace` forgets what is recorded first, which is what the listing's
+    /// "Set as Session Stats" means; "Add to" leaves it and appends.
+    fn record_session_stats(&mut self, paths: Vec<PathBuf>, replace: bool, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else {
+            tracing::warn!("replay inspector: session stats asked for before the WoWs directory was known");
+            return;
+        };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+
+        cx.spawn(async move |_this, cx| {
+            if replace {
+                let cleared = crate::runtime::spawn(cx, {
+                    let pool = pool.clone();
+                    async move { wows_toolkit_config::queries::clear_session_stats(&pool).await }
+                })
+                .await;
+                if let Ok(Err(err)) = cleared {
+                    tracing::warn!("session stats: the session could not be cleared: {err}");
+                    return;
+                }
+            }
+
+            for path in paths {
+                let parsed = {
+                    let game_data = game_data.clone();
+                    let path = path.clone();
+                    cx.background_spawn(async move { super::load::parse_replay(&path, &game_data, None) }).await
+                };
+                let stat = match parsed {
+                    Ok(parsed) => parsed.session_stat,
+                    Err(err) => {
+                        tracing::warn!(path = %path.display(), "session stats: the replay would not parse: {err}");
+                        continue;
+                    }
+                };
+                let Some(stat) = stat else {
+                    tracing::warn!(path = %path.display(), "session stats: the replay names no recording player");
+                    continue;
+                };
+
+                let row = stat.to_row();
+                let pool = pool.clone();
+                let written = crate::runtime::spawn(cx, async move {
+                    wows_toolkit_config::queries::add_session_stat(&pool, &row).await
+                })
+                .await;
+                match written {
+                    Ok(Ok(())) => {}
+                    Ok(Err(err)) => tracing::warn!("session stats: the battle could not be recorded: {err}"),
+                    Err(err) => tracing::warn!("session stats: the write did not complete: {err}"),
+                }
+            }
+        })
+        .detach();
     }
 
     /// Opens a playback viewport on `path`, in a dock tab of its own.

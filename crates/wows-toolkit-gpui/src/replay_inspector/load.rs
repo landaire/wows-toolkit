@@ -66,6 +66,7 @@ use wows_replays::game_constants::GameConstants;
 use wows_replays::packet2::Parser;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
+use wows_toolkit_viewmodel::stats::PerGameStat;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::cache as game_params_cache;
@@ -442,6 +443,9 @@ pub struct ParsedReplay {
     /// resolve. See
     /// [`wows_replay_insights::fire_chance::sections::compute_fire_chance`].
     pub fire_chance: Option<EffectiveFireChance>,
+    /// This battle as the Stats tab records it. `None` when the replay names
+    /// no recording player.
+    pub session_stat: Option<PerGameStat>,
 }
 
 /// Where the fire-section cache lives for `build`.
@@ -474,7 +478,7 @@ fn pretty_json_or_raw(raw: &str) -> String {
 /// computed against; absent until it has been downloaded, in which case the
 /// column stays empty until [`ReplayReportModel::populate_personal_ratings`]
 /// is applied later (see `panel.rs::ReplayPanel::set_personal_rating`).
-fn parse_replay(
+pub(crate) fn parse_replay(
     path: &Path,
     game_data: &GameDataCache,
     personal_rating: Option<&PersonalRatingData>,
@@ -547,9 +551,16 @@ fn parse_replay(
 
     let export = ExportedMatch::new(&normalized, report.players(), report.game_chat(), true);
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
+    // Built here because this is where the build that named the achievements
+    // is open; the row itself is only written when the reader asks for it.
+    let session_stat = PerGameStat::from_report(&normalized, &meta.dateTime, &|name| {
+        <GameMetadataProvider as GameParamProvider>::game_param_by_name(loaded.provider.as_ref(), name)
+            .map(|param| param.id())
+    });
 
     Ok(ParsedReplay {
         model,
+        session_stat,
         export,
         game_data: loaded,
         raw_metadata_json,
@@ -570,6 +581,101 @@ pub fn spawn_parse(
     cx: &App,
 ) -> Task<Result<ParsedReplay, ReplayLoadError>> {
     cx.background_spawn(async move { parse_replay(&path, &game_data, personal_rating.as_deref()) })
+}
+
+#[cfg(test)]
+mod session_stat_tests {
+    use super::super::test_support::fixture_normalized_battle_report;
+    use wows_replay_insights::battle_report::AchievementResult;
+    use wows_replays::analyzer::battle_controller::BattleResult;
+    use wows_replays::types::GameParamId;
+    use wows_toolkit_viewmodel::stats::PerGameStat;
+
+    /// The game writes `DD.MM.YYYY HH:MM:SS`, which the stored row carries
+    /// verbatim so both apps dedupe on the same string.
+    const GAME_TIME: &str = "28.12.2023 00:52:26";
+
+    fn named(_name: &str) -> Option<GameParamId> {
+        Some(GameParamId::from(4242u32))
+    }
+
+    fn unnamed(_name: &str) -> Option<GameParamId> {
+        None
+    }
+
+    /// The row is read off the recording player, not off whoever is first in
+    /// the roster.
+    #[test]
+    fn the_row_carries_the_recording_players_own_figures() {
+        let report = fixture_normalized_battle_report();
+        let stat = PerGameStat::from_report(&report, GAME_TIME, &named).expect("the report names a self player");
+
+        assert_eq!(stat.damage, 50_000);
+        assert_eq!(stat.spotting_damage, 8_000);
+        assert_eq!(stat.frags, 1);
+        assert_eq!(stat.base_xp, 1_500);
+        assert_eq!(stat.raw_xp, 1_200);
+    }
+
+    /// The date is rewritten so a string sort is a chronological one; the
+    /// stored `game_time` is left as the game wrote it.
+    #[test]
+    fn the_sort_key_reorders_the_date_and_the_game_time_does_not() {
+        let report = fixture_normalized_battle_report();
+        let stat = PerGameStat::from_report(&report, GAME_TIME, &named).expect("the report names a self player");
+
+        assert_eq!(stat.game_time, GAME_TIME);
+        assert_eq!(stat.sort_key, "2023-12-28 00:52:26");
+    }
+
+    /// A battle whose result never resolved is none of won, lost or drawn,
+    /// rather than counting as a loss.
+    #[test]
+    fn an_unresolved_result_is_not_recorded_as_any_outcome() {
+        let report = fixture_normalized_battle_report();
+        let stat = PerGameStat::from_report(&report, GAME_TIME, &named).expect("the report names a self player");
+
+        assert!(!stat.is_win && !stat.is_loss && !stat.is_draw);
+    }
+
+    #[test]
+    fn a_win_is_recorded_as_one() {
+        let mut report = fixture_normalized_battle_report();
+        report.metadata.battle_result = Some(BattleResult::Win(0));
+        let stat = PerGameStat::from_report(&report, GAME_TIME, &named).expect("the report names a self player");
+
+        assert!(stat.is_win);
+        assert!(!stat.is_loss);
+    }
+
+    /// An achievement the build cannot name is left out: stored under a
+    /// stand-in id, every unnamed achievement would aggregate as one.
+    #[test]
+    fn an_achievement_the_build_cannot_name_is_left_out() {
+        let mut report = fixture_normalized_battle_report();
+        let earned = AchievementResult {
+            name: "PCH001_Achievement".to_string(),
+            display_name: "First Blood".to_string(),
+            description: String::new(),
+            icon_key: "first_blood".to_string(),
+            count: 1,
+        };
+        report.players[0].achievements = vec![earned];
+
+        let named_stat = PerGameStat::from_report(&report, GAME_TIME, &named).expect("a self player");
+        assert_eq!(named_stat.achievements.len(), 1);
+
+        let unnamed_stat = PerGameStat::from_report(&report, GAME_TIME, &unnamed).expect("a self player");
+        assert!(unnamed_stat.achievements.is_empty());
+    }
+
+    /// A replay nobody was recording has no game to record.
+    #[test]
+    fn a_report_with_no_recording_player_records_nothing() {
+        let mut report = fixture_normalized_battle_report();
+        report.players.clear();
+        assert!(PerGameStat::from_report(&report, GAME_TIME, &named).is_none());
+    }
 }
 
 #[cfg(test)]

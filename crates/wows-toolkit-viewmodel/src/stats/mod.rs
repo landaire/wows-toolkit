@@ -13,6 +13,8 @@ pub mod chart;
 
 use serde::Deserialize;
 use serde::Serialize;
+use wows_replay_insights::battle_report::NormalizedBattleReport;
+use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::types::GameParamId;
 
 use crate::personal_rating::PersonalRatingData;
@@ -126,6 +128,84 @@ impl PerGameStat {
         table.calculate_pr(&[stats]).map(|result| result.pr)
     }
 
+    /// Reads one battle off a parsed report.
+    ///
+    /// `game_time` is the replay's own `dateTime` string rather than the
+    /// report's timestamp: it is what both apps store and dedupe on, so a
+    /// battle recorded by one is the same row to the other.
+    ///
+    /// `achievement_id` resolves an achievement's internal name against the
+    /// build the replay was recorded on, which is how the stored rows key
+    /// them; the normalized report carries only the name. An achievement the
+    /// build cannot name is left out rather than stored under a stand-in id,
+    /// which would make every unnamed achievement aggregate as one.
+    ///
+    /// `None` when the report names no recording player, which is the one
+    /// case there is no game to record.
+    pub fn from_report(
+        report: &NormalizedBattleReport,
+        game_time: &str,
+        achievement_id: &dyn Fn(&str) -> Option<GameParamId>,
+    ) -> Option<PerGameStat> {
+        let player = report.players.iter().find(|player| player.is_self)?;
+        let results = player.server_results.as_ref();
+        let battle_result = report.metadata.resolved_battle_result();
+
+        Some(PerGameStat {
+            ship_name: player.ship_name.clone(),
+            ship_id: player.ship_id,
+            game_time: game_time.to_string(),
+            sort_key: sortable_game_time(game_time),
+            player_id: player.db_id.raw(),
+            damage: results.and_then(|results| results.damage).unwrap_or_default(),
+            spotting_damage: player.spotting_damage().unwrap_or_default(),
+            frags: results.and_then(|results| results.kills).unwrap_or_default(),
+            raw_xp: results.and_then(|results| results.raw_xp).unwrap_or_default(),
+            base_xp: results.and_then(|results| results.xp).unwrap_or_default(),
+            is_win: matches!(battle_result, Some(BattleResult::Win(_))),
+            is_loss: matches!(battle_result, Some(BattleResult::Loss(_))),
+            is_draw: matches!(battle_result, Some(BattleResult::Draw)),
+            is_div: player.division_label.is_some(),
+            match_group: report.metadata.match_group.clone(),
+            achievements: player
+                .achievements
+                .iter()
+                .filter_map(|achievement| {
+                    Some(SerializableAchievement {
+                        game_param_id: achievement_id(&achievement.name)?,
+                        display_name: achievement.display_name.clone(),
+                        description: achievement.description.clone(),
+                        icon_key: achievement.icon_key.clone(),
+                        count: achievement.count,
+                    })
+                })
+                .collect(),
+        })
+    }
+
+    /// The row this game is stored as.
+    pub fn to_row(&self) -> SessionStatRow {
+        SessionStatRow {
+            id: 0,
+            sort_key: self.sort_key.clone(),
+            ship_name: self.ship_name.clone(),
+            ship_id: self.ship_id.raw() as i64,
+            player_id: self.player_id,
+            game_time: self.game_time.clone(),
+            match_group: self.match_group.clone(),
+            damage: self.damage as i64,
+            spotting_damage: self.spotting_damage as i64,
+            frags: self.frags,
+            raw_xp: self.raw_xp,
+            base_xp: self.base_xp,
+            is_win: self.is_win,
+            is_loss: self.is_loss,
+            is_draw: self.is_draw,
+            is_div: self.is_div,
+            achievements: serde_json::to_string(&self.achievements).unwrap_or_else(|_| "[]".to_string()),
+        }
+    }
+
     /// Adopts a stored row.
     ///
     /// A row whose achievement blob will not parse contributes no
@@ -151,6 +231,22 @@ impl PerGameStat {
             achievements: serde_json::from_str(&row.achievements).unwrap_or_default(),
         }
     }
+}
+
+/// `game_time` rewritten so lexicographic order is chronological.
+///
+/// The game writes `DD.MM.YYYY HH:MM:SS`, which sorts by day of the month.
+/// A string that does not read that way is kept as it is: an unsortable key
+/// is better than a wrong one.
+pub fn sortable_game_time(game_time: &str) -> String {
+    let Some((date, time)) = game_time.split_once(' ') else {
+        return game_time.to_string();
+    };
+    let parts: Vec<&str> = date.split('.').collect();
+    let [day, month, year] = parts.as_slice() else {
+        return game_time.to_string();
+    };
+    format!("{year}-{month}-{day} {time}")
 }
 
 /// Session-wide totals over the filtered games, as the overview line reads
