@@ -792,34 +792,67 @@ fn render_display_button(view: &ViewportView, entity: &Entity<ViewportView>) -> 
 /// numeric ambient-intensity control), and the transient light-source marker
 /// (`light_moved`/`light_changed_at`) the egui app shows for a few seconds
 /// after a light change.
+/// What the display popover draws, read off the viewport in one pass.
+///
+/// Taken as a snapshot because the content builder runs while the popover is
+/// open and must not hold a borrow of the view it came from.
+struct DisplayPopoverSnapshot {
+    display: super::upload::DisplaySettings,
+    lighting: LightingSettings,
+    waterline_slider: Entity<SliderState>,
+    armor_slider: Entity<SliderState>,
+    roll_slider: Entity<SliderState>,
+    /// How far the hull is currently heeled over, for the readout beside its
+    /// slider.
+    roll_deg: f32,
+    flat_slider: Entity<SliderState>,
+    key_slider: Entity<SliderState>,
+    azimuth_slider: Entity<SliderState>,
+    elevation_slider: Entity<SliderState>,
+    rim_slider: Entity<SliderState>,
+    specular_slider: Entity<SliderState>,
+    shininess_slider: Entity<SliderState>,
+}
+
 fn render_display_popover_content(
     entity: &Entity<ViewportView>,
     _window: &mut Window,
     cx: &mut Context<PopoverState>,
 ) -> AnyElement {
     let pane = entity.read(cx).pane();
-    let (display, lighting, waterline_slider, armor_slider, roll_slider, roll_deg, lighting_sliders) = {
+    let snapshot = {
         let view = entity.read(cx);
-        (
-            view.display_settings,
-            view.lighting(),
-            view.display_sliders.waterline_opacity.clone(),
-            view.display_sliders.armor_opacity.clone(),
-            view.display_sliders.model_roll_deg.clone(),
-            view.model_roll_deg(),
-            (
-                view.lighting_sliders.flat_intensity.clone(),
-                view.lighting_sliders.key_intensity.clone(),
-                view.lighting_sliders.azimuth_deg.clone(),
-                view.lighting_sliders.elevation_deg.clone(),
-                view.lighting_sliders.rim_strength.clone(),
-                view.lighting_sliders.specular_strength.clone(),
-                view.lighting_sliders.shininess.clone(),
-            ),
-        )
+        DisplayPopoverSnapshot {
+            display: view.display_settings,
+            lighting: view.lighting(),
+            waterline_slider: view.display_sliders.waterline_opacity.clone(),
+            armor_slider: view.display_sliders.armor_opacity.clone(),
+            roll_slider: view.display_sliders.model_roll_deg.clone(),
+            roll_deg: view.model_roll_deg(),
+            flat_slider: view.lighting_sliders.flat_intensity.clone(),
+            key_slider: view.lighting_sliders.key_intensity.clone(),
+            azimuth_slider: view.lighting_sliders.azimuth_deg.clone(),
+            elevation_slider: view.lighting_sliders.elevation_deg.clone(),
+            rim_slider: view.lighting_sliders.rim_strength.clone(),
+            specular_slider: view.lighting_sliders.specular_strength.clone(),
+            shininess_slider: view.lighting_sliders.shininess.clone(),
+        }
     };
-    let (flat_slider, key_slider, azimuth_slider, elevation_slider, rim_slider, specular_slider, shininess_slider) =
-        lighting_sliders;
+    let DisplayPopoverSnapshot {
+        display,
+        lighting,
+        waterline_slider,
+        armor_slider,
+        roll_slider,
+        roll_deg,
+        flat_slider,
+        key_slider,
+        azimuth_slider,
+        elevation_slider,
+        rim_slider,
+        specular_slider,
+        shininess_slider,
+    } = snapshot;
 
     let border = cx.theme().border;
 

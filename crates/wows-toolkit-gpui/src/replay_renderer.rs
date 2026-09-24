@@ -24,6 +24,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use crate::minimap_preview::SharedPreviewRenderer;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
@@ -42,7 +43,6 @@ use gpui_kit::component::v_flex;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
-use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_replays::types::GameClock;
 
 use crate::replay_inspector::GameDataCache;
@@ -95,10 +95,11 @@ pub struct ReplayRendererPanel {
     title: SharedString,
     state: State,
     /// The renderer the track is rasterised through, bound to the build and
-    /// map this replay was recorded on. Taken while a frame is being drawn on
-    /// the background executor, which is also what keeps two rasters of the
-    /// same frame from being asked for at once.
-    renderer: Option<PreviewRenderer>,
+    /// map this replay was recorded on, and shared with every other preview
+    /// of the same map. Taken while a frame is being drawn on the background
+    /// executor, which is also what keeps two rasters of the same frame from
+    /// being asked for at once.
+    renderer: Option<SharedPreviewRenderer>,
     /// The frame on screen. Stays put while the next one is drawn, so the
     /// viewport never blanks.
     frame: Option<Arc<RenderImage>>,
@@ -211,7 +212,7 @@ impl ReplayRendererPanel {
     /// moved back with the image, so a tick that arrives while a frame is
     /// still being drawn simply does nothing and the next one catches up.
     fn draw_current(&mut self, cx: &mut Context<Self>) {
-        let Some(mut renderer) = self.renderer.take() else { return };
+        let Some(renderer) = self.renderer.take() else { return };
         let State::Ready(track) = &self.state else {
             self.renderer = Some(renderer);
             return;
@@ -223,7 +224,10 @@ impl ReplayRendererPanel {
 
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
-                let image = to_image(renderer.render(&commands));
+                let image = {
+                    let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                    to_image(drawing.render(&commands))
+                };
                 (renderer, image)
             });
             let (renderer, image) = drawn.await;
@@ -490,10 +494,9 @@ fn bake(
     path: &std::path::Path,
     game_data: &GameDataCache,
     cancel: &AtomicBool,
-) -> Result<(Track, PreviewRenderer), RenderError> {
-    let (frames, clocks, renderer) =
-        crate::minimap_preview::bake_track(path, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL)?;
-    Ok((Track { frames, clocks }, renderer))
+) -> Result<(Track, SharedPreviewRenderer), RenderError> {
+    let baked = crate::minimap_preview::bake_track(path, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL)?;
+    Ok((Track { frames: baked.frames, clocks: baked.clocks }, baked.renderer))
 }
 
 /// One rasterised frame, as an image gpui can draw.

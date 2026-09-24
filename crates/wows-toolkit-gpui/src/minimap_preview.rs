@@ -7,7 +7,9 @@
 //! paints and the video export encodes, rasterised to an image here because
 //! this front end has no painter of its own.
 
+use std::num::NonZeroU32;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::AtomicBool;
 
 use gpui_kit::RenderImage;
@@ -29,6 +31,86 @@ use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::vfs::VfsPath;
+
+/// A renderer shared between the previews that draw the same map.
+///
+/// Behind a mutex because rendering a frame mutates it; two previews of one
+/// map therefore take turns, which is what they already did when each held
+/// its own copy.
+pub type SharedPreviewRenderer = Arc<Mutex<PreviewRenderer>>;
+
+/// Which map's art a kept renderer carries.
+///
+/// The build is part of the name because a map's art changes between builds;
+/// `None` is the entry a caller drawing against whichever build happens to be
+/// open takes, which claims no build of its own.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RendererKey {
+    build: Option<NonZeroU32>,
+    map: String,
+}
+
+/// One kept renderer and the map it draws.
+struct CachedRenderer {
+    key: RendererKey,
+    renderer: SharedPreviewRenderer,
+}
+
+/// The renderers already built, least recently asked for first.
+///
+/// A `PreviewRenderer` carries the whole art set for one map, read out of one
+/// build's VFS; building a fresh one per hover is what made sweeping the
+/// listing cost hundreds of megabytes.
+static RENDERERS: Mutex<Vec<CachedRenderer>> = Mutex::new(Vec::new());
+
+/// How many maps' art is kept. A reader sweeping a listing moves between a
+/// handful of maps, and every entry held is that map's whole art set.
+const RENDERER_CACHE_SIZE: usize = 4;
+
+/// The renderer for `map_name` on `build`, built once and kept.
+///
+/// `build` is `None` for a caller drawing against whichever build happens to
+/// be open ([`map_frame`]), which keys its own entry rather than claiming a
+/// build's.
+fn renderer_for(
+    build: Option<NonZeroU32>,
+    map_name: &str,
+    vfs: &VfsPath,
+    version: Option<&Version>,
+) -> Result<SharedPreviewRenderer, PreviewError> {
+    let key = RendererKey { build, map: map_name.to_owned() };
+    {
+        let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(at) = cache.iter().position(|held| held.key == key) {
+            // Moved to the end, so the least recently asked for is the one
+            // dropped when the cache is full.
+            let entry = cache.remove(at);
+            let renderer = Arc::clone(&entry.renderer);
+            cache.push(entry);
+            return Ok(renderer);
+        }
+    }
+
+    // Built outside the lock: reading a build's art takes long enough that
+    // holding the cache through it would stall every other preview. Two
+    // callers racing on the same map build it twice and the second wins,
+    // which costs one extra read rather than a stall.
+    let renderer: SharedPreviewRenderer = Arc::new(Mutex::new(PreviewRenderer::new(vfs, version, map_name)?));
+
+    let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.retain(|held| held.key != key);
+    cache.push(CachedRenderer { key, renderer: Arc::clone(&renderer) });
+    while cache.len() > RENDERER_CACHE_SIZE {
+        cache.remove(0);
+    }
+    Ok(renderer)
+}
+
+/// Drops every kept renderer, for a caller that would rather have the memory
+/// back than the next preview's speed.
+pub fn forget_renderers() {
+    RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).clear();
+}
 
 /// How long each baked frame is shown. The bake keeps an evenly spaced subset
 /// of the battle, so this is a display rate rather than the replay's own
@@ -89,7 +171,16 @@ pub fn bake_from_file(
 
 /// A battle walked once: every kept frame's draw commands, the clock each was
 /// drawn at, and the renderer they are rasterised through.
-pub type BakedTrack = (Vec<Vec<DrawCommand>>, Vec<wows_replays::types::GameClock>, PreviewRenderer);
+/// A whole battle, ready to be played back.
+pub struct BakedTrack {
+    /// One entry per kept frame, each the commands that draw it.
+    pub frames: Vec<Vec<DrawCommand>>,
+    /// The game clock each of those frames was taken at.
+    pub clocks: Vec<wows_replays::types::GameClock>,
+    /// The renderer they are drawn through, bound to the build and map the
+    /// replay was recorded on.
+    pub renderer: SharedPreviewRenderer,
+}
 
 /// Walks `path`'s battle once, keeping the draw commands of up to `budget`
 /// frames and the renderer they are drawn through.
@@ -123,7 +214,7 @@ pub fn bake_track(
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
     renderer.set_fonts(assets::load_game_fonts(vfs));
-    let target = PreviewRenderer::new(vfs, Some(&version), &map_name)?;
+    let target = renderer_for(Some(build), &map_name, vfs, Some(&version))?;
 
     let mut session =
         MergedReplays::new(provider.entity_specs(), provider, loaded.base_constants(), session_version, &replay, &[])
@@ -139,7 +230,7 @@ pub fn bake_track(
     }
 
     let clocks = sink.kept_clocks().to_vec();
-    Ok((sink.finish(), clocks, target))
+    Ok(BakedTrack { frames: sink.finish(), clocks, renderer: target })
 }
 
 /// The map `map_name` names, with nothing drawn over it.
@@ -152,8 +243,9 @@ pub fn bake_track(
 /// own bake, which carries the art it was recorded against.
 pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCache) -> Option<PreviewFrames> {
     let loaded = game_data.newest_loaded()?;
-    let mut renderer = PreviewRenderer::new(loaded.vfs(), None, map_name).ok()?;
+    let renderer = renderer_for(None, map_name, loaded.vfs(), None).ok()?;
     let nothing_drawn: Vec<DrawCommand> = Vec::new();
+    let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
 }
 
@@ -197,7 +289,8 @@ pub fn bake(
     // Built before the battle is walked so the map can be shown during it; it
     // is the same renderer the track is rasterised with afterwards.
     let assets_at = std::time::Instant::now();
-    let mut preview = PreviewRenderer::new(vfs, version, &map_name)?;
+    let preview = renderer_for(version.and_then(|version| version.build), &map_name, vfs, version)?;
+    let mut preview = preview.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     tracing::debug!("preview: art for {map_name} in {:?}", assets_at.elapsed());
     let nothing_drawn: Vec<DrawCommand> = Vec::new();
     let map_at = std::time::Instant::now();
