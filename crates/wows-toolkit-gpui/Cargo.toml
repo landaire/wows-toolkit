@@ -101,6 +101,8 @@ notify = "8.2.0"
 # "Copy Replay" puts the file on the clipboard so it pastes into a file
 # manager, not its path as text. Same version as the egui app's.
 arboard = "3.6.1"
+# A render put on the clipboard needs a file that outlives this process.
+tempfile = "3"
 
 [dev-dependencies]
 # Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the
@@ -112,7 +114,6 @@ jiff = "0.2"
 # Lets the tests point `storage_dir` at a temporary directory, so no test
 # reads or writes the running user's own data.
 wows-toolkit-config = { path = "../wows-toolkit-config", features = ["test-support"] }
-tempfile = "3"
 # Setting an mtime explicitly, so a test can order two files written in the
 # same moment.
 filetime = "0.2"

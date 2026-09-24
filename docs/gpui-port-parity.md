@@ -97,9 +97,15 @@ kept so the next audit does not re-report them.
     export still drives it as it did. The transport is refused while an
     export runs, because both want the one renderer, and the clock reads the
     frame count instead.
-  - Still absent: the tab-header Render button, Render to Clipboard, and the
-    annotation toolbar. The panel commands (stats, rosters) and position
-    trails are outside `bake_options` and so are not drawn.
+  - Render to Clipboard is beside it: the same encode to a temporary file,
+    handed to the clipboard as a file so it pastes into a chat window or an
+    upload dialog. The file is left behind deliberately, since the clipboard
+    holds a path.
+  - Still absent: the tab-header Render button, which is a second way to
+    reach what the row menu already opens, and the annotation toolbar, which
+    needs a drawing surface over the playback. The panel commands (stats,
+    rosters) and position trails are outside `bake_options` and so are not
+    drawn.
 - [done] "Copy Replay" puts the replay files on the clipboard through
   `arboard`, so they paste into a file manager; "Copy Path" still copies the
   text. A group offers both.
