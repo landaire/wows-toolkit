@@ -55,3 +55,45 @@ pub fn storage_dir() -> Option<PathBuf> {
             .map(|p| p.join(APP_NAME.to_lowercase().replace(|c: char| c.is_ascii_whitespace(), "")))
     }
 }
+
+/// Where dumped game data is cached when the reader has not chosen a
+/// directory.
+///
+/// `None` when there is no storage directory to hang it off, which is the
+/// same absence [`storage_dir`] reports.
+pub fn game_data_dump_base() -> Option<PathBuf> {
+    storage_dir().map(|dir| dir.join("game_data"))
+}
+
+/// Where dumped game data is cached, preferring the reader's own directory.
+///
+/// An empty setting means none was chosen. A relative one is refused rather
+/// than resolved against whatever the process happens to be running in, since
+/// the cache outlives the session that wrote the setting.
+pub fn game_data_dump_base_with_override(custom_dir: &str) -> Option<PathBuf> {
+    let chosen = PathBuf::from(custom_dir);
+    if chosen.is_absolute() {
+        return Some(chosen);
+    }
+    game_data_dump_base()
+}
+
+#[cfg(test)]
+mod dump_base_tests {
+    use super::*;
+
+    #[test]
+    fn an_absolute_override_is_taken_as_given() {
+        let absolute = if cfg!(windows) { r"C:\game-data-elsewhere" } else { "/game-data-elsewhere" };
+
+        assert_eq!(game_data_dump_base_with_override(absolute), Some(PathBuf::from(absolute)));
+    }
+
+    #[test]
+    fn an_empty_or_relative_override_falls_back_to_the_default() {
+        // A relative path is refused for the same reason an empty one is: it
+        // names no fixed place for a cache that outlives the session.
+        assert_eq!(game_data_dump_base_with_override(""), game_data_dump_base());
+        assert_eq!(game_data_dump_base_with_override("game_data"), game_data_dump_base());
+    }
+}

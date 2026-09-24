@@ -427,13 +427,7 @@ impl ConfirmableAction {
 
 /// Real disk usage and version count for the game-data cache directory,
 /// cached so the Settings tab does not re-walk the directory every frame.
-#[derive(Debug, Clone, Copy)]
-pub struct GameDataCacheStats {
-    /// Total size of regular files (symlinks excluded), in bytes.
-    pub total_bytes: u64,
-    /// Number of build versions (directories containing a `metadata.toml`).
-    pub version_count: usize,
-}
+pub use wows_data_mgr::dump::CacheStats as GameDataCacheStats;
 
 /// Where a replay opened from search is going, as resolved by
 /// [`TabState::workspace_to_open_replay_in`].

@@ -12,7 +12,6 @@ use crate::data::settings::AppPreferences;
 use crate::data::settings::DataSharingMode;
 use crate::data::settings::ThemeChoice;
 use crate::icons;
-use crate::tab_state::GameDataCacheStats;
 use crate::tab_state::TabState;
 use crate::task::DataExportSettings;
 use crate::task::ReplayBackgroundParserThreadMessage;
@@ -291,7 +290,7 @@ impl ToolkitTabViewer<'_> {
                     let stats = match self.tab_state.game_data_cache_stats {
                         Some(stats) => stats,
                         None => {
-                            let stats = compute_dump_cache_stats(&dump_base);
+                            let stats = wows_data_mgr::dump::cache_stats(&dump_base);
                             self.tab_state.game_data_cache_stats = Some(stats);
                             stats
                         }
@@ -307,7 +306,7 @@ impl ToolkitTabViewer<'_> {
                                 crate::util::open_directory(&dump_base);
                             }
                             if stats.version_count > 1 && ui.button(t!("ui.settings.wows.cache.delete_old")).clicked() {
-                                delete_old_dump_versions(&dump_base);
+                                wows_data_mgr::dump::delete_old_versions(&dump_base);
                                 self.tab_state.game_data_cache_stats = None;
                             }
                         });
@@ -616,68 +615,6 @@ impl ToolkitTabViewer<'_> {
                 }
             });
         });
-    }
-}
-
-/// Compute the game-data cache's real disk usage and version count.
-///
-/// `total_bytes` sums every regular file under `dump_base`, skipping symlinks,
-/// so each content-addressed blob in `common/` is counted once and the per-build
-/// vfs symlinks that reference it are ignored. `version_count` is the number of
-/// build directories containing a `metadata.toml`.
-fn compute_dump_cache_stats(dump_base: &Path) -> GameDataCacheStats {
-    let mut version_count = 0usize;
-    if let Ok(entries) = std::fs::read_dir(dump_base) {
-        for entry in entries.flatten() {
-            if entry.path().join("metadata.toml").exists() {
-                version_count += 1;
-            }
-        }
-    }
-    GameDataCacheStats { total_bytes: dir_size_real(dump_base), version_count }
-}
-
-/// Recursively sum regular-file sizes under `path`, ignoring symlinks. Symlinked
-/// files and directories are skipped, so symlinked content is never followed or
-/// double-counted.
-fn dir_size_real(path: &Path) -> u64 {
-    let mut total = 0u64;
-    if let Ok(entries) = std::fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let Ok(ft) = entry.file_type() else { continue };
-            if ft.is_symlink() {
-                continue;
-            }
-            if ft.is_file() {
-                total += entry.metadata().map(|m| m.len()).unwrap_or(0);
-            } else if ft.is_dir() {
-                total += dir_size_real(&entry.path());
-            }
-        }
-    }
-    total
-}
-
-/// Delete all dump versions except the most recent one (by directory name sort order).
-fn delete_old_dump_versions(dump_base: &std::path::Path) {
-    let mut versions: Vec<std::path::PathBuf> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(dump_base) {
-        for entry in entries.flatten() {
-            if entry.path().join("metadata.toml").exists() {
-                versions.push(entry.path());
-            }
-        }
-    }
-    if versions.len() <= 1 {
-        return;
-    }
-    // Sort by name so the latest version (highest build number) is last
-    versions.sort();
-    // Keep the last one, delete the rest
-    for dir in &versions[..versions.len() - 1] {
-        if let Err(e) = std::fs::remove_dir_all(dir) {
-            tracing::warn!("Failed to delete old dump {}: {e}", dir.display());
-        }
     }
 }
 

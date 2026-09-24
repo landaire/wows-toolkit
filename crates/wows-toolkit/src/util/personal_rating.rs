@@ -155,7 +155,7 @@ mod tests {
 
     #[test]
     fn validate_accepts_real_fixture() {
-        validate_expected_values(&fixture_bytes()).expect("fixture should pass validation");
+        validate_expected_values(fixture_bytes()).expect("fixture should pass validation");
     }
 
     #[test]
