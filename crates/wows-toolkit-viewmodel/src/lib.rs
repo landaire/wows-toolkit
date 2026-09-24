@@ -26,6 +26,7 @@ pub mod controls;
 pub mod fire_chance;
 pub mod formatting;
 pub mod glyphs;
+pub mod index_rows;
 pub mod listing_row;
 pub mod match_stats;
 pub mod personal_rating;

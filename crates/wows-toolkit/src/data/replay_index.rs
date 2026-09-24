@@ -11,9 +11,9 @@ use rootcause::prelude::*;
 use sqlx::SqlitePool;
 use tokio::runtime::Runtime;
 use tracing::warn;
-use wows_replays::analyzer::battle_controller::BattleResult;
 use wows_replays::analyzer::battle_controller::ConnectionChangeKind;
-use wows_replays::types::Relation;
+use wows_toolkit_viewmodel::index_rows::ConstantsFit as SharedFit;
+use wows_toolkit_viewmodel::index_rows::IndexContext;
 
 use crate::data::constants::ConstantsFit;
 use crate::db::index::query;
@@ -21,35 +21,16 @@ use crate::db::index::rows::IndexError;
 use crate::db::index::rows::IndexWriteMode;
 use crate::db::index::rows::IndexedVehicleRow;
 use crate::db::index::rows::MatchOutcome;
-use crate::db::index::rows::ObjectiveMatch;
 use crate::db::index::rows::PrInputs;
 use crate::db::index::rows::PrRepair;
-use crate::db::index::rows::ReplayRecord;
 use crate::db::index::rows::ResultsWrite;
 use crate::db::index::rows::SourceId;
-use crate::db::index::rows::VehicleRelation;
-use crate::ui::replay_parser::PlayerReport;
 use crate::ui::replay_parser::Replay;
 use crate::util::personal_rating::PersonalRatingData;
 
-pub fn outcome_from(result: Option<&BattleResult>) -> MatchOutcome {
-    match result {
-        Some(BattleResult::Win(_)) => MatchOutcome::Win,
-        Some(BattleResult::Loss(_)) => MatchOutcome::Loss,
-        Some(BattleResult::Draw) => MatchOutcome::Draw,
-        None => MatchOutcome::Unknown,
-    }
-}
+pub use wows_toolkit_viewmodel::index_rows::outcome_from;
 
-pub fn relation_from(rel: Relation) -> VehicleRelation {
-    if rel.is_self() {
-        VehicleRelation::SelfPlayer
-    } else if rel.is_enemy() {
-        VehicleRelation::Enemy
-    } else {
-        VehicleRelation::Ally
-    }
-}
+pub use wows_toolkit_viewmodel::index_rows::relation_from;
 
 /// Whether the player had a mid-match disconnect: a `Disconnected`
 /// connection-change event whose `had_death_event` is false. An empty history
@@ -64,20 +45,24 @@ pub fn player_disconnected(player: &wows_replays::analyzer::battle_controller::P
         .any(|change| ConnectionChangeKind::Disconnected == change.event_kind() && !change.had_death_event())
 }
 
-pub struct MappedRows {
-    pub objective: ObjectiveMatch,
-    pub vehicles: Vec<IndexedVehicleRow>,
-    pub record: ReplayRecord,
-}
+pub use wows_toolkit_viewmodel::index_rows::MappedRows;
 
 /// Build index rows from a parsed replay. Returns `None` if the reports needed
 /// are not present (unparsed replay).
+/// Builds every row a replay contributes.
+///
+/// The mapping itself is `wows_toolkit_viewmodel::index_rows`, over the
+/// normalized report both this app and the GPUI port build, so the two index
+/// a replay identically. What is assembled here is the part that is this
+/// app's own: where the file is and what the parse made of it.
+///
+/// `None` when the replay has not been parsed, which is not an indexable
+/// state.
 pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp, fit: ConstantsFit) -> Option<MappedRows> {
     let ui_report = replay.ui_report.as_ref()?;
     let battle_report = replay.battle_report.as_ref()?;
 
     let arena_id = battle_report.arena_id();
-    let version = battle_report.version();
 
     // `game_mode_id()` widens to `Recognized<GameMode, u32>` specifically so an
     // id the table does not cover still carries its true value (see
@@ -94,62 +79,21 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp, fit
         warn!("replay for arena {arena_id:?}: unrecognised game mode id {raw}; game_mode_id will stay unset");
     }
 
-    let objective = ObjectiveMatch {
-        arena_id,
-        timestamp: ui_report.match_timestamp(),
-        map: battle_report.map_name().to_string(),
-        game_mode: battle_report.game_mode().to_string(),
-        game_mode_id: game_mode.known().map(|mode| mode.id()),
-        game_type: battle_report.game_type().to_string(),
-        match_group: battle_report.match_group().to_string(),
-        version_build: version.build_number(),
-    };
-
-    let mut vehicles = Vec::new();
-    let mut self_row: Option<&PlayerReport> = None;
-    for report in ui_report.player_reports() {
-        let player = report.player();
-        let state = player.initial_state();
-        if state.is_bot() {
-            continue;
-        }
-        if report.relation().is_self() {
-            self_row = Some(report);
-        }
-        let vehicle_param = player.vehicle();
-        let species =
-            vehicle_param.species().and_then(|s| s.known().cloned()).map(|s| format!("{s:?}")).unwrap_or_default();
-        vehicles.push(IndexedVehicleRow {
-            arena_id,
-            account_id: state.db_id(),
-            player_name: state.username().to_string(),
-            clan: state.clan().to_string(),
-            realm: state.realm().map(str::to_owned),
-            ship_id: vehicle_param.id(),
-            ship_index: vehicle_param.index().to_string(),
-            ship_name: report.ship_name().to_string(),
-            nation: vehicle_param.nation().to_string(),
-            species,
-            tier: vehicle_param.data().vehicle_ref().map(|v| v.level()).unwrap_or(0),
-            relation: relation_from(report.relation()),
-            division_id: (state.division_id() > 0).then_some(state.division_id()),
-            survived: report.vehicle().map(|v| v.death_info().is_none()),
-            damage: report.actual_damage(),
-            kills: report.kills(),
-            spotting: report.spotting_damage(),
-            potential: report.potential_damage(),
-            received: report.received_damage(),
-            pr: report.personal_rating().map(|pr| pr.pr),
-            is_test_ship: report.is_test_ship(),
-            disconnected: Some(player_disconnected(player)),
-            is_stream_sniper: None,
-            sniper_twitch_login: None,
-        });
+    if fit == ConstantsFit::Mismatched {
+        // Expected for old or newly-released builds without a matching
+        // constants file yet; logged so a stats-free listing has an
+        // explanation to point to instead of looking like silent data loss.
+        tracing::info!(
+            build = ?battle_report.version().build_number(),
+            ?fit,
+            "suppressing results for arena {arena_id:?}: constants do not match this build"
+        );
     }
 
-    let self_ship_id = replay.player_vehicle().map(|v| v.shipId);
-    let record = ReplayRecord {
+    let context = IndexContext {
         arena_id,
+        game_mode_id: game_mode.known().map(|mode| mode.id()),
+        version_build: battle_report.version().build_number(),
         source_id,
         replay_path: replay.source_path.clone().unwrap_or_default(),
         file_mtime: replay
@@ -159,30 +103,16 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp, fit
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs() as i64),
-        outcome: outcome_from(replay.battle_result().as_ref()),
-        self_account_id: self_row.map(|r| r.player().initial_state().db_id()),
-        self_ship_id,
-        self_survived: self_row.and_then(|r| r.vehicle().map(|v| v.death_info().is_none())),
-        self_damage: self_row.and_then(|r| r.actual_damage()),
-        self_kills: self_row.and_then(|r| r.kills()),
-        self_pr: self_row.and_then(|r| r.personal_rating().map(|pr| pr.pr)),
-        results_available: !replay.battle_results_are_pending(),
+        self_ship_id: replay.player_vehicle().map(|v| v.shipId),
+        results_pending: replay.battle_results_are_pending(),
         indexed_at,
+        fit: match fit {
+            ConstantsFit::Exact => SharedFit::Matched,
+            ConstantsFit::Mismatched => SharedFit::Mismatched,
+        },
     };
 
-    let mut rows = MappedRows { objective, vehicles, record };
-    if fit == ConstantsFit::Mismatched {
-        // Expected for old or newly-released builds without a matching
-        // constants file yet; logged so a stats-free listing has an
-        // explanation to point to instead of looking like silent data loss.
-        tracing::info!(
-            build = ?version.build_number(),
-            ?fit,
-            "suppressing results for arena {arena_id:?}: constants do not match this build"
-        );
-        suppress_untrusted_results(&mut rows);
-    }
-    Some(rows)
+    Some(wows_toolkit_viewmodel::index_rows::map_rows(ui_report.normalized(), &context))
 }
 
 /// Blank every value that came from the server results blob, and mark the
@@ -198,20 +128,7 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp, fit
 /// `ResultsWrite::Keep` for a mismatched pass, so on a brand-new row the blanks
 /// here are what gets recorded (there is nothing earlier to preserve), while on
 /// an existing row the upsert leaves what an earlier trusted pass stored.
-pub fn suppress_untrusted_results(rows: &mut MappedRows) {
-    for vehicle in &mut rows.vehicles {
-        vehicle.damage = None;
-        vehicle.kills = None;
-        vehicle.spotting = None;
-        vehicle.potential = None;
-        vehicle.received = None;
-        vehicle.pr = None;
-    }
-    rows.record.self_damage = None;
-    rows.record.self_kills = None;
-    rows.record.self_pr = None;
-    rows.record.results_available = false;
-}
+pub use wows_toolkit_viewmodel::index_rows::suppress_untrusted_results;
 
 /// Seconds before/after a match's start within which a Twitch chat
 /// observation is considered relevant to that match, mirroring
@@ -432,7 +349,11 @@ pub async fn repair_missing_pr(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Built directly here rather than through `map_rows`, which needs a
+    // parsed replay these tests do not have.
     use crate::db::index::rows::MatchOutcome;
+    use crate::db::index::rows::ObjectiveMatch;
+    use crate::db::index::rows::ReplayRecord;
     use crate::db::index::rows::VehicleRelation;
     use wows_replays::analyzer::battle_controller::BattleResult;
     use wows_replays::types::AccountId;
