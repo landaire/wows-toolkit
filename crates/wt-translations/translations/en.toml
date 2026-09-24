@@ -249,6 +249,8 @@ directory_hint = "World of Warships Directory"
 browse = "Browse..."
 
 [ui.settings.wows.cache]
+heading = "Game Data Cache"
+description = "Dumped game data, so replays from older builds still open"
 auto_dump = "Cache game data for old replay compatibility"
 directory_label = "Cache directory:"
 browse = "Browse"

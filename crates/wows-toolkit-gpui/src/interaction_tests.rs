@@ -81,9 +81,26 @@ const PALETTE: &str = "command";
 /// Search tab controls (`search`).
 const SEARCH_QUERY: &str = "search-query";
 
+/// Points `storage_dir` at a temporary directory for the whole test process.
+///
+/// Without it the Settings tab measures the game-data cache under the running
+/// user's own app data, which against a real install is a walk of several
+/// gigabytes and hangs the suite. The directory is leaked deliberately: it has
+/// to outlive every test in the process, and it holds nothing but what a test
+/// wrote there.
+fn use_a_temporary_storage_dir() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let dir = tempfile::tempdir().expect("a temporary directory can be made");
+        wows_toolkit_config::storage_override::set(dir.path().to_path_buf());
+        std::mem::forget(dir);
+    });
+}
+
 /// Opens the real root view in a headless window sized like the app's own
 /// default, with the component layer initialized.
 fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
+    use_a_temporary_storage_dir();
     cx.update(gpui_kit::init);
     cx.open_window(size(px(1200.), px(800.)), App::new)
 }
@@ -94,8 +111,9 @@ fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
 /// a control near the bottom of the settings tab opens the window this way
 /// rather than scrolling to it.
 fn open_tall_app(cx: &mut TestAppContext) -> WindowHandle<App> {
+    use_a_temporary_storage_dir();
     cx.update(gpui_kit::init);
-    cx.open_window(size(px(1200.), px(2000.)), App::new)
+    cx.open_window(size(px(1200.), px(2600.)), App::new)
 }
 
 /// Opens the root view inside a `Root`, the way `main.rs` does.
@@ -105,6 +123,7 @@ fn open_tall_app(cx: &mut TestAppContext) -> WindowHandle<App> {
 /// `Root`, so whatever exercises those has to be mounted the way production
 /// mounts it.
 fn open_app_in_root(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::component::Root>, gpui_kit::Entity<App>) {
+    use_a_temporary_storage_dir();
     cx.update(gpui_kit::init);
     let app = std::cell::RefCell::new(None);
     let window = cx.open_window(size(px(1200.), px(800.)), |window, cx| {
@@ -329,6 +348,9 @@ fn test_settings() -> GpuiSettings {
         auto_load_latest_replay: false,
         output_dir: String::new(),
         armor_defaults: None,
+        auto_dump_game_data: false,
+        game_data_cache_dir: String::new(),
+        game_data_repo_commit: None,
     }
 }
 
@@ -582,9 +604,87 @@ fn the_recent_games_limit_can_be_switched_on_and_off(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// Writes a cached build under `base`, named the way the dumper names one.
+fn cached_build(base: &std::path::Path, version: &str, build: u32) {
+    let dir = base.join(format!("{version}_{build}"));
+    std::fs::create_dir_all(&dir).expect("the build directory can be made");
+    std::fs::write(dir.join("metadata.toml"), "").expect("the metadata can be written");
+    std::fs::write(dir.join("blob"), vec![0u8; 2048]).expect("the blob can be written");
+}
+
+/// The maintenance controls act on cached builds, so a cache holding none
+/// offers the directory and nothing else. The egui tab guards them the same
+/// way, on `version_count > 0`.
+#[gpui_kit::test]
+fn the_cache_controls_appear_only_once_something_is_cached(cx: &mut TestAppContext) {
+    let empty = tempfile::tempdir().expect("a temporary directory can be made");
+    let window = open_tall_app(cx);
+    let mut settings = test_settings();
+    settings.game_data_cache_dir = empty.path().to_string_lossy().into_owned();
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+    })
+    .expect("the test window stays open");
+    // The measurement runs off the UI thread; the controls follow it.
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("cache-auto-dump").is_some(), "the toggle does not depend on a cache");
+        assert!(window.try_find("cache-dir").is_some(), "the directory does not depend on a cache");
+        assert!(window.try_find("cache-check-updates").is_none(), "there is nothing cached to check");
+        assert!(window.try_find("cache-open-folder").is_none(), "there is no size to report");
+    })
+    .expect("the test window stays open");
+
+    let filled = tempfile::tempdir().expect("a temporary directory can be made");
+    cached_build(filled.path(), "1.0.0", 100);
+    let mut settings = test_settings();
+    settings.game_data_cache_dir = filled.path().to_string_lossy().into_owned();
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("cache-check-updates").is_some(), "a cached build can be checked");
+        assert!(window.try_find("cache-validate").is_some(), "a cached build can be validated");
+        assert!(window.try_find("cache-open-folder").is_some(), "a cached build has a folder to open");
+        // Pruning keeps the newest build, so one build is nothing to prune.
+        assert!(window.try_find("cache-delete-old").is_none(), "a lone build is not an old version");
+    })
+    .expect("the test window stays open");
+}
+
+/// A second build is what makes pruning mean anything.
+#[gpui_kit::test]
+fn pruning_is_offered_once_a_second_build_is_cached(cx: &mut TestAppContext) {
+    let cache = tempfile::tempdir().expect("a temporary directory can be made");
+    cached_build(cache.path(), "1.0.0", 100);
+    cached_build(cache.path(), "1.1.0", 200);
+
+    let window = open_tall_app(cx);
+    let mut settings = test_settings();
+    settings.game_data_cache_dir = cache.path().to_string_lossy().into_owned();
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("cache-delete-old").is_some(), "two builds means one is old");
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn the_settings_checkboxes_apply_and_toggle_back(cx: &mut TestAppContext) {
-    let window = open_app(cx);
+    let window = open_tall_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
         .expect("the test window stays open");
@@ -632,7 +732,7 @@ fn the_data_sharing_mode_is_single_select(cx: &mut TestAppContext) {
 
 #[gpui_kit::test]
 fn a_settings_edit_reaches_the_replay_inspector(cx: &mut TestAppContext) {
-    let window = open_app(cx);
+    let window = open_tall_app(cx);
     window
         .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
         .expect("the test window stays open");

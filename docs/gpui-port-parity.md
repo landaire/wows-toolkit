@@ -426,8 +426,21 @@ kept so the next audit does not re-report them.
 
 ## Settings
 
-- The game-data cache section is absent entirely (auto-dump, cache directory,
-  disk usage, delete old versions, check for updates, validate, repair).
+- [done] The game-data cache section is absent entirely (auto-dump, cache
+  directory, disk usage, delete old versions, check for updates, validate,
+  repair). It is its own section under the game directory, carrying all of
+  them. The maintenance runs `wows_data_mgr::download_repo`, which the egui
+  app already ran, so both act on one cache; the measurement and the pruning
+  moved to `wows_data_mgr::dump` and the cache path to `wows-toolkit-config`,
+  so neither app can drift on where the cache is or what is in it. Pruning
+  ordered by directory name in the egui app, which sorts `0.10.0` before
+  `0.9.0` and `_100` before `_99`, so Delete Old Versions could delete the
+  newest cached build and keep an older one; it now orders by the build
+  number the name carries, and leaves alone a directory carrying none. The
+  measurement, the pruning and the jobs all run off the UI thread here, where
+  the egui tab walks the cache inline every frame it draws. The repository
+  commit is written back only when a run finds nothing to do, so a run that
+  found work is re-checked rather than skipped.
 - [done] Automatic replay data export is not configurable. The Replay
   section carries the checkbox, the three formats and the directory,
   written to the same settings row the egui tab reads, and a finished

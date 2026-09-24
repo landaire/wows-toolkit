@@ -25,6 +25,13 @@ pub mod keys {
     pub const OUTPUT_DIR: &str = "output_dir";
     /// Which theme the app renders in; a [`super::ThemeChoice`].
     pub const THEME: &str = "theme";
+    /// Whether game data is cached on load so old replays still open after a
+    /// game update.
+    pub const AUTO_DUMP_GAME_DATA: &str = "auto_dump_game_data";
+    /// Where that cache is kept. Empty means the default location.
+    pub const GAME_DATA_CACHE_DIR: &str = "game_data_cache_dir";
+    /// The game-data repository commit the cache was last checked against.
+    pub const GAME_DATA_REPO_COMMIT: &str = "game_data_repo_commit";
 }
 
 /// A proxy setting as a URL a client can take.
