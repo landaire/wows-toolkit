@@ -745,8 +745,14 @@ fn render_hull_mesh_row(
 fn render_display_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
     let has_armor = view.current_armor.is_some();
     let content_entity = entity.clone();
+    let open_entity = entity.clone();
 
     Popover::new("armor-display-settings-popover")
+        .open(view.display_popover_open())
+        .on_open_change(move |open, _window, cx| {
+            let open = *open;
+            open_entity.update(cx, |view, cx| view.set_display_popover_open(open, cx));
+        })
         .trigger(
             Button::new("armor-display-settings-popover-trigger")
                 .icon(IconName::Settings)
