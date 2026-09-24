@@ -100,7 +100,12 @@ pub struct Plot<'a> {
 pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &mut App) {
     let theme = cx.theme();
     let colors = Colors { axis: theme.border, grid: theme.border.opacity(0.4), text: theme.muted_foreground };
+    let mut canvas = WindowCanvas { window, cx };
+    draw(plot, bounds, colors, &mut canvas);
+}
 
+/// Draws `plot` into `bounds` on any canvas.
+pub fn draw(plot: &Plot<'_>, bounds: Bounds<Pixels>, colors: Colors, canvas: &mut dyn PlotCanvas) {
     let area = plot_area(bounds);
     if area.size.width <= px(0.) || area.size.height <= px(0.) {
         return;
@@ -115,23 +120,48 @@ pub fn paint(plot: &Plot<'_>, bounds: Bounds<Pixels>, window: &mut Window, cx: &
         max: ticks.last().copied().unwrap_or(max_y),
     };
 
-    paint_grid(&ticks, &frame, colors, window, cx);
+    paint_grid(&ticks, &frame, colors, canvas);
     if plot.bars.is_empty() {
-        paint_game_ticks(plot, &frame, colors, window, cx);
+        paint_game_ticks(plot, &frame, colors, canvas);
     }
-    paint_axes(area, colors.axis, window);
+    paint_axes(area, colors.axis, canvas);
 
-    let mask = ContentMask { bounds: area };
-    window.with_content_mask(Some(mask), |window| {
+    canvas.clipped(area, &mut |canvas| {
         if plot.bars.is_empty() {
-            paint_lines(plot, &frame, window, cx);
+            paint_lines(plot, &frame, canvas);
         } else {
-            paint_bars(plot, &frame, colors, window, cx);
+            paint_bars(plot, &frame, colors, canvas);
         }
     });
 
-    paint_axis_titles(plot, bounds, area, colors.text, window, cx);
-    paint_legend(plot, area, colors.text, window, cx);
+    paint_axis_titles(plot, bounds, area, colors.text, canvas);
+    paint_legend(plot, area, colors.text, canvas);
+}
+
+/// What a plot draws through.
+///
+/// The layout is the same wherever a plot goes; only the primitives differ.
+/// A window draws them with GPUI, an image with `tiny-skia`, and neither
+/// knows where the ticks or the legend sit.
+pub trait PlotCanvas {
+    fn fill(&mut self, bounds: Bounds<Pixels>, color: Hsla, radius: Pixels);
+
+    /// A stroked open path through `points`.
+    fn polyline(&mut self, points: &[Point<Pixels>], width: f32, color: Hsla);
+
+    /// How wide `text` will be, which is what right-aligning a tick label or
+    /// centring a bar's name needs before it is drawn.
+    fn measure(&mut self, text: &str, size: f32) -> Pixels;
+
+    /// Draws `text` with its top-left at `origin`.
+    fn text(&mut self, origin: Point<Pixels>, text: &str, size: f32, color: Hsla);
+
+    /// Runs `body` with everything it draws confined to `area`.
+    ///
+    /// A closure rather than a push/pop pair because GPUI's own content mask
+    /// is closure-scoped, and a panned line has to be cut off at the plot's
+    /// edge rather than drawn across its gutters.
+    fn clipped(&mut self, area: Bounds<Pixels>, body: &mut dyn FnMut(&mut dyn PlotCanvas));
 }
 
 /// Where the data is drawn, how the view is placed on it, and the range the
@@ -153,10 +183,10 @@ impl Frame {
 
 /// The theme colours a plot paints with.
 #[derive(Clone, Copy)]
-struct Colors {
-    axis: Hsla,
-    grid: Hsla,
-    text: Hsla,
+pub struct Colors {
+    pub axis: Hsla,
+    pub grid: Hsla,
+    pub text: Hsla,
 }
 
 /// The rectangle the data itself is drawn in, inside the gutters the axes
@@ -230,18 +260,18 @@ fn viewed(x: f32, y: f32, view: PlotView) -> Point<Pixels> {
     point(px(x * view.zoom + view.pan.x.as_f32()), px(y * view.zoom + view.pan.y.as_f32()))
 }
 
-fn paint_grid(ticks: &[f64], frame: &Frame, colors: Colors, window: &mut Window, cx: &mut App) {
+fn paint_grid(ticks: &[f64], frame: &Frame, colors: Colors, canvas: &mut dyn PlotCanvas) {
     let area = frame.area;
     for tick in ticks {
         let y = viewed(0.0, value_to_y(*tick, frame.min, frame.max, area), frame.view).y;
         if y < area.origin.y || y > area.origin.y + area.size.height {
             continue;
         }
-        window.paint_quad(fill(Bounds::new(point(area.origin.x, y), size(area.size.width, px(1.))), colors.grid));
+        canvas.fill(Bounds::new(point(area.origin.x, y), size(area.size.width, px(1.))), colors.grid, px(0.));
         let label = format_value(*tick);
-        let shaped = shape(&label, TICK_FONT, colors.text, window);
-        let origin = point(area.origin.x - shaped.width() - px(6.), y - px(TICK_FONT * 0.7));
-        let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
+        let width = canvas.measure(&label, TICK_FONT);
+        let origin = point(area.origin.x - width - px(6.), y - px(TICK_FONT * 0.7));
+        canvas.text(origin, &label, TICK_FONT, colors.text);
     }
 }
 
@@ -250,7 +280,7 @@ fn paint_grid(ticks: &[f64], frame: &Frame, colors: Colors, window: &mut Window,
 /// The count is the longest line's: every line is drawn across the whole
 /// width, each against its own games, which is how the egui chart plots a
 /// ship that played fewer of them.
-fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut Window, cx: &mut App) {
+fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: Colors, canvas: &mut dyn PlotCanvas) {
     let count = plot.series.iter().map(|series| series.points.len()).max().unwrap_or(0);
     if count == 0 {
         return;
@@ -262,52 +292,45 @@ fn paint_game_ticks(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut
         if x < area.origin.x || x > area.origin.x + area.size.width {
             continue;
         }
-        window.paint_quad(fill(Bounds::new(point(x, area.origin.y), size(px(1.), area.size.height)), colors.grid));
-        let shaped = shape(&(index + 1).to_string(), TICK_FONT, colors.text, window);
-        let origin = point(x - shaped.width() * 0.5, area.origin.y + area.size.height + px(6.));
-        let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
+        canvas.fill(Bounds::new(point(x, area.origin.y), size(px(1.), area.size.height)), colors.grid, px(0.));
+        let label = (index + 1).to_string();
+        let width = canvas.measure(&label, TICK_FONT);
+        let origin = point(x - width * 0.5, area.origin.y + area.size.height + px(6.));
+        canvas.text(origin, &label, TICK_FONT, colors.text);
     }
 }
 
-fn paint_axes(area: Bounds<Pixels>, color: Hsla, window: &mut Window) {
-    window.paint_quad(fill(
+fn paint_axes(area: Bounds<Pixels>, color: Hsla, canvas: &mut dyn PlotCanvas) {
+    canvas.fill(
         Bounds::new(point(area.origin.x, area.origin.y + area.size.height), size(area.size.width, px(1.))),
         color,
-    ));
-    window.paint_quad(fill(Bounds::new(area.origin, size(px(1.), area.size.height)), color));
+        px(0.),
+    );
+    canvas.fill(Bounds::new(area.origin, size(px(1.), area.size.height)), color, px(0.));
 }
 
-fn paint_lines(plot: &Plot<'_>, frame: &Frame, window: &mut Window, cx: &mut App) {
+fn paint_lines(plot: &Plot<'_>, frame: &Frame, canvas: &mut dyn PlotCanvas) {
     for series in plot.series {
         let count = series.points.len();
         let positions: Vec<Point<Pixels>> =
             series.points.iter().enumerate().map(|(index, point)| frame.place(index, count, point.value)).collect();
         let color = hsla_from(series.color);
 
-        if positions.len() > 1 {
-            let mut path = PathBuilder::stroke(px(1.5));
-            path.move_to(positions[0]);
-            for position in &positions[1..] {
-                path.line_to(*position);
-            }
-            if let Ok(path) = path.build() {
-                window.paint_path(path, color);
-            }
-        }
+        canvas.polyline(&positions, 1.5, color);
 
         for (index, position) in positions.iter().enumerate() {
-            window.paint_quad(fill(dot_bounds(*position), color).corner_radii(px(POINT_RADIUS)));
+            canvas.fill(dot_bounds(*position), color, px(POINT_RADIUS));
             if plot.show_values {
                 let label = format_value(series.points[index].value);
-                let shaped = shape(&label, TICK_FONT, color, window);
-                let origin = point(position.x - shaped.width() * 0.5, position.y - px(TICK_FONT + 6.0));
-                let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
+                let width = canvas.measure(&label, TICK_FONT);
+                let origin = point(position.x - width * 0.5, position.y - px(TICK_FONT + 6.0));
+                canvas.text(origin, &label, TICK_FONT, color);
             }
         }
     }
 }
 
-fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut Window, cx: &mut App) {
+fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: Colors, canvas: &mut dyn PlotCanvas) {
     let area = frame.area;
     let count = plot.bars.len();
     let slot = area.size.width.as_f32() * frame.view.zoom / count.max(1) as f32;
@@ -322,23 +345,24 @@ fn paint_bars(plot: &Plot<'_>, frame: &Frame, colors: Colors, window: &mut Windo
         );
         let top = centre.y.min(baseline);
         let height = (centre.y - baseline).abs().max(px(1.));
-        window.paint_quad(fill(
+        canvas.fill(
             Bounds::new(point(centre.x - px(width * 0.5), top), size(px(width), height)),
             hsla_from(bar.color),
-        ));
+            px(0.),
+        );
 
         // A label per bar is unreadable once the bars are thinner than the
         // names, so they are dropped rather than overlapped.
         if slot >= 48.0 {
-            let shaped = shape(&bar.label, TICK_FONT, colors.text, window);
-            let origin = point(centre.x - shaped.width() * 0.5, baseline + px(4.));
-            let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
+            let label_width = canvas.measure(&bar.label, TICK_FONT);
+            let origin = point(centre.x - label_width * 0.5, baseline + px(4.));
+            canvas.text(origin, &bar.label, TICK_FONT, colors.text);
         }
         if plot.show_values {
             let label = format_value(bar.value);
-            let shaped = shape(&label, TICK_FONT, hsla_from(bar.color), window);
-            let origin = point(centre.x - shaped.width() * 0.5, top - px(TICK_FONT + 4.0));
-            let _ = shaped.paint(origin, px(TICK_FONT * 1.3), TextAlign::Left, None, window, cx);
+            let label_width = canvas.measure(&label, TICK_FONT);
+            let origin = point(centre.x - label_width * 0.5, top - px(TICK_FONT + 4.0));
+            canvas.text(origin, &label, TICK_FONT, hsla_from(bar.color));
         }
     }
 }
@@ -348,46 +372,34 @@ fn paint_axis_titles(
     bounds: Bounds<Pixels>,
     area: Bounds<Pixels>,
     color: Hsla,
-    window: &mut Window,
-    cx: &mut App,
+    canvas: &mut dyn PlotCanvas,
 ) {
     // The value axis is named above it rather than rotated alongside it:
     // gpui paints text on one baseline only.
-    let shaped = shape(plot.y_label, LABEL_FONT, color, window);
     let origin = point(bounds.origin.x + px(4.), bounds.origin.y + px(4.));
-    let _ = shaped.paint(origin, px(LABEL_FONT * 1.3), TextAlign::Left, None, window, cx);
+    canvas.text(origin, plot.y_label, LABEL_FONT, color);
 
-    let shaped = shape(plot.x_label, LABEL_FONT, color, window);
+    let width = canvas.measure(plot.x_label, LABEL_FONT);
     let origin = point(
-        area.origin.x + (area.size.width - shaped.width()) * 0.5,
+        area.origin.x + (area.size.width - width) * 0.5,
         bounds.origin.y + bounds.size.height - px(LABEL_FONT + 6.0),
     );
-    let _ = shaped.paint(origin, px(LABEL_FONT * 1.3), TextAlign::Left, None, window, cx);
+    canvas.text(origin, plot.x_label, LABEL_FONT, color);
 }
 
 /// Names each line beside its own colour, in the top right of the plot. Bars
 /// carry their name under them, so they are not listed again.
-fn paint_legend(plot: &Plot<'_>, area: Bounds<Pixels>, color: Hsla, window: &mut Window, cx: &mut App) {
+fn paint_legend(plot: &Plot<'_>, area: Bounds<Pixels>, color: Hsla, canvas: &mut dyn PlotCanvas) {
     for (row, series) in plot.series.iter().enumerate() {
         let top = area.origin.y + px(LEGEND_ROW * row as f32 + 2.0);
         if top + px(LEGEND_ROW) > area.origin.y + area.size.height {
             return;
         }
-        let shaped = shape(&series.name, TICK_FONT, color, window);
+        let width = canvas.measure(&series.name, TICK_FONT);
         let right = area.origin.x + area.size.width;
-        let swatch = point(right - shaped.width() - px(LEGEND_SWATCH + 10.0), top + px(3.));
-        window.paint_quad(
-            fill(Bounds::new(swatch, size(px(LEGEND_SWATCH), px(LEGEND_SWATCH))), hsla_from(series.color))
-                .corner_radii(px(2.)),
-        );
-        let _ = shaped.paint(
-            point(swatch.x + px(LEGEND_SWATCH + 4.0), top),
-            px(TICK_FONT * 1.3),
-            TextAlign::Left,
-            None,
-            window,
-            cx,
-        );
+        let swatch = point(right - width - px(LEGEND_SWATCH + 10.0), top + px(3.));
+        canvas.fill(Bounds::new(swatch, size(px(LEGEND_SWATCH), px(LEGEND_SWATCH))), hsla_from(series.color), px(2.));
+        canvas.text(point(swatch.x + px(LEGEND_SWATCH + 4.0), top), &series.name, TICK_FONT, color);
     }
 }
 
@@ -396,6 +408,49 @@ fn dot_bounds(centre: Point<Pixels>) -> Bounds<Pixels> {
         point(centre.x - px(POINT_RADIUS), centre.y - px(POINT_RADIUS)),
         size(px(POINT_RADIUS * 2.0), px(POINT_RADIUS * 2.0)),
     )
+}
+
+/// Draws a plot onto the window, which is what the chart panel shows.
+struct WindowCanvas<'a, 'b> {
+    window: &'a mut Window,
+    cx: &'b mut App,
+}
+
+impl PlotCanvas for WindowCanvas<'_, '_> {
+    fn fill(&mut self, bounds: Bounds<Pixels>, color: Hsla, radius: Pixels) {
+        self.window.paint_quad(fill(bounds, color).corner_radii(radius));
+    }
+
+    fn polyline(&mut self, points: &[Point<Pixels>], width: f32, color: Hsla) {
+        if points.len() < 2 {
+            return;
+        }
+        let mut path = PathBuilder::stroke(px(width));
+        path.move_to(points[0]);
+        for position in &points[1..] {
+            path.line_to(*position);
+        }
+        if let Ok(path) = path.build() {
+            self.window.paint_path(path, color);
+        }
+    }
+
+    fn measure(&mut self, text: &str, size: f32) -> Pixels {
+        shape(text, size, gpui_kit::black(), self.window).width()
+    }
+
+    fn text(&mut self, origin: Point<Pixels>, text: &str, size: f32, color: Hsla) {
+        let shaped = shape(text, size, color, self.window);
+        let _ = shaped.paint(origin, px(size * 1.3), TextAlign::Left, None, self.window, self.cx);
+    }
+
+    fn clipped(&mut self, area: Bounds<Pixels>, body: &mut dyn FnMut(&mut dyn PlotCanvas)) {
+        let cx = &mut *self.cx;
+        self.window.with_content_mask(Some(ContentMask { bounds: area }), |window| {
+            let mut inner = WindowCanvas { window, cx };
+            body(&mut inner);
+        });
+    }
 }
 
 fn shape(text: &str, font_size: f32, color: Hsla, window: &mut Window) -> gpui_kit::ShapedLine {
