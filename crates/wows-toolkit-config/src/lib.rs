@@ -35,6 +35,10 @@ pub const APP_NAME: &str = "WoWs Toolkit";
 /// - macOS:   `~/Library/Application Support/WoWs-Toolkit`
 /// - Linux:   `$XDG_DATA_HOME/wowstoolkit` or `~/.local/share/wowstoolkit`
 pub fn storage_dir() -> Option<PathBuf> {
+    if let Some(chosen) = storage_override::get() {
+        return Some(chosen);
+    }
+
     #[cfg(target_os = "windows")]
     {
         // %APPDATA% = roaming appdata, same as eframe's FOLDERID_RoamingAppData
@@ -53,6 +57,41 @@ pub fn storage_dir() -> Option<PathBuf> {
             .filter(|p| p.is_absolute())
             .or_else(|| home::home_dir().map(|p| p.join(".local").join("share")))
             .map(|p| p.join(APP_NAME.to_lowercase().replace(|c: char| c.is_ascii_whitespace(), "")))
+    }
+}
+
+/// A storage directory chosen for this process in place of the platform one.
+///
+/// Tests set it so nothing reads or writes the running user's own data: the
+/// settings tab measures the game-data cache under [`storage_dir`], and
+/// against a real install that is a walk of several gigabytes.
+#[cfg(feature = "test-support")]
+pub mod storage_override {
+    use std::path::PathBuf;
+    use std::sync::OnceLock;
+
+    static CHOSEN: OnceLock<PathBuf> = OnceLock::new();
+
+    /// Points every [`super::storage_dir`] caller in this process at `dir`.
+    ///
+    /// Takes effect once: a process has one storage directory, and a test
+    /// that could move it out from under another would be worse than one
+    /// that shares a temporary directory with it.
+    pub fn set(dir: PathBuf) {
+        let _ = CHOSEN.set(dir);
+    }
+
+    pub(crate) fn get() -> Option<PathBuf> {
+        CHOSEN.get().cloned()
+    }
+}
+
+#[cfg(not(feature = "test-support"))]
+mod storage_override {
+    use std::path::PathBuf;
+
+    pub(crate) fn get() -> Option<PathBuf> {
+        None
     }
 }
 

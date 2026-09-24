@@ -1,6 +1,7 @@
 //! Settings snapshot loaded from the shared SQLite config DB at startup.
 //!
-//! Read-only: the GPUI port does not write settings back to the database.
+//! An edit is written back through [`crate::settings_store`], to the same row
+//! the egui app reads, so a setting changed in either app holds in both.
 
 use std::path::PathBuf;
 
@@ -66,6 +67,16 @@ pub struct GpuiSettings {
     /// `None` when the `armor_viewer_defaults` table has no row yet (fresh DB),
     /// or when the read failed (logged via `tracing::warn!` in `load`).
     pub armor_defaults: Option<ArmorViewerDefaultsRow>,
+    /// Whether game data is cached on load so old replays still open after a
+    /// game update. The port does not dump; it reports and manages the cache
+    /// the egui app writes.
+    pub auto_dump_game_data: bool,
+    /// Where the game-data cache is kept. Empty means the default location,
+    /// which is the absence this setting has always used.
+    pub game_data_cache_dir: String,
+    /// The repository commit the cache was last checked against. `None` until
+    /// a check has run, which is what makes the first check a full one.
+    pub game_data_repo_commit: Option<String>,
 }
 
 impl GpuiSettings {
@@ -102,6 +113,12 @@ impl GpuiSettings {
             }
         };
 
+        let auto_dump_game_data = queries::get_setting::<bool>(pool, keys::AUTO_DUMP_GAME_DATA).await.unwrap_or(false);
+        let game_data_cache_dir =
+            queries::get_setting::<String>(pool, keys::GAME_DATA_CACHE_DIR).await.unwrap_or_default();
+        let game_data_repo_commit =
+            queries::get_setting::<Option<String>>(pool, keys::GAME_DATA_REPO_COMMIT).await.flatten();
+
         Self {
             zoom,
             theme,
@@ -119,6 +136,9 @@ impl GpuiSettings {
             auto_load_latest_replay,
             output_dir,
             armor_defaults,
+            auto_dump_game_data,
+            game_data_cache_dir,
+            game_data_repo_commit,
         }
     }
 }

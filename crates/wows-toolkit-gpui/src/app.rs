@@ -34,6 +34,7 @@ use rust_i18n::t;
 use std::rc::Rc;
 
 use crate::armor_viewer::ArmorViewerPane;
+use crate::game_data_cache;
 use crate::palette::PaletteAction;
 use crate::palette::PaletteEntry;
 use crate::player_tracker::PlayerTrackerEvent;
@@ -54,6 +55,8 @@ use crate::stats::view::StatsView;
 use crate::theme;
 use crate::ui::selectable;
 use crate::unpacker::view::UnpackerView;
+use gpui_kit::component::spinner::Spinner;
+use std::path::PathBuf;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -252,6 +255,12 @@ pub struct App {
     /// saved value can be shown when the tab first renders.
     wows_dir_input: Entity<InputState>,
     proxy_input: Entity<InputState>,
+    /// Where the game-data cache is kept. Empty shows the default location as
+    /// its placeholder, which is what an empty setting means.
+    cache_dir_input: Entity<InputState>,
+    /// The game-data cache: what is there, what is stale, and what job is
+    /// running against it.
+    cache: game_data_cache::CacheState,
     /// Backing state for the settings tab's language combo.
     language_select: Entity<SelectState<SearchableVec<LanguageItem>>>,
     /// Whether the directory in the field is one an install could be in. The
@@ -276,6 +285,12 @@ impl App {
         let twitch_channel_input = cx
             .new(|cx| InputState::new(window, cx).placeholder(t!("ui.settings.twitch.monitored_channel").to_string()));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
+        let cache_dir_input = cx.new(|cx| {
+            let default = wows_toolkit_config::game_data_dump_base()
+                .map(|dir| dir.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            InputState::new(window, cx).placeholder(default)
+        });
         let languages: SearchableVec<LanguageItem> =
             SearchableVec::new(wt_translations::SUPPORTED_LANGUAGES.iter().map(LanguageItem).collect::<Vec<_>>());
         let language_select =
@@ -307,6 +322,7 @@ impl App {
             this.run_search(query.clone(), window, cx);
         });
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
+        let cache_dir_edited = cx.subscribe(&cache_dir_input, Self::on_cache_dir_edited);
         // `Confirm(None)` is the cleared-selection case, which this combo
         // cannot produce: it always holds a language.
         let language_chosen = cx.subscribe_in(&language_select, window, |this, _state, event, window, cx| {
@@ -338,6 +354,8 @@ impl App {
             search,
             wows_dir_input,
             proxy_input,
+            cache_dir_input,
+            cache: game_data_cache::CacheState::default(),
             language_select,
             wows_dir_invalid: false,
             settings_scroll: ScrollHandle::new(),
@@ -346,6 +364,7 @@ impl App {
                 replay_settings_changed,
                 wows_dir_edited,
                 proxy_edited,
+                cache_dir_edited,
                 search_event,
                 tracker_event,
                 language_chosen,
@@ -381,6 +400,8 @@ impl App {
     /// language change has to push the new text in.
     fn refresh_placeholders(&self, window: &mut Window, cx: &mut Context<Self>) {
         let pairs: [(&Entity<InputState>, &str); 3] = [
+            // The cache directory's placeholder is a path, not a phrase, so a
+            // language change leaves it alone.
             (&self.wows_dir_input, "ui.settings.wows.directory_hint"),
             (&self.twitch_channel_input, "ui.settings.twitch.monitored_channel"),
             (&self.proxy_input, "ui.settings.app.proxy_url_hint"),
@@ -770,6 +791,11 @@ impl App {
         self.twitch_channel_input.update(cx, |state, cx| state.set_value(channel, window, cx));
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
+        let cache_dir = settings.game_data_cache_dir.clone();
+        self.cache_dir_input.update(cx, |state, cx| state.set_value(cache_dir, window, cx));
+        // Whatever is known about the cache belongs to the directory the old
+        // settings named, which these may not.
+        self.forget_cache_findings(cx);
         let wows_dir = settings.wows_dir.clone();
         let debug_mode = settings.debug_mode;
         let replay_settings = settings.replay.clone();
@@ -977,6 +1003,15 @@ impl App {
         }
     }
 
+    /// The loaded settings, or `None` while they are still being read or
+    /// after the read failed.
+    fn settings(&self) -> Option<&GpuiSettings> {
+        match &self.settings {
+            SettingsState::Loaded(settings) => Some(settings),
+            _ => None,
+        }
+    }
+
     fn settings_mut(&mut self) -> Option<&mut GpuiSettings> {
         match &mut self.settings {
             SettingsState::Loaded(settings) => Some(settings),
@@ -1013,6 +1048,393 @@ impl App {
             Err(err) => self.twitch_paste = Some(Err(err.to_string())),
         }
         cx.notify();
+    }
+
+    /// Adopts a new cache directory once the edit has settled.
+    ///
+    /// The measurement belongs to the old directory, so it is dropped rather
+    /// than shown against the new one.
+    fn on_cache_dir_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let dir = state.read(cx).value().trim().to_string();
+        let Some(settings) = self.settings_mut() else { return };
+        if settings.game_data_cache_dir == dir {
+            return;
+        }
+        settings.game_data_cache_dir = dir.clone();
+        settings_store::save(keys::GAME_DATA_CACHE_DIR, &dir, cx);
+        self.forget_cache_findings(cx);
+    }
+
+    /// Drops everything known about the cache, so the next draw asks again.
+    ///
+    /// The stale and damaged lists name builds under a particular directory;
+    /// carrying them across a change would offer to repair builds that are
+    /// not there.
+    fn forget_cache_findings(&mut self, cx: &mut Context<Self>) {
+        self.cache.forget_stats();
+        self.cache.updates.clear();
+        self.cache.repair.clear();
+        self.cache.failure = None;
+        cx.notify();
+    }
+
+    /// Where the cache is, as the settings currently point.
+    fn cache_base(&self) -> Option<PathBuf> {
+        let settings = self.settings()?;
+        game_data_cache::base(&settings.game_data_cache_dir)
+    }
+
+    fn proxy_url(&self) -> String {
+        self.settings().map(|settings| settings.proxy_url.clone()).unwrap_or_default()
+    }
+
+    /// Folds a finished cache job back into the tab.
+    ///
+    /// A clean check or validation is what lets the next check stop at the
+    /// tip, so the commit is saved only when nothing needs doing; saving it
+    /// after a run that found work would skip the re-check.
+    fn cache_job_finished(&mut self, outcome: game_data_cache::CacheOutcome, cx: &mut Context<Self>) {
+        match outcome {
+            game_data_cache::CacheOutcome::Checked { tip, updates } => {
+                let clean = updates.is_empty();
+                self.cache.updates = updates;
+                if clean {
+                    self.remember_cache_tip(tip, cx);
+                }
+            }
+            game_data_cache::CacheOutcome::Validated { tip, repair } => {
+                let clean = repair.is_empty();
+                self.cache.repair = repair;
+                if clean {
+                    self.remember_cache_tip(tip, cx);
+                }
+            }
+            game_data_cache::CacheOutcome::Downloaded { fetched, failed } => {
+                if fetched > 0 {
+                    // What was fetched is no longer stale or damaged, and the
+                    // cache is a different size than it was.
+                    self.cache.updates.clear();
+                    self.cache.repair.clear();
+                    self.cache.forget_stats();
+                }
+                if !failed.is_empty() {
+                    self.cache.failure = Some(t!("ui.messages.game_data_download_failed").into_owned());
+                }
+            }
+            game_data_cache::CacheOutcome::Failed(_) => {}
+        }
+        cx.notify();
+    }
+
+    fn remember_cache_tip(&mut self, tip: String, cx: &mut Context<Self>) {
+        self.cache.tip = Some(tip.clone());
+        if let Some(settings) = self.settings_mut() {
+            settings.game_data_repo_commit = Some(tip.clone());
+        }
+        settings_store::save(keys::GAME_DATA_REPO_COMMIT, &Some(tip), cx);
+    }
+
+    /// The game-data cache: what it holds, and the maintenance that keeps it
+    /// matching the published repository.
+    ///
+    /// Everything below the directory needs a cache that is actually there,
+    /// so a directory holding no builds shows the toggle and the path and
+    /// stops. The measurement is taken once and kept until something changes
+    /// it, because it walks every stored object.
+    fn render_cache_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let auto_dump = self.settings().is_some_and(|settings| settings.auto_dump_game_data);
+        let border = cx.theme().border;
+
+        let mut form = settings_form()
+            .child(
+                field().label(String::new()).child(
+                    Checkbox::new("cache-auto-dump")
+                        .label(t!("ui.settings.wows.cache.auto_dump").to_string())
+                        .checked(auto_dump)
+                        .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
+                            let on = *checked;
+                            this.edit_setting(keys::AUTO_DUMP_GAME_DATA, cx, |settings| {
+                                settings.auto_dump_game_data = on;
+                                on
+                            });
+                        })),
+                ),
+            )
+            .child(
+                field().label(t!("ui.settings.wows.cache.directory_label").to_string()).child(
+                    h_flex()
+                        .gap_2()
+                        .child(div().flex_1().child(Input::new(&self.cache_dir_input).id("cache-dir").small().w_full()))
+                        .child(
+                            Button::new("cache-dir-browse")
+                                .icon(IconName::FolderOpen)
+                                .label(t!("ui.settings.wows.cache.browse").to_string())
+                                .compact()
+                                .on_click(
+                                    cx.listener(|this, _event, window, cx| this.browse_for_cache_dir(window, cx)),
+                                ),
+                        ),
+                ),
+            );
+
+        let Some(base) = self.cache_base() else {
+            return settings_section(
+                crate::icons::ARCHIVE,
+                t!("ui.settings.wows.cache.heading").into_owned(),
+                t!("ui.settings.wows.cache.description").into_owned(),
+                border,
+                form,
+            )
+            .into_any_element();
+        };
+
+        // Measured once per directory, off the UI thread; until it lands the
+        // section shows only what does not depend on it.
+        if let Some(generation) = self.cache.wants_measure() {
+            game_data_cache::measure(base.clone(), generation, cx, |this, measured, generation, cx| {
+                this.cache.measured(measured, generation);
+                cx.notify();
+            });
+        }
+        let stats = self.cache.stats;
+
+        if let Some(stats) = stats.filter(|stats| stats.version_count > 0) {
+            let body = self.render_cache_body(base, stats, cx);
+            form = form.child(field().label(String::new()).child(body));
+        }
+
+        settings_section(
+            crate::icons::ARCHIVE,
+            t!("ui.settings.wows.cache.heading").into_owned(),
+            t!("ui.settings.wows.cache.description").into_owned(),
+            border,
+            form,
+        )
+        .into_any_element()
+    }
+
+    /// What a cache holding at least one build offers: its size, the jobs
+    /// that check it, and whatever those jobs found.
+    fn render_cache_body(
+        &mut self,
+        base: PathBuf,
+        stats: wows_data_mgr::dump::CacheStats,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let busy = self.cache.busy();
+        let running = self.cache.running.is_some();
+
+        let summary = h_flex()
+            .gap_2()
+            .flex_wrap()
+            .items_center()
+            .child(
+                div().text_sm().child(
+                    t!(
+                        "ui.settings.wows.cache.stats",
+                        size = humansize::format_size(stats.total_bytes, humansize::BINARY),
+                        count = stats.version_count,
+                    )
+                    .to_string(),
+                ),
+            )
+            .child({
+                let folder = base.clone();
+                Button::new("cache-open-folder")
+                    .label(t!("ui.settings.wows.cache.open_folder").to_string())
+                    .compact()
+                    .on_click(move |_event, _window, _cx| open_directory(&folder))
+            })
+            // Nothing to prune while there is one build: the newest is kept.
+            .when(stats.version_count > 1, |this| {
+                let dir = base.clone();
+                this.child(
+                    Button::new("cache-delete-old")
+                        .label(t!("ui.settings.wows.cache.delete_old").to_string())
+                        .compact()
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            this.delete_old_cache_versions(dir.clone(), cx)
+                        })),
+                )
+            });
+
+        let jobs = h_flex()
+            .gap_2()
+            .items_center()
+            .child({
+                let dir = base.clone();
+                Button::new("cache-check-updates")
+                    .label(t!("ui.settings.wows.cache.check_updates").to_string())
+                    .compact()
+                    .disabled(busy)
+                    .on_click(
+                        cx.listener(move |this, _event, _window, cx| this.check_cache_for_updates(dir.clone(), cx)),
+                    )
+            })
+            .child({
+                let dir = base.clone();
+                Button::new("cache-validate")
+                    .label(t!("ui.settings.wows.cache.validate").to_string())
+                    .compact()
+                    .disabled(busy)
+                    .tooltip(t!("ui.settings.wows.cache.validate_tooltip").to_string())
+                    .on_click(cx.listener(move |this, _event, _window, cx| this.validate_cache(dir.clone(), cx)))
+            })
+            .when(running, |this| this.child(Spinner::new()));
+
+        let progress = self.cache.progress.filter(|step| step.total > 0).map(|step| {
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(format!("{} / {}", step.done, step.total))
+                .into_any_element()
+        });
+
+        let updates = (!self.cache.updates.is_empty()).then(|| {
+            let count = self.cache.updates.len();
+            let dir = base.clone();
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(div().text_sm().child(t!("ui.settings.wows.cache.updates_available", count = count).to_string()))
+                .child(
+                    Button::new("cache-update-all")
+                        .label(t!("ui.settings.wows.cache.update_all").to_string())
+                        .compact()
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            let builds = this.cache.updates.clone();
+                            this.fetch_cache_builds(dir.clone(), builds, cx);
+                        })),
+                )
+                .into_any_element()
+        });
+
+        let repair = (!self.cache.repair.is_empty()).then(|| {
+            let count = self.cache.repair.len();
+            let dir = base.clone();
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(rgb(crate::theme::semantic().error))
+                        .child(t!("ui.settings.wows.cache.repair_needed", count = count).to_string()),
+                )
+                .child(
+                    Button::new("cache-repair")
+                        .label(t!("ui.settings.wows.cache.repair").to_string())
+                        .compact()
+                        .disabled(busy)
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            let builds = this.cache.repair.clone();
+                            this.fetch_cache_builds(dir.clone(), builds, cx);
+                        })),
+                )
+                .into_any_element()
+        });
+
+        let failure = self.cache.failure.clone().map(|reason| {
+            div().text_xs().text_color(rgb(crate::theme::semantic().error)).child(reason).into_any_element()
+        });
+
+        v_flex()
+            .gap_2()
+            .child(summary)
+            .child(jobs)
+            .children(progress)
+            .children(updates)
+            .children(repair)
+            .children(failure)
+            .into_any_element()
+    }
+
+    fn browse_for_cache_dir(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_folder("Game data cache directory");
+        cx.spawn(async move |this, cx| {
+            let Some(picked) = asked.await else { return };
+            let path = picked.to_string_lossy().into_owned();
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.cache_dir_input.update(cx, |state, cx| state.set_value(path.clone(), window, cx));
+                if let Some(settings) = this.settings_mut() {
+                    settings.game_data_cache_dir = path.clone();
+                }
+                settings_store::save(keys::GAME_DATA_CACHE_DIR, &path, cx);
+                this.forget_cache_findings(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Prunes every cached build but the newest.
+    ///
+    /// Run off the UI thread: it removes whole build directories, which on a
+    /// large cache is thousands of files.
+    fn delete_old_cache_versions(&mut self, base: PathBuf, cx: &mut Context<Self>) {
+        cx.spawn(async move |this, cx| {
+            let deleted = cx.background_spawn(async move { wows_data_mgr::dump::delete_old_versions(&base) }).await;
+            let _ = this.update(cx, |this, cx| {
+                if deleted > 0 {
+                    this.forget_cache_findings(cx);
+                }
+            });
+        })
+        .detach();
+    }
+
+    fn check_cache_for_updates(&mut self, base: PathBuf, cx: &mut Context<Self>) {
+        let known_tip = self.settings().and_then(|settings| settings.game_data_repo_commit.clone());
+        let proxy = self.proxy_url();
+        let view = cx.entity();
+        game_data_cache::check_for_updates(
+            |this: &mut Self| &mut this.cache,
+            base,
+            known_tip,
+            proxy,
+            &view,
+            cx,
+            |this, outcome, cx| this.cache_job_finished(outcome, cx),
+        );
+    }
+
+    fn validate_cache(&mut self, base: PathBuf, cx: &mut Context<Self>) {
+        let proxy = self.proxy_url();
+        let view = cx.entity();
+        game_data_cache::validate(
+            |this: &mut Self| &mut this.cache,
+            base,
+            proxy,
+            &view,
+            cx,
+            |this, outcome, cx| this.cache_job_finished(outcome, cx),
+        );
+    }
+
+    fn fetch_cache_builds(
+        &mut self,
+        base: PathBuf,
+        builds: Vec<wows_data_mgr::download_repo::BuildUpdateStatus>,
+        cx: &mut Context<Self>,
+    ) {
+        if builds.is_empty() {
+            return;
+        }
+        let proxy = self.proxy_url();
+        let view = cx.entity();
+        game_data_cache::download(
+            |this: &mut Self| &mut this.cache,
+            base,
+            builds,
+            proxy,
+            &view,
+            cx,
+            |this, outcome, cx| this.cache_job_finished(outcome, cx),
+        );
     }
 
     fn edit_setting<T: serde::Serialize>(
@@ -1299,6 +1721,8 @@ impl App {
             ),
         );
 
+        let cache = self.render_cache_section(cx);
+
         let replay_section = settings_section(
             crate::icons::TABLE,
             t!("ui.settings.replay.heading").into_owned(),
@@ -1484,7 +1908,15 @@ impl App {
             .overflow_y_scroll()
             .track_scroll(&self.settings_scroll)
             .child(
-                v_flex().gap_6().p_4().child(application).child(game).child(replay_section).child(twitch).child(armor),
+                v_flex()
+                    .gap_6()
+                    .p_4()
+                    .child(application)
+                    .child(game)
+                    .child(cache)
+                    .child(replay_section)
+                    .child(twitch)
+                    .child(armor),
             )
             .into_any_element()
     }
@@ -1504,7 +1936,11 @@ fn open_data_directory() {
         tracing::warn!("settings: the storage directory could not be created: {err}");
         return;
     }
+    open_directory(&dir);
+}
 
+/// Shows `dir` in the desktop's own file manager.
+fn open_directory(dir: &std::path::Path) {
     #[cfg(target_os = "windows")]
     let opener = "explorer.exe";
     #[cfg(target_os = "macos")]
@@ -1512,8 +1948,8 @@ fn open_data_directory() {
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let opener = "xdg-open";
 
-    if let Err(err) = std::process::Command::new(opener).arg(&dir).spawn() {
-        tracing::warn!("settings: the storage directory could not be opened: {err}");
+    if let Err(err) = std::process::Command::new(opener).arg(dir).spawn() {
+        tracing::warn!("settings: {} could not be opened: {err}", dir.display());
     }
 }
 

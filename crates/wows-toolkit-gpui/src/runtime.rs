@@ -72,3 +72,21 @@ where
     let mut guard = AbortOnDrop(handle.spawn(future));
     cx.background_spawn(async move { (&mut guard.0).await.map_err(TokioError::Join) })
 }
+
+/// Drives a future that is not `Send` to completion on one thread, yielding a
+/// GPUI `Task` for its result.
+///
+/// [`spawn`] needs a `Send` future because tokio may move it between workers.
+/// Some of `wows_data_mgr`'s download futures hold state across an await that
+/// cannot cross threads, so they are built and driven on a single GPUI
+/// background thread with the tokio reactor entered, which is how the egui app
+/// drives the same calls. `make` builds the future there rather than taking
+/// one built by the caller, so nothing non-`Send` has to reach the thread.
+pub fn block_on<R, F>(cx: &AsyncApp, make: impl FnOnce() -> F + Send + 'static) -> Task<R>
+where
+    R: Send + 'static,
+    F: Future<Output = R>,
+{
+    let handle: Handle = cx.update(|cx| cx.global::<TokioRuntime>().0.handle().clone());
+    cx.background_spawn(async move { handle.block_on(make()) })
+}
