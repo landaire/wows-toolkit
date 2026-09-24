@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_config::index::query::SortColumn as SearchSortColumn;
+use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -935,6 +936,14 @@ fn the_clans_table_keeps_its_own_sort(cx: &mut TestAppContext) {
         window.click(by_tag, cx);
         assert_eq!(window.find(by_tag).selected(), Some(true));
         assert_eq!(window.find(by_encounters).selected(), Some(false));
+
+        // Every column the egui clans table draws is here and sortable.
+        assert_eq!(ClanSortColumn::ALL.len(), 6);
+        for index in 0..ClanSortColumn::ALL.len() {
+            let column = ("tracker-clan-sort", index);
+            window.click(column, cx);
+            assert_eq!(window.find(column).selected(), Some(true), "clan column {index} takes the sort");
+        }
     })
     .expect("the test window stays open");
 }
