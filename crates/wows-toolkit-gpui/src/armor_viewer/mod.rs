@@ -50,6 +50,7 @@ pub mod pane;
 pub mod picking_ui;
 pub mod popover;
 pub mod sidebar;
+pub mod trajectory;
 pub mod upload;
 pub mod upload_hull;
 pub mod viewport_view;
