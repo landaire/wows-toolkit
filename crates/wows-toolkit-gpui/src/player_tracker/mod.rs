@@ -6,6 +6,7 @@
 //! have been met. The rows come from the shared replay index.
 
 mod live;
+mod panels;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
@@ -15,6 +16,11 @@ use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::dock::DockArea;
+use gpui_kit::component::dock::DockPlacement;
+use gpui_kit::component::dock::DockSkin;
+use gpui_kit::component::dock::PanelId;
+use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -26,8 +32,6 @@ use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::select::SelectEvent;
 use gpui_kit::component::select::SelectState;
-use gpui_kit::component::tab::Tab;
-use gpui_kit::component::tab::TabBar;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -101,7 +105,6 @@ use crate::runtime;
 use crate::ui::selectable;
 
 const ROW_HEIGHT: Pixels = px(24.);
-const LIST_OVERDRAW: Pixels = px(200.);
 const NAME_COLUMN_WIDTH: Pixels = px(220.);
 const CLAN_TAG_COLUMN_WIDTH: Pixels = px(160.);
 const MEMBERS_COLUMN_WIDTH: Pixels = px(120.);
@@ -122,7 +125,7 @@ const CHAT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// Both read the same loaded players, so switching is a re-render rather than
 /// another query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SubTab {
+pub(crate) enum SubTab {
     Players,
     /// The battle in progress, which is a different source entirely: the
     /// game's own `tempArenaInfo.json` rather than the index.
@@ -132,19 +135,14 @@ enum SubTab {
 
 impl SubTab {
     /// The order the egui app lists them in.
-    const ALL: [SubTab; 3] = [SubTab::Players, SubTab::CurrentMatch, SubTab::Clans];
+    pub(crate) const ALL: [SubTab; 3] = [SubTab::Players, SubTab::CurrentMatch, SubTab::Clans];
 
-    const fn label_key(self) -> &'static str {
+    pub(crate) const fn label_key(self) -> &'static str {
         match self {
             Self::Players => "ui.player_tracker.subtab_players",
             Self::CurrentMatch => "ui.player_tracker.subtab_current_match",
             Self::Clans => "ui.player_tracker.subtab_clans",
         }
-    }
-
-    /// The section's name in the reader's own language.
-    fn label(self) -> String {
-        t!(self.label_key()).into_owned()
     }
 }
 const CLAN_COLUMN_WIDTH: Pixels = px(120.);
@@ -250,7 +248,6 @@ struct TrackerSettings {
 }
 
 pub struct PlayerTrackerView {
-    sub_tab: SubTab,
     /// The battle in progress, `None` when there is none. Filled in by the
     /// poll in `live`, which starts once the replays directory is known.
     live_match: Option<LiveMatch>,
@@ -350,7 +347,11 @@ pub struct PlayerTrackerView {
     clan_state: LoadState,
     /// Bumped per query so a slower earlier period cannot overwrite a later.
     generation: u64,
-    list_state: ListState,
+    /// The dock the three sections live in, so they can be split and docked.
+    dock_area: Entity<DockArea>,
+    /// The panels in it, in [`SubTab::ALL`] order, so a row count can be
+    /// pushed to the one it belongs to.
+    panels: Vec<Entity<panels::TrackerPanel>>,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -376,8 +377,28 @@ impl PlayerTrackerView {
         let subscription = cx.subscribe(&filter_input, Self::on_filter_event);
         let note_edited = cx.subscribe(&note_input, Self::on_note_edited);
 
+        // The skinned area is what draws a tab bar over a group holding more
+        // than one panel, which is what the three sections read as until one
+        // is dragged out.
+        let (dock_area, _) = DockSkin::dock_area("tracker-dock", None, window, cx);
+        let this = cx.weak_entity();
+        let panels: Vec<Entity<panels::TrackerPanel>> = SubTab::ALL
+            .map(|section| {
+                let panel = cx.new(|cx| panels::TrackerPanel::new(section, this.clone(), cx));
+                dock_area.update(cx, |dock, cx| {
+                    dock.add_panel_view(panel_handle(panel.clone()), DockPlacement::Center, None, window, cx);
+                });
+                panel
+            })
+            .to_vec();
+        // Each add shows what it added, so the last would be on top; the tab
+        // opens on its players, as the egui tracker does.
+        if let Some(first) = panels.first() {
+            let id = PanelId::from(first.entity_id());
+            dock_area.update(cx, |dock, cx| dock.select_panel(id, window, cx));
+        }
+
         Self {
-            sub_tab: SubTab::Players,
             live_match: None,
             live_checked: false,
             game_data: None,
@@ -420,7 +441,8 @@ impl PlayerTrackerView {
             state: LoadState::Idle,
             clan_state: LoadState::Idle,
             generation: 0,
-            list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            dock_area,
+            panels,
             focus_handle: cx.focus_handle(),
             _subscriptions: vec![subscription, note_edited, period_chosen],
         }
@@ -580,8 +602,10 @@ impl PlayerTrackerView {
 
     /// Tells the list that a row's height changed under it.
     fn remeasure_rows(&mut self, cx: &mut Context<Self>) {
-        let len = self.visible_len();
-        self.list_state.remeasure_items(0..len);
+        for panel in self.panels.clone() {
+            let rows = self.rows_in(panel.read(cx).section());
+            panel.update(cx, |panel, cx| panel.remeasure(rows, cx));
+        }
         cx.notify();
     }
 
@@ -759,7 +783,9 @@ impl PlayerTrackerView {
         self.state = LoadState::Loading;
         self.clan_state = LoadState::Idle;
         self.load_tracked_players(pool.clone(), cx);
-        self.load_clan_inputs_if_shown(cx);
+        // A refresh re-reads whatever is on screen; the clans section asks
+        // again for itself as it redraws.
+        self.load_clan_inputs_if_idle(cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -858,16 +884,6 @@ impl PlayerTrackerView {
         self.show_division_mates = show;
         self.store_view_modes(cx);
         self.sync_rows(cx);
-    }
-
-    fn visible_len(&self) -> usize {
-        match self.sub_tab {
-            SubTab::Players => self.rows().len(),
-            // The roster is two short teams drawn side by side, not a
-            // virtualized list, so it contributes no rows to `list_state`.
-            SubTab::CurrentMatch => 0,
-            SubTab::Clans => self.clans().len(),
-        }
     }
 
     /// The live roster joined to game data and tracked history.
@@ -1124,24 +1140,51 @@ impl PlayerTrackerView {
         }));
     }
 
+    /// Tells each section's own list how many rows it has now.
     fn sync_rows(&mut self, cx: &mut Context<Self>) {
-        self.list_state.reset(self.visible_len());
+        for panel in self.panels.clone() {
+            let rows = self.rows_in(panel.read(cx).section());
+            panel.update(cx, |panel, cx| panel.rows_changed(rows, cx));
+        }
         cx.notify();
     }
 
-    fn set_sub_tab(&mut self, sub_tab: SubTab, cx: &mut Context<Self>) {
-        if self.sub_tab == sub_tab {
-            return;
+    /// How many rows one section has.
+    fn rows_in(&self, section: SubTab) -> usize {
+        match section {
+            SubTab::Players => self.rows().len(),
+            // The roster is two short teams drawn side by side, not a
+            // virtualized list, so it contributes no rows to a list state.
+            SubTab::CurrentMatch => 0,
+            SubTab::Clans => self.clans().len(),
         }
-        self.sub_tab = sub_tab;
-        self.load_clan_inputs_if_shown(cx);
+    }
+
+    /// Brings one section forward in the dock.
+    ///
+    /// The app itself switches sections through the dock's own tab bar; this
+    /// is how a test asks for one, and how anything that wants to point the
+    /// reader at a section would.
+    #[cfg(test)]
+    pub(crate) fn set_sub_tab(&mut self, sub_tab: SubTab, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(panel) = self.panels.iter().find(|panel| panel.read(cx).section() == sub_tab) {
+            let id = PanelId::from(panel.entity_id());
+            self.dock_area.update(cx, |dock, cx| dock.select_panel(id, window, cx));
+        }
+        if sub_tab == SubTab::Clans {
+            self.load_clan_inputs_if_idle(cx);
+        }
         self.sync_rows(cx);
     }
 
-    /// Starts the clans table's own index reads, if that table is the one on
-    /// screen and they have not been read for this refresh yet.
-    fn load_clan_inputs_if_shown(&mut self, cx: &mut Context<Self>) {
-        if self.sub_tab != SubTab::Clans || !matches!(self.clan_state, LoadState::Idle) {
+    /// Starts the clans table's own index reads, unless they have already
+    /// been read for this refresh.
+    ///
+    /// Asked for by the clans section as it draws rather than by whatever
+    /// switched to it: the sections are dock panels, so one can be brought on
+    /// screen by a drag this tab never hears about.
+    fn load_clan_inputs_if_idle(&mut self, cx: &mut Context<Self>) {
+        if !matches!(self.clan_state, LoadState::Idle) {
             return;
         }
         let Some(pool) = crate::settings_store::pool(cx) else { return };
@@ -1228,6 +1271,306 @@ impl PlayerTrackerView {
 
     /// The Current Match body: the roster when a battle is under way, and
     /// what is missing when it is not.
+    /// One section's own table: its header and the rows under it.
+    ///
+    /// Takes the section to draw and the list it scrolls rather than reading
+    /// the tab's own, so two sections docked beside each other each scroll
+    /// their own rows.
+    pub(crate) fn render_section(
+        &mut self,
+        sub_tab: SubTab,
+        list_state: &ListState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let border = cx.theme().border;
+        let hover_bg = cx.theme().accent;
+
+        // Drawing the clans table is what says it is wanted, whether it was
+        // brought forward by its tab or dragged into view.
+        if sub_tab == SubTab::Clans {
+            self.load_clan_inputs_if_idle(cx);
+        }
+
+        // The Current Match roster is its own layout: two teams side by
+        // side, each with its own header, so the shared table chrome below
+        // does not apply to it.
+        if sub_tab == SubTab::CurrentMatch {
+            return self.render_current_match(cx);
+        }
+
+        let header_cells: Vec<AnyElement> = match sub_tab {
+            SubTab::Players => SortColumn::ALL
+                .iter()
+                .enumerate()
+                .map(|(index, column)| {
+                    let column = *column;
+                    let width = player_column_width(column);
+                    sort_header(
+                        HeaderCell {
+                            id_prefix: "tracker-sort",
+                            index,
+                            label: t!(column.label_key()).into_owned().into(),
+                            width,
+                            active: self.sort.column == column,
+                            order: self.sort.order,
+                        },
+                        move |this, cx| this.sort_by(column, cx),
+                        cx,
+                    )
+                })
+                .collect(),
+            SubTab::CurrentMatch => unreachable!("the roster returns above"),
+            SubTab::Clans => ClanSortColumn::ALL
+                .iter()
+                .enumerate()
+                .map(|(index, column)| {
+                    let column = *column;
+                    let width = clan_column_width(column);
+                    sort_header(
+                        HeaderCell {
+                            id_prefix: "tracker-clan-sort",
+                            index,
+                            label: t!(column.label_key()).into_owned().into(),
+                            width,
+                            active: self.clan_sort.column == column,
+                            order: self.clan_sort.order,
+                        },
+                        move |this, cx| this.sort_clans_by(column, cx),
+                        cx,
+                    )
+                })
+                .collect(),
+        };
+
+        let header = h_flex()
+            .flex_none()
+            .gap_2()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(border)
+            .children(header_cells);
+
+        let players = self.rows();
+        let clans = self.clans();
+        let notes: HashMap<AccountId, String> = self
+            .tracked
+            .iter()
+            .filter(|(_, player)| !player.notes.is_empty())
+            .map(|(id, player)| (*id, player.notes.clone()))
+            .collect();
+        let tracker = cx.entity();
+        // What an opened row shows beneath itself, taken here rather than in
+        // the row closure, which cannot reach back into the tab.
+        let expanded = self.expanded_players.clone();
+        let details: HashMap<AccountId, PlayerDetail> = expanded
+            .iter()
+            .map(|account| (*account, player_detail(self.tracked.get(account), self.show_division_mates)))
+            .collect();
+        let expanded_clans = self.expanded_clans.clone();
+        // The name each member is known by, which the clan aggregate holds
+        // only account ids for.
+        let member_names: HashMap<AccountId, String> =
+            self.tracked.iter().map(|(id, player)| (*id, player.last_name.clone())).collect();
+        let editing_note = self.editing_note;
+        let note_input = self.note_input.clone();
+        let note_error = self.note_error.clone();
+        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| match sub_tab {
+            SubTab::Players => {
+                let Some(row) = players.get(ix) else {
+                    return div().into_any_element();
+                };
+                let account = row.facet.account_id;
+                let open = expanded.contains(&account);
+                let cells = h_flex()
+                    .id(ix)
+                    .w_full()
+                    .h(ROW_HEIGHT)
+                    .gap_2()
+                    .items_center()
+                    .px_2()
+                    .hover(|this| this.bg(hover_bg))
+                    .child(
+                        h_flex()
+                            .w(NAME_COLUMN_WIDTH)
+                            .gap_1()
+                            .items_center()
+                            .child(expand_caret(("tracker-player-expand", ix), open, {
+                                let tracker = tracker.clone();
+                                move |cx: &mut App| {
+                                    tracker.update(cx, |this, cx| this.toggle_player_expanded(account, cx));
+                                }
+                            }))
+                            .child(div().flex_1().min_w(px(0.)).text_sm().child(row.facet.latest_name.clone())),
+                    )
+                    .child(
+                        div()
+                            .w(CLAN_COLUMN_WIDTH)
+                            .text_sm()
+                            .text_color(crate::theme::text_dim())
+                            .child(row.facet.clan.clone()),
+                    )
+                    // Both counts are read in the tone the in-range one
+                    // deserves: how often you have met someone lately is what
+                    // the ramp is warning about.
+                    .child(
+                        div()
+                            .w(COUNT_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.encounters_in_range), |el, color| el.text_color(color))
+                            .child(count_text(row.total_encounters)),
+                    )
+                    .child(
+                        div()
+                            .w(RANGE_COUNT_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.encounters_in_range), |el, color| el.text_color(color))
+                            .child(separate_number(row.encounters_in_range as i64, None)),
+                    )
+                    .child(last_seen_cell(ix, row.last_seen))
+                    .child(find_matches_cell(
+                        ("tracker-find-player", ix),
+                        t!("ui.player_tracker.find_matches").into_owned(),
+                        {
+                            let tracker = tracker.clone();
+                            let account = row.facet.account_id;
+                            move |cx: &mut App| {
+                                tracker.update(cx, |this, cx| this.find_player_matches(account, cx));
+                            }
+                        },
+                    ))
+                    .child(note_cell(ix, row.facet.account_id, notes.get(&row.facet.account_id), tracker.clone()));
+
+                let detail = open.then(|| {
+                    player_detail_block(
+                        ix,
+                        account,
+                        details.get(&account),
+                        (editing_note == Some(account))
+                            .then(|| OpenNote { input: note_input.clone(), error: note_error.clone() }),
+                    )
+                });
+
+                v_flex()
+                    .w_full()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
+                    .child(cells)
+                    .children(detail)
+                    .into_any_element()
+            }
+            SubTab::CurrentMatch => unreachable!("the roster returns above"),
+            SubTab::Clans => {
+                let Some(row) = clans.get(ix) else {
+                    return div().into_any_element();
+                };
+                let open = expanded_clans.contains(&row.clan);
+                let cells = h_flex()
+                    .id(ix)
+                    .w_full()
+                    .h(ROW_HEIGHT)
+                    .gap_2()
+                    .items_center()
+                    .px_2()
+                    .hover(|this| this.bg(hover_bg))
+                    // The tag and both battle counts read in the tone the
+                    // in-range count deserves, as the egui table's do.
+                    .child(
+                        h_flex()
+                            .w(CLAN_TAG_COLUMN_WIDTH)
+                            .gap_1()
+                            .items_center()
+                            .child(expand_caret(("tracker-clan-expand", ix), open, {
+                                let tracker = tracker.clone();
+                                let clan = row.clan.clone();
+                                move |cx: &mut App| {
+                                    let clan = clan.clone();
+                                    tracker.update(cx, |this, cx| this.toggle_clan_expanded(clan, cx));
+                                }
+                            }))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .text_sm()
+                                    .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
+                                    .child(row.clan.clone()),
+                            ),
+                    )
+                    .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))
+                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(separate_number(row.matches as i64, None)))
+                    .child(
+                        div()
+                            .w(RANGE_COUNT_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
+                            .child(separate_number(row.matches_in_range as i64, None)),
+                    )
+                    .child(sightings_cell(ix, row.sightings, row.sightings_in_range))
+                    .child(last_seen_cell(ix, Some(row.last_seen)))
+                    .child(find_matches_cell(
+                        ("tracker-find-clan", ix),
+                        t!("ui.player_tracker.find_clan_matches").into_owned(),
+                        {
+                            let tracker = tracker.clone();
+                            let clan = row.clan.clone();
+                            move |cx: &mut App| {
+                                let clan = clan.clone();
+                                tracker.update(cx, |this, cx| this.find_clan_matches(clan, cx));
+                            }
+                        },
+                    ));
+
+                let members = open.then(|| clan_member_list(ix, &row.members, &member_names, tracker.clone()));
+
+                v_flex()
+                    .w_full()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
+                    .child(cells)
+                    .children(members)
+                    .into_any_element()
+            }
+        };
+
+        // The clans table reads its own aggregates, so it reports on those
+        // rather than on the player query it does not draw from.
+        let load_state = match sub_tab {
+            SubTab::Clans => &self.clan_state,
+            _ => &self.state,
+        };
+        let status = match load_state {
+            LoadState::Idle => Some(t!("ui.player_tracker.waiting_for_index").into_owned()),
+            LoadState::Loading => match sub_tab {
+                SubTab::Clans => Some(t!("ui.player_tracker.loading_clans").into_owned()),
+                _ => Some(t!("ui.player_tracker.loading_players").into_owned()),
+            },
+            LoadState::Failed(reason) => Some(t!("ui.player_tracker.index_failed", reason = reason).to_string()),
+            LoadState::Loaded if self.rows_in(sub_tab) == 0 => match sub_tab {
+                SubTab::Players => Some(t!("ui.player_tracker.no_players").into_owned()),
+                SubTab::Clans => Some(t!("ui.player_tracker.clan_no_data").into_owned()),
+                SubTab::CurrentMatch => unreachable!("the roster returns above"),
+            },
+            LoadState::Loaded => None,
+        };
+
+        let body: AnyElement = match status {
+            Some(status) => v_flex()
+                .size_full()
+                .items_center()
+                .justify_center()
+                .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
+                .into_any_element(),
+            None => div()
+                .relative()
+                .size_full()
+                .child(list(list_state.clone(), render_row).size_full())
+                .child(Scrollbar::vertical(list_state))
+                .into_any_element(),
+        };
+
+        v_flex().size_full().child(header).child(div().flex_1().min_h(px(0.)).child(body)).into_any_element()
+    }
+
     fn render_current_match(&self, cx: &mut Context<Self>) -> AnyElement {
         let border = cx.theme().border;
 
@@ -2145,16 +2488,6 @@ impl Render for PlayerTrackerView {
             self.load_view(window, cx);
         }
         let border = cx.theme().border;
-        let hover_bg = cx.theme().accent;
-
-        // The three sections are tabs, as they are in the egui tab (which
-        // docks them), rather than a row of buttons.
-        let sub_tabs = TabBar::new("tracker-subtabs")
-            .selected_index(self.sub_tab as usize)
-            .children(SubTab::ALL.map(|sub_tab| Tab::new().label(sub_tab.label())))
-            .on_click(cx.listener(|this, ix: &usize, _window, cx| {
-                this.set_sub_tab(SubTab::ALL[*ix], cx);
-            }));
 
         // Not wrapping: a wrapped row does not grow its own height in this
         // layout, so a second line would be drawn over the table header
@@ -2189,314 +2522,29 @@ impl Render for PlayerTrackerView {
                 // The checkbox sits at the far end rather than beside the filter,
                 // so neither moves when the other changes size.
                 .child(div().flex_1().min_w(px(0.)))
-                // Only the tables it filters offer it; the roster shows the
-                // battle in progress, which has no history to leave out.
-                .when(self.sub_tab != SubTab::CurrentMatch, |this| {
+                // Offered whatever is docked: the tables count it and the
+                // roster's own Seen column follows it too.
+                .child(crate::ui::rule_v(cx))
+                .child({
                     let show = self.show_division_mates;
-                    this.child(crate::ui::rule_v(cx)).child(
-                        Checkbox::new("tracker-show-division-mates")
-                            .label(t!("ui.player_tracker.show_division_mates").to_string())
-                            .checked(show)
-                            .tooltip(t!("ui.player_tracker.show_division_mates_hover").to_string())
-                            .on_click(cx.listener(move |this, _event, _window, cx| {
-                                this.set_show_division_mates(!show, cx);
-                            })),
-                    )
+                    Checkbox::new("tracker-show-division-mates")
+                        .label(t!("ui.player_tracker.show_division_mates").to_string())
+                        .checked(show)
+                        .tooltip(t!("ui.player_tracker.show_division_mates_hover").to_string())
+                        .on_click(cx.listener(move |this, _event, _window, cx| {
+                            this.set_show_division_mates(!show, cx);
+                        }))
                 });
-
-        // The Current Match roster is its own layout: two teams side by
-        // side, each with its own header, so the shared table chrome below
-        // does not apply to it.
-        if self.sub_tab == SubTab::CurrentMatch {
-            return v_flex()
-                .id("tracker-root")
-                .track_focus(&self.focus_handle)
-                .size_full()
-                .child(sub_tabs)
-                .child(toolbar)
-                .child(div().flex_1().min_h(px(0.)).child(self.render_current_match(cx)))
-                .into_any_element();
-        }
-
-        let header_cells: Vec<AnyElement> = match self.sub_tab {
-            SubTab::Players => SortColumn::ALL
-                .iter()
-                .enumerate()
-                .map(|(index, column)| {
-                    let column = *column;
-                    let width = player_column_width(column);
-                    sort_header(
-                        HeaderCell {
-                            id_prefix: "tracker-sort",
-                            index,
-                            label: t!(column.label_key()).into_owned().into(),
-                            width,
-                            active: self.sort.column == column,
-                            order: self.sort.order,
-                        },
-                        move |this, cx| this.sort_by(column, cx),
-                        cx,
-                    )
-                })
-                .collect(),
-            SubTab::CurrentMatch => unreachable!("the roster returns above"),
-            SubTab::Clans => ClanSortColumn::ALL
-                .iter()
-                .enumerate()
-                .map(|(index, column)| {
-                    let column = *column;
-                    let width = clan_column_width(column);
-                    sort_header(
-                        HeaderCell {
-                            id_prefix: "tracker-clan-sort",
-                            index,
-                            label: t!(column.label_key()).into_owned().into(),
-                            width,
-                            active: self.clan_sort.column == column,
-                            order: self.clan_sort.order,
-                        },
-                        move |this, cx| this.sort_clans_by(column, cx),
-                        cx,
-                    )
-                })
-                .collect(),
-        };
-
-        let header = h_flex()
-            .flex_none()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .py_1()
-            .border_b_1()
-            .border_color(border)
-            .children(header_cells);
-
-        let players = self.rows();
-        let clans = self.clans();
-        let sub_tab = self.sub_tab;
-        let notes: HashMap<AccountId, String> = self
-            .tracked
-            .iter()
-            .filter(|(_, player)| !player.notes.is_empty())
-            .map(|(id, player)| (*id, player.notes.clone()))
-            .collect();
-        let tracker = cx.entity();
-        // What an opened row shows beneath itself, taken here rather than in
-        // the row closure, which cannot reach back into the tab.
-        let expanded = self.expanded_players.clone();
-        let details: HashMap<AccountId, PlayerDetail> = expanded
-            .iter()
-            .map(|account| (*account, player_detail(self.tracked.get(account), self.show_division_mates)))
-            .collect();
-        let expanded_clans = self.expanded_clans.clone();
-        // The name each member is known by, which the clan aggregate holds
-        // only account ids for.
-        let member_names: HashMap<AccountId, String> =
-            self.tracked.iter().map(|(id, player)| (*id, player.last_name.clone())).collect();
-        let editing_note = self.editing_note;
-        let note_input = self.note_input.clone();
-        let note_error = self.note_error.clone();
-        let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| match sub_tab {
-            SubTab::Players => {
-                let Some(row) = players.get(ix) else {
-                    return div().into_any_element();
-                };
-                let account = row.facet.account_id;
-                let open = expanded.contains(&account);
-                let cells = h_flex()
-                    .id(ix)
-                    .w_full()
-                    .h(ROW_HEIGHT)
-                    .gap_2()
-                    .items_center()
-                    .px_2()
-                    .hover(|this| this.bg(hover_bg))
-                    .child(
-                        h_flex()
-                            .w(NAME_COLUMN_WIDTH)
-                            .gap_1()
-                            .items_center()
-                            .child(expand_caret(("tracker-player-expand", ix), open, {
-                                let tracker = tracker.clone();
-                                move |cx: &mut App| {
-                                    tracker.update(cx, |this, cx| this.toggle_player_expanded(account, cx));
-                                }
-                            }))
-                            .child(div().flex_1().min_w(px(0.)).text_sm().child(row.facet.latest_name.clone())),
-                    )
-                    .child(
-                        div()
-                            .w(CLAN_COLUMN_WIDTH)
-                            .text_sm()
-                            .text_color(crate::theme::text_dim())
-                            .child(row.facet.clan.clone()),
-                    )
-                    // Both counts are read in the tone the in-range one
-                    // deserves: how often you have met someone lately is what
-                    // the ramp is warning about.
-                    .child(
-                        div()
-                            .w(COUNT_COLUMN_WIDTH)
-                            .text_sm()
-                            .when_some(severity_color(row.encounters_in_range), |el, color| el.text_color(color))
-                            .child(count_text(row.total_encounters)),
-                    )
-                    .child(
-                        div()
-                            .w(RANGE_COUNT_COLUMN_WIDTH)
-                            .text_sm()
-                            .when_some(severity_color(row.encounters_in_range), |el, color| el.text_color(color))
-                            .child(separate_number(row.encounters_in_range as i64, None)),
-                    )
-                    .child(last_seen_cell(ix, row.last_seen))
-                    .child(find_matches_cell(
-                        ("tracker-find-player", ix),
-                        t!("ui.player_tracker.find_matches").into_owned(),
-                        {
-                            let tracker = tracker.clone();
-                            let account = row.facet.account_id;
-                            move |cx: &mut App| {
-                                tracker.update(cx, |this, cx| this.find_player_matches(account, cx));
-                            }
-                        },
-                    ))
-                    .child(note_cell(ix, row.facet.account_id, notes.get(&row.facet.account_id), tracker.clone()));
-
-                let detail = open.then(|| {
-                    player_detail_block(
-                        ix,
-                        account,
-                        details.get(&account),
-                        (editing_note == Some(account))
-                            .then(|| OpenNote { input: note_input.clone(), error: note_error.clone() }),
-                    )
-                });
-
-                v_flex()
-                    .w_full()
-                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
-                    .child(cells)
-                    .children(detail)
-                    .into_any_element()
-            }
-            SubTab::CurrentMatch => unreachable!("the roster returns above"),
-            SubTab::Clans => {
-                let Some(row) = clans.get(ix) else {
-                    return div().into_any_element();
-                };
-                let open = expanded_clans.contains(&row.clan);
-                let cells = h_flex()
-                    .id(ix)
-                    .w_full()
-                    .h(ROW_HEIGHT)
-                    .gap_2()
-                    .items_center()
-                    .px_2()
-                    .hover(|this| this.bg(hover_bg))
-                    // The tag and both battle counts read in the tone the
-                    // in-range count deserves, as the egui table's do.
-                    .child(
-                        h_flex()
-                            .w(CLAN_TAG_COLUMN_WIDTH)
-                            .gap_1()
-                            .items_center()
-                            .child(expand_caret(("tracker-clan-expand", ix), open, {
-                                let tracker = tracker.clone();
-                                let clan = row.clan.clone();
-                                move |cx: &mut App| {
-                                    let clan = clan.clone();
-                                    tracker.update(cx, |this, cx| this.toggle_clan_expanded(clan, cx));
-                                }
-                            }))
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w(px(0.))
-                                    .text_sm()
-                                    .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
-                                    .child(row.clan.clone()),
-                            ),
-                    )
-                    .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))
-                    .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(separate_number(row.matches as i64, None)))
-                    .child(
-                        div()
-                            .w(RANGE_COUNT_COLUMN_WIDTH)
-                            .text_sm()
-                            .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
-                            .child(separate_number(row.matches_in_range as i64, None)),
-                    )
-                    .child(sightings_cell(ix, row.sightings, row.sightings_in_range))
-                    .child(last_seen_cell(ix, Some(row.last_seen)))
-                    .child(find_matches_cell(
-                        ("tracker-find-clan", ix),
-                        t!("ui.player_tracker.find_clan_matches").into_owned(),
-                        {
-                            let tracker = tracker.clone();
-                            let clan = row.clan.clone();
-                            move |cx: &mut App| {
-                                let clan = clan.clone();
-                                tracker.update(cx, |this, cx| this.find_clan_matches(clan, cx));
-                            }
-                        },
-                    ));
-
-                let members = open.then(|| clan_member_list(ix, &row.members, &member_names, tracker.clone()));
-
-                v_flex()
-                    .w_full()
-                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
-                    .child(cells)
-                    .children(members)
-                    .into_any_element()
-            }
-        };
-
-        // The clans table reads its own aggregates, so it reports on those
-        // rather than on the player query it does not draw from.
-        let load_state = match self.sub_tab {
-            SubTab::Clans => &self.clan_state,
-            _ => &self.state,
-        };
-        let status = match load_state {
-            LoadState::Idle => Some(t!("ui.player_tracker.waiting_for_index").into_owned()),
-            LoadState::Loading => match self.sub_tab {
-                SubTab::Clans => Some(t!("ui.player_tracker.loading_clans").into_owned()),
-                _ => Some(t!("ui.player_tracker.loading_players").into_owned()),
-            },
-            LoadState::Failed(reason) => Some(t!("ui.player_tracker.index_failed", reason = reason).to_string()),
-            LoadState::Loaded if self.visible_len() == 0 => match self.sub_tab {
-                SubTab::Players => Some(t!("ui.player_tracker.no_players").into_owned()),
-                SubTab::Clans => Some(t!("ui.player_tracker.clan_no_data").into_owned()),
-                SubTab::CurrentMatch => unreachable!("the roster returns above"),
-            },
-            LoadState::Loaded => None,
-        };
-
-        let body: AnyElement = match status {
-            Some(status) => v_flex()
-                .size_full()
-                .items_center()
-                .justify_center()
-                .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
-                .into_any_element(),
-            None => div()
-                .relative()
-                .size_full()
-                .child(list(self.list_state.clone(), render_row).size_full())
-                .child(Scrollbar::vertical(&self.list_state))
-                .into_any_element(),
-        };
 
         v_flex()
             .id("tracker-root")
             .track_focus(&self.focus_handle)
             .size_full()
-            .child(sub_tabs)
             .child(toolbar)
-            .child(header)
-            .child(div().flex_1().min_h(px(0.)).child(body))
+            // The sections are dock panels rather than a tab strip, so they
+            // can be split and docked the way the egui tracker's are; the
+            // dock draws its own tab bar over them.
+            .child(div().flex_1().min_h(px(0.)).child(self.dock_area.clone()))
             .into_any_element()
     }
 }
@@ -2590,8 +2638,8 @@ mod tests {
         let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
 
         window
-            .update(cx, |tracker, _window, cx| {
-                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, window, cx);
                 tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
             })
             .expect("the window is open");
@@ -2659,8 +2707,8 @@ mod tests {
         let window = cx.open_window(size(px(1200.), px(700.)), PlayerTrackerView::new);
 
         window
-            .update(cx, |tracker, _window, cx| {
-                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, window, cx);
                 tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
             })
             .expect("the window is open");
@@ -2952,8 +3000,8 @@ mod tests {
         let window = cx.open_window(size(px(1200.), px(700.)), PlayerTrackerView::new);
 
         window
-            .update(cx, |tracker, _window, cx| {
-                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, window, cx);
                 tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
             })
             .expect("the window is open");
@@ -3006,8 +3054,8 @@ mod tests {
         let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
 
         window
-            .update(cx, |tracker, _window, cx| {
-                tracker.set_sub_tab(SubTab::CurrentMatch, cx);
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::CurrentMatch, window, cx);
                 tracker.watch_live_matches(dir.clone(), GameDataCache::new(dir.join("game")), String::new(), cx);
             })
             .expect("the window is open");
@@ -3103,8 +3151,8 @@ mod clan_table_tests {
         let tracked = HashMap::from([(AccountId(7), player)]);
 
         window
-            .update(cx, |tracker, _window, cx| {
-                tracker.set_sub_tab(SubTab::Clans, cx);
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::Clans, window, cx);
                 tracker.seed_players_and_notes(Vec::new(), tracked, cx);
 
                 let rows = tracker.clans();
@@ -3128,6 +3176,41 @@ mod clan_table_tests {
             .expect("the window is open");
     }
 
+    /// Two sections can be on screen at once, each with its own rows.
+    ///
+    /// The point of the dock: while the sections shared one list state, only
+    /// one of them could be scrolled, so only one could usefully be shown.
+    #[gpui_kit::test]
+    fn two_sections_can_be_docked_side_by_side(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(700.)), PlayerTrackerView::new);
+
+        let mut player =
+            TrackedPlayer { clan: "WTK".to_string(), last_name: "Harvey635".to_string(), ..TrackedPlayer::default() };
+        player.arena_ids.insert(ArenaId::from(1i64));
+        player.timestamps.insert(at(10));
+        let tracked = HashMap::from([(AccountId(7), player)]);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.seed_players_and_notes(Vec::new(), tracked, cx);
+
+                let sections: Vec<SubTab> = tracker.panels.iter().map(|panel| panel.read(cx).section()).collect();
+                assert_eq!(sections, SubTab::ALL.to_vec(), "one panel per section, in the egui tab's order");
+
+                // Each section's list holds its own rows, which is what lets
+                // both be shown and scrolled at once.
+                assert_eq!(tracker.panels[0].read(cx).list_len(), tracker.rows().len());
+                assert_eq!(tracker.panels[2].read(cx).list_len(), tracker.clans().len());
+                assert_ne!(
+                    tracker.panels[0].read(cx).list_len(),
+                    tracker.panels[2].read(cx).list_len(),
+                    "the two sections are not holding the same rows"
+                );
+            })
+            .expect("the window is open");
+    }
+
     /// A clans row opens on the members met from that clan.
     #[gpui_kit::test]
     fn a_clans_row_opens_on_the_members_met_from_it(cx: &mut TestAppContext) {
@@ -3141,8 +3224,8 @@ mod clan_table_tests {
         let tracked = HashMap::from([(AccountId(7), player)]);
 
         window
-            .update(cx, |tracker, _window, cx| {
-                tracker.set_sub_tab(SubTab::Clans, cx);
+            .update(cx, |tracker, window, cx| {
+                tracker.set_sub_tab(SubTab::Clans, window, cx);
                 tracker.seed_players_and_notes(Vec::new(), tracked, cx);
             })
             .expect("the window is open");

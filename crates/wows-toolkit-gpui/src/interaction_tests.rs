@@ -67,7 +67,9 @@ const STATS_LIMIT_COUNT: &str = "stats-limit-count";
 
 /// Player Tracker controls (`player_tracker`).
 const TRACKER_FILTER: &str = "tracker-filter";
-const TRACKER_SUBTABS: &str = "tracker-subtabs";
+/// The tracker's sections are dock panels, so the strip over them is the
+/// dock's own tab bar rather than a control the tab draws.
+const TRACKER_SUBTABS: &str = "tab-bar";
 const TRACKER_PERIOD: &str = "tracker-period";
 
 /// The tab strip a dock draws over a group holding more than one panel
@@ -880,23 +882,21 @@ fn the_tracker_sub_tabs_switch_between_their_three_views(cx: &mut TestAppContext
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
 
-        let (players, current_match, clans) = (0usize, 1usize, 2usize);
+        let (current_match, clans) = (1usize, 2usize);
 
-        assert_eq!(window.within(TRACKER_SUBTABS).find(players).selected(), Some(true), "the tracker opens on players");
         // The players table sorts by its own columns.
-        assert!(window.try_find(("tracker-sort", 0usize)).is_some());
+        assert!(window.try_find(("tracker-sort", 0usize)).is_some(), "the tracker opens on players");
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_none());
 
         window.within(TRACKER_SUBTABS).click(clans, cx);
-        assert_eq!(window.within(TRACKER_SUBTABS).find(clans).selected(), Some(true));
-        assert_eq!(window.within(TRACKER_SUBTABS).find(players).selected(), Some(false), "one table at a time");
+        window.render_frame(cx);
         // And the clans table brings its own.
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_some());
-        assert!(window.try_find(("tracker-sort", 0usize)).is_none());
+        assert!(window.try_find(("tracker-sort", 0usize)).is_none(), "one section in front at a time");
 
         // The roster is its own layout, so neither table's header survives it.
         window.within(TRACKER_SUBTABS).click(current_match, cx);
-        assert_eq!(window.within(TRACKER_SUBTABS).find(current_match).selected(), Some(true));
+        window.render_frame(cx);
         assert!(window.try_find(("tracker-sort", 0usize)).is_none());
         assert!(window.try_find(("tracker-clan-sort", 0usize)).is_none());
     })
@@ -934,6 +934,7 @@ fn the_clans_table_keeps_its_own_sort(cx: &mut TestAppContext) {
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::PlayerTracker, cx);
         window.within(TRACKER_SUBTABS).click(2usize, cx);
+        window.render_frame(cx);
 
         let by_tag = ("tracker-clan-sort", 0usize);
         let by_encounters = ("tracker-clan-sort", 2usize);
