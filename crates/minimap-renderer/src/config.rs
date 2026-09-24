@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::draw_command::DrawCommand;
 use crate::draw_command::ShipConfigVisibility;
 
 /// Configurable rendering options.
@@ -382,5 +383,49 @@ include_pre_battle = false
         if overrides.include_pre_battle {
             self.include_pre_battle = true;
         }
+    }
+}
+
+/// Whether a drawn command survives the options in force.
+///
+/// Beside the options it reads rather than in a front end, so every app that
+/// rasterises a command stream hides the same things: a toggle that means one
+/// thing in one viewer and another elsewhere is worse than no toggle.
+pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_ships: bool) -> bool {
+    match cmd {
+        DrawCommand::ShotTracer { .. } => opts.show_tracers,
+        DrawCommand::ShotTracerTip { .. } => opts.show_tracers,
+        DrawCommand::SecondaryShotTracer { .. } => opts.show_tracers,
+        DrawCommand::SecondaryShotTracerTip { .. } => opts.show_tracers,
+        DrawCommand::Torpedo { .. } => opts.show_torpedoes,
+        DrawCommand::Smoke { .. } => opts.show_smoke,
+        DrawCommand::Ship { .. } => true, // ships always drawn; name visibility handled below
+        DrawCommand::HealthBar { .. } => opts.show_hp_bars,
+        DrawCommand::DeadShip { .. } => show_dead_ships,
+        DrawCommand::Plane { .. } => opts.show_planes,
+        DrawCommand::ScoreBar { .. } => opts.show_score,
+        DrawCommand::Timer { .. } => opts.show_timer,
+        DrawCommand::PreBattleCountdown { .. } => opts.show_timer,
+        DrawCommand::KillFeed { .. } => opts.show_kill_feed && !opts.stats_panel_visible(),
+        DrawCommand::CapturePoint { .. } => opts.show_capture_points,
+        DrawCommand::Building { .. } => opts.show_buildings,
+        DrawCommand::CameraDirection { .. } => opts.show_camera_direction,
+        DrawCommand::ConsumableRadius { .. } => opts.show_consumables,
+        DrawCommand::PatrolRadius { .. } => opts.show_planes,
+        DrawCommand::ConsumableIcons { .. } => opts.show_consumables,
+        DrawCommand::PositionTrail { .. } => opts.show_trails || opts.show_speed_trails,
+        DrawCommand::ShipConfigCircle { .. } => opts.show_ship_config,
+        DrawCommand::BuffZone { .. } => opts.show_capture_points,
+        DrawCommand::TeamBuffs { .. } => opts.show_buffs,
+        DrawCommand::BattleResultOverlay { .. } => opts.show_battle_result,
+        DrawCommand::ChatOverlay { .. } => opts.show_chat && !opts.stats_panel_visible(),
+        DrawCommand::TeamAdvantage { .. } => opts.show_advantage,
+        DrawCommand::WeatherZone { .. } => opts.show_weather,
+        DrawCommand::StatsPanel { .. }
+        | DrawCommand::StatsSilhouette { .. }
+        | DrawCommand::StatsDamage { .. }
+        | DrawCommand::StatsRibbons { .. }
+        | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
+        DrawCommand::TeamRoster { .. } => opts.show_team_rosters,
     }
 }

@@ -1141,6 +1141,8 @@ save_as_video = "Save as Video"
 copy_to_clipboard = "Render Video to Clipboard"
 
 [ui.renderer.settings]
+title = "Display Settings"
+hp_bars = "HP Bars"
 ship_settings = "Ship Settings"
 armament = "Armament"
 dead_ships = "Dead Ships"
