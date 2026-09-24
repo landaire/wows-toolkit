@@ -36,6 +36,7 @@ use std::rc::Rc;
 use crate::armor_viewer::ArmorViewerPane;
 use crate::palette::PaletteAction;
 use crate::palette::PaletteEntry;
+use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
@@ -298,6 +299,12 @@ impl App {
         });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
+        // A "find matches" button on a tracker row asks a question the Search
+        // tab answers, so the tracker names the query and the app shows it.
+        let tracker_event = cx.subscribe_in(&player_tracker, window, |this, _tracker, event, window, cx| {
+            let PlayerTrackerEvent::SearchFor(query) = event;
+            this.run_search(query.clone(), window, cx);
+        });
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
         // `Confirm(None)` is the cleared-selection case, which this combo
         // cannot produce: it always holds a language.
@@ -339,6 +346,7 @@ impl App {
                 wows_dir_edited,
                 proxy_edited,
                 search_event,
+                tracker_event,
                 language_chosen,
             ],
         }
@@ -592,11 +600,15 @@ impl App {
             PaletteAction::OpenReplayFile => {
                 self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
             }
-            PaletteAction::SearchFor(query) => {
-                self.active_tab = AppTab::Search;
-                self.search.update(cx, |search, cx| search.run_query(query, window, cx));
-            }
+            PaletteAction::SearchFor(query) => self.run_search(query.to_string(), window, cx),
         }
+        cx.notify();
+    }
+
+    /// Shows the Search tab holding `query`, and runs it.
+    fn run_search(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.active_tab = AppTab::Search;
+        self.search.update(cx, |search, cx| search.run_query(&query, window, cx));
         cx.notify();
     }
 

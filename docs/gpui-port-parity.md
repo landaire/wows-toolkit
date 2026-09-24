@@ -268,15 +268,19 @@ kept so the next audit does not re-report them.
   Range, Sightings (with the in-range figure on hover), Last Encountered, and
   the tag now carries the severity tint. Every heading reads from the same
   `ui.player_tracker.column.*` keys the egui table uses, and the three new
-  sorts are in the shared `ClanSortColumn`. The member list and the clan
-  search are still missing.
-- No "find matches for this player/clan" action anywhere.
+  sorts are in the shared `ClanSortColumn`, and each row's magnifying glass
+  runs the clan search in the Search tab. The member list is still missing.
+- [done] No "find matches for this player/clan" action anywhere. Every
+  historical row and every clans row carries a magnifying glass, and the
+  roster row's menu carries the same item. The query is
+  `wows_toolkit_viewmodel::query_bar::seed`'s, printed back through the
+  grammar, and the tab raises it for the app to show in the Search tab.
 - [done] A roster row's menu links the player to wows-numbers and to
   shipbuilds. The URL builders moved to
   `wows_toolkit_viewmodel::player_tracker`, so both apps link the same way. A
   row the identity scan never named has nothing to link to and shows no menu.
-- The menu has no "find matches for this player" item; that needs the Search
-  tab to accept a seeded player query.
+- [done] The menu has no "find matches for this player" item; that needs the
+  Search tab to accept a seeded player query.
 - [done] Each team is headed by its name, how many players are on it, and its
   average win rate and personal rating in the band's colour. The averaging is
   `wows_toolkit_viewmodel::player_tracker::live`, shared with the egui tab, so
