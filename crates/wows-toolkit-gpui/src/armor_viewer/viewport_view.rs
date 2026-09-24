@@ -457,6 +457,11 @@ pub struct ViewportView {
     /// toggling it here updates both the 3D geometry and which plate rows
     /// that popover's tree shows.
     pub(crate) display_settings: upload::DisplaySettings,
+    /// Whether the viewport is showing only the plates the game's own armor
+    /// viewer hides. A mode rather than a setting: it is not written back
+    /// with the display defaults, because leaving it on is not a state to
+    /// open the next ship in.
+    show_hidden_only: bool,
     /// Whether the display-settings popover is up. Held here rather than in
     /// the popover's own element state because Ctrl+S opens and closes it.
     display_popover_open: bool,
@@ -524,6 +529,7 @@ impl ViewportView {
             pending_armor: None,
             ship_loading: None,
             current_armor: None,
+            show_hidden_only: false,
             display_popover_open: false,
             part_visibility: HashMap::new(),
             armor_all_visible: true,
@@ -838,7 +844,11 @@ impl ViewportView {
                 }
             }
         }
-        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let visibility = VisibilityFilter {
+            part: &self.part_visibility,
+            plate: &self.plate_visibility,
+            show_hidden_only: self.show_hidden_only,
+        };
         self.mesh_triangle_info =
             upload_armor_to_viewport(&mut self.viewport, &device, &armor, visibility, self.display_settings);
         upload_hull::upload_hull_meshes(
@@ -912,6 +922,22 @@ impl ViewportView {
             armor: self.part_visibility.values().all(|visible| *visible)
                 && !self.plate_visibility.values().any(|hidden| *hidden),
         }
+    }
+
+    /// Whether only the plates the game's own viewer hides are being shown.
+    pub(crate) fn show_hidden_only(&self) -> bool {
+        self.show_hidden_only
+    }
+
+    /// Shows only the plates the game's own viewer hides, or everything
+    /// again. Changes which triangles are uploaded, so the armor is rebuilt.
+    pub(crate) fn set_show_hidden_only(&mut self, hidden_only: bool, cx: &mut Context<Self>) {
+        if self.show_hidden_only == hidden_only {
+            return;
+        }
+        self.show_hidden_only = hidden_only;
+        self.reupload_current_armor(cx);
+        cx.notify();
     }
 
     /// Whether the display-settings popover is up.
@@ -1304,7 +1330,11 @@ impl ViewportView {
         }
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
-        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let visibility = VisibilityFilter {
+            part: &self.part_visibility,
+            plate: &self.plate_visibility,
+            show_hidden_only: self.show_hidden_only,
+        };
         let mesh_id = picking_ui::upload_plate_highlight(
             &mut self.viewport,
             &ctx.device,
@@ -1329,7 +1359,11 @@ impl ViewportView {
         }
         let GpuState::Ready { ctx, .. } = &self.gpu else { return };
         let Some(armor) = self.current_armor.clone() else { return };
-        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let visibility = VisibilityFilter {
+            part: &self.part_visibility,
+            plate: &self.plate_visibility,
+            show_hidden_only: self.show_hidden_only,
+        };
         let show_zero_mm = self.display_settings.show_zero_mm;
         let mesh_id = match &key {
             SidebarHighlightKey::Zone(zone) => picking_ui::upload_zone_highlight(
@@ -1613,7 +1647,11 @@ impl ViewportView {
         let Some(armor) = self.current_armor.clone() else { return };
         let device = ctx.device.clone();
         let queue = ctx.queue.clone();
-        let visibility = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let visibility = VisibilityFilter {
+            part: &self.part_visibility,
+            plate: &self.plate_visibility,
+            show_hidden_only: self.show_hidden_only,
+        };
         self.mesh_triangle_info =
             upload::reupload_armor_plates(&mut self.viewport, &device, &armor, visibility, self.display_settings);
         // `viewport.clear()` (inside the armor re-upload above) wipes every
@@ -2023,7 +2061,11 @@ impl ViewportView {
         self.active_camo_uvs = active_camo_uvs;
         self.model_bounds = Some(armor.bounds);
 
-        let visibility_filter = VisibilityFilter { part: &self.part_visibility, plate: &self.plate_visibility };
+        let visibility_filter = VisibilityFilter {
+            part: &self.part_visibility,
+            plate: &self.plate_visibility,
+            show_hidden_only: self.show_hidden_only,
+        };
         self.mesh_triangle_info = upload::reupload_armor_plates(
             &mut self.viewport,
             &device,

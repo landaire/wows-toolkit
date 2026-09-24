@@ -34,6 +34,10 @@ use super::load_ship::ZonePart;
 pub struct VisibilityFilter<'a> {
     pub part: &'a HashMap<(String, String), bool>,
     pub plate: &'a HashMap<PlateKey, bool>,
+    /// Show only the plates the in-game armor viewer hides, which is how the
+    /// egui app's "Show Hidden" mode reads: the plates that are functional in
+    /// the combat model but never drawn in the game's own viewer.
+    pub show_hidden_only: bool,
 }
 
 /// Snapshot of visibility state for undo/redo. Ports

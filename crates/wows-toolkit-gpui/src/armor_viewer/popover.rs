@@ -22,6 +22,7 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
+use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::Size;
 use gpui_kit::component::button::Button;
@@ -94,11 +95,37 @@ pub fn render_toolbar(
         .child(render_visibility_button(view, entity))
         .child(render_hull_button(view, entity))
         .child(render_display_button(view, entity))
+        .child(render_hidden_plates_button(view, entity))
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
             this.child(crate::ui::rule_v(cx)).child(render_penetration_button(pane, view.has_armor()))
         })
+}
+
+/// Toolbar toggle for "Show Hidden": the plates that are part of the combat
+/// model but that the game's own armor viewer never draws.
+///
+/// A mode rather than an addition, so it reads as selected while it is on.
+fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let showing = view.show_hidden_only();
+    let has_armor = view.has_armor();
+    let entity = entity.clone();
+
+    crate::ui::selectable(
+        "armor-show-hidden",
+        showing,
+        Button::new("armor-show-hidden-button")
+            .child(crate::icons::icon(crate::icons::EYE_SLASH))
+            .label(t!("ui.armor.show_hidden").to_string())
+            .compact()
+            .selected(showing)
+            .disabled(!has_armor)
+            .tooltip(t!("ui.armor.show_hidden_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                entity.update(cx, |view, cx| view.set_show_hidden_only(!showing, cx));
+            }),
+    )
 }
 
 /// Toolbar trigger for the penetration checker, which belongs to the pane
