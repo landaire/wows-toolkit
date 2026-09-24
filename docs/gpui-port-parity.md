@@ -210,7 +210,15 @@ kept so the next audit does not re-report them.
   comparison list, the server-vs-simulation report) is still absent.
 - Shell trajectory mode is absent.
 - Splash/blast mode and the splash-box popover are absent.
-- The camera-rings section is absent. Gap detection is on the pane's
+- [done] The camera-rings section is absent. It is in the display popover:
+  the orbits the game's camera rides are drawn over the ship, one mode at a
+  time, with the field-of-view and height sliders the egui section offers and
+  the inner-to-outer zoom path at either field of view. The orbits at both
+  extremes of the range are drawn faint behind the selected one. The
+  resolution is `wowsunpack`'s own `CameraTrajectory::resolve`, so both apps
+  draw the same orbits; a mode name belongs to the ship that named it, so it
+  is corrected whenever the loaded hull changes. The egui section's hover
+  labels over a ring are not ported. Gap detection is on the pane's
   toolbar, carrying its own count: the openings in the armor a shell could
   pass through are marked in red, found by the same two rules the egui app
   uses (an edge belonging to one triangle, no longer than 5 m, with no other

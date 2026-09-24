@@ -47,6 +47,7 @@ use wowsunpack::export::ship::ExportContents;
 use wowsunpack::export::ship::ShipAssets;
 use wowsunpack::export::ship::ShipExportOptions;
 use wowsunpack::game_params::keys::ComponentType;
+use wowsunpack::game_params::types::CameraTrajectory;
 use wowsunpack::game_params::types::GameParamProvider;
 use wowsunpack::game_params::types::Vehicle;
 
@@ -137,6 +138,8 @@ pub struct ShipLoadOptions {
     pub module_overrides: HashMap<ComponentType, String>,
     pub module_alternatives: Vec<(ComponentType, Vec<String>)>,
     pub hull_upgrade_names: Vec<(String, String)>,
+    /// The orbits the game's own camera rides for this ship, by mode name.
+    pub camera_trajectories: Vec<(String, CameraTrajectory)>,
 }
 
 /// A loaded ship's armor data: everything the sidebar/load/upload path in
@@ -164,6 +167,9 @@ pub struct LoadedShipArmor {
     pub loaded_hull: Option<String>,
     /// Module alternatives for the loaded hull upgrade: component type -> component names.
     pub module_alternatives: Vec<(ComponentType, Vec<String>)>,
+    /// The orbits the game's own camera rides, by mode name. Empty for a ship
+    /// whose GameParams name none.
+    pub camera_trajectories: Vec<(String, CameraTrajectory)>,
     /// Camo scheme metadata for the picker (`popover.rs`); no textures decoded.
     pub camo_scheme_infos: Vec<CamoSchemeInfo>,
     /// Decodes a scheme's textures on demand when one is selected.
@@ -282,6 +288,7 @@ fn default_load_options(vehicle: &Vehicle, display_name: &str, lod: usize) -> Sh
         module_overrides: HashMap::new(),
         module_alternatives: module_alternatives_for_hull(vehicle, None),
         hull_upgrade_names: build_hull_upgrade_names(vehicle),
+        camera_trajectories: vehicle.camera_trajectories().to_vec(),
     }
 }
 
@@ -303,6 +310,7 @@ fn reload_load_options(
         lod,
         module_alternatives: module_alternatives_for_hull(vehicle, selected_hull.as_deref()),
         hull_upgrade_names: build_hull_upgrade_names(vehicle),
+        camera_trajectories: vehicle.camera_trajectories().to_vec(),
         selected_hull,
         module_overrides,
     }
@@ -445,6 +453,7 @@ fn load_ship_armor(
         hull_upgrade_names: options.hull_upgrade_names,
         loaded_hull: options.selected_hull,
         module_alternatives: options.module_alternatives,
+        camera_trajectories: options.camera_trajectories,
         camo_scheme_infos,
         camo_source,
     })
