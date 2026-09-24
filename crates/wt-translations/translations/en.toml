@@ -853,6 +853,15 @@ copied = "Copied %{name}"
 # -- Search --
 
 [ui.search]
+pill_select = "Select"
+pill_deselect = "Deselect"
+pill_group_all = "Group with and"
+pill_group_any = "Group with or"
+pill_ungroup = "Ungroup"
+pill_negate = "Negate"
+pill_flip_connector = "Flip and/or"
+pill_delete = "Delete"
+
 match_count_truncated = "%{count}+ matches"
 outcome_win = "Win"
 outcome_loss = "Loss"

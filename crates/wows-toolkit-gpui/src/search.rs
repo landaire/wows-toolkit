@@ -30,14 +30,18 @@ use gpui_kit::*;
 use rust_i18n::t;
 
 use crate::search_pills::EditablePart;
+use crate::search_pills::StructuralEdit;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
 use wows_toolkit_config::index::query::SortDirection;
 use wows_toolkit_config::index::query::SortSpec;
+use wows_toolkit_config::index::query_ast::Expr;
 use wows_toolkit_config::index::query_sql::CompileCtx;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
+use wows_toolkit_viewmodel::query_bar::select;
+use wows_toolkit_viewmodel::query_bar::select::Selection;
 use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::query_bar::suggest::ValueOption;
 use wows_toolkit_viewmodel::query_bar::suggest::ValueRequest;
@@ -92,6 +96,11 @@ impl ResultColumn {
             Self::Ship => px(150.),
         }
     }
+}
+
+/// The path of `path`'s parent. The root's parent is the root.
+fn parent_of(path: &[usize]) -> NodePath {
+    path.iter().copied().take(path.len().saturating_sub(1)).collect()
 }
 
 /// A column as the current frame lays it out.
@@ -296,6 +305,10 @@ pub struct SearchView {
     /// How far back into the history Up has walked, and the text the walk
     /// started from so Down can put it back.
     history_walk: Option<(usize, String)>,
+    /// The pills the reader has selected, which is what a group or a delete
+    /// acts on. Cleared whenever the query is rewritten, since a path names
+    /// a place in a tree that no longer exists.
+    selection: Selection,
     /// The pill segment whose picker is open, and which part of it. `None`
     /// when none is.
     editing: Option<(NodePath, EditablePart)>,
@@ -379,6 +392,7 @@ impl SearchView {
             resizing: None,
             history: Vec::new(),
             history_walk: None,
+            selection: Selection::default(),
             editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
@@ -416,6 +430,65 @@ impl SearchView {
         let replacement = suggest::replace_active_value(&text, &day.format(CALENDAR_DATE_FORMAT).to_string());
         self.completions_open = false;
         self.take_completion(replacement, window, cx);
+    }
+
+    /// Applies one of the pill menu's edits to the query the bar is holding.
+    ///
+    /// The edits themselves are `query_bar::select`'s, shared with the egui
+    /// bar; this applies one, writes the query back as text and re-runs it,
+    /// which is how every other edit in this bar lands.
+    pub(crate) fn apply_structural_edit(
+        &mut self,
+        path: NodePath,
+        edit: StructuralEdit,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if edit == StructuralEdit::ToggleSelected {
+            self.selection.toggle(path);
+            cx.notify();
+            return;
+        }
+
+        let Some(mut expr) = self.reading.clone() else { return };
+        // A menu item acts on the selection where there is one and on the
+        // pill it was opened from where there is not, so a right-click on an
+        // unselected pill still does the obvious thing.
+        let target = if self.selection.is_empty() {
+            let mut one = Selection::default();
+            one.set_one(path.clone());
+            one
+        } else {
+            self.selection.clone()
+        };
+
+        match edit {
+            StructuralEdit::ToggleSelected => unreachable!("handled above"),
+            StructuralEdit::Group { is_or } => select::group(&mut expr, &target, is_or),
+            StructuralEdit::Ungroup => {
+                select::ungroup(&mut expr, &path);
+            }
+            StructuralEdit::Negate => select::negate(&mut expr, &path),
+            StructuralEdit::Delete => select::delete(&mut expr, &target),
+            StructuralEdit::FlipConnector => {
+                let is_or = matches!(select::node_at(&expr, &parent_of(&path)), Some(Expr::Any(_)));
+                select::set_connector(&mut expr, &path, !is_or);
+            }
+        }
+        select::canonicalise(&mut expr);
+
+        // Every path the selection held named a place in the tree that has
+        // just been rewritten.
+        self.selection.clear();
+        self.set_query_text(query_text::print_query(&expr), window, cx);
+    }
+
+    /// Replaces the bar's text with `text` and runs it.
+    fn set_query_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.query_input.update(cx, |state, cx| state.set_value(text, window, cx));
+        self.reading = query_text::parse_query(self.query_input.read(cx).value().as_ref()).ok();
+        self.run(cx);
+        cx.notify();
     }
 
     fn take_completion(&mut self, replacement: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -1239,9 +1312,19 @@ impl Render for SearchView {
             .as_ref()
             .and_then(|expr| {
                 let entity = entity.clone();
-                crate::search_pills::pill_strip(expr, &self.name_cache, cx, move |path, part, cx| {
-                    entity.update(cx, |this, cx| this.toggle_picker(path, part, cx));
-                })
+                let structure_entity = entity.clone();
+                crate::search_pills::pill_strip(
+                    expr,
+                    &self.name_cache,
+                    &self.selection,
+                    cx,
+                    move |path, part, cx| {
+                        entity.update(cx, |this, cx| this.toggle_picker(path, part, cx));
+                    },
+                    move |path, edit, window, cx| {
+                        structure_entity.update(cx, |this, cx| this.apply_structural_edit(path, edit, window, cx));
+                    },
+                )
             })
             .map(|strip| div().id("search-pills").test_support().w_full().px(px(20.)).child(strip));
 
