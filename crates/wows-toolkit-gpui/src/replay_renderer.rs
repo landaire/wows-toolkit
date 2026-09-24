@@ -32,10 +32,12 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::popover::Popover;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
@@ -43,6 +45,8 @@ use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
+use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_replays::types::GameClock;
 
@@ -127,6 +131,14 @@ pub struct ReplayRendererPanel {
     _export: Option<Task<()>>,
     /// Whether this viewport has a window to itself rather than a dock tab.
     popped_out: bool,
+    /// What the viewport draws of what it baked. Applied when a frame is
+    /// rasterised rather than when it was baked, so a toggle takes effect on
+    /// the next frame without walking the battle again.
+    options: RenderOptions,
+    /// Whether ships that have sunk are still drawn. Not one of
+    /// [`RenderOptions`]: the egui viewer keeps it beside them for the same
+    /// reason, since it gates a command rather than a layer.
+    show_dead_ships: bool,
     focus_handle: FocusHandle,
 }
 
@@ -173,6 +185,10 @@ impl ReplayRendererPanel {
             export_failure: None,
             _export: None,
             popped_out: false,
+            // The options the track was baked under, so what is drawn at
+            // first is exactly what is in it.
+            options: wows_minimap_renderer::frame_track::bake_options(),
+            show_dead_ships: true,
             speed: 1.0,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -210,6 +226,10 @@ impl ReplayRendererPanel {
             export_failure: None,
             _export: None,
             popped_out: false,
+            // The options the track was baked under, so what is drawn at
+            // first is exactly what is in it.
+            options: wows_minimap_renderer::frame_track::bake_options(),
+            show_dead_ships: true,
             speed: 1.0,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -241,6 +261,26 @@ impl ReplayRendererPanel {
     /// The replay this viewport is playing.
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    /// What the viewport is drawing.
+    pub fn options(&self) -> &RenderOptions {
+        &self.options
+    }
+
+    pub fn show_dead_ships(&self) -> bool {
+        self.show_dead_ships
+    }
+
+    /// Changes what is drawn and redraws the frame on screen.
+    ///
+    /// The frame is re-rasterised rather than waited for: a toggle whose
+    /// effect only arrived with the next tick would read as not having worked
+    /// while playback is paused.
+    pub fn set_options(&mut self, apply: impl FnOnce(&mut RenderOptions, &mut bool), cx: &mut Context<Self>) {
+        apply(&mut self.options, &mut self.show_dead_ships);
+        self.draw_current(cx);
+        cx.notify();
     }
 
     /// Whether this viewport is in a window of its own, which is what hides
@@ -279,11 +319,19 @@ impl ReplayRendererPanel {
             return;
         };
 
+        let options = self.options.clone();
+        let show_dead_ships = self.show_dead_ships;
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
+                // Filtered here rather than at bake time: a toggle then costs
+                // one frame rather than another walk of the battle.
+                let shown: Vec<DrawCommand> = commands
+                    .into_iter()
+                    .filter(|command| should_draw_command(command, &options, show_dead_ships))
+                    .collect();
                 let image = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    to_image(drawing.render(&commands))
+                    to_image(drawing.render(&shown))
                 };
                 (renderer, image)
             });
@@ -617,6 +665,7 @@ impl Render for ReplayRendererPanel {
                     .tooltip(t!("ui.replay.renderer.export_video").into_owned())
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
             )
+            .child(render_options_popover(&cx.entity(), self, cx))
             .when(!self.popped_out, |this| {
                 this.child(
                     Button::new("replay-renderer-pop-out")
@@ -771,6 +820,201 @@ fn encode_track(
     encoder.finish_submitted().map_err(|err| err.to_string())
 }
 
+/// One toggle in the settings popover: what it says, what it reads, and what
+/// it sets.
+struct Toggle {
+    id: &'static str,
+    label: &'static str,
+    read: fn(&RenderOptions, bool) -> bool,
+    write: fn(&mut RenderOptions, &mut bool, bool),
+}
+
+/// What the viewport can be told to draw.
+///
+/// Only the commands the track actually holds: `bake_options` leaves the
+/// stats panel, the team rosters, ship-range circles and position trails out
+/// of it (they cost a roster or a whole match history per frame), so a switch
+/// for those would do nothing and is not offered.
+const TOGGLES: &[Toggle] = &[
+    Toggle {
+        id: "renderer-opt-hp-bars",
+        label: "ui.renderer.settings.hp_bars",
+        read: |o, _| o.show_hp_bars,
+        write: |o, _, v| o.show_hp_bars = v,
+    },
+    Toggle {
+        id: "renderer-opt-tracers",
+        label: "ui.renderer.settings.tracers",
+        read: |o, _| o.show_tracers,
+        write: |o, _, v| o.show_tracers = v,
+    },
+    Toggle {
+        id: "renderer-opt-torpedoes",
+        label: "ui.renderer.settings.torpedoes",
+        read: |o, _| o.show_torpedoes,
+        write: |o, _, v| o.show_torpedoes = v,
+    },
+    Toggle {
+        id: "renderer-opt-planes",
+        label: "ui.renderer.settings.planes",
+        read: |o, _| o.show_planes,
+        write: |o, _, v| o.show_planes = v,
+    },
+    Toggle {
+        id: "renderer-opt-smoke",
+        label: "ui.renderer.settings.smoke",
+        read: |o, _| o.show_smoke,
+        write: |o, _, v| o.show_smoke = v,
+    },
+    Toggle {
+        id: "renderer-opt-consumables",
+        label: "ui.renderer.settings.consumables",
+        read: |o, _| o.show_consumables,
+        write: |o, _, v| o.show_consumables = v,
+    },
+    Toggle {
+        id: "renderer-opt-capture-points",
+        label: "ui.renderer.settings.capture_points",
+        read: |o, _| o.show_capture_points,
+        write: |o, _, v| o.show_capture_points = v,
+    },
+    Toggle {
+        id: "renderer-opt-buildings",
+        label: "ui.renderer.settings.buildings",
+        read: |o, _| o.show_buildings,
+        write: |o, _, v| o.show_buildings = v,
+    },
+    Toggle {
+        id: "renderer-opt-player-names",
+        label: "ui.renderer.settings.player_names",
+        read: |o, _| o.show_player_names,
+        write: |o, _, v| o.show_player_names = v,
+    },
+    Toggle {
+        id: "renderer-opt-ship-names",
+        label: "ui.renderer.settings.ship_names",
+        read: |o, _| o.show_ship_names,
+        write: |o, _, v| o.show_ship_names = v,
+    },
+    Toggle {
+        id: "renderer-opt-dead-ships",
+        label: "ui.renderer.settings.dead_ships",
+        read: |_, dead| dead,
+        write: |_, dead, v| *dead = v,
+    },
+    Toggle {
+        id: "renderer-opt-dead-ship-names",
+        label: "ui.renderer.settings.dead_ship_names",
+        read: |o, _| o.show_dead_ship_names,
+        write: |o, _, v| o.show_dead_ship_names = v,
+    },
+    Toggle {
+        id: "renderer-opt-camera-direction",
+        label: "ui.renderer.settings.camera_direction",
+        read: |o, _| o.show_camera_direction,
+        write: |o, _, v| o.show_camera_direction = v,
+    },
+    Toggle {
+        id: "renderer-opt-armament",
+        label: "ui.renderer.settings.armament",
+        read: |o, _| o.show_armament,
+        write: |o, _, v| o.show_armament = v,
+    },
+    Toggle {
+        id: "renderer-opt-score",
+        label: "ui.renderer.settings.score_label",
+        read: |o, _| o.show_score,
+        write: |o, _, v| o.show_score = v,
+    },
+    Toggle {
+        id: "renderer-opt-timer",
+        label: "ui.renderer.settings.timer",
+        read: |o, _| o.show_timer,
+        write: |o, _, v| o.show_timer = v,
+    },
+    Toggle {
+        id: "renderer-opt-kill-feed",
+        label: "ui.renderer.settings.kill_feed",
+        read: |o, _| o.show_kill_feed,
+        write: |o, _, v| o.show_kill_feed = v,
+    },
+    Toggle {
+        id: "renderer-opt-chat",
+        label: "ui.renderer.settings.chat_label",
+        read: |o, _| o.show_chat,
+        write: |o, _, v| o.show_chat = v,
+    },
+    Toggle {
+        id: "renderer-opt-battle-result",
+        label: "ui.renderer.settings.battle_result",
+        read: |o, _| o.show_battle_result,
+        write: |o, _, v| o.show_battle_result = v,
+    },
+    Toggle {
+        id: "renderer-opt-buffs",
+        label: "ui.renderer.settings.buff_counters",
+        read: |o, _| o.show_buffs,
+        write: |o, _, v| o.show_buffs = v,
+    },
+    Toggle {
+        id: "renderer-opt-advantage",
+        label: "ui.renderer.settings.team_advantage",
+        read: |o, _| o.show_advantage,
+        write: |o, _, v| o.show_advantage = v,
+    },
+];
+
+/// The gear on the transport: what the viewport draws of what it baked.
+///
+/// `view` rather than its entity, because this is built inside that view's
+/// own render where reading the entity would panic; the entity is captured
+/// only for the callbacks.
+fn render_options_popover(
+    panel: &Entity<ReplayRendererPanel>,
+    view: &ReplayRendererPanel,
+    cx: &Context<ReplayRendererPanel>,
+) -> AnyElement {
+    let _ = cx;
+    let options = view.options().clone();
+    let dead = view.show_dead_ships();
+    let owner = panel.clone();
+
+    Popover::new("replay-renderer-settings")
+        .trigger(
+            Button::new("replay-renderer-settings-toggle")
+                .child(crate::icons::icon(crate::icons::GEAR_FINE))
+                .compact()
+                .tooltip(t!("ui.renderer.settings.title").into_owned()),
+        )
+        .content(move |_state, _window, _cx| {
+            let owner = owner.clone();
+            let options = options.clone();
+            div()
+                .w(px(240.))
+                .max_h(px(420.))
+                .id("replay-renderer-settings-list")
+                .overflow_y_scroll()
+                .p_2()
+                .child(v_flex().gap_0().children(TOGGLES.iter().map(|toggle| {
+                    let owner = owner.clone();
+                    let on = (toggle.read)(&options, dead);
+                    let write = toggle.write;
+                    Checkbox::new(toggle.id)
+                        .label(t!(toggle.label).to_string())
+                        .checked(on)
+                        .on_click(move |checked, _window, cx: &mut App| {
+                            let checked = *checked;
+                            owner.update(cx, |panel, cx| {
+                                panel.set_options(|options, dead| write(options, dead, checked), cx)
+                            });
+                        })
+                        .into_any_element()
+                })))
+                .into_any_element()
+        })
+        .into_any_element()
+}
+
 #[cfg(test)]
 mod tests {
     use gpui_kit::AppContext;
@@ -792,6 +1036,47 @@ mod tests {
         // A clock that has gone negative is a bug elsewhere, not a reason to
         // print a minus sign here.
         assert_eq!(mmss(-3.0), "0:00");
+    }
+
+    /// A toggle changes what the viewport draws without re-baking: the
+    /// commands are filtered as a frame is rasterised, so the track is
+    /// untouched and the options are what moved.
+    #[gpui_kit::test]
+    fn a_display_toggle_changes_what_is_drawn_without_rebaking(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                let baked = panel.frame_count();
+                assert!(panel.options().show_torpedoes, "the track was baked with them on");
+
+                panel.set_options(|options, _dead| options.show_torpedoes = false, cx);
+
+                assert!(!panel.options().show_torpedoes);
+                assert_eq!(panel.frame_count(), baked, "the track is untouched; only what is drawn of it moved");
+            })
+            .expect("the window is open");
+    }
+
+    /// Dead ships are gated beside the options rather than in them, as the
+    /// egui viewer gates them, so the toggle has to reach its own flag.
+    #[gpui_kit::test]
+    fn the_dead_ship_toggle_reaches_its_own_flag(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                assert!(panel.show_dead_ships());
+                panel.set_options(|_options, dead| *dead = false, cx);
+                assert!(!panel.show_dead_ships());
+            })
+            .expect("the window is open");
     }
 
     /// The control that moves this viewport into a window of its own is
