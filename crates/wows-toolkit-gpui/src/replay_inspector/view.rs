@@ -47,6 +47,8 @@ use super::columns::default_columns;
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
 use super::load::spawn_startup_preload;
+use super::panel::AutoExport;
+use super::panel::PanelSetup;
 use super::panel::ReplayPanel;
 use crate::replay_renderer::ReplayRendererPanel;
 
@@ -390,8 +392,12 @@ impl ReplayInspectorView {
 
         let columns = default_columns(&self.replay_settings);
         let personal_rating = self.personal_rating.clone();
-        let panel = cx
-            .new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, personal_rating, window, cx));
+        // Read per open rather than held: a directory the reader has since
+        // removed simply stops being written to.
+        let auto_export = AutoExport::from_settings(&self.replay_settings);
+        let setup =
+            PanelSetup { path: path.clone(), game_data, debug: self.debug_mode, columns, personal_rating, auto_export };
+        let panel = cx.new(|cx| ReplayPanel::new(setup, window, cx));
         self.open_panels.insert(path.clone(), panel.downgrade());
         self.current_replay = Some(path);
         self.dock_area.update(cx, |dock_area, cx| {

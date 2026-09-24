@@ -54,6 +54,7 @@ use crate::stats::view::StatsView;
 use crate::theme;
 use crate::ui::selectable;
 use crate::unpacker::view::UnpackerView;
+use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
 use wows_toolkit_viewmodel::settings::ThemeChoice;
@@ -612,6 +613,92 @@ impl App {
         cx.notify();
     }
 
+    /// The auto-export controls: whether to write a file per battle, in which
+    /// format, and where.
+    ///
+    /// The directory is shown rather than typed: a path typed into a field is
+    /// only checked when it loses focus, and one that does not exist reads as
+    /// working until the first battle fails to write.
+    fn render_auto_export_row(&self, replay: &ReplaySettings, cx: &mut Context<Self>) -> AnyElement {
+        let enabled = replay.auto_export_data;
+        let chosen = replay.auto_export_format;
+        let directory = replay.auto_export_path.clone();
+        // A directory that is not there cannot be written to, and the reader
+        // has no other way to find that out until a battle is lost.
+        let missing = !directory.is_empty() && !std::path::Path::new(&directory).is_dir();
+
+        v_flex()
+            .gap_2()
+            .child(
+                h_flex()
+                    .flex_wrap()
+                    .gap_x_4()
+                    .gap_y_2()
+                    .items_center()
+                    .child(
+                        Checkbox::new("auto-export-data")
+                            .label(t!("ui.settings.replay.auto_export_data").to_string())
+                            .checked(enabled)
+                            .on_click(cx.listener(|this, checked: &bool, _window, cx| {
+                                let checked = *checked;
+                                this.edit_replay_settings(cx, |replay| replay.auto_export_data = checked);
+                            })),
+                    )
+                    .child(h_flex().gap_2().children(EXPORT_FORMATS.map(|format| {
+                        selectable(
+                            ("auto-export-format", format as usize),
+                            chosen == format,
+                            Button::new(("auto-export-format-button", format as usize))
+                                .label(format.as_str().to_string())
+                                .compact()
+                                .selected(chosen == format)
+                                .disabled(!enabled)
+                                .on_click(cx.listener(move |this, _event, _window, cx| {
+                                    this.edit_replay_settings(cx, |replay| replay.auto_export_format = format);
+                                })),
+                        )
+                    }))),
+            )
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        Button::new("auto-export-choose")
+                            .label(t!("ui.buttons.choose").to_string())
+                            .compact()
+                            .disabled(!enabled)
+                            .on_click(cx.listener(|this, _event, _window, cx| this.choose_export_directory(cx))),
+                    )
+                    .child(
+                        div()
+                            .id("settings-auto-export-path")
+                            .test_support()
+                            .text_sm()
+                            .when(missing, |path| path.text_color(rgb(crate::theme::semantic().error)))
+                            .child(if directory.is_empty() {
+                                t!("ui.settings.not_set").into_owned()
+                            } else {
+                                directory
+                            }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    /// Asks for the directory the per-battle exports are written to.
+    fn choose_export_directory(&mut self, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_folder(&t!("ui.settings.replay.export_path_hint"));
+        cx.spawn(async move |this, cx| {
+            let Some(directory) = asked.await else { return };
+            let directory = directory.to_string_lossy().into_owned();
+            let _ = this.update(cx, |this, cx| {
+                this.edit_replay_settings(cx, |replay| replay.auto_export_path = directory);
+            });
+        })
+        .detach();
+    }
+
     /// Twitch would not take the stored credential.
     ///
     /// Said out loud rather than only logged: the credential goes stale on its
@@ -742,6 +829,11 @@ impl App {
         cx.notify();
     }
 }
+
+/// The formats a battle can be auto-exported in, in the order the egui
+/// combo lists them.
+const EXPORT_FORMATS: [ReplayExportFormat; 3] =
+    [ReplayExportFormat::Json, ReplayExportFormat::Csv, ReplayExportFormat::Cbor];
 
 /// One settings section: its glyph, name and purpose over a card holding the
 /// controls, which is the shape the egui tab draws with `section_header` and
@@ -1273,6 +1365,12 @@ impl App {
                                 this.edit_replay_settings(cx, |replay| replay.enable_replay_previews = checked);
                             })),
                     ),
+                )
+                .child(
+                    field()
+                        .label(t!("ui.settings.replay.auto_export_data").to_string())
+                        .description(t!("ui.settings.replay.export_path_hint").to_string())
+                        .child(self.render_auto_export_row(&replay, cx)),
                 ),
         );
 
