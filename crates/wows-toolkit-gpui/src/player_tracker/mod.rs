@@ -293,6 +293,13 @@ pub struct PlayerTrackerView {
     show_division_mates: bool,
     /// The account whose note is open for editing, and the field holding it.
     editing_note: Option<AccountId>,
+    /// Historical rows opened to show what the tracker recorded beyond the
+    /// columns. Keyed by account so re-sorting carries the open state with
+    /// the player rather than with the row position.
+    expanded_players: HashSet<AccountId>,
+    /// Clans rows opened to show the members met from them, keyed by tag for
+    /// the same reason the players are keyed by account.
+    expanded_clans: HashSet<String>,
     /// Why the last note did not save, shown beside the editor. `None` when
     /// the last write succeeded, which is also the state before any write.
     note_error: Option<String>,
@@ -387,6 +394,8 @@ impl PlayerTrackerView {
             clan_corrections: Vec::new(),
             show_division_mates: false,
             editing_note: None,
+            expanded_players: HashSet::new(),
+            expanded_clans: HashSet::new(),
             note_error: None,
             note_generation: 0,
             _note_save: None,
@@ -527,6 +536,9 @@ impl PlayerTrackerView {
         self.players = players;
         self.tracked = tracked;
         self.state = LoadState::Loaded;
+        // The clans table aggregates the same tracked players, so seeding
+        // them is all it is waiting on too.
+        self.clan_state = LoadState::Loaded;
         self.sync_rows(cx);
     }
 
@@ -542,6 +554,34 @@ impl PlayerTrackerView {
         let note = self.tracked.get(&account).map(|player| player.notes.clone()).unwrap_or_default();
         self.note_input.update(cx, |state, cx| state.set_value(note, window, cx));
         self.editing_note = Some(account);
+        // The editor lives in the row's own detail block, so writing a note
+        // opens the row it belongs to.
+        self.expanded_players.insert(account);
+        self.remeasure_rows(cx);
+    }
+
+    /// Opens or closes a historical row's detail block.
+    fn toggle_player_expanded(&mut self, account: AccountId, cx: &mut Context<Self>) {
+        if !self.expanded_players.remove(&account) {
+            self.expanded_players.insert(account);
+        } else if self.editing_note == Some(account) {
+            self.editing_note = None;
+        }
+        self.remeasure_rows(cx);
+    }
+
+    /// Opens or closes a clans row's member list.
+    fn toggle_clan_expanded(&mut self, clan: String, cx: &mut Context<Self>) {
+        if !self.expanded_clans.remove(&clan) {
+            self.expanded_clans.insert(clan);
+        }
+        self.remeasure_rows(cx);
+    }
+
+    /// Tells the list that a row's height changed under it.
+    fn remeasure_rows(&mut self, cx: &mut Context<Self>) {
+        let len = self.visible_len();
+        self.list_state.remeasure_items(0..len);
         cx.notify();
     }
 
@@ -1426,6 +1466,158 @@ fn last_seen_cell(ix: usize, last_seen: Option<jiff::Timestamp>) -> AnyElement {
         .into_any_element()
 }
 
+/// What a historical row shows once it is opened.
+struct PlayerDetail {
+    /// Every other name this account has been seen under, sorted.
+    aliases: Vec<String>,
+    /// When the player was last met, spelled out in local time. Empty when
+    /// the tracker has no encounter recorded.
+    last_seen_exact: String,
+    /// Battles the player was met in, all time.
+    total_encounters: usize,
+}
+
+/// Reads one player's detail out of the tracker.
+fn player_detail(player: Option<&TrackedPlayer>, show_division_mates: bool) -> PlayerDetail {
+    let Some(player) = player else {
+        return PlayerDetail { aliases: Vec::new(), last_seen_exact: String::new(), total_encounters: 0 };
+    };
+    let mut aliases: Vec<String> = player.names.iter().filter(|name| **name != player.last_name).cloned().collect();
+    aliases.sort();
+    PlayerDetail {
+        aliases,
+        last_seen_exact: history::last_seen_timestamp_text(player.last_visible_timestamp(show_division_mates)),
+        total_encounters: player.visible_arena_ids(show_division_mates).count(),
+    }
+}
+
+/// The block under an opened historical row: what the tracker knows beyond
+/// the columns, and the note editor when this is the row being written about.
+fn player_detail_block(
+    ix: usize,
+    account: AccountId,
+    detail: Option<&PlayerDetail>,
+    note: Option<(Entity<InputState>, Option<String>)>,
+) -> AnyElement {
+    let dim = crate::theme::text_dim();
+    let mut block = v_flex()
+        .id(("tracker-player-detail", ix))
+        .test_support()
+        .w_full()
+        .gap_1()
+        .px_2()
+        .py_1()
+        .pl(NAME_COLUMN_WIDTH)
+        .child(
+            Button::new(("tracker-account-id", ix))
+                .label(account.0.to_string())
+                .compact()
+                .ghost()
+                .xsmall()
+                .tooltip(t!("ui.player_tracker.copy_wg_id").into_owned())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(account.0.to_string()));
+                }),
+        );
+
+    if let Some(detail) = detail {
+        if !detail.aliases.is_empty() {
+            block = block.child(
+                div()
+                    .text_xs()
+                    .text_color(dim)
+                    .child(t!("ui.player_tracker.aliases_hover", names = detail.aliases.join(", ")).into_owned()),
+            );
+        }
+        if !detail.last_seen_exact.is_empty() {
+            block = block.child(div().text_xs().text_color(dim).child(
+                t!("ui.player_tracker.last_encountered_exact", timestamp = detail.last_seen_exact).into_owned(),
+            ));
+        }
+        block = block.child(
+            div()
+                .text_xs()
+                .text_color(dim)
+                .child(t!("ui.player_tracker.arena_count", count = detail.total_encounters).into_owned()),
+        );
+    }
+
+    match note {
+        None => block.child(div().text_xs().text_color(dim).child(t!("ui.player_tracker.notes_hint").into_owned())),
+        Some((input, error)) => block.child(Input::new(&input).id("tracker-note-input").small().w_full()).when_some(
+            error,
+            |this, reason| {
+                this.child(
+                    div()
+                        .id("tracker-note-error")
+                        .test_support()
+                        .text_xs()
+                        .text_color(rgb(0xff8080))
+                        .child(t!("ui.player_tracker.note_not_saved", reason = reason).into_owned()),
+                )
+            },
+        ),
+    }
+    .into_any_element()
+}
+
+/// The members met from a clan, most-met first, each offering to look up
+/// the matches they were in.
+fn clan_member_list(
+    ix: usize,
+    members: &[(AccountId, usize)],
+    names: &HashMap<AccountId, String>,
+    tracker: Entity<PlayerTrackerView>,
+) -> AnyElement {
+    let dim = crate::theme::text_dim();
+    v_flex()
+        .id(("tracker-clan-members", ix))
+        .test_support()
+        .w_full()
+        .gap_px()
+        .px_2()
+        .py_1()
+        .pl(CLAN_TAG_COLUMN_WIDTH)
+        .children(members.iter().enumerate().map(|(member_ix, (account, matches))| {
+            // A member the tracker recorded under no name is still worth a
+            // row: the account id is what the search needs.
+            let name = names.get(account).cloned().unwrap_or_else(|| account.0.to_string());
+            let tracker = tracker.clone();
+            let account = *account;
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(find_matches_cell(
+                    ("tracker-find-clan-member", ix * MEMBER_ID_STRIDE + member_ix),
+                    t!("ui.player_tracker.find_matches").into_owned(),
+                    move |cx: &mut App| {
+                        tracker.update(cx, |this, cx| this.find_player_matches(account, cx));
+                    },
+                ))
+                .child(div().text_xs().child(name))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(dim)
+                        .child(t!("ui.player_tracker.clan_member_matches", count = matches).into_owned()),
+                )
+        }))
+        .into_any_element()
+}
+
+/// Spreads the member buttons' ids apart so two clans' lists cannot collide.
+const MEMBER_ID_STRIDE: usize = 1024;
+
+/// The triangle that opens a row.
+fn expand_caret(id: (&'static str, usize), open: bool, on_click: impl Fn(&mut App) + 'static) -> AnyElement {
+    Button::new(id)
+        .child(crate::icons::icon(if open { crate::icons::CARET_DOWN } else { crate::icons::CARET_RIGHT }))
+        .ghost()
+        .xsmall()
+        .on_click(move |_event, _window, cx: &mut App| on_click(cx))
+        .into_any_element()
+}
+
 /// The button that looks a row up in the replay index.
 fn find_matches_cell(id: (&'static str, usize), hover: String, on_click: impl Fn(&mut App) + 'static) -> AnyElement {
     Button::new(id)
@@ -2082,21 +2274,49 @@ impl Render for PlayerTrackerView {
             .map(|(id, player)| (*id, player.notes.clone()))
             .collect();
         let tracker = cx.entity();
+        // What an opened row shows beneath itself, taken here rather than in
+        // the row closure, which cannot reach back into the tab.
+        let expanded = self.expanded_players.clone();
+        let details: HashMap<AccountId, PlayerDetail> = expanded
+            .iter()
+            .map(|account| (*account, player_detail(self.tracked.get(account), self.show_division_mates)))
+            .collect();
+        let expanded_clans = self.expanded_clans.clone();
+        // The name each member is known by, which the clan aggregate holds
+        // only account ids for.
+        let member_names: HashMap<AccountId, String> =
+            self.tracked.iter().map(|(id, player)| (*id, player.last_name.clone())).collect();
+        let editing_note = self.editing_note;
+        let note_input = self.note_input.clone();
+        let note_error = self.note_error.clone();
         let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| match sub_tab {
             SubTab::Players => {
                 let Some(row) = players.get(ix) else {
                     return div().into_any_element();
                 };
-                h_flex()
+                let account = row.facet.account_id;
+                let open = expanded.contains(&account);
+                let cells = h_flex()
                     .id(ix)
                     .w_full()
                     .h(ROW_HEIGHT)
                     .gap_2()
                     .items_center()
                     .px_2()
-                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
-                    .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.facet.latest_name.clone()))
+                    .child(
+                        h_flex()
+                            .w(NAME_COLUMN_WIDTH)
+                            .gap_1()
+                            .items_center()
+                            .child(expand_caret(("tracker-player-expand", ix), open, {
+                                let tracker = tracker.clone();
+                                move |cx: &mut App| {
+                                    tracker.update(cx, |this, cx| this.toggle_player_expanded(account, cx));
+                                }
+                            }))
+                            .child(div().flex_1().min_w(px(0.)).text_sm().child(row.facet.latest_name.clone())),
+                    )
                     .child(
                         div()
                             .w(CLAN_COLUMN_WIDTH)
@@ -2133,7 +2353,22 @@ impl Render for PlayerTrackerView {
                             }
                         },
                     ))
-                    .child(note_cell(ix, row.facet.account_id, notes.get(&row.facet.account_id), tracker.clone()))
+                    .child(note_cell(ix, row.facet.account_id, notes.get(&row.facet.account_id), tracker.clone()));
+
+                let detail = open.then(|| {
+                    player_detail_block(
+                        ix,
+                        account,
+                        details.get(&account),
+                        (editing_note == Some(account)).then(|| (note_input.clone(), note_error.clone())),
+                    )
+                });
+
+                v_flex()
+                    .w_full()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
+                    .child(cells)
+                    .children(detail)
                     .into_any_element()
             }
             SubTab::CurrentMatch => unreachable!("the roster returns above"),
@@ -2141,23 +2376,38 @@ impl Render for PlayerTrackerView {
                 let Some(row) = clans.get(ix) else {
                     return div().into_any_element();
                 };
-                h_flex()
+                let open = expanded_clans.contains(&row.clan);
+                let cells = h_flex()
                     .id(ix)
                     .w_full()
                     .h(ROW_HEIGHT)
                     .gap_2()
                     .items_center()
                     .px_2()
-                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
                     // The tag and both battle counts read in the tone the
                     // in-range count deserves, as the egui table's do.
                     .child(
-                        div()
+                        h_flex()
                             .w(CLAN_TAG_COLUMN_WIDTH)
-                            .text_sm()
-                            .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
-                            .child(row.clan.clone()),
+                            .gap_1()
+                            .items_center()
+                            .child(expand_caret(("tracker-clan-expand", ix), open, {
+                                let tracker = tracker.clone();
+                                let clan = row.clan.clone();
+                                move |cx: &mut App| {
+                                    let clan = clan.clone();
+                                    tracker.update(cx, |this, cx| this.toggle_clan_expanded(clan, cx));
+                                }
+                            }))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .text_sm()
+                                    .when_some(severity_color(row.matches_in_range), |el, color| el.text_color(color))
+                                    .child(row.clan.clone()),
+                            ),
                     )
                     .child(div().w(MEMBERS_COLUMN_WIDTH).text_sm().child(row.members.len().to_string()))
                     .child(div().w(COUNT_COLUMN_WIDTH).text_sm().child(separate_number(row.matches as i64, None)))
@@ -2181,7 +2431,15 @@ impl Render for PlayerTrackerView {
                                 tracker.update(cx, |this, cx| this.find_clan_matches(clan, cx));
                             }
                         },
-                    ))
+                    ));
+
+                let members = open.then(|| clan_member_list(ix, &row.members, &member_names, tracker.clone()));
+
+                v_flex()
+                    .w_full()
+                    .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
+                    .child(cells)
+                    .children(members)
                     .into_any_element()
             }
         };
@@ -2222,56 +2480,6 @@ impl Render for PlayerTrackerView {
                 .into_any_element(),
         };
 
-        // The note editor sits below the table rather than over it: the row
-        // it belongs to stays visible while the note is written.
-        let note_editor = self.editing_note.map(|account| {
-            let name = self
-                .players
-                .iter()
-                .find(|facet| facet.account_id == account)
-                .map(|facet| facet.latest_name.clone())
-                .unwrap_or_default();
-
-            v_flex()
-                .flex_none()
-                .gap_1()
-                .px_2()
-                .py_1()
-                .border_t_1()
-                .border_color(border)
-                .child(
-                    h_flex()
-                        .justify_between()
-                        .items_center()
-                        .child(
-                            div()
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .child(t!("ui.player_tracker.notes_title", name = name).to_string()),
-                        )
-                        .child(
-                            Button::new("tracker-note-close")
-                                .label(t!("ui.armor.export.close_button").to_string())
-                                .compact()
-                                .on_click(cx.listener(|this, _event, _window, cx| {
-                                    this.editing_note = None;
-                                    cx.notify();
-                                })),
-                        ),
-                )
-                .child(Input::new(&self.note_input).id("tracker-note-input").small().w_full())
-                .when_some(self.note_error.clone(), |this, reason| {
-                    this.child(
-                        div()
-                            .id("tracker-note-error")
-                            .test_support()
-                            .text_xs()
-                            .text_color(rgb(0xff8080))
-                            .child(t!("ui.player_tracker.note_not_saved", reason = reason).to_string()),
-                    )
-                })
-        });
-
         v_flex()
             .id("tracker-root")
             .track_focus(&self.focus_handle)
@@ -2280,7 +2488,6 @@ impl Render for PlayerTrackerView {
             .child(toolbar)
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
-            .when_some(note_editor, |this, editor| this.child(editor))
             .into_any_element()
     }
 }
@@ -2545,6 +2752,53 @@ mod tests {
         assert!(hover.contains("Seen in chat at minute -1, 5 of this battle."));
         assert!(hover.contains("harvey_635 may be this player."));
         assert!(hover.ends_with("Click to copy."));
+    }
+
+    /// An opened row shows what the tracker knows beyond the columns.
+    #[gpui_kit::test]
+    fn a_historical_row_opens_on_its_aliases_and_account_id(cx: &mut TestAppContext) {
+        use std::collections::HashMap;
+        use wows_toolkit_config::index::rows::PlayerFacet;
+        use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        let account = AccountId(7);
+        let players = vec![PlayerFacet {
+            account_id: account,
+            latest_name: "Harvey635".to_string(),
+            clan: "WTK".to_string(),
+            match_count: 3,
+        }];
+        let tracked: HashMap<AccountId, TrackedPlayer> = [(
+            account,
+            TrackedPlayer {
+                last_name: "Harvey635".to_string(),
+                names: ["Harvey635".to_string(), "Harvey42".to_string()].into_iter().collect(),
+                ..TrackedPlayer::default()
+            },
+        )]
+        .into_iter()
+        .collect();
+
+        window
+            .update(cx, |tracker, _window, cx| tracker.seed_players_and_notes(players, tracked, cx))
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find(("tracker-player-detail", 0usize)).is_none(), "a row opens on request");
+
+            window.click(("tracker-player-expand", 0usize), cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("tracker-player-detail", 0usize)).is_some(), "the block is under the row");
+
+            window.click(("tracker-player-expand", 0usize), cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("tracker-player-detail", 0usize)).is_none(), "and closes again");
+        })
+        .expect("the window is open");
     }
 
     /// A row's magnifying glass asks the Search tab for every match the
@@ -2863,5 +3117,39 @@ mod clan_table_tests {
                 assert_eq!(tracker.clans()[0].matches, 2, "counting it back in adds the battle");
             })
             .expect("the window is open");
+    }
+
+    /// A clans row opens on the members met from that clan.
+    #[gpui_kit::test]
+    fn a_clans_row_opens_on_the_members_met_from_it(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        let mut player =
+            TrackedPlayer { clan: "WTK".to_string(), last_name: "Harvey635".to_string(), ..TrackedPlayer::default() };
+        player.arena_ids.insert(ArenaId::from(1i64));
+        player.timestamps.insert(at(10));
+        let tracked = HashMap::from([(AccountId(7), player)]);
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                tracker.set_sub_tab(SubTab::Clans, cx);
+                tracker.seed_players_and_notes(Vec::new(), tracked, cx);
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find(("tracker-clan-members", 0usize)).is_none(), "the list opens on request");
+
+            window.click(("tracker-clan-expand", 0usize), cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("tracker-clan-members", 0usize)).is_some(), "the members are under the row");
+
+            window.click(("tracker-clan-expand", 0usize), cx);
+            window.render_frame(cx);
+            assert!(window.try_find(("tracker-clan-members", 0usize)).is_none(), "and it closes again");
+        })
+        .expect("the window is open");
     }
 }

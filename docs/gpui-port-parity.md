@@ -264,12 +264,15 @@ kept so the next audit does not re-report them.
   change, so the two cannot disagree. A player the index names but the
   tracker never recorded keeps the index's own count for the period and shows
   a dash where the all-time figure would be.
-- The clans table's four missing columns are drawn: Encounters in Time
-  Range, Sightings (with the in-range figure on hover), Last Encountered, and
-  the tag now carries the severity tint. Every heading reads from the same
-  `ui.player_tracker.column.*` keys the egui table uses, and the three new
-  sorts are in the shared `ClanSortColumn`, and each row's magnifying glass
-  runs the clan search in the Search tab. The member list is still missing.
+- [done] The clans table is missing four columns, the member list and the
+  clan search. It draws Encounters in Time Range, Sightings (with the
+  in-range figure on hover) and Last Encountered, the tag carries the
+  severity tint, and every heading reads from the same
+  `ui.player_tracker.column.*` keys the egui table uses, with the three new
+  sorts in the shared `ClanSortColumn`. Each row's magnifying glass runs the
+  clan search in the Search tab, and a row opens on the members met from that
+  clan, each naming how many battles they were in and offering to look those
+  up.
 - [done] No "find matches for this player/clan" action anywhere. Every
   historical row and every clans row carries a magnifying glass, and the
   roster row's menu carries the same item. The query is
@@ -288,8 +291,12 @@ kept so the next audit does not re-report them.
 - [done] The roster's Encounters column counts the battles, in the tone that
   number deserves, and follows the division-mates toggle. (This entry was
   already stale when it was written.)
-- Historical rows do not expand; notes are a separate bottom panel, and
-  aliases and account ids are invisible.
+- [done] Historical rows do not expand; notes are a separate bottom panel,
+  and aliases and account ids are invisible. A row opens on its account id
+  (click to copy), the other names the account has been seen under, the exact
+  time it was last met, how many battles are recorded, and the note editor,
+  which is no longer a panel of its own. Writing a note opens the row it
+  belongs to.
 - [done] Encounter counts carry the severity ramp.
 - [done] Period, both table sorts and the filter are kept in a settings row
   and read back on the first frame. The egui tracker keeps none of these, so
