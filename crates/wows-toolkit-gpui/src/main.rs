@@ -6,6 +6,8 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 
 mod app;
 mod armor_viewer;
+mod collab;
+mod collab_popover;
 mod dialog;
 mod game_data_cache;
 mod http;

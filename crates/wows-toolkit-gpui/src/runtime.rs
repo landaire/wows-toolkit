@@ -34,7 +34,7 @@ pub enum TokioError {
 
 /// Owns the runtime for the life of the process. Held as a GPUI global so the
 /// runtime outlives every task submitted to it.
-struct TokioRuntime(Runtime);
+struct TokioRuntime(std::sync::Arc<Runtime>);
 
 impl Global for TokioRuntime {}
 
@@ -42,8 +42,18 @@ impl Global for TokioRuntime {}
 pub fn init(cx: &mut App) -> Result<(), TokioError> {
     let runtime =
         Builder::new_multi_thread().worker_threads(WORKER_THREADS).enable_all().build().map_err(TokioError::Build)?;
-    cx.set_global(TokioRuntime(runtime));
+    cx.set_global(TokioRuntime(std::sync::Arc::new(runtime)));
     Ok(())
+}
+
+/// The shared runtime itself, for a caller that owns long-lived work on it
+/// rather than a single future.
+///
+/// `None` before [`init`] has run. The collab session takes this: its peer
+/// task runs for the life of the session and spawns its own work, so it needs
+/// the runtime rather than one submission to it.
+pub fn runtime(cx: &App) -> Option<std::sync::Arc<Runtime>> {
+    cx.try_global::<TokioRuntime>().map(|held| std::sync::Arc::clone(&held.0))
 }
 
 /// Aborts the tokio task when the GPUI-side `Task` is dropped.

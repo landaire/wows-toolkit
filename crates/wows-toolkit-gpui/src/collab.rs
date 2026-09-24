@@ -1,0 +1,402 @@
+//! Collaborative replay sessions: hosting one, joining one, and what the
+//! session is doing while it runs.
+//!
+//! The session itself is `wt-collab-client`, shared with the egui app, so
+//! both front ends run one implementation of the mesh. What is here is the
+//! part that is this front end's own: waking it when the peer task changes
+//! something, and the controls that start, join and steer a session.
+
+use std::sync::Arc;
+
+use gpui_kit::App;
+use gpui_kit::AsyncApp;
+use gpui_kit::Entity;
+use parking_lot::Mutex;
+use wt_collab_client::PeerRole;
+use wt_collab_client::Permissions;
+use wt_collab_client::SessionCommand;
+use wt_collab_client::SessionEvent;
+use wt_collab_client::SessionState;
+use wt_collab_client::SessionStatus;
+use wt_collab_client::SessionWaker;
+use wt_collab_client::peer::HostParams;
+use wt_collab_client::peer::JoinParams;
+use wt_collab_client::peer::PeerMode;
+use wt_collab_client::peer::PeerSessionHandle;
+
+use crate::runtime;
+
+/// Where the web client is served. The session token rides in the fragment.
+const WEB_CLIENT_URL: &str = wt_collab_client::WEB_CLIENT_URL;
+
+/// What a session token is prefixed with, so a paste can be checked before it
+/// is sent anywhere.
+const TOKEN_PREFIX: &str = "toolkit-";
+
+/// Wakes this front end when the peer task changes the session.
+///
+/// The task runs off the UI thread, so a change it makes reaches the screen
+/// only when something asks for a redraw. Holding the entity weakly: the
+/// session outlives a closed window, and waking a view that has gone is not
+/// an error, just nothing to do.
+/// Wakes this front end when the peer task changes the session.
+///
+/// A wake arrives on a tokio worker, and neither a GPUI entity nor an
+/// `AsyncApp` may cross threads, so the wake is a nudge down a channel that a
+/// GPUI task reads and turns into a notify. Unbounded and non-blocking: the
+/// peer task must never wait on a redraw.
+struct GpuiWaker {
+    nudge: futures::channel::mpsc::UnboundedSender<()>,
+}
+
+impl SessionWaker for GpuiWaker {
+    fn wake(&self) {
+        let _ = self.nudge.unbounded_send(());
+    }
+}
+
+/// A session this app is running, and what it is doing.
+pub struct CollabState {
+    /// The live session, if one is running. `None` means neither hosting nor
+    /// joined, which is the resting state rather than a failure.
+    handle: Option<PeerSessionHandle>,
+    /// What the peer task and this side both read. Held even with no session
+    /// so a waker can be installed once and kept.
+    pub state: Arc<Mutex<SessionState>>,
+    /// Whether this app started the session or joined someone else's.
+    hosting: bool,
+    /// The name this app appears under. Empty until one is entered, which is
+    /// what refuses the start and join controls.
+    pub display_name: String,
+    /// Whether the token is shown rather than masked.
+    pub token_revealed: bool,
+    /// What went wrong starting or joining, for the line under the controls.
+    pub failure: Option<String>,
+    /// Where the asset bundle for web clients is kept once built. The port
+    /// builds none yet, so a web client joining sees no map art.
+    bundle: Arc<Mutex<Option<Vec<u8>>>>,
+}
+
+impl Default for CollabState {
+    fn default() -> Self {
+        Self {
+            handle: None,
+            state: Arc::new(Mutex::new(SessionState::default())),
+            hosting: false,
+            display_name: String::new(),
+            token_revealed: false,
+            failure: None,
+            bundle: Arc::new(Mutex::new(None)),
+        }
+    }
+}
+
+impl CollabState {
+    /// Whether a session is running, hosted or joined.
+    pub fn is_active(&self) -> bool {
+        self.handle.is_some()
+    }
+
+    pub fn is_hosting(&self) -> bool {
+        self.hosting && self.handle.is_some()
+    }
+
+    /// What the session is doing.
+    pub fn status(&self) -> SessionStatus {
+        self.state.lock().status.clone()
+    }
+
+    /// The token peers join with. `None` until the host has one, which is
+    /// after the endpoint is published.
+    pub fn token(&self) -> Option<String> {
+        self.state.lock().token.clone()
+    }
+
+    /// The token as it should be shown: masked unless revealed, because it
+    /// grants entry to the session and a shared screen is where it is read.
+    pub fn token_display(&self) -> Option<String> {
+        let token = self.token()?;
+        if self.token_revealed { Some(token) } else { Some("*".repeat(token.chars().count().min(32))) }
+    }
+
+    /// A link a browser can join from.
+    pub fn web_link(&self) -> Option<String> {
+        self.token().map(|token| format!("{WEB_CLIENT_URL}#{token}"))
+    }
+
+    /// Everyone in the session, this app included.
+    pub fn connected(&self) -> Vec<ConnectedPeer> {
+        let held = self.state.lock();
+        let me = held.my_user_id;
+        held.connected_users
+            .iter()
+            .map(|user| ConnectedPeer {
+                user_id: user.id,
+                name: user.name.clone(),
+                role: user.role,
+                is_me: user.id == me,
+            })
+            .collect()
+    }
+
+    /// What the host has locked.
+    pub fn permissions(&self) -> Permissions {
+        self.state.lock().permissions.clone()
+    }
+
+    /// Whether this app may change permissions and promote peers.
+    pub fn may_steer(&self) -> bool {
+        let role = self.state.lock().role;
+        role.is_host() || role.is_co_host()
+    }
+
+    /// Installs the waker, once, so the peer task can reach this front end.
+    pub fn bind<V: 'static>(&self, view: &Entity<V>, cx: &mut App) {
+        {
+            let held = self.state.lock();
+            if held.waker.is_some() {
+                return;
+            }
+        }
+        let (nudge, mut nudges) = futures::channel::mpsc::unbounded::<()>();
+        self.state.lock().waker = Some(Arc::new(GpuiWaker { nudge }));
+
+        let view = view.downgrade();
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            use futures::StreamExt as _;
+            while nudges.next().await.is_some() {
+                // A view that has gone ends the loop: nothing is drawing the
+                // session, so there is nothing to wake.
+                if view.update(cx, |_view, cx| cx.notify()).is_err() {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    /// Starts hosting.
+    ///
+    /// Refused without a name: every other peer sees it, and an empty one
+    /// makes a roster nobody can read.
+    pub fn host(&mut self, toolkit_version: String, cx: &mut App) {
+        if self.handle.is_some() || self.display_name.trim().is_empty() {
+            return;
+        }
+        let params = HostParams {
+            toolkit_version,
+            display_name: self.display_name.trim().to_string(),
+            initial_render_options: Default::default(),
+            web_asset_bundle: Arc::clone(&self.bundle),
+        };
+        self.start(PeerMode::Host(params), true, cx);
+    }
+
+    /// Joins the session `token` names.
+    ///
+    /// The token is checked here rather than at the far end, so a mis-paste
+    /// says so at once instead of timing out against nothing.
+    pub fn join(&mut self, token: String, toolkit_version: String, cx: &mut App) {
+        if self.handle.is_some() || self.display_name.trim().is_empty() {
+            return;
+        }
+        let token = token.trim().to_string();
+        if !token.starts_with(TOKEN_PREFIX) {
+            self.failure = Some(t!("ui.collab.invalid_token", error = TOKEN_PREFIX).into_owned());
+            return;
+        }
+        let params = JoinParams { token, display_name: self.display_name.trim().to_string(), toolkit_version };
+        self.start(PeerMode::Join(params), false, cx);
+    }
+
+    fn start(&mut self, mode: PeerMode, hosting: bool, cx: &mut App) {
+        let Some(runtime) = runtime::runtime(cx) else {
+            self.failure = Some(t!("ui.collab.no_runtime").into_owned());
+            return;
+        };
+        self.failure = None;
+        self.hosting = hosting;
+        self.handle = Some(wt_collab_client::peer::start_peer_session(runtime, mode, Arc::clone(&self.state)));
+    }
+
+    /// Leaves or stops the session.
+    ///
+    /// The peer task is told to stop and the shared state is cleared here
+    /// rather than waited for, so the controls return at once even if the
+    /// mesh takes a moment to wind down.
+    pub fn leave(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.command_tx.send(SessionCommand::Stop);
+        }
+        self.hosting = false;
+        self.token_revealed = false;
+        self.state.lock().clear_session_data();
+    }
+
+    /// Locks or unlocks what peers may change.
+    pub fn set_permissions(&self, permissions: Permissions) {
+        if let Some(handle) = &self.handle {
+            let _ = handle.command_tx.send(SessionCommand::SetPermissions(permissions));
+        }
+    }
+
+    /// Returns every peer's display settings to the host's.
+    pub fn reset_overrides(&self) {
+        if let Some(handle) = &self.handle {
+            let _ = handle.command_tx.send(SessionCommand::ResetClientOverrides);
+        }
+    }
+
+    /// Raises a peer to co-host.
+    pub fn promote(&self, user_id: u64) {
+        if let Some(handle) = &self.handle {
+            let _ = handle.command_tx.send(SessionCommand::PromoteToCoHost { user_id });
+        }
+    }
+
+    /// Takes what the peer task has raised since the last look and acts on
+    /// it.
+    ///
+    /// Called from the header's own draw, as the egui app polls its inbox
+    /// every frame. It has to be called: the inbox is unbounded, so an
+    /// undrained session's events would accumulate for as long as it runs.
+    ///
+    /// Returns whether anything arrived, so a caller can redraw on it.
+    pub fn poll(&mut self) -> bool {
+        let Some(handle) = &self.handle else { return false };
+        let events = handle.event_inbox.drain();
+        if events.is_empty() {
+            return false;
+        }
+        for event in events {
+            match event {
+                // The roster and the token are read from the shared state, so
+                // these need nothing beyond the redraw below.
+                SessionEvent::Started
+                | SessionEvent::UserJoined(_)
+                | SessionEvent::UserLeft { .. }
+                | SessionEvent::PeerPromoted { .. }
+                | SessionEvent::FrameSourceChanged { .. }
+                | SessionEvent::SessionInfoReceived { .. } => {}
+                // A replay opened on the host needs a viewport this port does
+                // not build yet; noted rather than silently dropped.
+                SessionEvent::ReplayOpened { replay_name, .. } => {
+                    tracing::info!("collab: the host opened {replay_name}, which this app cannot show yet");
+                }
+                SessionEvent::ReplayClosed { .. } => {}
+                SessionEvent::Ended => {
+                    self.leave();
+                }
+                SessionEvent::Error(reason) | SessionEvent::Rejected(reason) => {
+                    self.failure = Some(reason);
+                    self.leave();
+                }
+            }
+        }
+        true
+    }
+}
+
+/// One participant, as the roster shows them.
+pub struct ConnectedPeer {
+    pub user_id: u64,
+    pub name: String,
+    pub role: PeerRole,
+    /// Whether this is the reader, which the roster marks.
+    pub is_me: bool,
+}
+
+use rust_i18n::t;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_session_that_has_not_started_is_not_active() {
+        let collab = CollabState::default();
+
+        assert!(!collab.is_active());
+        assert!(!collab.is_hosting());
+        assert!(collab.token().is_none());
+        assert!(collab.connected().is_empty());
+    }
+
+    #[test]
+    fn a_token_is_masked_until_it_is_revealed() {
+        let mut collab = CollabState::default();
+        collab.state.lock().token = Some("toolkit-abcdef".to_string());
+
+        let masked = collab.token_display().expect("there is a token");
+        assert!(!masked.contains("abcdef"), "a token on a shared screen is not readable by default");
+
+        collab.token_revealed = true;
+        assert_eq!(collab.token_display().as_deref(), Some("toolkit-abcdef"));
+    }
+
+    #[test]
+    fn a_web_link_carries_the_token_in_its_fragment() {
+        let collab = CollabState::default();
+        collab.state.lock().token = Some("toolkit-abcdef".to_string());
+
+        let link = collab.web_link().expect("there is a token");
+
+        assert!(link.starts_with(WEB_CLIENT_URL));
+        assert!(link.ends_with("#toolkit-abcdef"));
+    }
+
+    #[test]
+    fn there_is_no_link_without_a_token() {
+        assert!(CollabState::default().web_link().is_none());
+    }
+
+    #[test]
+    fn the_roster_marks_which_peer_is_the_reader() {
+        let collab = CollabState::default();
+        {
+            let mut held = collab.state.lock();
+            held.my_user_id = 7;
+            held.connected_users = vec![
+                wt_collab_client::ConnectedUser {
+                    id: 7,
+                    name: "me".into(),
+                    color: [0, 0, 0],
+                    role: PeerRole::Host,
+                    client_type: wt_collab_client::protocol::ClientType::Desktop { toolkit_version: "test".into() },
+                },
+                wt_collab_client::ConnectedUser {
+                    id: 9,
+                    name: "them".into(),
+                    color: [0, 0, 0],
+                    role: PeerRole::Peer,
+                    client_type: wt_collab_client::protocol::ClientType::Desktop { toolkit_version: "test".into() },
+                },
+            ];
+        }
+
+        let roster = collab.connected();
+
+        assert_eq!(roster.len(), 2);
+        assert!(roster[0].is_me);
+        assert!(!roster[1].is_me);
+    }
+
+    #[test]
+    fn leaving_clears_what_the_session_held() {
+        let mut collab = CollabState::default();
+        {
+            let mut held = collab.state.lock();
+            held.token = Some("toolkit-abcdef".into());
+            held.status = SessionStatus::Active;
+        }
+        collab.token_revealed = true;
+
+        collab.leave();
+
+        // Carrying a token across sessions would offer entry to one that has
+        // ended.
+        assert!(collab.token().is_none());
+        assert!(!collab.token_revealed);
+        assert_eq!(collab.status(), SessionStatus::Idle);
+    }
+}

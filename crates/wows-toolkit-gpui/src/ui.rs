@@ -85,3 +85,8 @@ pub fn boxed(width: Pixels, height: Pixels) -> Div {
 pub fn rule_v(cx: &App) -> impl IntoElement {
     div().flex_none().w(px(1.)).h(px(16.)).mx_1().bg(cx.theme().border)
 }
+
+/// A horizontal rule between two groups of controls in one column.
+pub fn rule_h(cx: &App) -> impl IntoElement {
+    div().flex_none().h(px(1.)).w_full().my_1().bg(cx.theme().border)
+}

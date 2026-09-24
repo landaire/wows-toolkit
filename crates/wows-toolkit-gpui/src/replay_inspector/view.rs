@@ -51,6 +51,7 @@ use super::panel::AutoExport;
 use super::panel::PanelSetup;
 use super::panel::ReplayPanel;
 use crate::replay_renderer::ReplayRendererPanel;
+use gpui_kit::component::input::InputState;
 
 /// Sidebar width for the file browser, matching the egui app's left panel.
 const BROWSER_WIDTH: Pixels = px(280.);
@@ -84,6 +85,12 @@ fn grouping_index(grouping: ReplayGrouping) -> usize {
 
 pub struct ReplayInspectorView {
     browser: Entity<ReplayBrowser>,
+    /// The collaborative session, hosted or joined from this tab's header.
+    collab: crate::collab::CollabState,
+    /// The two fields the session popover writes into, held so a name typed
+    /// once survives the popover closing.
+    collab_name: Entity<InputState>,
+    collab_token: Entity<InputState>,
     dock_area: Entity<DockArea>,
     /// `None` until `apply_settings` learns the WoWs directory; opening a
     /// replay before then is a no-op (the browser has nothing to
@@ -206,6 +213,10 @@ impl ReplayInspectorView {
 
         Self {
             browser,
+            collab: crate::collab::CollabState::default(),
+            collab_name: cx
+                .new(|cx| InputState::new(window, cx).placeholder(t!("ui.collab.display_name_hint").to_string())),
+            collab_token: cx.new(|cx| InputState::new(window, cx).placeholder("toolkit-...".to_string())),
             dock_area,
             game_data: None,
             game_data_status: GameDataStatus::Loading,
@@ -812,10 +823,15 @@ impl Render for ReplayInspectorView {
 
         // Header toolbar: mirrors the egui app's `build_replay_header`
         // (`ui/replay_parser/mod.rs:3657`) -- manual file open, autoload
-        // checkbox, grouping selector, column-filter checkboxes -- in the
-        // same left-to-right order. The Tactics Board/session-popover
-        // controls `build_replay_header` also carries are out of scope (no
-        // collab session support in this port yet).
+        // checkbox, grouping selector, column-filter checkboxes, the session
+        // popover -- in the same left-to-right order. The Tactics Board
+        // button that header also carries is not ported: it opens a board
+        // this app has no drawing surface for.
+        self.collab.bind(&entity, cx);
+        // The session's event inbox is unbounded, so it is drained here every
+        // draw rather than left to grow for as long as the session runs.
+        self.collab.poll();
+        let session = crate::collab_popover::render(self, &entity, cx);
         let replay_header = h_flex()
             .flex_none()
             .gap_2()
@@ -824,6 +840,7 @@ impl Render for ReplayInspectorView {
             .py_1()
             .border_b_1()
             .border_color(cx.theme().border)
+            .child(session)
             .child(
                 Button::new("replay-header-open-manually")
                     .icon(IconName::FolderOpen)
@@ -891,6 +908,24 @@ impl Render for ReplayInspectorView {
     }
 }
 
+impl crate::collab_popover::SessionHost for ReplayInspectorView {
+    fn collab(&self) -> &crate::collab::CollabState {
+        &self.collab
+    }
+
+    fn collab_mut(&mut self) -> &mut crate::collab::CollabState {
+        &mut self.collab
+    }
+
+    fn name_input(&self) -> &Entity<InputState> {
+        &self.collab_name
+    }
+
+    fn token_input(&self) -> &Entity<InputState> {
+        &self.collab_token
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::InspectorSettings;
@@ -938,6 +973,52 @@ mod tests {
     /// The listing is a column down the side of the tab, and the rail takes
     /// it away and brings it back.
     ///
+    /// The session popover is built from inside this tab's own render, where
+    /// the tab's entity is leased. Reading that entity there panics with
+    /// "cannot read ... while it is already being updated", which takes the
+    /// whole tab down rather than just the popover -- so the header is drawn
+    /// here and every control on it checked.
+    #[gpui_kit::test]
+    fn the_header_draws_with_the_session_control_on_it(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+
+            assert!(window.try_find("collab-session-toggle").is_some(), "the session control is on the header");
+            // The rest of the header still draws beside it.
+            assert!(window.try_find("replay-header-open-manually").is_some());
+            assert!(window.try_find("replay-header-auto-load-latest").is_some());
+        })
+        .expect("the window is open");
+    }
+
+    /// Opening the popover with no session offers a name and the two ways to
+    /// start one, and starts neither until a name is given: every peer reads
+    /// that name, so an unnamed session makes a roster nobody can follow.
+    #[gpui_kit::test]
+    fn the_session_popover_starts_nothing_without_a_display_name(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("collab-session-toggle", cx);
+            window.render_frame(cx);
+
+            assert!(window.try_find("collab-display-name").is_some(), "a name is asked for first");
+            assert!(window.try_find("collab-host").is_some());
+            assert!(window.try_find("collab-token").is_some());
+
+            window.click("collab-host", cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        view.update(cx, |view, _cx| {
+            assert!(!view.collab.is_active(), "nothing started without a name to start it under");
+        });
+    }
+
     /// The height is the assertion that matters: the listing rendered at its
     /// content height, centred in an otherwise empty tab, for as long as its
     /// row was an `h_flex` (which installs `items_center`).
