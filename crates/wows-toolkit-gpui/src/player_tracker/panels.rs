@@ -6,6 +6,16 @@
 //! [`PlayerTrackerView::render_section`]. What a panel adds is its own scroll
 //! position, which is what lets two sections sit beside each other and each
 //! scroll its own rows.
+//!
+//! A panel watches the tab, because the dock draws it through
+//! `Entity::cached`: that recycles the drawn subtree until the panel's own
+//! entity is notified, and notifying the tab marks only the tab and its
+//! ancestors. Without the watch a section would keep last frame's rows until
+//! something unrelated forced a redraw.
+//!
+//! No test covers that watch: the harness draws through `render_frame`, which
+//! calls `Window::refresh` and so ignores caching. It has to be read off the
+//! running app.
 
 use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
@@ -28,6 +38,10 @@ pub(crate) struct TrackerPanel {
     tracker: WeakEntity<PlayerTrackerView>,
     /// This section's own scroll position.
     list: ListState,
+    /// Held to keep the watch on the tab alive. Installed on the first draw
+    /// rather than at construction, because the tab is not yet reachable
+    /// while it is building the panels that point back at it.
+    watching: Option<Subscription>,
     focus_handle: FocusHandle,
 }
 
@@ -37,6 +51,7 @@ impl TrackerPanel {
             section,
             tracker,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
+            watching: None,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -46,24 +61,18 @@ impl TrackerPanel {
         self.section
     }
 
-    /// How many rows this section's own list is holding. Test-only: the
-    /// production path pushes counts in rather than reading them back.
+    /// How many rows this section's own list is holding. Test-only: each
+    /// section sets its own count as it draws, so nothing in the app reads
+    /// one back.
     #[cfg(test)]
     pub(crate) fn list_len(&self) -> usize {
         self.list.item_count()
     }
 
-    /// Tells the list how many rows there are now, which is what a filter or
-    /// a period change means for it.
-    pub(crate) fn rows_changed(&mut self, rows: usize, cx: &mut Context<Self>) {
-        self.list.reset(rows);
-        cx.notify();
-    }
-
     /// Tells the list that its rows changed height, which is what opening a
-    /// row does.
-    pub(crate) fn remeasure(&mut self, rows: usize, cx: &mut Context<Self>) {
-        self.list.remeasure_items(0..rows);
+    /// row does. The count is the list's own, since only the heights moved.
+    pub(crate) fn remeasure(&mut self, cx: &mut Context<Self>) {
+        self.list.remeasure_items(0..self.list.item_count());
         cx.notify();
     }
 }
@@ -99,8 +108,17 @@ impl Render for TrackerPanel {
         let Some(tracker) = self.tracker.upgrade() else {
             return div().size_full().into_any_element();
         };
+        if self.watching.is_none() {
+            self.watching = Some(cx.observe(&tracker, |_panel, _tracker, cx| cx.notify()));
+        }
         let section = self.section;
         let list = self.list.clone();
-        tracker.update(cx, |tracker, cx| tracker.render_section(section, &list, cx))
+        // The dock focuses this handle when its tab is activated, so the
+        // section has to carry it or the focus lands on nothing.
+        div()
+            .track_focus(&self.focus_handle)
+            .size_full()
+            .child(tracker.update(cx, |tracker, cx| tracker.render_section(section, &list, cx)))
+            .into_any_element()
     }
 }

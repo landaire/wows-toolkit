@@ -579,7 +579,7 @@ impl PlayerTrackerView {
         // The editor lives in the row's own detail block, so writing a note
         // opens the row it belongs to.
         self.expanded_players.insert(account);
-        self.remeasure_rows(cx);
+        self.remeasure_section(SubTab::Players, cx);
     }
 
     /// Opens or closes a historical row's detail block.
@@ -589,7 +589,7 @@ impl PlayerTrackerView {
         } else if self.editing_note == Some(account) {
             self.editing_note = None;
         }
-        self.remeasure_rows(cx);
+        self.remeasure_section(SubTab::Players, cx);
     }
 
     /// Opens or closes a clans row's member list.
@@ -597,14 +597,17 @@ impl PlayerTrackerView {
         if !self.expanded_clans.remove(&clan) {
             self.expanded_clans.insert(clan);
         }
-        self.remeasure_rows(cx);
+        self.remeasure_section(SubTab::Clans, cx);
     }
 
-    /// Tells the list that a row's height changed under it.
-    fn remeasure_rows(&mut self, cx: &mut Context<Self>) {
-        for panel in self.panels.clone() {
-            let rows = self.rows_in(panel.read(cx).section());
-            panel.update(cx, |panel, cx| panel.remeasure(rows, cx));
+    /// Tells one section's list that a row's height changed under it.
+    ///
+    /// Only the section holding the opened row is remeasured: a row opening
+    /// in the players table moves nothing in the clans table, and remeasuring
+    /// a list also costs it its scroll position.
+    fn remeasure_section(&mut self, section: SubTab, cx: &mut Context<Self>) {
+        if let Some(panel) = self.panels.iter().find(|panel| panel.read(cx).section() == section).cloned() {
+            panel.update(cx, |panel, cx| panel.remeasure(cx));
         }
         cx.notify();
     }
@@ -715,7 +718,7 @@ impl PlayerTrackerView {
     /// established install -- and the config pool hands out one connection at
     /// a time, so running them with every refresh queued the Players table's
     /// own (period-filtered, near-instant) query behind them. They run when
-    /// the Clans table is shown instead: see [`Self::load_clan_inputs_if_shown`].
+    /// the Clans table is drawn instead: see [`Self::load_clan_inputs_if_idle`].
     fn load_clan_inputs(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
         let generation = self.generation;
         self.clan_state = LoadState::Loading;
@@ -783,9 +786,6 @@ impl PlayerTrackerView {
         self.state = LoadState::Loading;
         self.clan_state = LoadState::Idle;
         self.load_tracked_players(pool.clone(), cx);
-        // A refresh re-reads whatever is on screen; the clans section asks
-        // again for itself as it redraws.
-        self.load_clan_inputs_if_idle(cx);
         cx.notify();
 
         let filter = self.period.match_filter(Timestamp::now());
@@ -1140,31 +1140,17 @@ impl PlayerTrackerView {
         }));
     }
 
-    /// Tells each section's own list how many rows it has now.
+    /// Says the rows have changed. Each section reconciles its own list as
+    /// it draws, where the rows are already built, so this only has to ask
+    /// for a redraw; the panels watch this tab for it.
     fn sync_rows(&mut self, cx: &mut Context<Self>) {
-        for panel in self.panels.clone() {
-            let rows = self.rows_in(panel.read(cx).section());
-            panel.update(cx, |panel, cx| panel.rows_changed(rows, cx));
-        }
         cx.notify();
-    }
-
-    /// How many rows one section has.
-    fn rows_in(&self, section: SubTab) -> usize {
-        match section {
-            SubTab::Players => self.rows().len(),
-            // The roster is two short teams drawn side by side, not a
-            // virtualized list, so it contributes no rows to a list state.
-            SubTab::CurrentMatch => 0,
-            SubTab::Clans => self.clans().len(),
-        }
     }
 
     /// Brings one section forward in the dock.
     ///
-    /// The app itself switches sections through the dock's own tab bar; this
-    /// is how a test asks for one, and how anything that wants to point the
-    /// reader at a section would.
+    /// The app switches sections through the dock's own tab bar, so nothing
+    /// in it calls this; it is how a test asks for a section.
     #[cfg(test)]
     pub(crate) fn set_sub_tab(&mut self, sub_tab: SubTab, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(panel) = self.panels.iter().find(|panel| panel.read(cx).section() == sub_tab) {
@@ -1269,8 +1255,6 @@ impl PlayerTrackerView {
         .detach();
     }
 
-    /// The Current Match body: the roster when a battle is under way, and
-    /// what is missing when it is not.
     /// One section's own table: its header and the rows under it.
     ///
     /// Takes the section to draw and the list it scrolls rather than reading
@@ -1354,6 +1338,17 @@ impl PlayerTrackerView {
 
         let players = self.rows();
         let clans = self.clans();
+        let row_count = match sub_tab {
+            SubTab::Players => players.len(),
+            SubTab::Clans => clans.len(),
+            SubTab::CurrentMatch => unreachable!("the roster returns above"),
+        };
+        // Reconciled here, where the rows are already built. Resetting also
+        // returns the list to the top, so it is done only when the count
+        // actually moved and only to this section's own list.
+        if list_state.item_count() != row_count {
+            list_state.reset(row_count);
+        }
         let notes: HashMap<AccountId, String> = self
             .tracked
             .iter()
@@ -1545,7 +1540,7 @@ impl PlayerTrackerView {
                 _ => Some(t!("ui.player_tracker.loading_players").into_owned()),
             },
             LoadState::Failed(reason) => Some(t!("ui.player_tracker.index_failed", reason = reason).to_string()),
-            LoadState::Loaded if self.rows_in(sub_tab) == 0 => match sub_tab {
+            LoadState::Loaded if row_count == 0 => match sub_tab {
                 SubTab::Players => Some(t!("ui.player_tracker.no_players").into_owned()),
                 SubTab::Clans => Some(t!("ui.player_tracker.clan_no_data").into_owned()),
                 SubTab::CurrentMatch => unreachable!("the roster returns above"),
@@ -1571,6 +1566,8 @@ impl PlayerTrackerView {
         v_flex().size_full().child(header).child(div().flex_1().min_h(px(0.)).child(body)).into_any_element()
     }
 
+    /// The Current Match body: the roster when a battle is under way, and
+    /// what is missing when it is not.
     fn render_current_match(&self, cx: &mut Context<Self>) -> AnyElement {
         let border = cx.theme().border;
 
@@ -3127,6 +3124,7 @@ mod clan_table_tests {
     use std::collections::HashMap;
     use wows_replays::types::AccountId;
     use wows_replays::types::ArenaId;
+    use wows_toolkit_config::index::rows::PlayerFacet;
     use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 
     fn at(minute: i64) -> Timestamp {
@@ -3190,23 +3188,39 @@ mod clan_table_tests {
         player.arena_ids.insert(ArenaId::from(1i64));
         player.timestamps.insert(at(10));
         let tracked = HashMap::from([(AccountId(7), player)]);
+        let players = vec![PlayerFacet {
+            account_id: AccountId(7),
+            latest_name: "Harvey635".to_string(),
+            clan: "WTK".to_string(),
+            match_count: 1,
+        }];
+
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
 
         window
             .update(cx, |tracker, _window, cx| {
-                tracker.seed_players_and_notes(Vec::new(), tracked, cx);
-
                 let sections: Vec<SubTab> = tracker.panels.iter().map(|panel| panel.read(cx).section()).collect();
                 assert_eq!(sections, SubTab::ALL.to_vec(), "one panel per section, in the egui tab's order");
+                assert_eq!(tracker.panels[0].read(cx).list_len(), 0, "nothing is tracked yet");
 
-                // Each section's list holds its own rows, which is what lets
-                // both be shown and scrolled at once.
-                assert_eq!(tracker.panels[0].read(cx).list_len(), tracker.rows().len());
-                assert_eq!(tracker.panels[2].read(cx).list_len(), tracker.clans().len());
-                assert_ne!(
+                tracker.seed_players_and_notes(players, tracked, cx);
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+
+        window
+            .update(cx, |tracker, _window, cx| {
+                let expected = tracker.rows().len();
+                assert_eq!(expected, 1, "the seeded player is one row");
+                assert_eq!(
                     tracker.panels[0].read(cx).list_len(),
-                    tracker.panels[2].read(cx).list_len(),
-                    "the two sections are not holding the same rows"
+                    expected,
+                    "the drawn section reconciled its own list"
                 );
+                // The clans section has not been drawn, so it holds nothing
+                // yet; its own list is what it reconciles, not this one's.
+                assert_eq!(tracker.panels[2].read(cx).list_len(), 0);
             })
             .expect("the window is open");
     }
