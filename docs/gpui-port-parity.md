@@ -210,10 +210,15 @@ kept so the next audit does not re-report them.
   comparison list, the server-vs-simulation report) is still absent.
 - Shell trajectory mode is absent.
 - Splash/blast mode and the splash-box popover are absent.
-- Gap detection and the camera-rings section are absent. "Show Hidden" is on
-  the pane's toolbar: it swaps the view to the plates that are part of the
-  combat model but that the game's own viewer never draws, and still obeys a
-  plate the reader has switched off. The roll slider is in the display
+- The camera-rings section is absent. Gap detection is on the pane's
+  toolbar, carrying its own count: the openings in the armor a shell could
+  pass through are marked in red, found by the same two rules the egui app
+  uses (an edge belonging to one triangle, no longer than 5 m, with no other
+  boundary edge within 12 cm). They are looked for over the triangles
+  currently shown, so a plate the reader hid does not read as a hole in the
+  ship. "Show Hidden" is on the pane's toolbar too: it swaps the view to the
+  plates that are part of the combat model but that the game's own viewer
+  never draws, and still obeys a plate the reader has switched off. The roll slider is in the display
   popover: it heels the hull over through the same range the egui slider
   offers, leaving the waterline and the other world-space overlays level.
 - [done] The legend reopens from the pane's own strip.

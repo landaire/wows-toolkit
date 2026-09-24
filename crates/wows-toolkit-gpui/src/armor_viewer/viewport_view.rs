@@ -44,6 +44,7 @@ use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
 
+use super::gaps;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
 use crate::armor_viewer::camo::build_active_camo;
 use crate::armor_viewer::load_ship;
@@ -71,12 +72,20 @@ use crate::viewport::device::readback_to_render_image;
 use crate::viewport::gizmo;
 use crate::viewport::renderer::GpuPipeline;
 use crate::viewport::renderer::LAYER_DEFAULT;
+use crate::viewport::renderer::LAYER_OVERLAY;
 use crate::viewport::renderer::Viewport3D;
 use crate::viewport::types::LightingSettings;
 use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
+
+/// Whether the armor's openings are marked, and how many were found.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct GapState {
+    pub(crate) shown: bool,
+    pub(crate) count: usize,
+}
 
 /// What a pane is currently showing all of.
 ///
@@ -457,6 +466,11 @@ pub struct ViewportView {
     /// toggling it here updates both the 3D geometry and which plate rows
     /// that popover's tree shows.
     pub(crate) display_settings: upload::DisplaySettings,
+    /// Whether the openings in the armor are marked, and how many were
+    /// found last time they were looked for. The count is what the toolbar
+    /// reports, so it is kept rather than recomputed per frame.
+    show_gaps: bool,
+    gap_count: usize,
     /// Whether the viewport is showing only the plates the game's own armor
     /// viewer hides. A mode rather than a setting: it is not written back
     /// with the display defaults, because leaving it on is not a state to
@@ -529,6 +543,8 @@ impl ViewportView {
             pending_armor: None,
             ship_loading: None,
             current_armor: None,
+            show_gaps: false,
+            gap_count: 0,
             show_hidden_only: false,
             display_popover_open: false,
             part_visibility: HashMap::new(),
@@ -922,6 +938,22 @@ impl ViewportView {
             armor: self.part_visibility.values().all(|visible| *visible)
                 && !self.plate_visibility.values().any(|hidden| *hidden),
         }
+    }
+
+    /// Whether the openings in the armor are marked, and how many there
+    /// were.
+    pub(crate) fn gaps(&self) -> GapState {
+        GapState { shown: self.show_gaps, count: self.gap_count }
+    }
+
+    /// Marks the openings in the armor, or stops marking them.
+    pub(crate) fn set_show_gaps(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_gaps == show {
+            return;
+        }
+        self.show_gaps = show;
+        self.reupload_current_armor(cx);
+        cx.notify();
     }
 
     /// Whether only the plates the game's own viewer hides are being shown.
@@ -1671,6 +1703,17 @@ impl ViewportView {
             &self.active_camo_textures,
             &self.active_camo_uvs,
         );
+        // Walked over the same triangles the armor pass just uploaded, so a
+        // hidden plate's rim is not reported as a hole in the ship.
+        self.gap_count = 0;
+        if self.show_gaps {
+            let (vertices, indices, count) =
+                gaps::build_gap_mesh(&armor, visibility, self.display_settings.show_zero_mm);
+            self.gap_count = count;
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            }
+        }
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
         // the fresh geometry.

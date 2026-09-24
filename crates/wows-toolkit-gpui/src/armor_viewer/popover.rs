@@ -96,6 +96,7 @@ pub fn render_toolbar(
         .child(render_hull_button(view, entity))
         .child(render_display_button(view, entity))
         .child(render_hidden_plates_button(view, entity))
+        .child(render_gaps_button(view, entity))
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
@@ -124,6 +125,35 @@ fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView
             .tooltip(t!("ui.armor.show_hidden_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
                 entity.update(cx, |view, cx| view.set_show_hidden_only(!showing, cx));
+            }),
+    )
+}
+
+/// Toolbar toggle for gap detection, which carries its own count: the
+/// number is the answer, so it is on the control rather than behind a hover.
+fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let gaps = view.gaps();
+    let has_armor = view.has_armor();
+    let entity = entity.clone();
+
+    let label =
+        if gaps.shown { format!("{} ({})", t!("ui.armor.gaps"), gaps.count) } else { t!("ui.armor.gaps").into_owned() };
+    // A hull with openings is worth a warning tone; one with none, having
+    // been looked at, is worth saying so quietly.
+    let found = gaps.shown && gaps.count > 0;
+
+    crate::ui::selectable(
+        "armor-show-gaps",
+        gaps.shown,
+        Button::new("armor-show-gaps-button")
+            .child(crate::icons::icon(if found { crate::icons::WARNING } else { crate::icons::EYE_SLASH }))
+            .label(label)
+            .compact()
+            .selected(gaps.shown)
+            .disabled(!has_armor)
+            .tooltip(t!("ui.armor.gaps_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                entity.update(cx, |view, cx| view.set_show_gaps(!gaps.shown, cx));
             }),
     )
 }
