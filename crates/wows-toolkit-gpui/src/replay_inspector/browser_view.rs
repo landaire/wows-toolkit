@@ -1253,6 +1253,7 @@ impl Render for ReplayBrowser {
             .child(
                 div()
                     .id("replay-browser-rows")
+                    .test_support()
                     .flex_1()
                     .min_h(px(0.))
                     // The rows themselves start a preview; leaving them all

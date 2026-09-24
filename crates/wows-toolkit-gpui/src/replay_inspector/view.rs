@@ -485,6 +485,15 @@ impl ReplayInspectorView {
     /// The per-build game-data cache this tab loads replays through, once
     /// the WoWs directory is known. Shared rather than cloned fresh so a
     /// build another tab needs is loaded once for the whole app.
+    /// Hands the view a game-data cache directly, which is all
+    /// [`Self::open_replay`] waits on. Skips the directory scan and the
+    /// startup build preload `apply_settings` starts, neither of which a test
+    /// about the dock has anything to say about.
+    #[cfg(test)]
+    pub(crate) fn seed_game_data(&mut self, wows_dir: &str) {
+        self.game_data = Some(GameDataCache::new(PathBuf::from(wows_dir)));
+    }
+
     pub(crate) fn game_data(&self) -> Option<GameDataCache> {
         self.game_data.clone()
     }
@@ -782,7 +791,12 @@ impl Render for ReplayInspectorView {
             .child(replay_header)
             .when_some(status_banner, |this, banner| this.child(h_flex().flex_none().px_2().py_1().child(banner)))
             .child(
-                h_flex()
+                // A plain flex row rather than `h_flex`, which centres its
+                // children: this is the body, and the listing beside the
+                // replays is a full-height column rather than a toolbar item.
+                div()
+                    .flex()
+                    .flex_row()
                     .flex_1()
                     .min_h(px(0.))
                     // A rail beside the listing, as in the egui tab: one
@@ -822,7 +836,11 @@ mod tests {
     use gpui_kit::px;
     use gpui_kit::size;
     use gpui_kit::test::TestAppContextExt;
+    use gpui_kit::test::TestWindowExt as _;
     use std::path::PathBuf;
+
+    /// The test window's height, which the listing is measured against.
+    const WINDOW_HEIGHT: gpui_kit::Pixels = px(800.);
 
     /// Settings with a directory named, which is all `open_replay` waits on
     /// before it builds a panel. The directory does not have to exist: the
@@ -842,13 +860,127 @@ mod tests {
     fn open_view(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::component::Root>, Entity<ReplayInspectorView>) {
         cx.update(gpui_kit::init);
         let view = std::cell::RefCell::new(None);
-        let window = cx.open_window(size(px(1200.), px(800.)), |window, cx| {
+        let window = cx.open_window(size(px(1200.), WINDOW_HEIGHT), |window, cx| {
             let inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
             *view.borrow_mut() = Some(inspector.clone());
             gpui_kit::component::Root::new(inspector, window, cx)
         });
         let view = view.borrow_mut().take().expect("the view was built inside the window");
         (window, view)
+    }
+
+    /// The listing is a column down the side of the tab, and the rail takes
+    /// it away and brings it back.
+    ///
+    /// The height is the assertion that matters: the listing rendered at its
+    /// content height, centred in an otherwise empty tab, for as long as its
+    /// row was an `h_flex` (which installs `items_center`).
+    #[gpui_kit::test]
+    fn the_rail_collapses_a_full_height_listing_and_brings_it_back(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        let listing = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            listing.size.height > WINDOW_HEIGHT / 2.,
+            "the listing runs down the tab rather than sitting at its content height, got {:?}",
+            listing.size.height
+        );
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+
+            window.click("replay-listing-rail", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-browser-rows").is_none(), "the rail took the listing off screen");
+
+            window.click("replay-listing-rail", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-browser-rows").is_some(), "and brought it back");
+        })
+        .expect("the window is open");
+    }
+
+    /// The boundary between the listing and the replays beside it drags.
+    #[gpui_kit::test]
+    fn the_listing_is_adjustable_in_width(cx: &mut TestAppContext) {
+        let (window, _view) = open_view(cx);
+
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            // The boundary sits on the listing's trailing edge.
+            let from = gpui_kit::point(before.right(), before.center().y);
+            window.drag(from, gpui_kit::point(from.x + px(80.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let after = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            after.size.width > before.size.width,
+            "the listing widened with the drag, from {:?} to {:?}",
+            before.size.width,
+            after.size.width
+        );
+    }
+
+    /// The listing keeps its place, and its drag, once a replay is open
+    /// beside it: the dock that replaces the placeholder is the thing most
+    /// likely to take the space over.
+    #[gpui_kit::test]
+    fn the_listing_survives_a_replay_being_opened_beside_it(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        let before = cx
+            .update_window(window.into(), |_, window, cx| {
+                view.update(cx, |view, cx| {
+                    view.seed_game_data("G:/does-not-exist");
+                    view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                });
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(before.size.width > px(0.), "the listing still has width with a replay open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            let from = gpui_kit::point(before.right(), before.center().y);
+            window.drag(from, gpui_kit::point(from.x + px(80.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let after = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                window.find("replay-browser-rows").bounds()
+            })
+            .expect("the window is open");
+
+        assert!(
+            after.size.width > before.size.width,
+            "the boundary still drags with a replay open, from {:?} to {:?}",
+            before.size.width,
+            after.size.width
+        );
     }
 
     /// A plain open takes the place of the replay on screen, and "Open in New
