@@ -20,6 +20,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
 use gpui_kit::component::dock::DockSkin;
+use gpui_kit::component::dock::PaneRef;
 use gpui_kit::component::dock::PanelId;
 use gpui_kit::component::dock::panel_handle;
 use gpui_kit::component::h_flex;
@@ -107,6 +108,9 @@ pub struct ReplayInspectorView {
     /// closed until the next open for that same path notices the weak
     /// handle no longer upgrades and replaces the entry.
     open_panels: HashMap<PathBuf, WeakEntity<ReplayPanel>>,
+    /// The replay this view last opened or brought forward, which decides
+    /// which tab a plain open replaces when more than one is showing.
+    current_replay: Option<PathBuf>,
     /// The playback viewports open, one per replay, for the same reason
     /// `open_panels` exists: a second ask brings the tab forward.
     open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
@@ -159,6 +163,14 @@ pub struct InspectorSettings {
 /// row back. Carries the whole blob because that is how it is stored.
 pub struct ReplaySettingsChanged(pub ReplaySettings);
 
+/// Where an open puts the replay it was asked for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpenTarget {
+    /// In place of the replay tab already showing.
+    ShowingTab,
+    NewTab,
+}
+
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 
 impl ReplayInspectorView {
@@ -190,6 +202,7 @@ impl ReplayInspectorView {
             game_data_status: GameDataStatus::Loading,
             has_opened_replay: false,
             open_panels: HashMap::new(),
+            current_replay: None,
             open_renderers: HashMap::new(),
             personal_rating: None,
             debug_mode: false,
@@ -304,6 +317,7 @@ impl ReplayInspectorView {
     ) {
         match event {
             ReplayBrowserEvent::OpenReplay(path) => self.open_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::OpenReplayInNewTab(path) => self.open_replay_in_new_tab(path.clone(), window, cx),
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
             // The game has just finished a match. The egui app opens it
             // straight away when this is on, which is what the checkbox
@@ -326,6 +340,16 @@ impl ReplayInspectorView {
     /// `pub(crate)` so another tab can send a replay here: the Search tab's
     /// results open in this inspector rather than in one of their own.
     pub(crate) fn open_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_replay_into(path, OpenTarget::ShowingTab, window, cx);
+    }
+
+    /// Opens `path` beside whatever is already open, which is what the
+    /// listing's "Open in New Tab" asks for.
+    pub(crate) fn open_replay_in_new_tab(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_replay_into(path, OpenTarget::NewTab, window, cx);
+    }
+
+    fn open_replay_into(&mut self, path: PathBuf, target: OpenTarget, window: &mut Window, cx: &mut Context<Self>) {
         let Some(game_data) = self.game_data.clone() else {
             tracing::warn!(
                 path = %path.display(),
@@ -340,15 +364,26 @@ impl ReplayInspectorView {
         if let Some(existing) = self.open_panels.get(&path).and_then(|panel| panel.upgrade()) {
             let id = PanelId::from(existing.entity_id());
             self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            self.current_replay = Some(path);
             cx.notify();
             return;
+        }
+
+        // A plain open takes the place of the replay tab on screen, as the
+        // egui listing does; the reader asks for a second tab by name.
+        if target == OpenTarget::ShowingTab
+            && let Some((showing, id)) = self.replaceable_panel(cx)
+        {
+            self.open_panels.remove(&showing);
+            self.dock_area.update(cx, |dock_area, cx| dock_area.remove_panel_id(id, window, cx));
         }
 
         let columns = default_columns(&self.replay_settings);
         let personal_rating = self.personal_rating.clone();
         let panel = cx
             .new(|cx| ReplayPanel::new(path.clone(), game_data, self.debug_mode, columns, personal_rating, window, cx));
-        self.open_panels.insert(path, panel.downgrade());
+        self.open_panels.insert(path.clone(), panel.downgrade());
+        self.current_replay = Some(path);
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
@@ -357,6 +392,38 @@ impl ReplayInspectorView {
         // map is only walked when one is asked for, so it is swept here.
         self.open_renderers.retain(|_, panel| panel.upgrade().is_some());
         cx.notify();
+    }
+
+    /// The replay tab a plain open replaces: one that is the active tab of
+    /// its own group.
+    ///
+    /// A dock can hold several groups, each with a replay showing, so the one
+    /// this view last opened or brought forward wins; failing that, any of
+    /// them does, in path order so the choice is at least repeatable.
+    fn replaceable_panel(&self, cx: &App) -> Option<(PathBuf, PanelId)> {
+        let mut active: Vec<PanelId> = Vec::new();
+        if let Some(tree) = self.dock_area.read(cx).layout(DockPlacement::Center) {
+            tree.root().walk(&mut |node| {
+                if let PaneRef::Tabs { panels, active_ix } = node.kind()
+                    && let Some(id) = panels.get(active_ix)
+                {
+                    active.push(*id);
+                }
+            });
+        }
+
+        let mut showing: Vec<(PathBuf, PanelId)> = self
+            .open_panels
+            .iter()
+            .filter_map(|(path, panel)| {
+                let id = PanelId::from(panel.upgrade()?.entity_id());
+                active.contains(&id).then(|| (path.clone(), id))
+            })
+            .collect();
+        showing.sort_by(|left, right| left.0.cmp(&right.0));
+
+        let current = self.current_replay.as_ref();
+        showing.iter().find(|(path, _)| Some(path) == current).cloned().or_else(|| showing.into_iter().next())
     }
 
     /// Opens a playback viewport on `path`, in a dock tab of its own.
@@ -725,5 +792,87 @@ impl Render for ReplayInspectorView {
                             .into_any_element()
                     }),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::InspectorSettings;
+    use super::ReplayInspectorView;
+    use gpui_kit::AppContext as _;
+    use gpui_kit::Entity;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::WindowHandle;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestAppContextExt;
+    use std::path::PathBuf;
+
+    /// Settings with a directory named, which is all `open_replay` waits on
+    /// before it builds a panel. The directory does not have to exist: the
+    /// panel reports the failed parse itself.
+    fn settings() -> InspectorSettings {
+        InspectorSettings {
+            wows_dir: "G:/does-not-exist".to_string(),
+            debug_mode: false,
+            replay_settings: Default::default(),
+            auto_load_latest_replay: false,
+            locale: None,
+        }
+    }
+
+    /// The view inside a `Root`, which the dock's own overlays need under
+    /// them.
+    fn open_view(cx: &mut TestAppContext) -> (WindowHandle<gpui_kit::component::Root>, Entity<ReplayInspectorView>) {
+        cx.update(gpui_kit::init);
+        let view = std::cell::RefCell::new(None);
+        let window = cx.open_window(size(px(1200.), px(800.)), |window, cx| {
+            let inspector = cx.new(|cx| ReplayInspectorView::new(window, cx));
+            *view.borrow_mut() = Some(inspector.clone());
+            gpui_kit::component::Root::new(inspector, window, cx)
+        });
+        let view = view.borrow_mut().take().expect("the view was built inside the window");
+        (window, view)
+    }
+
+    /// A plain open takes the place of the replay on screen, and "Open in New
+    /// Tab" is how a second one is asked for.
+    #[gpui_kit::test]
+    fn a_plain_open_replaces_the_replay_on_screen(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            view.update(cx, |view, cx| {
+                view.apply_settings(settings(), window, cx);
+                view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 1, "the first replay opens a tab");
+
+                view.open_replay(PathBuf::from("second.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 1, "the second takes its place");
+                assert!(view.open_panels.contains_key(&PathBuf::from("second.wowsreplay")));
+
+                view.open_replay_in_new_tab(PathBuf::from("third.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 2, "a new tab is asked for by name");
+            });
+        })
+        .expect("the window is open");
+    }
+
+    /// Re-opening a replay already open brings its tab forward rather than
+    /// replacing it with a second copy of itself.
+    #[gpui_kit::test]
+    fn re_opening_the_showing_replay_leaves_it_alone(cx: &mut TestAppContext) {
+        let (window, view) = open_view(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            view.update(cx, |view, cx| {
+                view.apply_settings(settings(), window, cx);
+                view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                view.open_replay(PathBuf::from("first.wowsreplay"), window, cx);
+                assert_eq!(view.open_panels.len(), 1);
+                assert!(view.open_panels.contains_key(&PathBuf::from("first.wowsreplay")));
+            });
+        })
+        .expect("the window is open");
     }
 }

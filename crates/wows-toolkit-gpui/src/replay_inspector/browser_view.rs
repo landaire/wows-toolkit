@@ -29,6 +29,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::Arc;
 
+use futures::StreamExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
@@ -37,6 +38,7 @@ use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
+use gpui_kit::component::progress::Progress;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tree::TreeEntry;
 use gpui_kit::component::tree::TreeItem;
@@ -211,6 +213,24 @@ enum ScanStatus {
     Failed(ScanError),
 }
 
+/// How far the directory scan has got.
+///
+/// The walk that finds the candidate files is a single cheap pass, so `total`
+/// is known before the first meta is read; `done` then climbs through it.
+/// A total of zero means the walk itself is still running, which reads as
+/// "scanning" with no denominator to state.
+#[derive(Clone, Copy, Default)]
+struct ScanProgress {
+    done: usize,
+    total: usize,
+}
+
+/// Files read between one progress report and the next.
+///
+/// Reporting every file would post a message and a repaint per meta read,
+/// which is more work than the read itself on a warm directory.
+const SCAN_REPORT_EVERY: usize = 16;
+
 /// Reasons `start_scan` can fail before it ever reaches the background
 /// thread. Only the case `start_scan` actually produces is represented; the
 /// per-file read failures inside `scan_replay_files` are logged and skipped
@@ -229,6 +249,9 @@ enum ScanError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayBrowserEvent {
     OpenReplay(PathBuf),
+    /// Open this replay beside whatever is already open rather than in place
+    /// of it.
+    OpenReplayInNewTab(PathBuf),
     /// Play this replay's battle back on its minimap.
     RenderReplay(PathBuf),
     /// The game has just written a replay into the watched directory, and the
@@ -238,6 +261,8 @@ pub enum ReplayBrowserEvent {
 
 pub struct ReplayBrowser {
     files: Vec<RawReplay>,
+    /// How far the running scan has got. `None` when none is running.
+    scan_progress: Option<ScanProgress>,
     /// The replays the reader has ctrl-clicked, which every batch action
     /// works over. Empty means the one highlighted row, if any.
     marked: HashSet<PathBuf>,
@@ -316,6 +341,7 @@ impl ReplayBrowser {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         Self {
             files: Vec::new(),
+            scan_progress: None,
             marked: HashSet::new(),
             wows_dir: String::new(),
             grouping: ReplayGrouping::default(),
@@ -465,16 +491,45 @@ impl ReplayBrowser {
         }
 
         self.status = ScanStatus::Loading;
+        self.scan_progress = Some(ScanProgress::default());
         cx.notify();
+
+        // The scan reports itself as it goes rather than being polled: a
+        // ticker would keep firing with nothing to say, and in the test
+        // executor it would never stop.
+        let (reports, mut progress_rx) = futures::channel::mpsc::unbounded();
 
         cx.spawn(async move |this, cx| {
             let replays_dir = resolve_replays_dir(Path::new(&wows_dir));
             let scanned = replays_dir.clone();
-            let files = cx.background_spawn(async move { scan_replay_files(&scanned) }).await;
+            let scan = cx.background_spawn(async move { scan_replay_files(&scanned, &reports) });
+
+            let listen = {
+                let this = this.clone();
+                let mut cx = cx.clone();
+                async move {
+                    while let Some(progress) = progress_rx.next().await {
+                        let kept = this.update(&mut cx, |this, cx| {
+                            if this.scan_generation != generation {
+                                return false;
+                            }
+                            this.scan_progress = Some(progress);
+                            cx.notify();
+                            true
+                        });
+                        if !matches!(kept, Ok(true)) {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let (files, ()) = futures::future::join(scan, listen).await;
             let _ = this.update(cx, |this, cx| {
                 if this.scan_generation != generation {
                     return;
                 }
+                this.scan_progress = None;
                 this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
                 this.files = files;
                 this.rebuild_tree(cx);
@@ -900,15 +955,30 @@ impl Render for ReplayBrowser {
         let body = match &self.status {
             // A spinner beside the line, as the egui listing shows while it
             // is reading the directory.
-            ScanStatus::Loading => h_flex()
-                .p_2()
-                .gap_2()
-                .items_center()
-                .text_sm()
-                .text_color(crate::theme::text_dim())
-                .child(Spinner::new())
-                .child(t!("ui.replay.scanning").to_string())
-                .into_any_element(),
+            ScanStatus::Loading => {
+                let ScanProgress { done, total } = self.scan_progress.unwrap_or_default();
+                // Zero files counted so far means the directory walk itself
+                // is still running, and there is no denominator to report.
+                let caption = if total == 0 {
+                    t!("ui.replay.scanning").into_owned()
+                } else {
+                    t!("ui.replay.scanning_count", done = done, total = total).into_owned()
+                };
+                v_flex()
+                    .p_2()
+                    .gap_1()
+                    .text_sm()
+                    .text_color(crate::theme::text_dim())
+                    .child(h_flex().gap_2().items_center().child(Spinner::new()).child(caption.clone()))
+                    .when(total > 0, |this| {
+                        this.child(
+                            Progress::new("replay-scan-progress")
+                                .accessibility_label(caption)
+                                .value(done as f32 / total as f32 * 100.),
+                        )
+                    })
+                    .into_any_element()
+            }
             ScanStatus::Failed(reason) => {
                 div().p_2().text_sm().text_color(crate::theme::text_dim()).child(reason.to_string()).into_any_element()
             }
@@ -975,6 +1045,8 @@ impl Render for ReplayBrowser {
                         if selection.len() > 1 && selection.contains(&leaf.path) { selection } else { Vec::new() };
 
                     let open_path = leaf.path.clone();
+                    let new_tab_path = leaf.path.clone();
+                    let new_tab_entity = context_menu_entity.clone();
                     let render_path = leaf.path.clone();
                     let render_entity = context_menu_entity.clone();
                     let batch_files = batch.clone();
@@ -1019,6 +1091,13 @@ impl Render for ReplayBrowser {
                         let path = open_path.clone();
                         open_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplay(path)));
                     }))
+                    .item(PopupMenuItem::new(t!("ui.replay.context.open_in_new_tab").into_owned()).on_click(
+                        move |_event, _window, cx| {
+                            let path = new_tab_path.clone();
+                            new_tab_entity
+                                .update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::OpenReplayInNewTab(path)));
+                        },
+                    ))
                     .item(PopupMenuItem::new(t!("ui.replay.context.render_replay").into_owned()).on_click(
                         move |_event, _window, cx| {
                             let path = render_path.clone();
@@ -1232,12 +1311,17 @@ fn last_server_version(data: &str) -> Option<String> {
 /// `ReplayFile::meta_from_file` read. A file that fails to parse (corrupt,
 /// mid-write, or from a format this parser does not understand) is logged
 /// and skipped rather than aborting the whole scan.
-fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
+fn scan_replay_files(
+    replays_dir: &Path,
+    reports: &futures::channel::mpsc::UnboundedSender<ScanProgress>,
+) -> Vec<RawReplay> {
     let Ok(entries) = std::fs::read_dir(replays_dir) else {
         return Vec::new();
     };
 
-    let mut out = Vec::new();
+    // The walk is separated from the meta reads so the listing can say how
+    // many files there are to read before it starts reading them.
+    let mut candidates = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
         let Ok(file_type) = entry.file_type() else { continue };
@@ -1250,10 +1334,20 @@ fn scan_replay_files(replays_dir: &Path) -> Vec<RawReplay> {
         if path.file_name().is_some_and(|name| name == "temp.wowsreplay") {
             continue;
         }
+        candidates.push(path);
+    }
+    let total = candidates.len();
+    let _ = reports.unbounded_send(ScanProgress { done: 0, total });
 
+    let mut out = Vec::with_capacity(total);
+    for (read, path) in candidates.into_iter().enumerate() {
         match ReplayFile::meta_from_file(&path) {
             Ok(meta) => out.push(RawReplay { listed: ListedReplay::from_meta(&meta), path }),
             Err(err) => tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta"),
+        }
+        let done = read + 1;
+        if done % SCAN_REPORT_EVERY == 0 || done == total {
+            let _ = reports.unbounded_send(ScanProgress { done, total });
         }
     }
     out
