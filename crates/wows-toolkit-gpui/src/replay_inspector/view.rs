@@ -51,6 +51,7 @@ use super::panel::AutoExport;
 use super::panel::PanelSetup;
 use super::panel::ReplayPanel;
 use crate::replay_renderer::ReplayRendererPanel;
+use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 
 /// Sidebar width for the file browser, matching the egui app's left panel.
@@ -838,12 +839,16 @@ impl Render for ReplayInspectorView {
 
         let entity = cx.entity();
 
+        // What a header Render acts on: the replay showing in the dock, or
+        // the one last opened when none is.
+        let renderable = self.replaceable_panel(cx).map(|shown| shown.path).or_else(|| self.current_replay.clone());
+
         // Header toolbar: mirrors the egui app's `build_replay_header`
         // (`ui/replay_parser/mod.rs:3657`) -- manual file open, autoload
-        // checkbox, grouping selector, column-filter checkboxes, the session
-        // popover -- in the same left-to-right order. The Tactics Board
-        // button that header also carries is not ported: it opens a board
-        // this app has no drawing surface for.
+        // checkbox, grouping selector, column-filter checkboxes, Render, the
+        // session popover -- in the same left-to-right order. The Tactics
+        // Board button that header also carries is not ported: it opens a
+        // board this app has no drawing surface for.
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
@@ -859,6 +864,20 @@ impl Render for ReplayInspectorView {
             .border_b_1()
             .border_color(cx.theme().border)
             .child(session)
+            .child({
+                let path = renderable.clone();
+                Button::new("replay-header-render")
+                    .icon(IconName::Frame)
+                    .label(t!("ui.replay.context.render_replay").to_string())
+                    .compact()
+                    // Nothing open is nothing to render.
+                    .disabled(path.is_none())
+                    .on_click(cx.listener(move |this, _event: &ClickEvent, window, cx| {
+                        if let Some(path) = path.clone() {
+                            this.render_replay(path, window, cx);
+                        }
+                    }))
+            })
             .child(
                 Button::new("replay-header-open-manually")
                     .icon(IconName::FolderOpen)
@@ -1005,6 +1024,8 @@ mod tests {
             window.render_frame(cx);
 
             assert!(window.try_find("collab-session-toggle").is_some(), "the session control is on the header");
+            // Nothing is open, so there is nothing to render.
+            assert!(window.try_find("replay-header-render").is_some(), "the render control is on the header");
             // The rest of the header still draws beside it.
             assert!(window.try_find("replay-header-open-manually").is_some());
             assert!(window.try_find("replay-header-auto-load-latest").is_some());
