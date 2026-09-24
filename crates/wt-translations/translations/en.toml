@@ -291,6 +291,13 @@ reindex_all_replays_hover = "Re-parse every replay and rewrite its stored data, 
 
 show_heals = "Show Heals"
 current_path = "Current Replay Path"
+[ui.settings.index]
+heading = "Replay Index"
+description = "The searchable record of every replay in your directory"
+build = "Build Index"
+progress = "%{done} of %{total} read, %{failed} could not be"
+built = "Indexed %{indexed} replays, %{failed} could not be read"
+
 [ui.settings.session]
 heading = "Session Settings"
 description = "Collaborative replay session preferences"

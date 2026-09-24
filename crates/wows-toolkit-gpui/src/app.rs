@@ -43,6 +43,7 @@ use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::ReplaySettingsChanged;
+use crate::runtime;
 use crate::search::SearchEvent;
 use crate::search::SearchView;
 use crate::settings::DEFAULT_ZOOM;
@@ -57,6 +58,9 @@ use crate::ui::selectable;
 use crate::unpacker::view::UnpackerView;
 use gpui_kit::component::spinner::Spinner;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use wows_toolkit_config::ReplayExportFormat;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::settings::DataSharingMode;
@@ -264,6 +268,15 @@ pub struct App {
     /// The name this app appears under to the peers in a session. Written
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
+    /// How far an index build has got, while one is running.
+    index_progress: Option<crate::replay_index::IndexProgress>,
+    /// What an index build reported when it stopped. Cleared when the next
+    /// one starts.
+    index_outcome: Option<String>,
+    /// Set when an index build should stop, so a long one can be abandoned
+    /// without waiting for the whole directory.
+    index_cancel: Option<Arc<AtomicBool>>,
+    _index_build: Option<Task<()>>,
     /// Backing state for the settings tab's language combo.
     language_select: Entity<SelectState<SearchableVec<LanguageItem>>>,
     /// Whether the directory in the field is one an install could be in. The
@@ -363,6 +376,10 @@ impl App {
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
             collab_name_input,
+            index_progress: None,
+            index_outcome: None,
+            index_cancel: None,
+            _index_build: None,
             language_select,
             wows_dir_invalid: false,
             settings_scroll: ScrollHandle::new(),
@@ -1086,6 +1103,71 @@ impl App {
         self.forget_cache_findings(cx);
     }
 
+    /// Walks the replay directory and indexes what is in it.
+    ///
+    /// The whole directory rather than what changed: this is the control for
+    /// building an index that is not there, or rebuilding one whose rows an
+    /// older parse got wrong.
+    fn build_replay_index(&mut self, cx: &mut Context<Self>) {
+        if self.index_cancel.is_some() {
+            return;
+        }
+        let Some(settings) = self.settings() else { return };
+        let wows_dir = settings.wows_dir.clone();
+        if wows_dir.is_empty() {
+            return;
+        }
+        let Some(pool) = settings_store::pool(cx) else { return };
+        let Some(runtime) = runtime::runtime(cx) else { return };
+        let Some(game_data) = self.replay_inspector.read(cx).game_data() else { return };
+
+        let root = std::path::Path::new(&wows_dir).join("replays");
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.index_cancel = Some(Arc::clone(&cancel));
+        self.index_outcome = None;
+        self.index_progress = Some(crate::replay_index::IndexProgress::default());
+        cx.notify();
+
+        let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded();
+        cx.spawn(async move |this, cx| {
+            use futures::StreamExt as _;
+            while let Some(step) = progress_rx.next().await {
+                if this
+                    .update(cx, |this: &mut Self, cx| {
+                        this.index_progress = Some(step);
+                        cx.notify();
+                    })
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        })
+        .detach();
+
+        self._index_build = Some(cx.spawn(async move |this, cx| {
+            let built = cx
+                .background_spawn(async move {
+                    crate::replay_index::build_index(&runtime, &pool, &root, &game_data, &cancel, |step| {
+                        let _ = progress_tx.unbounded_send(step);
+                    })
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.index_cancel = None;
+                this.index_progress = None;
+                this.index_outcome = Some(match built {
+                    Ok(progress) => {
+                        t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed).into_owned()
+                    }
+                    Err(err) => err.to_string(),
+                });
+                cx.notify();
+            });
+        }));
+    }
+
     /// Adopts a new session display name once the edit has settled.
     fn on_collab_name_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
         if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
@@ -1167,6 +1249,73 @@ impl App {
             settings.game_data_repo_commit = Some(tip.clone());
         }
         settings_store::save(keys::GAME_DATA_REPO_COMMIT, &Some(tip), cx);
+    }
+
+    /// The replay index: building it, and how far a build has got.
+    ///
+    /// Refused without a game directory, since the replays are under it.
+    fn render_index_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let has_dir = self.settings().is_some_and(|settings| !settings.wows_dir.is_empty());
+        let running = self.index_cancel.is_some();
+        let progress = self.index_progress;
+        let outcome = self.index_outcome.clone();
+
+        settings_section(
+            crate::icons::DATABASE,
+            t!("ui.settings.index.heading").into_owned(),
+            t!("ui.settings.index.description").into_owned(),
+            cx.theme().border,
+            settings_form().child(
+                field().label(String::new()).child(
+                    v_flex()
+                        .gap_2()
+                        .child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(
+                                    Button::new("index-build")
+                                        .label(t!("ui.settings.index.build").to_string())
+                                        .compact()
+                                        .disabled(!has_dir || running)
+                                        .on_click(cx.listener(|this, _event, _window, cx| this.build_replay_index(cx))),
+                                )
+                                .when(running, |this| {
+                                    this.child(Spinner::new()).child(
+                                        Button::new("index-stop")
+                                            .label(t!("ui.buttons.stop").to_string())
+                                            .compact()
+                                            .on_click(cx.listener(|this, _event, _window, cx| {
+                                                if let Some(cancel) = &this.index_cancel {
+                                                    cancel.store(true, Ordering::Relaxed);
+                                                }
+                                                cx.notify();
+                                            })),
+                                    )
+                                }),
+                        )
+                        .children(progress.map(|step| {
+                            div()
+                                .text_xs()
+                                .text_color(crate::theme::text_dim())
+                                .child(
+                                    t!(
+                                        "ui.settings.index.progress",
+                                        done = step.done,
+                                        total = step.total,
+                                        failed = step.failed
+                                    )
+                                    .to_string(),
+                                )
+                                .into_any_element()
+                        }))
+                        .children(outcome.map(|text| {
+                            div().text_xs().text_color(crate::theme::text_dim()).child(text).into_any_element()
+                        })),
+                ),
+            ),
+        )
+        .into_any_element()
     }
 
     /// The game-data cache: what it holds, and the maintenance that keeps it
@@ -1761,6 +1910,7 @@ impl App {
         let disable_auto_open = settings.disable_auto_open_session_windows;
 
         let cache = self.render_cache_section(cx);
+        let index = self.render_index_section(cx);
 
         let session = settings_section(
             crate::icons::USERS,
@@ -1996,6 +2146,7 @@ impl App {
                     .child(application)
                     .child(game)
                     .child(cache)
+                    .child(index)
                     .child(session)
                     .child(replay_section)
                     .child(twitch)

@@ -618,6 +618,26 @@ fn cached_build(base: &std::path::Path, version: &str, build: u32) {
 /// The maintenance controls act on cached builds, so a cache holding none
 /// offers the directory and nothing else. The egui tab guards them the same
 /// way, on `version_count > 0`.
+/// The index is built from the replays under the game directory, so without
+/// one there is nothing to walk.
+#[gpui_kit::test]
+fn building_the_replay_index_is_refused_without_a_game_directory(cx: &mut TestAppContext) {
+    let window = open_tall_app(cx);
+    let mut settings = test_settings();
+    settings.wows_dir = String::new();
+    window.update(cx, |app, window, cx| app.apply_settings(settings, window, cx)).expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Settings, cx);
+        window.render_frame(cx);
+
+        assert!(window.try_find("index-build").is_some(), "the control is there to explain what is missing");
+        // Nothing is running, so there is nothing to stop.
+        assert!(window.try_find("index-stop").is_none());
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn the_cache_controls_appear_only_once_something_is_cached(cx: &mut TestAppContext) {
     let empty = tempfile::tempdir().expect("a temporary directory can be made");

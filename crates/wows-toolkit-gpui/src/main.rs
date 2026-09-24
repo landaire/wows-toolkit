@@ -19,6 +19,7 @@ mod palette;
 mod personal_rating;
 mod player_tracker;
 mod preview_hover;
+mod replay_index;
 mod replay_inspector;
 mod replay_renderer;
 mod runtime;
