@@ -12,9 +12,12 @@
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 
+use rust_i18n::t;
 use wows_toolkit_config::index::query_ast::MatchExpr;
 use wows_toolkit_config::index::query_ast::MatchField;
 use wows_toolkit_config::index::query_ast::Op;
@@ -24,6 +27,7 @@ use wows_toolkit_viewmodel::query_bar::label;
 use wows_toolkit_viewmodel::query_bar::label::NameCache;
 use wows_toolkit_viewmodel::query_bar::label::SegmentRole;
 use wows_toolkit_viewmodel::query_bar::select;
+use wows_toolkit_viewmodel::query_bar::select::Selection;
 use wows_toolkit_viewmodel::query_bar::suggest;
 use wows_toolkit_viewmodel::query_bar::suggest::SuggestionKind;
 use wows_toolkit_viewmodel::query_bar::suggest::TermField;
@@ -191,8 +195,10 @@ fn value_choices(expr: &MatchExpr, path: &[usize]) -> Vec<Choice> {
 pub fn pill_strip(
     expr: &MatchExpr,
     cache: &NameCache,
+    selection: &Selection,
     cx: &App,
     on_segment: impl Fn(NodePath, EditablePart, &mut App) + Clone + 'static,
+    on_structure: impl Fn(NodePath, StructuralEdit, &mut Window, &mut App) + Clone + 'static,
 ) -> Option<AnyElement> {
     let stream = tokens::tokenize(expr, cache);
     if stream.is_empty() {
@@ -206,6 +212,9 @@ pub fn pill_strip(
     for (index, token) in stream.iter().enumerate() {
         row = match &token.kind {
             TokenKind::Pill { segments } => {
+                // A selected pill reads as selected, which is what says what
+                // a group or a delete is about to act on.
+                let chosen = selection.contains(&token.path);
                 let mut pill = h_flex()
                     .id(("search-pill", index))
                     .gap_0p5()
@@ -214,7 +223,8 @@ pub fn pill_strip(
                     .py(px(1.))
                     .rounded_sm()
                     .border_1()
-                    .border_color(border);
+                    .border_color(if chosen { accent } else { border })
+                    .when(chosen, |this| this.bg(accent.opacity(0.2)));
                 for (slot, segment) in segments.iter().enumerate() {
                     // The field and the operator are chrome around the value,
                     // which is the part the reader is looking for.
@@ -241,7 +251,7 @@ pub fn pill_strip(
                             .child(segment.text.clone()),
                     );
                 }
-                row.child(pill)
+                row.child(pill_with_menu(pill, index, &token.path, expr, selection, on_structure.clone()))
             }
             TokenKind::Connector { is_or } => {
                 row.child(div().text_xs().text_color(crate::theme::text_dim()).child(if *is_or { "or" } else { "and" }))
@@ -262,6 +272,76 @@ pub fn pill_strip(
     }
 
     Some(row.into_any_element())
+}
+
+/// What a pill's own menu can do to the query's shape.
+///
+/// The edits themselves are `wows_toolkit_viewmodel::query_bar::select`,
+/// shared with the egui bar; this only names which one was asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StructuralEdit {
+    /// Add this pill to the selection, or take it out again.
+    ToggleSelected,
+    /// Wrap the selection in a group of its own.
+    Group { is_or: bool },
+    /// Dissolve the group this pill is in, lifting its members into the
+    /// group above.
+    Ungroup,
+    /// Put a `not` in front of this pill, or take the one that is there off.
+    Negate,
+    /// Drop the selection from the query.
+    Delete,
+    /// Swap the connector joining this pill to its siblings.
+    FlipConnector,
+}
+
+/// Wraps a drawn pill in the menu that acts on the query's shape.
+///
+/// Everything it offers is refused rather than hidden when it does not
+/// apply: a menu whose items move around is harder to learn than one whose
+/// items grey out.
+fn pill_with_menu(
+    pill: impl IntoElement,
+    index: usize,
+    path: &NodePath,
+    expr: &MatchExpr,
+    selection: &Selection,
+    on_structure: impl Fn(NodePath, StructuralEdit, &mut Window, &mut App) + Clone + 'static,
+) -> impl IntoElement {
+    let path = path.clone();
+    let selected = selection.contains(&path);
+    let can_group = select::can_group(expr, selection) && !selection.is_empty();
+    let can_ungroup = path.len() > 1;
+    let can_delete = !selection.is_empty();
+
+    let item = {
+        let path = path.clone();
+        let on_structure = on_structure.clone();
+        move |label: String, edit: StructuralEdit, enabled: bool| {
+            let path = path.clone();
+            let on_structure = on_structure.clone();
+            PopupMenuItem::new(label).disabled(!enabled).on_click(move |_event, window, cx: &mut App| {
+                on_structure(path.clone(), edit, window, cx);
+            })
+        }
+    };
+
+    div().id(("search-pill-menu", index)).child(pill).context_menu(move |menu, _window, _cx| {
+        menu.item(item(
+            t!(if selected { "ui.search.pill_deselect" } else { "ui.search.pill_select" }).into_owned(),
+            StructuralEdit::ToggleSelected,
+            true,
+        ))
+        .separator()
+        .item(item(t!("ui.search.pill_group_all").into_owned(), StructuralEdit::Group { is_or: false }, can_group))
+        .item(item(t!("ui.search.pill_group_any").into_owned(), StructuralEdit::Group { is_or: true }, can_group))
+        .item(item(t!("ui.search.pill_ungroup").into_owned(), StructuralEdit::Ungroup, can_ungroup))
+        .separator()
+        .item(item(t!("ui.search.pill_negate").into_owned(), StructuralEdit::Negate, true))
+        .item(item(t!("ui.search.pill_flip_connector").into_owned(), StructuralEdit::FlipConnector, true))
+        .separator()
+        .item(item(t!("ui.search.pill_delete").into_owned(), StructuralEdit::Delete, can_delete))
+    })
 }
 
 /// One completion the bar is offering.

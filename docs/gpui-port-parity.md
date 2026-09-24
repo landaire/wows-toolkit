@@ -364,8 +364,15 @@ kept so the next audit does not re-report them.
   as it is typed, after a short pause rather than per keystroke.
 - [done] The tab opens on the query it was left with, and saves it back.
   Sort order and operator preferences are still not persisted.
-- No structural editing: no selection, grouping, negate, delete, ungroup or
-  connector flip, and no right-click menu on a pill.
+- [done] No structural editing: no selection, grouping, negate, delete,
+  ungroup or connector flip, and no right-click menu on a pill. Every pill
+  carries a menu offering all six, and a selected pill reads as selected so
+  what a group or a delete will act on is visible. A menu opened on an
+  unselected pill acts on that pill alone. The edits are
+  `wows_toolkit_viewmodel::query_bar::select`'s, already shared with the egui
+  bar, so the two reshape a query the same way; the result is printed back
+  through the grammar and re-run, which is how every other edit in this bar
+  lands.
 - [done] Up and Down walk the queries that were run, and walking back out
   restores the text the walk started from. The history is the `history` field
   the egui settings row already declares (and never filled).

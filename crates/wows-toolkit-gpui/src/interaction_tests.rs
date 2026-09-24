@@ -1111,6 +1111,84 @@ fn the_query_bar_offers_completions_and_takes_them(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// A pill's own menu reshapes the query.
+///
+/// Asserted as a round trip rather than against a spelling: the shared
+/// transform negates an invertible term by flipping its operator
+/// (`outcome=win` becomes `outcome!=win`) rather than by wrapping it in a
+/// `not`, and which of the two it picks is its business, not this test's.
+#[gpui_kit::test]
+fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("outcome=win", cx);
+        window.render_frame(cx);
+
+        assert!(window.try_find(("search-pill-segment", 0usize)).is_some(), "the query reads back as a pill");
+    })
+    .expect("the test window stays open");
+
+    // The path is read off the token stream, the way the pill strip reads
+    // it: a one-term query's pill is not at a path a test can assume.
+    let expr = wows_toolkit_config::index::query_text::parse_query("outcome=win").expect("the query parses");
+    let cache = wows_toolkit_viewmodel::query_bar::label::NameCache::default();
+    let tokens = wows_toolkit_viewmodel::query_bar::tokens::tokenize(&expr, &cache);
+    let pill = wows_toolkit_viewmodel::query_bar::select::pill_paths(&tokens)
+        .into_iter()
+        .next()
+        .expect("the query draws one pill");
+
+    // The edit runs through the same shared transform the egui bar uses, so
+    // the assertion is on what lands in the bar rather than on the menu.
+    window
+        .update(cx, |app, window, cx| {
+            app.search().clone().update(cx, |search, cx| {
+                search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
+            });
+        })
+        .expect("the test window stays open");
+
+    let negated = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.find(SEARCH_QUERY).value().expect("the bar has text").to_string()
+        })
+        .expect("the test window stays open");
+
+    assert_ne!(negated, "outcome=win", "negating the pill changed the query");
+    assert!(
+        wows_toolkit_config::index::query_text::parse_query(&negated).is_ok(),
+        "and left a query that parses, got {negated:?}"
+    );
+
+    // Negating it again is the identity, whichever way the transform chose to
+    // express the first one.
+    let expr = wows_toolkit_config::index::query_text::parse_query(&negated).expect("the query parses");
+    let tokens = wows_toolkit_viewmodel::query_bar::tokens::tokenize(&expr, &cache);
+    let pill = wows_toolkit_viewmodel::query_bar::select::pill_paths(&tokens)
+        .into_iter()
+        .next()
+        .expect("the query still draws one pill");
+
+    window
+        .update(cx, |app, window, cx| {
+            app.search().clone().update(cx, |search, cx| {
+                search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
+            });
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
+        assert_eq!(text, "outcome=win", "negating twice is the query it started from");
+    })
+    .expect("the test window stays open");
+}
+
 /// A date field is picked from a calendar rather than from the list of values
 /// the index happens to hold.
 #[gpui_kit::test]
