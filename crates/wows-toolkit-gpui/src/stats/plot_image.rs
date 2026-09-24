@@ -13,6 +13,11 @@
 //! the faces the desktop already has, rather than tofu from a Latin-only
 //! file.
 
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
 use ab_glyph::Font as _;
 use ab_glyph::FontRef;
 use ab_glyph::PxScale;
@@ -39,13 +44,33 @@ use super::plot::draw;
 /// light background as well as a dark one.
 const BACKGROUND: [u8; 4] = [24, 24, 27, 255];
 
-/// Faces the system offers, loaded once: enumerating them is slow enough to
-/// notice, and a copy is not the moment to do it twice.
+/// A face's bytes and which face inside them, which is what `ab_glyph` reads
+/// a glyph out of.
+type FaceBytes = Arc<(Vec<u8>, u32)>;
+
+/// The faces the system offers, enumerated once for the process.
+///
+/// Walking the font directories costs the better part of a second on a
+/// desktop with a full set installed, and every canvas would otherwise pay
+/// it again.
+fn faces() -> &'static Faces {
+    static FACES: OnceLock<Faces> = OnceLock::new();
+    FACES.get_or_init(Faces::load)
+}
+
+/// Faces the system offers, with what has already been looked up in them.
 struct Faces {
     db: fontdb::Database,
     /// The families to try, in order. The first that covers a character wins,
     /// which is what puts a Japanese label in a Japanese face.
     order: Vec<fontdb::ID>,
+    /// Which face covers a character. Finding one parses every face ahead of
+    /// it, so a label of repeated characters would pay for each of them.
+    covering: Mutex<HashMap<char, Option<fontdb::ID>>>,
+    /// A face's bytes, kept. `with_face_data` lends a borrow that cannot be
+    /// held while the pixmap is written, so the bytes have to be copied out;
+    /// copying a font file per glyph is what made a chart cost seconds.
+    bytes: Mutex<HashMap<fontdb::ID, Option<FaceBytes>>>,
 }
 
 impl Faces {
@@ -65,7 +90,16 @@ impl Faces {
         }
         let rest: Vec<fontdb::ID> = db.faces().map(|face| face.id).filter(|id| !order.contains(id)).collect();
         order.extend(rest);
-        Self { db, order }
+        Self { db, order, covering: Mutex::new(HashMap::new()), bytes: Mutex::new(HashMap::new()) }
+    }
+
+    /// `id`'s bytes and face index, read out of the database once.
+    fn bytes(&self, id: fontdb::ID) -> Option<FaceBytes> {
+        let mut bytes = self.bytes.lock().expect("the face cache is only held to read or fill it");
+        bytes
+            .entry(id)
+            .or_insert_with(|| self.db.with_face_data(id, |data, index| Arc::new((data.to_vec(), index))))
+            .clone()
     }
 
     /// The first face that can draw `ch`.
@@ -73,6 +107,15 @@ impl Faces {
     /// `None` when nothing installed covers it, which is a character that
     /// would show as a blank box in any application.
     fn face_for(&self, ch: char) -> Option<fontdb::ID> {
+        if let Some(known) = self.covering.lock().expect("the cover cache is only held to read or fill it").get(&ch) {
+            return *known;
+        }
+        let found = self.search_for(ch);
+        self.covering.lock().expect("the cover cache is only held to read or fill it").insert(ch, found);
+        found
+    }
+
+    fn search_for(&self, ch: char) -> Option<fontdb::ID> {
         self.order.iter().copied().find(|id| {
             self.db
                 .with_face_data(*id, |data, index| {
@@ -86,7 +129,6 @@ impl Faces {
 /// Draws a plot into an image.
 pub struct ImageCanvas {
     pixmap: Pixmap,
-    faces: Faces,
     /// What the current [`clipped`](PlotCanvas::clipped) confines drawing to.
     clip: Option<Bounds<Pixels>>,
 }
@@ -98,7 +140,7 @@ impl ImageCanvas {
     pub fn new(width: u32, height: u32) -> Option<Self> {
         let mut pixmap = Pixmap::new(width, height)?;
         pixmap.fill(tiny_skia::Color::from_rgba8(BACKGROUND[0], BACKGROUND[1], BACKGROUND[2], BACKGROUND[3]));
-        Some(Self { pixmap, faces: Faces::load(), clip: None })
+        Some(Self { pixmap, clip: None })
     }
 
     /// The finished image, as the clipboard wants it.
@@ -132,10 +174,10 @@ impl ImageCanvas {
         let baseline = origin.y.as_f32() + size;
 
         for ch in text.chars() {
-            let Some(id) = self.faces.face_for(ch) else { continue };
-            // Cloned out of the database so the pixmap can be borrowed while
-            // the glyph is drawn.
-            let Some(data) = self.faces.db.with_face_data(id, |data, index| (data.to_vec(), index)) else { continue };
+            let Some(id) = faces().face_for(ch) else { continue };
+            // Read out of the database rather than borrowed from it, so the
+            // pixmap can be written while the glyph is drawn.
+            let Some(data) = faces().bytes(id) else { continue };
             let Ok(font) = FontRef::try_from_slice_and_index(&data.0, data.1) else { continue };
             let scaled = font.as_scaled(PxScale::from(size));
             let glyph_id = font.glyph_id(ch);
@@ -337,7 +379,7 @@ mod tests {
         assert!(latin > px(0.), "a Latin label has width");
         // Skipped rather than failed where the host installs no CJK face:
         // that is the machine's font set, not this code's behaviour.
-        if canvas.faces.face_for('大').is_some() {
+        if super::faces().face_for('大').is_some() {
             assert!(japanese > px(0.), "a Japanese label has width too");
         }
     }
