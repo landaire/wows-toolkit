@@ -14571,6 +14571,7 @@ dependencies = [
 name = "wows-toolkit-gpui"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph",
  "anyhow",
  "arboard",
  "bytemuck",
@@ -14578,6 +14579,7 @@ dependencies = [
  "csv",
  "escaper",
  "filetime",
+ "fontdb",
  "futures",
  "gettext",
  "gpui-kit",
@@ -14597,6 +14599,7 @@ dependencies = [
  "sqlx",
  "tempfile",
  "thiserror 2.0.20",
+ "tiny-skia 0.12.0",
  "tokio",
  "tracing",
  "tracing-subscriber",

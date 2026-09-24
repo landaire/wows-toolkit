@@ -46,6 +46,7 @@ use crate::ui::selectable;
 
 use super::plot;
 use super::plot::PlotView;
+use super::plot_image;
 
 /// The settings menu's box. Wide enough for a ship name, and no wider than a
 /// menu needs to be; a session spanning dozens of ships scrolls rather than
@@ -113,6 +114,9 @@ pub struct StatsChartPanel {
     /// before it was played.
     selection_touched: bool,
     view: PlotView,
+    /// Where the plot last drew, so a copy is the size it is on screen.
+    /// `None` before the first frame, which is when there is nothing to copy.
+    plot_bounds: Option<Bounds<Pixels>>,
     /// Where the pointer went down and where it was last seen, while a drag
     /// is panning the plot.
     drag: Option<Point<Pixels>>,
@@ -146,6 +150,7 @@ impl StatsChartPanel {
             selected_ships: Vec::new(),
             selection_touched: false,
             view: PlotView::default(),
+            plot_bounds: None,
             drag: None,
             personal_rating: None,
             focus_handle: cx.focus_handle(),
@@ -324,6 +329,56 @@ impl StatsChartPanel {
 
     /// What the value axis is called: the statistic, plus how it is being
     /// read when that is not the raw per-game figure.
+    /// Draws the chart again into an image and puts it on the clipboard.
+    ///
+    /// Drawn rather than captured: GPUI will not hand back a rendered window
+    /// (`render_to_image` is unimplemented off the test platform), so the
+    /// same plot description goes through an image canvas instead. The
+    /// geometry is identical; the glyphs come from the system's own fonts,
+    /// which is also what lets a Japanese or Russian label render.
+    fn copy_as_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(bounds) = self.plot_bounds else { return };
+        let width = bounds.size.width.as_f32().round() as u32;
+        let height = bounds.size.height.as_f32().round() as u32;
+
+        let series = self.series();
+        let bars = self.bars();
+        let x_label = if self.mode == ChartMode::Bar {
+            t!("ui.stats.column_ship").into_owned()
+        } else {
+            t!("ui.stats.axis_game").into_owned()
+        };
+        let value_label = self.value_label();
+        let plot = plot::Plot {
+            series: &series,
+            bars: &bars,
+            x_label: &x_label,
+            y_label: &value_label,
+            show_values: self.show_values,
+            view: self.view,
+        };
+
+        let theme = cx.theme();
+        let colors = plot::Colors { axis: theme.border, grid: theme.border.opacity(0.4), text: theme.muted_foreground };
+
+        let Some((width, height, pixels)) = plot_image::render(&plot, colors, width, height) else {
+            crate::toast::failed(t!("ui.stats.copy_image_failed").into_owned(), window, cx);
+            return;
+        };
+
+        // GPUI's clipboard carries no image format, so this goes through
+        // `arboard` directly, as the file-list copy in the replay browser
+        // does.
+        let image = arboard::ImageData { width: width as usize, height: height as usize, bytes: pixels.into() };
+        match arboard::Clipboard::new().and_then(|mut board| board.set_image(image)) {
+            Ok(()) => crate::toast::ok(t!("ui.stats.copy_image_done").into_owned(), window, cx),
+            Err(err) => {
+                tracing::warn!("stats: the chart image could not be copied: {err}");
+                crate::toast::failed(t!("ui.stats.copy_image_failed").into_owned(), window, cx);
+            }
+        }
+    }
+
     fn value_label(&self) -> String {
         if self.mode == ChartMode::Bar {
             return t!("ui.stats.series_average", stat = self.stat.label()).into_owned();
@@ -702,6 +757,13 @@ impl Render for StatsChartPanel {
             .border_color(border)
             .child(self.settings_menu(cx))
             .child(div().flex_1())
+            .child(
+                Button::new(("chart-copy-image", id))
+                    .label(t!("ui.stats.copy_image").to_string())
+                    .compact()
+                    .xsmall()
+                    .on_click(cx.listener(|this, _event, window, cx| this.copy_as_image(window, cx))),
+            )
             .when(!self.view.is_default(), |this| {
                 this.child(
                     Button::new(("chart-reset-view", id))
@@ -723,8 +785,11 @@ impl Render for StatsChartPanel {
         let value_label = self.value_label();
         let view = self.view;
         let show_values = self.show_values;
+        let measured = cx.entity();
         let surface = canvas(
-            |_bounds, _window, _cx| {},
+            move |bounds, _window, cx| {
+                measured.update(cx, |this: &mut Self, _cx| this.plot_bounds = Some(bounds));
+            },
             move |bounds, _prepaint, window, cx| {
                 plot::paint(
                     &plot::Plot {

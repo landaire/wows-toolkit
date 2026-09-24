@@ -103,6 +103,13 @@ notify = "8.2.0"
 arboard = "3.6.1"
 # A render put on the clipboard needs a file that outlives this process.
 tempfile = "3"
+# Copying a chart as an image draws it a second time without a window:
+# tiny-skia for the geometry, ab_glyph for the glyphs, and fontdb to find a
+# system face that covers the text. Nothing is bundled, so a chart in
+# Japanese or Russian is drawn with the same faces the desktop uses.
+tiny-skia = "0.12"
+ab_glyph = "0.2"
+fontdb = "0.23"
 
 [dev-dependencies]
 # Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the

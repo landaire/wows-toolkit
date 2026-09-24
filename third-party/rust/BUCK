@@ -11871,6 +11871,12 @@ cargo.rust_library(
     deps = [":roxmltree-0.20"],
 )
 
+alias(
+    name = "fontdb",
+    actual = ":fontdb-0.23",
+    visibility = ["PUBLIC"],
+)
+
 extract_archive(
     name = "fontdb-0.23.0.crate",
     src = "vendor/fontdb-0.23.0.crate",
@@ -11898,6 +11904,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_PRE": "",
     },
     features = [
+        "default",
         "fontconfig",
         "fontconfig-parser",
         "fs",
