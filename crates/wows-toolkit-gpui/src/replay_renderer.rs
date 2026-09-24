@@ -266,6 +266,19 @@ impl ReplayRendererPanel {
     /// track is rasterised through the same renderer the viewport draws with,
     /// and the pixels go straight to the encoder.
     fn export_video(&mut self, cx: &mut Context<Self>) {
+        self.export(ExportTarget::File, cx)
+    }
+
+    /// Renders to a temporary file and puts that file on the clipboard, so it
+    /// pastes into a chat window or an upload dialog.
+    ///
+    /// The file is left behind deliberately: the clipboard holds a path, and
+    /// deleting what it points at would paste nothing.
+    fn export_to_clipboard(&mut self, cx: &mut Context<Self>) {
+        self.export(ExportTarget::Clipboard, cx)
+    }
+
+    fn export(&mut self, target: ExportTarget, cx: &mut Context<Self>) {
         if self.export.is_some() {
             return;
         }
@@ -280,7 +293,14 @@ impl ReplayRendererPanel {
         let frames = track.frames.clone();
         let duration = track.seconds_at(track.len().saturating_sub(1));
         let suggested = format!("{}.mp4", self.title);
-        let asked = crate::dialog::save_file(Some(&t!("ui.replay.renderer.export_video")), &suggested, Some(MP4));
+        // The clipboard needs a file, not a place to put one, so it is not
+        // asked for.
+        let asked: Option<_> = match target {
+            ExportTarget::File => {
+                Some(crate::dialog::save_file(Some(&t!("ui.replay.renderer.export_video")), &suggested, Some(MP4)))
+            }
+            ExportTarget::Clipboard => None,
+        };
 
         self.export_failure = None;
         self.export = Some(ExportProgress { done: 0, total: frames.len() as u64 });
@@ -301,9 +321,16 @@ impl ReplayRendererPanel {
         .detach();
 
         self._export = Some(cx.spawn(async move |this, cx| {
-            let Some(output) = asked.await else {
-                // Cancelled at the dialog: the renderer goes back to the
-                // viewport and nothing else changes.
+            let chosen = match asked {
+                Some(dialog) => dialog.await,
+                // A temporary file that outlives this process, since the
+                // clipboard will point at it.
+                None => temporary_output(&suggested),
+            };
+            let Some(output) = chosen else {
+                // Cancelled at the dialog, or no temporary file could be
+                // made: the renderer goes back to the viewport and nothing
+                // else changes.
                 let _ = this.update(cx, |this, cx| {
                     this.renderer = Some(renderer);
                     this.export = None;
@@ -312,9 +339,10 @@ impl ReplayRendererPanel {
                 return;
             };
 
+            let written = output.clone();
             let (renderer, outcome) = cx
                 .background_spawn(async move {
-                    let outcome = encode_track(&renderer, &frames, duration, &output, progress_tx);
+                    let outcome = encode_track(&renderer, &frames, duration, &written, progress_tx);
                     (renderer, outcome)
                 })
                 .await;
@@ -322,8 +350,16 @@ impl ReplayRendererPanel {
             let _ = this.update(cx, |this, cx| {
                 this.renderer = Some(renderer);
                 this.export = None;
-                if let Err(reason) = outcome {
-                    this.export_failure = Some(reason);
+                match outcome {
+                    Ok(()) if target == ExportTarget::Clipboard => {
+                        if let Err(err) =
+                            arboard::Clipboard::new().and_then(|mut board| board.set().file_list(&[output]))
+                        {
+                            this.export_failure = Some(err.to_string());
+                        }
+                    }
+                    Ok(()) => {}
+                    Err(reason) => this.export_failure = Some(reason),
                 }
                 cx.notify();
             });
@@ -544,6 +580,14 @@ impl Render for ReplayRendererPanel {
                     .tooltip(t!("ui.replay.renderer.export_video").into_owned())
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
             )
+            .child(
+                Button::new("replay-renderer-clipboard")
+                    .child(crate::icons::icon(crate::icons::CLIPBOARD))
+                    .compact()
+                    .disabled(!ready || self.export.is_some())
+                    .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
+                    .on_click(cx.listener(|this, _event, _window, cx| this.export_to_clipboard(cx))),
+            )
             .child(crate::ui::rule_v(cx))
             .child(div().flex_1().min_w(px(0.)).child(Slider::new(&self.seek).disabled(!ready)))
             .child(
@@ -623,6 +667,28 @@ fn to_image(frame: image::RgbImage) -> Arc<RenderImage> {
     let buffer = image::RgbaImage::from_raw(width, height, bgra)
         .expect("the buffer is four bytes per pixel of the size it was built at");
     Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
+}
+
+/// Where a render goes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ExportTarget {
+    /// A file the reader chose.
+    File,
+    /// A temporary file, handed to the clipboard.
+    Clipboard,
+}
+
+/// A place to render to that outlives this process, for the clipboard.
+///
+/// `None` when no temporary directory could be made, which is the only way
+/// this fails.
+fn temporary_output(name: &str) -> Option<PathBuf> {
+    let dir = tempfile::Builder::new().prefix("wt-gpui-render-").tempdir().ok()?;
+    let path = dir.path().join(name);
+    // Kept: the clipboard will hold this path, and a directory removed on
+    // drop would leave it pointing at nothing.
+    let _ = dir.keep();
+    Some(path)
 }
 
 /// The file an export writes.
