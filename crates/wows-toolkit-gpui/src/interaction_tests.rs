@@ -896,6 +896,30 @@ fn the_tracker_sub_tabs_switch_between_their_three_views(cx: &mut TestAppContext
     .expect("the test window stays open");
 }
 
+/// The historical table carries every column the egui tracker's does, and the
+/// sort moves between them.
+#[gpui_kit::test]
+fn the_historical_table_sorts_by_each_of_its_columns(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::PlayerTracker, cx);
+
+        let columns = SortColumn::ALL.len();
+        assert_eq!(columns, 5, "name, clan, both counts and the last encounter");
+
+        let in_range = ("tracker-sort", 3usize);
+        assert_eq!(window.find(in_range).selected(), Some(true), "the table opens on the in-range count");
+
+        for index in 0..columns {
+            let column = ("tracker-sort", index);
+            window.click(column, cx);
+            assert_eq!(window.find(column).selected(), Some(true), "column {index} takes the sort");
+        }
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn the_clans_table_keeps_its_own_sort(cx: &mut TestAppContext) {
     let window = open_app(cx);

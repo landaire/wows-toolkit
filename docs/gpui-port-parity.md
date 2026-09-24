@@ -252,8 +252,18 @@ kept so the next audit does not re-report them.
   Clans tab now.
 - [done] The period is a combo and the three sections are tabs.
 - [done] Roster figures are grouped.
-- The historical table is missing the in-range count and last-encountered
-  columns, and the division-mates checkbox does not affect it.
+- [done] The historical table is missing the in-range count and
+  last-encountered columns, and the division-mates checkbox does not affect
+  it. It now draws Total Encounters, Encounters in Time Range and Last
+  Encountered (an age, with the exact local time behind it), every one of
+  them sortable and headed in the reader's own language; a player met inside
+  the period only as a division mate leaves the table while the toggle is
+  off. The counting is
+  `wows_toolkit_viewmodel::player_tracker::visible_player_rows` over the
+  shared `history` helpers, which the egui tracker was moved onto in the same
+  change, so the two cannot disagree. A player the index names but the
+  tracker never recorded keeps the index's own count for the period and shows
+  a dash where the all-time figure would be.
 - The clans table is missing four columns, the member list and the clan
   search.
 - No "find matches for this player/clan" action anywhere.

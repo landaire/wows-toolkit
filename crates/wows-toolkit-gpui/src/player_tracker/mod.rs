@@ -59,12 +59,14 @@ use wows_toolkit_viewmodel::personal_rating;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory;
 use wows_toolkit_viewmodel::player_tracker::ClanSort;
 use wows_toolkit_viewmodel::player_tracker::ClanSortColumn;
+use wows_toolkit_viewmodel::player_tracker::PlayerRow;
 use wows_toolkit_viewmodel::player_tracker::Sort;
 use wows_toolkit_viewmodel::player_tracker::SortColumn;
 use wows_toolkit_viewmodel::player_tracker::SortOrder;
 use wows_toolkit_viewmodel::player_tracker::TimePeriod;
 use wows_toolkit_viewmodel::player_tracker::clans::build_clan_breakdown;
 use wows_toolkit_viewmodel::player_tracker::clans::visible_clans;
+use wows_toolkit_viewmodel::player_tracker::history;
 use wows_toolkit_viewmodel::player_tracker::live::CurrentMatchViewMode;
 use wows_toolkit_viewmodel::player_tracker::live::LiveIdentities;
 use wows_toolkit_viewmodel::player_tracker::live::LiveMatch;
@@ -80,7 +82,7 @@ use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
-use wows_toolkit_viewmodel::player_tracker::visible_players;
+use wows_toolkit_viewmodel::player_tracker::visible_player_rows;
 use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
 use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
@@ -145,6 +147,10 @@ impl SubTab {
 }
 const CLAN_COLUMN_WIDTH: Pixels = px(120.);
 const COUNT_COLUMN_WIDTH: Pixels = px(110.);
+/// Wide enough for "Encounters in Time Range" and the figure under it.
+const RANGE_COUNT_COLUMN_WIDTH: Pixels = px(170.);
+/// Wide enough for a relative age such as "2 months, 3 days ago".
+const LAST_SEEN_COLUMN_WIDTH: Pixels = px(200.);
 
 /// Where the stats lookup for the battle in progress has got to.
 ///
@@ -746,8 +752,18 @@ impl PlayerTrackerView {
         self.sync_rows(cx);
     }
 
-    fn rows(&self) -> Vec<PlayerFacet> {
-        visible_players(&self.players, &self.filter_text, self.sort)
+    /// The historical table's rows: the indexed players, joined to what the
+    /// tracker recorded about the same accounts, so the counts and the
+    /// division-mate toggle read the way the egui tracker's do.
+    fn rows(&self) -> Vec<PlayerRow> {
+        visible_player_rows(
+            &self.players,
+            &self.tracked,
+            &self.filter_text,
+            self.period.earliest(Timestamp::now()),
+            self.show_division_mates,
+            self.sort,
+        )
     }
 
     /// The clans table, counted over the tracked encounters.
@@ -1336,11 +1352,49 @@ struct HeaderCell {
     /// once but must not share ids.
     id_prefix: &'static str,
     index: usize,
-    label: &'static str,
+    label: SharedString,
     width: Pixels,
     /// Whether this is the column the table is currently ordered by.
     active: bool,
     order: SortOrder,
+}
+
+/// What each historical column is drawn at.
+fn player_column_width(column: SortColumn) -> Pixels {
+    match column {
+        SortColumn::Name => NAME_COLUMN_WIDTH,
+        SortColumn::Clan => CLAN_COLUMN_WIDTH,
+        SortColumn::TotalEncounters => COUNT_COLUMN_WIDTH,
+        SortColumn::Encounters => RANGE_COUNT_COLUMN_WIDTH,
+        SortColumn::LastEncountered => LAST_SEEN_COLUMN_WIDTH,
+    }
+}
+
+/// A count the tracker has no record of reads as a dash rather than as zero,
+/// which would claim the player was never met.
+fn count_text(count: Option<usize>) -> String {
+    match count {
+        Some(count) => separate_number(count as i64, None),
+        None => "-".to_string(),
+    }
+}
+
+/// When the player was last met, worded as an age with the exact local time
+/// behind it.
+fn last_seen_cell(ix: usize, last_seen: Option<jiff::Timestamp>) -> AnyElement {
+    let relative = history::last_seen_text(last_seen, Timestamp::now());
+    let exact = history::last_seen_timestamp_text(last_seen);
+    div()
+        .id(("tracker-last-seen", ix))
+        .w(LAST_SEEN_COLUMN_WIDTH)
+        .text_sm()
+        .text_color(crate::theme::text_dim())
+        .when(!exact.is_empty(), |this| {
+            let exact = SharedString::from(exact);
+            this.tooltip(move |window, cx| Tooltip::new(exact.clone()).build(window, cx))
+        })
+        .child(relative)
+        .into_any_element()
 }
 
 /// Renders a header cell, with the arrow on whichever column is active.
@@ -1890,16 +1944,12 @@ impl Render for PlayerTrackerView {
                 .enumerate()
                 .map(|(index, column)| {
                     let column = *column;
-                    let width = match column {
-                        SortColumn::Name => NAME_COLUMN_WIDTH,
-                        SortColumn::Clan => CLAN_COLUMN_WIDTH,
-                        SortColumn::Encounters => COUNT_COLUMN_WIDTH,
-                    };
+                    let width = player_column_width(column);
                     sort_header(
                         HeaderCell {
                             id_prefix: "tracker-sort",
                             index,
-                            label: column.label(),
+                            label: t!(column.label_key()).into_owned().into(),
                             width,
                             active: self.sort.column == column,
                             order: self.sort.order,
@@ -1924,7 +1974,7 @@ impl Render for PlayerTrackerView {
                         HeaderCell {
                             id_prefix: "tracker-clan-sort",
                             index,
-                            label: column.label(),
+                            label: column.label().into(),
                             width,
                             active: self.clan_sort.column == column,
                             order: self.clan_sort.order,
@@ -1970,22 +2020,33 @@ impl Render for PlayerTrackerView {
                     .px_2()
                     .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                     .hover(|this| this.bg(hover_bg))
-                    .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.latest_name.clone()))
+                    .child(div().w(NAME_COLUMN_WIDTH).text_sm().child(row.facet.latest_name.clone()))
                     .child(
                         div()
                             .w(CLAN_COLUMN_WIDTH)
                             .text_sm()
                             .text_color(crate::theme::text_dim())
-                            .child(row.clan.clone()),
+                            .child(row.facet.clan.clone()),
                     )
+                    // Both counts are read in the tone the in-range one
+                    // deserves: how often you have met someone lately is what
+                    // the ramp is warning about.
                     .child(
                         div()
                             .w(COUNT_COLUMN_WIDTH)
                             .text_sm()
-                            .when_some(severity_color(row.match_count as usize), |el, color| el.text_color(color))
-                            .child(separate_number(row.match_count, None)),
+                            .when_some(severity_color(row.encounters_in_range), |el, color| el.text_color(color))
+                            .child(count_text(row.total_encounters)),
                     )
-                    .child(note_cell(ix, row.account_id, notes.get(&row.account_id), tracker.clone()))
+                    .child(
+                        div()
+                            .w(RANGE_COUNT_COLUMN_WIDTH)
+                            .text_sm()
+                            .when_some(severity_color(row.encounters_in_range), |el, color| el.text_color(color))
+                            .child(separate_number(row.encounters_in_range as i64, None)),
+                    )
+                    .child(last_seen_cell(ix, row.last_seen))
+                    .child(note_cell(ix, row.facet.account_id, notes.get(&row.facet.account_id), tracker.clone()))
                     .into_any_element()
             }
             SubTab::CurrentMatch => unreachable!("the roster returns above"),

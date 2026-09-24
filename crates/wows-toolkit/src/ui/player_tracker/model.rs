@@ -5,9 +5,6 @@ use std::hash::Hash;
 use egui::Color32;
 use jiff::Timestamp;
 use jiff::ToSpan;
-use jiff::Unit;
-use jiff::ZonedDifference;
-use jiff::tz::TimeZone;
 use rust_i18n::t;
 use serde::Deserialize;
 use serde::Serialize;
@@ -26,55 +23,6 @@ pub(crate) fn encounter_severity_color(ui: &egui::Ui, times_encountered_in_range
         4..=5 => Some(ui.sem().warn),
         _ => Some(ui.sem().loss),
     }
-}
-
-/// Human-readable "how long ago" for a past timestamp.
-pub(crate) fn relative_age_text(timestamp: Timestamp, now: Timestamp) -> String {
-    let timestamp = timestamp.to_zoned(TimeZone::system());
-    let now = now.to_zoned(TimeZone::system());
-    let delta = now
-        .since(
-            ZonedDifference::new(&timestamp)
-                .smallest(Unit::Minute)
-                .largest(Unit::Year)
-                .mode(jiff::RoundMode::HalfExpand),
-        )
-        .expect("failed to calculate the age of an encounter timestamp");
-
-    format!("{delta:#}")
-}
-
-/// Absolute local-time rendering of a timestamp, for the hover behind a
-/// relative age.
-pub(crate) fn exact_timestamp_text(timestamp: Timestamp) -> String {
-    timestamp.to_zoned(TimeZone::system()).strftime("%Y-%m-%d %H:%M:%S").to_string()
-}
-
-/// Human-readable "how long ago" for an encounter timestamp. Empty when there
-/// is no encounter to describe, which is the right degradation for a hover.
-pub(crate) fn last_seen_text(last_seen: Option<Timestamp>, now: Timestamp) -> String {
-    match last_seen {
-        Some(last) => relative_age_text(last, now),
-        None => String::new(),
-    }
-}
-
-/// How many of a player's encounters fall inside the active period, counting
-/// only the ones the division-mate toggle leaves visible. `since` is the
-/// period's resolved boundary; `None` is the all-time period, where every
-/// visible encounter counts.
-pub(crate) fn encounters_in_range(
-    player: &TrackedPlayer,
-    since: Option<Timestamp>,
-    show_division_mates: bool,
-) -> usize {
-    player.visible_timestamps(show_division_mates).filter(|ts| since.is_none_or(|since| *ts > since)).count()
-}
-
-/// Absolute local-time stamp behind the relative "last seen" text. Empty for
-/// the same reason [`last_seen_text`] is.
-pub(crate) fn last_seen_timestamp_text(last_seen: Option<Timestamp>) -> String {
-    last_seen.map(exact_timestamp_text).unwrap_or_default()
 }
 
 /// Header label with the sort arrow appended when this column drives the sort.

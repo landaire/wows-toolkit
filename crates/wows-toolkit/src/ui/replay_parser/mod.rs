@@ -1502,7 +1502,10 @@ impl UiReport {
                             ui,
                             RichText::new(wt_translations::icon_t(
                                 icons::FIRE,
-                                &wows_toolkit_viewmodel::fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits),
+                                &wows_toolkit_viewmodel::fire_chance::counts_text(
+                                    fire_chance.fires,
+                                    fire_chance.eligible_hits,
+                                ),
                             ))
                             .strong(),
                         );
@@ -5809,7 +5812,11 @@ fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], loc
 /// matching per-hit chance so the two are comparable.
 fn fire_chance_per_ship_line(ship: &PerShipFireChance, localize_ship: &dyn Fn(&PerShipFireChance) -> String) -> String {
     let rate_text = match ship.rate() {
-        Some(rate) => format!("{:.1}%  {}", rate * 100.0, wows_toolkit_viewmodel::fire_chance::counts_text(ship.fires, ship.eligible_hits)),
+        Some(rate) => format!(
+            "{:.1}%  {}",
+            rate * 100.0,
+            wows_toolkit_viewmodel::fire_chance::counts_text(ship.fires, ship.eligible_hits)
+        ),
         None => t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned(),
     };
     match ship.expected_rate() {
@@ -6379,7 +6386,10 @@ mod fire_chance_render_tests {
     #[test]
     fn headline_over_zero_eligible_hits_shows_no_expected_line() {
         let fc = fixture(0, 0, Some(0.0));
-        assert_eq!(wows_toolkit_viewmodel::fire_chance::headline_lines(&fc), vec!["no hits that could have started a fire".to_owned()]);
+        assert_eq!(
+            wows_toolkit_viewmodel::fire_chance::headline_lines(&fc),
+            vec!["no hits that could have started a fire".to_owned()]
+        );
     }
 
     /// Zero eligible hits is unknown, not zero: this must never render as a
@@ -6539,8 +6549,14 @@ mod fire_chance_render_tests {
     /// One fire is one fire, not "1 fires", and one hit is one hit.
     #[test]
     fn counts_of_one_are_singular() {
-        assert_eq!(wows_toolkit_viewmodel::fire_chance::counts_text(1, 1), "1 fire / 1 hit that could have started one");
-        assert_eq!(wows_toolkit_viewmodel::fire_chance::counts_text(0, 2), "0 fires / 2 hits that could have started one");
+        assert_eq!(
+            wows_toolkit_viewmodel::fire_chance::counts_text(1, 1),
+            "1 fire / 1 hit that could have started one"
+        );
+        assert_eq!(
+            wows_toolkit_viewmodel::fire_chance::counts_text(0, 2),
+            "0 fires / 2 hits that could have started one"
+        );
     }
 
     /// The same shape over a real match's counts, taken from
@@ -6705,7 +6721,10 @@ mod fire_chance_render_tests {
     fn sorted_per_ship_orders_by_eligible_hits_descending() {
         let mut fc = fixture(23, 3, None);
         fc.per_ship = vec![ship("Iowa", 11, 1, None), ship("Zao", 12, 2, None)];
-        let names: Vec<&str> = wows_toolkit_viewmodel::fire_chance::sorted_per_ship(&fc).into_iter().map(|s| s.victim_ship_name.as_str()).collect();
+        let names: Vec<&str> = wows_toolkit_viewmodel::fire_chance::sorted_per_ship(&fc)
+            .into_iter()
+            .map(|s| s.victim_ship_name.as_str())
+            .collect();
         assert_eq!(names, vec!["Zao", "Iowa"]);
     }
 

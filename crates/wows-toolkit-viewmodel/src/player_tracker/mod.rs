@@ -5,6 +5,7 @@
 //! shows of them, the same way in both front ends.
 
 pub mod clans;
+pub mod history;
 pub mod live;
 
 /// How loudly a number of encounters reads.
@@ -38,6 +39,7 @@ use jiff::Timestamp;
 use jiff::ToSpan;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::rows::MatchFilter;
 use wows_toolkit_config::index::rows::PlayerFacet;
@@ -108,18 +110,26 @@ impl TimePeriod {
 pub enum SortColumn {
     Name,
     Clan,
+    /// Every battle the player was met in, whenever it was.
+    TotalEncounters,
+    /// Only the ones inside the period on screen.
     #[default]
     Encounters,
+    LastEncountered,
 }
 
 impl SortColumn {
-    pub const ALL: [SortColumn; 3] = [Self::Name, Self::Clan, Self::Encounters];
+    pub const ALL: [SortColumn; 5] =
+        [Self::Name, Self::Clan, Self::TotalEncounters, Self::Encounters, Self::LastEncountered];
 
-    pub fn label(self) -> &'static str {
+    /// The translation key the column's heading reads from.
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::Name => "Player",
-            Self::Clan => "Clan",
-            Self::Encounters => "Encounters",
+            Self::Name => "ui.player_tracker.column.player_name",
+            Self::Clan => "ui.player_tracker.column.clan",
+            Self::TotalEncounters => "ui.player_tracker.column.total_encounters",
+            Self::Encounters => "ui.player_tracker.column.encounters_in_range",
+            Self::LastEncountered => "ui.player_tracker.column.last_encountered",
         }
     }
 
@@ -130,7 +140,7 @@ impl SortColumn {
     pub fn default_order(self) -> SortOrder {
         match self {
             Self::Name | Self::Clan => SortOrder::Ascending,
-            Self::Encounters => SortOrder::Descending,
+            Self::TotalEncounters | Self::Encounters | Self::LastEncountered => SortOrder::Descending,
         }
     }
 }
@@ -203,9 +213,83 @@ pub fn visible_players(players: &[PlayerFacet], needle: &str, sort: Sort) -> Vec
         let ordering = match sort.column {
             SortColumn::Name => a.latest_name.to_lowercase().cmp(&b.latest_name.to_lowercase()),
             SortColumn::Clan => a.clan.to_lowercase().cmp(&b.clan.to_lowercase()),
-            SortColumn::Encounters => a.match_count.cmp(&b.match_count),
+            SortColumn::TotalEncounters | SortColumn::Encounters | SortColumn::LastEncountered => {
+                a.match_count.cmp(&b.match_count)
+            }
         };
         sort.order.apply(ordering).then_with(|| a.account_id.cmp(&b.account_id))
+    });
+    rows
+}
+
+/// One historical row: an indexed player, joined to what the tracker recorded
+/// about the same account.
+#[derive(Debug, Clone)]
+pub struct PlayerRow {
+    pub facet: PlayerFacet,
+    /// Every battle the player was met in, from the tracker. `None` for a
+    /// player the index names but the tracker never recorded, where there is
+    /// no all-time figure to give.
+    pub total_encounters: Option<usize>,
+    /// Battles inside the period on screen. Taken from the tracker, which
+    /// knows which of them were division ones; a player the tracker never
+    /// recorded falls back to the index's own count for the same period.
+    pub encounters_in_range: usize,
+    /// When the player was last met, from the tracker.
+    pub last_seen: Option<Timestamp>,
+}
+
+/// The historical table's rows: filtered by `needle`, joined to `tracked`,
+/// and sorted.
+///
+/// `since` is the period's resolved boundary and `show_division_mates` the
+/// toggle above the table. While the toggle is off, a player met inside the
+/// period only as a division mate leaves the table entirely, which is what
+/// the egui tracker does.
+///
+/// Ties break on the account id so the order is stable between refreshes
+/// rather than reshuffling players with the same count.
+pub fn visible_player_rows(
+    players: &[PlayerFacet],
+    tracked: &HashMap<AccountId, tracked::TrackedPlayer>,
+    needle: &str,
+    since: Option<Timestamp>,
+    show_division_mates: bool,
+    sort: Sort,
+) -> Vec<PlayerRow> {
+    let mut rows: Vec<PlayerRow> = players
+        .iter()
+        .filter(|player| matches_filter(player, needle))
+        .filter_map(|facet| {
+            let Some(player) = tracked.get(&facet.account_id) else {
+                return Some(PlayerRow {
+                    facet: facet.clone(),
+                    total_encounters: None,
+                    encounters_in_range: facet.match_count.max(0) as usize,
+                    last_seen: None,
+                });
+            };
+            if !show_division_mates && history::met_only_in_division(player, since) {
+                return None;
+            }
+            Some(PlayerRow {
+                facet: facet.clone(),
+                total_encounters: Some(player.visible_arena_ids(show_division_mates).count()),
+                encounters_in_range: history::encounters_in_range(player, since, show_division_mates),
+                last_seen: player.last_visible_timestamp(show_division_mates),
+            })
+        })
+        .collect();
+
+    rows.sort_by(|a, b| {
+        let ordering = match sort.column {
+            SortColumn::Name => a.facet.latest_name.to_lowercase().cmp(&b.facet.latest_name.to_lowercase()),
+            SortColumn::Clan => a.facet.clan.to_lowercase().cmp(&b.facet.clan.to_lowercase()),
+            SortColumn::TotalEncounters => a.total_encounters.cmp(&b.total_encounters),
+            SortColumn::Encounters => a.encounters_in_range.cmp(&b.encounters_in_range),
+            SortColumn::LastEncountered => a.last_seen.cmp(&b.last_seen),
+        };
+        sort.order.apply(ordering).then_with(|| a.facet.account_id.cmp(&b.facet.account_id))
     });
     rows
 }
@@ -225,6 +309,85 @@ mod tests {
 
     fn sample() -> Vec<PlayerFacet> {
         vec![player(1, "Zeta", "ALPHA", 2), player(2, "alpha", "ZULU", 9), player(3, "Mike", "", 9)]
+    }
+
+    /// A tracked player met at `hours_ago`, each meeting flagged as a
+    /// division one or not.
+    fn met(account: i64, meetings: &[(i64, bool)]) -> (AccountId, tracked::TrackedPlayer) {
+        let now = Timestamp::now();
+        let mut player = tracked::TrackedPlayer::default();
+        for (ix, (hours_ago, in_division)) in meetings.iter().enumerate() {
+            let arena = wows_replays::types::ArenaId::from(ix as i64);
+            let at = now - hours_ago.hours();
+            player.timestamps.insert(at);
+            player.arena_ids.insert(arena);
+            if *in_division {
+                player.division_encounters.mark(arena, at);
+            }
+        }
+        (account.into(), player)
+    }
+
+    #[test]
+    fn a_row_takes_its_counts_from_the_tracker_when_it_knows_the_player() {
+        let now = Timestamp::now();
+        let tracked: HashMap<AccountId, tracked::TrackedPlayer> =
+            [met(1, &[(1, false), (24 * 40, false)])].into_iter().collect();
+        let rows = visible_player_rows(
+            &[player(1, "Zeta", "ALPHA", 99)],
+            &tracked,
+            "",
+            Some(now - (24 * 7).hours()),
+            false,
+            Sort::default(),
+        );
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].total_encounters, Some(2), "the all-time count reaches past the period");
+        assert_eq!(rows[0].encounters_in_range, 1, "only the meeting inside the period counts");
+        assert!(rows[0].last_seen.is_some());
+    }
+
+    #[test]
+    fn a_player_the_tracker_never_recorded_falls_back_to_the_indexed_count() {
+        let rows =
+            visible_player_rows(&[player(1, "Zeta", "ALPHA", 4)], &HashMap::new(), "", None, false, Sort::default());
+
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].total_encounters, None, "there is no all-time figure to give");
+        assert_eq!(rows[0].encounters_in_range, 4);
+        assert_eq!(rows[0].last_seen, None);
+    }
+
+    #[test]
+    fn a_player_met_only_in_division_leaves_the_table_while_the_toggle_is_off() {
+        let tracked: HashMap<AccountId, tracked::TrackedPlayer> = [met(1, &[(1, true)])].into_iter().collect();
+        let players = [player(1, "Zeta", "ALPHA", 1)];
+
+        assert!(visible_player_rows(&players, &tracked, "", None, false, Sort::default()).is_empty());
+        let shown = visible_player_rows(&players, &tracked, "", None, true, Sort::default());
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].encounters_in_range, 1);
+    }
+
+    #[test]
+    fn rows_sort_by_the_column_asked_for() {
+        let tracked: HashMap<AccountId, tracked::TrackedPlayer> =
+            [met(1, &[(1, false)]), met(2, &[(2, false), (3, false), (4, false)])].into_iter().collect();
+        let players = [player(1, "Zeta", "ALPHA", 1), player(2, "Alpha", "ZULU", 3)];
+
+        let by_count = visible_player_rows(&players, &tracked, "", None, false, Sort::default());
+        assert_eq!(by_count[0].facet.latest_name, "Alpha", "the most-met player leads");
+
+        let by_last_seen = visible_player_rows(
+            &players,
+            &tracked,
+            "",
+            None,
+            false,
+            Sort { column: SortColumn::LastEncountered, order: SortOrder::Descending },
+        );
+        assert_eq!(by_last_seen[0].facet.latest_name, "Zeta", "the most recently met player leads");
     }
 
     #[test]
