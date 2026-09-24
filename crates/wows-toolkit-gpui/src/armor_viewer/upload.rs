@@ -138,6 +138,11 @@ pub(crate) fn plate_is_visible(info: &ArmorTriangleInfo, visibility: VisibilityF
     if !show_zero_mm && is_zero_mm(info.thickness_mm) {
         return false;
     }
+    // "Show Hidden" is a mode rather than an addition: it shows the plates
+    // the game's own viewer never draws, and nothing else.
+    if visibility.show_hidden_only && !info.hidden {
+        return false;
+    }
     if !part_on(visibility.part, &info.zone, &info.material_name) {
         return false;
     }
@@ -501,18 +506,55 @@ mod tests {
         (HashMap::new(), HashMap::new())
     }
 
+    /// "Show Hidden" is a mode: it swaps which plates are drawn rather than
+    /// adding the hidden ones to what is already there.
+    #[test]
+    fn show_hidden_only_swaps_which_plates_are_drawn() {
+        let drawn = test_triangle_info("Citadel", "Cit_Belt", 32.0);
+        let never_drawn = ArmorTriangleInfo { hidden: true, ..test_triangle_info("Hull", "Trans", 19.0) };
+        let (part, plate) = no_overrides();
+
+        let ordinary = VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false };
+        assert!(plate_is_visible(&drawn, ordinary, false));
+        assert!(plate_is_visible(&never_drawn, ordinary, false), "an ordinary view draws both");
+
+        let hidden_only = VisibilityFilter { part: &part, plate: &plate, show_hidden_only: true };
+        assert!(!plate_is_visible(&drawn, hidden_only, false), "the plates the game draws stand aside");
+        assert!(plate_is_visible(&never_drawn, hidden_only, false));
+    }
+
+    /// The mode does not override the rules that hide a plate outright: a
+    /// hidden plate the reader has switched off stays off.
+    #[test]
+    fn show_hidden_only_still_obeys_an_explicitly_hidden_plate() {
+        let never_drawn = ArmorTriangleInfo { hidden: true, ..test_triangle_info("Hull", "Trans", 19.0) };
+        let (part, _) = no_overrides();
+        let switched_off = HashMap::from([(derive_plate_key(&never_drawn), true)]);
+
+        let hidden_only = VisibilityFilter { part: &part, plate: &switched_off, show_hidden_only: true };
+        assert!(!plate_is_visible(&never_drawn, hidden_only, false));
+    }
+
     #[test]
     fn plate_is_visible_hides_zero_mm_triangles_by_default() {
         let info = test_triangle_info("Hull", "Trans", 0.0);
         let (part, plate) = no_overrides();
-        assert!(!plate_is_visible(&info, VisibilityFilter { part: &part, plate: &plate }, false));
+        assert!(!plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false },
+            false
+        ));
     }
 
     #[test]
     fn plate_is_visible_shows_zero_mm_triangles_when_show_zero_mm_is_on() {
         let info = test_triangle_info("Hull", "Trans", 0.0);
         let (part, plate) = no_overrides();
-        assert!(plate_is_visible(&info, VisibilityFilter { part: &part, plate: &plate }, true));
+        assert!(plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false },
+            true
+        ));
     }
 
     #[test]
@@ -520,11 +562,19 @@ mod tests {
         let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
         let key = derive_plate_key(&info);
         let (part, empty) = no_overrides();
-        assert!(plate_is_visible(&info, VisibilityFilter { part: &part, plate: &empty }, false));
+        assert!(plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &empty, show_hidden_only: false },
+            false
+        ));
 
         let mut hidden = HashMap::new();
         hidden.insert(key, true);
-        assert!(!plate_is_visible(&info, VisibilityFilter { part: &part, plate: &hidden }, false));
+        assert!(!plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &hidden, show_hidden_only: false },
+            false
+        ));
     }
 
     #[test]
@@ -536,7 +586,11 @@ mod tests {
             PlateKey { zone: "Bow".to_string(), material_name: "Bow_Bottom".to_string(), thickness_tenths: 16 },
             true,
         );
-        assert!(plate_is_visible(&info, VisibilityFilter { part: &part, plate: &hidden }, false));
+        assert!(plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &hidden, show_hidden_only: false },
+            false
+        ));
     }
 
     #[test]
@@ -545,7 +599,11 @@ mod tests {
         let mut part = HashMap::new();
         part.insert(("Citadel".to_string(), "Cit_Belt".to_string()), false);
         let plate = HashMap::new();
-        assert!(!plate_is_visible(&info, VisibilityFilter { part: &part, plate: &plate }, false));
+        assert!(!plate_is_visible(
+            &info,
+            VisibilityFilter { part: &part, plate: &plate, show_hidden_only: false },
+            false
+        ));
     }
 
     #[test]
@@ -657,7 +715,7 @@ mod tests {
             &mut viewport,
             &ctx.device,
             &armor,
-            VisibilityFilter { part: &empty_part, plate: &empty_plate },
+            VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             display,
         );
         assert!(!mesh_triangle_info.is_empty(), "expected at least one uploaded armor mesh");
@@ -687,7 +745,7 @@ mod tests {
             &mut viewport,
             &ctx.device,
             &armor,
-            VisibilityFilter { part: &empty_part, plate: &plate_visibility },
+            VisibilityFilter { part: &empty_part, plate: &plate_visibility, show_hidden_only: false },
             display,
         );
         let total_after: usize = reuploaded.iter().map(|(_, tooltips)| tooltips.len()).sum();
@@ -743,7 +801,7 @@ mod tests {
             &mut viewport,
             &ctx.device,
             &armor,
-            VisibilityFilter { part: &empty_part, plate: &empty_plate },
+            VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             no_edges,
         );
         let (_, _, rgba_no_edges) = viewport
@@ -765,7 +823,7 @@ mod tests {
             &mut viewport,
             &ctx.device,
             &armor,
-            VisibilityFilter { part: &empty_part, plate: &empty_plate },
+            VisibilityFilter { part: &empty_part, plate: &empty_plate, show_hidden_only: false },
             dim,
         );
         let (_, _, rgba_dim) = viewport

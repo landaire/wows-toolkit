@@ -210,10 +210,12 @@ kept so the next audit does not re-report them.
   comparison list, the server-vs-simulation report) is still absent.
 - Shell trajectory mode is absent.
 - Splash/blast mode and the splash-box popover are absent.
-- Gap detection, "show hidden plates" and the camera-rings section are
-  absent. The roll slider is in the display popover: it heels the hull over
-  through the same range the egui slider offers, leaving the waterline and
-  the other world-space overlays level.
+- Gap detection and the camera-rings section are absent. "Show Hidden" is on
+  the pane's toolbar: it swaps the view to the plates that are part of the
+  combat model but that the game's own viewer never draws, and still obeys a
+  plate the reader has switched off. The roll slider is in the display
+  popover: it heels the hull over through the same range the egui slider
+  offers, leaving the waterline and the other world-space overlays level.
 - [done] The legend reopens from the pane's own strip.
 - [done] Camo selection decodes on the UI thread. Picking a scheme now
   decodes and composites it on a background thread and applies the result
