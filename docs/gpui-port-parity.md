@@ -299,7 +299,10 @@ kept so the next audit does not re-report them.
 - [done] A copied path reports itself.
 - [done] A result row plays its replay back, in the viewport the Replay
   Inspector opens.
-- Results are fixed-width and unresizable.
+- [done] Results are fixed-width and unresizable. A header's trailing
+  edge drags its column wider or narrower, double-clicking it puts the
+  column back on its default, and the widths are kept in a settings row
+  of the port's own, since the egui table has none to share.
 - A parse error replaces the results instead of marking the offending span.
 - [done] The footer reports truncation on the right row; the query fetches
   one past the limit itself, so the extra `+ 1` the port added is gone.
