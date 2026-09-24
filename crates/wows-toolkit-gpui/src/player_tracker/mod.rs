@@ -50,6 +50,7 @@ use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::menu::PopupMenuItem;
 use wows_replays::types::AccountId;
 use wows_toolkit_config::index::query;
+use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::ClanCorrection;
 use wows_toolkit_config::index::rows::PlayerFacet;
 use wows_toolkit_config::queries;
@@ -84,6 +85,7 @@ use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_player_rows;
 use wows_toolkit_viewmodel::player_tracker::wows_numbers_player_url;
+use wows_toolkit_viewmodel::query_bar::seed;
 use wows_toolkit_viewmodel::twitch;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::game_params::types::Species;
@@ -165,6 +167,17 @@ enum StatsState {
     Ready(HashMap<AccountId, PlayerStatsOut>),
     Failed(String),
 }
+
+/// Raised for the app to act on.
+#[derive(Clone, Debug)]
+pub enum PlayerTrackerEvent {
+    /// Show the Search tab, holding this query. Raised by the "find matches"
+    /// buttons, which look a player or a clan up in the replay index rather
+    /// than in the tracker's own tables.
+    SearchFor(String),
+}
+
+impl EventEmitter<PlayerTrackerEvent> for PlayerTrackerView {}
 
 /// The tone a number of encounters is read in, or none for a number not
 /// worth marking (`wows_toolkit_viewmodel::player_tracker::
@@ -784,6 +797,20 @@ impl PlayerTrackerView {
         visible_clans(rows, &self.filter_text, self.clan_sort)
     }
 
+    /// Hands the Search tab a query for every match this player was in.
+    fn find_player_matches(&mut self, account: AccountId, cx: &mut Context<Self>) {
+        let query = query_text::print_query(&seed::matches_with_player(account));
+        cx.emit(PlayerTrackerEvent::SearchFor(query));
+    }
+
+    /// The same for a clan tag. The index has no clan-only field, so this
+    /// matches a tag appearing in a name too, which is what the button's
+    /// hover says.
+    fn find_clan_matches(&mut self, clan: String, cx: &mut Context<Self>) {
+        let query = query_text::print_query(&seed::matches_mentioning_clan(&clan));
+        cx.emit(PlayerTrackerEvent::SearchFor(query));
+    }
+
     fn set_show_division_mates(&mut self, show: bool, cx: &mut Context<Self>) {
         if self.show_division_mates == show {
             return;
@@ -1253,6 +1280,7 @@ impl PlayerTrackerView {
             _ => None,
         };
         let modes = visible_stat_modes(self.view_mode, self.win_rate_mode);
+        let tracker = cx.entity();
         let layout = RosterLayout {
             stats,
             met: &self.tracked,
@@ -1261,6 +1289,7 @@ impl PlayerTrackerView {
             twitch: &self.twitch_candidates,
             modes: &modes,
             border,
+            tracker: &tracker,
         };
 
         v_flex()
@@ -1394,6 +1423,16 @@ fn last_seen_cell(ix: usize, last_seen: Option<jiff::Timestamp>) -> AnyElement {
             this.tooltip(move |window, cx| Tooltip::new(exact.clone()).build(window, cx))
         })
         .child(relative)
+        .into_any_element()
+}
+
+/// The button that looks a row up in the replay index.
+fn find_matches_cell(id: (&'static str, usize), hover: String, on_click: impl Fn(&mut App) + 'static) -> AnyElement {
+    Button::new(id)
+        .child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS))
+        .compact()
+        .tooltip(hover)
+        .on_click(move |_event, _window, cx: &mut App| on_click(cx))
         .into_any_element()
 }
 
@@ -1540,6 +1579,8 @@ struct RosterLayout<'a> {
     /// The scopes each row shows, left to right.
     modes: &'a [WinRateMode],
     border: Hsla,
+    /// The tab itself, which a row's menu asks to look a player up.
+    tracker: &'a Entity<PlayerTrackerView>,
 }
 
 /// One team's heading: its name, how many players are on it, and what they
@@ -1651,7 +1692,12 @@ fn band_color(band: Option<PersonalRatingCategory>) -> Option<Hsla> {
 ///
 /// Both links need an account id and a region, which only the identity scan
 /// supplies; a row it never named has nothing to link to and shows no menu.
-fn roster_row_menu(side: &'static str, index: usize, row: &LiveRosterRow) -> impl IntoElement + use<> {
+fn roster_row_menu(
+    side: &'static str,
+    index: usize,
+    row: &LiveRosterRow,
+    tracker: &Entity<PlayerTrackerView>,
+) -> impl IntoElement + use<> {
     let Some((account_id, region)) = row.account_id.zip(row.region) else {
         // The column still holds its width, so a row with no menu does not
         // pull the ones around it out of line.
@@ -1660,6 +1706,7 @@ fn roster_row_menu(side: &'static str, index: usize, row: &LiveRosterRow) -> imp
 
     let numbers = wows_numbers_player_url(region, account_id, &row.name);
     let builds = shipbuilds_player_url(region, account_id, &row.name);
+    let tracker = tracker.clone();
 
     div()
         .flex_none()
@@ -1678,6 +1725,14 @@ fn roster_row_menu(side: &'static str, index: usize, row: &LiveRosterRow) -> imp
                         PopupMenuItem::link(t!("ui.player_tracker.open_shipbuilds").into_owned(), builds.clone())
                             .icon(IconName::ExternalLink),
                     )
+                    .item({
+                        let tracker = tracker.clone();
+                        PopupMenuItem::new(t!("ui.player_tracker.find_matches").into_owned())
+                            .icon(IconName::Search)
+                            .on_click(move |_event, _window, cx| {
+                                tracker.update(cx, |this, cx| this.find_player_matches(account_id, cx));
+                            })
+                    })
                 }),
         )
         .into_any_element()
@@ -1879,7 +1934,7 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
                 .when(met == 0, |el| el.text_color(crate::theme::text_dim()))
                 .child(if met == 0 { String::new() } else { separate_number(met as i64, None) }),
         )
-        .child(roster_row_menu(side, index, row))
+        .child(roster_row_menu(side, index, row, layout.tracker))
         .into_any_element()
 }
 
@@ -2067,6 +2122,17 @@ impl Render for PlayerTrackerView {
                             .child(separate_number(row.encounters_in_range as i64, None)),
                     )
                     .child(last_seen_cell(ix, row.last_seen))
+                    .child(find_matches_cell(
+                        ("tracker-find-player", ix),
+                        t!("ui.player_tracker.find_matches").into_owned(),
+                        {
+                            let tracker = tracker.clone();
+                            let account = row.facet.account_id;
+                            move |cx: &mut App| {
+                                tracker.update(cx, |this, cx| this.find_player_matches(account, cx));
+                            }
+                        },
+                    ))
                     .child(note_cell(ix, row.facet.account_id, notes.get(&row.facet.account_id), tracker.clone()))
                     .into_any_element()
             }
@@ -2104,6 +2170,18 @@ impl Render for PlayerTrackerView {
                     )
                     .child(sightings_cell(ix, row.sightings, row.sightings_in_range))
                     .child(last_seen_cell(ix, Some(row.last_seen)))
+                    .child(find_matches_cell(
+                        ("tracker-find-clan", ix),
+                        t!("ui.player_tracker.find_clan_matches").into_owned(),
+                        {
+                            let tracker = tracker.clone();
+                            let clan = row.clan.clone();
+                            move |cx: &mut App| {
+                                let clan = clan.clone();
+                                tracker.update(cx, |this, cx| this.find_clan_matches(clan, cx));
+                            }
+                        },
+                    ))
                     .into_any_element()
             }
         };
@@ -2467,6 +2545,55 @@ mod tests {
         assert!(hover.contains("Seen in chat at minute -1, 5 of this battle."));
         assert!(hover.contains("harvey_635 may be this player."));
         assert!(hover.ends_with("Click to copy."));
+    }
+
+    /// A row's magnifying glass asks the Search tab for every match the
+    /// player was in.
+    #[gpui_kit::test]
+    fn finding_a_players_matches_names_a_query_the_search_tab_can_run(cx: &mut TestAppContext) {
+        use std::cell::RefCell;
+        use std::collections::HashMap;
+        use std::rc::Rc;
+        use wows_toolkit_config::index::rows::PlayerFacet;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1000.), px(700.)), PlayerTrackerView::new);
+
+        let account = AccountId(7);
+        let players = vec![PlayerFacet {
+            account_id: account,
+            latest_name: "Harvey635".to_string(),
+            clan: "WTK".to_string(),
+            match_count: 3,
+        }];
+        window
+            .update(cx, |tracker, _window, cx| tracker.seed_players_and_notes(players, HashMap::new(), cx))
+            .expect("the window is open");
+
+        let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let tracker = window.entity(cx).expect("the window has a root view");
+        let recorder = seen.clone();
+        let subscription = cx.update(|cx| {
+            cx.subscribe(&tracker, move |_tracker, event: &super::PlayerTrackerEvent, _cx| {
+                let super::PlayerTrackerEvent::SearchFor(query) = event;
+                recorder.borrow_mut().push(query.clone());
+            })
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("tracker-find-player", 0usize), cx);
+        })
+        .expect("the window is open");
+
+        let seen = seen.borrow();
+        let query = seen.first().expect("the button asked for a search");
+        assert!(query.contains("7"), "the query names the account, got {query:?}");
+        assert!(
+            wows_toolkit_config::index::query_text::parse_query(query).is_ok(),
+            "the query parses back, got {query:?}"
+        );
+        drop(subscription);
     }
 
     /// A note opens for editing from its row, and what is typed is what the
