@@ -343,7 +343,16 @@ kept so the next audit does not re-report them.
   still not kept; only which charts exist and how each is set up.
 - [done] The filter bar clears the whole session and a ship's own row clears
   that ship, both behind a two-press confirm (ctrl+click skips it).
-- Charts cannot be copied as an image.
+- Charts cannot be copied as an image. The egui app captures the window
+  framebuffer through eframe's `Event::Screenshot` and crops it to the plot
+  rectangle. GPUI has the shape of that: `Window::render_to_image` is public
+  and not test-gated. It is not usable here, though -- the `PlatformWindow`
+  trait's default bails with "render_to_image not implemented for this
+  platform", and the only implementor in the tree is the test platform's
+  window, so a real window returns that error. The alternative is rasterising
+  the chart a second way, which means two chart renderers inside one app that
+  have to agree on axes, scales and colours; that is a worse drift than the
+  one this port exists to avoid. Left undone deliberately.
 - [done] Achievements draw their own art from the installed build, ordered by
   how often they were earned, and name themselves on hover.
 - [done] The records name the ship that set them.
