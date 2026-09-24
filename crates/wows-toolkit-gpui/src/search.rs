@@ -1589,16 +1589,22 @@ impl Render for SearchView {
                 .into_any_element(),
         };
 
-        let footer = matches!(self.state, SearchState::Done).then(|| {
-            let capped = self.truncated;
-            h_flex().flex_none().px_2().py_1().border_t_1().border_color(border).child(
-                div().text_xs().text_color(crate::theme::text_dim()).child(if capped {
-                    t!("ui.search.match_count_truncated", count = RESULT_LIMIT).into_owned()
-                } else {
-                    t!("ui.search.match_count", count = self.hits.len()).into_owned()
-                }),
-            )
-        });
+        // Always there, empty until a search has finished, so a count
+        // arriving does not lift the results off the bottom of the tab.
+        let counted = match self.state {
+            SearchState::Done if self.truncated => {
+                t!("ui.search.match_count_truncated", count = RESULT_LIMIT).into_owned()
+            }
+            SearchState::Done => t!("ui.search.match_count", count = self.hits.len()).into_owned(),
+            _ => String::new(),
+        };
+        let footer = h_flex()
+            .flex_none()
+            .px_2()
+            .py_1()
+            .border_t_1()
+            .border_color(border)
+            .child(div().text_xs().text_color(crate::theme::text_dim()).child(counted));
 
         v_flex()
             .id("search-root")
@@ -1616,24 +1622,24 @@ impl Render for SearchView {
                 cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
             )
             .child(query_bar)
-            .when_some(gap_hint, |this, hint| {
-                this.child(
-                    div()
-                        .id("search-game-mode-gap")
-                        .test_support()
-                        .flex_none()
-                        .px_2()
-                        .py_1()
-                        .text_xs()
-                        // The colour the egui hint uses: this is a warning
-                        // about results the query cannot reach, not a note.
-                        .text_color(rgb(0xe8a54a))
-                        .child(hint),
-                )
-            })
+            // The strip holds its line whether or not there is a gap to
+            // report, so noticing one does not push the results down.
+            .child(
+                div()
+                    .id("search-game-mode-gap")
+                    .test_support()
+                    .flex_none()
+                    .px_2()
+                    .py_1()
+                    .text_xs()
+                    // The colour the egui hint uses: this is a warning about
+                    // results the query cannot reach, not a note.
+                    .text_color(rgb(0xe8a54a))
+                    .child(gap_hint.unwrap_or_default()),
+            )
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
             .when_some(preview, |this, preview| this.child(preview))
-            .when_some(footer, |this, footer| this.child(footer))
+            .child(footer)
     }
 }

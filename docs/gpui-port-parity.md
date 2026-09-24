@@ -62,11 +62,18 @@ kept so the next audit does not re-report them.
 - [done] The queue and dump popovers, the chart settings and the armor
   legend size to their content between a floor and a cap.
 - [done] Inputs in an icon row take the space the icon leaves.
-- `ui::rule_v` now separates the groups in the stats filter bar and the
-  replay header; the other toolbars still run their controls together.
-- Conditional elements still shift the layout in the settings tab, the
-  unpacker's queue bar and the search tab's hint and footer. The armor
-  viewer's status strip and the search completions were fixed.
+- [done] `ui::rule_v` now separates the groups in the stats filter bar and
+  the replay header; the other toolbars still run their controls together. It
+  separates them in the tracker's toolbar (the period, what narrows it, and
+  the division-mates toggle) and the playback transport (what plays it, where
+  in it, and how fast) too. The unpacker and armor toolbars already carried
+  theirs.
+- [done] Conditional elements still shift the layout in the settings tab,
+  the unpacker's queue bar and the search tab's hint and footer. Each of them
+  now holds its slot: the WoWs-directory and Twitch lines are always drawn
+  and empty when there is nothing to say, the queue bar keeps the heights of
+  its progress bar and its written-file line, and the search tab keeps its
+  game-mode hint and its count row.
 - [done] The Settings tab tints itself when the WoWs directory is invalid.
 - [done] Charts draw both sets of gridlines, a legend, and value labels in
   each series' own tone.

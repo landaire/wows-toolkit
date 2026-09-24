@@ -446,6 +446,7 @@ impl Render for ReplayRendererPanel {
                     )
                     .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
             )
+            .child(crate::ui::rule_v(cx))
             .child(div().flex_1().min_w(px(0.)).child(Slider::new(&self.seek).disabled(!ready)))
             .child(
                 div()
@@ -455,6 +456,7 @@ impl Render for ReplayRendererPanel {
                     .text_color(crate::theme::text_dim())
                     .child(self.clock_label()),
             )
+            .child(crate::ui::rule_v(cx))
             .children(SPEEDS.map(|speed| {
                 let chosen = (self.speed - speed).abs() < f32::EPSILON;
                 crate::ui::selectable(
