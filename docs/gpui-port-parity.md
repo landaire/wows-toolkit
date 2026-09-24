@@ -10,12 +10,13 @@ kept so the next audit does not re-report them.
 
 ## Shell and visual design
 
-- A hover preview costs ~740 MB of steady-state memory after sweeping a few
-  dozen rows: the renderer's whole asset set is loaded from the VFS twice per
-  hover and never cached, and one baked track is kept for a return visit.
-  Caching `PreviewRenderer` per build and map is the fix. (Latency is no
-  longer the reason to do it: measured, the asset load is 50 ms and the build
-  load that dominated is now warmed at startup.)
+- [done] A hover preview costs ~740 MB of steady-state memory after sweeping
+  a few dozen rows: the renderer's whole asset set was loaded from the VFS
+  twice per hover and never kept. A renderer is now built once per build and
+  map and shared by every preview that draws it, so what a sweep holds is
+  bounded by the four most recently drawn maps rather than by how many rows
+  were passed over. Changing the WoWs directory drops them, since they carry
+  art read out of the install being replaced.
 - Toasts: `Root` holds the queue but the window's own view has to draw the
   layer, which `App::render` now does; before that every toast and dialog was
   silent. Wired: the game-data load and its empty-replays warning, an invalid

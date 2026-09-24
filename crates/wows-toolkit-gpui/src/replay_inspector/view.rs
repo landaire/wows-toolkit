@@ -163,6 +163,13 @@ pub struct InspectorSettings {
 /// row back. Carries the whole blob because that is how it is stored.
 pub struct ReplaySettingsChanged(pub ReplaySettings);
 
+/// A replay tab that is the one showing in its dock group.
+#[derive(Clone)]
+struct ShowingReplay {
+    path: PathBuf,
+    panel: PanelId,
+}
+
 /// Where an open puts the replay it was asked for.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum OpenTarget {
@@ -259,6 +266,9 @@ impl ReplayInspectorView {
             return;
         }
 
+        // The kept preview renderers hold art read out of the previous
+        // install's VFS, which this directory is replacing.
+        crate::minimap_preview::forget_renderers();
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
         self.game_data = Some(game_data.clone());
         self.game_data_status = GameDataStatus::Loading;
@@ -372,10 +382,10 @@ impl ReplayInspectorView {
         // A plain open takes the place of the replay tab on screen, as the
         // egui listing does; the reader asks for a second tab by name.
         if target == OpenTarget::ShowingTab
-            && let Some((showing, id)) = self.replaceable_panel(cx)
+            && let Some(showing) = self.replaceable_panel(cx)
         {
-            self.open_panels.remove(&showing);
-            self.dock_area.update(cx, |dock_area, cx| dock_area.remove_panel_id(id, window, cx));
+            self.open_panels.remove(&showing.path);
+            self.dock_area.update(cx, |dock_area, cx| dock_area.remove_panel_id(showing.panel, window, cx));
         }
 
         let columns = default_columns(&self.replay_settings);
@@ -400,7 +410,7 @@ impl ReplayInspectorView {
     /// A dock can hold several groups, each with a replay showing, so the one
     /// this view last opened or brought forward wins; failing that, any of
     /// them does, in path order so the choice is at least repeatable.
-    fn replaceable_panel(&self, cx: &App) -> Option<(PathBuf, PanelId)> {
+    fn replaceable_panel(&self, cx: &App) -> Option<ShowingReplay> {
         let mut active: Vec<PanelId> = Vec::new();
         if let Some(tree) = self.dock_area.read(cx).layout(DockPlacement::Center) {
             tree.root().walk(&mut |node| {
@@ -412,18 +422,18 @@ impl ReplayInspectorView {
             });
         }
 
-        let mut showing: Vec<(PathBuf, PanelId)> = self
+        let mut showing: Vec<ShowingReplay> = self
             .open_panels
             .iter()
             .filter_map(|(path, panel)| {
-                let id = PanelId::from(panel.upgrade()?.entity_id());
-                active.contains(&id).then(|| (path.clone(), id))
+                let panel = PanelId::from(panel.upgrade()?.entity_id());
+                active.contains(&panel).then(|| ShowingReplay { path: path.clone(), panel })
             })
             .collect();
-        showing.sort_by(|left, right| left.0.cmp(&right.0));
+        showing.sort_by(|left, right| left.path.cmp(&right.path));
 
         let current = self.current_replay.as_ref();
-        showing.iter().find(|(path, _)| Some(path) == current).cloned().or_else(|| showing.into_iter().next())
+        showing.iter().find(|shown| Some(&shown.path) == current).cloned().or_else(|| showing.into_iter().next())
     }
 
     /// Opens a playback viewport on `path`, in a dock tab of its own.

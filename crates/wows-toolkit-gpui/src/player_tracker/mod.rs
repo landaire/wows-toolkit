@@ -1466,6 +1466,14 @@ fn last_seen_cell(ix: usize, last_seen: Option<jiff::Timestamp>) -> AnyElement {
         .into_any_element()
 }
 
+/// The note editor, when the row being drawn is the one being written
+/// about.
+struct OpenNote {
+    input: Entity<InputState>,
+    /// Why the last write did not land, if it did not.
+    error: Option<String>,
+}
+
 /// What a historical row shows once it is opened.
 struct PlayerDetail {
     /// Every other name this account has been seen under, sorted.
@@ -1497,7 +1505,7 @@ fn player_detail_block(
     ix: usize,
     account: AccountId,
     detail: Option<&PlayerDetail>,
-    note: Option<(Entity<InputState>, Option<String>)>,
+    note: Option<OpenNote>,
 ) -> AnyElement {
     let dim = crate::theme::text_dim();
     let mut block = v_flex()
@@ -1544,9 +1552,9 @@ fn player_detail_block(
 
     match note {
         None => block.child(div().text_xs().text_color(dim).child(t!("ui.player_tracker.notes_hint").into_owned())),
-        Some((input, error)) => block.child(Input::new(&input).id("tracker-note-input").small().w_full()).when_some(
-            error,
-            |this, reason| {
+        Some(OpenNote { input, error }) => block
+            .child(Input::new(&input).id("tracker-note-input").small().w_full())
+            .when_some(error, |this, reason| {
                 this.child(
                     div()
                         .id("tracker-note-error")
@@ -1555,8 +1563,7 @@ fn player_detail_block(
                         .text_color(rgb(0xff8080))
                         .child(t!("ui.player_tracker.note_not_saved", reason = reason).into_owned()),
                 )
-            },
-        ),
+            }),
     }
     .into_any_element()
 }
@@ -2360,7 +2367,8 @@ impl Render for PlayerTrackerView {
                         ix,
                         account,
                         details.get(&account),
-                        (editing_note == Some(account)).then(|| (note_input.clone(), note_error.clone())),
+                        (editing_note == Some(account))
+                            .then(|| OpenNote { input: note_input.clone(), error: note_error.clone() }),
                     )
                 });
 

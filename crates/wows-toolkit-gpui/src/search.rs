@@ -94,6 +94,13 @@ impl ResultColumn {
     }
 }
 
+/// A column as the current frame lays it out.
+#[derive(Clone, Copy)]
+struct DrawnColumn {
+    column: ResultColumn,
+    width: Pixels,
+}
+
 /// A column-width drag in progress.
 #[derive(Clone, Copy)]
 struct ColumnDrag {
@@ -1462,8 +1469,10 @@ impl Render for SearchView {
 
         let hits = self.hits.clone();
         // What the header just laid out, so a row cannot disagree with it.
-        let drawn_widths: Vec<(ResultColumn, Pixels)> =
-            ResultColumn::all().into_iter().map(|column| (column, self.width_of(column))).collect();
+        let drawn_columns: Vec<DrawnColumn> = ResultColumn::all()
+            .into_iter()
+            .map(|column| DrawnColumn { column, width: self.width_of(column) })
+            .collect();
         let on_disk = self.on_disk.clone();
         let resolved = self.resolved_ships.clone();
         let entity = cx.entity();
@@ -1493,7 +1502,7 @@ impl Render for SearchView {
                         }
                     });
                 })
-                .children(drawn_widths.iter().copied().map(|(column, width)| {
+                .children(drawn_columns.iter().copied().map(|DrawnColumn { column, width }| {
                     // The outcome and the rating carry their meaning in
                     // colour, as they do in the replay table and in the egui
                     // results (`ui/search_tab.rs`).
