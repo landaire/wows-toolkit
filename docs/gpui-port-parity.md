@@ -379,7 +379,12 @@ kept so the next audit does not re-report them.
 
 - The game-data cache section is absent entirely (auto-dump, cache directory,
   disk usage, delete old versions, check for updates, validate, repair).
-- Automatic replay data export is not configurable.
+- [done] Automatic replay data export is not configurable. The Replay
+  section carries the checkbox, the three formats and the directory,
+  written to the same settings row the egui tab reads, and a finished
+  parse writes itself out under the replay's own name. A directory that
+  is not there turns the writing off rather than failing once per
+  battle, and is marked in the settings tab.
 - No way to build or rebuild the replay index.
 - [done] The language is chosen from a combo.
 - [done] The Twitch section has the "Get Token" link, and says what Twitch

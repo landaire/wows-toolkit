@@ -44,6 +44,7 @@
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use wows_toolkit_config::ReplaySettings;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -187,6 +188,11 @@ pub struct ReplayPanel {
     /// The match the Export menu writes, in its debug form. `None` until the
     /// parse finishes, which is what keeps the menu disabled until then.
     export: Option<ExportedMatch>,
+    /// Where a finished parse writes itself without being asked, if anywhere.
+    auto_export: AutoExport,
+    /// The replay this tab is reading, kept because an auto-export is named
+    /// after it.
+    path: PathBuf,
     /// What the last export did, shown beside the menu.
     export_status: Option<String>,
     _parse_task: Task<()>,
@@ -198,17 +204,10 @@ pub struct ReplayPanel {
 }
 
 impl ReplayPanel {
-    pub fn new(
-        path: PathBuf,
-        game_data: GameDataCache,
-        debug: bool,
-        columns: Vec<ReplayColumn>,
-        personal_rating: Option<Arc<PersonalRatingData>>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub fn new(setup: PanelSetup, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let PanelSetup { path, game_data, debug, columns, personal_rating, auto_export } = setup;
         let focus_handle = cx.focus_handle();
-        let parse_task = spawn_parse(path, game_data, personal_rating.clone(), cx);
+        let parse_task = spawn_parse(path.clone(), game_data, personal_rating.clone(), cx);
         let parse_task = cx.spawn_in(window, async move |this, cx| {
             let result = parse_task.await;
             let _ = this.update_in(cx, |this, window, cx| this.apply_result(result, window, cx));
@@ -223,6 +222,8 @@ impl ReplayPanel {
             personal_rating,
             export: None,
             export_status: None,
+            auto_export,
+            path,
             _parse_task: parse_task,
             _table_subscription: None,
         }
@@ -260,6 +261,38 @@ impl ReplayPanel {
     ///
     /// The document is held in its debug form, so an ordinary export strips a
     /// copy here rather than reparsing the replay.
+    /// Writes this battle out on its own, for a reader who asked for every
+    /// battle rather than this one.
+    ///
+    /// Named after the replay file so a directory of exports reads in the
+    /// same order as the directory of replays it came from. A battle opened
+    /// twice is written twice, over the same name, which is what the egui
+    /// app does with the same setting.
+    fn write_auto_export(&mut self, cx: &mut Context<Self>) {
+        let AutoExport::To { directory, format } = &self.auto_export else { return };
+        let Some(export) = self.export.clone() else { return };
+        let export = if self.debug { export } else { export.stripped() };
+
+        let Some(stem) = self.path.file_stem() else {
+            tracing::warn!(path = %self.path.display(), "auto-export: the replay has no name to write under");
+            return;
+        };
+        let path = directory.join(stem).with_extension(format.extension());
+        let format = *format;
+
+        cx.spawn(async move |this, cx| {
+            let written = cx.background_spawn(async move { write_export(&export, &path, format) }).await;
+            if let Err(err) = written {
+                tracing::warn!("auto-export failed: {err}");
+                let _ = this.update(cx, |this, cx| {
+                    this.export_status = Some(err.to_string());
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
+
     fn export_match(&mut self, format: ExportFormat, cx: &mut Context<Self>) {
         let Some(export) = self.export.clone() else {
             return;
@@ -358,6 +391,7 @@ impl ReplayPanel {
                 fire_chance,
             }) => {
                 self.export = Some(export);
+                self.write_auto_export(cx);
                 let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
                 self.loaded_state(model, game_data.vfs().clone(), fire_chance, payloads, window, cx)
             }
@@ -442,6 +476,8 @@ impl ReplayPanel {
             // gate is that there is one, not what is in it.
             export: Some(ExportedMatch::new(&super::test_support::fixture_empty_battle_report(), &[], &[], true)),
             export_status: None,
+            auto_export: AutoExport::Off,
+            path: PathBuf::from("test.wowsreplay"),
             _parse_task: Task::ready(()),
             _table_subscription: None,
         };
@@ -529,12 +565,66 @@ fn export_menu(panel: Entity<ReplayPanel>, can_export: bool) -> impl IntoElement
     })
 }
 
+/// What a tab needs to start reading a replay.
+///
+/// Passed as one value rather than as six loose arguments, so a caller cannot
+/// transpose two of them.
+pub struct PanelSetup {
+    pub path: PathBuf,
+    pub game_data: GameDataCache,
+    /// Whether the debug-only columns and side panels are offered.
+    pub debug: bool,
+    pub columns: Vec<ReplayColumn>,
+    /// The expected-values table, when one has been read.
+    pub personal_rating: Option<Arc<PersonalRatingData>>,
+    pub auto_export: AutoExport,
+}
+
+/// Whether a finished parse writes itself out, and where.
+///
+/// A directory that is not there is not one: the setting is read at open
+/// time, so a directory removed since then simply turns the writing off
+/// rather than failing once per battle.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum AutoExport {
+    #[default]
+    Off,
+    To {
+        directory: PathBuf,
+        format: ExportFormat,
+    },
+}
+
+impl From<wows_toolkit_config::ReplayExportFormat> for ExportFormat {
+    fn from(format: wows_toolkit_config::ReplayExportFormat) -> ExportFormat {
+        match format {
+            wows_toolkit_config::ReplayExportFormat::Json => ExportFormat::Json,
+            wows_toolkit_config::ReplayExportFormat::Cbor => ExportFormat::Cbor,
+            wows_toolkit_config::ReplayExportFormat::Csv => ExportFormat::Csv,
+        }
+    }
+}
+
+impl AutoExport {
+    /// Reads the setting, refusing a directory that is not one.
+    pub fn from_settings(settings: &ReplaySettings) -> AutoExport {
+        if !settings.auto_export_data {
+            return AutoExport::Off;
+        }
+        let directory = PathBuf::from(&settings.auto_export_path);
+        if !directory.is_dir() {
+            return AutoExport::Off;
+        }
+        AutoExport::To { directory, format: ExportFormat::from(settings.auto_export_format) }
+    }
+}
+
 /// What the Export menu writes.
 ///
 /// JSON and CBOR carry the whole match; CSV carries one flattened row per
 /// vehicle, which is what a spreadsheet can read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ExportFormat {
+pub enum ExportFormat {
     Json,
     Cbor,
     Csv,
@@ -1098,6 +1188,34 @@ mod tests {
 
     /// Dragging a column header's grip widens that column, and every row
     /// follows it. A column nobody dragged keeps fitting its content.
+    #[test]
+    fn the_auto_export_setting_refuses_a_directory_that_is_not_one() {
+        use super::AutoExport;
+        use wows_toolkit_config::ReplayExportFormat;
+        use wows_toolkit_config::ReplaySettings;
+
+        let off = ReplaySettings { auto_export_data: false, ..ReplaySettings::default() };
+        assert_eq!(AutoExport::from_settings(&off), AutoExport::Off, "the setting is what turns it on");
+
+        let nowhere = ReplaySettings {
+            auto_export_data: true,
+            auto_export_path: "G:/does-not-exist".to_string(),
+            ..ReplaySettings::default()
+        };
+        assert_eq!(AutoExport::from_settings(&nowhere), AutoExport::Off, "a missing directory is not one to write to");
+
+        let here = ReplaySettings {
+            auto_export_data: true,
+            auto_export_path: std::env::temp_dir().to_string_lossy().into_owned(),
+            auto_export_format: ReplayExportFormat::Csv,
+            ..ReplaySettings::default()
+        };
+        assert!(
+            matches!(AutoExport::from_settings(&here), AutoExport::To { format, .. } if format == ExportFormat::Csv),
+            "the chosen format carries through"
+        );
+    }
+
     #[gpui_kit::test]
     fn dragging_a_header_grip_widens_that_column(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
