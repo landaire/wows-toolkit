@@ -223,8 +223,13 @@ async fn look_up_values(pool: &sqlx::SqlitePool, request: &ValueRequest) -> Vec<
 enum SearchState {
     /// Nothing asked for yet.
     Idle,
-    /// The query text did not parse. Carries what the parser objected to.
-    Invalid(String),
+    /// The query text did not parse. Carries what the parser objected to and
+    /// the part of the text it objected at, so the bar can point at it.
+    Invalid {
+        reason: String,
+        span: std::ops::Range<usize>,
+        text: String,
+    },
     Running,
     Failed(String),
     Done,
@@ -945,13 +950,13 @@ impl SearchView {
         let expr = match query_text::parse_query(&text) {
             Ok(expr) => expr,
             Err(err) => {
-                self.state = SearchState::Invalid(err.to_string());
-                // The hint above the table reads this; a query that did not
-                // parse filters on nothing.
-                self.expr = None;
-                self.hits.clear();
-                self.on_disk.clear();
-                self.sync_rows(cx);
+                // The results on screen came from a query that did parse, so
+                // they stay: the error is said above them, pointing at the
+                // part of the text it is about, rather than taking the page
+                // over.
+                self.state =
+                    SearchState::Invalid { reason: err.kind.to_string(), span: err.span.clone(), text: text.clone() };
+                cx.notify();
                 return;
             }
         };
@@ -1134,6 +1139,40 @@ fn outcome_color(outcome: MatchOutcome) -> Option<Hsla> {
     Some(rgb(packed).into())
 }
 
+/// The parse error, above the results: the message, and the query with the
+/// run the parser objected to marked.
+///
+/// An empty or out-of-range span (the parser reports one past the end for
+/// text that simply stops early) marks nothing, and the message stands on
+/// its own.
+fn parse_error_strip(reason: &str, span: std::ops::Range<usize>, text: &str) -> AnyElement {
+    let warn: Hsla = rgb(0xe8a54a).into();
+    let mut strip = v_flex()
+        .id("search-parse-error")
+        .test_support()
+        .aria_label(t!("ui.search.parse_failed", reason = reason).into_owned())
+        .w_full()
+        .gap_px()
+        .px(px(20.))
+        .child(div().text_xs().text_color(warn).child(t!("ui.search.parse_failed", reason = reason).into_owned()));
+
+    let marked = text.get(span.clone()).filter(|marked| !marked.is_empty());
+    if let Some(marked) = marked {
+        let before = text[..span.start].to_string();
+        let after = text[span.end..].to_string();
+        strip = strip.child(
+            h_flex()
+                .text_xs()
+                .font_family("monospace")
+                .child(div().text_color(crate::theme::text_dim()).child(before))
+                .child(div().text_color(warn).underline().child(marked.to_string()))
+                .child(div().text_color(crate::theme::text_dim()).child(after)),
+        );
+    }
+
+    strip.into_any_element()
+}
+
 /// The band a personal rating falls in, in that band's own text tone.
 fn rating_color(pr: f64) -> Hsla {
     let category = wows_toolkit_viewmodel::personal_rating::PersonalRatingCategory::from_pr(pr);
@@ -1296,6 +1335,13 @@ impl Render for SearchView {
             .into_any_element()
         });
 
+        // What the parser objected to, with the offending run of the query
+        // marked where it sits.
+        let parse_error = match &self.state {
+            SearchState::Invalid { reason, span, text } => Some(parse_error_strip(reason, span.clone(), text)),
+            _ => None,
+        };
+
         let dropdown = (self.completions_open && !wants_calendar && (!rows.is_empty() || looking_up.is_some()))
             .then_some(self.bar_bounds)
             .flatten()
@@ -1343,7 +1389,8 @@ impl Render for SearchView {
             .when_some(pills, |this, pills| this.child(pills))
             .when_some(picker, |this, rows| this.child(rows))
             .when_some(calendar, |this, calendar| this.child(calendar))
-            .when_some(dropdown, |this, rows| this.child(rows));
+            .when_some(dropdown, |this, rows| this.child(rows))
+            .when_some(parse_error, |this, strip| this.child(strip));
 
         let header =
             h_flex().flex_none().gap_2().items_center().px_2().py_1().border_b_1().border_color(border).children(
@@ -1488,7 +1535,10 @@ impl Render for SearchView {
 
         let status = match &self.state {
             SearchState::Idle => Some(t!("ui.search.type_a_query").into_owned()),
-            SearchState::Invalid(reason) => Some(t!("ui.search.parse_failed", reason = reason).into_owned()),
+            // Said in its own strip under the bar, not in place of the
+            // results.
+            SearchState::Invalid { .. } if !self.hits.is_empty() => None,
+            SearchState::Invalid { .. } => Some(t!("ui.search.type_a_query").into_owned()),
             SearchState::Running => Some(t!("ui.search.searching").into_owned()),
             SearchState::Failed(reason) => Some(t!("ui.search.failed", reason = reason).into_owned()),
             SearchState::Done if self.hits.is_empty() => Some(t!("ui.search.no_matches").into_owned()),

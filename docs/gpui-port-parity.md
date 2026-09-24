@@ -332,7 +332,10 @@ kept so the next audit does not re-report them.
   edge drags its column wider or narrower, double-clicking it puts the
   column back on its default, and the widths are kept in a settings row
   of the port's own, since the egui table has none to share.
-- A parse error replaces the results instead of marking the offending span.
+- [done] A parse error replaces the results instead of marking the
+  offending span. The results the last query returned stay on screen,
+  and the objection is said in a strip under the bar with the run of the
+  query the parser named underlined beneath it.
 - [done] The footer reports truncation on the right row; the query fetches
   one past the limit itself, so the extra `+ 1` the port added is gone.
 
