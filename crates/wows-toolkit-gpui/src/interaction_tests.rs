@@ -832,6 +832,41 @@ fn clicking_a_search_column_moves_the_sort_to_it(cx: &mut TestAppContext) {
 }
 
 #[gpui_kit::test]
+fn dragging_a_search_header_grip_widens_that_column(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    let grip = ("search-header-grip", 0usize);
+
+    let before = cx
+        .update_window(window.into(), |_, window, cx| {
+            show_tab(window, AppTab::Search, cx);
+            window.render_frame(cx);
+            window.find(grip).bounds()
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        let from = before.center();
+        window.drag(from, gpui_kit::point(from.x + px(50.), from.y), cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    let after = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.find(grip).bounds()
+        })
+        .expect("the test window stays open");
+
+    assert!(
+        after.origin.x > before.origin.x,
+        "the grip moved right with the column it widens, from {:?} to {:?}",
+        before.origin.x,
+        after.origin.x
+    );
+}
+
+#[gpui_kit::test]
 fn the_tracker_sub_tabs_switch_between_their_three_views(cx: &mut TestAppContext) {
     let window = open_app(cx);
 

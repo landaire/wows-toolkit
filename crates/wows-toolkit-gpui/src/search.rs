@@ -55,7 +55,7 @@ use crate::ui::selectable;
 ///
 /// The sortable ones are the shared `SortColumn`; Ship is drawn beside them
 /// and carries no sort, since the index has nothing to order it by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 enum ResultColumn {
     Sortable(SortColumn),
     Ship,
@@ -81,13 +81,35 @@ impl ResultColumn {
         }
     }
 
-    fn width(self) -> Pixels {
+    /// What the column is drawn at until the reader drags it.
+    fn default_width(self) -> Pixels {
         match self {
             Self::Sortable(column) => column_width(column),
             Self::Ship => px(150.),
         }
     }
 }
+
+/// A column-width drag in progress.
+#[derive(Clone, Copy)]
+struct ColumnDrag {
+    column: ResultColumn,
+    pointer_start: Pixels,
+    width_start: Pixels,
+}
+
+/// The narrowest a dragged column may be made. Below this a column's own
+/// content is unreadable and its header is gone.
+const COLUMN_DRAG_MIN: Pixels = px(28.);
+
+/// The width of the strip on a header's trailing edge that starts a drag.
+const RESIZE_GRIP: Pixels = px(6.);
+
+/// The settings row the dragged column widths are kept in.
+///
+/// The port's own row: the egui results table has fixed widths and nothing to
+/// share.
+const COLUMN_WIDTHS_KEY: &str = "search_column_widths";
 
 /// Raised for the app to act on.
 #[derive(Clone, Debug)]
@@ -282,6 +304,16 @@ pub struct SearchView {
     game_mode_gap: Option<i64>,
     /// Whether the last run had more matches than it asked for.
     truncated: bool,
+    /// Widths the reader dragged a column to. A column not in here is drawn
+    /// at its own [`ResultColumn::default_width`].
+    column_widths: HashMap<ResultColumn, Pixels>,
+    /// Whether the saved widths have been read back yet. One shot, on the
+    /// first frame.
+    widths_loaded: bool,
+    /// The column being dragged and the width it had when the drag started,
+    /// so the new width follows the pointer's total travel rather than
+    /// accumulating per-frame deltas.
+    resizing: Option<ColumnDrag>,
     /// Whether the saved query has been read and run. The tab opens showing
     /// what the query bar was left holding, the way the egui tab does, rather
     /// than an empty page with an instruction on it.
@@ -316,6 +348,9 @@ impl SearchView {
             took_completion_on_enter: false,
             last_run_query: String::new(),
             _rerun: None,
+            column_widths: HashMap::new(),
+            widths_loaded: false,
+            resizing: None,
             history: Vec::new(),
             history_walk: None,
             editing: None,
@@ -677,6 +712,81 @@ impl SearchView {
     /// the same query; only that field is written back, leaving the saved
     /// searches, the history and the column set the egui tab keeps there
     /// untouched.
+    /// The width `column` is drawn at: what the reader dragged it to, or its
+    /// own default.
+    fn width_of(&self, column: ResultColumn) -> Pixels {
+        self.column_widths.get(&column).copied().unwrap_or_else(|| column.default_width())
+    }
+
+    /// Starts a width drag on `column` from the pointer's current position.
+    fn start_column_drag(&mut self, column: ResultColumn, at: Pixels, cx: &mut Context<Self>) {
+        self.resizing = Some(ColumnDrag { column, pointer_start: at, width_start: self.width_of(column) });
+        cx.notify();
+    }
+
+    /// Follows a width drag. A no-op when nothing is being dragged, which is
+    /// every pointer move outside one.
+    fn drag_column(&mut self, at: Pixels, cx: &mut Context<Self>) {
+        let Some(drag) = self.resizing else { return };
+        let width = (drag.width_start + (at - drag.pointer_start)).max(COLUMN_DRAG_MIN);
+        self.column_widths.insert(drag.column, width);
+        cx.notify();
+    }
+
+    /// Ends a width drag, keeping where it got to.
+    fn end_column_drag(&mut self, cx: &mut Context<Self>) {
+        if self.resizing.take().is_some() {
+            self.save_column_widths(cx);
+            cx.notify();
+        }
+    }
+
+    /// Puts `column` back on its default width.
+    fn reset_column_width(&mut self, column: ResultColumn, cx: &mut Context<Self>) {
+        self.resizing = None;
+        if self.column_widths.remove(&column).is_some() {
+            self.save_column_widths(cx);
+            cx.notify();
+        }
+    }
+
+    /// Writes the dragged widths back, in `ResultColumn::all` order, so the
+    /// tab opens at them next time.
+    fn save_column_widths(&self, cx: &mut Context<Self>) {
+        let widths: Vec<Option<f32>> = ResultColumn::all()
+            .into_iter()
+            .map(|column| self.column_widths.get(&column).copied().map(f32::from))
+            .collect();
+        crate::settings_store::save(COLUMN_WIDTHS_KEY, &widths, cx);
+    }
+
+    /// Reads the dragged widths back on the first frame, once the config
+    /// database is open. `new` runs before it is.
+    fn load_column_widths(&mut self, cx: &mut Context<Self>) {
+        if self.widths_loaded {
+            return;
+        }
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        self.widths_loaded = true;
+        cx.spawn(async move |this, cx| {
+            let stored = runtime::spawn(cx, async move {
+                wows_toolkit_config::queries::get_setting::<Vec<Option<f32>>>(&pool, COLUMN_WIDTHS_KEY).await
+            })
+            .await;
+            let Ok(Some(widths)) = stored else { return };
+            let _ = this.update(cx, |this, cx| {
+                for (column, width) in ResultColumn::all().into_iter().zip(widths) {
+                    // A width narrower than the grip would leave a column
+                    // that cannot be grabbed to widen again.
+                    let Some(width) = width else { continue };
+                    this.column_widths.insert(column, px(width).max(COLUMN_DRAG_MIN));
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn open_saved_query(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.opened {
             return;
@@ -1004,6 +1114,7 @@ impl Render for SearchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.preview.release_dropped(window);
         self.open_saved_query(window, cx);
+        self.load_column_widths(cx);
         self.refresh_bar(cx);
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
@@ -1178,40 +1289,76 @@ impl Render for SearchView {
 
         let header =
             h_flex().flex_none().gap_2().items_center().px_2().py_1().border_b_1().border_color(border).children(
-                ResultColumn::all().into_iter().map(|column| {
+                ResultColumn::all().into_iter().enumerate().map(|(ix, column)| {
+                    let width = self.width_of(column);
+                    // The grip sits on the header's trailing edge, over the
+                    // rule between this column and the next, which is where a
+                    // reader reaches for it.
+                    let grip = div()
+                        .id(("search-header-grip", ix))
+                        .test_support()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .w(RESIZE_GRIP)
+                        .cursor_col_resize()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                // Double-clicking a grip puts that column back
+                                // on its default, which is the usual way out of
+                                // a drag that went too far.
+                                if event.click_count >= 2 {
+                                    this.reset_column_width(column, cx);
+                                    return;
+                                }
+                                this.start_column_drag(column, event.position.x, cx);
+                            }),
+                        );
+
                     let ResultColumn::Sortable(sortable) = column else {
                         // Nothing to sort by, so the header is a label rather
                         // than a control that would refuse every click.
                         return div()
-                            .w(column.width())
+                            .relative()
+                            .w(width)
                             .text_xs()
                             .font_weight(FontWeight::BOLD)
                             .child(column.label())
+                            .child(grip)
                             .into_any_element();
                     };
 
                     let active = self.sort.column == sortable;
-                    selectable(
-                        ("search-sort", sortable as usize),
-                        active,
-                        div()
-                            .id(("search-sort-button", sortable as usize))
-                            .w(column.width())
-                            .text_xs()
-                            .font_weight(FontWeight::BOLD)
-                            .child(h_flex().gap_1().items_center().child(column.label()).when(active, |this| {
-                                this.child(Icon::new(match self.sort.direction {
-                                    SortDirection::Ascending => IconName::SortAscending,
-                                    SortDirection::Descending => IconName::SortDescending,
+                    div()
+                        .relative()
+                        .w(width)
+                        .child(selectable(
+                            ("search-sort", sortable as usize),
+                            active,
+                            div()
+                                .id(("search-sort-button", sortable as usize))
+                                .w_full()
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .child(h_flex().gap_1().items_center().child(column.label()).when(active, |this| {
+                                    this.child(Icon::new(match self.sort.direction {
+                                        SortDirection::Ascending => IconName::SortAscending,
+                                        SortDirection::Descending => IconName::SortDescending,
+                                    }))
                                 }))
-                            }))
-                            .on_click(cx.listener(move |this, _event, _window, cx| this.sort_by(sortable, cx))),
-                    )
-                    .into_any_element()
+                                .on_click(cx.listener(move |this, _event, _window, cx| this.sort_by(sortable, cx))),
+                        ))
+                        .child(grip)
+                        .into_any_element()
                 }),
             );
 
         let hits = self.hits.clone();
+        // What the header just laid out, so a row cannot disagree with it.
+        let drawn_widths: Vec<(ResultColumn, Pixels)> =
+            ResultColumn::all().into_iter().map(|column| (column, self.width_of(column))).collect();
         let on_disk = self.on_disk.clone();
         let resolved = self.resolved_ships.clone();
         let entity = cx.entity();
@@ -1241,7 +1388,7 @@ impl Render for SearchView {
                         }
                     });
                 })
-                .children(ResultColumn::all().into_iter().map(|column| {
+                .children(drawn_widths.iter().copied().map(|(column, width)| {
                     // The outcome and the rating carry their meaning in
                     // colour, as they do in the replay table and in the egui
                     // results (`ui/search_tab.rs`).
@@ -1250,12 +1397,8 @@ impl Render for SearchView {
                         ResultColumn::Sortable(SortColumn::Pr) => hit.self_pr.map(rating_color),
                         _ => None,
                     };
-                    div()
-                        .w(column.width())
-                        .text_sm()
-                        .truncate()
-                        .when_some(tint, |el, color| el.text_color(color))
-                        .child(match column {
+                    div().w(width).text_sm().truncate().when_some(tint, |el, color| el.text_color(color)).child(
+                        match column {
                             ResultColumn::Sortable(column) => cell_text(hit, column),
                             // The name this match's own build resolves when
                             // that build is loaded, else the one stored at
@@ -1265,7 +1408,8 @@ impl Render for SearchView {
                                     hit.version_build.zip(hit.self_ship_id).and_then(|key| resolved.get(&key)).cloned();
                                 ship_display_name(hit, live).unwrap_or_else(|| "-".to_string())
                             }
-                        })
+                        },
+                    )
                 }))
                 .child(row_actions(ix, hit, on_disk.get(ix).copied().unwrap_or(false), entity.clone()))
                 .into_any_element()
@@ -1343,6 +1487,17 @@ impl Render for SearchView {
             .id("search-root")
             .track_focus(&self.focus_handle)
             .size_full()
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
+                this.drag_column(event.position.x, cx);
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _event: &MouseUpEvent, _window, cx| this.end_column_drag(cx)),
+            )
             .child(query_bar)
             .when_some(gap_hint, |this, hint| {
                 this.child(
