@@ -80,7 +80,7 @@ kept so the next audit does not re-report them.
 
 ## Replay Inspector
 
-- The replay renderer is partly there. "Render Replay" in the row menu opens
+- [done] The replay renderer is partly there. "Render Replay" in the row menu opens
   a playback viewport in a dock tab of its own: the battle is walked once in
   the background, and the transport plays, pauses, seeks and runs at 0.5x to
   8x with the game clock beside it.
@@ -101,11 +101,12 @@ kept so the next audit does not re-report them.
     handed to the clipboard as a file so it pastes into a chat window or an
     upload dialog. The file is left behind deliberately, since the clipboard
     holds a path.
-  - Still absent: the tab-header Render button, which is a second way to
-    reach what the row menu already opens, and the annotation toolbar, which
-    needs a drawing surface over the playback. The panel commands (stats,
-    rosters) and position trails are outside `bake_options` and so are not
-    drawn.
+  - The tab-header Render button is there too, acting on the replay showing
+    in the dock, or the one last opened when none is.
+  - Still absent: the annotation toolbar, which needs a drawing surface over
+    the playback that this port has no painter for. The panel commands
+    (stats, rosters) and position trails are outside `bake_options` and so
+    are not drawn.
 - [done] "Copy Replay" puts the replay files on the clipboard through
   `arboard`, so they paste into a file manager; "Copy Path" still copies the
   text. A group offers both.
