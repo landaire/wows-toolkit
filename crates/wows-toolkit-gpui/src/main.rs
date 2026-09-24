@@ -34,6 +34,7 @@ mod twitch;
 mod ui;
 mod unpacker;
 mod viewport;
+mod window_shell;
 
 use app::App;
 use gpui_kit::assets::Assets;
