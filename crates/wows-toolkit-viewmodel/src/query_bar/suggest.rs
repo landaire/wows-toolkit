@@ -448,6 +448,22 @@ pub fn value_request_for(pending: &str) -> Option<ValueRequest> {
     request_for_kind(field.value_kind(), needle)
 }
 
+/// The half-typed value under the caret when its field takes a date, which
+/// the bar offers a calendar for rather than a list of stored values.
+///
+/// `None` for every other field, and for a fragment with no operator yet.
+pub fn date_value_at_caret(pending: &str) -> Option<&str> {
+    let (key, needle) = split_on_operator(active_fragment(pending))?;
+    let bare = key.rsplit('.').next()?;
+    if bare.is_empty() {
+        return None;
+    }
+    let kind = RosterField::from_name(bare)
+        .map(RosterField::value_kind)
+        .or_else(|| MatchField::from_name(bare).map(MatchField::value_kind))?;
+    (kind == ValueKind::Timestamp).then_some(needle)
+}
+
 /// Splits `<key><op><value>` at the first operator character. `None` when the
 /// fragment carries no operator, which means the user is still typing a field
 /// name and no value lookup applies yet.
@@ -968,6 +984,20 @@ mod tests {
         assert_eq!(value_request_for("enemy.shi"), None);
         assert_eq!(value_request_for(":"), None);
         assert_eq!(value_request_for("nonsense:x"), None);
+    }
+
+    #[test]
+    fn a_date_field_asks_for_a_calendar_and_carries_what_is_typed_so_far() {
+        assert_eq!(date_value_at_caret("date>2025-01"), Some("2025-01"));
+        assert_eq!(date_value_at_caret("outcome:win date<"), Some(""));
+    }
+
+    #[test]
+    fn a_field_that_is_not_a_date_asks_for_no_calendar() {
+        assert_eq!(date_value_at_caret("map:ocean"), None);
+        assert_eq!(date_value_at_caret("dat"), None);
+        assert_eq!(date_value_at_caret(""), None);
+        assert_eq!(date_value_at_caret("nonsense:2025-01-01"), None);
     }
 
     #[test]

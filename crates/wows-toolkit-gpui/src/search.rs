@@ -15,6 +15,10 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::calendar::Calendar;
+use gpui_kit::component::calendar::CalendarEvent;
+use gpui_kit::component::calendar::CalendarState;
+use gpui_kit::component::calendar::Date as CalendarDate;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
@@ -144,6 +148,10 @@ const HISTORY_DEPTH: usize = 50;
 /// How long a typed edit waits before the results follow it.
 const RERUN_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
 
+/// How a taken day is written into the query. The grammar reads a bare
+/// `YYYY-MM-DD` as local midnight on that day.
+const CALENDAR_DATE_FORMAT: &str = "%Y-%m-%d";
+
 /// Rows a value lookup offers, matching the egui bar's own limit.
 const VALUE_LIMIT: i64 = 50;
 /// How tall the completions dropdown grows before it scrolls, matching the
@@ -235,6 +243,9 @@ pub struct SearchView {
     /// from: editing the text must not relabel results it has not been run
     /// against.
     reading: Option<wows_toolkit_config::index::query_ast::MatchExpr>,
+    /// The calendar a date field is picked from. Held rather than built per
+    /// render so the month it was paged to survives a keystroke.
+    calendar: Entity<CalendarState>,
     /// The value lookup the caret calls for, and the options it returned.
     /// The index is asked for ships and players; maps and sources are read
     /// once and kept.
@@ -332,9 +343,12 @@ impl SearchView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let query_input = cx.new(|cx| InputState::new(window, cx).placeholder("outcome=win and map:ocean"));
         let subscription = cx.subscribe(&query_input, Self::on_query_event);
+        let calendar = cx.new(|cx| CalendarState::new(window, cx));
+        let calendar_subscription = cx.subscribe_in(&calendar, window, Self::on_calendar_event);
 
         Self {
             query_input,
+            calendar,
             completions: Vec::new(),
             completion_source: String::new(),
             reading: None,
@@ -370,12 +384,28 @@ impl SearchView {
             generation: 0,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             focus_handle: cx.focus_handle(),
-            _subscriptions: vec![subscription],
+            _subscriptions: vec![subscription, calendar_subscription],
         }
     }
 
     /// Puts `replacement` in the bar. What may follow it is re-offered by the
     /// next render, which notices the text changed.
+    /// A day taken from the calendar: it replaces the half-typed value under
+    /// the caret, the way a completion row does.
+    fn on_calendar_event(
+        &mut self,
+        _calendar: &Entity<CalendarState>,
+        event: &CalendarEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let CalendarEvent::Selected(CalendarDate::Single(Some(day))) = event else { return };
+        let text = self.query_input.read(cx).value().to_string();
+        let replacement = suggest::replace_active_value(&text, &day.format(CALENDAR_DATE_FORMAT).to_string());
+        self.completions_open = false;
+        self.take_completion(replacement, window, cx);
+    }
+
     fn take_completion(&mut self, replacement: String, window: &mut Window, cx: &mut Context<Self>) {
         self.query_input.update(cx, |state, cx| state.set_value(replacement, window, cx));
         self.completion_cursor = None;
@@ -1239,7 +1269,34 @@ impl Render for SearchView {
                 .into_any_element()
         });
 
-        let dropdown = (self.completions_open && (!rows.is_empty() || looking_up.is_some()))
+        // A date field is picked from a calendar rather than from a list of
+        // values the index happens to hold.
+        let bar_text = self.query_input.read(cx).value().to_string();
+        let wants_calendar = suggest::date_value_at_caret(&bar_text).is_some();
+        let calendar = (self.completions_open && wants_calendar).then_some(self.bar_bounds).flatten().map(|bounds| {
+            deferred(
+                anchored()
+                    .position(point(bounds.origin.x, bounds.origin.y + bounds.size.height + px(4.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(
+                        div()
+                            .id("search-calendar")
+                            .test_support()
+                            .occlude()
+                            .p_1()
+                            .bg(surface)
+                            .border_1()
+                            .border_color(border)
+                            .rounded(theme.radius)
+                            .shadow_md()
+                            .child(Calendar::new(&self.calendar)),
+                    ),
+            )
+            .with_priority(1)
+            .into_any_element()
+        });
+
+        let dropdown = (self.completions_open && !wants_calendar && (!rows.is_empty() || looking_up.is_some()))
             .then_some(self.bar_bounds)
             .flatten()
             .map(|bounds| {
@@ -1285,6 +1342,7 @@ impl Render for SearchView {
             .child(entry_row)
             .when_some(pills, |this, pills| this.child(pills))
             .when_some(picker, |this, rows| this.child(rows))
+            .when_some(calendar, |this, calendar| this.child(calendar))
             .when_some(dropdown, |this, rows| this.child(rows));
 
         let header =
