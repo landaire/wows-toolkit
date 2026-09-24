@@ -89,10 +89,17 @@ kept so the next audit does not re-report them.
     painter of its own, so it cannot convert commands to shapes the way the
     egui renderer does. The track is bounded (`TrackSink`'s budget), so a
     long battle is sampled more coarsely rather than costing more memory.
-  - Still absent: the tab-header Render button, Render to Video, Render to
-    Clipboard, the annotation toolbar, and video export. The panel commands
-    (stats, rosters) and position trails are outside `bake_options` and so
-    are not drawn.
+  - Render to Video is on the transport: the baked track is rasterised
+    through the same renderer the viewport draws with and encoded to an MP4,
+    so nothing is parsed a second time. The encoder gained `submit_frame` and
+    `finish_submitted` for a caller that holds its own frames rather than a
+    battle to draw them from; `advance_clock` is unchanged, so the egui
+    export still drives it as it did. The transport is refused while an
+    export runs, because both want the one renderer, and the clock reads the
+    frame count instead.
+  - Still absent: the tab-header Render button, Render to Clipboard, and the
+    annotation toolbar. The panel commands (stats, rosters) and position
+    trails are outside `bake_options` and so are not drawn.
 - [done] "Copy Replay" puts the replay files on the clipboard through
   `arboard`, so they paste into a file manager; "Copy Path" still copies the
   text. A group offers both.

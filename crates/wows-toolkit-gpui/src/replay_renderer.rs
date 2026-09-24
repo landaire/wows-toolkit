@@ -114,7 +114,21 @@ pub struct ReplayRendererPanel {
     _bake: Option<Task<()>>,
     _tick: Option<Task<()>>,
     _seek_subscription: Option<Subscription>,
+    /// The export under way, if any. Only one at a time: it holds the same
+    /// renderer the viewport draws through.
+    export: Option<ExportProgress>,
+    /// Why the last export stopped, when it did not finish. Cleared when the
+    /// next one starts.
+    export_failure: Option<String>,
+    _export: Option<Task<()>>,
     focus_handle: FocusHandle,
+}
+
+/// How far an export has got, in frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ExportProgress {
+    pub done: u64,
+    pub total: u64,
 }
 
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
@@ -138,6 +152,9 @@ impl ReplayRendererPanel {
             frame: None,
             at: 0,
             playing: false,
+            export: None,
+            export_failure: None,
+            _export: None,
             speed: 1.0,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -170,6 +187,9 @@ impl ReplayRendererPanel {
             frame: None,
             at: 0,
             playing: false,
+            export: None,
+            export_failure: None,
+            _export: None,
             speed: 1.0,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -238,6 +258,76 @@ impl ReplayRendererPanel {
             });
         })
         .detach();
+    }
+
+    /// Asks where to write, then encodes the baked track there.
+    ///
+    /// The frames are the ones already baked, so nothing is parsed twice: the
+    /// track is rasterised through the same renderer the viewport draws with,
+    /// and the pixels go straight to the encoder.
+    fn export_video(&mut self, cx: &mut Context<Self>) {
+        if self.export.is_some() {
+            return;
+        }
+        let State::Ready(track) = &self.state else { return };
+        if track.frames.is_empty() {
+            return;
+        }
+        // Held for the whole encode, which is why the transport is refused
+        // while one runs: a frame cannot be drawn for two things at once.
+        let Some(renderer) = self.renderer.take() else { return };
+
+        let frames = track.frames.clone();
+        let duration = track.seconds_at(track.len().saturating_sub(1));
+        let suggested = format!("{}.mp4", self.title);
+        let asked = crate::dialog::save_file(Some(&t!("ui.replay.renderer.export_video")), &suggested, Some(MP4));
+
+        self.export_failure = None;
+        self.export = Some(ExportProgress { done: 0, total: frames.len() as u64 });
+        self.playing = false;
+        cx.notify();
+
+        let (progress_tx, mut progress_rx) = futures::channel::mpsc::unbounded::<ExportProgress>();
+        let watched = cx.entity();
+        cx.spawn(async move |_this, cx| {
+            use futures::StreamExt as _;
+            while let Some(step) = progress_rx.next().await {
+                watched.update(cx, |this, cx| {
+                    this.export = Some(step);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
+        self._export = Some(cx.spawn(async move |this, cx| {
+            let Some(output) = asked.await else {
+                // Cancelled at the dialog: the renderer goes back to the
+                // viewport and nothing else changes.
+                let _ = this.update(cx, |this, cx| {
+                    this.renderer = Some(renderer);
+                    this.export = None;
+                    cx.notify();
+                });
+                return;
+            };
+
+            let (renderer, outcome) = cx
+                .background_spawn(async move {
+                    let outcome = encode_track(&renderer, &frames, duration, &output, progress_tx);
+                    (renderer, outcome)
+                })
+                .await;
+
+            let _ = this.update(cx, |this, cx| {
+                this.renderer = Some(renderer);
+                this.export = None;
+                if let Err(reason) = outcome {
+                    this.export_failure = Some(reason);
+                }
+                cx.notify();
+            });
+        }));
     }
 
     fn set_at(&mut self, at: usize, cx: &mut Context<Self>) {
@@ -446,6 +536,14 @@ impl Render for ReplayRendererPanel {
                     )
                     .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
             )
+            .child(
+                Button::new("replay-renderer-export")
+                    .child(crate::icons::icon(crate::icons::DOWNLOAD_SIMPLE))
+                    .compact()
+                    .disabled(!ready || self.export.is_some())
+                    .tooltip(t!("ui.replay.renderer.export_video").into_owned())
+                    .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
+            )
             .child(crate::ui::rule_v(cx))
             .child(div().flex_1().min_w(px(0.)).child(Slider::new(&self.seek).disabled(!ready)))
             .child(
@@ -454,8 +552,22 @@ impl Render for ReplayRendererPanel {
                     .w(CLOCK_WIDTH)
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(self.clock_label()),
+                    // While an export runs it says how far it has got rather
+                    // than where playback is: the transport is held and the
+                    // clock would sit still.
+                    .child(match self.export {
+                        Some(progress) => format!("{} / {}", progress.done, progress.total),
+                        None => self.clock_label(),
+                    }),
             )
+            .children(self.export_failure.as_ref().map(|reason| {
+                div()
+                    .flex_none()
+                    .text_xs()
+                    .text_color(rgb(crate::theme::semantic().error))
+                    .child(reason.clone())
+                    .into_any_element()
+            }))
             .child(crate::ui::rule_v(cx))
             .children(SPEEDS.map(|speed| {
                 let chosen = (self.speed - speed).abs() < f32::EPSILON;
@@ -511,6 +623,40 @@ fn to_image(frame: image::RgbImage) -> Arc<RenderImage> {
     let buffer = image::RgbaImage::from_raw(width, height, bgra)
         .expect("the buffer is four bytes per pixel of the size it was built at");
     Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
+}
+
+/// The file an export writes.
+const MP4: crate::dialog::Filter = crate::dialog::Filter { label: "MP4", extensions: &["mp4"] };
+
+/// Rasterises a baked track and encodes it to `output`.
+///
+/// Runs on a background thread: it draws every frame and blocks on the
+/// encoder. The renderer is the viewport's own, which is why the caller hands
+/// it over for the duration rather than sharing it.
+fn encode_track(
+    renderer: &SharedPreviewRenderer,
+    frames: &[Vec<DrawCommand>],
+    duration_seconds: f32,
+    output: &std::path::Path,
+    progress: futures::channel::mpsc::UnboundedSender<ExportProgress>,
+) -> Result<(), String> {
+    let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (width, height) = drawing.canvas_size();
+
+    let Some(path) = output.to_str() else {
+        return Err(t!("ui.replay.renderer.export_path_unusable").into_owned());
+    };
+    let mut encoder =
+        wows_minimap_renderer::VideoEncoder::new(Some(path), None, false, duration_seconds, width, height);
+    encoder.init().map_err(|err| err.to_string())?;
+
+    let total = frames.len() as u64;
+    for (index, commands) in frames.iter().enumerate() {
+        let image = drawing.render(commands);
+        encoder.submit_frame(&image).map_err(|err| err.to_string())?;
+        let _ = progress.unbounded_send(ExportProgress { done: index as u64 + 1, total });
+    }
+    encoder.finish_submitted().map_err(|err| err.to_string())
 }
 
 #[cfg(test)]

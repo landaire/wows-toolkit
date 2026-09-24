@@ -3,6 +3,7 @@ use std::io::BufWriter;
 use std::io::Write;
 use std::io::stdout;
 
+use image::RgbImage;
 use image::codecs::png::PngEncoder;
 use muxide::api::MuxerBuilder;
 use muxide::api::VideoCodec as MuxideCodec;
@@ -341,6 +342,69 @@ impl VideoEncoder {
         writer.flush().expect("flushing output to stdout failed");
     }
 
+    /// Encodes one frame that the caller has already drawn.
+    ///
+    /// [`advance_clock`](Self::advance_clock) draws its own frames from a live
+    /// battle, which a caller holding a finished track of draw commands does
+    /// not have. This takes the drawn pixels instead, so the same encoder and
+    /// muxer serve both. Pair it with
+    /// [`finish_submitted`](Self::finish_submitted).
+    ///
+    /// The frame must be the canvas size this encoder was built for; one of
+    /// any other size is refused rather than encoded into a stream whose
+    /// header says otherwise.
+    pub fn submit_frame(&mut self, frame: &RgbImage) -> rootcause::Result<(), VideoError> {
+        if let Some(error) = &self.encoder_error {
+            return Err(report!(VideoError::EncodeFailed).attach(format!("the encoder already failed: {error}")));
+        }
+        let (width, height) = (frame.width(), frame.height());
+        if width != self.canvas_width || height != self.canvas_height {
+            return Err(report!(VideoError::EncodeFailed).attach(format!(
+                "frame is {width}x{height} but the encoder was built for {}x{}",
+                self.canvas_width, self.canvas_height
+            )));
+        }
+
+        self.ensure_encoder()?;
+        let worker = self.worker.as_ref().expect("worker is Some after ensure_encoder succeeded");
+        if let Err(e) = worker.submit(frame.as_raw().to_vec()) {
+            self.encoder_error = Some(e);
+            let error = self.encoder_error.as_ref().expect("just set");
+            return Err(report!(VideoError::EncodeFailed).attach(format!("frame submission failed: {error}")));
+        }
+        self.last_rendered_frame += 1;
+
+        if let Some(ref cb) = self.progress_callback {
+            let encoded = self.worker.as_ref().map(|w| w.encoded_count()).unwrap_or(0);
+            cb(RenderProgress { stage: RenderStage::Encoding, current: encoded, total: self.expected_frames });
+        }
+        Ok(())
+    }
+
+    /// Closes a stream fed by [`submit_frame`](Self::submit_frame) and writes
+    /// the file.
+    ///
+    /// The counterpart to [`finish`](Self::finish) for a caller with no battle
+    /// to draw a final frame from.
+    pub fn finish_submitted(&mut self) -> rootcause::Result<(), VideoError> {
+        let output = match self.worker.take() {
+            Some(worker) => worker.finish()?,
+            // Nothing was ever submitted, which is an empty track rather than
+            // a failure; the mux below reports it as one.
+            None => EncoderOutput { samples: Vec::new(), codec: self.active_codec.unwrap_or(VideoCodec::H264) },
+        };
+
+        if let Some(ref cb) = self.progress_callback {
+            cb(RenderProgress {
+                stage: RenderStage::Encoding,
+                current: output.samples.len() as u64,
+                total: self.expected_frames,
+            });
+        }
+
+        self.mux_to_mp4(&output.samples, output.codec)
+    }
+
     pub fn finish(
         &mut self,
         controller: &BattleView<'_>,
@@ -481,5 +545,34 @@ fn map_codec(c: VideoCodec) -> MuxideCodec {
         VideoCodec::H264 => MuxideCodec::H264,
         VideoCodec::H265 => MuxideCodec::H265,
         VideoCodec::Av1 => MuxideCodec::Av1,
+    }
+}
+
+#[cfg(test)]
+mod submitted_frame_tests {
+    use super::*;
+
+    /// A frame of the wrong size is refused before the encoder is started, so
+    /// the check costs nothing and needs no encode backend to exercise.
+    #[test]
+    fn a_frame_of_the_wrong_size_is_refused() {
+        let mut encoder = VideoEncoder::new(Some("unused.mp4"), None, false, 60.0, 64, 32);
+
+        let wrong = RgbImage::new(32, 64);
+        let refused = encoder.submit_frame(&wrong);
+
+        assert!(refused.is_err(), "a 32x64 frame does not belong in a 64x32 stream");
+        // Nothing was started, so nothing has to be torn down.
+        assert!(encoder.worker.is_none());
+    }
+
+    #[test]
+    fn a_stream_that_was_fed_nothing_reports_no_frames_to_mux() {
+        let mut encoder = VideoEncoder::new(Some("unused.mp4"), None, false, 60.0, 64, 32);
+
+        let finished = encoder.finish_submitted();
+
+        // An empty track is a failure to report, not a zero-byte file.
+        assert!(finished.is_err());
     }
 }
