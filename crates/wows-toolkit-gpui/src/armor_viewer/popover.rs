@@ -54,6 +54,7 @@ use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
 use super::viewport_view::CameraRingSettings;
+use super::viewport_view::TrajectoryState;
 use super::viewport_view::ViewportView;
 use super::visibility::SidebarHighlightKey;
 use super::visibility::TriState;
@@ -66,6 +67,7 @@ use super::visibility::zone_all_on;
 use super::visibility::zone_any_on;
 use crate::armor_viewer::analysis;
 use crate::armor_viewer::pane::ArmorViewerPane;
+use wowsunpack::game_params::types::Km;
 
 /// Checkbox box size for [`TriState`] partial-dash placement (`Size::Medium`,
 /// `checkbox.rs`'s own `size_4` = 1rem = 16px).
@@ -98,6 +100,7 @@ pub fn render_toolbar(
         .child(render_display_button(view, entity))
         .child(render_hidden_plates_button(view, entity))
         .child(render_gaps_button(view, entity))
+        .child(render_trajectory_button(view, entity))
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
@@ -258,6 +261,50 @@ fn zoom_path_checkbox(
         .into_any_element()
 }
 
+/// The trajectory section of the display popover: the range a cast shell is
+/// fired from, whether a ricochet is followed, and a way to drop what has
+/// been cast.
+///
+/// Everything here is refused while the mode is off, because each of them
+/// only says something about a shell that has been or is about to be cast.
+fn render_trajectory_section(
+    entity: &Entity<ViewportView>,
+    state: &TrajectoryState,
+    cast_range: Km,
+    range_slider: &Entity<SliderState>,
+) -> AnyElement {
+    let on = state.shown;
+
+    v_flex()
+        .gap_1()
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.trajectory").to_string()))
+        .child(labeled_slider_row(t!("ui.armor.trajectory_range").into_owned(), range_slider, cast_range.value(), !on))
+        .child({
+            let entity = entity.clone();
+            let continuing = state.continue_on_ricochet;
+            Checkbox::new("armor-trajectory-ricochet")
+                .label(t!("ui.armor.continue_ricochet").to_string())
+                .checked(continuing)
+                .disabled(!on)
+                .on_click(move |checked, _window, cx| {
+                    let next = *checked;
+                    entity.update(cx, |view, cx| view.set_continue_on_ricochet(next, cx));
+                })
+        })
+        .child({
+            let entity = entity.clone();
+            Button::new("armor-trajectory-clear")
+                .label(t!("ui.armor.trajectory_clear").to_string())
+                .compact()
+                // Nothing cast is nothing to clear.
+                .disabled(state.count == 0)
+                .on_click(move |_event, _window, cx: &mut App| {
+                    entity.update(cx, |view, cx| view.clear_trajectories(cx));
+                })
+        })
+        .into_any_element()
+}
+
 /// Toolbar toggle for gap detection, which carries its own count: the
 /// number is the answer, so it is on the control rather than behind a hover.
 fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
@@ -283,6 +330,36 @@ fn render_gaps_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
             .tooltip(t!("ui.armor.gaps_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
                 entity.update(cx, |view, cx| view.set_show_gaps(!gaps.shown, cx));
+            }),
+    )
+}
+
+/// Toolbar toggle for trajectory mode, which carries how many shells have
+/// been cast: while the mode is on a click casts rather than hides a plate,
+/// and the count is what says whether the last click landed.
+fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let state = view.trajectory_state();
+    let has_armor = view.has_armor();
+    let entity = entity.clone();
+
+    let label = if state.shown {
+        format!("{} ({})", t!("ui.armor.trajectory"), state.count)
+    } else {
+        t!("ui.armor.trajectory").into_owned()
+    };
+
+    crate::ui::selectable(
+        "armor-trajectory",
+        state.shown,
+        Button::new("armor-trajectory-button")
+            .child(crate::icons::icon(crate::icons::CROSSHAIR))
+            .label(label)
+            .compact()
+            .selected(state.shown)
+            .disabled(!has_armor)
+            .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
             }),
     )
 }
@@ -991,6 +1068,11 @@ struct DisplayPopoverSnapshot {
     /// How far the hull is currently heeled over, for the readout beside its
     /// slider.
     roll_deg: f32,
+    trajectory: TrajectoryState,
+    /// The range cast shells are fired from, for the readout beside its
+    /// slider.
+    cast_range: Km,
+    cast_range_slider: Entity<SliderState>,
     camera_rings: CameraRingSettings,
     /// The modes this ship's own GameParams name.
     camera_modes: Vec<String>,
@@ -1022,6 +1104,9 @@ fn render_display_popover_content(
             roll_deg: view.model_roll_deg(),
             camera_rings: view.camera_rings(),
             camera_modes: view.camera_modes(),
+            trajectory: view.trajectory_state(),
+            cast_range: view.cast_range(),
+            cast_range_slider: view.display_sliders.cast_range.clone(),
             camera_fov_slider: view.display_sliders.camera_fov.clone(),
             camera_height_slider: view.display_sliders.camera_height.clone(),
             flat_slider: view.lighting_sliders.flat_intensity.clone(),
@@ -1038,6 +1123,9 @@ fn render_display_popover_content(
         lighting,
         camera_rings,
         camera_modes,
+        trajectory,
+        cast_range,
+        cast_range_slider,
         camera_fov_slider,
         camera_height_slider,
         waterline_slider,
@@ -1131,6 +1219,8 @@ fn render_display_popover_content(
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.
         .child(labeled_slider_row(t!("ui.armor.roll").into_owned(), &roll_slider, roll_deg, false))
+        .child(div().h(px(1.)).bg(border))
+        .child(render_trajectory_section(entity, &trajectory, cast_range, &cast_range_slider))
         .child(div().h(px(1.)).bg(border))
         .child(render_camera_rings_section(
             entity,

@@ -46,6 +46,7 @@ use wowsunpack::game_params::keys::ComponentType;
 
 use super::camera_rings;
 use super::gaps;
+use super::trajectory;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
 use crate::armor_viewer::camo::build_active_camo;
 use crate::armor_viewer::load_ship;
@@ -80,6 +81,12 @@ use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
+use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
+use wowsunpack::ballistics::ImpactResult;
+use wowsunpack::ballistics::ShellParams;
+use wowsunpack::ballistics::solve_for_range;
+use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Km;
 
 /// The mode a ship opens on: its first, which is the one the game itself
 /// uses. `None` for a ship whose GameParams name none, where there is
@@ -111,6 +118,32 @@ pub(crate) struct CameraRingSettings {
 pub(crate) struct GapState {
     pub(crate) shown: bool,
     pub(crate) count: usize,
+}
+
+/// How far outside the hull a cast ray starts, in model units, so it crosses
+/// every plate on the way in rather than only those past the point clicked.
+const CAST_STANDOFF: f32 = 50.0;
+
+/// The camera distance trajectory markers are sized against, so one stays
+/// readable as the view pulls back.
+const CAST_SCALE_REFERENCE: f32 = 200.0;
+
+/// How wide a ship is assumed to be before its bounds are known, so an arc
+/// drawn early has a length rather than none.
+const DEFAULT_MODEL_EXTENT: f32 = 20.0;
+
+/// The range a cast shell is fired from until one is chosen.
+const DEFAULT_CAST_RANGE: Km = Km::new(10.0);
+
+/// The colours cast shells are drawn in, in the order they were cast.
+const TRAJECTORY_PALETTE: [[f32; 4]; 4] =
+    [[0.30, 0.75, 1.00, 1.0], [1.00, 0.65, 0.20, 1.0], [0.65, 1.00, 0.45, 1.0], [0.95, 0.45, 0.85, 1.0]];
+
+/// Whether clicks cast shells, and what has been cast so far.
+pub(crate) struct TrajectoryState {
+    pub(crate) shown: bool,
+    pub(crate) count: usize,
+    pub(crate) continue_on_ricochet: bool,
 }
 
 /// What a pane is currently showing all of.
@@ -253,6 +286,9 @@ pub(crate) struct DisplaySettingsSliders {
     pub(crate) camera_fov: Entity<SliderState>,
     /// How far those orbits are raised.
     pub(crate) camera_height: Entity<SliderState>,
+    /// The range a cast shell is fired from, in kilometres, which sets how
+    /// steeply it comes down onto the armor.
+    pub(crate) cast_range: Entity<SliderState>,
 }
 
 /// The display-settings popover's lighting sliders, same persistent-entity
@@ -505,6 +541,20 @@ pub struct ViewportView {
     /// found last time they were looked for. The count is what the toolbar
     /// reports, so it is kept rather than recomputed per frame.
     show_gaps: bool,
+    /// Whether a click casts a shell instead of hiding the plate under it.
+    trajectory_mode: bool,
+    /// The shells cast so far. A plain click replaces them; a shift-click
+    /// adds to them, which is how two angles are compared.
+    trajectories: Vec<trajectory::Trajectory>,
+    /// Whether a shell that ricochets is followed past the bounce.
+    continue_on_ricochet: bool,
+    /// The attacker a cast is made with, pushed in by the pane, which owns
+    /// the comparison list. `None` until one is chosen, which still casts:
+    /// the plates a ray crosses are worth showing without a shell.
+    cast_ship: Option<ComparisonShip>,
+    /// The range the cast shell is fired from, which sets how steeply it
+    /// falls. The egui viewer offers the same slider over the same span.
+    cast_range: Km,
     gap_count: usize,
     /// Whether the viewport is showing only the plates the game's own armor
     /// viewer hides. A mode rather than a setting: it is not written back
@@ -580,6 +630,11 @@ impl ViewportView {
             current_armor: None,
             camera_rings: CameraRingSettings::default(),
             show_gaps: false,
+            trajectory_mode: false,
+            trajectories: Vec::new(),
+            continue_on_ricochet: false,
+            cast_ship: None,
+            cast_range: DEFAULT_CAST_RANGE,
             gap_count: 0,
             show_hidden_only: false,
             display_popover_open: false,
@@ -660,6 +715,8 @@ impl ViewportView {
         // The ranges the trajectory itself is resolved over.
         let camera_fov = Self::new_slider(cx, 0.0, 1.0, 0.01, 0.0);
         let camera_height = Self::new_slider(cx, -1.0, 1.0, 0.01, 0.0);
+        // The span the egui viewer's own range slider offers, in kilometres.
+        let cast_range = Self::new_slider(cx, 0.0, 30.0, 0.5, DEFAULT_CAST_RANGE.value());
         let subs = vec![
             Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
@@ -676,8 +733,19 @@ impl ViewportView {
                 let next = CameraRingSettings { height: v, ..this.camera_rings.clone() };
                 this.set_camera_rings(next, cx);
             }),
+            Self::subscribe_slider(cx, &cast_range, |this, v, cx| this.set_cast_range(Km::new(v), cx)),
         ];
-        (DisplaySettingsSliders { waterline_opacity, armor_opacity, model_roll_deg, camera_fov, camera_height }, subs)
+        (
+            DisplaySettingsSliders {
+                waterline_opacity,
+                armor_opacity,
+                model_roll_deg,
+                camera_fov,
+                camera_height,
+                cast_range,
+            },
+            subs,
+        )
     }
 
     /// Builds [`LightingSliders`] seeded from `lighting`, wired so a drag
@@ -1019,6 +1087,74 @@ impl ViewportView {
     }
 
     /// Marks the openings in the armor, or stops marking them.
+    /// Whether clicks cast shells, and how many have been cast.
+    pub(crate) fn trajectory_state(&self) -> TrajectoryState {
+        TrajectoryState {
+            shown: self.trajectory_mode,
+            count: self.trajectories.len(),
+            continue_on_ricochet: self.continue_on_ricochet,
+        }
+    }
+
+    /// Adopts the attacker casts are made with.
+    ///
+    /// Everything already cast is re-run, since a different shell reaches a
+    /// different depth through the same plates.
+    pub(crate) fn set_cast_ship(&mut self, ship: Option<ComparisonShip>, cx: &mut Context<Self>) {
+        if self.cast_ship.as_ref().map(|held| &held.param_index) == ship.as_ref().map(|next| &next.param_index) {
+            return;
+        }
+        self.cast_ship = ship;
+        self.recast_trajectories(cx);
+    }
+
+    /// The range cast shells are fired from.
+    pub(crate) fn cast_range(&self) -> Km {
+        self.cast_range
+    }
+
+    pub(crate) fn set_cast_range(&mut self, range: Km, cx: &mut Context<Self>) {
+        if (self.cast_range.value() - range.value()).abs() < f32::EPSILON {
+            return;
+        }
+        self.cast_range = range;
+        self.recast_trajectories(cx);
+    }
+
+    /// Turns trajectory casting on or off.
+    ///
+    /// Leaving the mode keeps what was cast: coming back to compare against
+    /// an earlier shell is the reason to leave it and return.
+    pub(crate) fn set_trajectory_mode(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.trajectory_mode == on {
+            return;
+        }
+        self.trajectory_mode = on;
+        cx.notify();
+    }
+
+    /// Whether a ricocheting shell is followed past the bounce.
+    ///
+    /// Everything already cast is re-cast, since the answer changes where
+    /// each of those shells ended.
+    pub(crate) fn set_continue_on_ricochet(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.continue_on_ricochet == on {
+            return;
+        }
+        self.continue_on_ricochet = on;
+        self.recast_trajectories(cx);
+    }
+
+    /// Drops every cast shell.
+    pub(crate) fn clear_trajectories(&mut self, cx: &mut Context<Self>) {
+        if self.trajectories.is_empty() {
+            return;
+        }
+        self.trajectories.clear();
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
     pub(crate) fn set_show_gaps(&mut self, show: bool, cx: &mut Context<Self>) {
         if self.show_gaps == show {
             return;
@@ -1238,14 +1374,123 @@ impl ViewportView {
                 self.snap_camera(axis, positive, cx);
             }
         } else if event.button == MouseButton::Left && !self.gizmo_press_in_box && plain_click {
-            // A plain click (not a drag) on the model, outside the gizmo box:
-            // toggle the hovered plate's visibility, matching the egui app's
-            // `response.clicked()` click-to-hide (`tab.rs:5350-5362`).
-            if let Some(key) = self.hovered.as_ref().map(|h| h.key.clone()) {
+            if self.trajectory_mode {
+                // Shift adds a shell to those already cast, which is how two
+                // angles are compared; a plain click starts again.
+                self.cast_at(point_to_vec2(event.position), event.modifiers.shift, cx);
+            } else if let Some(key) = self.hovered.as_ref().map(|h| h.key.clone()) {
+                // A plain click on the model, outside the gizmo box, toggles
+                // the hovered plate's visibility, matching the egui app's
+                // `response.clicked()` click-to-hide (`tab.rs:5350-5362`).
                 self.toggle_plate(key, cx);
             }
         }
         self.gizmo_press_in_box = false;
+    }
+
+    /// Casts a shell at whatever the pointer is over.
+    ///
+    /// The shell comes in along the camera's own bearing, flattened: a
+    /// trajectory is read against the ship, and firing from wherever the eye
+    /// happens to sit vertically would say more about the camera than the
+    /// armor. Clicking past the ship clears what was cast, which is how the
+    /// egui viewer dismisses them.
+    fn cast_at(&mut self, pointer: Vec2, keep_existing: bool, cx: &mut Context<Self>) {
+        let Some(bounds) = self.last_bounds else { return };
+        let rect = view_rect_from_bounds(bounds);
+        let Some(surface) = self.viewport.pick(pointer, rect) else {
+            if !keep_existing {
+                self.clear_trajectories(cx);
+            }
+            return;
+        };
+
+        let Some((_, ray)) = self.viewport.screen_to_ray(pointer, rect) else { return };
+        let approach = trajectory::approach_xz(&ray);
+        let shell_dir = self.shell_direction(approach);
+
+        // Cast from outside the hull so the ray crosses every plate on the
+        // way in, not just those past the point clicked.
+        let origin = surface.world_position - shell_dir * CAST_STANDOFF;
+        let ray_hits = self.viewport.pick_all_ray(origin, shell_dir);
+        let hits = trajectory::build_hits(&ray_hits, &self.mesh_triangle_info, &shell_dir);
+        if hits.is_empty() {
+            if !keep_existing {
+                self.clear_trajectories(cx);
+            }
+            return;
+        }
+
+        let cast = self.build_cast(hits, shell_dir);
+        if !keep_existing {
+            self.trajectories.clear();
+        }
+        self.trajectories.push(cast);
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// The direction a shell travels, given the bearing it comes in on.
+    ///
+    /// With a shell to fire the fall angle is the solver's; without one the
+    /// shell comes in flat, which is what the lead-in line then shows.
+    fn shell_direction(&self, approach: Vec3) -> Vec3 {
+        match self.cast_shell() {
+            Some((_, impact)) => {
+                let fall = impact.impact_angle_horizontal.value().to_radians();
+                Vec3::new(approach[0] * fall.cos(), -fall.sin(), approach[2] * fall.cos()).normalize()
+            }
+            None => approach,
+        }
+    }
+
+    /// The shell a cast is made with: the first comparison ship's, preferring
+    /// one that can be simulated through armor.
+    ///
+    /// `None` with nothing in the comparison list, which is a real state: the
+    /// plates a ray crosses are still worth showing without a shell to send
+    /// through them.
+    fn cast_shell(&self) -> Option<(ShellParams, ImpactResult)> {
+        let ship = self.cast_ship.as_ref()?;
+        // Armour-piercing first: it is the shell a trajectory through plating
+        // says anything about. A ship carrying none still casts with what it
+        // has rather than refusing.
+        let shell = ship.shells.iter().find(|shell| shell.ammo_type == AmmoType::AP).or_else(|| ship.shells.first())?;
+        let params = ShellParams::from_shell_info(shell)?;
+        let impact = solve_for_range(&params, self.cast_range.to_meters())?;
+        Some((params, impact))
+    }
+
+    fn build_cast(&self, hits: Vec<trajectory::TrajectoryHit>, shell_dir: Vec3) -> trajectory::Trajectory {
+        let shell = self.cast_shell();
+        let parts = shell.as_ref().map(|(params, impact)| (params, impact));
+        trajectory::cast(hits, shell_dir, parts, self.model_extent(), self.continue_on_ricochet)
+    }
+
+    /// Re-runs every cast shell, for a change that alters where they end.
+    fn recast_trajectories(&mut self, cx: &mut Context<Self>) {
+        if self.trajectories.is_empty() {
+            cx.notify();
+            return;
+        }
+        let recast: Vec<trajectory::Trajectory> = std::mem::take(&mut self.trajectories)
+            .into_iter()
+            .map(|old| self.build_cast(old.hits, old.shell_dir))
+            .collect();
+        self.trajectories = recast;
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// How wide the ship is, which sets how long an incoming arc is drawn.
+    ///
+    /// A ship whose bounds are not known yet gets a default rather than a
+    /// zero-length arc.
+    fn model_extent(&self) -> f32 {
+        match self.model_bounds {
+            Some((min, max)) => (max[0] - min[0]).max(max[2] - min[2]),
+            None => DEFAULT_MODEL_EXTENT,
+        }
     }
 
     fn handle_mouse_up_out(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -1286,6 +1531,10 @@ impl ViewportView {
             let key = event.keystroke.key.as_str();
             if modifiers.secondary() && key == "s" {
                 self.set_display_popover_open(!self.display_popover_open, cx);
+                return;
+            }
+            if modifiers.secondary() && key == "t" {
+                self.set_trajectory_mode(!self.trajectory_mode, cx);
                 return;
             }
             if modifiers.secondary() && !modifiers.shift && key == "z" {
@@ -1792,6 +2041,17 @@ impl ViewportView {
                 waterline_dy: 0.0,
             };
             let (vertices, indices) = camera_rings::build_camera_rings(&request);
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            }
+        }
+
+        // Scaled to the camera so a marker stays readable as the view pulls
+        // back, which is why these are rebuilt with the rest of the overlays.
+        let scale = (self.viewport.camera.distance / CAST_SCALE_REFERENCE).clamp(0.15, 3.0);
+        for (index, cast) in self.trajectories.iter().enumerate() {
+            let color = TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()];
+            let (vertices, indices) = trajectory::build_mesh(cast, color, scale);
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
             }

@@ -315,6 +315,11 @@ impl ArmorViewerPane {
         let SelectEvent::Confirm(Some(param_index)) = event else { return };
         let BundleState::Ready(bundle) = &self.bundle else { return };
         self.pen.ship = resolve_ship_shells(bundle.assets.metadata(), param_index.as_ref());
+        // The checker and the trajectory cast ask about the same attacker, so
+        // choosing one here is what the viewport casts with too.
+        let chosen = self.pen.ship.clone();
+        let viewport = self.dock.read(cx).active_viewport().clone();
+        viewport.update(cx, |view, cx| view.set_cast_ship(chosen, cx));
         cx.notify();
     }
 
