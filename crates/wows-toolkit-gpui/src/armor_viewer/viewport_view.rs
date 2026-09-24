@@ -44,6 +44,7 @@ use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
 
+use super::camera_rings;
 use super::gaps;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
 use crate::armor_viewer::camo::build_active_camo;
@@ -79,6 +80,31 @@ use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
+
+/// The mode a ship opens on: its first, which is the one the game itself
+/// uses. `None` for a ship whose GameParams name none, where there is
+/// nothing to draw.
+fn first_camera_mode(armor: &LoadedShipArmor) -> Option<String> {
+    armor.camera_trajectories.first().map(|(name, _)| name.clone())
+}
+
+/// How the camera orbits are drawn.
+///
+/// `mode` is `None` until a ship names one, and is corrected whenever the
+/// loaded ship changes: a mode name belongs to a ship's own GameParams, so
+/// carrying one across ships would silently draw nothing.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct CameraRingSettings {
+    pub(crate) shown: bool,
+    pub(crate) mode: Option<String>,
+    /// Where between the field-of-view extremes the camera sits, 0 to 1.
+    pub(crate) fov: f32,
+    /// How far the camera is raised, -1 to 1.
+    pub(crate) height: f32,
+    pub(crate) zoom_path: bool,
+    pub(crate) zoom_path_at_fov: bool,
+    pub(crate) zoom_path_at_max_fov: bool,
+}
 
 /// Whether the armor's openings are marked, and how many were found.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -223,6 +249,10 @@ pub(crate) struct DisplaySettingsSliders {
     /// on screen rather than of the armor, so it is not written back with the
     /// display defaults.
     pub(crate) model_roll_deg: Entity<SliderState>,
+    /// Where between the field-of-view extremes the drawn camera orbits sit.
+    pub(crate) camera_fov: Entity<SliderState>,
+    /// How far those orbits are raised.
+    pub(crate) camera_height: Entity<SliderState>,
 }
 
 /// The display-settings popover's lighting sliders, same persistent-entity
@@ -466,6 +496,11 @@ pub struct ViewportView {
     /// toggling it here updates both the 3D geometry and which plate rows
     /// that popover's tree shows.
     pub(crate) display_settings: upload::DisplaySettings,
+    /// Which camera orbits are drawn over the ship, and how they are asked
+    /// for. `mode` names one of the loaded ship's own trajectories; it is
+    /// corrected to a mode the ship has whenever the armor changes, since a
+    /// mode is a per-ship name rather than a global one.
+    camera_rings: CameraRingSettings,
     /// Whether the openings in the armor are marked, and how many were
     /// found last time they were looked for. The count is what the toolbar
     /// reports, so it is kept rather than recomputed per frame.
@@ -543,6 +578,7 @@ impl ViewportView {
             pending_armor: None,
             ship_loading: None,
             current_armor: None,
+            camera_rings: CameraRingSettings::default(),
             show_gaps: false,
             gap_count: 0,
             show_hidden_only: false,
@@ -621,6 +657,9 @@ impl ViewportView {
         // turn, and further than that reads as a capsize rather than a
         // camera angle worth checking armor against.
         let model_roll_deg = Self::new_slider(cx, -ROLL_LIMIT_DEG, ROLL_LIMIT_DEG, 0.5, 0.0);
+        // The ranges the trajectory itself is resolved over.
+        let camera_fov = Self::new_slider(cx, 0.0, 1.0, 0.01, 0.0);
+        let camera_height = Self::new_slider(cx, -1.0, 1.0, 0.01, 0.0);
         let subs = vec![
             Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
@@ -629,8 +668,16 @@ impl ViewportView {
                 this.mutate_display_settings(cx, |d| d.armor_opacity = v)
             }),
             Self::subscribe_slider(cx, &model_roll_deg, |this, v, cx| this.set_model_roll_deg(v, cx)),
+            Self::subscribe_slider(cx, &camera_fov, |this, v, cx| {
+                let next = CameraRingSettings { fov: v, ..this.camera_rings.clone() };
+                this.set_camera_rings(next, cx);
+            }),
+            Self::subscribe_slider(cx, &camera_height, |this, v, cx| {
+                let next = CameraRingSettings { height: v, ..this.camera_rings.clone() };
+                this.set_camera_rings(next, cx);
+            }),
         ];
-        (DisplaySettingsSliders { waterline_opacity, armor_opacity, model_roll_deg }, subs)
+        (DisplaySettingsSliders { waterline_opacity, armor_opacity, model_roll_deg, camera_fov, camera_height }, subs)
     }
 
     /// Builds [`LightingSliders`] seeded from `lighting`, wired so a drag
@@ -832,6 +879,7 @@ impl ViewportView {
         self.selected_hull = None;
         self.hull_lod = load_ship::DEFAULT_LOD;
         self.selected_modules.clear();
+        self.camera_rings.mode = first_camera_mode(&armor);
         self.selected_camo = None;
         self.camo_generation = self.camo_generation.wrapping_add(1);
         self.camo_texture_cache.clear();
@@ -938,6 +986,30 @@ impl ViewportView {
             armor: self.part_visibility.values().all(|visible| *visible)
                 && !self.plate_visibility.values().any(|hidden| *hidden),
         }
+    }
+
+    /// How the camera orbits are being drawn, and which modes this ship
+    /// offers.
+    pub(crate) fn camera_rings(&self) -> CameraRingSettings {
+        self.camera_rings.clone()
+    }
+
+    /// The camera modes this ship's own GameParams name, in their own order.
+    pub(crate) fn camera_modes(&self) -> Vec<String> {
+        self.current_armor
+            .as_ref()
+            .map(|armor| armor.camera_trajectories.iter().map(|(name, _)| name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    /// Adopts a change made in the display popover's camera-rings section.
+    pub(crate) fn set_camera_rings(&mut self, settings: CameraRingSettings, cx: &mut Context<Self>) {
+        if self.camera_rings == settings {
+            return;
+        }
+        self.camera_rings = settings;
+        self.reupload_current_armor(cx);
+        cx.notify();
     }
 
     /// Whether the openings in the armor are marked, and how many there
@@ -1703,6 +1775,28 @@ impl ViewportView {
             &self.active_camo_textures,
             &self.active_camo_uvs,
         );
+        if self.camera_rings.shown
+            && let Some((_, trajectory)) =
+                armor.camera_trajectories.iter().find(|(name, _)| Some(name) == self.camera_rings.mode.as_ref())
+        {
+            let request = camera_rings::RingRequest {
+                trajectory,
+                fov: self.camera_rings.fov,
+                height: self.camera_rings.height,
+                zoom_path: self.camera_rings.zoom_path,
+                zoom_path_at_fov: self.camera_rings.zoom_path_at_fov,
+                zoom_path_at_max_fov: self.camera_rings.zoom_path_at_max_fov,
+                // The egui app's own armor carries a waterline offset that is
+                // always zero; the orbits sit at the height the trajectory
+                // states until a ship is found that says otherwise.
+                waterline_dy: 0.0,
+            };
+            let (vertices, indices) = camera_rings::build_camera_rings(&request);
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            }
+        }
+
         // Walked over the same triangles the armor pass just uploaded, so a
         // hidden plate's rim is not reported as a hole in the ship.
         self.gap_count = 0;
@@ -2089,6 +2183,10 @@ impl ViewportView {
         // would skip decode and apply a different scheme's textures.
         self.camo_texture_cache.clear();
         self.camo_generation = self.camo_generation.wrapping_add(1);
+        // A reload can change the hull, and with it which modes are named.
+        if !armor.camera_trajectories.iter().any(|(name, _)| Some(name) == self.camera_rings.mode.as_ref()) {
+            self.camera_rings.mode = first_camera_mode(&armor);
+        }
 
         visibility::retain_hull_visibility(&mut self.hull_visibility, &armor.hull_part_groups);
         visibility::retain_part_visibility(&mut self.part_visibility, &armor.zone_parts);

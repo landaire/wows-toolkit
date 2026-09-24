@@ -39,10 +39,11 @@
 
 pub mod analysis;
 pub mod assets;
+pub mod camera_rings;
 pub(crate) mod camo;
 pub mod catalog;
 pub mod dock;
-pub mod gaps;
+mod gaps;
 pub mod legend;
 mod load_ship;
 pub mod pane;

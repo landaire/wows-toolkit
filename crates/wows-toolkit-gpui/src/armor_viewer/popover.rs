@@ -53,6 +53,7 @@ use super::load_ship::ArmorZone;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
+use super::viewport_view::CameraRingSettings;
 use super::viewport_view::ViewportView;
 use super::visibility::SidebarHighlightKey;
 use super::visibility::TriState;
@@ -127,6 +128,134 @@ fn render_hidden_plates_button(view: &ViewportView, entity: &Entity<ViewportView
                 entity.update(cx, |view, cx| view.set_show_hidden_only(!showing, cx));
             }),
     )
+}
+
+/// The camera-rings section of the display popover: whether the orbits are
+/// drawn, which mode's, and where on them the camera sits.
+///
+/// Every control but the first is refused while the rings are off, and the
+/// whole section says so when the ship names no modes: a slider that moves
+/// nothing is worse than one that will not move.
+fn render_camera_rings_section(
+    entity: &Entity<ViewportView>,
+    rings: &CameraRingSettings,
+    modes: &[String],
+    fov_slider: &Entity<SliderState>,
+    height_slider: &Entity<SliderState>,
+) -> AnyElement {
+    let has_modes = !modes.is_empty();
+    let on = rings.shown && has_modes;
+
+    let mut section = v_flex()
+        .gap_1()
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.camera_rings").to_string()))
+        .child({
+            let entity = entity.clone();
+            let rings = rings.clone();
+            Checkbox::new("armor-camera-rings")
+                .label(t!("ui.armor.show_camera_rings").to_string())
+                .checked(rings.shown)
+                .disabled(!has_modes)
+                .on_click(move |checked, _window, cx| {
+                    let shown = *checked;
+                    let next = CameraRingSettings { shown, ..rings.clone() };
+                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                })
+        });
+
+    if !has_modes {
+        return section
+            .child(
+                div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.armor.no_ship_loaded").to_string()),
+            )
+            .into_any_element();
+    }
+
+    // One button per mode rather than a combo: a ship names two or three, and
+    // which one is showing is the thing being read.
+    section = section.child(h_flex().flex_wrap().gap_1().children(modes.iter().enumerate().map(|(ix, mode)| {
+        let chosen = rings.mode.as_ref() == Some(mode);
+        let entity = entity.clone();
+        let rings = rings.clone();
+        let mode = mode.clone();
+        crate::ui::selectable(
+            ("armor-camera-mode", ix),
+            chosen,
+            Button::new(("armor-camera-mode-button", ix))
+                .label(mode.clone())
+                .compact()
+                .selected(chosen)
+                .disabled(!on)
+                .on_click(move |_event, _window, cx: &mut App| {
+                    let next = CameraRingSettings { mode: Some(mode.clone()), ..rings.clone() };
+                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                }),
+        )
+    })));
+
+    section
+        .child(labeled_slider_row(t!("ui.armor.camera_fov").into_owned(), fov_slider, rings.fov, !on))
+        .child(labeled_slider_row(t!("ui.armor.camera_height").into_owned(), height_slider, rings.height, !on))
+        .child({
+            let entity = entity.clone();
+            let rings = rings.clone();
+            Checkbox::new("armor-camera-zoom-path")
+                .label(t!("ui.armor.show_camera_zoom_path").to_string())
+                .checked(rings.zoom_path)
+                .disabled(!on)
+                .on_click(move |checked, _window, cx| {
+                    let zoom_path = *checked;
+                    let next = CameraRingSettings { zoom_path, ..rings.clone() };
+                    entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+                })
+        })
+        .when(rings.zoom_path, |this| {
+            this.child(div().pl(px(20.)).child(h_flex().gap_4().flex_wrap().children([
+                zoom_path_checkbox(
+                    entity,
+                    "armor-camera-zoom-path-fov",
+                    t!("ui.armor.zoom_path_regular_fov").into_owned(),
+                    rings,
+                    rings.zoom_path_at_fov,
+                    on,
+                    |settings, value| settings.zoom_path_at_fov = value,
+                ),
+                zoom_path_checkbox(
+                    entity,
+                    "armor-camera-zoom-path-max",
+                    t!("ui.armor.zoom_path_max_fov").into_owned(),
+                    rings,
+                    rings.zoom_path_at_max_fov,
+                    on,
+                    |settings, value| settings.zoom_path_at_max_fov = value,
+                ),
+            ])))
+        })
+        .into_any_element()
+}
+
+/// One of the zoom path's two field-of-view checkboxes.
+fn zoom_path_checkbox(
+    entity: &Entity<ViewportView>,
+    id: &'static str,
+    label: String,
+    rings: &CameraRingSettings,
+    checked: bool,
+    enabled: bool,
+    apply: fn(&mut CameraRingSettings, bool),
+) -> AnyElement {
+    let entity = entity.clone();
+    let rings = rings.clone();
+    Checkbox::new(id)
+        .label(label)
+        .checked(checked)
+        .disabled(!enabled)
+        .on_click(move |checked, _window, cx| {
+            let mut next = rings.clone();
+            apply(&mut next, *checked);
+            entity.update(cx, |view, cx| view.set_camera_rings(next.clone(), cx));
+        })
+        .into_any_element()
 }
 
 /// Toolbar toggle for gap detection, which carries its own count: the
@@ -862,6 +991,11 @@ struct DisplayPopoverSnapshot {
     /// How far the hull is currently heeled over, for the readout beside its
     /// slider.
     roll_deg: f32,
+    camera_rings: CameraRingSettings,
+    /// The modes this ship's own GameParams name.
+    camera_modes: Vec<String>,
+    camera_fov_slider: Entity<SliderState>,
+    camera_height_slider: Entity<SliderState>,
     flat_slider: Entity<SliderState>,
     key_slider: Entity<SliderState>,
     azimuth_slider: Entity<SliderState>,
@@ -886,6 +1020,10 @@ fn render_display_popover_content(
             armor_slider: view.display_sliders.armor_opacity.clone(),
             roll_slider: view.display_sliders.model_roll_deg.clone(),
             roll_deg: view.model_roll_deg(),
+            camera_rings: view.camera_rings(),
+            camera_modes: view.camera_modes(),
+            camera_fov_slider: view.display_sliders.camera_fov.clone(),
+            camera_height_slider: view.display_sliders.camera_height.clone(),
             flat_slider: view.lighting_sliders.flat_intensity.clone(),
             key_slider: view.lighting_sliders.key_intensity.clone(),
             azimuth_slider: view.lighting_sliders.azimuth_deg.clone(),
@@ -898,6 +1036,10 @@ fn render_display_popover_content(
     let DisplayPopoverSnapshot {
         display,
         lighting,
+        camera_rings,
+        camera_modes,
+        camera_fov_slider,
+        camera_height_slider,
         waterline_slider,
         armor_slider,
         roll_slider,
@@ -989,6 +1131,14 @@ fn render_display_popover_content(
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.
         .child(labeled_slider_row(t!("ui.armor.roll").into_owned(), &roll_slider, roll_deg, false))
+        .child(div().h(px(1.)).bg(border))
+        .child(render_camera_rings_section(
+            entity,
+            &camera_rings,
+            &camera_modes,
+            &camera_fov_slider,
+            &camera_height_slider,
+        ))
         .child(div().h(px(1.)).bg(border))
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.lighting").to_string()))
         .child(
