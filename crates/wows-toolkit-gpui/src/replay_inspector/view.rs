@@ -50,6 +50,7 @@ use super::load::spawn_startup_preload;
 use super::panel::AutoExport;
 use super::panel::PanelSetup;
 use super::panel::ReplayPanel;
+use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
@@ -124,6 +125,9 @@ pub struct ReplayInspectorView {
     /// The playback viewports open, one per replay, for the same reason
     /// `open_panels` exists: a second ask brings the tab forward.
     open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
+    /// Held so a viewport's request for its own window still reaches this
+    /// view; a dropped subscription is a silent button.
+    renderer_events: Vec<Subscription>,
     /// The expected-values table every replay tab rates its players against,
     /// loaded once per session beside the Stats tab's copy (`App::
     /// apply_session_stats`). Held here rather than fetched per tab so a
@@ -229,6 +233,7 @@ impl ReplayInspectorView {
             open_panels: HashMap::new(),
             current_replay: None,
             open_renderers: HashMap::new(),
+            renderer_events: Vec::new(),
             personal_rating: None,
             debug_mode: false,
             replay_settings: ReplaySettings::default(),
@@ -563,10 +568,71 @@ impl ReplayInspectorView {
             .unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned())
             .into();
         let panel = cx.new(|cx| ReplayRendererPanel::new(path.clone(), title, game_data, window, cx));
+        self.renderer_events.push(cx.subscribe_in(&panel, window, Self::on_renderer_event));
         self.open_renderers.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
+        cx.notify();
+    }
+
+    /// Answers a viewport that asked for a window of its own.
+    fn on_renderer_event(
+        &mut self,
+        panel: &Entity<ReplayRendererPanel>,
+        event: &RendererEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let RendererEvent::PopOut = event;
+        self.pop_out_renderer(panel.clone(), window, cx);
+    }
+
+    /// Moves a viewport out of the dock and into a window of its own.
+    ///
+    /// The same entity is re-hosted rather than a new one built: the baked
+    /// track and the renderer it draws through come with it, so nothing is
+    /// walked or loaded twice. GPUI entities are not owned by a window, which
+    /// is what makes that possible.
+    pub(crate) fn pop_out_renderer(
+        &mut self,
+        panel: Entity<ReplayRendererPanel>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if panel.read(cx).is_popped_out() {
+            return;
+        }
+        let title = panel.read(cx).path().file_stem().map(|stem| stem.to_string_lossy().into_owned());
+
+        // Out of the dock first: the same entity drawn in two places would
+        // fight over the one renderer it rasterises through.
+        let id = PanelId::from(panel.entity_id());
+        self.dock_area.update(cx, |dock_area, cx| dock_area.remove_panel_id(id, window, cx));
+
+        let options = crate::window_shell::options(
+            wows_toolkit_config::WindowKind::ReplayRenderer,
+            title.clone().unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned()),
+        );
+        let opened = cx.open_window(options, {
+            let panel = panel.clone();
+            move |window, cx| {
+                let view: AnyView = panel.into();
+                cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
+            }
+        });
+
+        match opened {
+            Ok(_) => panel.update(cx, |panel, cx| panel.mark_popped_out(cx)),
+            Err(err) => {
+                // The window would not open, so the viewport goes back where
+                // it was rather than vanishing.
+                tracing::warn!("replay renderer: the window could not be opened: {err}");
+                self.dock_area.update(cx, |dock_area, cx| {
+                    dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+                });
+            }
+        }
         cx.notify();
     }
 

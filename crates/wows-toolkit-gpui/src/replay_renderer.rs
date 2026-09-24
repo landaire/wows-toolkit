@@ -40,6 +40,7 @@ use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
+use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::draw_command::DrawCommand;
@@ -92,6 +93,9 @@ impl Track {
 
 /// A replay played back on its own minimap.
 pub struct ReplayRendererPanel {
+    /// The replay being played, which is how a host keys its bookkeeping and
+    /// what titles a window this viewport is popped out into.
+    path: PathBuf,
     title: SharedString,
     state: State,
     /// The renderer the track is rasterised through, bound to the build and
@@ -121,6 +125,8 @@ pub struct ReplayRendererPanel {
     /// next one starts.
     export_failure: Option<String>,
     _export: Option<Task<()>>,
+    /// Whether this viewport has a window to itself rather than a dock tab.
+    popped_out: bool,
     focus_handle: FocusHandle,
 }
 
@@ -132,6 +138,16 @@ pub struct ExportProgress {
 }
 
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
+
+/// What the viewport asks of whoever is hosting it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RendererEvent {
+    /// Move this viewport into a window of its own. The dock cannot do that
+    /// itself: it does not own the window list.
+    PopOut,
+}
+
+impl EventEmitter<RendererEvent> for ReplayRendererPanel {}
 
 impl ReplayRendererPanel {
     /// Opens a viewport on `path` and starts baking it.
@@ -146,6 +162,7 @@ impl ReplayRendererPanel {
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
 
         let mut panel = Self {
+            path: path.clone(),
             title,
             state: State::Baking,
             renderer: None,
@@ -155,6 +172,7 @@ impl ReplayRendererPanel {
             export: None,
             export_failure: None,
             _export: None,
+            popped_out: false,
             speed: 1.0,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -178,6 +196,7 @@ impl ReplayRendererPanel {
         let seek = cx.new(|_| SliderState::new().min(0.).max(1.).default_value(0.));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         Self {
+            path: PathBuf::new(),
             title: SharedString::from("test"),
             state: State::Ready(Track {
                 frames: vec![Vec::new(); clocks.len()],
@@ -190,6 +209,7 @@ impl ReplayRendererPanel {
             export: None,
             export_failure: None,
             _export: None,
+            popped_out: false,
             speed: 1.0,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -216,6 +236,23 @@ impl ReplayRendererPanel {
                 cx.notify();
             });
         }));
+    }
+
+    /// The replay this viewport is playing.
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
+    /// Whether this viewport is in a window of its own, which is what hides
+    /// the control that would put it in one.
+    pub fn is_popped_out(&self) -> bool {
+        self.popped_out
+    }
+
+    /// Records that this viewport now has a window to itself.
+    pub fn mark_popped_out(&mut self, cx: &mut Context<Self>) {
+        self.popped_out = true;
+        cx.notify();
     }
 
     /// The number of frames in the baked track, or zero while it is baking.
@@ -580,6 +617,15 @@ impl Render for ReplayRendererPanel {
                     .tooltip(t!("ui.replay.renderer.export_video").into_owned())
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
             )
+            .when(!self.popped_out, |this| {
+                this.child(
+                    Button::new("replay-renderer-pop-out")
+                        .child(crate::icons::icon(crate::icons::ARROW_SQUARE_OUT))
+                        .compact()
+                        .tooltip(t!("ui.replay.renderer.pop_out").into_owned())
+                        .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(RendererEvent::PopOut))),
+                )
+            })
             .child(
                 Button::new("replay-renderer-clipboard")
                     .child(crate::icons::icon(crate::icons::CLIPBOARD))
@@ -727,9 +773,11 @@ fn encode_track(
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::AppContext;
     use gpui_kit::TestAppContext;
     use gpui_kit::px;
     use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt;
 
     use super::ReplayRendererPanel;
     use super::mmss;
@@ -744,6 +792,38 @@ mod tests {
         // A clock that has gone negative is a bug elsewhere, not a reason to
         // print a minus sign here.
         assert_eq!(mmss(-3.0), "0:00");
+    }
+
+    /// The control that moves this viewport into a window of its own is
+    /// offered while it is in the dock and withdrawn once it has one, so a
+    /// popped-out viewport cannot be popped out again.
+    #[gpui_kit::test]
+    fn the_pop_out_control_is_withdrawn_once_the_viewport_has_a_window(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-renderer-pop-out").is_some(), "a docked viewport offers it");
+        })
+        .expect("the window is open");
+
+        window
+            .update(cx, |panel, _window, cx| {
+                assert!(!panel.is_popped_out());
+                panel.mark_popped_out(cx);
+            })
+            .expect("the window is open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-renderer-pop-out").is_none(), "one with a window of its own does not");
+            // The transport is still there; only that one control went.
+            assert!(window.try_find("replay-renderer-play").is_some());
+        })
+        .expect("the window is open");
     }
 
     /// Playing advances through the track and stops at the end rather than
