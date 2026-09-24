@@ -602,6 +602,8 @@ defeat = "Defeat"
 draw = "Draw"
 
 [ui.replay.renderer]
+export_video = "Render to Video"
+export_path_unusable = "That location cannot be written to"
 baking = "Reading the replay and walking the battle..."
 failed = "This replay could not be played back"
 play = "Play"
