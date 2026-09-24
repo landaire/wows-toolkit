@@ -156,3 +156,24 @@ fn hsv_to_rgb(h: f32, s: f32, v: f32) -> [u8; 3] {
     };
     [((r1 + m) * 255.0) as u8, ((g1 + m) * 255.0) as u8, ((b1 + m) * 255.0) as u8]
 }
+
+/// Where a peer's pointer is, as the session last heard.
+///
+/// `pos` is `None` when that peer's pointer has left the view, which is not
+/// the same as it resting at the origin.
+#[derive(Debug, Clone)]
+pub struct UserCursor {
+    pub user_id: u64,
+    pub name: String,
+    pub color: [u8; 3],
+    pub pos: Option<[f32; 2]>,
+    pub last_update: web_time::Instant,
+}
+
+/// What the host has locked. Enforced by each receiver against the sender's
+/// role, so a peer that ignores this changes nothing for anyone else.
+#[derive(Debug, Clone, Default)]
+pub struct Permissions {
+    pub annotations_locked: bool,
+    pub settings_locked: bool,
+}

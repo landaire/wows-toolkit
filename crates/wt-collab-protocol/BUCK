@@ -15,6 +15,7 @@ workspace_library(
         "//third-party/rust:flate2",
         "//third-party/rust:iroh",
         "//third-party/rust:rkyv",
+        "//third-party/rust:web-time",
     ],
 )
 
@@ -37,5 +38,6 @@ workspace_test(
         "//third-party/rust:flate2",
         "//third-party/rust:iroh",
         "//third-party/rust:rkyv",
+        "//third-party/rust:web-time",
     ],
 )

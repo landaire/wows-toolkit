@@ -1,4 +1,4 @@
-pub use wt_collab_protocol::protocol::*;
+pub use wt_collab_client::protocol::*;
 /// Convert from the persisted settings format.
 pub fn collab_render_options_from_saved(s: &crate::data::settings::SavedRenderOptions) -> CollabRenderOptions {
     CollabRenderOptions {

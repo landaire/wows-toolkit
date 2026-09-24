@@ -13,6 +13,8 @@ data-encoding = { workspace = true }
 iroh = { workspace = true, default-features = false }
 wowsunpack = { workspace = true, features = ["rkyv"] }
 wows_minimap_renderer = { workspace = true, features = ["rkyv"] }
+# Instant that also works in the wasm client.
+web-time = { workspace = true }
 
 # Optional: egui conversion helpers
 egui = { version = "0.35", optional = true }

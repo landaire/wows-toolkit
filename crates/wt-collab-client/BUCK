@@ -1,0 +1,33 @@
+load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+
+WTCC_DEPS = [
+    "//crates/minimap-renderer:wows_minimap_renderer",
+    "//crates/wows-replays:wows_replays",
+    "//crates/wt-collab-protocol:wt_collab_protocol",
+    "//third-party/rust:data-encoding",
+    "//third-party/rust:iroh",
+    "//third-party/rust:parking_lot",
+    "//third-party/rust:rand",
+    "//third-party/rust:serde",
+    "//third-party/rust:serde_json",
+    "//third-party/rust:tokio",
+    "//third-party/rust:tracing",
+    "//third-party/rust:web-time",
+]
+
+workspace_library(
+    name = "wt_collab_client",
+    crate = "wt_collab_client",
+    package = "wt-collab-client",
+    version = "1.0.2-beta2",
+    deps = WTCC_DEPS,
+)
+
+workspace_test(
+    name = "wt_collab_client_test",
+    crate = "wt_collab_client",
+    crate_root = "src/lib.rs",
+    package = "wt-collab-client",
+    version = "1.0.2-beta2",
+    deps = WTCC_DEPS,
+)

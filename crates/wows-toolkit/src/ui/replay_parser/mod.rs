@@ -4789,7 +4789,10 @@ impl ToolkitTabViewer<'_> {
                                 viewer.shared_state().lock().collab_frame_rx = Some(frame_rx);
                                 self.tab_state.session_state.lock().register_viewport_sink(
                                     replay.replay_id,
-                                    crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                                    crate::collab::ViewportSink {
+                                        frame_tx: Some(frame_tx),
+                                        wake: Some(crate::collab::viewport_wake(ui.ctx(), viewport_id)),
+                                    },
                                 );
                             }
                         } else {
@@ -4820,7 +4823,10 @@ impl ToolkitTabViewer<'_> {
                                 state.collab_frame_rx = Some(frame_rx);
                                 self.tab_state.session_state.lock().register_viewport_sink(
                                     replay.replay_id,
-                                    crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                                    crate::collab::ViewportSink {
+                                        frame_tx: Some(frame_tx),
+                                        wake: Some(crate::collab::viewport_wake(ui.ctx(), viewport_id)),
+                                    },
                                 );
                             }
                             self.tab_state.replay_renderers.lock().push(viewer);

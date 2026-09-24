@@ -686,9 +686,10 @@ impl TacticsBoardViewer {
         // Register this viewport for targeted repaints from the peer task.
         if let Some(ref session_state) = self.collab_session_state {
             let mut s = session_state.lock();
-            s.viewport_sinks
-                .entry(self.board_id)
-                .or_insert_with(|| crate::collab::ViewportSink { frame_tx: None, viewport_id });
+            s.viewport_sinks.entry(self.board_id).or_insert_with(|| crate::collab::ViewportSink {
+                frame_tx: None,
+                wake: Some(crate::collab::viewport_wake(ctx, viewport_id)),
+            });
         }
 
         // Apply persisted window size if available.

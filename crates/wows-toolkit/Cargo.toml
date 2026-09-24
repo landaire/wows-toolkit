@@ -97,6 +97,7 @@ jiff = { workspace = true, features = ["serde"] }
 rootcause = { workspace = true }
 arboard = "3.6.1"
 iroh = { workspace = true, default-features = false, features = ["fast-apple-datapath", "portmapper"] }
+wt-collab-client = { workspace = true }
 wt-collab-protocol = { workspace = true, features = ["egui"] }
 wt-collab-egui = { workspace = true }
 wows-toolkit-config = { workspace = true }
