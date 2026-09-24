@@ -375,6 +375,10 @@ pub struct ViewportView {
     /// Reset (cleared) whenever a new ship loads -- a cached decode from a
     /// previous ship is meaningless for a different ship's `CamoTextureSource`.
     camo_texture_cache: HashMap<CamoSchemeId, SchemeTextures>,
+    /// Bumped by every camo selection and by every armor swap, so a decode
+    /// that lands after the reader moved on (or after the ship changed under
+    /// it) is dropped rather than applied to the wrong hull.
+    camo_generation: u64,
     /// The active camo's composited hull textures, keyed by mfm stem
     /// (`camo::build_active_camo`'s output). Empty when `selected_camo` is
     /// `None`. Lives here (not on `LoadedShipArmor`, an immutable `Arc`) and
@@ -518,6 +522,7 @@ impl ViewportView {
             reload_generation: 0,
             selected_camo: None,
             camo_texture_cache: HashMap::new(),
+            camo_generation: 0,
             active_camo_textures: HashMap::new(),
             active_camo_uvs: HashMap::new(),
             undo_stack: VisibilityUndoStack::default(),
@@ -783,6 +788,7 @@ impl ViewportView {
         self.hull_lod = load_ship::DEFAULT_LOD;
         self.selected_modules.clear();
         self.selected_camo = None;
+        self.camo_generation = self.camo_generation.wrapping_add(1);
         self.camo_texture_cache.clear();
         self.active_camo_textures.clear();
         self.active_camo_uvs.clear();
@@ -1662,29 +1668,56 @@ impl ViewportView {
     /// decode `id`'s textures (cache hit skips the decode), look up its
     /// `CamoSchemeInfo` for `uv_transforms`/`use_color_scheme`, composite them
     /// against `armor.hull_textures` via `camo::build_active_camo`, and store
-    /// the result as `active_camo_textures`/`active_camo_uvs`. A decode
+    /// the result as `active_camo_textures`/`active_camo_uvs`, off the UI
+    /// thread. A decode
     /// failure, or a selected id with no matching `camo_scheme_infos` entry,
     /// is logged via `tracing::warn!` and treated as stock (empty active-camo
     /// maps) rather than left half-applied. The decode/composite step itself
-    /// is [`recompute_active_camo`] -- also called by `apply_reload_result`
-    /// to re-apply the same `selected_camo` against a freshly reloaded
-    /// armor's hull textures (a hull/LOD/module reload).
+    /// is [`decode_active_camo`], run on a background thread here;
+    /// `apply_reload_result` runs it inline ([`recompute_active_camo`]) to
+    /// re-apply the same `selected_camo` against a freshly reloaded armor's
+    /// hull textures, because that pass is re-uploading the hull anyway and
+    /// deferring would show the ship stock first.
     pub(crate) fn select_camo(&mut self, id: Option<CamoSchemeId>, cx: &mut Context<Self>) {
         if self.selected_camo == id {
             return;
         }
         self.selected_camo = id;
-        match self.current_armor.clone() {
-            Some(armor) => {
-                let (t, u) = recompute_active_camo(self.selected_camo, &mut self.camo_texture_cache, &armor);
-                self.active_camo_textures = t;
-                self.active_camo_uvs = u;
-            }
-            None => {
-                self.active_camo_textures.clear();
-                self.active_camo_uvs.clear();
-            }
+        self.camo_generation = self.camo_generation.wrapping_add(1);
+
+        let Some((id, armor)) = id.zip(self.current_armor.clone()) else {
+            self.active_camo_textures.clear();
+            self.active_camo_uvs.clear();
+            self.reupload_hull();
+            cx.emit(ViewportEvent::SettingsChanged);
+            cx.notify();
+            return;
+        };
+
+        // Decoding a scheme reads and composites several full-size textures,
+        // which is far too much work to do between two frames; the hull keeps
+        // the camo it has until the new one lands.
+        let generation = self.camo_generation;
+        let cached = self.camo_texture_cache.get(&id).cloned();
+        cx.spawn(async move |this, cx| {
+            let decode = cx.background_spawn(async move { decode_active_camo(id, cached, &armor) }).await;
+            let _ = this.update(cx, |this, cx| this.apply_camo_decode(generation, id, decode, cx));
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Takes a finished camo decode, unless the selection moved on while it
+    /// ran.
+    fn apply_camo_decode(&mut self, generation: u64, id: CamoSchemeId, decode: CamoDecode, cx: &mut Context<Self>) {
+        if generation != self.camo_generation {
+            return;
         }
+        if let Some(textures) = decode.decoded {
+            self.camo_texture_cache.insert(id, textures);
+        }
+        self.active_camo_textures = decode.textures;
+        self.active_camo_uvs = decode.uvs;
         self.reupload_hull();
         cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();
@@ -1910,6 +1943,7 @@ impl ViewportView {
         // into the new `camo_scheme_infos` list -- a stale-keyed hit here
         // would skip decode and apply a different scheme's textures.
         self.camo_texture_cache.clear();
+        self.camo_generation = self.camo_generation.wrapping_add(1);
 
         visibility::retain_hull_visibility(&mut self.hull_visibility, &armor.hull_part_groups);
         visibility::retain_part_visibility(&mut self.part_visibility, &armor.zone_parts);
@@ -2298,41 +2332,68 @@ fn remap_camo_selection(
     new_infos.iter().find(|i| &i.display_name == name).map(|i| i.id)
 }
 
-/// Decodes and composites `selected_camo`'s textures (if any) against
-/// `armor`'s hull textures, returning the active-camo texture/UV maps for
-/// [`upload_hull::upload_hull_meshes`] (empty maps mean "render base albedo
-/// only", matching stock). A free function (not a `&mut Self` method) so it
-/// can run while a caller already holds a `&self.gpu` borrow (`ViewportView`
-/// methods use `let GpuState::Ready { ctx, pipeline } = &self.gpu else {
-/// return };` at the top of every re-upload path) without a whole-self
-/// mutable-borrow conflict; only `camo_texture_cache` needs `&mut`, passed in
-/// directly rather than through `&mut self`. A decode failure, or a selected
-/// id with no matching `camo_scheme_infos` entry, is logged via
-/// `tracing::warn!` and treated as stock rather than left half-applied.
-#[allow(clippy::type_complexity)]
+/// [`decode_active_camo`] against a cache, for callers already on the UI
+/// thread. A free function (not a `&mut Self` method) so it can run while a
+/// caller already holds a `&self.gpu` borrow (`ViewportView` methods use
+/// `let GpuState::Ready { ctx, pipeline } = &self.gpu else { return };` at
+/// the top of every re-upload path) without a whole-self mutable-borrow
+/// conflict; only `camo_texture_cache` needs `&mut`, passed in directly
+/// rather than through `&mut self`.
 fn recompute_active_camo(
     selected_camo: Option<CamoSchemeId>,
     camo_texture_cache: &mut HashMap<CamoSchemeId, SchemeTextures>,
     armor: &LoadedShipArmor,
-) -> (HashMap<String, (u32, u32, Vec<u8>)>, HashMap<String, UvTransform>) {
+) -> (CamoTextures, HashMap<String, UvTransform>) {
     let Some(id) = selected_camo else { return (HashMap::new(), HashMap::new()) };
-    let decoded = match camo_texture_cache.get(&id) {
-        Some(t) => Some(t.clone()),
+    let cached = camo_texture_cache.get(&id).cloned();
+    let decode = decode_active_camo(id, cached, armor);
+    if let Some(textures) = decode.decoded {
+        camo_texture_cache.insert(id, textures);
+    }
+    (decode.textures, decode.uvs)
+}
+
+/// Per-hull-part composited camo textures: width, height and RGBA bytes,
+/// keyed by hull part name as [`upload_hull::upload_hull_meshes`] expects.
+type CamoTextures = HashMap<String, (u32, u32, Vec<u8>)>;
+
+/// One scheme's decoded and composited textures.
+struct CamoDecode {
+    /// The scheme's own textures, when this run decoded them; a run that was
+    /// handed them from the cache leaves this `None`, since the caller
+    /// already holds them.
+    decoded: Option<SchemeTextures>,
+    /// Empty means "render base albedo only", which is what stock looks
+    /// like.
+    textures: CamoTextures,
+    uvs: HashMap<String, UvTransform>,
+}
+
+/// Decodes `id`'s textures (unless `cached` already holds them) and
+/// composites them against `armor`'s hull textures. A decode failure, or an
+/// id with no matching `camo_scheme_infos` entry, is logged via
+/// `tracing::warn!` and treated as stock rather than left half-applied.
+///
+/// Takes no `&mut` state, so it can run on a background thread
+/// ([`ViewportView::select_camo`]) as well as inline
+/// ([`recompute_active_camo`], which the reload path uses because it is
+/// already re-uploading the hull in the same pass).
+fn decode_active_camo(id: CamoSchemeId, cached: Option<SchemeTextures>, armor: &LoadedShipArmor) -> CamoDecode {
+    let (textures, decoded) = match cached {
+        Some(t) => (t, None),
         None => match armor.camo_source.decode(id) {
             Ok(t) => {
                 if t.is_empty() {
                     tracing::warn!("camo scheme {id:?} decoded to zero textures for this ship; rendering as stock");
                 }
-                camo_texture_cache.insert(id, t.clone());
-                Some(t)
+                (t.clone(), Some(t))
             }
             Err(e) => {
                 tracing::warn!("failed to decode camo scheme {id:?}: {e}");
-                None
+                return CamoDecode { decoded: None, textures: HashMap::new(), uvs: HashMap::new() };
             }
         },
     };
-    let Some(textures) = decoded else { return (HashMap::new(), HashMap::new()) };
     let info = armor.camo_scheme_infos.iter().find(|i| i.id == id);
     let (uv, use_color_scheme) = match info {
         Some(i) => (i.uv_transforms.clone(), i.use_color_scheme),
@@ -2343,7 +2404,8 @@ fn recompute_active_camo(
             (HashMap::default(), false)
         }
     };
-    build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures)
+    let (built, uvs) = build_active_camo(&textures, &uv, use_color_scheme, &armor.hull_textures);
+    CamoDecode { decoded, textures: built, uvs }
 }
 
 fn view_rect_from_bounds(b: Bounds<Pixels>) -> ViewRect {
