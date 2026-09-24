@@ -435,6 +435,9 @@ pub struct ViewportView {
     /// toggling it here updates both the 3D geometry and which plate rows
     /// that popover's tree shows.
     pub(crate) display_settings: upload::DisplaySettings,
+    /// Whether the display-settings popover is up. Held here rather than in
+    /// the popover's own element state because Ctrl+S opens and closes it.
+    display_popover_open: bool,
     /// The display-settings popover's waterline/armor opacity slider state.
     pub(crate) display_sliders: DisplaySettingsSliders,
     /// Kept alive so `display_sliders`' `SliderEvent::Change` subscriptions
@@ -499,6 +502,7 @@ impl ViewportView {
             pending_armor: None,
             ship_loading: None,
             current_armor: None,
+            display_popover_open: false,
             part_visibility: HashMap::new(),
             armor_all_visible: true,
             plate_visibility: HashMap::new(),
@@ -848,6 +852,22 @@ impl ViewportView {
     /// which names it.
     /// Whether a ship's armor is loaded, which is what the pane-level controls
     /// in the toolbar are gated on.
+    /// Whether the display-settings popover is up.
+    pub(crate) fn display_popover_open(&self) -> bool {
+        self.display_popover_open
+    }
+
+    /// Opens or closes the display-settings popover. Refused with no ship
+    /// loaded, matching the trigger button, which is disabled there.
+    pub(crate) fn set_display_popover_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        let open = open && self.current_armor.is_some();
+        if self.display_popover_open == open {
+            return;
+        }
+        self.display_popover_open = open;
+        cx.notify();
+    }
+
     pub(crate) fn has_armor(&self) -> bool {
         self.current_armor.is_some()
     }
@@ -1057,7 +1077,8 @@ impl ViewportView {
         }
     }
 
-    /// Ctrl/Cmd+Z (no shift) undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R redoes.
+    /// Ctrl/Cmd+S opens and closes the display-settings popover. Ctrl/Cmd+Z
+    /// (no shift) undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+R redoes.
     /// Otherwise WASD moves the camera target and arrows move it vertically /
     /// orbit the azimuth, tracking the key as held and (re)starting the
     /// ~60Hz movement ticker (`start_key_ticker`), which applies the
@@ -1071,6 +1092,10 @@ impl ViewportView {
         if !event.is_held {
             let modifiers = event.keystroke.modifiers;
             let key = event.keystroke.key.as_str();
+            if modifiers.secondary() && key == "s" {
+                self.set_display_popover_open(!self.display_popover_open, cx);
+                return;
+            }
             if modifiers.secondary() && !modifiers.shift && key == "z" {
                 self.undo_visibility(cx);
                 return;

@@ -202,7 +202,9 @@ kept so the next audit does not re-report them.
   carries a close button; closing the only one replaces it with a fresh
   empty pane, as the egui app does when its final dock tab is closed.
   Dragging a pane to re-dock it elsewhere is still egui-only.
-- Ctrl+S and Ctrl+T accelerators are missing.
+- [done] Ctrl+S opens and closes the display-settings popover, which
+  anchors to its toolbar button rather than to the pointer. Ctrl+T waits
+  on shell trajectory mode, which it toggles and which is not ported.
 
 ## Stats
 
