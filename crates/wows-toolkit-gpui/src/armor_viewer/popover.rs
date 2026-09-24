@@ -106,7 +106,7 @@ pub fn render_toolbar(
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
-            this.child(crate::ui::rule_v(cx)).child(render_penetration_button(pane, view.has_armor()))
+            this.child(crate::ui::rule_v(cx)).child(render_penetration_button(pane, cx))
         })
 }
 
@@ -424,26 +424,39 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
     )
 }
 
-/// Toolbar trigger for the penetration checker, which belongs to the pane
+/// Toolbar toggle for the penetration checker, which belongs to the pane
 /// rather than to this viewport: the egui app puts its own Pen Check button
 /// in this same row (`ui/armor.pen_check`).
-fn render_penetration_button(pane: Entity<ArmorViewerPane>, has_armor: bool) -> impl IntoElement + use<> {
-    let seed = pane.clone();
-    Popover::new("armor-analysis-popover")
-        .on_open_change(move |open, window, cx| {
-            if *open {
-                seed.update(cx, |pane, cx| pane.seed_penetration_plate(window, cx));
-            }
-        })
-        .trigger(
-            Button::new("armor-analysis-toggle")
-                .icon(IconName::Search)
-                .label(t!("ui.armor.pen.title").to_string())
-                .compact()
-                .disabled(!has_armor)
-                .tooltip(t!("ui.armor.pen.title_tooltip").to_string()),
-        )
-        .content(move |_state, _window, cx| analysis::render_panel(&pane, cx))
+///
+/// A toggle rather than a popover trigger. The verdicts are read against the
+/// plate the pointer is on, so the panel has to stay up while the pointer is
+/// on the hull; a popover closes on the first click and swallows the pointer
+/// moves that would move the plate.
+fn render_penetration_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl IntoElement + use<> {
+    let open = pane.read(cx).analysis_open();
+    let count = pane.read(cx).comparison_count();
+    let label = if count > 0 {
+        format!("{} ({})", t!("ui.armor.pen_check"), count)
+    } else {
+        t!("ui.armor.pen_check").into_owned()
+    };
+
+    crate::ui::selectable(
+        "armor-analysis",
+        open,
+        Button::new("armor-analysis-toggle")
+            .icon(IconName::Search)
+            .label(label)
+            .compact()
+            .selected(open)
+            // Not gated on a loaded hull, as the egui button is not: the
+            // list is of attackers, and it is worth building before a target
+            // is opened.
+            .tooltip(t!("ui.armor.pen_check_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                pane.update(cx, |pane, cx| pane.toggle_analysis(cx));
+            }),
+    )
 }
 
 /// Toolbar trigger for the export-confirm flow (Milestone 5 Task 10): opens

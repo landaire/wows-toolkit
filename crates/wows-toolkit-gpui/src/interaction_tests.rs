@@ -105,6 +105,17 @@ fn open_app(cx: &mut TestAppContext) -> WindowHandle<App> {
     cx.open_window(size(px(1200.), px(800.)), App::new)
 }
 
+/// The same, wide enough that a whole toolbar strip is in one frame.
+///
+/// The armor viewport's strip carries a dozen controls beside a sidebar; at
+/// the default width the last of them are off the edge, and the harness
+/// refuses to click what it cannot see.
+fn open_wide_app(cx: &mut TestAppContext) -> WindowHandle<App> {
+    use_a_temporary_storage_dir();
+    cx.update(gpui_kit::init);
+    cx.open_window(size(px(2200.), px(900.)), App::new)
+}
+
 /// The same, tall enough that a whole scrolling tab is in one frame.
 ///
 /// The harness refuses to click what is below the fold, so a test that drives
@@ -384,6 +395,39 @@ fn the_autoload_checkbox_reflects_the_loaded_setting(cx: &mut TestAppContext) {
         assert_eq!(window.find(AUTOLOAD).checked(), Some(false), "seeded from the settings snapshot");
         window.click(AUTOLOAD, cx);
         assert_eq!(window.find(AUTOLOAD).checked(), Some(true), "and it is still live after seeding");
+    })
+    .expect("the test window stays open");
+}
+
+/// The penetration checker is a panel, not a popover.
+///
+/// Its verdicts are read against the plate the pointer is on, so it has to
+/// survive clicking and hovering the ship. As a popover it closed on the
+/// first click on the hull and swallowed the pointer moves that would have
+/// moved the plate, which is what made it unusable.
+#[gpui_kit::test]
+fn the_penetration_panel_stays_up_while_the_ship_is_clicked(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+
+        assert!(window.try_find("armor-pen-search").is_none(), "the panel is down until it is asked for");
+
+        window.click("armor-analysis-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-pen-search").is_some(), "the toggle brings the panel up");
+
+        // Whatever else is clicked, the panel is still there: this is the
+        // whole interaction the popover made impossible.
+        window.click(SHIP_SEARCH, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-pen-search").is_some(), "a click elsewhere does not dismiss it");
+
+        window.click("armor-analysis-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-pen-search").is_none(), "the toggle puts it away again");
     })
     .expect("the test window stays open");
 }
