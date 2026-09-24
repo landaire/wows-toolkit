@@ -90,6 +90,7 @@ use super::sidebar::ShipSelected;
 use super::sidebar::Sidebar;
 use super::viewport_view::ViewportEvent;
 use super::viewport_view::ViewportView;
+use wowsunpack::game_params::types::Millimeters;
 
 /// The status strip above the split. Fixed, so what it says never moves the
 /// viewport.
@@ -163,6 +164,9 @@ pub struct ArmorViewerPane {
     sync_options: bool,
     /// The penetration checker's own state.
     pen: PenetrationState,
+    /// Whether the checker's panel is up beside the viewport. It stays up
+    /// while the pointer sweeps the hull, which is the whole interaction.
+    show_analysis: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -192,7 +196,9 @@ impl ArmorViewerPane {
         let dock_event_sub = cx.subscribe_in(&dock, window, Self::on_dock_event);
 
         let pen = PenetrationState::new(window, cx);
-        let pen_ship_sub = cx.subscribe_in(&pen.ship_select, window, Self::on_pen_ship_chosen);
+        let show_analysis = false;
+        let pen_search_sub =
+            cx.subscribe(&pen.search, |_pane, _state, _event: &gpui_kit::component::input::InputEvent, cx| cx.notify());
 
         let mut this = Self {
             sidebar,
@@ -207,8 +213,9 @@ impl ArmorViewerPane {
             mirror_cameras: false,
             sync_options: false,
             pen,
+            show_analysis,
             _subscriptions: vec![
-                pen_ship_sub,
+                pen_search_sub,
                 ship_selected_sub,
                 compare_split_sub,
                 export_requested_sub,
@@ -305,34 +312,72 @@ impl ArmorViewerPane {
     /// Resolves the ship the penetration checker's combo just picked into the
     /// shells it brings, which is a GameParams walk rather than something to
     /// redo per render.
-    fn on_pen_ship_chosen(
-        &mut self,
-        _state: &Entity<gpui_kit::component::select::SelectState<SearchableVec<super::analysis::ShipItem>>>,
-        event: &SelectEvent<SearchableVec<super::analysis::ShipItem>>,
-        _window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        let SelectEvent::Confirm(Some(param_index)) = event else { return };
+    /// Adds `param_index` to the ships being compared.
+    ///
+    /// The search field is cleared, as the egui panel clears it: the ship
+    /// asked for is now in the list below, and leaving the text would keep
+    /// offering it.
+    pub(crate) fn add_comparison_ship(&mut self, param_index: &str, window: &mut Window, cx: &mut Context<Self>) {
         let BundleState::Ready(bundle) = &self.bundle else { return };
-        self.pen.ship = resolve_ship_shells(bundle.assets.metadata(), param_index.as_ref());
-        // The checker and the trajectory cast ask about the same attacker, so
-        // choosing one here is what the viewport casts with too.
-        let chosen = self.pen.ship.clone();
-        let viewport = self.dock.read(cx).active_viewport().clone();
-        viewport.update(cx, |view, cx| view.set_cast_ship(chosen, cx));
+        let Some(ship) = resolve_ship_shells(bundle.assets.metadata(), param_index) else { return };
+        self.pen.add(ship);
+        self.pen.search.update(cx, |state, cx| state.set_value(String::new(), window, cx));
+        self.push_cast_ship(cx);
         cx.notify();
     }
 
-    /// Points the checker at the plate the pointer was last over, so opening
-    /// it right after a hover asks about that plate rather than the default.
-    pub(crate) fn seed_penetration_plate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some((zone, thickness_mm)) = self.dock.read(cx).active_viewport().read(cx).last_plate() else {
-            return;
-        };
-        self.pen.plate = Some(zone);
-        let value = format!("{thickness_mm:.0}");
-        self.pen.thickness.update(cx, |state, cx| state.set_value(value, window, cx));
+    pub(crate) fn remove_comparison_ship(&mut self, index: usize, cx: &mut Context<Self>) {
+        self.pen.remove(index);
+        self.push_cast_ship(cx);
         cx.notify();
+    }
+
+    pub(crate) fn clear_comparison_ships(&mut self, cx: &mut Context<Self>) {
+        self.pen.clear();
+        self.push_cast_ship(cx);
+        cx.notify();
+    }
+
+    /// Hands the viewport the ship a trajectory cast fires.
+    ///
+    /// The first of the compared ships, which is the one the egui viewer
+    /// casts the shared ray with; the rest contribute their own arcs there,
+    /// which this port does not draw yet.
+    fn push_cast_ship(&mut self, cx: &mut Context<Self>) {
+        let first = self.pen.ships.first().cloned();
+        let viewport = self.dock.read(cx).active_viewport().clone();
+        viewport.update(cx, |view, cx| view.set_cast_ship(first, cx));
+    }
+
+    /// Whether the checker's panel is up.
+    pub(crate) fn analysis_open(&self) -> bool {
+        self.show_analysis
+    }
+
+    /// How many ships are being compared, which the toolbar button carries.
+    pub(crate) fn comparison_count(&self) -> usize {
+        self.pen.ships.len()
+    }
+
+    pub(crate) fn toggle_analysis(&mut self, cx: &mut Context<Self>) {
+        self.show_analysis = !self.show_analysis;
+        cx.notify();
+    }
+
+    /// Reads the plate the pointer is on into the checker.
+    ///
+    /// Called as the pane draws rather than when a panel opens: the verdicts
+    /// are read against whatever the pointer is over, so they have to follow
+    /// it. Returns whether it moved, so a caller can redraw on it.
+    fn follow_pointer_plate(&mut self, cx: &mut Context<Self>) -> bool {
+        let found = self.dock.read(cx).active_viewport().read(cx).last_plate().map(|(zone, thickness_mm)| {
+            super::analysis::PlateUnderPointer { zone, thickness: Millimeters::from(thickness_mm) }
+        });
+        if found == self.pen.plate {
+            return false;
+        }
+        self.pen.plate = found;
+        true
     }
 
     /// Whether the armor legend is up. Read by the Display menu, which is
@@ -586,7 +631,7 @@ impl ArmorViewerPane {
     fn apply_bundle_result(
         &mut self,
         result: Result<ArmorAssetsBundle, ArmorAssetsError>,
-        window: &mut Window,
+        _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match result {
@@ -595,7 +640,7 @@ impl ArmorViewerPane {
                 self.sidebar.update(cx, |sidebar, cx| sidebar.set_bundle(Arc::clone(&bundle), cx));
                 // The attacker combo is filled the moment the catalog lands,
                 // not lazily in a render pass.
-                self.pen.set_catalog(&bundle.catalog, window, cx);
+                self.pen.set_catalog(&bundle.catalog);
                 self.bundle = BundleState::Ready(bundle);
             }
             Err(e) => {
@@ -893,6 +938,21 @@ struct UnportedDefaults {
 
 impl Render for ArmorViewerPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // The checker reads its verdicts against whatever the pointer is on,
+        // so the plate is taken here, every frame, rather than once when a
+        // panel opens.
+        if self.follow_pointer_plate(cx) && self.show_analysis {
+            cx.notify();
+        }
+
+        let analysis = self.show_analysis.then(|| {
+            resizable_panel()
+                .size(analysis::PANEL_WIDTH)
+                .size_range(analysis::PANEL_MIN_WIDTH..analysis::PANEL_MAX_WIDTH)
+                .flex_none()
+                .child(analysis::render_panel(self, &cx.entity(), cx))
+        });
+
         let content = v_flex().size_full().child(
             div().flex_1().min_h(px(0.)).child(
                 h_resizable("armor-viewer-split")
@@ -903,7 +963,10 @@ impl Render for ArmorViewerPane {
                             .flex_none()
                             .child(self.sidebar.clone()),
                     )
-                    .child(resizable_panel().child(self.dock.clone())),
+                    .child(resizable_panel().child(self.dock.clone()))
+                    // `child`, not `children`: the group tracks its panels,
+                    // and a plain `ParentElement` child is not one of them.
+                    .when_some(analysis, |group, panel| group.child(panel)),
             ),
         );
 

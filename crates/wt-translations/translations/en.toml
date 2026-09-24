@@ -1377,6 +1377,12 @@ rendering = "Rendering..."
 # -- Armor Viewer: penetration checker --
 
 [ui.armor.pen]
+search_hint = "Search ships to compare..."
+add_a_ship = "Search and add ships above to compare penetration"
+hover_a_plate = "Hover a plate on the ship to check it"
+awaiting_plate = "hover a plate"
+clear_all = "Clear all"
+remove = "Remove from comparison"
 title = "Penetration"
 title_tooltip = "Check what a ship's shells do to a plate"
 ship = "Ship firing"
