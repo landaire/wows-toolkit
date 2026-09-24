@@ -77,6 +77,13 @@ pub struct GpuiSettings {
     /// The repository commit the cache was last checked against. `None` until
     /// a check has run, which is what makes the first check a full one.
     pub game_data_repo_commit: Option<String>,
+    /// The name this app appears under to the peers in a session. Empty until
+    /// one is chosen, which is what refuses hosting and joining.
+    pub collab_display_name: String,
+    /// Whether the warning that hosting reveals an address is suppressed.
+    pub suppress_p2p_ip_warning: bool,
+    /// Whether windows a session opens are left for the reader to open.
+    pub disable_auto_open_session_windows: bool,
 }
 
 impl GpuiSettings {
@@ -119,6 +126,13 @@ impl GpuiSettings {
         let game_data_repo_commit =
             queries::get_setting::<Option<String>>(pool, keys::GAME_DATA_REPO_COMMIT).await.flatten();
 
+        let collab_display_name =
+            queries::get_setting::<String>(pool, keys::COLLAB_DISPLAY_NAME).await.unwrap_or_default();
+        let suppress_p2p_ip_warning =
+            queries::get_setting::<bool>(pool, keys::SUPPRESS_P2P_IP_WARNING).await.unwrap_or(false);
+        let disable_auto_open_session_windows =
+            queries::get_setting::<bool>(pool, keys::DISABLE_AUTO_OPEN_SESSION_WINDOWS).await.unwrap_or(false);
+
         Self {
             zoom,
             theme,
@@ -139,6 +153,9 @@ impl GpuiSettings {
             auto_dump_game_data,
             game_data_cache_dir,
             game_data_repo_commit,
+            collab_display_name,
+            suppress_p2p_ip_warning,
+            disable_auto_open_session_windows,
         }
     }
 }

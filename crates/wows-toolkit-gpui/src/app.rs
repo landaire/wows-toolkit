@@ -261,6 +261,9 @@ pub struct App {
     /// The game-data cache: what is there, what is stale, and what job is
     /// running against it.
     cache: game_data_cache::CacheState,
+    /// The name this app appears under to the peers in a session. Written
+    /// back to the row the Replay Inspector's own session popover reads.
+    collab_name_input: Entity<InputState>,
     /// Backing state for the settings tab's language combo.
     language_select: Entity<SelectState<SearchableVec<LanguageItem>>>,
     /// Whether the directory in the field is one an install could be in. The
@@ -285,6 +288,8 @@ impl App {
         let twitch_channel_input = cx
             .new(|cx| InputState::new(window, cx).placeholder(t!("ui.settings.twitch.monitored_channel").to_string()));
         let proxy_input = cx.new(|cx| InputState::new(window, cx).placeholder("http://host:port"));
+        let collab_name_input =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.collab.display_name_hint").to_string()));
         let cache_dir_input = cx.new(|cx| {
             let default = wows_toolkit_config::game_data_dump_base()
                 .map(|dir| dir.to_string_lossy().into_owned())
@@ -323,6 +328,7 @@ impl App {
         });
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
         let cache_dir_edited = cx.subscribe(&cache_dir_input, Self::on_cache_dir_edited);
+        let collab_name_edited = cx.subscribe(&collab_name_input, Self::on_collab_name_edited);
         // `Confirm(None)` is the cleared-selection case, which this combo
         // cannot produce: it always holds a language.
         let language_chosen = cx.subscribe_in(&language_select, window, |this, _state, event, window, cx| {
@@ -356,6 +362,7 @@ impl App {
             proxy_input,
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
+            collab_name_input,
             language_select,
             wows_dir_invalid: false,
             settings_scroll: ScrollHandle::new(),
@@ -365,6 +372,7 @@ impl App {
                 wows_dir_edited,
                 proxy_edited,
                 cache_dir_edited,
+                collab_name_edited,
                 search_event,
                 tracker_event,
                 language_chosen,
@@ -791,6 +799,9 @@ impl App {
         self.twitch_channel_input.update(cx, |state, cx| state.set_value(channel, window, cx));
         self.zoom_slider =
             cx.new(|_| SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.05).default_value(settings.zoom));
+        let collab_name = settings.collab_display_name.clone();
+        let collab_display_name = collab_name.clone();
+        self.collab_name_input.update(cx, |state, cx| state.set_value(collab_name, window, cx));
         let cache_dir = settings.game_data_cache_dir.clone();
         self.cache_dir_input.update(cx, |state, cx| state.set_value(cache_dir, window, cx));
         // Whatever is known about the cache belongs to the directory the old
@@ -803,7 +814,14 @@ impl App {
         let locale = settings.locale.clone();
         self.debug_mode = debug_mode;
         self.replay_inspector.update(cx, |view, cx| {
-            let settings = InspectorSettings { wows_dir, debug_mode, replay_settings, auto_load_latest_replay, locale };
+            let settings = InspectorSettings {
+                wows_dir,
+                debug_mode,
+                replay_settings,
+                auto_load_latest_replay,
+                locale,
+                collab_display_name,
+            };
             view.apply_settings(settings, window, cx)
         });
         // The tracker watches the same install for a battle in progress, and
@@ -1066,6 +1084,20 @@ impl App {
         settings.game_data_cache_dir = dir.clone();
         settings_store::save(keys::GAME_DATA_CACHE_DIR, &dir, cx);
         self.forget_cache_findings(cx);
+    }
+
+    /// Adopts a new session display name once the edit has settled.
+    fn on_collab_name_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let name = state.read(cx).value().trim().to_string();
+        let Some(settings) = self.settings_mut() else { return };
+        if settings.collab_display_name == name {
+            return;
+        }
+        settings.collab_display_name = name.clone();
+        settings_store::save(keys::COLLAB_DISPLAY_NAME, &name, cx);
     }
 
     /// Drops everything known about the cache, so the next draw asks again.
@@ -1507,6 +1539,9 @@ impl App {
                 replay_settings,
                 auto_load_latest_replay: auto_load,
                 locale,
+                // The name is not what changed here; the popover keeps the
+                // one it already has.
+                collab_display_name: String::new(),
             };
             view.apply_settings(settings, window, cx)
         });
@@ -1721,7 +1756,54 @@ impl App {
             ),
         );
 
+        // Read before the cache section, which takes `self` mutably.
+        let suppress_ip_warning = settings.suppress_p2p_ip_warning;
+        let disable_auto_open = settings.disable_auto_open_session_windows;
+
         let cache = self.render_cache_section(cx);
+
+        let session = settings_section(
+            crate::icons::USERS,
+            t!("ui.settings.session.heading").into_owned(),
+            t!("ui.settings.session.description").into_owned(),
+            border,
+            settings_form()
+                .child(
+                    field()
+                        .label(t!("ui.settings.session.display_name").to_string())
+                        .child(Input::new(&self.collab_name_input).id("session-display-name").small().w_full()),
+                )
+                .child(
+                    field().label(String::new()).child(
+                        Checkbox::new("session-suppress-ip-warning")
+                            .label(t!("ui.settings.session.suppress_ip_warning").to_string())
+                            .checked(suppress_ip_warning)
+                            .tooltip(t!("ui.settings.session.ip_warning_tooltip").to_string())
+                            .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
+                                let on = *checked;
+                                this.edit_setting(keys::SUPPRESS_P2P_IP_WARNING, cx, |settings| {
+                                    settings.suppress_p2p_ip_warning = on;
+                                    on
+                                });
+                            })),
+                    ),
+                )
+                .child(
+                    field().label(String::new()).child(
+                        Checkbox::new("session-disable-auto-open")
+                            .label(t!("ui.settings.session.disable_auto_open").to_string())
+                            .checked(disable_auto_open)
+                            .tooltip(t!("ui.settings.session.auto_open_tooltip").to_string())
+                            .on_click(cx.listener(move |this, checked: &bool, _window, cx| {
+                                let on = *checked;
+                                this.edit_setting(keys::DISABLE_AUTO_OPEN_SESSION_WINDOWS, cx, |settings| {
+                                    settings.disable_auto_open_session_windows = on;
+                                    on
+                                });
+                            })),
+                    ),
+                ),
+        );
 
         let replay_section = settings_section(
             crate::icons::TABLE,
@@ -1914,6 +1996,7 @@ impl App {
                     .child(application)
                     .child(game)
                     .child(cache)
+                    .child(session)
                     .child(replay_section)
                     .child(twitch)
                     .child(armor),

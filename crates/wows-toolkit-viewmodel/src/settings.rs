@@ -32,6 +32,12 @@ pub mod keys {
     pub const GAME_DATA_CACHE_DIR: &str = "game_data_cache_dir";
     /// The game-data repository commit the cache was last checked against.
     pub const GAME_DATA_REPO_COMMIT: &str = "game_data_repo_commit";
+    /// The name this app appears under to the peers in a session.
+    pub const COLLAB_DISPLAY_NAME: &str = "collab_display_name";
+    /// Whether the warning that a session reveals an address is suppressed.
+    pub const SUPPRESS_P2P_IP_WARNING: &str = "suppress_p2p_ip_warning";
+    /// Whether windows a session opens are left for the reader to open.
+    pub const DISABLE_AUTO_OPEN_SESSION_WINDOWS: &str = "disable_auto_open_session_windows";
 }
 
 /// A proxy setting as a URL a client can take.
