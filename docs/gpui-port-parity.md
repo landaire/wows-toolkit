@@ -126,7 +126,19 @@ kept so the next audit does not re-report them.
   the downloading and data-loading stages have no counts of their own.
 - [done] Enter on the highlighted row opens it. The kit tree's own Confirm
   only expands a folder, so the listing catches the key itself.
-- The collab session popover and the Tactics Board button.
+- [done] The collab session popover and the Tactics Board button. The
+  popover is on the Replay Inspector header, where the egui app puts it:
+  a display name, hosting, joining by token, the token itself (masked until
+  revealed, with copy and a web link), the roster with roles and
+  promote-to-co-host, the annotation and settings locks, reset client
+  overrides, and leave. It drives `wt-collab-client`, extracted from the egui
+  app for this, so a session hosted from either reads the same to a peer; the
+  session state carries a `SessionWaker` the front end supplies rather than an
+  egui context. The event inbox is drained on every header draw, because it is
+  unbounded. Not ported: the Tactics Board button, which opens a board this
+  app has no drawing surface for; the shared-windows list and the replay
+  viewports a host opens for peers, which need that same surface; and the web
+  asset bundle, so a browser joining a session this app hosts sees no map art.
 
 - [done] Re-opening an open replay did nothing; it now brings that tab
   forward.
