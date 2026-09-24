@@ -103,6 +103,11 @@ fn parent_of(path: &[usize]) -> NodePath {
     path.iter().copied().take(path.len().saturating_sub(1)).collect()
 }
 
+/// How many structural edits can be stepped back through. Deep enough to
+/// cover a session's worth of reshaping, bounded so a long one does not grow
+/// without limit.
+const UNDO_DEPTH: usize = 64;
+
 /// A column as the current frame lays it out.
 #[derive(Clone, Copy)]
 struct DrawnColumn {
@@ -309,6 +314,17 @@ pub struct SearchView {
     /// acts on. Cleared whenever the query is rewritten, since a path names
     /// a place in a tree that no longer exists.
     selection: Selection,
+    /// Queries a structural edit replaced, newest last.
+    ///
+    /// Only structural edits are recorded: typing in the bar has the text
+    /// field's own undo, and pushing every keystroke here would bury the
+    /// edits this stack exists for. Bounded, because a long session should
+    /// not grow it without limit.
+    undo: Vec<String>,
+    /// Queries undone, for redoing. Cleared by the next edit, since redoing
+    /// past one would restore a query that no longer follows from what is in
+    /// the bar.
+    redo: Vec<String>,
     /// The pill segment whose picker is open, and which part of it. `None`
     /// when none is.
     editing: Option<(NodePath, EditablePart)>,
@@ -393,6 +409,8 @@ impl SearchView {
             history: Vec::new(),
             history_walk: None,
             selection: Selection::default(),
+            undo: Vec::new(),
+            redo: Vec::new(),
             editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
@@ -477,10 +495,53 @@ impl SearchView {
         }
         select::canonicalise(&mut expr);
 
+        // Recorded before the rewrite lands, so undo restores what was there.
+        self.remember_for_undo(cx);
         // Every path the selection held named a place in the tree that has
         // just been rewritten.
         self.selection.clear();
         self.set_query_text(query_text::print_query(&expr), window, cx);
+    }
+
+    /// Puts the query as it stands on the undo stack.
+    fn remember_for_undo(&mut self, cx: &Context<Self>) {
+        let current = self.query_input.read(cx).value().to_string();
+        if self.undo.last() == Some(&current) {
+            return;
+        }
+        self.undo.push(current);
+        if self.undo.len() > UNDO_DEPTH {
+            self.undo.remove(0);
+        }
+        // A new edit is a new branch; what was undone no longer follows.
+        self.redo.clear();
+    }
+
+    /// Whether there is anything to step back to, and anything to step
+    /// forward to.
+    pub(crate) fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+
+    pub(crate) fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
+    }
+
+    /// Steps back to the query before the last structural edit.
+    pub(crate) fn undo_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(previous) = self.undo.pop() else { return };
+        self.redo.push(self.query_input.read(cx).value().to_string());
+        // The paths a selection holds name places in the tree being replaced.
+        self.selection.clear();
+        self.set_query_text(previous, window, cx);
+    }
+
+    /// Steps forward again to a query that was undone.
+    pub(crate) fn redo_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(next) = self.redo.pop() else { return };
+        self.undo.push(self.query_input.read(cx).value().to_string());
+        self.selection.clear();
+        self.set_query_text(next, window, cx);
     }
 
     /// Replaces the bar's text with `text` and runs it.
@@ -519,6 +580,20 @@ impl SearchView {
     /// dropdown open at all.
     fn on_bar_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let offered = self.offered_completions().len();
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.secondary() {
+            match event.keystroke.key.as_str() {
+                "z" if !modifiers.shift => {
+                    self.undo_edit(window, cx);
+                    return;
+                }
+                "y" | "z" => {
+                    self.redo_edit(window, cx);
+                    return;
+                }
+                _ => {}
+            }
+        }
         match event.keystroke.key.as_str() {
             "down" if self.completions_open => self.move_completion_cursor(1, offered, cx),
             "up" if self.completions_open => self.move_completion_cursor(-1, offered, cx),
@@ -1276,6 +1351,22 @@ impl Render for SearchView {
             .gap_2()
             .items_center()
             .child(Icon::new(IconName::Search))
+            .child(
+                Button::new("search-undo")
+                    .child(crate::icons::icon(crate::icons::ARROW_COUNTER_CLOCKWISE))
+                    .compact()
+                    .disabled(!self.can_undo())
+                    .tooltip(t!("ui.search.undo").to_string())
+                    .on_click(cx.listener(|this: &mut Self, _event, window, cx| this.undo_edit(window, cx))),
+            )
+            .child(
+                Button::new("search-redo")
+                    .child(crate::icons::icon(crate::icons::CLOCK_CLOCKWISE))
+                    .compact()
+                    .disabled(!self.can_redo())
+                    .tooltip(t!("ui.search.redo").to_string())
+                    .on_click(cx.listener(|this: &mut Self, _event, window, cx| this.redo_edit(window, cx))),
+            )
             .child(
                 div()
                     .flex_1()

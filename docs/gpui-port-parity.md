@@ -440,8 +440,14 @@ kept so the next audit does not re-report them.
 - [done] Up and Down walk the queries that were run, and walking back out
   restores the text the walk started from. The history is the `history` field
   the egui settings row already declares (and never filled).
-- No undo/redo in the bar. The port's bar is a text input rather than the
-  egui pill editor, so this is the input's own undo, not an AST stack.
+- [done] No undo/redo in the bar. Two controls beside the bar, and Ctrl+Z /
+  Ctrl+Shift+Z (Ctrl+Y too), step back and forward through structural edits:
+  group, ungroup, negate, delete and connector flips, which are the changes
+  the pill menu makes to the query tree. Typing is not recorded, because the
+  text field has its own undo and pushing every keystroke would bury the
+  edits this stack is for. The stack is bounded at 64, and a new edit clears
+  what was undone, since redoing past one would restore a query that no
+  longer follows from what is in the bar.
 - [done] No date picker for timestamp values. A caret on a date field
   opens a calendar under the bar in place of the value list, and the day
   taken replaces the half-typed value. Which fields take a date is
