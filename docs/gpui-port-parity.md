@@ -184,7 +184,12 @@ kept so the next audit does not re-report them.
 - Gap detection, "show hidden plates", the roll slider and the camera-rings
   section are absent.
 - [done] The legend reopens from the pane's own strip.
-- Camo selection decodes on the UI thread.
+- [done] Camo selection decodes on the UI thread. Picking a scheme now
+  decodes and composites it on a background thread and applies the result
+  when it lands, dropping it if the selection or the ship moved on
+  meanwhile; the hull keeps the camo it has until then. A hull, LOD or
+  module reload still re-applies the scheme inline, because that pass is
+  re-uploading the hull anyway.
 - [done] Display settings and the legend's placement, visibility and
   collapsed state are written back to the `armor_viewer_defaults` row the
   viewer already reads at startup. Export options are still session-only.
@@ -195,7 +200,10 @@ kept so the next audit does not re-report them.
   language (`catalog::translate_part`, the same `IDS_<NAME>` lookup the egui
   app's `translate_part` does). The raw key stays the identity, so a
   `PlateKey` is unchanged.
-- The gizmo-snap animation does not mirror to the other panes.
+- [done] The gizmo-snap animation does not mirror to the other panes. It
+  does: the snap ticker emits `CameraChanged` on every one of its frames,
+  so a mirrored pane follows the whole eased move rather than jumping to
+  the settled orientation.
 - [done] Panes split horizontally only, and the last pane cannot be
   closed. The common-settings menu now carries a "Stack panes" toggle
   that lays the comparison panes out one above the other, and every pane
