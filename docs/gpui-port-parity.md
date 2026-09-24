@@ -103,10 +103,27 @@ kept so the next audit does not re-report them.
     holds a path.
   - The tab-header Render button is there too, acting on the replay showing
     in the dock, or the one last opened when none is.
-  - Still absent: the annotation toolbar, which needs a drawing surface over
-    the playback that this port has no painter for. The panel commands
-    (stats, rosters) and position trails are outside `bake_options` and so
-    are not drawn.
+  - A gear on the transport carries the display toggles: every command class
+    the baked track holds can be switched off, filtered as a frame is
+    rasterised rather than at bake time, so a toggle costs one frame instead
+    of another walk of the battle. `should_draw_command` moved from
+    `wt-collab-egui` to `minimap-renderer`, beside the options and commands it
+    reads, so both apps hide the same things.
+  - A viewport can be popped out to a window of its own. The same entity is
+    re-hosted, so the baked track and the renderer come with it; it leaves the
+    dock first, because one entity drawn twice would fight over the one
+    renderer.
+  - Still absent, in rough order of what would be missed: zoom and pan; the
+    jump-to-start/end, plus-or-minus ten seconds and previous/next-event
+    buttons, and the keyboard shortcuts for them; the elapsed-rather-than-
+    absolute clock and the battle-start/end ticks on the seek bar; the event
+    timeline panel; codec, prefer-CPU and include-pre-battle on export; the
+    per-ship context menu (trail and range toggles, Show Realtime Armor); the
+    roster, consumable, build and team-advantage hover readouts; the
+    annotation toolbar and everything collab draws over the map (pings,
+    remote cursors, shared annotations). The stats panel, team rosters, ship
+    ranges and position trails are outside `bake_options`, so they are not in
+    the track and cannot be switched on without widening the bake.
 - [done] "Copy Replay" puts the replay files on the clipboard through
   `arboard`, so they paste into a file manager; "Copy Path" still copies the
   text. A group offers both.
