@@ -798,13 +798,15 @@ fn render_display_popover_content(
     cx: &mut Context<PopoverState>,
 ) -> AnyElement {
     let pane = entity.read(cx).pane();
-    let (display, lighting, waterline_slider, armor_slider, lighting_sliders) = {
+    let (display, lighting, waterline_slider, armor_slider, roll_slider, roll_deg, lighting_sliders) = {
         let view = entity.read(cx);
         (
             view.display_settings,
             view.lighting(),
             view.display_sliders.waterline_opacity.clone(),
             view.display_sliders.armor_opacity.clone(),
+            view.display_sliders.model_roll_deg.clone(),
+            view.model_roll_deg(),
             (
                 view.lighting_sliders.flat_intensity.clone(),
                 view.lighting_sliders.key_intensity.clone(),
@@ -894,6 +896,9 @@ fn render_display_popover_content(
             display.armor_opacity,
             false,
         ))
+        // Heeling the hull over is what says whether a belt is still a belt
+        // at the angle the ship is fighting at.
+        .child(labeled_slider_row(t!("ui.armor.roll").into_owned(), &roll_slider, roll_deg, false))
         .child(div().h(px(1.)).bg(border))
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.lighting").to_string()))
         .child(
