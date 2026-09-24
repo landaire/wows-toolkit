@@ -1268,8 +1268,12 @@ impl App {
                     .label(t!("ui.settings.wows.directory_hint").to_string())
                     // The tab strip already flags it; the field says it too,
                     // because that is where the path is read and corrected.
-                    .when(self.wows_dir_invalid, |field| {
-                        field.description(t!("ui.messages.wows_dir_invalid").into_owned())
+                    // The line is always there, empty while the path is good,
+                    // so saying so does not move the controls below it.
+                    .description(if self.wows_dir_invalid {
+                        t!("ui.messages.wows_dir_invalid").into_owned()
+                    } else {
+                        String::new()
                     })
                     .child(
                         h_flex()
@@ -1398,9 +1402,13 @@ impl App {
                 )
                 .child(
                     field()
-                        .when_some(self.twitch_paste.as_ref(), |this, outcome| match outcome {
-                            Ok(who) => this.description(t!("ui.settings.twitch.signed_in_as", who = who).into_owned()),
-                            Err(why) => this.description(why.clone()),
+                        // Always there, empty until a credential has been
+                        // pasted, so reporting one does not move the button
+                        // that pasted it.
+                        .description(match self.twitch_paste.as_ref() {
+                            Some(Ok(who)) => t!("ui.settings.twitch.signed_in_as", who = who).into_owned(),
+                            Some(Err(why)) => why.clone(),
+                            None => String::new(),
                         })
                         .child(
                             h_flex().child(

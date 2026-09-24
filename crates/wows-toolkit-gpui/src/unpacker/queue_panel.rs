@@ -165,6 +165,12 @@ impl Panel for QueuePanel {
     }
 }
 
+/// The bar's own height, held whether or not an extraction is running.
+const PROGRESS_SLOT_HEIGHT: gpui_kit::Pixels = gpui_kit::px(8.);
+
+/// One line for the file being written, held the same way.
+const WRITING_SLOT_HEIGHT: gpui_kit::Pixels = gpui_kit::px(16.);
+
 impl Render for QueuePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
@@ -250,11 +256,14 @@ impl Render for QueuePanel {
             .child(div().h(px(16.)).when_some(self.view.status.clone(), |this, status| {
                 this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
             }))
-            .when_some(self.view.progress, |this, (done, total)| {
+            // Both slots are always there, empty while nothing is being
+            // written, so an extraction starting does not push the queue down
+            // the panel.
+            .child(div().h(PROGRESS_SLOT_HEIGHT).when_some(self.view.progress, |this, (done, total)| {
                 let fraction = if total == 0 { 0.0 } else { (done as f32 / total as f32) * 100.0 };
                 this.child(Progress::new("unpacker-extract-progress").value(fraction))
-            })
-            .when_some(self.view.writing.clone(), |this, writing| {
+            }))
+            .child(div().h(WRITING_SLOT_HEIGHT).when_some(self.view.writing.clone(), |this, writing| {
                 this.child(
                     div()
                         .id("unpacker-extract-file")
@@ -265,7 +274,7 @@ impl Render for QueuePanel {
                         .whitespace_nowrap()
                         .child(writing),
                 )
-            });
+            }));
 
         v_flex()
             .id("unpacker-queue-panel")

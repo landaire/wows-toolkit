@@ -2180,6 +2180,7 @@ impl Render for PlayerTrackerView {
                             .menu_width(PERIOD_COMBO_WIDTH),
                     ),
                 )
+                .child(crate::ui::rule_v(cx))
                 .child(
                     h_flex().gap_1().items_center().flex_none().child(Icon::new(IconName::Search)).child(
                         div().w(FILTER_WIDTH).child(Input::new(&self.filter_input).id("tracker-filter").small()),
@@ -2192,7 +2193,7 @@ impl Render for PlayerTrackerView {
                 // battle in progress, which has no history to leave out.
                 .when(self.sub_tab != SubTab::CurrentMatch, |this| {
                     let show = self.show_division_mates;
-                    this.child(
+                    this.child(crate::ui::rule_v(cx)).child(
                         Checkbox::new("tracker-show-division-mates")
                             .label(t!("ui.player_tracker.show_division_mates").to_string())
                             .checked(show)
