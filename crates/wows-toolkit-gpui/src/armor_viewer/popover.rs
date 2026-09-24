@@ -101,6 +101,8 @@ pub fn render_toolbar(
         .child(render_hidden_plates_button(view, entity))
         .child(render_gaps_button(view, entity))
         .child(render_trajectory_button(view, entity))
+        .child(render_splash_button(view, entity))
+        .child(render_splash_boxes_button(view, entity))
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
@@ -360,6 +362,64 @@ fn render_trajectory_button(view: &ViewportView, entity: &Entity<ViewportView>) 
             .tooltip(t!("ui.armor.trajectory_tooltip").to_string())
             .on_click(move |_event, _window, cx: &mut App| {
                 entity.update(cx, |view, cx| view.set_trajectory_mode(!state.shown, cx));
+            }),
+    )
+}
+
+/// Toolbar toggle for splash mode, carrying how many zones the last burst
+/// reached: that number is the answer the mode exists to give.
+///
+/// Refused on a hull that ships no splash file, and on one where the chosen
+/// attacker carries nothing that bursts; the tooltip says which.
+fn render_splash_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let state = view.splash_state();
+    let entity = entity.clone();
+
+    let label = if state.shown {
+        format!("{} ({})", t!("ui.armor.splash_mode"), state.zones_reached)
+    } else {
+        t!("ui.armor.splash_mode").into_owned()
+    };
+    let tooltip = if state.has_data {
+        t!("ui.armor.splash_tooltip_mode").into_owned()
+    } else {
+        t!("ui.armor.splash_no_data").into_owned()
+    };
+
+    crate::ui::selectable(
+        "armor-splash",
+        state.shown,
+        Button::new("armor-splash-button")
+            .child(crate::icons::icon(crate::icons::BOMB))
+            .label(label)
+            .compact()
+            .selected(state.shown)
+            .disabled(!state.has_data)
+            .tooltip(tooltip)
+            .on_click(move |_event, _window, cx: &mut App| {
+                entity.update(cx, |view, cx| view.set_splash_mode(!state.shown, cx));
+            }),
+    )
+}
+
+/// Toolbar toggle for the splash-box outlines, which stand on their own: they
+/// are worth seeing while placing a burst and after it.
+fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
+    let state = view.splash_state();
+    let entity = entity.clone();
+
+    crate::ui::selectable(
+        "armor-splash-boxes",
+        state.boxes_shown,
+        Button::new("armor-splash-boxes-button")
+            .child(crate::icons::icon(crate::icons::CUBE))
+            .label(t!("ui.armor.splash_toggle").to_string())
+            .compact()
+            .selected(state.boxes_shown)
+            .disabled(!state.has_data)
+            .tooltip(t!("ui.armor.splash_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                entity.update(cx, |view, cx| view.set_show_splash_boxes(!state.boxes_shown, cx));
             }),
     )
 }

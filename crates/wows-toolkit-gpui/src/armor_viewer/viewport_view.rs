@@ -46,6 +46,7 @@ use wowsunpack::game_params::keys::ComponentType;
 
 use super::camera_rings;
 use super::gaps;
+use super::splash;
 use super::trajectory;
 use crate::armor_viewer::assets::ArmorAssetsBundle;
 use crate::armor_viewer::camo::build_active_camo;
@@ -138,6 +139,16 @@ const DEFAULT_CAST_RANGE: Km = Km::new(10.0);
 /// The colours cast shells are drawn in, in the order they were cast.
 const TRAJECTORY_PALETTE: [[f32; 4]; 4] =
     [[0.30, 0.75, 1.00, 1.0], [1.00, 0.65, 0.20, 1.0], [0.65, 1.00, 0.45, 1.0], [0.95, 0.45, 0.85, 1.0]];
+
+/// Whether clicks burst shells, and what the last burst reached.
+pub(crate) struct SplashState {
+    pub(crate) shown: bool,
+    pub(crate) boxes_shown: bool,
+    /// Whether this hull ships a splash file at all. The mode is refused
+    /// without one rather than placing a burst against nothing.
+    pub(crate) has_data: bool,
+    pub(crate) zones_reached: usize,
+}
 
 /// Whether clicks cast shells, and what has been cast so far.
 pub(crate) struct TrajectoryState {
@@ -555,6 +566,14 @@ pub struct ViewportView {
     /// The range the cast shell is fired from, which sets how steeply it
     /// falls. The egui viewer offers the same slider over the same span.
     cast_range: Km,
+    /// Whether a click bursts a shell instead of hiding the plate under it.
+    /// Mutually exclusive with trajectory mode: both want the click.
+    splash_mode: bool,
+    /// The burst on screen, and what it reached. `None` until one is placed.
+    splash_result: Option<splash::SplashResult>,
+    /// Whether the named boxes are outlined over the hull. Independent of the
+    /// mode: the outlines are worth seeing while placing a burst and after.
+    show_splash_boxes: bool,
     gap_count: usize,
     /// Whether the viewport is showing only the plates the game's own armor
     /// viewer hides. A mode rather than a setting: it is not written back
@@ -635,6 +654,9 @@ impl ViewportView {
             continue_on_ricochet: false,
             cast_ship: None,
             cast_range: DEFAULT_CAST_RANGE,
+            splash_mode: false,
+            splash_result: None,
+            show_splash_boxes: false,
             gap_count: 0,
             show_hidden_only: false,
             display_popover_open: false,
@@ -1124,13 +1146,100 @@ impl ViewportView {
     /// Turns trajectory casting on or off.
     ///
     /// Leaving the mode keeps what was cast: coming back to compare against
-    /// an earlier shell is the reason to leave it and return.
+    /// an earlier shell is the reason to leave it and return. Turning it on
+    /// leaves splash mode, since both want the click.
     pub(crate) fn set_trajectory_mode(&mut self, on: bool, cx: &mut Context<Self>) {
         if self.trajectory_mode == on {
             return;
         }
         self.trajectory_mode = on;
+        if on {
+            self.splash_mode = false;
+        }
         cx.notify();
+    }
+
+    /// Whether a click bursts a shell, whether this ship has boxes to burst
+    /// against, and what the last burst reached.
+    pub(crate) fn splash_state(&self) -> SplashState {
+        SplashState {
+            shown: self.splash_mode,
+            boxes_shown: self.show_splash_boxes,
+            has_data: self.current_armor.as_ref().is_some_and(|armor| armor.splash_data.is_some()),
+            zones_reached: self.splash_result.as_ref().map(|result| result.hit_zones.len()).unwrap_or(0),
+        }
+    }
+
+    /// Turns splash bursting on or off, leaving trajectory mode if it was on.
+    pub(crate) fn set_splash_mode(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.splash_mode == on {
+            return;
+        }
+        self.splash_mode = on;
+        if on {
+            self.trajectory_mode = false;
+        }
+        cx.notify();
+    }
+
+    /// Shows or hides the outlines of the ship's named splash boxes.
+    pub(crate) fn set_show_splash_boxes(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_splash_boxes == show {
+            return;
+        }
+        self.show_splash_boxes = show;
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// The zones the burst on screen reached, for the list beside it.
+    pub(crate) fn splash_zones(&self) -> &[splash::SplashZoneHit] {
+        self.splash_result.as_ref().map(|result| result.hit_zones.as_slice()).unwrap_or(&[])
+    }
+
+    /// Bursts a shell where the pointer is.
+    ///
+    /// The burst is sized by the largest high-explosive or semi-armour-piercing
+    /// shell the chosen attacker carries, which is the shell worth asking
+    /// about: an armour-piercing round that fails to penetrate does not burst
+    /// outside the hull. Clicking past the ship clears the burst.
+    fn burst_at(&mut self, pointer: Vec2, cx: &mut Context<Self>) {
+        let Some(bounds) = self.last_bounds else { return };
+        let rect = view_rect_from_bounds(bounds);
+        let Some(surface) = self.viewport.pick(pointer, rect) else {
+            self.splash_result = None;
+            self.reupload_current_armor(cx);
+            cx.notify();
+            return;
+        };
+
+        let Some(armor) = self.current_armor.clone() else { return };
+        let Some(data) = armor.splash_data.as_ref() else { return };
+
+        let point: [f32; 3] = surface.world_position.into();
+        let reach = self.burst_reach();
+        self.splash_result = Some(splash::compute_splash(point, reach, data, armor.hit_locations.as_ref()));
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// How far the chosen attacker's burst reaches.
+    ///
+    /// A ship with no bursting shell, or none chosen, still places a marker
+    /// at the smallest reach rather than none, so the click is not silently
+    /// ignored; the list beside it says no shell was found.
+    fn burst_reach(&self) -> splash::ModelUnit {
+        let largest = self.cast_ship.as_ref().and_then(|ship| {
+            ship.shells
+                .iter()
+                .filter(|shell| matches!(shell.ammo_type, AmmoType::HE | AmmoType::SAP))
+                .map(|shell| shell.caliber)
+                .max_by(|a, b| a.value().total_cmp(&b.value()))
+        });
+        match largest {
+            Some(caliber) => splash::splash_half_extent(caliber),
+            None => splash::ModelUnit::new(0.0),
+        }
     }
 
     /// Whether a ricocheting shell is followed past the bounce.
@@ -1378,6 +1487,8 @@ impl ViewportView {
                 // Shift adds a shell to those already cast, which is how two
                 // angles are compared; a plain click starts again.
                 self.cast_at(point_to_vec2(event.position), event.modifiers.shift, cx);
+            } else if self.splash_mode {
+                self.burst_at(point_to_vec2(event.position), cx);
             } else if let Some(key) = self.hovered.as_ref().map(|h| h.key.clone()) {
                 // A plain click on the model, outside the gizmo box, toggles
                 // the hovered plate's visibility, matching the egui app's
@@ -2052,6 +2163,24 @@ impl ViewportView {
         for (index, cast) in self.trajectories.iter().enumerate() {
             let color = TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()];
             let (vertices, indices) = trajectory::build_mesh(cast, color, scale);
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            }
+        }
+
+        if self.show_splash_boxes
+            && let Some(data) = armor.splash_data.as_ref()
+        {
+            let shapes: Vec<&wowsunpack::models::geometry::SplashBox> = data.boxes.iter().collect();
+            let (vertices, indices, _labels) = splash::build_splash_box_wireframes(&shapes);
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            }
+        }
+
+        if let Some(result) = self.splash_result.as_ref() {
+            let (vertices, indices) =
+                splash::build_splash_cube_mesh(result.impact_point, result.half_extent, splash::CUBE_COLOR);
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
             }

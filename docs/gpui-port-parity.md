@@ -225,7 +225,22 @@ kept so the next audit does not re-report them.
   dropped rather than guessed at. Not ported: the Trajectory tab's per-arc
   list, its per-arc range sliders and its isolate-plates/isolate-zones
   buttons, and the per-ship arcs a comparison list of more than one draws.
-- Splash/blast mode and the splash-box popover are absent.
+- [done] Splash/blast mode and the splash-box popover are absent. Splash mode
+  is on the pane's toolbar, carrying how many zones the last burst reached; a
+  click places a burst, sized from the largest high-explosive or
+  semi-armour-piercing shell the chosen attacker carries, and the zones it
+  reaches are read off the named boxes the hull ships with. The boxes
+  themselves have a toolbar toggle of their own, since they are worth seeing
+  while placing a burst and after. The boxes come from
+  `wowsunpack::models::geometry::parse_splash_file` and their zones from
+  GameParams' hit locations, which is what the egui viewer reads, so both
+  answer from the same data. A zone GameParams names no hit location for
+  reports an unknown thickness rather than a zero one, and a shell with no
+  published penetration figure reports no verdict rather than reading as one
+  that bounces off everything. Trajectory and splash mode each turn the other
+  off, since both want the click. Not ported: the per-box visibility popover
+  with its group tri-state checkboxes, the box name labels drawn over the
+  hull, and the per-triangle penetration shading inside the burst.
 - [done] The camera-rings section is absent. It is in the display popover:
   the orbits the game's camera rides are drawn over the ship, one mode at a
   time, with the field-of-view and height sliders the egui section offers and
