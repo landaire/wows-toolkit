@@ -138,9 +138,15 @@ kept so the next audit does not re-report them.
   `wows_toolkit_viewmodel::fire_chance`, so the two apps share both. The cache
   directory is the one the egui app already writes, so a build resolved by
   either is not re-parsed by the other.
-- The block's deeper expanders are not ported: the formula listing, the
-  battle/ribbon tallies, and copy-to-clipboard. Their text builders are still
-  in the egui crate.
+- [done] The block's deeper expanders are not ported: the formula listing,
+  the battle/ribbon tallies, and copy-to-clipboard. All three are here, and
+  their text builders moved to `wows_toolkit_viewmodel::fire_chance` with the
+  tests that cover them, so the two apps read the same rows. They stand open
+  rather than behind a second collapse, since the whole block is already
+  behind the row's own expansion. The port's formula still names a modifier's
+  source and a victim's ship by its raw identifier where the egui block
+  resolves both against the build: that lookup needs the metadata provider,
+  which the expanded renderer is not handed.
 - [done] Chat now copies its whole transcript and saves it to a file.
 - [done] A row's words are the preview popup's own caption, which goes up as
   soon as the row is hovered rather than waiting for a map.
