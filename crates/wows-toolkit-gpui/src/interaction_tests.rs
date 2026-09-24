@@ -810,6 +810,12 @@ fn a_query_that_does_not_parse_is_reported_rather_than_searched_for(cx: &mut Tes
 
         // The tab stays usable and keeps its query box rather than clearing.
         assert!(window.try_find(SEARCH_QUERY).is_some());
+
+        // And the objection is said above the results rather than in place
+        // of them.
+        window.render_frame(cx);
+        let reported = window.find("search-parse-error").label().unwrap_or_default().to_string();
+        assert!(reported.contains("did not parse"), "the error names itself, got {reported:?}");
     })
     .expect("the test window stays open");
 }
@@ -1151,7 +1157,7 @@ fn the_results_follow_a_typed_query_without_enter(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        let reported = window.find("search-status").label().unwrap_or_default().to_string();
+        let reported = window.find("search-parse-error").label().unwrap_or_default().to_string();
         assert!(
             reported.contains("did not parse"),
             "the bar ran the query as it was typed, and says what it made of it; got {reported:?}"
