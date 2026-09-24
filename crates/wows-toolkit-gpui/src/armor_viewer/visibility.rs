@@ -127,8 +127,10 @@ pub(crate) fn zone_all_on(
         if !part_on(part_visibility, &zone.name, &p.name) {
             return false;
         }
-        !visible_thicknesses(p, show_zero_mm)
-            .any(|t| plate_explicitly_hidden(plate_visibility, &(zone.name.clone(), p.name.clone(), t)))
+        !visible_thicknesses(p, show_zero_mm).any(|t| {
+            let key = PlateKey { zone: zone.name.clone(), material_name: p.name.clone(), thickness_tenths: t };
+            plate_explicitly_hidden(plate_visibility, &key)
+        })
     })
 }
 
@@ -147,8 +149,10 @@ pub(crate) fn part_any_plate_hidden(
     plate_visibility: &HashMap<PlateKey, bool>,
     show_zero_mm: bool,
 ) -> bool {
-    visible_thicknesses(part, show_zero_mm)
-        .any(|t| plate_explicitly_hidden(plate_visibility, &(zone.to_string(), part.name.clone(), t)))
+    visible_thicknesses(part, show_zero_mm).any(|t| {
+        let key = PlateKey { zone: zone.to_string(), material_name: part.name.clone(), thickness_tenths: t };
+        plate_explicitly_hidden(plate_visibility, &key)
+    })
 }
 
 /// Clears any `plate_visibility` override for `(zone, part, thickness)` for
@@ -164,7 +168,11 @@ pub(crate) fn clear_plate_overrides(
     thicknesses: &[i32],
 ) {
     for &t in thicknesses {
-        plate_visibility.remove(&(zone.to_string(), part.to_string(), t));
+        plate_visibility.remove(&PlateKey {
+            zone: zone.to_string(),
+            material_name: part.to_string(),
+            thickness_tenths: t,
+        });
     }
 }
 
@@ -229,10 +237,14 @@ pub(crate) fn retain_part_visibility(
 /// [`retain_part_visibility`]; matches the egui app's own `apply_upgrade_reload`
 /// plate retain (`tab.rs:2725-2729`), which likewise has no default-fill.
 pub(crate) fn retain_plate_visibility(plate_visibility: &mut HashMap<PlateKey, bool>, zone_part_plates: &[ArmorZone]) {
-    plate_visibility.retain(|(zone, part, thickness), _| {
-        zone_part_plates
-            .iter()
-            .any(|z| z.name == *zone && z.parts.iter().any(|p| p.name == *part && p.plates.contains(thickness)))
+    plate_visibility.retain(|key, _| {
+        zone_part_plates.iter().any(|zone| {
+            zone.name == key.zone
+                && zone
+                    .parts
+                    .iter()
+                    .any(|part| part.name == key.material_name && part.plates.contains(&key.thickness_tenths))
+        })
     });
 }
 
@@ -359,7 +371,10 @@ mod tests {
     fn zone_all_on_is_false_when_a_plate_is_explicitly_hidden() {
         let z = zone("Citadel", vec![("Cit_Belt", vec![320])]);
         let mut plate_visibility = HashMap::new();
-        plate_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 320), true);
+        plate_visibility.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 },
+            true,
+        );
         assert!(!zone_all_on(&z, &HashMap::new(), &plate_visibility, false));
         // The part itself is still on (no part-level override), so any_on stays true.
         assert!(zone_any_on(&z, &HashMap::new()));
@@ -378,7 +393,10 @@ mod tests {
     fn zone_all_on_ignores_zero_mm_plates_unless_shown() {
         let z = zone("Hull", vec![("Trans", vec![0])]);
         let mut plate_visibility = HashMap::new();
-        plate_visibility.insert(("Hull".to_string(), "Trans".to_string(), 0), true);
+        plate_visibility.insert(
+            PlateKey { zone: "Hull".to_string(), material_name: "Trans".to_string(), thickness_tenths: 0 },
+            true,
+        );
         // The only plate is 0mm and hidden by default, so it's excluded from
         // the "any plate hidden" check regardless of its own override.
         assert!(zone_all_on(&z, &HashMap::new(), &plate_visibility, false));
@@ -388,7 +406,10 @@ mod tests {
     fn part_any_plate_hidden_detects_one_hidden_layer() {
         let part = ZonePart { name: "Cit_Belt".to_string(), plates: vec![320, 200] };
         let mut plate_visibility = HashMap::new();
-        plate_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 200), true);
+        plate_visibility.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 200 },
+            true,
+        );
         assert!(part_any_plate_hidden("Citadel", &part, &plate_visibility, false));
     }
 
@@ -401,17 +422,31 @@ mod tests {
     #[test]
     fn clear_plate_overrides_leaves_thicknesses_outside_the_given_set_untouched() {
         let mut plate_visibility = HashMap::new();
-        plate_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 0), true);
-        plate_visibility.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 320), true);
+        plate_visibility.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 0 },
+            true,
+        );
+        plate_visibility.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 },
+            true,
+        );
 
         // Toggling the part's checkbox while `show_zero_mm` is off passes only
         // the filtered (non-zero) thickness set, matching `render_part_row`'s
         // `visible_plates`.
         clear_plate_overrides(&mut plate_visibility, "Citadel", "Cit_Belt", &[320]);
 
-        assert!(!plate_visibility.contains_key(&("Citadel".to_string(), "Cit_Belt".to_string(), 320)));
+        assert!(!plate_visibility.contains_key(&PlateKey {
+            zone: "Citadel".to_string(),
+            material_name: "Cit_Belt".to_string(),
+            thickness_tenths: 320
+        }));
         assert!(
-            plate_visibility.contains_key(&("Citadel".to_string(), "Cit_Belt".to_string(), 0)),
+            plate_visibility.contains_key(&PlateKey {
+                zone: "Citadel".to_string(),
+                material_name: "Cit_Belt".to_string(),
+                thickness_tenths: 0
+            }),
             "a 0mm override should survive a show_zero_mm-filtered toggle"
         );
     }
@@ -497,11 +532,28 @@ mod tests {
     #[test]
     fn retain_plate_visibility_drops_plates_no_longer_present_and_keeps_survivors() {
         let mut vis = HashMap::new();
-        vis.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 320), true);
-        vis.insert(("Citadel".to_string(), "Cit_Belt".to_string(), 999), true);
+        vis.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 },
+            true,
+        );
+        vis.insert(
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 999 },
+            true,
+        );
         let zone_part_plates = vec![zone("Citadel", vec![("Cit_Belt", vec![320])])];
         retain_plate_visibility(&mut vis, &zone_part_plates);
-        assert!(!vis.contains_key(&("Citadel".to_string(), "Cit_Belt".to_string(), 999)));
-        assert_eq!(vis.get(&("Citadel".to_string(), "Cit_Belt".to_string(), 320)), Some(&true));
+        assert!(!vis.contains_key(&PlateKey {
+            zone: "Citadel".to_string(),
+            material_name: "Cit_Belt".to_string(),
+            thickness_tenths: 999
+        }));
+        assert_eq!(
+            vis.get(&PlateKey {
+                zone: "Citadel".to_string(),
+                material_name: "Cit_Belt".to_string(),
+                thickness_tenths: 320
+            }),
+            Some(&true)
+        );
     }
 }

@@ -119,7 +119,11 @@ pub(crate) fn is_zero_mm(thickness_mm: f32) -> bool {
 /// to tenths of mm). Matches the egui app's own inline key derivation at
 /// every `plate_visibility` check site (`tab.rs:1180`, `2911`, `4025`, ...).
 pub(crate) fn derive_plate_key(info: &ArmorTriangleInfo) -> PlateKey {
-    (info.zone.clone(), info.material_name.clone(), (info.thickness_mm * 10.0).round() as i32)
+    PlateKey {
+        zone: info.zone.clone(),
+        material_name: info.material_name.clone(),
+        thickness_tenths: (info.thickness_mm * 10.0).round() as i32,
+    }
 }
 
 /// Whether triangle `info` should be included in an upload: not (effectively)
@@ -487,7 +491,10 @@ mod tests {
     #[test]
     fn derive_plate_key_rounds_thickness_to_tenths_of_a_mm() {
         let info = test_triangle_info("Citadel", "Cit_Belt", 32.04);
-        assert_eq!(derive_plate_key(&info), ("Citadel".to_string(), "Cit_Belt".to_string(), 320));
+        assert_eq!(
+            derive_plate_key(&info),
+            PlateKey { zone: "Citadel".to_string(), material_name: "Cit_Belt".to_string(), thickness_tenths: 320 }
+        );
     }
 
     fn no_overrides() -> (HashMap<(String, String), bool>, HashMap<PlateKey, bool>) {
@@ -525,7 +532,10 @@ mod tests {
         let info = test_triangle_info("Citadel", "Cit_Belt", 32.0);
         let (part, _) = no_overrides();
         let mut hidden = HashMap::new();
-        hidden.insert(("Bow".to_string(), "Bow_Bottom".to_string(), 16), true);
+        hidden.insert(
+            PlateKey { zone: "Bow".to_string(), material_name: "Bow_Bottom".to_string(), thickness_tenths: 16 },
+            true,
+        );
         assert!(plate_is_visible(&info, VisibilityFilter { part: &part, plate: &hidden }, false));
     }
 
@@ -657,8 +667,10 @@ mod tests {
         // Hiding one real plate and re-uploading (the click-to-hide path,
         // `picking_ui.rs`) should drop exactly that plate's triangles and
         // nothing else, without moving the camera.
-        let tooltip_key = |t: &ArmorTriangleTooltip| {
-            (t.zone.clone(), t.material_name.clone(), (t.thickness_mm * 10.0).round() as i32)
+        let tooltip_key = |t: &ArmorTriangleTooltip| PlateKey {
+            zone: t.zone.clone(),
+            material_name: t.material_name.clone(),
+            thickness_tenths: (t.thickness_mm * 10.0).round() as i32,
         };
         let hidden_key = mesh_triangle_info[0]
             .1
