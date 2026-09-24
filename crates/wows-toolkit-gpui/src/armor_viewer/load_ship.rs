@@ -144,8 +144,8 @@ pub struct LoadedShipArmor {
     /// Hull visual meshes. Loaded for Milestone 4; not displayed by `upload.rs` yet.
     pub hull_meshes: Vec<InteractiveHullMesh>,
     pub hull_part_groups: Vec<(String, Vec<String>)>,
-    /// Decoded hull textures: mfm_path -> (width, height, RGBA8 pixels).
-    pub hull_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    /// Decoded hull textures, keyed by `.mfm` path.
+    pub hull_textures: super::camo::TexturesByPart,
     pub hull_lod_count: usize,
     pub hull_lod: usize,
     /// Available hull upgrade names: Vec<(param_key, display_label)>, sorted alphabetically.
@@ -401,7 +401,7 @@ fn load_ship_armor(
         if let Ok(img) = image::load_from_memory(&png) {
             let rgba = img.to_rgba8();
             let (w, h) = (rgba.width(), rgba.height());
-            hull_textures.insert(mfm, (w, h, rgba.into_raw()));
+            hull_textures.insert(mfm, super::camo::RgbaTexture { width: w, height: h, pixels: rgba.into_raw() });
         }
     }
 
