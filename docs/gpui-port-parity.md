@@ -352,7 +352,14 @@ kept so the next audit does not re-report them.
 - [done] Period, both table sorts and the filter are kept in a settings row
   and read back on the first frame. The egui tracker keeps none of these, so
   the row is the port's own rather than one the two apps share.
-- The sub-tabs cannot be split or docked.
+- [done] The sub-tabs cannot be split or docked. The three sections are
+  dock panels now, so they can be split and dragged the way the egui
+  tracker's are, and the dock draws the tab bar over them. Each keeps
+  its own scroll, which is what lets two of them be useful at once; the
+  tab still owns the period, the filter, the division toggle and the
+  data, so the toolbar governs whichever sections are showing. The
+  division toggle is no longer hidden on the roster, whose own Seen
+  column follows it too.
 
 ## Search
 
