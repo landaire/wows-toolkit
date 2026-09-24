@@ -497,7 +497,19 @@ kept so the next audit does not re-report them.
   parse writes itself out under the replay's own name. A directory that
   is not there turns the writing off rather than failing once per
   battle, and is marked in the settings tab.
-- No way to build or rebuild the replay index.
+- No way to build or rebuild the replay index. The mapping is now shared:
+  `wows_toolkit_viewmodel::index_rows::map_rows` reads the
+  `NormalizedBattleReport` both apps build rather than the egui app's own
+  presentation rows, so the two index a replay identically and the damage
+  fallbacks a row stores are the ones a cell shows. The egui app was moved
+  onto it with its 1043 tests unchanged, and `NormalizedPlayer` gained
+  `survived`, which `time_lived_secs` could not express (it is absent both
+  for a player who lived and for one who never had a ship). What remains is
+  the port's own half: a pass over the replay directory that parses each
+  file, maps it and writes the rows through the shared
+  `upsert_*_with_mode`, with progress and a control to start it. `parse_replay`
+  does not currently hand back the normalized report, so that pass needs it
+  exposed.
 - [done] The language is chosen from a combo.
 - [done] The Twitch section has the "Get Token" link, and says what Twitch
   made of the stored credential.

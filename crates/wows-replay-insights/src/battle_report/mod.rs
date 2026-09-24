@@ -118,6 +118,10 @@ pub struct NormalizedPlayer {
     pub heal_count: Option<u32>,
     pub personal_rating: Option<PersonalRatingResult>,
     pub time_lived_secs: Option<u64>,
+    /// Whether this player's ship was still afloat at the end. `None` when
+    /// the player had no ship at all, which is not the same as surviving:
+    /// a spectator neither lived nor died.
+    pub survived: Option<bool>,
     /// The account hides its own statistics, which the client reports on the
     /// arena state.
     pub is_hidden_profile: bool,
@@ -743,6 +747,9 @@ fn build_player(
     );
 
     let time_lived_secs = vehicle.and_then(|v| v.death_info()).map(|death_info| death_info.time_lived().as_secs());
+    // Absent for a player who never had a ship; `time_lived_secs` cannot say
+    // that on its own, since it is also absent for one who survived.
+    let survived = vehicle.map(|v| v.death_info().is_none());
 
     let division_label = report.divisions().get(&state.entity_id()).copied().map(|div| format!("({div})"));
     let division_id = if state.division_id() > 0 { Some(state.division_id() as u32) } else { None };
@@ -790,6 +797,7 @@ fn build_player(
         heal_count,
         personal_rating: None,
         time_lived_secs,
+        survived,
         is_hidden_profile: state.is_hidden(),
         connection: connection_note(player),
     }
