@@ -34,6 +34,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use wowsunpack::game_params::types::HitLocation;
 
 use gpui_kit::App;
 use gpui_kit::AppContext;
@@ -174,6 +175,15 @@ pub struct LoadedShipArmor {
     pub camo_scheme_infos: Vec<CamoSchemeInfo>,
     /// Decodes a scheme's textures on demand when one is selected.
     pub camo_source: CamoTextureSource,
+    /// The splash boxes this hull ships with. `None` for a hull carrying no
+    /// splash file, which the splash mode reports rather than drawing an
+    /// empty burst over.
+    pub splash_data: Option<super::splash::ShipSplashData>,
+    /// The boxes grouped by the part they belong to, for the visibility list.
+    pub splash_box_groups: Vec<(String, Vec<String>)>,
+    /// The zones GameParams names for this ship, which is where a splash
+    /// zone's plating and health come from.
+    pub hit_locations: Option<HashMap<String, HitLocation>>,
 }
 
 impl LoadedShipArmor {
@@ -338,6 +348,11 @@ fn load_ship_armor(
 
     let meshes = ctx.interactive_armor_meshes().map_err(|e| ShipLoadError::ArmorMeshes(format!("{e:?}")))?;
 
+    let splash_data = super::splash::parse_ship_splash_data(ctx.hull_splash_bytes(), ctx.hit_locations());
+    let splash_box_groups =
+        splash_data.as_ref().map(|data| super::splash::build_splash_box_groups(&data.boxes)).unwrap_or_default();
+    let hit_locations = ctx.hit_locations().cloned();
+
     let mut min = [f32::MAX; 3];
     let mut max = [f32::MIN; 3];
     for mesh in &meshes {
@@ -456,6 +471,9 @@ fn load_ship_armor(
         camera_trajectories: options.camera_trajectories,
         camo_scheme_infos,
         camo_source,
+        splash_data,
+        splash_box_groups,
+        hit_locations,
     })
 }
 
