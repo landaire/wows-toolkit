@@ -617,15 +617,11 @@ pub enum PlaybackCommand {
 }
 
 /// A single frame's rendering data, shared from background to UI thread.
-#[derive(Debug)]
-pub struct PlaybackFrame {
-    pub replay_id: u64,
-    pub commands: Vec<DrawCommand>,
-    pub clock: GameClock,
-    pub frame_index: usize,
-    pub total_frames: usize,
-    pub game_duration: f32,
-}
+///
+/// Defined by `wt-collab-client`, which pushes frames to a session's
+/// viewports; re-exported here because this is where the app's own playback
+/// reads it.
+pub use wt_collab_client::PlaybackFrame;
 /// Probe the encoder status at most once per session and cache the result in
 /// egui memory. `check_encoder()` enumerates Vulkan devices and is too
 /// expensive to call every frame from the settings popover.

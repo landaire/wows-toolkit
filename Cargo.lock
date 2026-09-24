@@ -14800,6 +14800,7 @@ dependencies = [
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
+ "wt-collab-client",
  "wt-collab-egui",
  "wt-collab-protocol",
  "wt-translations",
@@ -14879,6 +14880,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "wt-collab-client"
+version = "1.0.2-beta2"
+dependencies = [
+ "data-encoding",
+ "iroh",
+ "parking_lot",
+ "rand 0.10.3",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "web-time",
+ "wows_minimap_renderer",
+ "wows_replays",
+ "wt-collab-protocol",
+]
+
+[[package]]
 name = "wt-collab-egui"
 version = "1.0.2-beta2"
 dependencies = [
@@ -14901,6 +14920,7 @@ dependencies = [
  "iroh",
  "rand 0.10.3",
  "rkyv",
+ "web-time",
  "wows_minimap_renderer",
  "wowsunpack",
 ]

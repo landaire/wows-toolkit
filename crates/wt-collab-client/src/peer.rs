@@ -24,23 +24,23 @@ use tracing::trace;
 use tracing::warn;
 use wows_minimap_renderer::DrawCommand;
 
-use crate::collab::ConnectedUser;
-use crate::collab::OpenReplay;
-use crate::collab::PeerRole;
-use crate::collab::Permissions;
-use crate::collab::SessionCommand;
-use crate::collab::SessionEvent;
-use crate::collab::SessionState;
-use crate::collab::SessionStatus;
-use crate::collab::UserCursor;
-use crate::collab::protocol;
-use crate::collab::protocol::*;
-use crate::collab::types::Annotation;
-use crate::collab::types::color_from_name;
-use crate::collab::validation::validate_annotation;
-use crate::collab::validation::validate_frame_commands_count;
-use crate::collab::validation::validate_peer_message;
-use crate::replay::renderer::PlaybackFrame;
+use crate::ConnectedUser;
+use crate::OpenReplay;
+use crate::PeerRole;
+use crate::Permissions;
+use crate::PlaybackFrame;
+use crate::SessionCommand;
+use crate::SessionEvent;
+use crate::SessionState;
+use crate::SessionStatus;
+use crate::UserCursor;
+use wt_collab_protocol::protocol;
+use wt_collab_protocol::protocol::*;
+use wt_collab_protocol::types::Annotation;
+use wt_collab_protocol::types::color_from_name;
+use wt_collab_protocol::validation::validate_annotation;
+use wt_collab_protocol::validation::validate_frame_commands_count;
+use wt_collab_protocol::validation::validate_peer_message;
 /// Whether to host or join a session.
 pub enum PeerMode {
     Host(HostParams),
@@ -141,7 +141,7 @@ pub enum LocalEvent {
 pub struct PeerSessionHandle {
     /// Receive session events. The inbox sender wakes the UI on send, so the UI
     /// does not need to poll for events.
-    pub event_inbox: egui_inbox::UiInbox<SessionEvent>,
+    pub event_inbox: crate::EventInbox,
     /// Send commands to the session.
     pub command_tx: mpsc::Sender<SessionCommand>,
     /// Send frames for broadcast (host/co-host only). `try_send` to avoid blocking.
@@ -161,13 +161,9 @@ pub fn start_peer_session(
     mode: PeerMode,
     state: Arc<Mutex<SessionState>>,
 ) -> PeerSessionHandle {
-    let mut event_inbox = egui_inbox::UiInbox::new();
-    // Bind the main window context now if the UI has registered it, so the peer
-    // task's first events (handshake status, errors) wake the UI immediately
-    // rather than waiting for the next idle tick to bind it on first read.
-    if let Some(ctx) = state.lock().egui_ctx.clone() {
-        event_inbox.set_ctx(&ctx);
-    }
+    // Bound now rather than on first read, so the task's first events
+    // (handshake status, errors) wake whatever is drawing immediately.
+    let event_inbox = crate::EventInbox::new(state.lock().waker.clone());
     let event_tx = event_inbox.sender();
     let (command_tx, command_rx) = mpsc::channel();
     let (frame_tx, frame_broadcast_rx) = mpsc::sync_channel(2);
@@ -240,7 +236,7 @@ impl MeshState {
 }
 async fn peer_task(
     mode: PeerMode,
-    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
+    event_tx: crate::EventSender,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     local_rx: mpsc::Receiver<LocalEvent>,
@@ -257,7 +253,7 @@ async fn peer_task(
 }
 async fn host_main(
     params: HostParams,
-    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
+    event_tx: crate::EventSender,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     local_rx: mpsc::Receiver<LocalEvent>,
@@ -275,7 +271,7 @@ async fn host_main(
         Err(e) => {
             let msg = format!("Failed to bind iroh endpoint: {e}");
             error!("{msg}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+            event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
@@ -326,7 +322,7 @@ async fn host_main(
             client_type: ClientType::Desktop { toolkit_version: params.toolkit_version.clone() },
         });
     }
-    let _ = event_tx.send(SessionEvent::Started);
+    event_tx.send(SessionEvent::Started);
     info!("Collab host session started");
 
     // Frame compression channel (broadcast to all peers).
@@ -481,7 +477,7 @@ async fn host_main(
                                 let mut s = ui_state.lock();
                                 if let Some(bid) = board_id {
                                     let board = s.tactics_boards.entry(bid).or_default();
-                                    board.annotation_sync = crate::collab::AnnotationSyncState {
+                                    board.annotation_sync = crate::AnnotationSyncState {
                                         annotations: annotations.clone(),
                                         owners: owners.clone(),
                                         ids: ids.clone(),
@@ -489,7 +485,7 @@ async fn host_main(
                                     board.annotation_sync_version += 1;
                                     s.tactics_boards_version += 1;
                                 } else {
-                                    s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                                    s.current_annotation_sync = Some(crate::AnnotationSyncState {
                                         annotations: annotations.clone(),
                                         owners: owners.clone(),
                                         ids: ids.clone(),
@@ -519,7 +515,7 @@ async fn host_main(
                                     u.role = PeerRole::CoHost;
                                 }
                             }
-                            let _ = event_tx.send(SessionEvent::PeerPromoted { user_id });
+                            event_tx.send(SessionEvent::PeerPromoted { user_id });
                         }
                         SessionCommand::BecomeFrameSource => {
                             let msg = PeerMessage::FrameSourceChanged { source_user_id: my_user_id };
@@ -528,7 +524,7 @@ async fn host_main(
                             { let mut s = ui_state.lock();
                                 s.frame_source_id = my_user_id;
                             }
-                            let _ = event_tx.send(SessionEvent::FrameSourceChanged { source_user_id: my_user_id });
+                            event_tx.send(SessionEvent::FrameSourceChanged { source_user_id: my_user_id });
                         }
                         SessionCommand::ReplayOpened { replay_id, replay_name, map_image_png, game_version, map_name, display_name } => {
                             // Store in session state (deduplicate by replay_id).
@@ -570,7 +566,7 @@ async fn host_main(
                             {
                                 let mut s = ui_state.lock();
                                 let board = s.tactics_boards.entry(board_id).or_default();
-                                board.cap_point_sync = crate::collab::CapPointSyncState {
+                                board.cap_point_sync = crate::CapPointSyncState {
                                     cap_points: cap_points.clone(),
                                 };
                                 board.cap_point_sync_version += 1;
@@ -706,7 +702,7 @@ async fn host_main(
                                 let owner = if owner_user_id == 0 { s.my_user_id } else { owner_user_id };
                                 let board = s.tactics_boards.entry(board_id).or_default();
                                 board.owner_user_id = owner;
-                                board.tactics_map = crate::collab::TacticsMapInfo {
+                                board.tactics_map = crate::TacticsMapInfo {
                                     map_name: map_name.clone(),
                                     display_name: display_name.clone(),
                                     map_id,
@@ -739,7 +735,7 @@ async fn host_main(
 
     // Cleanup.
     endpoint.close().await;
-    let _ = event_tx.send(SessionEvent::Ended);
+    event_tx.send(SessionEvent::Ended);
     ui_state.lock().clear_session_data();
     info!("Collab host session ended");
 }
@@ -755,7 +751,7 @@ async fn host_accept_peer(
     endpoint: &Endpoint,
     mesh: Arc<Mutex<MeshState>>,
     ui_state: Arc<Mutex<SessionState>>,
-    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
+    event_tx: crate::EventSender,
     peer_msg_tx: tokio::sync::mpsc::Sender<(u64, PeerMessage)>,
     mut frame_rx: tokio::sync::broadcast::Receiver<Arc<Vec<u8>>>,
     last_frame_bytes: Arc<Mutex<Option<Arc<Vec<u8>>>>>,
@@ -897,7 +893,7 @@ async fn host_accept_peer(
             last_update: Instant::now(),
         });
     }
-    let _ = event_tx.send(SessionEvent::UserJoined(user));
+    event_tx.send(SessionEvent::UserJoined(user));
     info!("Peer {user_id} ({client_name}) joined session");
 
     // Send setup data (asset bundle, permissions, render options, annotations,
@@ -1043,7 +1039,7 @@ async fn host_accept_peer(
         }
         let leave_msg = PeerMessage::UserLeft { user_id };
         broadcast_to_mesh(&mesh, &leave_msg);
-        let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: client_name, timed_out: false });
+        event_tx.send(SessionEvent::UserLeft { user_id, name: client_name, timed_out: false });
         return;
     }
 
@@ -1166,12 +1162,12 @@ async fn host_accept_peer(
     }
     let leave_msg = PeerMessage::UserLeft { user_id };
     broadcast_to_mesh(&mesh, &leave_msg);
-    let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: client_name.clone(), timed_out });
+    event_tx.send(SessionEvent::UserLeft { user_id, name: client_name.clone(), timed_out });
     info!("Peer {user_id} ({client_name}) left session");
 }
 async fn join_main(
     params: JoinParams,
-    event_tx: egui_inbox::UiInboxSender<SessionEvent>,
+    event_tx: crate::EventSender,
     command_rx: mpsc::Receiver<SessionCommand>,
     frame_broadcast_rx: mpsc::Receiver<FrameBroadcast>,
     local_rx: mpsc::Receiver<LocalEvent>,
@@ -1182,7 +1178,7 @@ async fn join_main(
         Ok(id) => id,
         Err(e) => {
             let msg = format!("Invalid session token: {e}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+            event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
@@ -1193,7 +1189,7 @@ async fn join_main(
         Ok(ep) => ep,
         Err(e) => {
             let msg = format!("Failed to bind iroh endpoint: {e}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+            event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
@@ -1215,13 +1211,13 @@ async fn join_main(
         Ok(Ok(c)) => c,
         Ok(Err(e)) => {
             let msg = format!("Failed to connect to host: {e}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+            event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
         Err(_) => {
             let msg = "Connection to host timed out".to_string();
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+            event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
@@ -1231,7 +1227,7 @@ async fn join_main(
         Ok(s) => s,
         Err(e) => {
             let msg = format!("Failed to open stream to host: {e}");
-            let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+            event_tx.send(SessionEvent::Error(msg.clone()));
             set_status(&ui_state, SessionStatus::Error(msg));
             return;
         }
@@ -1244,7 +1240,7 @@ async fn join_main(
     };
     if let Err(e) = write_peer_message(&mut send, &join_msg).await {
         let msg = format!("Failed to send Join: {e}");
-        let _ = event_tx.send(SessionEvent::Error(msg.clone()));
+        event_tx.send(SessionEvent::Error(msg.clone()));
         set_status(&ui_state, SessionStatus::Error(msg));
         return;
     }
@@ -1256,15 +1252,15 @@ async fn join_main(
         {
             Ok(Ok(Some(msg))) => msg,
             Ok(Ok(None)) => {
-                let _ = event_tx.send(SessionEvent::Error("Host closed connection".into()));
+                event_tx.send(SessionEvent::Error("Host closed connection".into()));
                 return;
             }
             Ok(Err(e)) => {
-                let _ = event_tx.send(SessionEvent::Error(format!("Read error: {e}")));
+                event_tx.send(SessionEvent::Error(format!("Read error: {e}")));
                 return;
             }
             Err(_) => {
-                let _ = event_tx.send(SessionEvent::Error("Handshake timed out".into()));
+                event_tx.send(SessionEvent::Error("Handshake timed out".into()));
                 return;
             }
         };
@@ -1272,13 +1268,13 @@ async fn join_main(
     let (my_user_id, my_name, my_color, host_user_id, host_name, host_color, frame_source_id, toolkit_version) =
         match &first_msg {
             PeerMessage::Rejected { reason } => {
-                let _ = event_tx.send(SessionEvent::Rejected(reason.clone()));
+                event_tx.send(SessionEvent::Rejected(reason.clone()));
                 set_status(&ui_state, SessionStatus::Error(format!("Rejected: {reason}")));
                 return;
             }
             PeerMessage::SessionInfo { toolkit_version, peers, assigned_identity, frame_source_id, open_replays } => {
                 if let Err(e) = validate_peer_message(&first_msg) {
-                    let _ = event_tx.send(SessionEvent::Error(format!("Invalid SessionInfo: {e}")));
+                    event_tx.send(SessionEvent::Error(format!("Invalid SessionInfo: {e}")));
                     return;
                 }
                 let open_replay_list: Vec<OpenReplay> = open_replays
@@ -1292,7 +1288,7 @@ async fn join_main(
                         display_name: r.display_name.clone(),
                     })
                     .collect();
-                let _ = event_tx.send(SessionEvent::SessionInfoReceived { open_replays: open_replay_list });
+                event_tx.send(SessionEvent::SessionInfoReceived { open_replays: open_replay_list });
                 // The host is peer[0] (if present).
                 let host_peer = peers.first();
                 let host_uid = host_peer.map(|p| p.user_id).unwrap_or(0);
@@ -1310,7 +1306,7 @@ async fn join_main(
                 )
             }
             _ => {
-                let _ = event_tx.send(SessionEvent::Error("Expected SessionInfo as first message".into()));
+                event_tx.send(SessionEvent::Error("Expected SessionInfo as first message".into()));
                 return;
             }
         };
@@ -1371,7 +1367,7 @@ async fn join_main(
             last_update: Instant::now(),
         });
     }
-    let _ = event_tx.send(SessionEvent::Started);
+    event_tx.send(SessionEvent::Started);
     info!("Joined collab session as peer {my_user_id}");
 
     // Frame compression task for when we become frame source (co-host).
@@ -1455,7 +1451,7 @@ async fn join_main(
             _ = heartbeat_interval.tick() => {
                 if last_received.elapsed() > std::time::Duration::from_secs(HEARTBEAT_TIMEOUT_SECS) {
                     warn!("Host heartbeat timeout");
-                    let _ = event_tx.send(SessionEvent::Error(
+                    event_tx.send(SessionEvent::Error(
                         format!("Connection to host lost (no response for {HEARTBEAT_TIMEOUT_SECS}s)")
                     ));
                     break;
@@ -1491,7 +1487,7 @@ async fn join_main(
                                 let mut s = ui_state.lock();
                                 if let Some(bid) = board_id {
                                     let board = s.tactics_boards.entry(bid).or_default();
-                                    board.annotation_sync = crate::collab::AnnotationSyncState {
+                                    board.annotation_sync = crate::AnnotationSyncState {
                                         annotations: annotations.clone(),
                                         owners: owners.clone(),
                                         ids: ids.clone(),
@@ -1499,7 +1495,7 @@ async fn join_main(
                                     board.annotation_sync_version += 1;
                                     s.tactics_boards_version += 1;
                                 } else {
-                                    s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                                    s.current_annotation_sync = Some(crate::AnnotationSyncState {
                                         annotations: annotations.clone(),
                                         owners: owners.clone(),
                                         ids: ids.clone(),
@@ -1529,7 +1525,7 @@ async fn join_main(
                             {
                                 let mut s = ui_state.lock();
                                 let board = s.tactics_boards.entry(board_id).or_default();
-                                board.cap_point_sync = crate::collab::CapPointSyncState {
+                                board.cap_point_sync = crate::CapPointSyncState {
                                     cap_points: cap_points.clone(),
                                 };
                                 board.cap_point_sync_version += 1;
@@ -1663,7 +1659,7 @@ async fn join_main(
                                 let owner = if owner_user_id == 0 { s.my_user_id } else { owner_user_id };
                                 let board = s.tactics_boards.entry(board_id).or_default();
                                 board.owner_user_id = owner;
-                                board.tactics_map = crate::collab::TacticsMapInfo {
+                                board.tactics_map = crate::TacticsMapInfo {
                                     map_name: map_name.clone(),
                                     display_name: display_name.clone(),
                                     map_id,
@@ -1700,7 +1696,7 @@ async fn join_main(
     }
 
     // Cleanup.
-    let _ = event_tx.send(SessionEvent::Ended);
+    event_tx.send(SessionEvent::Ended);
     ui_state.lock().clear_session_data();
     info!("Left collab session");
 }
@@ -1722,7 +1718,7 @@ fn handle_incoming_message(
     msg: PeerMessage,
     mesh: &Arc<Mutex<MeshState>>,
     ui_state: &Arc<Mutex<SessionState>>,
-    event_tx: &egui_inbox::UiInboxSender<SessionEvent>,
+    event_tx: &crate::EventSender,
 ) {
     let m = mesh.lock();
     let sender_is_authority = m.is_authority(sender_id);
@@ -1929,7 +1925,7 @@ fn handle_incoming_message(
         PeerMessage::Ping { pos, color, .. } => {
             {
                 let mut s = ui_state.lock();
-                s.pings.push(crate::collab::PeerPing { user_id: sender_id, color, pos, time: Instant::now() });
+                s.pings.push(crate::PeerPing { user_id: sender_id, color, pos, time: Instant::now() });
                 repaint_replay_viewports(&s);
             }
             // Relay with the real sender_id and their color.
@@ -1974,7 +1970,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 if let Some(bid) = board_id {
                     if let Some(board) = s.tactics_boards.get_mut(&bid) {
-                        board.annotation_sync = crate::collab::AnnotationSyncState {
+                        board.annotation_sync = crate::AnnotationSyncState {
                             annotations: annotations.clone(),
                             owners: owners.clone(),
                             ids: ids.clone(),
@@ -1985,7 +1981,7 @@ fn handle_incoming_message(
                     s.repaint_viewport(bid);
                 } else {
                     s.annotation_sync_version += 1;
-                    s.current_annotation_sync = Some(crate::collab::AnnotationSyncState {
+                    s.current_annotation_sync = Some(crate::AnnotationSyncState {
                         annotations: annotations.clone(),
                         owners: owners.clone(),
                         ids: ids.clone(),
@@ -2022,7 +2018,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.connected_users.push(user.clone());
             }
-            let _ = event_tx.send(SessionEvent::UserJoined(user));
+            event_tx.send(SessionEvent::UserJoined(user));
         }
 
         PeerMessage::UserLeft { user_id } => {
@@ -2039,7 +2035,7 @@ fn handle_incoming_message(
                 name
             };
             mesh.lock().peers.remove(&user_id);
-            let _ = event_tx.send(SessionEvent::UserLeft { user_id, name: left_name, timed_out: false });
+            event_tx.send(SessionEvent::UserLeft { user_id, name: left_name, timed_out: false });
         }
 
         // ── Co-host promotion (host only) ───────────────────────────────
@@ -2066,7 +2062,7 @@ fn handle_incoming_message(
                     u.role = PeerRole::CoHost;
                 }
             }
-            let _ = event_tx.send(SessionEvent::PeerPromoted { user_id });
+            event_tx.send(SessionEvent::PeerPromoted { user_id });
         }
 
         // ── Frame sourcing ──────────────────────────────────────────────
@@ -2080,7 +2076,7 @@ fn handle_incoming_message(
                 let mut s = ui_state.lock();
                 s.frame_source_id = source_user_id;
             }
-            let _ = event_tx.send(SessionEvent::FrameSourceChanged { source_user_id });
+            event_tx.send(SessionEvent::FrameSourceChanged { source_user_id });
             relay_if_host(sender_id, &PeerMessage::FrameSourceChanged { source_user_id }, mesh);
         }
 
@@ -2096,7 +2092,7 @@ fn handle_incoming_message(
             let frame = PlaybackFrame {
                 replay_id,
                 commands: commands.clone(),
-                clock: wowsunpack::game_types::GameClock(clock),
+                clock: wows_replays::types::GameClock(clock),
                 frame_index: frame_index as usize,
                 total_frames: total_frames as usize,
                 game_duration,
@@ -2140,7 +2136,7 @@ fn handle_incoming_message(
                     });
                 }
             }
-            let _ = event_tx.send(SessionEvent::ReplayOpened {
+            event_tx.send(SessionEvent::ReplayOpened {
                 replay_id,
                 replay_name,
                 map_image_png,
@@ -2161,7 +2157,7 @@ fn handle_incoming_message(
                 s.current_annotation_sync = None;
                 s.annotation_sync_version += 1;
             }
-            let _ = event_tx.send(SessionEvent::ReplayClosed { replay_id });
+            event_tx.send(SessionEvent::ReplayClosed { replay_id });
         }
 
         // ── Tactics board messages ────────────────────────────────────
@@ -2182,7 +2178,7 @@ fn handle_incoming_message(
                 }
                 let board = s.tactics_boards.entry(board_id).or_default();
                 board.owner_user_id = owner_user_id;
-                board.tactics_map = crate::collab::TacticsMapInfo {
+                board.tactics_map = crate::TacticsMapInfo {
                     map_name: map_name.clone(),
                     display_name: display_name.clone(),
                     map_id,
@@ -2273,7 +2269,7 @@ fn handle_incoming_message(
             {
                 let mut s = ui_state.lock();
                 if let Some(board) = s.tactics_boards.get_mut(&board_id) {
-                    board.cap_point_sync = crate::collab::CapPointSyncState { cap_points: cap_points.clone() };
+                    board.cap_point_sync = crate::CapPointSyncState { cap_points: cap_points.clone() };
                     board.cap_point_sync_version += 1;
                     s.tactics_boards_version += 1;
                     s.repaint_viewport(board_id);
@@ -2315,11 +2311,8 @@ fn handle_incoming_message(
         }
     }
 
-    // Wake the main window so it can process session events.
-    let s = ui_state.lock();
-    if let Some(ctx) = &s.egui_ctx {
-        ctx.request_repaint();
-    }
+    // Wake whatever is drawing so it picks the session events up.
+    ui_state.lock().wake();
 }
 /// Broadcast a peer message to all connected peers in the mesh.
 fn broadcast_to_mesh(mesh: &Arc<Mutex<MeshState>>, msg: &PeerMessage) {
@@ -2455,8 +2448,8 @@ mod tests {
     struct MessageTestHarness {
         mesh: Arc<Mutex<MeshState>>,
         ui_state: Arc<Mutex<SessionState>>,
-        event_inbox: egui_inbox::UiInbox<SessionEvent>,
-        event_tx: egui_inbox::UiInboxSender<SessionEvent>,
+        event_inbox: crate::EventInbox,
+        event_tx: crate::EventSender,
     }
 
     impl MessageTestHarness {
@@ -2472,7 +2465,7 @@ mod tests {
                 m
             }));
             let ui_state = Arc::new(Mutex::new(SessionState::default()));
-            let event_inbox = egui_inbox::UiInbox::new();
+            let event_inbox = crate::EventInbox::new(None);
             let event_tx = event_inbox.sender();
             Self { mesh, ui_state, event_inbox, event_tx }
         }
@@ -2492,13 +2485,9 @@ mod tests {
         /// and return the receiver.
         fn with_frame_channel(&self, replay_id: u64) -> mpsc::Receiver<PlaybackFrame> {
             let (tx, rx) = mpsc::sync_channel(1);
-            self.ui_state.lock().register_viewport_sink(
-                replay_id,
-                crate::collab::ViewportSink {
-                    frame_tx: Some(tx),
-                    viewport_id: egui::ViewportId::from_hash_of(replay_id),
-                },
-            );
+            self.ui_state
+                .lock()
+                .register_viewport_sink(replay_id, crate::ViewportSink { frame_tx: Some(tx), wake: None });
             rx
         }
 
@@ -2831,7 +2820,7 @@ mod tests {
         assert_eq!(s.role, PeerRole::CoHost);
 
         // Event should be emitted.
-        let event = h.event_inbox.read_without_ctx().next().unwrap();
+        let event = h.event_inbox.drain().into_iter().next().unwrap();
         match event {
             SessionEvent::PeerPromoted { user_id } => assert_eq!(user_id, 1),
             _ => panic!("Expected PeerPromoted event"),

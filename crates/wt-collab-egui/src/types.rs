@@ -409,22 +409,8 @@ pub struct MapPing {
     pub time: web_time::Instant,
 }
 
-/// Remote cursor position.
-#[derive(Debug, Clone)]
-pub struct UserCursor {
-    pub user_id: u64,
-    pub name: String,
-    pub color: [u8; 3],
-    pub pos: Option<[f32; 2]>,
-    pub last_update: web_time::Instant,
-}
-
-/// Permission flags controlled by the host/co-host.
-#[derive(Debug, Clone, Default)]
-pub struct Permissions {
-    pub annotations_locked: bool,
-    pub settings_locked: bool,
-}
+pub use wt_collab_protocol::types::Permissions;
+pub use wt_collab_protocol::types::UserCursor;
 
 /// Style parameters for the 10×10 minimap grid overlay.
 pub struct GridStyle {

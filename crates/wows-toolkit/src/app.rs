@@ -3050,11 +3050,11 @@ impl WowsToolkitApp {
             *self.tab_state.active_viewports.lock() = viewports;
         }
 
-        // Register main window context so the peer task can wake us.
+        // Register how the peer task wakes this window.
         {
             let mut s = self.tab_state.session_state.lock();
-            if s.egui_ctx.is_none() {
-                s.egui_ctx = Some(ctx.clone());
+            if s.waker.is_none() {
+                s.waker = Some(std::sync::Arc::new(crate::collab::EguiWaker(ctx.clone())));
             }
         }
         // Draw realtime armor viewer windows
@@ -3292,7 +3292,7 @@ impl WowsToolkitApp {
             self.tab_state.pending_host = false;
             self.do_host_session();
         }
-        self.poll_host_session_events(ctx);
+        self.poll_host_session_events();
         self.poll_client_session_events(ctx);
 
         // Pop open something to view the clicked file from the unpacker tab
@@ -4131,7 +4131,7 @@ impl WowsToolkitApp {
         }
     }
 
-    fn poll_host_session_events(&mut self, ctx: &egui::Context) {
+    fn poll_host_session_events(&mut self) {
         if self.tab_state.host_session.is_none() {
             return;
         }
@@ -4146,7 +4146,7 @@ impl WowsToolkitApp {
 
         // Drain queued session events; the inbox sender wakes the UI on send.
         let events: Vec<crate::collab::SessionEvent> = match self.tab_state.host_session {
-            Some(ref session) => session.event_inbox.read(ctx).collect(),
+            Some(ref session) => session.event_inbox.drain(),
             None => return,
         };
 
@@ -4241,7 +4241,7 @@ impl WowsToolkitApp {
     fn poll_client_session_events(&mut self, ctx: &egui::Context) {
         // Drain queued session events; the inbox sender wakes the UI on send.
         let events: Vec<crate::collab::SessionEvent> = match self.tab_state.client_session {
-            Some(ref session) => session.event_inbox.read(ctx).collect(),
+            Some(ref session) => session.event_inbox.drain(),
             None => return,
         };
 
@@ -4280,7 +4280,10 @@ impl WowsToolkitApp {
                             state.collab_frame_rx = Some(frame_rx);
                             self.tab_state.session_state.lock().register_viewport_sink(
                                 replay.replay_id,
-                                crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                                crate::collab::ViewportSink {
+                                    frame_tx: Some(frame_tx),
+                                    wake: Some(crate::collab::viewport_wake(ctx, viewport_id)),
+                                },
                             );
                         }
                         self.tab_state.replay_renderers.lock().push(viewer);
@@ -4356,7 +4359,10 @@ impl WowsToolkitApp {
                         state.collab_frame_rx = Some(frame_rx);
                         self.tab_state.session_state.lock().register_viewport_sink(
                             replay_id,
-                            crate::collab::ViewportSink { frame_tx: Some(frame_tx), viewport_id },
+                            crate::collab::ViewportSink {
+                                frame_tx: Some(frame_tx),
+                                wake: Some(crate::collab::viewport_wake(ctx, viewport_id)),
+                            },
                         );
                     }
                     self.tab_state.replay_renderers.lock().push(viewer);
