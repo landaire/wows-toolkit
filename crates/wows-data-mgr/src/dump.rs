@@ -89,6 +89,97 @@ pub fn dump_exists(output_base: &Path, version_str: &str, build: u32) -> bool {
     dump_dir(output_base, version_str, build).join("metadata.toml").exists()
 }
 
+/// What the cache under a dump base occupies, for the settings tab that
+/// reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CacheStats {
+    /// Real disk usage, counting each stored object once.
+    pub total_bytes: u64,
+    /// How many builds are cached.
+    pub version_count: usize,
+}
+
+/// The build directories under `output_base`, which are the directories
+/// holding a `metadata.toml`.
+///
+/// A directory that cannot be read yields no builds: an unreadable cache
+/// reports as empty rather than failing the settings tab that asks.
+fn cached_build_dirs(output_base: &Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(output_base) else { return Vec::new() };
+    entries.flatten().map(|entry| entry.path()).filter(|dir| dir.join("metadata.toml").exists()).collect()
+}
+
+/// Measure the cache under `output_base`.
+///
+/// `total_bytes` sums regular files and skips symlinks, so each object in
+/// `common/` counts once and the per-build trees pointing at it do not double
+/// it.
+pub fn cache_stats(output_base: &Path) -> CacheStats {
+    CacheStats { total_bytes: dir_size_real(output_base), version_count: cached_build_dirs(output_base).len() }
+}
+
+/// Sum regular-file sizes under `path`, skipping symlinks so symlinked
+/// content is neither followed nor counted twice.
+fn dir_size_real(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else { return 0 };
+    entries
+        .flatten()
+        .filter_map(|entry| {
+            let file_type = entry.file_type().ok()?;
+            if file_type.is_symlink() {
+                return None;
+            }
+            if file_type.is_file() {
+                // A file whose size cannot be read contributes nothing rather
+                // than aborting the walk: this figure is a report, not a
+                // decision.
+                Some(entry.metadata().map(|meta| meta.len()).unwrap_or(0))
+            } else if file_type.is_dir() {
+                Some(dir_size_real(&entry.path()))
+            } else {
+                None
+            }
+        })
+        .sum()
+}
+
+/// The build number [`dump_dir`] encoded in a directory name, which is the
+/// part after the final underscore.
+///
+/// `None` for a directory this function did not name. Ordering such a
+/// directory against a build number is guesswork, so callers leave it alone
+/// rather than rank it.
+fn build_number_of(dir: &Path) -> Option<u32> {
+    dir.file_name()?.to_str()?.rsplit_once('_')?.1.parse().ok()
+}
+
+/// Delete every cached build but the newest, and report how many went.
+///
+/// Newest is the highest build number, read from the directory name rather
+/// than taken from its sort order: names sort `0.10.0` before `0.9.0` and
+/// `_100` before `_99`, so ordering by name would keep an older build and
+/// delete the newest. A directory whose name carries no build number is left
+/// alone, since nothing places it in the order. The objects the deleted
+/// builds referenced stay in `common/` until a collection runs, because
+/// another build may share them.
+pub fn delete_old_versions(output_base: &Path) -> usize {
+    let mut versions: Vec<(u32, std::path::PathBuf)> =
+        cached_build_dirs(output_base).into_iter().filter_map(|dir| Some((build_number_of(&dir)?, dir))).collect();
+    if versions.len() <= 1 {
+        return 0;
+    }
+    versions.sort_by_key(|(build, _)| *build);
+    let doomed = versions.len() - 1;
+    let mut deleted = 0;
+    for (_, dir) in &versions[..doomed] {
+        match std::fs::remove_dir_all(dir) {
+            Ok(()) => deleted += 1,
+            Err(e) => tracing::warn!("Failed to delete old dump {}: {e}", dir.display()),
+        }
+    }
+    deleted
+}
+
 /// Dump game data with content-addressed deduplication.
 ///
 /// Every file (VFS content, translation catalogs, derived artifacts) is
@@ -1735,6 +1826,106 @@ fn count_map_files(vfs: &VfsPath, parent_dir: &str, filenames: &[&str]) -> u64 {
         }
     }
     count
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::*;
+
+    /// A cached build, named the way [`dump_dir`] names one, holding a file of
+    /// `bytes` bytes beside its metadata.
+    fn cached_build(base: &Path, version: &str, build: u32, bytes: usize) {
+        let dir = dump_dir(base, version, build);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("metadata.toml"), "").unwrap();
+        std::fs::write(dir.join("blob"), vec![0u8; bytes]).unwrap();
+    }
+
+    fn build_names(base: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(base)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_directory_without_metadata_is_not_a_cached_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        cached_build(base, "1.0.0", 100, 8);
+        // `common/` holds the stored objects and carries no metadata, so it
+        // must not read as a build.
+        std::fs::create_dir_all(base.join("common")).unwrap();
+        std::fs::write(base.join("common").join("object"), vec![0u8; 32]).unwrap();
+
+        let stats = cache_stats(base);
+
+        assert_eq!(stats.version_count, 1);
+        // Both the build's blob and the stored object count toward disk use.
+        assert_eq!(stats.total_bytes, 8 + 32);
+    }
+
+    #[test]
+    fn an_unreadable_base_measures_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+
+        let stats = cache_stats(&dir.path().join("was-never-created"));
+
+        assert_eq!(stats, CacheStats::default());
+    }
+
+    #[test]
+    fn pruning_keeps_the_highest_build_not_the_last_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        // Sorting these by name yields 1.0.0_100 before 1.0.0_99, so keeping
+        // the last name would keep build 99 and delete build 100.
+        cached_build(base, "1.0.0", 99, 1);
+        cached_build(base, "1.0.0", 100, 1);
+
+        assert_eq!(delete_old_versions(base), 1);
+        assert_eq!(build_names(base), vec!["1.0.0_100".to_string()]);
+    }
+
+    #[test]
+    fn pruning_orders_across_the_0_9_to_0_10_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        // `0.10.0` sorts before `0.9.0` by name although it is the newer
+        // game version; the build number is what settles it.
+        cached_build(base, "0.9.0", 1_000_000, 1);
+        cached_build(base, "0.10.0", 2_000_000, 1);
+
+        assert_eq!(delete_old_versions(base), 1);
+        assert_eq!(build_names(base), vec!["0.10.0_2000000".to_string()]);
+    }
+
+    #[test]
+    fn pruning_leaves_a_directory_that_carries_no_build_number() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        cached_build(base, "1.0.0", 100, 1);
+        cached_build(base, "1.0.0", 200, 1);
+        let foreign = base.join("handwritten");
+        std::fs::create_dir_all(&foreign).unwrap();
+        std::fs::write(foreign.join("metadata.toml"), "").unwrap();
+
+        assert_eq!(delete_old_versions(base), 1);
+        assert_eq!(build_names(base), vec!["1.0.0_200".to_string(), "handwritten".to_string()]);
+    }
+
+    #[test]
+    fn pruning_a_lone_build_deletes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path();
+        cached_build(base, "1.0.0", 100, 1);
+
+        assert_eq!(delete_old_versions(base), 0);
+        assert_eq!(build_names(base), vec!["1.0.0_100".to_string()]);
+    }
 }
 
 #[cfg(test)]

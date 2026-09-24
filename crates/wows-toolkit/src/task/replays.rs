@@ -348,25 +348,12 @@ pub fn load_wows_files(
     })
 }
 
-/// Returns the base directory for auto-dumped game data.
-/// Uses the custom path from settings if set, otherwise the default app data location.
-pub fn game_data_dump_base() -> Option<PathBuf> {
-    // Try to read the custom path from settings (requires db to be loaded).
-    // This is called from background threads that may not have access to TabState,
-    // so we also accept it as a parameter in the dump trigger path.
-    crate::storage_dir().map(|d| d.join("game_data"))
-}
+/// Where auto-dumped game data is cached by default.
+pub use wows_toolkit_config::game_data_dump_base;
 
-/// Returns the base directory for auto-dumped game data, preferring a custom path if set.
-pub fn game_data_dump_base_with_override(custom_dir: &str) -> Option<PathBuf> {
-    if !custom_dir.is_empty() {
-        let p = PathBuf::from(custom_dir);
-        if p.is_absolute() {
-            return Some(p);
-        }
-    }
-    game_data_dump_base()
-}
+/// Where auto-dumped game data is cached, preferring the reader's own
+/// directory. Shared with the GPUI port so both resolve the same cache.
+pub use wows_toolkit_config::game_data_dump_base_with_override;
 
 /// Load game data from a previously dumped directory.
 /// Used as a fallback when the live game install no longer has the build.
