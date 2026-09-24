@@ -67,8 +67,15 @@ const BAKE_INTERVAL: f32 = 0.5;
 /// multiplier. One frame of game time per tick at 1x.
 const TICK: Duration = Duration::from_millis(500);
 
-/// The speeds the transport offers, as the egui renderer's own do.
-const SPEEDS: [f32; 5] = [0.5, 1.0, 2.0, 4.0, 8.0];
+/// The speeds the transport offers, which are the egui renderer's own
+/// (`PLAYBACK_SPEEDS`). A battle runs twenty minutes, so the useful range is
+/// well above real time.
+const SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
+
+/// The speed a viewport opens at, as the egui renderer opens at
+/// (`SharedRendererState::speed`). Real time is too slow to watch a battle
+/// through.
+const DEFAULT_SPEED: f32 = 20.0;
 
 /// What the viewport is doing.
 enum State {
@@ -122,6 +129,9 @@ pub struct ReplayRendererPanel {
     _bake: Option<Task<()>>,
     _tick: Option<Task<()>>,
     _seek_subscription: Option<Subscription>,
+    /// Held for the slider built once the track's length is known, which
+    /// replaces the one the panel opened with.
+    _rebuilt_seek: Option<Subscription>,
     /// The export under way, if any. Only one at a time: it holds the same
     /// renderer the viewport draws through.
     export: Option<ExportProgress>,
@@ -170,7 +180,7 @@ impl ReplayRendererPanel {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let seek = cx.new(|_| SliderState::new().min(0.).max(1.).default_value(0.));
+        let seek = cx.new(|_| seek_slider(0));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
 
         let mut panel = Self {
@@ -189,12 +199,13 @@ impl ReplayRendererPanel {
             // first is exactly what is in it.
             options: wows_minimap_renderer::frame_track::bake_options(),
             show_dead_ships: true,
-            speed: 1.0,
+            speed: DEFAULT_SPEED,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
             _tick: None,
             _seek_subscription: Some(seek_subscription),
+            _rebuilt_seek: None,
             focus_handle: cx.focus_handle(),
         };
         panel.start_bake(path, game_data, cx);
@@ -209,7 +220,7 @@ impl ReplayRendererPanel {
     /// reads, where the bar sits -- none of which needs a drawn frame.
     #[cfg(test)]
     pub(crate) fn ready_for_test(clocks: Vec<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let seek = cx.new(|_| SliderState::new().min(0.).max(1.).default_value(0.));
+        let seek = cx.new(|_| seek_slider(clocks.len().saturating_sub(1)));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         Self {
             path: PathBuf::new(),
@@ -230,12 +241,13 @@ impl ReplayRendererPanel {
             // first is exactly what is in it.
             options: wows_minimap_renderer::frame_track::bake_options(),
             show_dead_ships: true,
-            speed: 1.0,
+            speed: DEFAULT_SPEED,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
             _tick: None,
             _seek_subscription: Some(seek_subscription),
+            _rebuilt_seek: None,
             focus_handle: cx.focus_handle(),
         }
     }
@@ -249,6 +261,7 @@ impl ReplayRendererPanel {
                     Ok((track, renderer)) => {
                         this.renderer = Some(renderer);
                         this.state = State::Ready(track);
+                        this.rebuild_seek(cx);
                         this.draw_current(cx);
                     }
                     Err(err) => this.state = State::Failed(err.to_string()),
@@ -525,9 +538,26 @@ impl ReplayRendererPanel {
     /// The slider reports the move back as a change, which would ask for the
     /// frame it is already on; `set_at` answers that with nothing to do.
     fn sync_seek(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.seek.update(cx, |slider, cx| slider.set_value(self.at as f32, window, cx));
+    }
+
+    /// Rebuilds the seek slider over the frames the bake produced.
+    ///
+    /// A slider quantises to its step and its range is fixed when it is
+    /// built, so one built before the track was known could only sit at
+    /// either end of it. This one steps a frame at a time over the track's
+    /// real length, which is what the control is choosing.
+    fn rebuild_seek(&mut self, cx: &mut Context<Self>) {
         let last = self.frame_count().saturating_sub(1);
-        let fraction = if last == 0 { 0.0 } else { self.at as f32 / last as f32 };
-        self.seek.update(cx, |slider, cx| slider.set_value(fraction, window, cx));
+        self.seek = cx.new(|_| seek_slider(last));
+        // A rebuilt slider is a different entity, so the old subscription
+        // reports nothing; without this the scrubber goes dead on the first
+        // drag after a bake.
+        self._seek_subscription = None;
+        self._rebuilt_seek = Some(cx.subscribe(&self.seek, |this, state, event, cx| {
+            let _ = state;
+            this.on_seek_event(event, cx);
+        }));
     }
 
     fn on_seek(
@@ -537,9 +567,13 @@ impl ReplayRendererPanel {
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.on_seek_event(event, cx);
+    }
+
+    /// A slider change is a frame to go to.
+    fn on_seek_event(&mut self, event: &gpui_kit::component::slider::SliderEvent, cx: &mut Context<Self>) {
         let gpui_kit::component::slider::SliderEvent::Change(value) = event else { return };
-        let last = self.frame_count().saturating_sub(1);
-        self.set_at((value.start() * last as f32).round() as usize, cx);
+        self.set_at(value.start().round().max(0.) as usize, cx);
     }
 
     /// Where playback has reached, as "M:SS / M:SS" of game time.
@@ -1015,6 +1049,15 @@ fn render_options_popover(
         .into_any_element()
 }
 
+/// The seek slider for a track of `last + 1` frames.
+///
+/// It selects a frame rather than a fraction: a slider quantises to its step,
+/// and the step cannot be finer than the thing being chosen without the
+/// rounding throwing frames away.
+fn seek_slider(last: usize) -> SliderState {
+    SliderState::new().min(0.).max(last.max(1) as f32).step(1.).default_value(0.)
+}
+
 #[cfg(test)]
 mod tests {
     use gpui_kit::AppContext;
@@ -1024,6 +1067,7 @@ mod tests {
     use gpui_kit::test::TestWindowExt;
 
     use super::ReplayRendererPanel;
+    use super::SPEEDS;
     use super::mmss;
 
     /// The transport reads in the clock the game shows, not in seconds.
@@ -1036,6 +1080,81 @@ mod tests {
         // A clock that has gone negative is a bug elsewhere, not a reason to
         // print a minus sign here.
         assert_eq!(mmss(-3.0), "0:00");
+    }
+
+    /// The transport opens at the speed the egui renderer opens at, over the
+    /// ladder it offers. Real time is too slow to watch a battle through, so
+    /// a viewport that opens at 1x reads as broken.
+    #[gpui_kit::test]
+    fn the_transport_opens_at_the_speed_the_egui_renderer_does(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                assert_eq!(panel.speed, 20.0);
+                assert!(SPEEDS.contains(&panel.speed), "and it is one of the offered speeds");
+                assert_eq!(SPEEDS, [1.0, 5.0, 10.0, 20.0, 40.0, 60.0], "the egui ladder");
+            })
+            .expect("the window is open");
+    }
+
+    /// The scrubber addresses every frame, not just the two ends.
+    ///
+    /// A slider quantises to its step, and the step defaults to 1.0. Built
+    /// over a 0-to-1 fraction that rounded every position to one end or the
+    /// other, so every drag that did not reach an end looked dead. It is
+    /// built over the frames instead.
+    #[gpui_kit::test]
+    fn the_scrubber_steps_over_the_frames_rather_than_a_fraction(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let clocks: Vec<f32> = (0..40).map(|frame| frame as f32 * 5.0).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                let slider = panel.seek.read(cx);
+                assert_eq!(slider.max_value(), 39.0, "the slider runs over the track, not over 0 to 1");
+                // The step is what broke it: quantised against a range of 1,
+                // every position rounded to an end.
+                assert_eq!(slider.step_value(), 1.0);
+                assert!(
+                    slider.step_value() <= (slider.max_value() - slider.min_value()) / 2.0,
+                    "a step that coarse can only reach the ends"
+                );
+            })
+            .expect("the window is open");
+    }
+
+    /// A move of the scrubber is a frame to go to.
+    #[gpui_kit::test]
+    fn a_scrubber_move_lands_on_the_frame_it_names(cx: &mut TestAppContext) {
+        use gpui_kit::component::slider::SliderEvent;
+        use gpui_kit::component::slider::SliderValue;
+
+        cx.update(gpui_kit::init);
+        let clocks: Vec<f32> = (0..40).map(|frame| frame as f32 * 5.0).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.on_seek_event(&SliderEvent::Change(SliderValue::Single(17.0)), cx);
+                assert_eq!(panel.at, 17, "the middle of the track is reachable");
+
+                panel.on_seek_event(&SliderEvent::Change(SliderValue::Single(3.0)), cx);
+                assert_eq!(panel.at, 3);
+
+                // Past the end clamps rather than panicking on the index.
+                panel.on_seek_event(&SliderEvent::Change(SliderValue::Single(999.0)), cx);
+                assert_eq!(panel.at, 39);
+            })
+            .expect("the window is open");
     }
 
     /// A toggle changes what the viewport draws without re-baking: the
