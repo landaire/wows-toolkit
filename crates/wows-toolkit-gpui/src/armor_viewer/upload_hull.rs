@@ -112,7 +112,7 @@ pub fn upload_hull_meshes(
     hull_mesh_ids: &mut Vec<MeshId>,
     hull_visibility: &HashMap<String, bool>,
     hull_opaque: bool,
-    active_camo_textures: &HashMap<String, (u32, u32, Vec<u8>)>,
+    active_camo_textures: &super::camo::TexturesByPart,
     active_camo_uvs: &HashMap<String, UvTransform>,
 ) {
     for mid in hull_mesh_ids.drain(..) {
@@ -140,7 +140,7 @@ pub fn upload_hull_meshes(
         let camo_uv = stem.filter(|s| active_camo_textures.contains_key(*s)).and_then(|s| active_camo_uvs.get(s));
         let has_texture = texture_data.is_some() && has_uvs;
 
-        let brightness = texture_data.map(|(_, _, rgba)| tex_brightness(rgba)).unwrap_or(FALLBACK_TEX_BRIGHTNESS);
+        let brightness = texture_data.map(|texture| tex_brightness(&texture.pixels)).unwrap_or(FALLBACK_TEX_BRIGHTNESS);
         let fallback_color: [f32; 4] =
             [0.6 * HULL_BRIGHTNESS, 0.6 * HULL_BRIGHTNESS, 0.65 * HULL_BRIGHTNESS, hull_alpha];
         let has_baked_colors = mesh.colors.len() == mesh.positions.len();
@@ -179,8 +179,9 @@ pub fn upload_hull_meshes(
         if mesh.indices.is_empty() {
             continue;
         }
-        let mid = if let Some((w, h, rgba)) = texture_data.filter(|_| has_uvs) {
-            let tex_bind_group = pipeline.create_texture_bind_group(device, queue, rgba, *w, *h);
+        let mid = if let Some(texture) = texture_data.filter(|_| has_uvs) {
+            let tex_bind_group =
+                pipeline.create_texture_bind_group(device, queue, &texture.pixels, texture.width, texture.height);
             viewport.add_textured_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer, tex_bind_group)
         } else {
             viewport.add_non_pickable_mesh(device, &vertices, &mesh.indices, hull_layer)

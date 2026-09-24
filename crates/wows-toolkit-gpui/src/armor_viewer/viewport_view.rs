@@ -392,7 +392,7 @@ pub struct ViewportView {
     /// `None`. Lives here (not on `LoadedShipArmor`, an immutable `Arc`) and
     /// is passed into [`upload_hull::upload_hull_meshes`] as a parameter on
     /// every hull upload. Reset (cleared) whenever a new ship loads.
-    active_camo_textures: HashMap<String, (u32, u32, Vec<u8>)>,
+    active_camo_textures: CamoTextures,
     /// The active camo's UV transforms, keyed by mfm stem, for stems the
     /// compositor left tiled (GPU-side) rather than baking. Same lifetime/
     /// reset rules as `active_camo_textures`.
@@ -2384,9 +2384,9 @@ fn recompute_active_camo(
     (decode.textures, decode.uvs)
 }
 
-/// Per-hull-part composited camo textures: width, height and RGBA bytes,
-/// keyed by hull part name as [`upload_hull::upload_hull_meshes`] expects.
-type CamoTextures = HashMap<String, (u32, u32, Vec<u8>)>;
+/// Per-hull-part composited camo textures, keyed as
+/// [`upload_hull::upload_hull_meshes`] expects.
+type CamoTextures = super::camo::TexturesByPart;
 
 /// One scheme's decoded and composited textures.
 struct CamoDecode {
