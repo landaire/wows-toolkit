@@ -78,6 +78,10 @@ use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
 
+/// How far the hull may be heeled over from the display popover, in
+/// degrees, matching the egui slider's own range.
+const ROLL_LIMIT_DEG: f32 = 25.0;
+
 /// How long a gizmo-snap animation runs before the ticker (`start_animation_ticker`)
 /// stops re-rendering.
 const GIZMO_SNAP_DURATION_SECS: f32 = 0.35;
@@ -196,6 +200,10 @@ struct HoverInfo {
 pub(crate) struct DisplaySettingsSliders {
     pub(crate) waterline_opacity: Entity<SliderState>,
     pub(crate) armor_opacity: Entity<SliderState>,
+    /// How far the hull is heeled over, in degrees. A property of the model
+    /// on screen rather than of the armor, so it is not written back with the
+    /// display defaults.
+    pub(crate) model_roll_deg: Entity<SliderState>,
 }
 
 /// The display-settings popover's lighting sliders, same persistent-entity
@@ -577,6 +585,10 @@ impl ViewportView {
     ) -> (DisplaySettingsSliders, Vec<Subscription>) {
         let waterline_opacity = Self::new_slider(cx, 0.05, 1.0, 0.01, display.waterline_opacity);
         let armor_opacity = Self::new_slider(cx, 0.1, 1.0, 0.01, display.armor_opacity);
+        // The range the egui slider uses: a hull heels this far in a hard
+        // turn, and further than that reads as a capsize rather than a
+        // camera angle worth checking armor against.
+        let model_roll_deg = Self::new_slider(cx, -ROLL_LIMIT_DEG, ROLL_LIMIT_DEG, 0.5, 0.0);
         let subs = vec![
             Self::subscribe_slider(cx, &waterline_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.waterline_opacity = v)
@@ -584,8 +596,9 @@ impl ViewportView {
             Self::subscribe_slider(cx, &armor_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.armor_opacity = v)
             }),
+            Self::subscribe_slider(cx, &model_roll_deg, |this, v, cx| this.set_model_roll_deg(v, cx)),
         ];
-        (DisplaySettingsSliders { waterline_opacity, armor_opacity }, subs)
+        (DisplaySettingsSliders { waterline_opacity, armor_opacity, model_roll_deg }, subs)
     }
 
     /// Builds [`LightingSliders`] seeded from `lighting`, wired so a drag
@@ -858,6 +871,24 @@ impl ViewportView {
     /// which names it.
     /// Whether a ship's armor is loaded, which is what the pane-level controls
     /// in the toolbar are gated on.
+    /// How far the hull is heeled over, in degrees.
+    pub(crate) fn model_roll_deg(&self) -> f32 {
+        self.viewport.model_roll.to_degrees()
+    }
+
+    /// Heels the hull over. Only the model turns: the waterline and the other
+    /// world-space overlays stay level, which is what makes the angle
+    /// readable.
+    pub(crate) fn set_model_roll_deg(&mut self, degrees: f32, cx: &mut Context<Self>) {
+        let radians = degrees.to_radians();
+        if (self.viewport.model_roll - radians).abs() < f32::EPSILON {
+            return;
+        }
+        self.viewport.model_roll = radians;
+        self.viewport.mark_dirty();
+        cx.notify();
+    }
+
     /// Whether the display-settings popover is up.
     pub(crate) fn display_popover_open(&self) -> bool {
         self.display_popover_open
