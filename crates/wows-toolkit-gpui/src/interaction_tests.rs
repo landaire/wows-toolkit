@@ -1096,6 +1096,27 @@ fn the_query_bar_offers_completions_and_takes_them(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// A date field is picked from a calendar rather than from the list of values
+/// the index happens to hold.
+#[gpui_kit::test]
+fn a_date_field_opens_a_calendar_instead_of_the_completions(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("map:", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-calendar").is_none(), "a map is not a date");
+
+        window.input("ocean date>", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-calendar").is_some(), "the date field brings a calendar");
+        assert!(window.try_find(("search-completion", 0usize)).is_none(), "and the value list stands aside");
+    })
+    .expect("the test window stays open");
+}
+
 /// The results follow the query as it is typed, without Enter.
 ///
 /// Driven with a query that cannot parse, because that verdict is reached

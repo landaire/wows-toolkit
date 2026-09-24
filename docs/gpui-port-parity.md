@@ -305,7 +305,11 @@ kept so the next audit does not re-report them.
   the egui settings row already declares (and never filled).
 - No undo/redo in the bar. The port's bar is a text input rather than the
   egui pill editor, so this is the input's own undo, not an AST stack.
-- No date picker for timestamp values.
+- [done] No date picker for timestamp values. A caret on a date field
+  opens a calendar under the bar in place of the value list, and the day
+  taken replaces the half-typed value. Which fields take a date is
+  `wows_toolkit_viewmodel::query_bar::suggest::date_value_at_caret`, read
+  off the same grammar the egui bar reads.
 - [done] A copied path reports itself.
 - [done] A result row plays its replay back, in the viewport the Replay
   Inspector opens.
