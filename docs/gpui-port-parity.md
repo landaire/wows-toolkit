@@ -208,7 +208,23 @@ kept so the next audit does not re-report them.
 - [done] The penetration checker is a popover on the pane's own strip, over
   the plate the pointer was last on. The rest of the Analysis window (the
   comparison list, the server-vs-simulation report) is still absent.
-- Shell trajectory mode is absent.
+- [done] Shell trajectory mode is absent. It is on the pane's toolbar,
+  carrying how many shells have been cast, and Ctrl+T toggles it. A click
+  casts a shell at the armor: the ray is sent along the camera's bearing,
+  flattened and then pitched by the solver's own fall angle, from outside the
+  hull so it crosses every plate rather than only those past the point
+  clicked. Shift-click adds a shell to those already cast; clicking past the
+  ship drops them. The arc, the impact markers coloured by strike angle, the
+  path between plates and the detonation burst are one overlay mesh, scaled
+  to the camera. The flight solver and the penetration chain are
+  `wowsunpack::ballistics`, which the egui viewer casts through too, so both
+  draw the same shell; the attacker is the penetration checker's own, so
+  choosing a ship there is what the cast fires. The range slider and the
+  continue-past-ricochet toggle are in the display popover, and both re-cast
+  what is already on screen. A hit on a triangle carrying no thickness is
+  dropped rather than guessed at. Not ported: the Trajectory tab's per-arc
+  list, its per-arc range sliders and its isolate-plates/isolate-zones
+  buttons, and the per-ship arcs a comparison list of more than one draws.
 - Splash/blast mode and the splash-box popover are absent.
 - [done] The camera-rings section is absent. It is in the display popover:
   the orbits the game's camera rides are drawn over the ship, one mode at a
