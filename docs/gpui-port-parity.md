@@ -17,7 +17,7 @@ kept so the next audit does not re-report them.
   bounded by the four most recently drawn maps rather than by how many rows
   were passed over. Changing the WoWs directory drops them, since they carry
   art read out of the install being replaced.
-- Toasts: `Root` holds the queue but the window's own view has to draw the
+- [done] Toasts: `Root` holds the queue but the window's own view has to draw the
   layer, which `App::render` now does; before that every toast and dialog was
   silent. Wired: the game-data load and its empty-replays warning, an invalid
   game directory, a failed replay parse, the Twitch credential, a copied
@@ -127,7 +127,7 @@ kept so the next audit does not re-report them.
   since the reader has moved on from the set.
 - Set as / Add to Session Stats is still not offered, for one replay or for a
   set: the port has no session-stats writer.
-- The header's Actions menu carries "Hide My Test Ship Stats", and is shown
+- [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match
   timeline and the other-team perspective are not ported at all.
@@ -209,9 +209,14 @@ kept so the next audit does not re-report them.
 - [done] Display settings and the legend's placement, visibility and
   collapsed state are written back to the `armor_viewer_defaults` row the
   viewer already reads at startup. Export options are still session-only.
-- The row's `hull_all_visible`, `armor_all_visible` and `show_splash_boxes`
-  are written back exactly as read: the port has no control for them, and the
-  row is shared with the egui app.
+- [done] The row's `hull_all_visible`, `armor_all_visible` and
+  `show_splash_boxes` are written back exactly as read. The first two are now
+  derived from what the pane is showing when the defaults are saved, the way
+  the egui app derives them, so hiding everything and opening another ship
+  opens it the same way in either app. The derivation reads this port's own
+  absence rules, which are the opposite of the egui app's on the hull side.
+  `show_splash_boxes` belongs to a mode the port does not draw and is still
+  written back as read.
 - [done] Part, material and nation names are drawn in the reader's own
   language (`catalog::translate_part`, the same `IDS_<NAME>` lookup the egui
   app's `translate_part` does). The raw key stays the identity, so a

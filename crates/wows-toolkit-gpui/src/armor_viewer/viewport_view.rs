@@ -78,6 +78,16 @@ use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
 
+/// What a pane is currently showing all of.
+///
+/// Kept in the shared `armor_viewer_defaults` row, which is how a ship opened
+/// after one where the reader hid everything opens the same way.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct AllVisible {
+    pub(crate) hull: bool,
+    pub(crate) armor: bool,
+}
+
 /// How far the hull may be heeled over from the display popover, in
 /// degrees, matching the egui slider's own range.
 const ROLL_LIMIT_DEG: f32 = 25.0;
@@ -887,6 +897,21 @@ impl ViewportView {
         self.viewport.model_roll = radians;
         self.viewport.mark_dirty();
         cx.notify();
+    }
+
+    /// Whether everything is currently shown, which is what the next ship
+    /// loaded starts from.
+    ///
+    /// Read against this port's own absence rules rather than the egui app's:
+    /// a part with no entry is visible and a hull mesh with no entry is not,
+    /// so an empty `part_visibility` means every part is on while an empty
+    /// `hull_visibility` means no hull mesh is.
+    pub(crate) fn all_visible(&self) -> AllVisible {
+        AllVisible {
+            hull: !self.hull_visibility.is_empty() && self.hull_visibility.values().all(|visible| *visible),
+            armor: self.part_visibility.values().all(|visible| *visible)
+                && !self.plate_visibility.values().any(|hidden| *hidden),
+        }
     }
 
     /// Whether the display-settings popover is up.
@@ -2546,6 +2571,54 @@ fn paint_axis_label(label: &'static str, tip: Point<Pixels>, window: &mut Window
     let shaped = window.text_system().shape_line(label.into(), px(10.0), &[run], None);
     let origin = point(tip.x - shaped.width() * 0.5, tip.y - px(5.0));
     let _ = shaped.paint(origin, px(12.0), TextAlign::Left, None, window, cx);
+}
+
+#[cfg(test)]
+mod all_visible_tests {
+    use super::AllVisible;
+    use super::PlateKey;
+    use std::collections::HashMap;
+
+    /// The derivation, read off the three maps without a viewport to hold
+    /// them: this is the rule that decides what the next ship opens showing.
+    fn all_visible(
+        hull: &HashMap<String, bool>,
+        parts: &HashMap<(String, String), bool>,
+        plates: &HashMap<PlateKey, bool>,
+    ) -> AllVisible {
+        AllVisible {
+            hull: !hull.is_empty() && hull.values().all(|visible| *visible),
+            armor: parts.values().all(|visible| *visible) && !plates.values().any(|hidden| *hidden),
+        }
+    }
+
+    fn hull(entries: &[(&str, bool)]) -> HashMap<String, bool> {
+        entries.iter().map(|(name, visible)| ((*name).to_string(), *visible)).collect()
+    }
+
+    #[test]
+    fn nothing_hidden_reads_as_everything_shown() {
+        let shown = all_visible(&hull(&[("Hull_A", true)]), &HashMap::new(), &HashMap::new());
+        assert_eq!(shown, AllVisible { hull: true, armor: true });
+    }
+
+    #[test]
+    fn a_hull_mesh_with_no_entry_is_not_shown() {
+        // Absent means hidden on the hull side, so an empty map is not
+        // "everything".
+        let shown = all_visible(&HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert!(!shown.hull);
+        assert!(shown.armor, "a part with no entry is visible, so an empty map is everything");
+    }
+
+    #[test]
+    fn one_hidden_part_or_plate_is_enough_to_say_not_everything() {
+        let parts = HashMap::from([(("Zone".to_string(), "Part".to_string()), false)]);
+        assert!(!all_visible(&HashMap::new(), &parts, &HashMap::new()).armor);
+
+        let plates: HashMap<PlateKey, bool> = HashMap::from([(("Zone".to_string(), "Part".to_string(), 0), true)]);
+        assert!(!all_visible(&HashMap::new(), &HashMap::new(), &plates).armor);
+    }
 }
 
 #[cfg(test)]

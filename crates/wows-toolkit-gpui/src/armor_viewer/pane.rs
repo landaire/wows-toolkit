@@ -547,11 +547,7 @@ impl ArmorViewerPane {
     /// single initial pane at this point -- no "Compare" pane can exist yet.
     pub fn apply_armor_defaults(&mut self, defaults: Option<&ArmorViewerDefaultsRow>, cx: &mut Context<Self>) {
         if let Some(defaults) = defaults {
-            self.unported_defaults = UnportedDefaults {
-                hull_all_visible: defaults.hull_all_visible,
-                armor_all_visible: defaults.armor_all_visible,
-                show_splash_boxes: defaults.show_splash_boxes,
-            };
+            self.unported_defaults = UnportedDefaults { show_splash_boxes: defaults.show_splash_boxes };
         }
         self.legend = LegendState::from_defaults(defaults);
         let panes = self.dock.read(cx).panes().to_vec();
@@ -841,7 +837,12 @@ impl ArmorViewerPane {
     /// of the same ship, not a second preference.
     pub(crate) fn save_defaults(&self, cx: &mut Context<Self>) {
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        let display = self.dock.read(cx).active_viewport().read(cx).display_settings;
+        let active = self.dock.read(cx).active_viewport();
+        let display = active.read(cx).display_settings;
+        // Derived from what the pane is showing, the way the egui app derives
+        // them when it saves: they are a record of the current state rather
+        // than a setting of their own.
+        let all_visible = active.read(cx).all_visible();
         let (visible, collapsed, pos) = (self.legend.visible, self.legend.collapsed, self.legend.pos);
         let unported = self.unported_defaults;
         let row = ArmorViewerDefaultsRow {
@@ -851,11 +852,11 @@ impl ArmorViewerPane {
             armor_opacity: display.armor_opacity as f64,
             waterline_opacity: display.waterline_opacity as f64,
             hull_opaque: display.hull_opaque,
-            // The egui row carries these too, and the port has no control
-            // for any of them. They are written back exactly as they were
-            // read, so saving here never overwrites what the other app set.
-            hull_all_visible: unported.hull_all_visible,
-            armor_all_visible: unported.armor_all_visible,
+            hull_all_visible: all_visible.hull,
+            armor_all_visible: all_visible.armor,
+            // Splash boxes belong to a mode the port does not draw, so this
+            // is written back exactly as it was read and never overwrites
+            // what the other app set.
             show_splash_boxes: unported.show_splash_boxes,
             show_legend: visible,
             legend_collapsed: collapsed,
@@ -880,17 +881,9 @@ impl ArmorViewerPane {
 
 /// The parts of `armor_viewer_defaults` the port does not draw a control
 /// for. Defaults match the row's own, for a database with no row yet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 struct UnportedDefaults {
-    hull_all_visible: bool,
-    armor_all_visible: bool,
     show_splash_boxes: bool,
-}
-
-impl Default for UnportedDefaults {
-    fn default() -> Self {
-        Self { hull_all_visible: true, armor_all_visible: true, show_splash_boxes: false }
-    }
 }
 
 impl Render for ArmorViewerPane {
