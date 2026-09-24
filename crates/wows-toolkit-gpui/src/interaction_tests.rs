@@ -1312,6 +1312,82 @@ fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
 
 /// A date field is picked from a calendar rather than from the list of values
 /// the index happens to hold.
+/// Undo steps back through structural edits, and redo steps forward again.
+///
+/// Only structural edits: typing has the text field's own undo, and pushing
+/// every keystroke here would bury the edits this stack is for.
+#[gpui_kit::test]
+fn the_query_bar_steps_back_and_forward_through_structural_edits(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+    window
+        .update(cx, |app, window, cx| app.apply_settings(test_settings(), window, cx))
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("outcome=win", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+
+    let expr = wows_toolkit_config::index::query_text::parse_query("outcome=win").expect("the query parses");
+    let cache = wows_toolkit_viewmodel::query_bar::label::NameCache::default();
+    let tokens = wows_toolkit_viewmodel::query_bar::tokens::tokenize(&expr, &cache);
+    let pill = wows_toolkit_viewmodel::query_bar::select::pill_paths(&tokens)
+        .into_iter()
+        .next()
+        .expect("the query draws one pill");
+
+    window
+        .update(cx, |app, window, cx| {
+            app.search().clone().update(cx, |search, cx| {
+                assert!(!search.can_undo(), "nothing has been edited yet");
+                search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
+                assert!(search.can_undo(), "the edit is on the stack");
+            });
+        })
+        .expect("the test window stays open");
+
+    let negated = cx
+        .update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.find(SEARCH_QUERY).value().expect("the bar has text").to_string()
+        })
+        .expect("the test window stays open");
+    assert_ne!(negated, "outcome=win");
+
+    window
+        .update(cx, |app, window, cx| {
+            app.search().clone().update(cx, |search, cx| search.undo_edit(window, cx));
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
+        assert_eq!(text, "outcome=win", "undo restored the query the edit replaced");
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, window, cx| {
+            app.search().clone().update(cx, |search, cx| {
+                assert!(!search.can_undo(), "the stack is empty again");
+                assert!(search.can_redo(), "and what was undone can be redone");
+                search.redo_edit(window, cx);
+            });
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let text = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
+        assert_eq!(text, negated, "redo put the edit back");
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn a_date_field_opens_a_calendar_instead_of_the_completions(cx: &mut TestAppContext) {
     let window = open_app(cx);
