@@ -77,17 +77,7 @@ pub fn match_group_display_name(match_group: &str) -> &str {
 /// Parse the replay `dateTime` format (`DD.MM.YYYY HH:MM:SS`) into a
 /// lexicographically sortable string (`YYYY-MM-DD HH:MM:SS`).
 /// Falls back to the original string if parsing fails.
-fn sortable_game_time(game_time: &str) -> String {
-    // Expected format: "DD.MM.YYYY HH:MM:SS"
-    let parts: Vec<&str> = game_time.splitn(2, ' ').collect();
-    if parts.len() == 2 {
-        let date_parts: Vec<&str> = parts[0].split('.').collect();
-        if date_parts.len() == 3 {
-            return format!("{}-{}-{} {}", date_parts[2], date_parts[1], date_parts[0], parts[1]);
-        }
-    }
-    game_time.to_string()
-}
+use wows_toolkit_viewmodel::stats::sortable_game_time;
 
 /// Per-game statistics extracted from a single replay
 #[derive(Clone, Serialize, Deserialize)]

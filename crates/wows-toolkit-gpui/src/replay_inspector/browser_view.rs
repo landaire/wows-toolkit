@@ -257,6 +257,12 @@ pub enum ReplayBrowserEvent {
     /// The game has just written a replay into the watched directory, and the
     /// listing now holds it.
     ReplayAppeared(PathBuf),
+    /// Record these battles in the Stats tab's session. `replace` forgets
+    /// what is already recorded first, which is what "Set as" means.
+    SessionStats {
+        paths: Vec<PathBuf>,
+        replace: bool,
+    },
 }
 
 pub struct ReplayBrowser {
@@ -1049,6 +1055,12 @@ impl Render for ReplayBrowser {
                     let new_tab_entity = context_menu_entity.clone();
                     let render_path = leaf.path.clone();
                     let render_entity = context_menu_entity.clone();
+                    let session_paths = if batch.is_empty() { vec![leaf.path.clone()] } else { batch.clone() };
+                    let set_paths = session_paths.clone();
+                    let set_entity = context_menu_entity.clone();
+                    let add_paths = session_paths.clone();
+                    let add_entity = context_menu_entity.clone();
+                    let session_count = session_paths.len();
                     let batch_files = batch.clone();
                     let batch_paths = batch.clone();
                     let batch_render = batch.clone();
@@ -1104,6 +1116,40 @@ impl Render for ReplayBrowser {
                             render_entity.update(cx, |_browser, cx| cx.emit(ReplayBrowserEvent::RenderReplay(path)));
                         },
                     ))
+                    .separator()
+                    .item(
+                        PopupMenuItem::new(
+                            if session_count == 1 {
+                                t!("ui.replay.context.set_session_stats_one")
+                            } else {
+                                t!("ui.replay.context.set_session_stats_many", count = session_count)
+                            }
+                            .into_owned(),
+                        )
+                        .on_click(move |_event, _window, cx| {
+                            let paths = set_paths.clone();
+                            set_entity.update(cx, |_browser, cx| {
+                                cx.emit(ReplayBrowserEvent::SessionStats { paths, replace: true });
+                            });
+                        }),
+                    )
+                    .item(
+                        PopupMenuItem::new(
+                            if session_count == 1 {
+                                t!("ui.replay.context.add_session_stats_one")
+                            } else {
+                                t!("ui.replay.context.add_session_stats_many", count = session_count)
+                            }
+                            .into_owned(),
+                        )
+                        .on_click(move |_event, _window, cx| {
+                            let paths = add_paths.clone();
+                            add_entity.update(cx, |_browser, cx| {
+                                cx.emit(ReplayBrowserEvent::SessionStats { paths, replace: false });
+                            });
+                        }),
+                    )
+                    .separator()
                     .item(PopupMenuItem::new(t!("ui.replay.context.copy_replay").into_owned()).on_click(
                         move |_event, window, cx| {
                             copy_replay_files(std::slice::from_ref(&copy_file), window, cx);

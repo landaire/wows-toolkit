@@ -92,6 +92,43 @@ pub async fn get_all_session_stats(pool: &SqlitePool) -> Result<Vec<SessionStatR
     sqlx::query_as("SELECT * FROM session_stats ORDER BY sort_key ASC").fetch_all(pool).await
 }
 
+/// Records one game, replacing an earlier record of the same battle.
+///
+/// A battle is the same battle when it was played at the same moment by the
+/// same account, which is the rule the egui app's own `add_game` dedupes on:
+/// re-adding a replay refreshes its row rather than counting the battle
+/// twice.
+pub async fn add_session_stat(pool: &SqlitePool, row: &SessionStatRow) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("DELETE FROM session_stats WHERE game_time = ?1 AND player_id = ?2")
+        .bind(&row.game_time)
+        .bind(row.player_id)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(
+        "INSERT INTO session_stats (sort_key, ship_name, ship_id, player_id, game_time, match_group,          damage, spotting_damage, frags, raw_xp, base_xp, is_win, is_loss, is_draw, is_div, achievements)          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+    )
+    .bind(&row.sort_key)
+    .bind(&row.ship_name)
+    .bind(row.ship_id)
+    .bind(row.player_id)
+    .bind(&row.game_time)
+    .bind(&row.match_group)
+    .bind(row.damage)
+    .bind(row.spotting_damage)
+    .bind(row.frags)
+    .bind(row.raw_xp)
+    .bind(row.base_xp)
+    .bind(row.is_win)
+    .bind(row.is_loss)
+    .bind(row.is_draw)
+    .bind(row.is_div)
+    .bind(&row.achievements)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await
+}
+
 /// Forgets every recorded game.
 ///
 /// What the Stats tab's own clear does: the table is the session, so there is
@@ -103,8 +140,7 @@ pub async fn clear_session_stats(pool: &SqlitePool) -> Result<u64, sqlx::Error> 
 
 /// Forgets the games recorded in one ship.
 pub async fn clear_session_stats_for_ship(pool: &SqlitePool, ship_id: i64) -> Result<u64, sqlx::Error> {
-    let result =
-        sqlx::query("DELETE FROM session_stats WHERE ship_id = ?1").bind(ship_id).execute(pool).await?;
+    let result = sqlx::query("DELETE FROM session_stats WHERE ship_id = ?1").bind(ship_id).execute(pool).await?;
     Ok(result.rows_affected())
 }
 

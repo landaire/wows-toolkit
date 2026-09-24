@@ -389,6 +389,7 @@ impl ReplayPanel {
                 raw_results_json,
                 mapped_results_json,
                 fire_chance,
+                session_stat: _,
             }) => {
                 self.export = Some(export);
                 self.write_auto_export(cx);
