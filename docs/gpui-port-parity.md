@@ -343,16 +343,26 @@ kept so the next audit does not re-report them.
   still not kept; only which charts exist and how each is set up.
 - [done] The filter bar clears the whole session and a ship's own row clears
   that ship, both behind a two-press confirm (ctrl+click skips it).
-- Charts cannot be copied as an image. The egui app captures the window
-  framebuffer through eframe's `Event::Screenshot` and crops it to the plot
-  rectangle. GPUI has the shape of that: `Window::render_to_image` is public
-  and not test-gated. It is not usable here, though -- the `PlatformWindow`
-  trait's default bails with "render_to_image not implemented for this
-  platform", and the only implementor in the tree is the test platform's
-  window, so a real window returns that error. The alternative is rasterising
-  the chart a second way, which means two chart renderers inside one app that
-  have to agree on axes, scales and colours; that is a worse drift than the
-  one this port exists to avoid. Left undone deliberately.
+- Charts cannot be copied as an image. Left undone; three paths were tried
+  and each is closed, so this is recorded rather than re-derived.
+  - The egui app captures the window framebuffer through eframe's
+    `Event::Screenshot` and crops it to the plot rectangle. GPUI has the
+    shape of that -- `Window::render_to_image` is public and not test-gated
+    -- but the `PlatformWindow` trait's default bails with "render_to_image
+    not implemented for this platform" and the only implementor in the tree
+    is the test platform's window, so a real window returns that error.
+  - Rasterising the plot separately would work for its geometry: the layout
+    is already pure functions (`plot_area`, `tick_values`, `value_to_y`,
+    `index_to_x`), and `tiny-skia` is already a dependency through
+    minimap-renderer, so the drawing could emit primitives that a window
+    backend and an image backend both consume without the geometry drifting.
+  - Text is what stops it. The eight labelled parts of a plot are shaped
+    through GPUI's own text system, and there is no way to reach the font it
+    used: `TextSystem::rasterize_glyph` is `pub(crate)`, and `add_fonts`
+    takes bytes in with nothing to read them back out. An image backend would
+    have to bundle a typeface, so the copied chart would not be the chart on
+    screen. The game fonts minimap-renderer carries are the wrong face and
+    are absent until game data loads.
 - [done] Achievements draw their own art from the installed build, ordered by
   how often they were earned, and name themselves on hover.
 - [done] The records name the ship that set them.
