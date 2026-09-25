@@ -242,6 +242,10 @@ pub struct ReplayRendererPanel {
     moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
     /// The shape being turned by its handle, and what it was before.
     turning: Option<(usize, wt_collab_client::types::Annotation)>,
+    /// What the session held before each change this viewport made, newest
+    /// last. Bounded: a session left open all evening must not grow a
+    /// history of every stroke in it.
+    history: Vec<Vec<wt_collab_client::drawing::Held>>,
     /// The redraw a running session needs, held only while there is one.
     _collab_tick: Option<Task<()>>,
     /// Kept so the viewport can build the canvas a layer asks for: the team
@@ -359,6 +363,7 @@ impl ReplayRendererPanel {
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
             turning: None,
+            history: Vec::new(),
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -445,6 +450,7 @@ impl ReplayRendererPanel {
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
             turning: None,
+            history: Vec::new(),
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -1621,6 +1627,10 @@ impl ReplayRendererPanel {
         }
         // The handle over a picked shape turns it rather than moving it.
         if let Some((index, annotation)) = self.handle_under(event.position) {
+            // Snapshotted as the handle is taken hold of: a turn reaches the
+            // session as the pointer moves, so by the time it is let go the
+            // old bearing has already gone.
+            self.remember();
             self.turning = Some((index, annotation));
             return;
         }
@@ -1668,6 +1678,28 @@ impl ReplayRendererPanel {
         Some(((anchor.0, anchor.1 - HANDLE_DISTANCE), anchor))
     }
 
+    /// Remembers what the session holds, before changing it.
+    fn remember(&mut self) {
+        if !self.collab.is_active() {
+            return;
+        }
+        self.history.push(self.collab.annotations_held());
+        if self.history.len() > HISTORY_DEPTH {
+            self.history.remove(0);
+        }
+    }
+
+    /// Puts the session back the way it was before the last change this
+    /// viewport made.
+    fn undo(&mut self, cx: &mut Context<Self>) {
+        let Some(was) = self.history.pop() else { return };
+        self.collab.restore(&was);
+        // What was picked out may no longer be there.
+        self.picked.clear();
+        self.draw_current(cx);
+        cx.notify();
+    }
+
     /// Takes up `tool`, dropping whatever was half-drawn.
     fn take_up(&mut self, tool: Tool, cx: &mut Context<Self>) {
         self.drawing.set_tool(tool);
@@ -1685,8 +1717,14 @@ impl ReplayRendererPanel {
     fn stroke(&mut self, stroke: Stroke, cx: &mut Context<Self>) {
         let existing = self.collab.annotations();
         match self.drawing.handle(stroke, &existing) {
-            Some(Drawn::Added(annotation)) => self.collab.add_annotation(annotation),
-            Some(Drawn::Erased(index)) => self.collab.erase_annotation(index),
+            Some(Drawn::Added(annotation)) => {
+                self.remember();
+                self.collab.add_annotation(annotation);
+            }
+            Some(Drawn::Erased(index)) => {
+                self.remember();
+                self.collab.erase_annotation(index);
+            }
             None => {}
         }
         // The frame carries the part-drawn shape, so every stroke redraws.
@@ -1760,6 +1798,7 @@ impl ReplayRendererPanel {
         if let Some((from, before)) = self.moving.take()
             && let Some((x, y)) = self.map_point(event.position)
         {
+            self.remember();
             let delta = [x - from[0], y - from[1]];
             for index in self.picked.picked() {
                 let Some(annotation) = before.get(*index) else { continue };
@@ -2367,6 +2406,9 @@ fn per_ship_allows(
     }
 }
 
+/// How many changes back an undo can reach.
+const HISTORY_DEPTH: usize = 32;
+
 /// How big a rotation handle is drawn, and how far above the shape it sits.
 /// The egui renderer's own figures, in screen pixels at any zoom.
 const HANDLE_RADIUS: Pixels = px(5.);
@@ -2850,6 +2892,7 @@ fn tools_popover(
     let in_session = view.collab.is_active();
     let chosen = view.drawing.tool().clone();
     let ink = view.drawing.color();
+    let undoable = !view.history.is_empty();
 
     Popover::new("replay-renderer-tools")
         .trigger(
@@ -2880,6 +2923,18 @@ fn tools_popover(
                         ),
                     )
                 })))
+                .child(crate::ui::rule_h(_cx))
+                .child({
+                    let owner = owner.clone();
+                    Button::new("replay-renderer-annotations-undo")
+                        .child(crate::icons::icon(crate::icons::ARROW_COUNTER_CLOCKWISE))
+                        .label(t!("ui.renderer.annotations.undo").into_owned())
+                        .compact()
+                        .disabled(!undoable)
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            owner.update(cx, |panel, cx| panel.undo(cx));
+                        })
+                })
                 .child(crate::ui::rule_h(_cx))
                 .child(h_flex().gap_1().flex_wrap().children(INKS.iter().map(|(id, color)| {
                     let owner = owner.clone();
@@ -4748,6 +4803,73 @@ mod tests {
                 assert!((radius - 40.0).abs() < 1.0, "as wide as the drag has gone: {radius}");
             })
             .expect("the window is open");
+    }
+
+    /// Drawing puts the session back within reach, and undoing takes the
+    /// shape off again under the id it was added with.
+    #[gpui_kit::test]
+    fn undoing_takes_back_what_was_just_drawn(cx: &mut TestAppContext) {
+        use wt_collab_client::AnnotationSyncState;
+        use wt_collab_client::drawing::Stroke as DrawStroke;
+        use wt_collab_client::drawing::Tool;
+        use wt_collab_client::peer::LocalAnnotationEvent;
+        use wt_collab_client::peer::LocalEvent;
+        use wt_collab_client::types::Annotation;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                assert!(panel.history.is_empty(), "nothing to undo before anything is drawn");
+
+                panel.take_up(Tool::Line, cx);
+                panel.stroke(DrawStroke::Began { at: [100.0, 100.0] }, cx);
+                panel.stroke(DrawStroke::Ended { at: [200.0, 100.0] }, cx);
+                assert_eq!(panel.history.len(), 1, "the list as it was before the line");
+            })
+            .expect("the window is open");
+
+        // The session now holds what was drawn, under the id it was sent
+        // with, which is what an undo has to name.
+        let drawn: Vec<(u64, Annotation)> = sent
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(LocalAnnotationEvent::Set { id, annotation, .. }) => Some((id, annotation)),
+                _ => None,
+            })
+            .collect();
+        let [(id, annotation)] = &drawn[..] else { panic!("one line was drawn, got {drawn:?}") };
+        state.lock().current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![annotation.clone()],
+            ids: vec![*id],
+            owners: vec![0],
+            ..Default::default()
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.undo(cx);
+                assert!(panel.history.is_empty(), "and there is nothing left to undo");
+            })
+            .expect("the window is open");
+
+        let removed: Vec<u64> = sent
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(LocalAnnotationEvent::Remove { id, .. }) => Some(id),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(removed, vec![*id], "the line goes, under the id it arrived with");
     }
 
     /// A ping is shed only once its ripple has run out.
