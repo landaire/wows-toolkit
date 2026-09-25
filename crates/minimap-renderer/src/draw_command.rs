@@ -118,6 +118,26 @@ pub enum ShipConfigCircleKind {
     Hydro,
 }
 
+impl ShipConfigCircleKind {
+    /// The colour, opacity and dashing this kind of circle is drawn with.
+    ///
+    /// Here rather than at each place one is built, so a circle drawn for a
+    /// ship in the battle and one drawn for a ship a reader placed cannot
+    /// come out different colours.
+    pub const fn style(self) -> ([u8; 3], f32, bool) {
+        match self {
+            // Dashed, because it is the only one that says where the ship
+            // can be seen from rather than what it can reach.
+            Self::Detection => ([135, 206, 235], 0.6, true),
+            Self::MainBattery => ([180, 180, 180], 0.5, false),
+            Self::SecondaryBattery => ([255, 165, 0], 0.5, false),
+            Self::TorpedoRange => ([0, 200, 200], 0.5, false),
+            Self::Radar => ([255, 255, 100], 0.5, false),
+            Self::Hydro => ([100, 255, 100], 0.5, false),
+        }
+    }
+}
+
 /// Per-range-type visibility filter for ship configuration circles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]

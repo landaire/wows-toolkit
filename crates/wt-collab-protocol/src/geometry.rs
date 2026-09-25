@@ -11,6 +11,7 @@
 use crate::types::Annotation;
 use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
 use wows_minimap_renderer::draw_command::ShipVisibility;
 use wows_minimap_renderer::map_data::MinimapPos;
 use wowsunpack::game_types::EntityId;
@@ -367,6 +368,91 @@ pub fn annotation_commands(annotation: &Annotation) -> Vec<DrawCommand> {
     }
 }
 
+/// How many metres one unit of the game's own world space is.
+const WORLD_TO_METERS: f32 = 30.0;
+
+/// The range circles a placed ship shows, given the ranges its ship actually
+/// has.
+///
+/// The ranges are resolved by the caller, because reading them means reading
+/// the ship's own game data and this layer carries none. What is here is
+/// what the annotation decides: which circles the reader asked for, and the
+/// coefficients their build applies to them.
+///
+/// `space_size` is the map's own, in world units, which is what turns a
+/// range in metres into a distance on the minimap.
+pub fn ship_range_commands(
+    annotation: &Annotation,
+    ranges: &wowsunpack::game_params::types::ShipRanges,
+    space_size: f32,
+) -> Vec<DrawCommand> {
+    let Annotation::Ship { pos, config: Some(config), .. } = annotation else { return Vec::new() };
+    if space_size <= 0.0 {
+        return Vec::new();
+    }
+    let to_minimap = |meters: f32| meters / WORLD_TO_METERS / space_size * wows_minimap_renderer::MINIMAP_SIZE as f32;
+
+    let wanted = &config.range_filter;
+    let mut circles = Vec::new();
+    let mut circle = |kind: ShipConfigCircleKind, meters: f32, coefficient: f32| {
+        // A build's coefficient moves the ring and the figure beside it
+        // together: the reader is reading their own range, not the stock one.
+        let reach = meters * coefficient;
+        let radius = to_minimap(reach);
+        if radius < 1.0 {
+            return;
+        }
+        let (color, alpha, dashed) = kind.style();
+        circles.push(DrawCommand::ShipConfigCircle {
+            entity_id: EntityId::from(0_u32),
+            pos: at(*pos),
+            radius_px: radius,
+            color,
+            alpha,
+            dashed,
+            label: Some(format!("{:.1} km", reach / 1000.0)),
+            kind,
+            // Belongs to nobody, which keeps it out of the per-ship filters.
+            player_name: String::new(),
+            is_self: false,
+        });
+    };
+
+    if wanted.detection
+        && let Some(km) = ranges.detection_km
+    {
+        circle(ShipConfigCircleKind::Detection, km.value() * 1000.0, config.vis_coeff);
+    }
+    if wanted.main_battery
+        && let Some(meters) = ranges.main_battery_m
+    {
+        circle(ShipConfigCircleKind::MainBattery, meters.value(), config.gm_coeff);
+    }
+    if wanted.secondary_battery
+        && let Some(meters) = ranges.secondary_battery_m
+    {
+        circle(ShipConfigCircleKind::SecondaryBattery, meters.value(), config.gs_coeff);
+    }
+    // Torpedoes, radar and hydro take no coefficient: no captain skill or
+    // upgrade in the annotation's build moves them.
+    if wanted.torpedo
+        && let Some(meters) = ranges.torpedo_range_m
+    {
+        circle(ShipConfigCircleKind::TorpedoRange, meters.value(), 1.0);
+    }
+    if wanted.radar
+        && let Some(meters) = ranges.radar_m
+    {
+        circle(ShipConfigCircleKind::Radar, meters.value(), 1.0);
+    }
+    if wanted.hydro
+        && let Some(meters) = ranges.hydro_m
+    {
+        circle(ShipConfigCircleKind::Hydro, meters.value(), 1.0);
+    }
+    circles
+}
+
 /// The three corners of an arrow's head, or `None` for a stroke with no tip
 /// to put one on.
 fn arrow_head(points: &[[f32; 2]], width: f32) -> Option<[[f32; 2]; 3]> {
@@ -623,6 +709,96 @@ mod tests {
         let enemy = annotation_commands(&ship(false));
         let [DrawCommand::Ship { color, .. }] = &enemy[..] else { panic!("still a ship") };
         assert_eq!(*color, Some([254, 77, 42]), "and tinted as the enemy otherwise");
+    }
+
+    fn ranges() -> wowsunpack::game_params::types::ShipRanges {
+        use wowsunpack::game_params::types::Km;
+        use wowsunpack::game_params::types::Meters;
+
+        wowsunpack::game_params::types::ShipRanges {
+            detection_km: Some(Km::new(10.0)),
+            main_battery_m: Some(Meters::new(16000.0)),
+            secondary_battery_m: Some(Meters::new(6000.0)),
+            torpedo_range_m: Some(Meters::new(8000.0)),
+            radar_m: Some(Meters::new(9000.0)),
+            hydro_m: Some(Meters::new(5000.0)),
+            ..Default::default()
+        }
+    }
+
+    fn placed(filter: crate::types::AnnotationRangeFilter, vis: f32, gm: f32) -> Annotation {
+        Annotation::Ship {
+            pos: [100.0, 100.0],
+            yaw: 0.0,
+            species: "Cruiser".to_string(),
+            friendly: true,
+            config: Some(crate::types::AnnotationShipConfig {
+                ship_name: "Moskva".to_string(),
+                vis_coeff: vis,
+                gm_coeff: gm,
+                range_filter: filter,
+                ..Default::default()
+            }),
+        }
+    }
+
+    /// Only the circles the reader asked for are drawn.
+    #[test]
+    fn a_placed_ship_draws_only_the_ranges_asked_for() {
+        let wanted = crate::types::AnnotationRangeFilter { detection: true, radar: true, ..Default::default() };
+        let drawn = ship_range_commands(&placed(wanted, 1.0, 1.0), &ranges(), 1400.0);
+
+        let kinds: Vec<ShipConfigCircleKind> = drawn
+            .iter()
+            .map(|command| match command {
+                DrawCommand::ShipConfigCircle { kind, .. } => *kind,
+                other => panic!("a range draws a range circle, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(kinds, vec![ShipConfigCircleKind::Detection, ShipConfigCircleKind::Radar]);
+    }
+
+    /// A build's coefficient moves the ring and the figure beside it
+    /// together, so the reader reads their own range rather than the stock
+    /// one.
+    #[test]
+    fn a_build_moves_the_ring_and_its_label_together() {
+        let wanted = crate::types::AnnotationRangeFilter { main_battery: true, ..Default::default() };
+
+        let stock = ship_range_commands(&placed(wanted.clone(), 1.0, 1.0), &ranges(), 1400.0);
+        let [DrawCommand::ShipConfigCircle { radius_px: stock_radius, label: stock_label, .. }] = &stock[..] else {
+            panic!("one circle, got {stock:?}");
+        };
+        assert_eq!(stock_label.as_deref(), Some("16.0 km"));
+
+        let upgraded = ship_range_commands(&placed(wanted, 1.0, 1.1), &ranges(), 1400.0);
+        let [DrawCommand::ShipConfigCircle { radius_px, label, .. }] = &upgraded[..] else {
+            panic!("one circle, got {upgraded:?}");
+        };
+        assert!((radius_px / stock_radius - 1.1).abs() < 1e-3, "the ring grew with the build");
+        assert_eq!(label.as_deref(), Some("17.6 km"), "and so did the figure beside it");
+    }
+
+    /// A ship nobody has chosen yet draws no ranges, rather than a stock
+    /// ship's.
+    #[test]
+    fn a_ship_with_no_build_draws_no_ranges() {
+        let unconfigured = Annotation::Ship {
+            pos: [100.0, 100.0],
+            yaw: 0.0,
+            species: "Cruiser".to_string(),
+            friendly: true,
+            config: None,
+        };
+        assert!(ship_range_commands(&unconfigured, &ranges(), 1400.0).is_empty());
+    }
+
+    /// A map of no size cannot place a circle, and dividing by it would put
+    /// one of infinite radius on the frame.
+    #[test]
+    fn a_map_of_no_size_draws_no_ranges() {
+        let wanted = crate::types::AnnotationRangeFilter { detection: true, ..Default::default() };
+        assert!(ship_range_commands(&placed(wanted, 1.0, 1.0), &ranges(), 0.0).is_empty());
     }
 
     /// A ship that has been given a name carries it, which is what the

@@ -125,6 +125,12 @@ struct Track {
     battle_start: GameClock,
     /// When the battle ended, if the replay ran that far.
     battle_end: Option<GameClock>,
+    /// How wide the map is in the game's own world units, which is what
+    /// turns a ship's range in metres into a distance on the minimap.
+    space_size: f32,
+    /// The build this was recorded on, which some of a ship's ranges are
+    /// gated on.
+    version: wowsunpack::data::Version,
     /// Where the map's top-left corner sits in these frames.
     map_origin: (f32, f32),
 }
@@ -422,6 +428,10 @@ impl ReplayRendererPanel {
                 clocks: clocks.into_iter().map(GameClock).collect(),
                 battle_start: GameClock(0.0),
                 battle_end: None,
+                // A middling map, so a range in metres lands somewhere
+                // sensible on the minimap.
+                space_size: 1400.0,
+                version: wowsunpack::data::Version::base(99, 0, 0),
                 map_origin: (0.0, wows_minimap_renderer::HUD_HEIGHT as f32),
             }),
             renderer: None,
@@ -1227,6 +1237,7 @@ impl ReplayRendererPanel {
         // with it and they go on last.
         let mut drawn_on: Vec<DrawCommand> =
             self.collab.annotations().iter().flat_map(wt_collab_client::geometry::annotation_commands).collect();
+        drawn_on.extend(self.placed_ship_ranges());
         // The shape under the pointer is drawn the same way the finished one
         // will be, so what a reader sees while dragging is what they get.
         if let Some(at) = self.pointer_at
@@ -1676,6 +1687,40 @@ impl ReplayRendererPanel {
         let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(annotation);
         let anchor = self.element_point(((left + right) / 2.0, top))?;
         Some(((anchor.0, anchor.1 - HANDLE_DISTANCE), anchor))
+    }
+
+    /// The range circles every placed ship asks for.
+    ///
+    /// Resolved here rather than in the shared layer because a range is read
+    /// out of the ship's own game data, which only a front end has. Nothing
+    /// is drawn until a ship has been chosen for the annotation, since there
+    /// is no ship to read the ranges of.
+    fn placed_ship_ranges(&self) -> Vec<DrawCommand> {
+        use wowsunpack::data::ResourceLoader as _;
+
+        let Some(track) = self.track() else { return Vec::new() };
+        let (space_size, version) = (track.space_size, track.version);
+        let annotations = self.collab.annotations();
+        if annotations.is_empty() {
+            return Vec::new();
+        }
+        let Some(loaded) = self.game_data.as_ref().and_then(|cache| cache.newest_loaded()) else {
+            return Vec::new();
+        };
+        let provider = loaded.provider();
+
+        let mut circles = Vec::new();
+        for annotation in &annotations {
+            let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else {
+                continue;
+            };
+            let Some(param) = provider.game_param_by_id(config.param_id.into()) else { continue };
+            let Some(vehicle) = param.vehicle() else { continue };
+            let hull = (!config.hull_name.is_empty()).then_some(config.hull_name.as_str());
+            let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, version);
+            circles.extend(wt_collab_client::geometry::ship_range_commands(annotation, &ranges, space_size));
+        }
+        circles
     }
 
     /// Remembers what the session holds, before changing it.
@@ -2545,6 +2590,8 @@ fn bake(
         clocks: baked.clocks,
         battle_start: baked.battle_start,
         battle_end: baked.battle_end,
+        space_size: baked.space_size,
+        version: baked.version,
         map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
     };
     Ok((track, baked.renderer))
