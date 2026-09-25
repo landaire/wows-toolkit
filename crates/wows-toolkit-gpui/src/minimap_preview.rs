@@ -234,6 +234,12 @@ pub struct BakedTrack {
     /// When `BattleEnd` arrived, if it did. Absent on a replay that was cut
     /// short.
     pub battle_end: Option<GameClock>,
+    /// How wide the map is in the game's own world units, which is what
+    /// turns a range in metres into a distance on the minimap.
+    pub space_size: f32,
+    /// The build the replay was recorded on, which some of a ship's ranges
+    /// are gated on.
+    pub version: Version,
     /// Where the map's top-left corner sits in these frames. The layout
     /// decides it, and a side panel moves it.
     pub map_origin: (u32, u32),
@@ -294,6 +300,7 @@ pub fn bake_track(
         assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
 
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
+    let space_size = map_info.space_size as f32;
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, options);
     renderer.set_fonts(assets::load_game_fonts(vfs));
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
@@ -320,7 +327,16 @@ pub fn bake_track(
 
     let clocks = sink.kept_clocks().to_vec();
     let map_origin = target.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
-    Ok(BakedTrack { frames: sink.finish(), clocks, renderer: target, battle_start, battle_end, map_origin })
+    Ok(BakedTrack {
+        frames: sink.finish(),
+        clocks,
+        renderer: target,
+        battle_start,
+        battle_end,
+        space_size,
+        version,
+        map_origin,
+    })
 }
 
 /// The map `map_name` names, with nothing drawn over it.
