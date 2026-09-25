@@ -191,8 +191,8 @@ kept so the next audit does not re-report them.
     cannot word a factor differently. The port hovers the whole strip rather
     than the label's own rectangle: the label is drawn into the frame by the
     renderer, so there is no element of its own to rest a pointer on.
-  - Two things are still absent, and each is a feature the port lacks the
-    plumbing for rather than a control left unwired. What each needs first:
+  - [done] Both of the features that were absent -- Show Realtime Armor and
+    the annotation toolbar -- are in. What each needed:
     - **Show Realtime Armor** from the per-ship menu. The egui app opens an
       armor viewer bound to a `RealtimeArmorBridge` that streams shot hits at
       it as playback advances. The port's armor viewer has no shot-hit
@@ -228,9 +228,16 @@ kept so the next audit does not re-report them.
       is the one colour, because what kind of hit it was is the penetration
       checker's answer and colouring them here would claim something the
       markers do not know. A hit the viewport cannot place is left unmarked.
-      What remains is the rest of the egui window's furniture: the shot log
-      beside the hull, the health readout, and following playback live rather
-      than taking the hits as they stand when the viewer opens.
+      An open viewer follows playback, and is disturbed only when the set of
+      hits actually changes: showing them again rebuilds the hull's meshes,
+      which is far more than a frame of playback is worth, and
+      `RealtimeArmorFeed` is what answers whether anything changed. A step
+      backwards always counts, because a hull cannot be un-hit one shell at a
+      time. Following is a separate event from opening, so playback never
+      pulls the reader back to the armor tab. Beside the hull it reads the
+      ship's health at that moment and a shot log of what landed, newest
+      first and bounded, worded by `hull_impact::log_line` so a log in one
+      viewer cannot call a shatter something else than a log in the other.
     - [done] **Team rosters, and reading a consumable by resting on it.** The
       gear carries a Team Rosters switch, as the egui display settings do,
       and the two clear each other because the rosters and the stats panel
