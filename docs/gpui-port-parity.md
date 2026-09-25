@@ -149,8 +149,22 @@ kept so the next audit does not re-report them.
     already depends on `wows-replay-insights` and the timeline reads team
     advantage -- it is game logic over game types, so `wows-core` is where it
     belongs anyway.
-  - Still absent, in rough order of what would be missed: the event timeline
-    panel; codec, prefer-CPU and include-pre-battle on export;
+  - The event timeline is a popover on the transport: the battle's events,
+    filtered by kind and by a search over what each row says, each row clickable
+    to seek to it and coloured by whose it was. Copy takes whatever the filter
+    is showing. While the second walk runs it says so rather than showing an
+    empty list, and it distinguishes "nothing happened" from "nothing matches".
+    The filter, the row wording and the friendly/enemy decision are all in
+    `wows_replay_insights::timeline`, so the egui list and this one cannot
+    drift; only the widgets and the colours differ.
+  - Export carries the egui renderer's own settings: prefer-CPU,
+    include-pre-battle, and the codec with an Auto that names what it would
+    pick. Only codecs this machine can actually encode with are offered, the
+    probe runs once for the process, and a codec the GPU cannot encode falls
+    back to software rather than failing the export. Leaving the pre-battle
+    phase out trims the frames before the battle's own start rather than
+    re-baking.
+  - Still absent, in rough order of what would be missed:
     the per-ship context menu (trail and range toggles, Show Realtime Armor);
     the roster, consumable, build and team-advantage hover readouts; the
     annotation toolbar and everything collab draws over the map (pings,
