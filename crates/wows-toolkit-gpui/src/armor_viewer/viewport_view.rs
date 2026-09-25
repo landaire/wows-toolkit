@@ -515,6 +515,9 @@ pub struct ViewportView {
     /// What this ship had taken when a replay viewport asked for it, drawn
     /// over the hull as the overlays are.
     hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// What the ship's health was at that moment, when a replay is driving
+    /// this viewer. `None` when nothing is.
+    hit_health: Option<f32>,
     /// The camera orbits currently drawn, so a pointer resting on one can be
     /// told which it is. Rebuilt with the overlay that drew them.
     ring_hovers: Vec<camera_rings::RingHover>,
@@ -694,6 +697,7 @@ impl ViewportView {
             popover_scroll: ScrollHandle::new(),
             hovered: None,
             hits: Vec::new(),
+            hit_health: None,
             ring_hovers: Vec::new(),
             hovered_ring: None,
             hover_highlight: None,
@@ -1134,6 +1138,25 @@ impl ViewportView {
     /// How many hits are drawn on the hull.
     pub(crate) fn hits_drawn(&self) -> usize {
         self.hits.len()
+    }
+
+    /// Says what the ship's health was at the moment being shown.
+    ///
+    /// Set apart from the hits because it changes without them: a fire or a
+    /// flood takes health off between one shell and the next.
+    pub(crate) fn set_hit_health(&mut self, health: Option<f32>, cx: &mut Context<Self>) {
+        if self.hit_health == health {
+            return;
+        }
+        self.hit_health = health;
+        cx.notify();
+    }
+
+    /// What a replay viewer reads beside the hull: how much of the ship was
+    /// left, and how much of it had been hit.
+    pub(crate) fn hit_readout(&self) -> Option<String> {
+        let health = self.hit_health?;
+        Some(t!("ui.armor.realtime_readout", health = format!("{health:.0}"), hits = self.hits.len()).into_owned())
     }
 
     /// Whether the openings in the armor are marked, and how many there
@@ -3000,6 +3023,23 @@ impl Render for ViewportView {
             .on_key_up(cx.listener(Self::handle_key_up))
             .child(image_child)
             .child(overlay)
+            .children(self.hit_readout().map(|readout| {
+                // Over the hull rather than on the strip: it belongs to what
+                // is being shown, and the strip is the same whatever drives
+                // the viewer.
+                div()
+                    .absolute()
+                    .top_2()
+                    .left_2()
+                    .px_2()
+                    .py_1()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().background.opacity(0.85))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .text_xs()
+                    .child(readout)
+            }))
             .when_some(tooltip_overlay, |this, t| this.child(t))
             .when_some(ring_overlay, |this, t| this.child(t))
             .when_some(export_overlay, |this, o| this.child(o))

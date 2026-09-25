@@ -767,6 +767,27 @@ impl ArmorViewerPane {
         self.start_ship_load(param_index, display_name, cx);
     }
 
+    /// Updates what the open viewer shows as playback moves.
+    ///
+    /// Nothing if no ship is loaded: a viewer that was never opened has no
+    /// hull to put them on, and loading one here would drag the reader into
+    /// a tab they did not ask for.
+    pub fn follow_hits(
+        &mut self,
+        hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+        health: Option<f32>,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.ship_loaded {
+            return;
+        }
+        let active = self.dock.read(cx).active_viewport();
+        active.update(cx, |view, cx| {
+            view.set_hit_health(health, cx);
+            view.show_hits(hits, cx);
+        });
+    }
+
     fn start_ship_load(&mut self, param_index: String, display_name: String, cx: &mut Context<Self>) {
         let BundleState::Ready(bundle) = &self.bundle else {
             tracing::warn!("armor viewer: ship selected before ship assets finished loading");
