@@ -220,6 +220,11 @@ pub struct ReplayRendererPanel {
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
     collab: crate::collab::CollabLink,
+    /// Kept so the viewport can build the canvas a layer asks for: the team
+    /// rosters need gutters the canvas it opened with does not have.
+    game_data: Option<GameDataCache>,
+    /// The canvas the frame on screen was drawn on.
+    layout: wows_minimap_renderer::drawing::SidePanelLayout,
     /// What an export is encoded with.
     export_settings: ExportSettings,
     /// Ships whose trail the reader has hidden, by player name, which is what
@@ -308,7 +313,7 @@ impl ReplayRendererPanel {
             popped_out: false,
             // The options the track was baked under, so what is drawn at
             // first is exactly what is in it.
-            options: wows_minimap_renderer::frame_track::bake_options(),
+            options: playback_options_hidden(),
             show_dead_ships: true,
             view: MapViewport::default(),
             zoom,
@@ -317,6 +322,8 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            game_data: None,
+            layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
             export_settings: ExportSettings::default(),
             trail_hidden: HashSet::new(),
             ship_ranges: HashMap::new(),
@@ -338,6 +345,7 @@ impl ReplayRendererPanel {
             _rebuilt_seek: None,
             focus_handle: cx.focus_handle(),
         };
+        panel.game_data = Some(game_data.clone());
         panel.start_bake(path.clone(), game_data.clone(), cx);
         panel.start_event_scan(path, game_data, cx);
         panel
@@ -383,7 +391,7 @@ impl ReplayRendererPanel {
             popped_out: false,
             // The options the track was baked under, so what is drawn at
             // first is exactly what is in it.
-            options: wows_minimap_renderer::frame_track::bake_options(),
+            options: playback_options_hidden(),
             show_dead_ships: true,
             view: MapViewport::default(),
             zoom,
@@ -392,6 +400,8 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            game_data: None,
+            layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
             export_settings: ExportSettings::default(),
             trail_hidden: HashSet::new(),
             ship_ranges: HashMap::new(),
@@ -898,8 +908,47 @@ impl ReplayRendererPanel {
     /// while playback is paused.
     pub fn set_options(&mut self, apply: impl FnOnce(&mut RenderOptions, &mut bool), cx: &mut Context<Self>) {
         apply(&mut self.options, &mut self.show_dead_ships);
+        self.follow_layout(cx);
         self.draw_current(cx);
         cx.notify();
+    }
+
+    /// Moves the viewport onto the canvas its layers now need.
+    ///
+    /// The rosters sit in gutters either side of the map, so turning them on
+    /// is not a layer but a wider canvas. The renderer for one is kept, so
+    /// switching back and forth costs nothing after the first time.
+    fn follow_layout(&mut self, cx: &mut Context<Self>) {
+        let wanted = crate::minimap_preview::layout_for(&self.options);
+        if wanted == self.layout {
+            return;
+        }
+        let Some(game_data) = self.game_data.clone() else {
+            // Nothing to build a canvas from, so the layer cannot be shown.
+            self.options.show_team_rosters = false;
+            self.options.show_stats_panel = false;
+            return;
+        };
+        match crate::minimap_preview::renderer_for_replay(&self.path, &game_data, wanted) {
+            Ok((renderer, origin)) => {
+                self.layout = wanted;
+                self.renderer = Some(renderer);
+                if let State::Ready(track) = &mut self.state {
+                    track.map_origin = (origin.0 as f32, origin.1 as f32);
+                }
+                // The frame on screen was drawn on the old canvas, so it is
+                // the wrong shape until the next one lands.
+                self.redraw_wanted = true;
+                let _ = cx;
+            }
+            Err(reason) => {
+                // The layer stays off rather than drawing on a canvas with no
+                // room for it.
+                tracing::warn!("replay renderer: the canvas for {wanted:?} could not be built: {reason}");
+                self.options.show_team_rosters = false;
+                self.options.show_stats_panel = false;
+            }
+        }
     }
 
     /// Whether this viewport is in a window of its own, which is what hides
@@ -1991,6 +2040,15 @@ const SCROLL_LINE: Pixels = px(20.);
 /// rate, so the wheel feels the same in both.
 const ZOOM_PER_PIXEL: f32 = 0.01;
 
+/// What a playback viewport draws when it opens.
+///
+/// Everything it baked except the layers that are asked for rather than
+/// assumed: the rosters take a gutter either side of the map, and the ranges
+/// would cover it.
+fn playback_options_hidden() -> RenderOptions {
+    RenderOptions { show_ship_config: false, show_team_rosters: false, ..playback_options() }
+}
+
 /// What a playback viewport bakes.
 ///
 /// The hover preview's set plus every ship's range circles. They are per-frame
@@ -2001,6 +2059,10 @@ const ZOOM_PER_PIXEL: f32 = 0.01;
 fn playback_options() -> RenderOptions {
     RenderOptions {
         show_ship_config: true,
+        // The rosters' own commands carry fixed coordinates, so baking them
+        // costs a roster per frame and nothing else; the canvas they need is
+        // the target's business, not the bake's.
+        show_team_rosters: true,
         // Every ship's, so the reader can choose whose to look at afterwards
         // rather than re-baking to change their mind.
         ship_config_visibility: wows_minimap_renderer::draw_command::ShipConfigVisibility::Filtered(

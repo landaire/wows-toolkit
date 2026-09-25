@@ -19,6 +19,7 @@ use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::assets;
 use wows_minimap_renderer::config::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::drawing::SidePanelLayout;
 use wows_minimap_renderer::frame_track::PREVIEW_FPS;
 use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
 use wows_minimap_renderer::frame_track::TrackSink;
@@ -51,6 +52,10 @@ pub type SharedPreviewRenderer = Arc<Mutex<PreviewRenderer>>;
 struct RendererKey {
     build: Option<NonZeroU32>,
     map: String,
+    /// The canvas a renderer was built for. A viewport showing the team
+    /// rosters needs gutters the hover previews have no room for, so the two
+    /// cannot share one.
+    layout: SidePanelLayout,
 }
 
 /// One kept renderer and the map it draws.
@@ -80,8 +85,9 @@ fn renderer_for(
     map_name: &str,
     vfs: &VfsPath,
     version: Option<&Version>,
+    layout: SidePanelLayout,
 ) -> Result<SharedPreviewRenderer, PreviewError> {
-    let key = RendererKey { build, map: map_name.to_owned() };
+    let key = RendererKey { build, map: map_name.to_owned(), layout };
     {
         let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(at) = cache.iter().position(|held| held.key == key) {
@@ -98,7 +104,8 @@ fn renderer_for(
     // holding the cache through it would stall every other preview. Two
     // callers racing on the same map build it twice and the second wins,
     // which costs one extra read rather than a stall.
-    let renderer: SharedPreviewRenderer = Arc::new(Mutex::new(PreviewRenderer::new(vfs, version, map_name)?));
+    let renderer: SharedPreviewRenderer =
+        Arc::new(Mutex::new(PreviewRenderer::with_layout(vfs, version, map_name, layout)?));
 
     let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     cache.retain(|held| held.key != key);
@@ -107,6 +114,43 @@ fn renderer_for(
         cache.remove(0);
     }
     Ok(renderer)
+}
+
+/// The renderer `path`'s battle is drawn through on `layout`'s canvas.
+///
+/// Kept per layout, so asking for the rosters' canvas builds it once and
+/// switching back is free. Reads the replay's header again to find its build,
+/// which is what a deliberate toggle can afford.
+pub fn renderer_for_replay(
+    path: &std::path::Path,
+    game_data: &crate::replay_inspector::GameDataCache,
+    layout: SidePanelLayout,
+) -> Result<(SharedPreviewRenderer, (u32, u32)), PreviewError> {
+    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
+        .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let build =
+        version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
+    let loaded =
+        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+
+    let renderer = renderer_for(Some(build), &replay.meta.mapName, loaded.vfs(), Some(&version), layout)?;
+    let origin = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
+    Ok((renderer, origin))
+}
+
+/// The canvas `options` need.
+///
+/// Rosters live in gutters either side of the map, so a canvas that shows
+/// them is wider and its map does not start at the left edge.
+pub fn layout_for(options: &RenderOptions) -> SidePanelLayout {
+    if options.show_team_rosters {
+        SidePanelLayout::TeamRosters
+    } else if options.show_stats_panel {
+        SidePanelLayout::StatsPanel
+    } else {
+        SidePanelLayout::None
+    }
 }
 
 /// Drops every kept renderer, for a caller that would rather have the memory
@@ -252,7 +296,7 @@ pub fn bake_track(
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
     let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, options);
     renderer.set_fonts(assets::load_game_fonts(vfs));
-    let target = renderer_for(Some(build), &map_name, vfs, Some(&version))?;
+    let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
     let mut session =
         MergedReplays::new(provider.entity_specs(), provider, loaded.base_constants(), session_version, &replay, &[])
@@ -289,7 +333,7 @@ pub fn bake_track(
 /// own bake, which carries the art it was recorded against.
 pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCache) -> Option<PreviewFrames> {
     let loaded = game_data.newest_loaded()?;
-    let renderer = renderer_for(None, map_name, loaded.vfs(), None).ok()?;
+    let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
     let nothing_drawn: Vec<DrawCommand> = Vec::new();
     let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
@@ -335,7 +379,8 @@ pub fn bake(
     // Built before the battle is walked so the map can be shown during it; it
     // is the same renderer the track is rasterised with afterwards.
     let assets_at = std::time::Instant::now();
-    let preview = renderer_for(version.and_then(|version| version.build), &map_name, vfs, version)?;
+    let preview =
+        renderer_for(version.and_then(|version| version.build), &map_name, vfs, version, SidePanelLayout::None)?;
     let mut preview = preview.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
     tracing::debug!("preview: art for {map_name} in {:?}", assets_at.elapsed());
     let nothing_drawn: Vec<DrawCommand> = Vec::new();
