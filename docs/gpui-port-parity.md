@@ -208,15 +208,17 @@ kept so the next audit does not re-report them.
       target to report where it drew each consumable icon, which it does now:
       `ImageTarget::drawn_regions` records a `DrawnRegion` per icon, keyed to
       the roster row it belongs to, so a front end can put a hover over one
-      without repeating the layout and drifting from it. What is still in the
-      way is that rosters are not a layer that can be switched on at
-      raster time: they need the canvas built as
-      `SidePanelLayout::TeamRosters`, which widens it and moves the map right,
-      so a viewport showing them needs a renderer of its own rather than the
-      one shared with every hover preview of that map. The map's corner is no
-      longer assumed -- `ImageTarget::map_origin` reports it and a baked track
-      carries it -- so the projections are ready for a layout that moves the
-      map.
+      without repeating the layout and drifting from it. The canvas is ready
+      too: renderers are kept per `SidePanelLayout`, a playback bake carries
+      the roster commands (their coordinates are fixed, so they do not depend
+      on the canvas), a viewport moves itself onto the wider canvas when a
+      layer asks for it, and the map's corner is no longer assumed.
+      What is actually missing is a reason for the rosters to appear at all.
+      The egui renderer has no toggle for them: they come from a saved
+      setting, and turn on by themselves for merged replays, which are "the
+      whole point of having alt perspectives". The port's viewport has
+      neither, so these hovers sit behind whichever is ported first. A gear
+      toggle instead would be an invention rather than parity.
     - **The annotation toolbar.** Peers' cursors and their pings are drawn
       now: `wt-collab-client` already tracked both, so the work was a
       `CollabLink` the viewport holds (inert without a session, and handed on
