@@ -234,6 +234,12 @@ pub struct ReplayRendererPanel {
     /// Where the pointer last was on the map, which is what a part-drawn
     /// shape is previewed against.
     pointer_at: Option<[f32; 2]>,
+    /// What the reader has picked out to move, with no tool in hand.
+    picked: wt_collab_client::drawing::Selection,
+    /// Where a move of the picked shapes began, in map space, and what they
+    /// looked like then. Kept so a move is one update at the end rather than
+    /// one per pixel of the drag.
+    moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
     /// The redraw a running session needs, held only while there is one.
     _collab_tick: Option<Task<()>>,
     /// Kept so the viewport can build the canvas a layer asks for: the team
@@ -348,6 +354,8 @@ impl ReplayRendererPanel {
             collab: crate::collab::CollabLink::default(),
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
+            picked: wt_collab_client::drawing::Selection::default(),
+            moving: None,
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -431,6 +439,8 @@ impl ReplayRendererPanel {
             collab: crate::collab::CollabLink::default(),
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
+            picked: wt_collab_client::drawing::Selection::default(),
+            moving: None,
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -1571,6 +1581,11 @@ impl ReplayRendererPanel {
             self.stroke(Stroke::Began { at: [at.0, at.1] }, cx);
             return;
         }
+        // Nor is one dragging something they have already picked out.
+        if !self.picked.is_empty() {
+            self.moving = Some(([at.0, at.1], self.collab.annotations()));
+            return;
+        }
         if self.view.is_whole_map() {
             return;
         }
@@ -1626,6 +1641,21 @@ impl ReplayRendererPanel {
             && let Some(at) = self.map_point(event.position)
         {
             self.stroke(Stroke::Ended { at: [at.0, at.1] }, cx);
+            return;
+        }
+        // The session hears about a move once, when it is over, rather than
+        // per pixel of the drag.
+        if let Some((from, before)) = self.moving.take()
+            && let Some((x, y)) = self.map_point(event.position)
+        {
+            let delta = [x - from[0], y - from[1]];
+            for index in self.picked.picked() {
+                let Some(annotation) = before.get(*index) else { continue };
+                let mut moved = annotation.clone();
+                wt_collab_client::drawing::move_annotation(&mut moved, delta);
+                self.collab.update_annotation(*index, moved);
+            }
+            cx.notify();
         }
     }
 
@@ -1639,6 +1669,20 @@ impl ReplayRendererPanel {
                 self.stroke(Stroke::Clicked { at: [at.0, at.1] }, cx);
             }
             return;
+        }
+        // With no tool, a click picks a drawn shape out to move. Only when
+        // there is something to pick: otherwise every click on the map would
+        // swallow the double-click that puts the whole map back.
+        if let Some((x, y)) = self.map_point(event.position()) {
+            let annotations = self.collab.annotations();
+            if !annotations.is_empty() {
+                self.picked.click(&annotations, [x, y], event.modifiers().secondary());
+                self.picked.retain_within(&annotations);
+                cx.notify();
+                if !self.picked.is_empty() {
+                    return;
+                }
+            }
         }
         if event.click_count() < 2 {
             return;
@@ -4431,6 +4475,101 @@ mod tests {
                 assert!(panel.dragging.is_some());
             })
             .expect("the window is open");
+    }
+
+    /// A shape picked out and dragged moves, and the session hears about it
+    /// once, at the end, under the id it already knows.
+    #[gpui_kit::test]
+    fn a_picked_shape_moves_with_the_drag(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::MouseButton;
+        use gpui_kit::MouseDownEvent;
+        use gpui_kit::MouseUpEvent;
+        use gpui_kit::point;
+        use wt_collab_client::AnnotationSyncState;
+        use wt_collab_client::peer::LocalAnnotationEvent;
+        use wt_collab_client::peer::LocalEvent;
+        use wt_collab_client::types::Annotation;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        state.lock().current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![Annotation::Circle {
+                center: [200.0, 200.0],
+                radius: 20.0,
+                color: [255, 255, 255, 255],
+                width: 2.0,
+                filled: false,
+            }],
+            ids: vec![4242],
+            owners: vec![7],
+            ..Default::default()
+        });
+        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                // On the circle's own edge, which is where a hit test finds
+                // it.
+                let on = panel.element_point((220.0, 200.0)).expect("a point the viewport is showing");
+                let click = gpui_kit::ClickEvent::Mouse(gpui_kit::MouseClickEvent {
+                    down: MouseDownEvent {
+                        button: MouseButton::Left,
+                        position: point(on.0, on.1),
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    },
+                    up: MouseUpEvent {
+                        button: MouseButton::Left,
+                        position: point(on.0, on.1),
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                    },
+                });
+                panel.on_viewport_click(&click, window, cx);
+                assert_eq!(panel.picked.picked(), [0], "the click picked the circle out");
+
+                let press = MouseDownEvent {
+                    button: MouseButton::Left,
+                    position: point(on.0, on.1),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                };
+                panel.on_drag_start(&press, window, cx);
+                assert!(panel.dragging.is_none(), "the drag moves the shape rather than the map");
+
+                let to = panel.element_point((260.0, 230.0)).expect("and another");
+                let release = MouseUpEvent {
+                    button: MouseButton::Left,
+                    position: point(to.0, to.1),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                };
+                panel.on_drag_end(&release, window, cx);
+            })
+            .expect("the window is open");
+
+        let moved: Vec<(u64, Annotation)> = sent
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(LocalAnnotationEvent::Set { id, annotation, .. }) => Some((id, annotation)),
+                _ => None,
+            })
+            .collect();
+        let [(id, Annotation::Circle { center, .. })] = &moved[..] else {
+            panic!("one update for the one shape, got {moved:?}");
+        };
+        assert_eq!(*id, 4242, "under the id the session already knows");
+        assert!((center[0] - 240.0).abs() < 1.0 && (center[1] - 230.0).abs() < 1.0, "moved by the drag: {center:?}");
     }
 
     /// A ping is shed only once its ripple has run out.
