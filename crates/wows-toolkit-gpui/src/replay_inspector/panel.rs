@@ -97,8 +97,6 @@ use wows_toolkit_viewmodel::twitch;
 const LOADING_TITLE: &str = "Loading...";
 const FAILED_TITLE: &str = "Failed to load replay";
 const SIDE_PANEL_WIDTH: Pixels = px(360.);
-const EXPORT_MENU_WIDTH: Pixels = px(220.);
-
 /// Which entity (if any) occupies the panel's single side-panel slot. Chat
 /// and the debug-mode raw viewers share the slot rather than each having
 /// their own, since only one is useful to look at at a time and the egui app
@@ -495,6 +493,14 @@ impl ReplayPanel {
 
 impl EventEmitter<PanelEvent> for ReplayPanel {}
 
+/// A panel asked for its own replay to be rendered.
+///
+/// The panel owns neither the dock nor the renderer, so it says which replay
+/// rather than opening anything itself.
+pub struct RenderRequested(pub PathBuf);
+
+impl EventEmitter<RenderRequested> for ReplayPanel {}
+
 impl Focusable for ReplayPanel {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -545,28 +551,6 @@ fn outcome_badge(battle_result: Option<BattleResult>) -> AnyElement {
         .child(icons::icon(glyph))
         .child(label)
         .into_any_element()
-}
-
-/// The Export dropdown, mirroring the egui app's three Export Results items.
-/// Disabled until the parse finishes, since there is nothing to write before
-/// then.
-fn export_menu(panel: Entity<ReplayPanel>, can_export: bool) -> impl IntoElement {
-    let trigger = Button::new("replay-export-trigger")
-        .child(icons::icon(icons::DOWNLOAD_SIMPLE))
-        .label(t!("ui.replay.section_export").to_string())
-        .compact()
-        .disabled(!can_export)
-        .when(!can_export, |this| this.tooltip(t!("ui.replay.loading").to_string()));
-
-    Popover::new("replay-export").trigger(trigger).content(move |_state, _window, _cx| {
-        let panel = panel.clone();
-        v_flex().w(EXPORT_MENU_WIDTH).gap_1().p_1().children(ExportFormat::ALL.map(|format| {
-            let panel = panel.clone();
-            Button::new(format.id()).label(format.label()).compact().on_click(move |_event, _window, cx: &mut App| {
-                panel.update(cx, |this, cx| this.export_match(format, cx));
-            })
-        }))
-    })
 }
 
 /// What a tab needs to start reading a replay.
@@ -772,6 +756,9 @@ fn side_panel_button(spec: SidePanelButtonSpec, current: SidePanel, cx: &mut Con
 /// What the header row draws, bundled so it stays under clippy's
 /// argument-count limit (the same reason `SidePanelButtonSpec` exists).
 struct HeaderState {
+    /// The replay this panel is reading, which is what its Actions menu
+    /// asks to have rendered.
+    path: PathBuf,
     battle_result: Option<BattleResult>,
     personal_rating: Option<PersonalRatingResult>,
     has_chat: bool,
@@ -836,27 +823,101 @@ fn match_context_line(context: &MatchContext, team_damage: (u64, u64)) -> AnyEle
 /// What the egui line puts between its fields.
 const SEPARATOR: &str = "-";
 
+/// What the header's Actions menu is built from.
+///
+/// Passed as one value rather than as five loose flags, so a caller cannot
+/// transpose two of them.
+struct ActionsState {
+    path: PathBuf,
+    /// Whether this replay's own figures are hidden, and whether hiding them
+    /// means anything: only a test ship's do.
+    hidden: bool,
+    is_test_ship: bool,
+    can_export: bool,
+    /// Whether the debug-only side panels are offered, and which of them
+    /// have anything behind them.
+    debug: bool,
+    has_results: bool,
+    has_mapped_results: bool,
+    side_panel: SidePanel,
+}
+
 /// The header's Actions menu.
 ///
-/// Only what this port can actually do is here: the egui menu also carries
-/// the match timeline and the other-team perspective, neither of which the
-/// port has. Shown only for a test ship, which is the one case hiding your
-/// own figures means anything in.
-fn actions_menu(panel: Entity<ReplayPanel>, hidden: bool) -> impl IntoElement + use<> {
+/// Everything that is not a thing the reader flips back and forth lives in
+/// here, sectioned as the egui menu sections it: a header row of eight
+/// buttons is a row nobody reads.
+///
+/// The egui menu also carries the other-team perspective, which this port
+/// has no loading path for.
+fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoElement + use<> {
+    let ActionsState { path, hidden, is_test_ship, can_export, debug, has_results, has_mapped_results, side_panel } =
+        state;
+
     Button::new("replay-actions").label(t!("ui.replay.actions").into_owned()).compact().dropdown_menu(
         move |menu, _window, _cx| {
-            let panel = panel.clone();
-            menu.item(PopupMenuItem::new(t!("ui.replay.hide_my_stats").into_owned()).checked(hidden).on_click(
-                move |_event, _window, cx| {
-                    panel.update(cx, |panel, cx| panel.set_self_stats_hidden(!hidden, cx));
-                },
-            ))
+            let path = path.clone();
+            let menu = menu.label(t!("ui.replay.section_match").into_owned()).item(
+                PopupMenuItem::new(t!("ui.replay.context.render_replay").into_owned()).on_click({
+                    let panel = panel.clone();
+                    move |_event, _window, cx| {
+                        let path = path.clone();
+                        panel.update(cx, |_panel, cx| cx.emit(RenderRequested(path)));
+                    }
+                }),
+            );
+
+            // Hiding your own figures only means anything for a test ship,
+            // where they are the thing being kept quiet.
+            let menu = if is_test_ship {
+                let panel = panel.clone();
+                menu.item(PopupMenuItem::new(t!("ui.replay.hide_my_stats").into_owned()).checked(hidden).on_click(
+                    move |_event, _window, cx| {
+                        panel.update(cx, |panel, cx| panel.set_self_stats_hidden(!hidden, cx));
+                    },
+                ))
+            } else {
+                menu
+            };
+
+            let menu = menu.separator().label(t!("ui.replay.section_export").into_owned());
+            let menu = ExportFormat::ALL.into_iter().fold(menu, |menu, format| {
+                let panel = panel.clone();
+                menu.item(PopupMenuItem::new(format.label()).disabled(!can_export).on_click(
+                    move |_event, _window, cx| {
+                        panel.update(cx, |this, cx| this.export_match(format, cx));
+                    },
+                ))
+            });
+
+            if !debug {
+                return menu;
+            }
+            let menu = menu.separator().label(t!("ui.replay.section_debug").into_owned());
+            [
+                (SidePanel::RawMetadata, "ui.replay.debug.raw_metadata", true),
+                (SidePanel::RawResults, "ui.replay.debug.raw_results", has_results),
+                (SidePanel::MappedResults, "ui.replay.debug.mapped_results", has_mapped_results),
+            ]
+            .into_iter()
+            .fold(menu, |menu, (which, label, enabled)| {
+                let panel = panel.clone();
+                menu.item(
+                    PopupMenuItem::new(t!(label).into_owned())
+                        .checked(side_panel == which)
+                        .disabled(!enabled)
+                        .on_click(move |_event, _window, cx| {
+                            panel.update(cx, |panel, cx| panel.toggle_side_panel(which, cx));
+                        }),
+                )
+            })
         },
     )
 }
 
 fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
     let HeaderState {
+        path,
         battle_result,
         personal_rating,
         has_chat,
@@ -883,55 +944,29 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         cx,
     );
 
-    let mut buttons = h_flex()
+    let buttons = h_flex()
         .flex_none()
         .items_center()
         .gap_1()
         .when_some(export_status, |this, status| {
             this.child(div().text_xs().text_color(crate::theme::text_dim()).child(status))
         })
-        .when(self_is_test_ship, |row| row.child(actions_menu(cx.entity(), self_stats_hidden)))
-        .child(export_menu(cx.entity(), can_export))
+        .child(actions_menu(
+            cx.entity(),
+            ActionsState {
+                path,
+                hidden: self_stats_hidden,
+                is_test_ship: self_is_test_ship,
+                can_export,
+                debug,
+                has_results,
+                has_mapped_results,
+                side_panel,
+            },
+        ))
+        // Kept out of the menu: the chat is read alongside the table and
+        // flipped back and forth, not chosen once.
         .child(chat_button);
-    if debug {
-        buttons = buttons
-            .child(side_panel_button(
-                SidePanelButtonSpec {
-                    id: "replay-debug-raw-metadata",
-                    icon: IconName::File,
-                    label_key: "ui.replay.debug.raw_metadata",
-                    panel: SidePanel::RawMetadata,
-                    enabled: true,
-                    disabled_tooltip_key: None,
-                },
-                side_panel,
-                cx,
-            ))
-            .child(side_panel_button(
-                SidePanelButtonSpec {
-                    id: "replay-debug-raw-results",
-                    icon: IconName::File,
-                    label_key: "ui.replay.debug.raw_results",
-                    panel: SidePanel::RawResults,
-                    enabled: has_results,
-                    disabled_tooltip_key: Some("ui.replay.debug.no_results_packet"),
-                },
-                side_panel,
-                cx,
-            ))
-            .child(side_panel_button(
-                SidePanelButtonSpec {
-                    id: "replay-debug-mapped-results",
-                    icon: IconName::File,
-                    label_key: "ui.replay.debug.mapped_results",
-                    panel: SidePanel::MappedResults,
-                    enabled: has_mapped_results,
-                    disabled_tooltip_key: Some("ui.replay.debug.no_results_packet"),
-                },
-                side_panel,
-                cx,
-            ));
-    }
 
     h_flex()
         .flex_none()
@@ -1047,6 +1082,7 @@ impl Render for ReplayPanel {
                     .size_full()
                     .child(header_row(
                         HeaderState {
+                            path: self.path.clone(),
                             battle_result,
                             personal_rating,
                             has_chat,
@@ -1151,13 +1187,65 @@ mod tests {
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            assert!(window.try_find("replay-export-json").is_none(), "the formats live behind the trigger");
-            window.click("replay-export-trigger", cx);
+            let offered = |window: &gpui_kit::Window| -> Vec<String> {
+                gpui_kit::base::test_support::snapshots(window)
+                    .iter()
+                    .filter_map(|element| element.label().map(str::to_string))
+                    .collect()
+            };
+            assert!(
+                !offered(window).iter().any(|label| *label == ExportFormat::ALL[0].label()),
+                "the formats live behind the menu"
+            );
+
+            window.click("replay-actions", cx);
+            window.render_frame(cx);
+            let offered = offered(window);
             for format in ExportFormat::ALL {
-                assert!(window.try_find(format.id()).is_some(), "{} is offered", format.label());
+                assert!(offered.iter().any(|label| *label == format.label()), "{} is offered", format.label());
             }
         })
         .expect("the window is open");
+    }
+
+    /// Rendering is offered on the replay being read, so a reader does not
+    /// have to go back to the listing to ask for it.
+    #[gpui_kit::test]
+    fn the_actions_menu_offers_to_render_the_replay_it_is_reading(cx: &mut TestAppContext) {
+        use super::RenderRequested;
+        use rust_i18n::t;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+
+        let asked = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let heard = std::rc::Rc::clone(&asked);
+        let panel = cx.update(|cx| window.root(cx).expect("the panel is open"));
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&panel, move |_view, event: &RenderRequested, _cx| {
+                let RenderRequested(path) = event;
+                heard.borrow_mut().push(path.clone());
+            })
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click("replay-actions", cx);
+            window.render_frame(cx);
+
+            let render = gpui_kit::base::test_support::snapshots(window)
+                .into_iter()
+                .find(|element| element.label() == Some(t!("ui.replay.context.render_replay").as_ref()))
+                .expect("the menu offers to render the replay");
+            window.click(render.path().last().expect("a menu item has an id").clone(), cx);
+        })
+        .expect("the window is open");
+
+        let asked = asked.borrow();
+        assert_eq!(asked.len(), 1, "one ask, for one replay");
+        assert_eq!(asked[0], std::path::PathBuf::from("test.wowsreplay"), "the replay this panel is reading");
     }
 
     /// The recording player's own figures can be hidden when they are in a
