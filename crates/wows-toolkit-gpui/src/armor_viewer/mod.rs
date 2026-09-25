@@ -49,6 +49,7 @@ mod load_ship;
 pub mod pane;
 pub mod picking_ui;
 pub mod popover;
+pub mod realtime;
 pub mod sidebar;
 pub mod splash;
 pub mod trajectory;

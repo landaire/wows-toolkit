@@ -202,8 +202,14 @@ kept so the next audit does not re-report them.
       and `ShipShotTimeline` now answers the questions a viewport asks of one
       -- the hits taken by a clock, the hits gained since the last one, and
       the health at a clock -- so the data half is shared and ready. What is
-      missing is the armor viewer's side: somewhere to put the hits, and a
-      way to open a viewer on a ship the renderer names.
+      missing is the armor viewer's side. Its bookkeeping is in:
+      `armor_viewer::realtime::RealtimeArmorFeed` holds a ship's timeline and
+      answers what it had taken by the moment playback is showing, reporting a
+      step forward as the hits it gained and a step backwards as "draw the
+      hull again", which is the part the egui app keeps tangled inside
+      `RealtimeArmorBridge`. What is left is the drawing: somewhere on the
+      hull to put those hits, and a way to open a viewer on a ship the
+      renderer names.
     - **Roster, consumable and build hover readouts.** A hover needs the
       target to report where it drew each consumable icon, which it does now:
       `ImageTarget::drawn_regions` records a `DrawnRegion` per icon, keyed to
