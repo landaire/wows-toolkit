@@ -2865,6 +2865,45 @@ struct ToolButton {
     tool: fn() -> Tool,
 }
 
+/// The ships that can be placed on the map, as the egui toolbar offers
+/// them, short name first.
+const SPECIES: &[(&str, &str)] =
+    &[("DD", "Destroyer"), ("CA", "Cruiser"), ("BB", "Battleship"), ("CV", "AirCarrier"), ("SS", "Submarine")];
+
+/// What a placed ship is tinted by which side it is on.
+const FRIENDLY_TINT: u32 = 0x4CE8AA;
+const ENEMY_TINT: u32 = 0xFE4D2A;
+
+/// A row of ships to place, for one side.
+fn species_row(panel: &Entity<ReplayRendererPanel>, chosen: &Tool, friendly: bool) -> AnyElement {
+    let tint = if friendly { FRIENDLY_TINT } else { ENEMY_TINT };
+    h_flex()
+        .gap_1()
+        .children(SPECIES.iter().map(|(short, species)| {
+            let owner = panel.clone();
+            let species = (*species).to_string();
+            let on = matches!(
+                chosen,
+                Tool::Ship { species: in_hand, friendly: side, .. } if in_hand == &species && *side == friendly
+            );
+            let id = format!("replay-renderer-place-{}-{short}", if friendly { "friendly" } else { "enemy" });
+            crate::ui::selectable(
+                gpui_kit::SharedString::from(id.clone()),
+                on,
+                Button::new(gpui_kit::SharedString::from(id))
+                    .label((*short).to_string())
+                    .compact()
+                    .selected(on)
+                    .text_color(gpui_kit::rgb(tint))
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        let species = species.clone();
+                        owner.update(cx, |panel, cx| panel.take_up(Tool::Ship { species, friendly, yaw: 0.0 }, cx));
+                    }),
+            )
+        }))
+        .into_any_element()
+}
+
 /// What a tool draws with, as the egui toolbar offers it.
 const INKS: &[(&str, [u8; 4])] = &[
     ("replay-renderer-ink-white", [255, 255, 255, 255]),
@@ -2923,6 +2962,9 @@ fn tools_popover(
                         ),
                     )
                 })))
+                .child(crate::ui::rule_h(_cx))
+                .child(species_row(&owner, &chosen, true))
+                .child(species_row(&owner, &chosen, false))
                 .child(crate::ui::rule_h(_cx))
                 .child({
                     let owner = owner.clone();
@@ -4870,6 +4912,54 @@ mod tests {
             })
             .collect();
         assert_eq!(removed, vec![*id], "the line goes, under the id it arrived with");
+    }
+
+    /// Placing a ship sends one, tinted by the side it was placed for and
+    /// facing the way the tool was holding it.
+    #[gpui_kit::test]
+    fn placing_a_ship_sends_one_for_the_side_it_was_placed_for(cx: &mut TestAppContext) {
+        use wt_collab_client::drawing::Stroke as DrawStroke;
+        use wt_collab_client::drawing::Tool;
+        use wt_collab_client::peer::LocalAnnotationEvent;
+        use wt_collab_client::peer::LocalEvent;
+        use wt_collab_client::types::Annotation;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.take_up(Tool::Ship { species: "Destroyer".to_string(), friendly: false, yaw: 0.75 }, cx);
+                panel.stroke(DrawStroke::Clicked { at: [150.0, 250.0] }, cx);
+            })
+            .expect("the window is open");
+
+        let placed: Vec<Annotation> = sent
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(LocalAnnotationEvent::Set { annotation, .. }) => Some(annotation),
+                _ => None,
+            })
+            .collect();
+        let [Annotation::Ship { pos, yaw, species, friendly, .. }] = &placed[..] else {
+            panic!("one ship was placed, got {placed:?}");
+        };
+        assert_eq!(*pos, [150.0, 250.0]);
+        assert_eq!(*yaw, 0.75);
+        assert_eq!(species, "Destroyer");
+        assert!(!friendly, "for the side the tool was holding");
+
+        // And it draws as a ship rather than as nothing.
+        let drawn = wt_collab_client::geometry::annotation_commands(&placed[0]);
+        assert!(matches!(drawn.as_slice(), [super::DrawCommand::Ship { .. }]), "{drawn:?}");
     }
 
     /// A ping is shed only once its ripple has run out.
