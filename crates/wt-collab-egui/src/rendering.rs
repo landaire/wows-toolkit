@@ -39,9 +39,6 @@ pub const ROTATION_HANDLE_DISTANCE: f32 = 25.0;
 /// Duration in seconds that a ping ripple is visible.
 pub const PING_DURATION: f32 = 1.0;
 
-/// BigWorld-to-meters conversion factor (1 BW unit = 30 meters).
-const BW_TO_METERS: f32 = 30.0;
-
 /// Font ID using the game font family (Warhelios Bold + CJK fallbacks).
 pub fn game_font(size: f32) -> FontId {
     FontId::new(size, egui::FontFamily::Name("GameFont".into()))
@@ -363,66 +360,30 @@ pub fn draw_remote_cursors(cursors: &[UserCursor], my_user_id: u64, painter: &eg
 /// Compute the distance from a point (in minimap coords) to the nearest part
 /// of an annotation. Returns 0 if the point is inside.
 pub fn annotation_distance(ann: &Annotation, point: Vec2) -> f32 {
+    use wt_collab_protocol::geometry as geom;
+
+    let at = [point.x, point.y];
     match ann {
         Annotation::Ship { pos, .. } => (*pos - point).length(),
-        Annotation::FreehandStroke { points, .. } => {
-            points.windows(2).map(|seg| point_to_segment_dist(point, seg[0], seg[1])).fold(f32::MAX, f32::min)
+        Annotation::FreehandStroke { points, .. } | Annotation::Arrow { points, .. } => {
+            geom::distance_to_polyline(points.iter().map(|p| [p.x, p.y]), at)
         }
-        Annotation::Line { start, end, .. } => point_to_segment_dist(point, *start, *end),
-        Annotation::Circle { center, radius, .. } => {
-            let dist_from_center = (point - *center).length();
-            if dist_from_center <= *radius { 0.0 } else { dist_from_center - *radius }
+        Annotation::Line { start, end, .. } | Annotation::Measurement { start, end, .. } => {
+            geom::distance_to_segment(at, [start.x, start.y], [end.x, end.y])
         }
+        Annotation::Circle { center, radius, .. } => geom::distance_to_circle([center.x, center.y], *radius, at),
         Annotation::Rectangle { center, half_size, rotation, .. } => {
-            let dp = point - *center;
-            let cos_r = rotation.cos();
-            let sin_r = rotation.sin();
-            let local = Vec2::new(dp.x * cos_r + dp.y * sin_r, -dp.x * sin_r + dp.y * cos_r);
-            let dx = (local.x.abs() - half_size.x).max(0.0);
-            let dy = (local.y.abs() - half_size.y).max(0.0);
-            (dx * dx + dy * dy).sqrt()
+            geom::distance_to_rotated_rect([center.x, center.y], [half_size.x, half_size.y], *rotation, at)
         }
         Annotation::Triangle { center, radius, rotation, .. } => {
-            let dist = (point - *center).length();
-            let inradius = *radius * 0.5;
-            if dist <= inradius {
-                0.0
-            } else {
-                let verts: Vec<Vec2> = (0..3)
-                    .map(|i| {
-                        let angle = *rotation + i as f32 * std::f32::consts::TAU / 3.0 - std::f32::consts::FRAC_PI_2;
-                        *center + Vec2::new(radius * angle.cos(), radius * angle.sin())
-                    })
-                    .collect();
-                let mut min_dist = f32::MAX;
-                for i in 0..3 {
-                    let d = point_to_segment_dist(point, verts[i], verts[(i + 1) % 3]);
-                    if d < min_dist {
-                        min_dist = d;
-                    }
-                }
-                min_dist
-            }
+            geom::distance_to_triangle([center.x, center.y], *radius, *rotation, at)
         }
-        Annotation::Arrow { points, .. } => {
-            points.windows(2).map(|seg| point_to_segment_dist(point, seg[0], seg[1])).fold(f32::MAX, f32::min)
-        }
-        Annotation::Measurement { start, end, .. } => point_to_segment_dist(point, *start, *end),
     }
 }
 
 /// Distance from a point to a line segment.
 pub fn point_to_segment_dist(p: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let ab = b - a;
-    let ap = p - a;
-    let len_sq = ab.length_sq();
-    if len_sq < 0.001 {
-        return ap.length();
-    }
-    let t = (ap.x * ab.x + ap.y * ab.y) / len_sq;
-    let t = t.clamp(0.0, 1.0);
-    let closest = a + ab * t;
-    (p - closest).length()
+    wt_collab_protocol::geometry::distance_to_segment([p.x, p.y], [a.x, a.y], [b.x, b.y])
 }
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
@@ -611,126 +572,17 @@ pub fn render_annotation(
 
 /// Compute a stable arrow direction from a sequence of minimap-space points.
 pub fn arrow_direction_from_points(points: &[Vec2]) -> Vec2 {
-    const ARROW_TRAILING_DISTANCE: f32 = 30.0;
-    const MAX_TRAILING_POINTS: usize = 10;
-
-    let n = points.len();
-    if n < 2 {
-        return Vec2::new(1.0, 0.0);
-    }
-
-    let tip = points[n - 1];
-    let mut accumulated = Vec2::ZERO;
-    let mut total_weight = 0.0;
-    let mut distance_walked = 0.0;
-    let trailing = n.min(MAX_TRAILING_POINTS + 1);
-
-    for i in 1..trailing {
-        let idx = n - 1 - i;
-        let seg = points[idx + 1] - points[idx];
-        let seg_len = seg.length();
-        if seg_len < 0.001 {
-            continue;
-        }
-        let seg_dir = seg / seg_len;
-        let weight = 1.0 / (i as f32);
-        accumulated += seg_dir * weight;
-        total_weight += weight;
-        distance_walked += seg_len;
-        if distance_walked >= ARROW_TRAILING_DISTANCE {
-            break;
-        }
-    }
-
-    if total_weight > 0.0 {
-        let avg = accumulated / total_weight;
-        if avg.length() > 0.001 {
-            return avg.normalized();
-        }
-    }
-
-    let fallback = tip - points[0];
-    if fallback.length() > 0.001 { fallback.normalized() } else { Vec2::new(1.0, 0.0) }
+    let points: Vec<[f32; 2]> = points.iter().map(|p| [p.x, p.y]).collect();
+    let [x, y] = wt_collab_protocol::geometry::arrow_direction(&points);
+    Vec2::new(x, y)
 }
 
 // ─── Freehand Smoothing ─────────────────────────────────────────────────────
 
 /// Smooth a freehand polyline: RDP simplification + Chaikin subdivision.
 pub fn smooth_freehand(points: Vec<Vec2>) -> Vec<Vec2> {
-    if points.len() <= 2 {
-        return points;
-    }
-
-    let bbox_diag = {
-        let (mut lo, mut hi) = (points[0], points[0]);
-        for p in &points {
-            lo.x = lo.x.min(p.x);
-            lo.y = lo.y.min(p.y);
-            hi.x = hi.x.max(p.x);
-            hi.y = hi.y.max(p.y);
-        }
-        (hi - lo).length()
-    };
-    let epsilon = (bbox_diag * 0.012).max(0.3);
-    let simplified = rdp_simplify(&points, epsilon);
-
-    let mut result = simplified;
-    for _ in 0..2 {
-        result = chaikin_subdivide(&result);
-    }
-    result
-}
-
-/// Ramer-Douglas-Peucker polyline simplification.
-fn rdp_simplify(points: &[Vec2], epsilon: f32) -> Vec<Vec2> {
-    if points.len() <= 2 {
-        return points.to_vec();
-    }
-    let first = points[0];
-    let last = *points.last().unwrap();
-    let seg = last - first;
-    let seg_len_sq = seg.length_sq();
-
-    let mut max_dist = 0.0f32;
-    let mut max_idx = 0;
-    for (i, p) in points.iter().enumerate().skip(1).take(points.len() - 2) {
-        let d = if seg_len_sq < 1e-10 {
-            (*p - first).length()
-        } else {
-            let t = ((*p - first).dot(seg) / seg_len_sq).clamp(0.0, 1.0);
-            (*p - (first + seg * t)).length()
-        };
-        if d > max_dist {
-            max_dist = d;
-            max_idx = i;
-        }
-    }
-
-    if max_dist > epsilon {
-        let mut left = rdp_simplify(&points[..=max_idx], epsilon);
-        let right = rdp_simplify(&points[max_idx..], epsilon);
-        left.pop();
-        left.extend(right);
-        left
-    } else {
-        vec![first, last]
-    }
-}
-
-/// One pass of Chaikin's corner-cutting subdivision.
-fn chaikin_subdivide(points: &[Vec2]) -> Vec<Vec2> {
-    if points.len() <= 2 {
-        return points.to_vec();
-    }
-    let mut out = Vec::with_capacity(points.len() * 2);
-    out.push(points[0]);
-    for pair in points.windows(2) {
-        let (a, b) = (pair[0], pair[1]);
-        out.push(a + (b - a) * 0.25);
-        out.push(a + (b - a) * 0.75);
-    }
-    out.push(*points.last().unwrap());
-    out
+    let points: Vec<[f32; 2]> = points.into_iter().map(|p| [p.x, p.y]).collect();
+    wt_collab_protocol::geometry::smooth_freehand(points).into_iter().map(|[x, y]| Vec2::new(x, y)).collect()
 }
 
 // ─── Measurement ─────────────────────────────────────────────────────────────
@@ -738,15 +590,13 @@ fn chaikin_subdivide(points: &[Vec2]) -> Vec<Vec2> {
 /// Convert a minimap-space distance to kilometres, given the map's space_size.
 #[inline]
 pub fn minimap_distance_to_km(minimap_dist: f32, space_size: f32) -> f32 {
-    let bw = minimap_dist / MINIMAP_SIZE as f32 * space_size;
-    bw * BW_TO_METERS / 1000.0
+    wt_collab_protocol::geometry::minimap_distance_to_km(minimap_dist, space_size)
 }
 
 /// Convert kilometres to minimap-space distance, given the map's space_size.
 #[inline]
 pub fn km_to_minimap_distance(km: f32, space_size: f32) -> f32 {
-    let bw = km * 1000.0 / BW_TO_METERS;
-    bw / space_size * MINIMAP_SIZE as f32
+    wt_collab_protocol::geometry::km_to_minimap_distance(km, space_size)
 }
 
 /// Render measurement tick marks and distance labels along a line.
