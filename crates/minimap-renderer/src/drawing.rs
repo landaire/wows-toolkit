@@ -1505,6 +1505,7 @@ fn draw_team_roster(
     ship_icons: &HashMap<String, ShipIcon>,
     consumable_icons: &HashMap<String, RgbaImage>,
     death_cause_icons: &HashMap<String, RgbaImage>,
+    regions: &mut Vec<DrawnRegion>,
 ) {
     use crate::draw_command::ChargeCount as RosterCharge;
     use crate::draw_command::RosterSide;
@@ -1758,6 +1759,10 @@ fn draw_team_roster(
         } else {
             for (i, cons) in row.consumables.iter().enumerate() {
                 let icon_x = strip_x + i as f32 * (icon_size + icon_gap);
+                regions.push(DrawnRegion {
+                    rect: [icon_x, strip_y, icon_size, icon_size],
+                    kind: RegionKind::RosterConsumable { entity_id: row.entity_id, index: i },
+                });
                 let charges_remaining = cons.total_charges.remaining(cons.charges_used);
                 let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
 
@@ -1807,6 +1812,7 @@ use crate::TEAM_ROSTER_WIDTH;
 
 use crate::config::RenderOptions;
 use crate::viewport::MapViewport;
+use wows_replays::types::EntityId;
 
 /// Which side panel the CLI canvas should reserve space for. Mirrors the
 /// runtime decision the desktop renderer makes from
@@ -1884,6 +1890,8 @@ pub struct ImageTarget {
     powerup_icons: HashMap<String, RgbaImage>,
     /// Bounding rects [x, y, w, h] of previously placed config-circle labels in the current frame.
     placed_labels: Vec<[i32; 4]>,
+    /// What this frame drew that a pointer can rest on. Cleared each frame.
+    regions: Vec<DrawnRegion>,
     /// Resolves translatable game text (battle results, advantage labels, etc.)
     text_resolver: Arc<dyn TextResolver>,
 }
@@ -1998,6 +2006,7 @@ impl ImageTarget {
             death_cause_icons,
             powerup_icons,
             placed_labels: Vec::new(),
+            regions: Vec::new(),
             text_resolver: Arc::new(DefaultTextResolver),
         }
     }
@@ -2005,6 +2014,11 @@ impl ImageTarget {
     /// Set a custom text resolver for translating game text.
     pub fn set_text_resolver(&mut self, resolver: Arc<dyn TextResolver>) {
         self.text_resolver = resolver;
+    }
+
+    /// What the last frame drew that a pointer can rest on.
+    pub fn drawn_regions(&self) -> &[DrawnRegion] {
+        &self.regions
     }
 
     /// Where the map's top-left corner sits in a frame.
@@ -2070,6 +2084,38 @@ impl ImageTarget {
 /// What a frame starts as, everywhere the map and the HUD do not reach.
 const CANVAS_BACKGROUND: [u8; 3] = [20, 25, 35];
 
+/// Something drawn into a frame that a reader can rest a pointer on.
+///
+/// A target draws the rosters itself, so nothing outside it knows where a
+/// consumable icon or a player's name ended up. Recording them as they are
+/// drawn is what lets a front end put a hover over one without repeating the
+/// layout and drifting from it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DrawnRegion {
+    /// Left, top, width and height in canvas pixels.
+    pub rect: [f32; 4],
+    pub kind: RegionKind,
+}
+
+impl DrawnRegion {
+    /// Whether `at` is inside this region, in canvas pixels.
+    pub fn contains(&self, at: (f32, f32)) -> bool {
+        let [left, top, width, height] = self.rect;
+        at.0 >= left && at.0 < left + width && at.1 >= top && at.1 < top + height
+    }
+}
+
+/// What a drawn region belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RegionKind {
+    /// One of a roster row's consumable icons. The index is into that row's
+    /// own `consumables`, so the caller reads the rest off the command it
+    /// already has.
+    RosterConsumable { entity_id: EntityId, index: usize },
+    /// A roster row's player name, which is what a build popover hangs on.
+    RosterPlayer { entity_id: EntityId },
+}
+
 /// Whether `cmd` draws on the map rather than over it.
 ///
 /// The map's own elements move and grow with the viewport and are clipped to
@@ -2117,6 +2163,7 @@ impl RenderTarget for ImageTarget {
         // with nothing drawn on it.
         self.map_dirty = true;
         self.placed_labels.clear();
+        self.regions.clear();
     }
 
     fn draw(&mut self, cmd: &DrawCommand) {
@@ -3247,6 +3294,7 @@ impl RenderTarget for ImageTarget {
                     &self.ship_icons,
                     &self.consumable_icons,
                     &self.death_cause_icons,
+                    &mut self.regions,
                 );
             }
         }
@@ -3366,5 +3414,120 @@ mod tests {
         // background the canvas starts as.
         assert_eq!(pixel(&frame, 400, 400 + HUD_HEIGHT), [30, 40, 60]);
         assert_eq!(pixel(&frame, 400, 4), [20, 25, 35], "and the HUD strip is still the background");
+    }
+}
+
+#[cfg(test)]
+mod region_tests {
+    use super::*;
+    use crate::draw_command::ChargeCount;
+    use crate::draw_command::ConsumableAvailability;
+    use crate::draw_command::RosterConsumable;
+    use crate::draw_command::RosterRow;
+    use crate::draw_command::RosterSide;
+
+    fn consumable(key: &str) -> RosterConsumable {
+        RosterConsumable {
+            icon_key: key.to_string(),
+            display_name: key.to_string(),
+            description: String::new(),
+            total_charges: ChargeCount::Finite(3),
+            charges_used: 0,
+            work_time_secs: 10.0,
+            reload_time_secs: 60.0,
+            active_remaining_secs: None,
+            availability: ConsumableAvailability::Ready,
+        }
+    }
+
+    fn row(entity: u32, consumables: Vec<RosterConsumable>) -> RosterRow {
+        RosterRow {
+            entity_id: EntityId::from(entity),
+            team_id: 0,
+            player_name: format!("player{entity}"),
+            clan_tag: None,
+            clan_color: None,
+            ship_name: "Smaland".to_string(),
+            ship_param_id: None,
+            class_icon_key: None,
+            species: None,
+            hp_current: 15400.0,
+            hp_max: 15400.0,
+            hp_healable: 0.0,
+            hp_healable_per_charge: 0.0,
+            heal_availability: ConsumableAvailability::Ready,
+            is_dead: false,
+            is_self: false,
+            is_spotted: false,
+            is_disconnected: false,
+            kills: 0,
+            damage_dealt: 0.0,
+            seconds_since_damage: None,
+            consumables,
+        }
+    }
+
+    /// Drawing a roster records where each consumable icon landed, in the
+    /// row's own order, so a hover can be put over one without repeating the
+    /// layout.
+    #[test]
+    fn a_roster_records_where_its_consumable_icons_landed() {
+        let Some(fonts) = crate::assets::test_fonts() else { return };
+        let mut canvas = Pixmap::new(400, 400).expect("a canvas");
+        let mut regions = Vec::new();
+
+        draw_team_roster(
+            &mut canvas,
+            RosterSide::Friendly,
+            0,
+            0,
+            280,
+            400,
+            &[row(7, vec![consumable("heal"), consumable("smoke")])],
+            &fonts,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut regions,
+        );
+
+        assert_eq!(regions.len(), 2, "one per consumable the row carries");
+        for (index, region) in regions.iter().enumerate() {
+            assert_eq!(
+                region.kind,
+                RegionKind::RosterConsumable { entity_id: EntityId::from(7u32), index },
+                "each keys back to its own row and place in it"
+            );
+            let [_, _, width, height] = region.rect;
+            assert!(width > 0.0 && height > 0.0, "a region a pointer can land in");
+        }
+        assert!(regions[1].rect[0] > regions[0].rect[0], "the second sits to the right of the first");
+        assert!(!regions[0].contains((regions[1].rect[0], regions[1].rect[1])), "and they do not overlap");
+    }
+
+    /// A row with no consumables records nothing, so an empty strip is not a
+    /// hover that says nothing.
+    #[test]
+    fn a_row_with_no_consumables_records_nothing() {
+        let Some(fonts) = crate::assets::test_fonts() else { return };
+        let mut canvas = Pixmap::new(400, 400).expect("a canvas");
+        let mut regions = Vec::new();
+
+        draw_team_roster(
+            &mut canvas,
+            RosterSide::Friendly,
+            0,
+            0,
+            280,
+            400,
+            &[row(7, Vec::new())],
+            &fonts,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &mut regions,
+        );
+
+        assert!(regions.is_empty());
     }
 }
