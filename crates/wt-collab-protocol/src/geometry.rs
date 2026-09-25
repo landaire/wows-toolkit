@@ -11,7 +11,9 @@
 use crate::types::Annotation;
 use wows_minimap_renderer::draw_command::AnnotationShape;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipVisibility;
 use wows_minimap_renderer::map_data::MinimapPos;
+use wowsunpack::game_types::EntityId;
 
 /// Below this a segment is a point, and its own start is the nearest thing on
 /// it.
@@ -253,6 +255,10 @@ pub fn km_to_minimap_distance(km: f32, space_size: f32) -> f32 {
     world / space_size * wows_minimap_renderer::MINIMAP_SIZE as f32
 }
 
+/// What a placed ship is tinted, as the egui toolbar tints it.
+const FRIENDLY: [u8; 3] = [76, 232, 170];
+const ENEMY: [u8; 3] = [254, 77, 42];
+
 /// How long an arrow's head is, relative to the line's width.
 const ARROW_HEAD_LENGTH: f32 = 6.0;
 
@@ -271,12 +277,34 @@ fn run(points: &[[f32; 2]]) -> Vec<MinimapPos> {
 ///
 /// The target knows three shapes, so the drawing tools turn into those here
 /// rather than every renderer learning each tool. An arrow is two commands:
-/// its shaft and its filled head. A ship annotation draws nothing yet -- it
-/// is an icon and a set of range circles rather than a shape, and it needs
-/// the ship's own game data.
+/// its shaft and its filled head. A ship is the renderer's own ship command,
+/// so a placed one is drawn from the same icons as a real one; its range
+/// circles are not here, because a range is read out of the ship's game
+/// data, which this layer does not carry.
 pub fn annotation_commands(annotation: &Annotation) -> Vec<DrawCommand> {
     match annotation {
-        Annotation::Ship { .. } => Vec::new(),
+        Annotation::Ship { pos, yaw, species, friendly, config } => {
+            vec![DrawCommand::Ship {
+                // Not a ship in the battle, so it answers to no entity. The
+                // viewport picks ships out of the baked frame rather than
+                // out of what is drawn over it, so nothing looks this up.
+                entity_id: EntityId::from(0_u32),
+                pos: at(*pos),
+                yaw: *yaw,
+                species: Some(species.clone()),
+                color: Some(if *friendly { FRIENDLY } else { ENEMY }),
+                visibility: ShipVisibility::Visible,
+                opacity: 1.0,
+                is_self: false,
+                // A placed ship belongs to nobody, which is also what keeps
+                // it out of anything keyed by player.
+                player_name: None,
+                ship_name: config.as_ref().map(|config| config.ship_name.clone()).filter(|name| !name.is_empty()),
+                is_detected_teammate: false,
+                is_disconnected: false,
+                name_color: None,
+            }]
+        }
         Annotation::FreehandStroke { points, color, width } => {
             vec![DrawCommand::Annotation {
                 shape: AnnotationShape::Polyline { points: run(points) },
@@ -569,18 +597,48 @@ mod tests {
         assert_eq!(shapes(&stub).len(), 1, "the shaft alone");
     }
 
-    /// A ship annotation is an icon and its range circles rather than a
-    /// shape, so it draws nothing here rather than something wrong.
+    /// A placed ship is drawn from the renderer's own ship icons, tinted by
+    /// which side it is on, and belongs to no player.
     #[test]
-    fn a_ship_annotation_draws_nothing_yet() {
-        let ship = Annotation::Ship {
-            pos: [10.0, 10.0],
+    fn a_placed_ship_is_drawn_as_a_ship() {
+        let ship = |friendly: bool| Annotation::Ship {
+            pos: [10.0, 20.0],
+            yaw: 1.25,
+            species: "Cruiser".to_string(),
+            friendly,
+            config: None,
+        };
+
+        let drawn = annotation_commands(&ship(true));
+        let [DrawCommand::Ship { pos, yaw, species, color, player_name, ship_name, .. }] = &drawn[..] else {
+            panic!("a placed ship draws a ship, got {drawn:?}");
+        };
+        assert_eq!((pos.x, pos.y), (10.0, 20.0));
+        assert_eq!(*yaw, 1.25);
+        assert_eq!(species.as_deref(), Some("Cruiser"));
+        assert_eq!(*color, Some([76, 232, 170]), "tinted as friendly");
+        assert!(player_name.is_none(), "it belongs to nobody");
+        assert!(ship_name.is_none(), "and is unnamed until one is chosen");
+
+        let enemy = annotation_commands(&ship(false));
+        let [DrawCommand::Ship { color, .. }] = &enemy[..] else { panic!("still a ship") };
+        assert_eq!(*color, Some([254, 77, 42]), "and tinted as the enemy otherwise");
+    }
+
+    /// A ship that has been given a name carries it, which is what the
+    /// renderer draws above the icon.
+    #[test]
+    fn a_named_ship_carries_its_name() {
+        let named = Annotation::Ship {
+            pos: [10.0, 20.0],
             yaw: 0.0,
             species: "Cruiser".to_string(),
             friendly: true,
-            config: None,
+            config: Some(crate::types::AnnotationShipConfig { ship_name: "Moskva".to_string(), ..Default::default() }),
         };
-        assert!(annotation_commands(&ship).is_empty());
+        let drawn = annotation_commands(&named);
+        let [DrawCommand::Ship { ship_name, .. }] = &drawn[..] else { panic!("a ship") };
+        assert_eq!(ship_name.as_deref(), Some("Moskva"));
     }
 
     /// Minimap distance and kilometres convert back to each other.
