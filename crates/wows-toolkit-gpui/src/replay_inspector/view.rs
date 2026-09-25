@@ -211,6 +211,14 @@ pub struct ShowArmorRequested {
 
 impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}
 
+/// Playback moved and the followed ship has taken different hits by now.
+pub struct ArmorFollowed {
+    pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    pub health: Option<f32>,
+}
+
+impl EventEmitter<ArmorFollowed> for ReplayInspectorView {}
+
 impl ReplayInspectorView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let browser = cx.new(ReplayBrowser::new);
@@ -632,6 +640,9 @@ impl ReplayInspectorView {
                 display_name: display_name.clone(),
                 hits: hits.clone(),
             }),
+            RendererEvent::ArmorFollowed { hits, health } => {
+                cx.emit(ArmorFollowed { hits: hits.clone(), health: *health })
+            }
         }
     }
 

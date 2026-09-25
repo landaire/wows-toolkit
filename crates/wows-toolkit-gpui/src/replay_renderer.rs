@@ -300,6 +300,11 @@ pub struct ReplayRendererPanel {
     /// frame's own ship commands carry, so a ship the reader points at is
     /// looked up directly.
     shots: HashMap<EntityId, wows_replay_insights::timeline::ShipShotTimeline>,
+    /// The ship an armor viewer was opened on, and what it had taken when it
+    /// was last told. Kept so playback only disturbs the viewer when the set
+    /// of hits actually changes: showing them again rebuilds the hull's
+    /// meshes, which is far too much work for every frame.
+    armor_following: Option<(EntityId, crate::armor_viewer::realtime::RealtimeArmorFeed)>,
     _events: Option<Task<()>>,
     /// Set when a frame was asked for while one was still being drawn. The
     /// draw in flight starts another as it finishes, so what ends up on
@@ -335,6 +340,13 @@ pub enum RendererEvent {
     /// it says which ship and hands over the hits rather than opening
     /// anything itself.
     ShowArmor { param_index: String, display_name: String, hits: Vec<PreExtractedHit> },
+    /// Playback moved, and the ship an armor viewer is already open on has
+    /// taken different hits by this point.
+    ///
+    /// Separate from [`Self::ShowArmor`] because it must not pull the reader
+    /// back to the armor tab: they asked for the viewer once, not on every
+    /// frame.
+    ArmorFollowed { hits: Vec<PreExtractedHit>, health: Option<f32> },
 }
 
 impl EventEmitter<RendererEvent> for ReplayRendererPanel {}
@@ -420,6 +432,7 @@ impl ReplayRendererPanel {
             events_read: false,
             events: Vec::new(),
             shots: HashMap::new(),
+            armor_following: None,
             _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
@@ -526,6 +539,7 @@ impl ReplayRendererPanel {
             events_read: false,
             events: Vec::new(),
             shots: HashMap::new(),
+            armor_following: None,
             _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
@@ -935,17 +949,42 @@ impl ReplayRendererPanel {
 
     /// What the menu's ship had taken by where playback is, for an armor
     /// viewer to draw.
-    fn hits_so_far(&self, entity_id: EntityId) -> Vec<PreExtractedHit> {
-        let Some(timeline) = self.shots.get(&entity_id) else { return Vec::new() };
-        let Some(track) = self.track() else { return Vec::new() };
-        timeline.hits_through(GameClock(track.seconds_at(self.at))).to_vec()
-    }
-
-    /// Asks for an armor viewer on the ship the menu is open for.
+    /// Asks for an armor viewer on the ship the menu is open for, and
+    /// follows it from then on.
     pub(crate) fn show_armor(&mut self, entity_id: EntityId, cx: &mut Context<Self>) {
         let Some((param_index, display_name)) = self.armor_target(entity_id) else { return };
-        cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: self.hits_so_far(entity_id) });
+        let Some(timeline) = self.shots.get(&entity_id).cloned() else { return };
+
+        let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(timeline);
+        feed.advance_to(GameClock(self.clock_of(self.at)));
+        cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: feed.taken().to_vec() });
+        self.armor_following = Some((entity_id, feed));
         self.close_ship_menu(cx);
+    }
+
+    /// Tells a viewer that is already open what its ship has taken by where
+    /// playback has reached.
+    ///
+    /// Only when the set of hits has changed: telling it again rebuilds the
+    /// hull's meshes, which is far more than a frame of playback is worth.
+    fn follow_armor(&mut self, cx: &mut Context<Self>) {
+        let clock = GameClock(self.clock_of(self.at));
+        let Some((_, feed)) = self.armor_following.as_mut() else { return };
+        let moved = feed.advance_to(clock);
+        let changed = match moved {
+            crate::armor_viewer::realtime::Advance::Rewound => true,
+            crate::armor_viewer::realtime::Advance::Gained(gained) => !gained.is_empty(),
+        };
+        if !changed {
+            return;
+        }
+        let (hits, health) = (feed.taken().to_vec(), feed.health());
+        cx.emit(RendererEvent::ArmorFollowed { hits, health });
+    }
+
+    /// The game clock frame `at` was drawn at.
+    fn clock_of(&self, at: usize) -> f32 {
+        self.track().map(|track| track.seconds_at(at)).unwrap_or_default()
     }
 
     /// Whether the menu's ship has anything an armor viewer could show.
@@ -1494,6 +1533,7 @@ impl ReplayRendererPanel {
             return;
         }
         self.at = at;
+        self.follow_armor(cx);
         self.draw_current(cx);
         cx.notify();
     }
@@ -5345,6 +5385,66 @@ mod tests {
                 panel.show_armor(untouched, _cx);
             })
             .expect("the window is open");
+    }
+
+    /// A viewer that is open follows playback, and is only disturbed when
+    /// the hits it shows actually change: showing them again rebuilds the
+    /// hull, which is far more than a frame of playback is worth.
+    #[gpui_kit::test]
+    fn an_open_armor_viewer_follows_playback_but_only_when_it_must(cx: &mut TestAppContext) {
+        use std::collections::BTreeMap;
+        use wows_replay_insights::timeline::HealthSnapshot;
+        use wows_replay_insights::timeline::ShipShotTimeline;
+        use wows_replays::types::GameClock;
+
+        cx.update(gpui_kit::init);
+        let clocks: Vec<f32> = (0..20).map(|frame| frame as f32 * 5.0).collect();
+        let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        let ship = wows_replays::types::EntityId::from(7u32);
+        let mut health_history = BTreeMap::new();
+        health_history.insert(GameClock(0.0), HealthSnapshot { health: 15400.0, max_health: 15400.0 });
+        health_history.insert(GameClock(30.0), HealthSnapshot { health: 12000.0, max_health: 15400.0 });
+
+        let told = std::rc::Rc::new(std::cell::Cell::new(0usize));
+        let counter = std::rc::Rc::clone(&told);
+        let panel = cx.update(|cx| window.root(cx).expect("the viewport is open"));
+        let _subscription = cx.update(|cx| {
+            cx.subscribe(&panel, move |_view, event, _cx| {
+                if matches!(event, super::RendererEvent::ArmorFollowed { .. }) {
+                    counter.set(counter.get() + 1);
+                }
+            })
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.shots.insert(ship, ShipShotTimeline { hits: Vec::new(), health_history });
+                // Following starts without a viewer, which is what the
+                // menu's own guard is for; seeded here directly.
+                let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(
+                    panel.shots.get(&ship).expect("just inserted").clone(),
+                );
+                feed.advance_to(GameClock(0.0));
+                panel.armor_following = Some((ship, feed));
+
+                // This battle recorded no hits, so walking it never changes
+                // what the viewer shows.
+                for frame in 1..6 {
+                    panel.set_at(frame, cx);
+                }
+            })
+            .expect("the window is open");
+
+        assert_eq!(told.get(), 0, "nothing changed, so the viewer was left alone");
+
+        // Scrubbing back is the other case: what was drawn can no longer be
+        // right, and a hull cannot be un-hit one shell at a time, so the
+        // viewer is told to draw it again.
+        window.update(cx, |panel, _window, cx| panel.set_at(1, cx)).expect("the window is open");
+        assert_eq!(told.get(), 1, "a step backwards asks for the hull again");
     }
 
     /// A ping is shed only once its ripple has run out.

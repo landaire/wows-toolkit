@@ -336,6 +336,14 @@ impl App {
             cx.notify();
         });
 
+        // The followed ship took more hits, which the open viewer shows
+        // without pulling the reader away from what they are watching.
+        let armor_followed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
+            let crate::replay_inspector::view::ArmorFollowed { hits, health } = event;
+            let (hits, health) = (hits.clone(), *health);
+            this.armor_pane.update(cx, |pane, cx| pane.follow_hits(hits, health, cx));
+        });
+
         let replay_settings_changed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
             let ReplaySettingsChanged(settings) = event;
             let settings = settings.clone();
@@ -396,6 +404,7 @@ impl App {
             _subscriptions: vec![
                 subscription,
                 show_armor_requested,
+                armor_followed,
                 replay_settings_changed,
                 wows_dir_edited,
                 proxy_edited,
