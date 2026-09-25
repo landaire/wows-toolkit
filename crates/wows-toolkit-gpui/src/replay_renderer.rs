@@ -911,7 +911,8 @@ impl ReplayRendererPanel {
     fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
         let scale = self.drawn_scale()?;
         let (left, top, _) = self.hud_strip()?;
-        let drawn = (self.view.x(at.0), self.view.y(at.1));
+        let view = self.shaped_view();
+        let drawn = (view.x(at.0), view.y(at.1));
         let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
         if drawn.0 < 0.0 || drawn.0 >= span || drawn.1 < 0.0 || drawn.1 >= span {
             return None;
@@ -1476,7 +1477,7 @@ impl ReplayRendererPanel {
 
         let options = self.options.clone();
         let show_dead_ships = self.show_dead_ships;
-        let view = self.view;
+        let view = self.shaped_view();
         let trail_hidden = self.trail_hidden.clone();
         let ship_ranges = self.ship_ranges.clone();
         // Drawn over the battle rather than by it, so they are not filtered
@@ -1795,7 +1796,7 @@ impl ReplayRendererPanel {
     /// the margin beside a frame that does not fill its element.
     fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
         let (x, y) = self.drawn_point(position)?;
-        Some(self.view.to_map(x, y))
+        Some(self.shaped_view().to_map(x, y))
     }
 
     /// Where in the drawn map a window position falls, after the zoom and pan
@@ -1809,6 +1810,25 @@ impl ReplayRendererPanel {
         let (x, y) = (x - origin.0, y - origin.1);
         let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
         (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
+    }
+
+    /// The window as it is drawn: stretched toward the shape of the
+    /// viewport it is drawn in.
+    ///
+    /// A wide viewport leaves the map with empty space either side. Zoomed
+    /// in there is map to put there, so the window takes it; at rest there is
+    /// not, and the frame stays square.
+    fn shaped_view(&self) -> MapViewport {
+        let Some(bounds) = self.drawn.get() else { return self.view };
+        let (width, height) = (bounds.size.width.as_f32(), bounds.size.height.as_f32());
+        if height <= 0.0 || width <= 0.0 {
+            return self.view;
+        }
+        // Measured against the whole canvas, HUD strip included, since that
+        // is what is fitted into the viewport.
+        let canvas = wows_minimap_renderer::CANVAS_HEIGHT as f32;
+        let wanted = width / height * canvas / wows_minimap_renderer::MINIMAP_SIZE as f32;
+        self.view.widened(wanted)
     }
 
     /// Where a pointer position lands on the whole rasterised canvas, which
@@ -1871,7 +1891,7 @@ impl ReplayRendererPanel {
             return;
         }
         let zoom = self.view.zoom() * (1.0 + delta * ZOOM_PER_PIXEL);
-        self.set_view(self.view.zoomed_about(zoom, at), window, cx);
+        self.set_view(self.shaped_view().zoomed_about(zoom, at), window, cx);
         cx.stop_propagation();
     }
 
@@ -2149,7 +2169,7 @@ impl ReplayRendererPanel {
         let Some(scale) = self.drawn_scale() else { return };
         let delta = ((event.position.x - from.x).as_f32() / scale, (event.position.y - from.y).as_f32() / scale);
         self.dragging = Some(event.position);
-        self.set_view(self.view.dragged(delta), window, cx);
+        self.set_view(self.shaped_view().dragged(delta), window, cx);
     }
 
     fn on_drag_end(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -5689,6 +5709,40 @@ mod tests {
 
         assert_eq!(ExportStage::Encoding.label(), "ui.renderer.encoding");
         assert_eq!(ExportStage::Muxing.label(), "ui.renderer.muxing", "and the wait after the last frame is named");
+    }
+
+    /// A wide viewport fills its sides as the map is zoomed into, and stays
+    /// square while there is no map to put there.
+    #[gpui_kit::test]
+    fn a_wide_viewport_fills_its_sides_as_the_map_is_zoomed(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1600.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                // A viewport twice as wide as the canvas is tall.
+                let frame = panel.frame.as_ref().expect("a frame was seeded").size(0);
+                let (w, h) = (frame.width.0 as f32, frame.height.0 as f32);
+                panel.set_drawn_for_test(gpui_kit::Bounds {
+                    origin: gpui_kit::point(px(0.), px(0.)),
+                    size: gpui_kit::size(px(w * 2.0), px(h)),
+                });
+
+                assert_eq!(panel.shaped_view().widen(), 1.0, "at rest there is no map to put beside it");
+
+                panel.set_view(super::MapViewport::new(1.2, (0.0, 0.0)), window, cx);
+                let creeping = panel.shaped_view().widen();
+                assert!(creeping > 1.0 && creeping <= 1.2, "it starts to fill, held to the zoom: {creeping}");
+
+                panel.set_view(super::MapViewport::new(6.0, (0.0, 0.0)), window, cx);
+                let filled = panel.shaped_view().widen();
+                assert!(filled > creeping, "and fills further in: {filled} against {creeping}");
+                assert!(filled > 1.9 && filled < 2.1, "about the shape of the viewport: {filled}");
+            })
+            .expect("the window is open");
     }
 
     /// A ping is shed only once its ripple has run out.
