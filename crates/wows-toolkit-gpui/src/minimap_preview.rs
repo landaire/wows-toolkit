@@ -25,7 +25,7 @@ use wows_minimap_renderer::frame_track::bake_options;
 use wows_minimap_renderer::frame_track::build_frame_track;
 use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_minimap_renderer::renderer::MinimapRenderer;
-use wows_replay_insights::timeline::TimelineEvent;
+use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
 use wows_replays::types::GameClock;
@@ -199,7 +199,7 @@ pub struct BakedTrack {
 pub fn extract_events(
     path: &std::path::Path,
     game_data: &crate::replay_inspector::GameDataCache,
-) -> Result<Vec<TimelineEvent>, PreviewError> {
+) -> Result<TimelineExtractionResult, PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
@@ -208,12 +208,11 @@ pub fn extract_events(
     let loaded =
         game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
 
-    let extracted = wows_replay_insights::timeline::extract_timeline_events(
+    Ok(wows_replay_insights::timeline::extract_timeline_events(
         &replay,
         loaded.provider(),
         Some(loaded.base_constants()),
-    );
-    Ok(extracted.events)
+    ))
 }
 
 /// Walks `path`'s battle once, keeping the draw commands of up to `budget`

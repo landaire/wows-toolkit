@@ -765,6 +765,146 @@ pub fn merge_timelines(
 
     TimelineExtractionResult { events, battle_start, battle_end, viewer_team }
 }
+/// How many kinds of event there are, which is what a filter has a switch per.
+pub const KIND_COUNT: usize = 8;
+
+/// A stable index per kind, which is what keys a filter's switches.
+pub fn kind_index(kind: &TimelineEventKind) -> usize {
+    match kind {
+        TimelineEventKind::HealthLost { .. } => 0,
+        TimelineEventKind::Death { .. } => 1,
+        TimelineEventKind::CapContested { .. } => 2,
+        TimelineEventKind::CapFlipped { .. } => 3,
+        TimelineEventKind::CapBeingCaptured { .. } => 4,
+        TimelineEventKind::RadarUsed { .. } => 5,
+        TimelineEventKind::AdvantageChanged { .. } => 6,
+        TimelineEventKind::Disconnected { .. } => 7,
+    }
+}
+
+/// The translation key naming the kind at `index`.
+pub fn kind_label_key(index: usize) -> &'static str {
+    match index {
+        0 => "ui.replay.timeline_kind_health_lost",
+        1 => "ui.replay.timeline_kind_death",
+        2 => "ui.replay.timeline_kind_cap_contested",
+        3 => "ui.replay.timeline_kind_cap_flipped",
+        4 => "ui.replay.timeline_kind_cap_being_captured",
+        5 => "ui.replay.timeline_kind_radar",
+        6 => "ui.replay.timeline_kind_advantage",
+        _ => "ui.replay.timeline_kind_disconnected",
+    }
+}
+
+/// The two pieces of text a search looks through.
+pub fn searchable_text(kind: &TimelineEventKind) -> (&str, &str) {
+    match kind {
+        TimelineEventKind::HealthLost { ship_name, player_name, .. }
+        | TimelineEventKind::Death { ship_name, player_name, .. }
+        | TimelineEventKind::RadarUsed { ship_name, player_name, .. }
+        | TimelineEventKind::Disconnected { ship_name, player_name, .. } => (ship_name, player_name),
+        TimelineEventKind::CapContested { cap_label, .. }
+        | TimelineEventKind::CapFlipped { cap_label, .. }
+        | TimelineEventKind::CapBeingCaptured { cap_label, .. } => (cap_label, ""),
+        TimelineEventKind::AdvantageChanged { label, .. } => (label, ""),
+    }
+}
+
+/// Which events a reader is looking at.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TimelineFilter {
+    pub kinds: [bool; KIND_COUNT],
+    pub search: String,
+}
+
+impl Default for TimelineFilter {
+    fn default() -> Self {
+        Self { kinds: [true; KIND_COUNT], search: String::new() }
+    }
+}
+
+impl TimelineFilter {
+    pub fn matches(&self, event: &TimelineEvent) -> bool {
+        if !self.kinds[kind_index(&event.kind)] {
+            return false;
+        }
+        if self.search.is_empty() {
+            return true;
+        }
+        let needle = self.search.to_lowercase();
+        let (a, b) = searchable_text(&event.kind);
+        a.to_lowercase().contains(&needle) || b.to_lowercase().contains(&needle)
+    }
+}
+
+/// Whose event a row is, which is what decides the colour each front end
+/// paints it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EventTone {
+    Friendly,
+    Enemy,
+    Neutral,
+}
+
+/// Whose event this is, from the viewer's side.
+///
+/// Without a known viewer team every ship reads as an opponent, which is the
+/// safer default: it never claims an enemy is an ally.
+pub fn row_tone(kind: &TimelineEventKind, viewer_team: Option<TeamId>) -> EventTone {
+    let side = |team: TeamId| match viewer_team {
+        Some(viewer) if viewer == team => EventTone::Friendly,
+        _ => EventTone::Enemy,
+    };
+    match kind {
+        TimelineEventKind::HealthLost { team, .. }
+        | TimelineEventKind::Death { team, .. }
+        | TimelineEventKind::RadarUsed { team, .. }
+        | TimelineEventKind::Disconnected { team, .. } => side(*team),
+        TimelineEventKind::CapFlipped { capturer_team, .. }
+        | TimelineEventKind::CapBeingCaptured { capturer_team, .. } => side(*capturer_team),
+        TimelineEventKind::CapContested { owner_team, .. } => owner_team.map(side).unwrap_or(EventTone::Neutral),
+        // Advantage events are viewer-relative and carry no absolute team.
+        TimelineEventKind::AdvantageChanged { is_friendly, .. } => {
+            if *is_friendly {
+                EventTone::Friendly
+            } else {
+                EventTone::Enemy
+            }
+        }
+    }
+}
+
+/// What a row says, and what a pointer resting on it says. The hover is empty
+/// where the row already says everything.
+pub fn row_text(kind: &TimelineEventKind) -> (String, String) {
+    match kind {
+        TimelineEventKind::HealthLost { ship_name, player_name, percent_lost, old_hp, new_hp, max_hp, .. } => (
+            format!("{} -{}% HP", ship_name, (percent_lost * 100.0) as u32),
+            format!("{} ({})\n{:.0}/{:.0} -> {:.0}/{:.0} HP", ship_name, player_name, old_hp, max_hp, new_hp, max_hp),
+        ),
+        TimelineEventKind::Death { ship_name, player_name, killer_ship, killer_player, .. } => {
+            let hover = if killer_ship.is_empty() {
+                format!("{} ({})", ship_name, player_name)
+            } else {
+                format!("{} ({})\nKilled by {} ({})", ship_name, player_name, killer_ship, killer_player)
+            };
+            (format!("{} destroyed", ship_name), hover)
+        }
+        TimelineEventKind::CapContested { cap_label, .. } => (format!("{} contested", cap_label), String::new()),
+        TimelineEventKind::CapFlipped { cap_label, .. } => (format!("{} captured", cap_label), String::new()),
+        TimelineEventKind::CapBeingCaptured { cap_label, .. } => {
+            (format!("{} being captured", cap_label), String::new())
+        }
+        TimelineEventKind::RadarUsed { ship_name, player_name, .. } => {
+            (format!("{} used radar", ship_name), format!("{} ({})", ship_name, player_name))
+        }
+        TimelineEventKind::AdvantageChanged { label, .. } => (label.clone(), String::new()),
+        TimelineEventKind::Disconnected { ship_name, player_name, .. } => {
+            (format!("{} disconnected", ship_name), format!("{} ({})", ship_name, player_name))
+        }
+    }
+}
+
 #[cfg(test)]
 mod merge_tests {
     use super::*;

@@ -6,139 +6,28 @@ use wowsunpack::game_types::TeamId;
 use crate::replay::minimap_view::ENEMY_COLOR;
 use crate::replay::minimap_view::FRIENDLY_COLOR;
 use crate::replay::minimap_view::NEUTRAL_COLOR;
+use crate::replay::timeline::EventTone;
+use crate::replay::timeline::KIND_COUNT;
 use crate::replay::timeline::TimelineEvent;
 use crate::replay::timeline::TimelineEventKind;
+pub(crate) use crate::replay::timeline::TimelineFilter;
+use crate::replay::timeline::kind_label_key;
+use crate::replay::timeline::row_text;
+use crate::replay::timeline::row_tone;
 
-fn event_color(team: TeamId, viewer_team: Option<TeamId>) -> Color32 {
-    // Without a known viewer team every ship reads as an opponent, which is the
-    // safer default: it never claims an enemy is an ally.
-    match viewer_team {
-        Some(viewer) if viewer == team => FRIENDLY_COLOR,
-        _ => ENEMY_COLOR,
-    }
-}
-
-/// Advantage events are viewer-relative and carry no absolute team.
-fn advantage_color(is_friendly: bool) -> Color32 {
-    if is_friendly { FRIENDLY_COLOR } else { ENEMY_COLOR }
-}
-
-const KIND_COUNT: usize = 8;
-
-/// Stable index per event kind, used to key the filter's checkbox array.
-fn kind_index(kind: &TimelineEventKind) -> usize {
-    match kind {
-        TimelineEventKind::HealthLost { .. } => 0,
-        TimelineEventKind::Death { .. } => 1,
-        TimelineEventKind::CapContested { .. } => 2,
-        TimelineEventKind::CapFlipped { .. } => 3,
-        TimelineEventKind::CapBeingCaptured { .. } => 4,
-        TimelineEventKind::RadarUsed { .. } => 5,
-        TimelineEventKind::AdvantageChanged { .. } => 6,
-        TimelineEventKind::Disconnected { .. } => 7,
-    }
-}
-
-fn kind_label_key(index: usize) -> &'static str {
-    match index {
-        0 => "ui.replay.timeline_kind_health_lost",
-        1 => "ui.replay.timeline_kind_death",
-        2 => "ui.replay.timeline_kind_cap_contested",
-        3 => "ui.replay.timeline_kind_cap_flipped",
-        4 => "ui.replay.timeline_kind_cap_being_captured",
-        5 => "ui.replay.timeline_kind_radar",
-        6 => "ui.replay.timeline_kind_advantage",
-        _ => "ui.replay.timeline_kind_disconnected",
-    }
-}
-
-/// Names an event can be searched by.
-fn searchable_text(kind: &TimelineEventKind) -> (&str, &str) {
-    match kind {
-        TimelineEventKind::HealthLost { ship_name, player_name, .. }
-        | TimelineEventKind::Death { ship_name, player_name, .. }
-        | TimelineEventKind::RadarUsed { ship_name, player_name, .. }
-        | TimelineEventKind::Disconnected { ship_name, player_name, .. } => (ship_name, player_name),
-        TimelineEventKind::CapContested { cap_label, .. }
-        | TimelineEventKind::CapFlipped { cap_label, .. }
-        | TimelineEventKind::CapBeingCaptured { cap_label, .. } => (cap_label, ""),
-        TimelineEventKind::AdvantageChanged { label, .. } => (label, ""),
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct TimelineFilter {
-    pub kinds: [bool; KIND_COUNT],
-    pub search: String,
-}
-
-impl Default for TimelineFilter {
-    fn default() -> Self {
-        Self { kinds: [true; KIND_COUNT], search: String::new() }
-    }
-}
-
-impl TimelineFilter {
-    pub fn matches(&self, event: &TimelineEvent) -> bool {
-        if !self.kinds[kind_index(&event.kind)] {
-            return false;
-        }
-        if self.search.is_empty() {
-            return true;
-        }
-        let needle = self.search.to_lowercase();
-        let (a, b) = searchable_text(&event.kind);
-        a.to_lowercase().contains(&needle) || b.to_lowercase().contains(&needle)
+/// The colour a tone is painted in this app.
+fn tone_color(tone: EventTone) -> Color32 {
+    match tone {
+        EventTone::Friendly => FRIENDLY_COLOR,
+        EventTone::Enemy => ENEMY_COLOR,
+        EventTone::Neutral => NEUTRAL_COLOR,
     }
 }
 
 /// Color, label text, and hover text for one timeline row.
 fn row_content(kind: &TimelineEventKind, viewer_team: Option<TeamId>) -> (Color32, String, String) {
-    match kind {
-        TimelineEventKind::HealthLost { ship_name, player_name, team, percent_lost, old_hp, new_hp, max_hp } => {
-            let pct = (percent_lost * 100.0) as u32;
-            (
-                event_color(*team, viewer_team),
-                format!("{} -{}% HP", ship_name, pct),
-                format!(
-                    "{} ({})\n{:.0}/{:.0} -> {:.0}/{:.0} HP",
-                    ship_name, player_name, old_hp, max_hp, new_hp, max_hp
-                ),
-            )
-        }
-        TimelineEventKind::Death { ship_name, player_name, team, killer_ship, killer_player } => {
-            let hover = if killer_ship.is_empty() {
-                format!("{} ({})", ship_name, player_name)
-            } else {
-                format!("{} ({})\nKilled by {} ({})", ship_name, player_name, killer_ship, killer_player)
-            };
-            (event_color(*team, viewer_team), format!("{} destroyed", ship_name), hover)
-        }
-        TimelineEventKind::CapContested { cap_label, owner_team, .. } => (
-            owner_team.map(|team| event_color(team, viewer_team)).unwrap_or(NEUTRAL_COLOR),
-            format!("{} contested", cap_label),
-            String::new(),
-        ),
-        TimelineEventKind::CapFlipped { cap_label, capturer_team, .. } => {
-            (event_color(*capturer_team, viewer_team), format!("{} captured", cap_label), String::new())
-        }
-        TimelineEventKind::CapBeingCaptured { cap_label, capturer_team, .. } => {
-            (event_color(*capturer_team, viewer_team), format!("{} being captured", cap_label), String::new())
-        }
-        TimelineEventKind::RadarUsed { ship_name, player_name, team } => (
-            event_color(*team, viewer_team),
-            format!("{} used radar", ship_name),
-            format!("{} ({})", ship_name, player_name),
-        ),
-        TimelineEventKind::AdvantageChanged { label, is_friendly } => {
-            (advantage_color(*is_friendly), label.clone(), String::new())
-        }
-        TimelineEventKind::Disconnected { ship_name, player_name, team } => (
-            event_color(*team, viewer_team),
-            format!("{} disconnected", ship_name),
-            format!("{} ({})", ship_name, player_name),
-        ),
-    }
+    let (label, hover) = row_text(kind);
+    (tone_color(row_tone(kind, viewer_team)), label, hover)
 }
 
 /// Kind toggles live inside a menu rather than an inline row so this bar fits
@@ -213,6 +102,7 @@ mod tests {
     use super::*;
     use crate::replay::timeline::TimelineEvent;
     use crate::replay::timeline::TimelineEventKind;
+    use crate::replay::timeline::kind_index;
     use wows_replays::types::ElapsedClock;
     use wowsunpack::game_types::TeamId;
 

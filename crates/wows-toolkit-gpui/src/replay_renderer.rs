@@ -37,6 +37,9 @@ use gpui_kit::component::dock::BasePanel;
 use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::input::Input;
+use gpui_kit::component::input::InputEvent;
+use gpui_kit::component::input::InputState;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
@@ -49,14 +52,22 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
+use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
+use wows_replay_insights::timeline::EventTone;
+use wows_replay_insights::timeline::KIND_COUNT;
 use wows_replay_insights::timeline::TimelineEvent;
+use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
+use wows_replay_insights::timeline::kind_label_key;
+use wows_replay_insights::timeline::row_text;
+use wows_replay_insights::timeline::row_tone;
 use wows_replays::types::GameClock;
+use wowsunpack::game_types::TeamId;
 
 use crate::replay_inspector::GameDataCache;
 
@@ -198,6 +209,19 @@ pub struct ReplayRendererPanel {
     drawn: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Where a drag of the map last was, in window coordinates.
     dragging: Option<Point<Pixels>>,
+    /// What an export is encoded with.
+    export_settings: ExportSettings,
+    /// Which of the battle's events the timeline shows.
+    event_filter: TimelineFilter,
+    /// The timeline's search box.
+    event_search: Entity<InputState>,
+    _event_search: Option<Subscription>,
+    /// Which side the reader was on, which is what makes a row friendly. Read
+    /// with the events.
+    viewer_team: Option<TeamId>,
+    /// Whether the second walk has finished, which is what the timeline says
+    /// instead of an empty list while it runs.
+    events_read: bool,
     /// What happened in the battle, once the second walk has read it. Empty
     /// until then, which is what leaves the event controls refused.
     events: Vec<TimelineEvent>,
@@ -241,6 +265,14 @@ impl ReplayRendererPanel {
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         let zoom = cx.new(|_| zoom_slider());
         let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
+        let event_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
+        let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.event_filter.search = state.read(cx).value().to_string();
+                cx.notify();
+            }
+        });
 
         let mut panel = Self {
             path: path.clone(),
@@ -263,6 +295,12 @@ impl ReplayRendererPanel {
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
+            export_settings: ExportSettings::default(),
+            event_filter: TimelineFilter::default(),
+            event_search,
+            _event_search: Some(event_search_subscription),
+            viewer_team: None,
+            events_read: false,
             events: Vec::new(),
             _events: None,
             redraw_wanted: false,
@@ -292,6 +330,14 @@ impl ReplayRendererPanel {
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         let zoom = cx.new(|_| zoom_slider());
         let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
+        let event_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
+        let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.event_filter.search = state.read(cx).value().to_string();
+                cx.notify();
+            }
+        });
         Self {
             path: PathBuf::new(),
             title: SharedString::from("test"),
@@ -318,6 +364,12 @@ impl ReplayRendererPanel {
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
+            export_settings: ExportSettings::default(),
+            event_filter: TimelineFilter::default(),
+            event_search,
+            _event_search: Some(event_search_subscription),
+            viewer_team: None,
+            events_read: false,
             events: Vec::new(),
             _events: None,
             redraw_wanted: false,
@@ -353,7 +405,11 @@ impl ReplayRendererPanel {
                 cx.background_spawn(async move { crate::minimap_preview::extract_events(&path, &game_data) }).await;
             let _ = this.update(cx, |this, cx| {
                 match read {
-                    Ok(events) => this.events = events,
+                    Ok(read) => {
+                        this.events = read.events;
+                        this.viewer_team = read.viewer_team;
+                        this.events_read = true;
+                    }
                     // The viewport still plays; only the event controls are
                     // worse off, and they stay refused.
                     Err(reason) => tracing::warn!("replay renderer: the battle's events could not be read: {reason}"),
@@ -375,6 +431,28 @@ impl ReplayRendererPanel {
                 kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
             })
             .collect();
+    }
+
+    /// The events the filter admits, newest last.
+    pub(crate) fn visible_events(&self) -> Vec<&TimelineEvent> {
+        self.events.iter().filter(|event| self.event_filter.matches(event)).collect()
+    }
+
+    /// Which of the battle's events the timeline shows.
+    pub(crate) fn event_filter(&self) -> &TimelineFilter {
+        &self.event_filter
+    }
+
+    /// Changes which events the timeline shows.
+    pub(crate) fn set_event_filter(&mut self, apply: impl FnOnce(&mut TimelineFilter), cx: &mut Context<Self>) {
+        apply(&mut self.event_filter);
+        cx.notify();
+    }
+
+    /// Whether the battle has been read yet, which is what the timeline says
+    /// instead of an empty list while the second walk runs.
+    pub(crate) fn events_are_read(&self) -> bool {
+        self.events_read
     }
 
     /// The event before where playback is, if there is one.
@@ -403,6 +481,13 @@ impl ReplayRendererPanel {
         let frame = track.frame_at(at + track.battle_start.seconds());
         self.go_to(frame, window, cx);
         crate::toast::info(said, window, cx);
+    }
+
+    /// Moves playback to `at` seconds into the battle.
+    pub(crate) fn go_to_event_at(&mut self, at: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(track) = self.track() else { return };
+        let frame = track.frame_at(at + track.battle_start.seconds());
+        self.go_to(frame, window, cx);
     }
 
     fn jump_to_previous_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -439,6 +524,30 @@ impl ReplayRendererPanel {
     /// The replay this viewport is playing.
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    /// What an export is encoded with.
+    pub fn export_settings(&self) -> &ExportSettings {
+        &self.export_settings
+    }
+
+    /// Changes what an export is encoded with.
+    pub fn set_export_settings(&mut self, apply: impl FnOnce(&mut ExportSettings), cx: &mut Context<Self>) {
+        apply(&mut self.export_settings);
+        cx.notify();
+    }
+
+    /// The frames an export covers.
+    ///
+    /// A replay records the loading screen and the countdown before the battle
+    /// proper; unless the reader asked for them, an export starts where the
+    /// battle did.
+    fn frames_to_export<'a>(&self, track: &'a Track) -> &'a [Vec<DrawCommand>] {
+        if self.export_settings.include_pre_battle {
+            return &track.frames;
+        }
+        let from = track.frame_at(track.battle_start.seconds());
+        track.frames.get(from..).unwrap_or(&track.frames)
     }
 
     /// What the viewport is drawing.
@@ -620,8 +729,11 @@ impl ReplayRendererPanel {
         // while one runs: a frame cannot be drawn for two things at once.
         let Some(renderer) = self.renderer.take() else { return };
 
-        let frames = track.frames.clone();
-        let duration = track.seconds_at(track.len().saturating_sub(1));
+        let settings = self.export_settings;
+        let frames = self.frames_to_export(track).to_vec();
+        // What the video covers, which is not the whole track when the
+        // pre-battle phase is left out.
+        let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
         let suggested = format!("{}.mp4", self.title);
         // The clipboard needs a file, not a place to put one, so it is not
         // asked for.
@@ -672,7 +784,7 @@ impl ReplayRendererPanel {
             let written = output.clone();
             let (renderer, outcome) = cx
                 .background_spawn(async move {
-                    let outcome = encode_track(&renderer, &frames, duration, &written, progress_tx);
+                    let outcome = encode_track(&renderer, &frames, duration, &written, settings, progress_tx);
                     (renderer, outcome)
                 })
                 .await;
@@ -1179,6 +1291,7 @@ impl Render for ReplayRendererPanel {
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
             )
             .child(render_options_popover(&cx.entity(), self, cx))
+            .child(timeline_popover(&cx.entity(), self, cx))
             .when(!self.popped_out, |this| {
                 this.child(
                     Button::new("replay-renderer-pop-out")
@@ -1358,11 +1471,47 @@ const MP4: crate::dialog::Filter = crate::dialog::Filter { label: "MP4", extensi
 /// Runs on a background thread: it draws every frame and blocks on the
 /// encoder. The renderer is the viewport's own, which is why the caller hands
 /// it over for the duration rather than sharing it.
+/// What an export is encoded with.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExportSettings {
+    /// Encode in software even where the GPU could do it.
+    pub prefer_cpu: bool,
+    /// Start the video at the loading screen rather than at the battle.
+    pub include_pre_battle: bool,
+    /// The codec to encode with. `None` lets the encoder pick the best one it
+    /// can, which is what most readers want.
+    pub codec: Option<VideoCodec>,
+}
+
+/// What this machine can encode with, probed once.
+///
+/// The probe builds a GPU device to ask it, which costs long enough to notice,
+/// and the answer cannot change while the app runs.
+fn encoder_status() -> &'static wows_minimap_renderer::encoder::EncoderStatus {
+    static STATUS: std::sync::OnceLock<wows_minimap_renderer::encoder::EncoderStatus> = std::sync::OnceLock::new();
+    STATUS.get_or_init(wows_minimap_renderer::check_encoder)
+}
+
+/// Whether an export has to be encoded in software.
+///
+/// A codec the GPU cannot encode falls back rather than failing: picking AV1
+/// is a choice of codec, not a demand for the GPU.
+fn must_use_cpu(settings: &ExportSettings, status: &wows_minimap_renderer::encoder::EncoderStatus) -> bool {
+    if settings.prefer_cpu || !status.gpu_available() {
+        return true;
+    }
+    match settings.codec {
+        Some(codec) => !status.supports(wows_minimap_renderer::EncoderKind::Gpu, codec),
+        None => false,
+    }
+}
+
 fn encode_track(
     renderer: &SharedPreviewRenderer,
     frames: &[Vec<DrawCommand>],
     duration_seconds: f32,
     output: &std::path::Path,
+    settings: ExportSettings,
     progress: futures::channel::mpsc::UnboundedSender<ExportProgress>,
 ) -> Result<(), String> {
     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1373,6 +1522,11 @@ fn encode_track(
     };
     let mut encoder =
         wows_minimap_renderer::VideoEncoder::new(Some(path), None, false, duration_seconds, width, height);
+    encoder.set_prefer_cpu(must_use_cpu(&settings, encoder_status()));
+    encoder.set_codec(match settings.codec {
+        Some(codec) => wows_minimap_renderer::video::CodecChoice::Explicit(codec),
+        None => wows_minimap_renderer::video::CodecChoice::Auto,
+    });
     encoder.init().map_err(|err| err.to_string())?;
 
     let total = frames.len() as u64;
@@ -1541,6 +1695,7 @@ fn render_options_popover(
     let _ = cx;
     let options = view.options().clone();
     let dead = view.show_dead_ships();
+    let export = *view.export_settings();
     let owner = panel.clone();
 
     Popover::new("replay-renderer-settings")
@@ -1574,9 +1729,307 @@ fn render_options_popover(
                         })
                         .into_any_element()
                 })))
+                .child(export_settings_section(&owner, export))
                 .into_any_element()
         })
         .into_any_element()
+}
+
+/// What an export is encoded with, under the display toggles as the egui
+/// renderer arranges them.
+fn export_settings_section(panel: &Entity<ReplayRendererPanel>, settings: ExportSettings) -> AnyElement {
+    let status = encoder_status();
+    let chosen = settings.codec;
+
+    v_flex()
+        .gap_0()
+        .pt_2()
+        .child(
+            div()
+                .pt_1()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.renderer.settings.export_settings").into_owned()),
+        )
+        .child({
+            let owner = panel.clone();
+            Checkbox::new("replay-renderer-prefer-cpu")
+                .label(t!("ui.renderer.settings.prefer_cpu").to_string())
+                .checked(settings.prefer_cpu)
+                .tooltip(t!("ui.renderer.settings.prefer_cpu_tooltip").into_owned())
+                .on_click(move |checked, _window, cx: &mut App| {
+                    let checked = *checked;
+                    owner.update(cx, |panel, cx| {
+                        panel.set_export_settings(|settings| settings.prefer_cpu = checked, cx)
+                    });
+                })
+        })
+        .child({
+            let owner = panel.clone();
+            Checkbox::new("replay-renderer-include-pre-battle")
+                .label(t!("ui.renderer.settings.include_pre_battle").to_string())
+                .checked(settings.include_pre_battle)
+                .tooltip(t!("ui.renderer.settings.include_pre_battle_tooltip").into_owned())
+                .on_click(move |checked, _window, cx: &mut App| {
+                    let checked = *checked;
+                    owner.update(cx, |panel, cx| {
+                        panel.set_export_settings(|settings| settings.include_pre_battle = checked, cx)
+                    });
+                })
+        })
+        .child(
+            div()
+                .pt_1()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.renderer.settings.codec").into_owned()),
+        )
+        .child({
+            let owner = panel.clone();
+            // Auto names the codec it would pick, so the choice is not blind.
+            let auto = format!(
+                "{} ({})",
+                t!("ui.renderer.settings.codec_auto"),
+                status.best_codec(settings.prefer_cpu).display_name()
+            );
+            crate::ui::selectable(
+                "replay-renderer-codec-auto",
+                chosen.is_none(),
+                Button::new("replay-renderer-codec-auto-button")
+                    .label(auto)
+                    .compact()
+                    .selected(chosen.is_none())
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        owner.update(cx, |panel, cx| panel.set_export_settings(|settings| settings.codec = None, cx));
+                    }),
+            )
+        })
+        // Only what this machine can actually encode with.
+        .children(status.supported_codecs().map(|codec| {
+            let owner = panel.clone();
+            let picked = chosen == Some(codec);
+            crate::ui::selectable(
+                ("replay-renderer-codec", codec as usize),
+                picked,
+                Button::new(("replay-renderer-codec-button", codec as usize))
+                    .label(codec.display_name().to_string())
+                    .compact()
+                    .selected(picked)
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        owner.update(cx, |panel, cx| {
+                            panel.set_export_settings(|settings| settings.codec = Some(codec), cx)
+                        });
+                    }),
+            )
+            .into_any_element()
+        }))
+        .into_any_element()
+}
+
+/// The transport's event timeline: what happened, filtered, and clickable.
+///
+/// `view` rather than its entity, because this is built inside that view's
+/// own render where reading the entity would panic.
+fn timeline_popover(
+    panel: &Entity<ReplayRendererPanel>,
+    view: &ReplayRendererPanel,
+    cx: &Context<ReplayRendererPanel>,
+) -> AnyElement {
+    let _ = cx;
+    let owner = panel.clone();
+    let read = view.events_are_read();
+    let any_events = !view.events.is_empty();
+    let filter = view.event_filter().clone();
+    let viewer_team = view.viewer_team;
+    let search = view.event_search.clone();
+    // Cloned out because the content closure runs after this render returns,
+    // when the panel cannot be read.
+    let rows: Vec<TimelineRow> = view
+        .visible_events()
+        .into_iter()
+        .map(|event| {
+            let (label, hover) = row_text(&event.kind);
+            TimelineRow { at: event.clock.seconds(), label, hover, tone: row_tone(&event.kind, viewer_team) }
+        })
+        .collect();
+    let copyable: String = view.visible_events().into_iter().map(format_timeline_event).collect::<Vec<_>>().join("\n");
+
+    Popover::new("replay-renderer-timeline")
+        .trigger(
+            Button::new("replay-renderer-timeline-toggle")
+                .child(crate::icons::icon(crate::icons::LIST_BULLETS))
+                .compact()
+                .tooltip(t!("ui.renderer.settings.event_timeline").into_owned()),
+        )
+        .content(move |_state, _window, cx| {
+            let owner = owner.clone();
+            let filter = filter.clone();
+            let rows = rows.clone();
+            let copyable = copyable.clone();
+            v_flex()
+                .w(px(340.))
+                .p_2()
+                .gap_1()
+                .child(
+                    h_flex()
+                        .justify_between()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .font_weight(FontWeight::BOLD)
+                                .child(t!("ui.renderer.settings.event_timeline").into_owned()),
+                        )
+                        .child(
+                            Button::new("replay-renderer-timeline-copy")
+                                .label(t!("ui.buttons.copy").into_owned())
+                                .compact()
+                                .disabled(rows.is_empty())
+                                .tooltip(t!("ui.replay.timeline_export_tooltip").into_owned())
+                                .on_click(move |_event, window, cx: &mut App| {
+                                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(copyable.clone()));
+                                    crate::toast::ok(t!("ui.replay.timeline_copied").into_owned(), window, cx);
+                                }),
+                        ),
+                )
+                .child(timeline_filter_bar(&owner, &filter, &search))
+                .child(crate::ui::rule_h(cx))
+                .child(timeline_rows(&owner, rows, read, any_events))
+                .into_any_element()
+        })
+        .into_any_element()
+}
+
+/// One row of the timeline, already worded and sided.
+#[derive(Clone)]
+struct TimelineRow {
+    /// Where in the battle it happened, in seconds.
+    at: f32,
+    label: String,
+    hover: String,
+    tone: EventTone,
+}
+
+/// The kind switches and the search box.
+fn timeline_filter_bar(
+    panel: &Entity<ReplayRendererPanel>,
+    filter: &TimelineFilter,
+    search: &Entity<InputState>,
+) -> AnyElement {
+    let all = panel.clone();
+    let none = panel.clone();
+    v_flex()
+        .gap_1()
+        .child(
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(
+                    Button::new("replay-renderer-timeline-all")
+                        .label(t!("ui.replay.timeline_filter_all").into_owned())
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            all.update(cx, |panel, cx| {
+                                panel.set_event_filter(|filter| filter.kinds = [true; KIND_COUNT], cx)
+                            });
+                        }),
+                )
+                .child(
+                    Button::new("replay-renderer-timeline-none")
+                        .label(t!("ui.replay.timeline_filter_none").into_owned())
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            none.update(cx, |panel, cx| {
+                                panel.set_event_filter(|filter| filter.kinds = [false; KIND_COUNT], cx)
+                            });
+                        }),
+                )
+                .child(div().flex_1().child(Input::new(search).small())),
+        )
+        .child(v_flex().gap_0().children((0..KIND_COUNT).map(|index| {
+            let owner = panel.clone();
+            Checkbox::new(("replay-renderer-timeline-kind", index))
+                .label(t!(kind_label_key(index)).to_string())
+                .checked(filter.kinds[index])
+                .on_click(move |checked, _window, cx: &mut App| {
+                    let checked = *checked;
+                    owner.update(cx, |panel, cx| panel.set_event_filter(|filter| filter.kinds[index] = checked, cx));
+                })
+                .into_any_element()
+        })))
+        .into_any_element()
+}
+
+/// The filtered list, or what to say instead of one.
+fn timeline_rows(
+    panel: &Entity<ReplayRendererPanel>,
+    rows: Vec<TimelineRow>,
+    read: bool,
+    any_events: bool,
+) -> AnyElement {
+    if !read {
+        return h_flex()
+            .gap_2()
+            .items_center()
+            .py_2()
+            .child(Spinner::new())
+            .child(div().text_xs().child(t!("ui.replay.timeline_parsing").into_owned()))
+            .into_any_element();
+    }
+    if rows.is_empty() {
+        let said = if any_events { t!("ui.replay.timeline_no_matches") } else { t!("ui.replay.timeline_no_events") };
+        return div().py_2().text_xs().text_color(crate::theme::text_dim()).child(said.into_owned()).into_any_element();
+    }
+
+    div()
+        .id("replay-renderer-timeline-list")
+        .max_h(px(400.))
+        .overflow_y_scroll()
+        .child(v_flex().gap_0().children(rows.into_iter().enumerate().map(|(index, row)| {
+            let owner = panel.clone();
+            let at = row.at;
+            div()
+                .id(("replay-renderer-timeline-row", index))
+                .flex()
+                .gap_2()
+                .px_1()
+                .py_0p5()
+                .cursor_pointer()
+                .hover(|style| style.bg(crate::theme::surface()))
+                .when(!row.hover.is_empty(), |row_div| row_div.tooltip(hover_lines(row.hover.clone().into())))
+                .child(div().flex_none().w(px(40.)).text_xs().text_color(crate::theme::text_dim()).child(mmss(row.at)))
+                .child(div().flex_1().text_xs().text_color(tone_color(row.tone)).child(row.label))
+                .on_click(move |_event, window, cx: &mut App| {
+                    owner.update(cx, |panel, cx| panel.go_to_event_at(at, window, cx));
+                })
+                .into_any_element()
+        })))
+        .into_any_element()
+}
+
+/// The colour a row's side is drawn in.
+fn tone_color(tone: EventTone) -> gpui_kit::Hsla {
+    let semantic = crate::theme::semantic();
+    match tone {
+        // The two colours this app already paints a friendly and an enemy
+        // team in.
+        EventTone::Friendly => rgb(semantic.win).into(),
+        EventTone::Enemy => rgb(semantic.loss).into(),
+        EventTone::Neutral => crate::theme::text_dim(),
+    }
+}
+
+/// A hover that puts each newline-separated line on its own row.
+fn hover_lines(text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    move |window, cx| {
+        let text = text.clone();
+        gpui_kit::component::tooltip::Tooltip::element(move |_window, _cx| {
+            let text = text.clone();
+            v_flex().gap_0().text_xs().children(text.split('\n').map(|line| div().child(line.to_string())))
+        })
+        .build(window, cx)
+    }
 }
 
 /// The seek slider for a track of `last + 1` frames.
@@ -2114,6 +2567,119 @@ mod tests {
                 panel.jump_to_next_event(window, cx);
                 panel.jump_to_previous_event(window, cx);
                 assert_eq!(panel.at, 10, "playback stayed where it was");
+            });
+        })
+        .expect("the window is open");
+    }
+
+    /// An export starts at the battle unless the reader asked for what came
+    /// before it.
+    ///
+    /// A replay records the loading screen and the countdown; exporting those
+    /// by default would put most of a minute of a still map at the front of
+    /// every video.
+    #[gpui_kit::test]
+    fn an_export_leaves_out_the_pre_battle_phase_unless_it_is_asked_for(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        // Half-second frames: the battle starts forty seconds in, at frame 80.
+        let clocks: Vec<f32> = (0..200).map(|frame| frame as f32 * 0.5).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.set_battle_window(40.0, Some(95.0));
+                let track = panel.track().expect("the track is ready");
+                assert_eq!(track.frames.len(), 200);
+
+                assert_eq!(panel.frames_to_export(track).len(), 120, "the eighty frames before the battle are cut");
+
+                panel.set_export_settings(|settings| settings.include_pre_battle = true, cx);
+                let track = panel.track().expect("the track is ready");
+                assert_eq!(panel.frames_to_export(track).len(), 200, "and kept when asked for");
+            })
+            .expect("the window is open");
+    }
+
+    /// A codec the GPU cannot encode falls back to software rather than
+    /// failing the export.
+    #[test]
+    fn a_codec_the_gpu_cannot_encode_falls_back_to_software() {
+        use wows_minimap_renderer::EncoderKind;
+        use wows_minimap_renderer::VideoCodec;
+        use wows_minimap_renderer::encoder::CodecSupport;
+        use wows_minimap_renderer::encoder::EncoderStatus;
+
+        let mut status = EncoderStatus {
+            gpu_adapter_name: Some("test".into()),
+            gpu_error: None,
+            gpu_codecs: Default::default(),
+            cpu_codecs: Default::default(),
+        };
+        status.gpu_codecs.insert(VideoCodec::H264, CodecSupport::Supported);
+        status.cpu_codecs.insert(VideoCodec::Av1, CodecSupport::Supported);
+        assert!(status.supports(EncoderKind::Gpu, VideoCodec::H264));
+
+        let settings = super::ExportSettings::default();
+        assert!(!super::must_use_cpu(&settings, &status), "the GPU handles the codec it would pick");
+
+        let asked_for_av1 = super::ExportSettings { codec: Some(VideoCodec::Av1), ..settings };
+        assert!(super::must_use_cpu(&asked_for_av1, &status), "AV1 has no GPU encoder here, so it falls back");
+
+        let asked_for_cpu = super::ExportSettings { prefer_cpu: true, ..settings };
+        assert!(super::must_use_cpu(&asked_for_cpu, &status));
+
+        // Availability is read off the codec table, not the adapter name.
+        let no_gpu = EncoderStatus { gpu_codecs: Default::default(), ..status };
+        assert!(!no_gpu.gpu_available());
+        assert!(super::must_use_cpu(&settings, &no_gpu), "with no GPU there is nothing to fall back from");
+    }
+
+    /// The timeline shows the events the filter admits, and says which of
+    /// "nothing happened" and "nothing matches" it means.
+    #[gpui_kit::test]
+    fn the_timeline_filter_decides_what_the_list_shows(cx: &mut TestAppContext) {
+        use wows_replay_insights::timeline::KIND_COUNT;
+        use wows_replay_insights::timeline::kind_index;
+
+        let clocks: Vec<f32> = (0..200).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport_in_root(cx, clocks);
+
+        cx.update_window(window.into(), |_, _window, cx| {
+            panel.update(cx, |panel, cx| {
+                assert!(!panel.events_are_read(), "the second walk has not landed yet");
+
+                panel.seed_events_for_test(&[10.0, 30.0, 60.0]);
+                panel.events_read = true;
+                assert_eq!(panel.visible_events().len(), 3);
+
+                // Every seeded event is an advantage change, so switching that
+                // kind off empties the list without emptying the battle.
+                let advantage = kind_index(&panel.events[0].kind);
+                panel.set_event_filter(|filter| filter.kinds[advantage] = false, cx);
+                assert!(panel.visible_events().is_empty());
+                assert!(!panel.events.is_empty(), "which is 'nothing matches', not 'nothing happened'");
+
+                panel.set_event_filter(|filter| filter.kinds = [true; KIND_COUNT], cx);
+                panel.set_event_filter(|filter| filter.search = "at 30".into(), cx);
+                assert_eq!(panel.visible_events().len(), 1, "the search looks through what a row says");
+            });
+        })
+        .expect("the window is open");
+    }
+
+    /// Clicking a row moves playback to when it happened.
+    #[gpui_kit::test]
+    fn clicking_a_timeline_row_seeks_to_it(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..200).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport_in_root(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            panel.update(cx, |panel, cx| {
+                panel.set_battle_window(40.0, Some(95.0));
+                panel.go_to_event_at(30.0, window, cx);
+                assert_eq!(panel.clock_label(), "00:30");
             });
         })
         .expect("the window is open");
