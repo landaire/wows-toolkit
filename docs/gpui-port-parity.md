@@ -204,10 +204,12 @@ kept so the next audit does not re-report them.
       the health at a clock -- so the data half is shared and ready. What is
       missing is the armor viewer's side: somewhere to put the hits, and a
       way to open a viewer on a ship the renderer names.
-    - **Roster, consumable and build hover readouts.** Two things stand in
-      the way. A hover needs the target to report where it drew each
-      consumable icon, and `ImageTarget` reports no geometry beyond the map's
-      own corner. And rosters are not a layer that can be switched on at
+    - **Roster, consumable and build hover readouts.** A hover needs the
+      target to report where it drew each consumable icon, which it does now:
+      `ImageTarget::drawn_regions` records a `DrawnRegion` per icon, keyed to
+      the roster row it belongs to, so a front end can put a hover over one
+      without repeating the layout and drifting from it. What is still in the
+      way is that rosters are not a layer that can be switched on at
       raster time: they need the canvas built as
       `SidePanelLayout::TeamRosters`, which widens it and moves the map right,
       so a viewport showing them needs a renderer of its own rather than the
