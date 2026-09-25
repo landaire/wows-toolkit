@@ -853,6 +853,25 @@ fn system_game_fonts() -> GameFonts {
     }
 }
 
+/// Fonts from whatever the machine has installed.
+///
+/// Test-only, for a test that needs a render target but has no game files and
+/// does not care what the text looks like. `None` on a machine with none of
+/// the listed faces, where such a test skips rather than fails.
+#[cfg(test)]
+pub(crate) fn test_fonts() -> Option<GameFonts> {
+    let (primary, primary_bytes) = load_system_fallback_font()?;
+    let primary_scale_factor = compute_scale_factor(&primary);
+    Some(GameFonts {
+        primary,
+        fallbacks: Vec::new(),
+        primary_scale_factor,
+        fallback_scale_factors: Vec::new(),
+        primary_bytes,
+        fallback_bytes: Vec::new(),
+    })
+}
+
 /// Load game fonts from a single VFS, falling back to a system font when the
 /// VFS ships no TrueType face.
 pub fn load_game_fonts(vfs: &VfsPath) -> GameFonts {

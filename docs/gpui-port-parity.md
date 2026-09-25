@@ -82,8 +82,8 @@ kept so the next audit does not re-report them.
 
 - [done] The replay renderer is partly there. "Render Replay" in the row menu opens
   a playback viewport in a dock tab of its own: the battle is walked once in
-  the background, and the transport plays, pauses, seeks and runs at 0.5x to
-  8x with the game clock beside it.
+  the background, and the transport plays, pauses, seeks and runs at the egui
+  renderer's own ladder of 1x to 60x, opening at 20x as it does.
   - Frames are kept as draw commands and rasterised one at a time through
     `PreviewRenderer`, the path the hover preview uses; the port has no
     painter of its own, so it cannot convert commands to shapes the way the
@@ -113,17 +113,52 @@ kept so the next audit does not re-report them.
     re-hosted, so the baked track and the renderer come with it; it leaves the
     dock first, because one entity drawn twice would fight over the one
     renderer.
-  - Still absent, in rough order of what would be missed: zoom and pan; the
-    jump-to-start/end, plus-or-minus ten seconds and previous/next-event
-    buttons, and the keyboard shortcuts for them; the elapsed-rather-than-
-    absolute clock and the battle-start/end ticks on the seek bar; the event
-    timeline panel; codec, prefer-CPU and include-pre-battle on export; the
-    per-ship context menu (trail and range toggles, Show Realtime Armor); the
-    roster, consumable, build and team-advantage hover readouts; the
+  - The scrubber addresses frames rather than a fraction. A slider quantises
+    to its step, so one built over a range of 1 rounded every position to an
+    end and only the ends of a drag did anything; it is rebuilt over the
+    track once the bake lands.
+  - Jump-to-start, back and forward ten seconds and jump-to-end are on the
+    transport, and Space, Up, Down, Left and Right drive them from the
+    keyboard as they do in the egui renderer. A skip moves by game time
+    rather than by frames, since the sampling interval decides how many
+    frames a second is.
+  - The clock reads the battle's own time rather than the recording's: a
+    replay records from the loading screen, so the raw clock of the first
+    frame is already most of a minute in. The seek bar marks where the battle
+    began and ended, which is what says which stretch of the bar is the
+    battle. `bake_track` carries both clocks out of the walk it already
+    makes.
+  - The map zooms and pans. The wheel zooms about whatever is under the
+    pointer, a drag moves the map under it, a double-click puts the whole map
+    back, and a zoom control and Reset sit on the transport where the egui
+    renderer keeps them. A drag asks for frames faster than one can be
+    rasterised, so a request that arrives while a frame is still being drawn
+    is remembered and made once it lands; dropping it left the map showing a
+    zoom the reader had already moved past.
+  - Still absent, in rough order of what would be missed: the
+    previous/next-event buttons and their Shift+Left/Right shortcuts, and the
+    event timeline panel, all of which want the timeline scan that today
+    lives inside the egui crate (`replay::timeline`) and would have to move to
+    a shared crate first; codec, prefer-CPU and include-pre-battle on export;
+    the per-ship context menu (trail and range toggles, Show Realtime Armor);
+    the roster, consumable, build and team-advantage hover readouts; the
     annotation toolbar and everything collab draws over the map (pings,
     remote cursors, shared annotations). The stats panel, team rosters, ship
     ranges and position trails are outside `bake_options`, so they are not in
     the track and cannot be switched on without widening the bake.
+  - Zoom and pan was the one gap that was not a matter of wiring. The egui
+    renderer converts draw commands to shapes itself and applies a
+    `MapTransform` as it goes, so map elements zoom while the HUD does not;
+    the port rasterises a whole frame through `ImageTarget`, and transforming
+    the finished image would have zoomed the score bar, the timer and the
+    kill feed with the map. `ImageTarget` now has a map viewport of its own
+    (`minimap-renderer` `viewport.rs`), which both apps share: map elements
+    draw on a layer the size of the map, so the map's own rectangle clips
+    them, and the layer is composited onto the canvas before anything that is
+    not a map element, so the HUD still lands on top. Positions, radii, icons,
+    bars and the labels beside them grow with the map; strokes and the grid's
+    own labels do not, which is what the egui renderer's `scale_distance` and
+    `scale_stroke` decide between.
 - [done] "Copy Replay" puts the replay files on the clipboard through
   `arboard`, so they paste into a file manager; "Copy Path" still copies the
   text. A group offers both.

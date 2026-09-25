@@ -21,6 +21,7 @@ pub mod preview;
 pub mod renderer;
 #[cfg(feature = "rendering")]
 pub mod video;
+pub mod viewport;
 
 /// Minimap image size in pixels (square). Multiple of 16 for H.264 macroblock alignment.
 pub const MINIMAP_SIZE: u32 = 768;

@@ -18,6 +18,7 @@ use crate::assets;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::RenderTarget;
 use crate::drawing::ImageTarget;
+use crate::viewport::MapViewport;
 use wowsunpack::data::Version;
 
 /// Why a preview could not be rendered.
@@ -79,8 +80,19 @@ impl PreviewRenderer {
         self.target.canvas_size()
     }
 
-    /// One frame of `commands`, drawn over the map.
+    /// One frame of `commands`, drawn over the whole map.
     pub fn render(&mut self, commands: &[DrawCommand]) -> RgbImage {
+        self.render_at(MapViewport::default(), commands)
+    }
+
+    /// One frame of `commands`, drawn over the part of the map `viewport`
+    /// shows.
+    ///
+    /// The viewport is given per frame rather than kept, because one renderer
+    /// is shared by every preview of a map: one that remembered a zoom would
+    /// zoom the others with it.
+    pub fn render_at(&mut self, viewport: MapViewport, commands: &[DrawCommand]) -> RgbImage {
+        self.target.set_map_viewport(viewport);
         self.target.begin_frame();
         for command in commands {
             self.target.draw(command);
