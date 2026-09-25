@@ -229,9 +229,12 @@ kept so the next audit does not re-report them.
       now: `wt-collab-client` already tracked both, so the work was a
       `CollabLink` the viewport holds (inert without a session, and handed on
       when one starts or stops while a viewport is open) and the projection
-      from map space back to the element. A middle-click drops a ping. What is
-      still absent is the toolbar itself, which is a drawing editor -- tools,
-      selection, transforms -- and its own piece of work.
+      from map space back to the element. A middle-click drops a ping. A
+      running session drives its own redraw, so a peer's pointer moves and a
+      ping finishes its ripple while this app sits still; the egui renderer
+      reaches the same place by asking for a repaint while a ping is alive.
+      What is still absent is the toolbar itself, which is a drawing editor
+      -- tools, selection, transforms -- and its own piece of work.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
@@ -413,8 +416,13 @@ kept so the next audit does not re-report them.
   extremes of the range are drawn faint behind the selected one. The
   resolution is `wowsunpack`'s own `CameraTrajectory::resolve`, so both apps
   draw the same orbits; a mode name belongs to the ship that named it, so it
-  is corrected whenever the loaded hull changes. The egui section's hover
-  labels over a ring are not ported. Gap detection is on the pane's
+  is corrected whenever the loaded hull changes. Resting the pointer on an
+  orbit reads it: which mode it belongs to, which of the two orbits it is,
+  at which field of view, and the numbers behind it. Measured to the drawn
+  curve on screen rather than by raycast, as the egui app measures it, since
+  an orbit is drawn a few centimetres wide and no pick would land on one;
+  the orbit takes the tooltip from the plate behind it, which still picks
+  for a click. Gap detection is on the pane's
   toolbar, carrying its own count: the openings in the armor a shell could
   pass through are marked in red, found by the same two rules the egui app
   uses (an edge belonging to one triangle, no longer than 5 m, with no other
