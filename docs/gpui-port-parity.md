@@ -264,11 +264,18 @@ kept so the next audit does not re-report them.
       beside the gear, refused without a session because an annotation is
       something everyone in one sees. The icons are the egui toolbar's own
       Phosphor codepoints rather than approximations.
-      What remains is selection and the transforms that go with it (moving,
-      rotating and rubbing out by handle rather than by the eraser), the undo
-      the egui toolbar carries, and the ship annotation, which is an icon and
-      a set of range circles rather than a shape and so needs the ship's own
-      game data.
+      Selection is in: with no tool, a click picks out the shape under the
+      pointer (ctrl-click builds a selection up, a click on open water lets
+      go) and dragging one moves it, which the session hears about once, at
+      the end, under the id it already knows rather than as a new shape
+      beside the old one. `drawing::{move_annotation, rotate_annotation,
+      can_rotate, Selection}` are shared, so both front ends move a shape the
+      same way, and a selection is trimmed against the list each click
+      because another peer can rub something out from under it.
+      What remains is the rotation handle (the maths is shared, the handle
+      itself is not drawn yet), the undo the egui toolbar carries, and the
+      ship annotation, which is an icon and a set of range circles rather
+      than a shape and so needs the ship's own game data.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
