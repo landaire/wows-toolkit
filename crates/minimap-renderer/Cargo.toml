@@ -40,7 +40,7 @@ rendering = [
     "wowsunpack/parsing",
 ]
 bin = ["dep:clap", "dep:gettext", "dep:toml", "dep:indicatif", "dep:tracing-subscriber", "dep:serde_json", "dep:wows-data-mgr", "rendering", "rkyv"]
-rkyv = ["dep:rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
+rkyv = ["dep:rkyv", "wows-core/rkyv", "wowsunpack/rkyv", "wowsunpack/parsing"]
 vulkan = ["dep:gpu-video", "dep:wgpu", "dep:yuvutils-rs", "rendering"]
 videotoolbox = ["dep:objc2", "dep:objc2-foundation", "dep:objc2-core-foundation", "dep:objc2-core-media", "dep:objc2-core-video", "dep:objc2-video-toolbox", "dep:yuvutils-rs", "rendering"]
 cpu = ["dep:openh264", "rendering"]
@@ -52,6 +52,7 @@ vfs = ["wows-battle-world?/vfs", "wows_replays/vfs", "wowsunpack/vfs-mmap"]
 
 [dependencies]
 wows_replays = { workspace = true, default-features = false }
+wows-core = { workspace = true }
 wowsunpack = { workspace = true, default-features = false }
 wows-replay-insights = { workspace = true, optional = true, features = ["build"] }
 wows-battle-world = { workspace = true, optional = true }

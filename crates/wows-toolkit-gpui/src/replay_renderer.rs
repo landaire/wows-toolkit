@@ -54,6 +54,8 @@ use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
+use wows_replay_insights::timeline::TimelineEvent;
+use wows_replay_insights::timeline::format_timeline_event;
 use wows_replays::types::GameClock;
 
 use crate::replay_inspector::GameDataCache;
@@ -196,6 +198,10 @@ pub struct ReplayRendererPanel {
     drawn: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Where a drag of the map last was, in window coordinates.
     dragging: Option<Point<Pixels>>,
+    /// What happened in the battle, once the second walk has read it. Empty
+    /// until then, which is what leaves the event controls refused.
+    events: Vec<TimelineEvent>,
+    _events: Option<Task<()>>,
     /// Set when a frame was asked for while one was still being drawn. The
     /// draw in flight starts another as it finishes, so what ends up on
     /// screen is the last thing asked for rather than the first.
@@ -257,6 +263,8 @@ impl ReplayRendererPanel {
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
+            events: Vec::new(),
+            _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
             seek,
@@ -267,7 +275,8 @@ impl ReplayRendererPanel {
             _rebuilt_seek: None,
             focus_handle: cx.focus_handle(),
         };
-        panel.start_bake(path, game_data, cx);
+        panel.start_bake(path.clone(), game_data.clone(), cx);
+        panel.start_event_scan(path, game_data, cx);
         panel
     }
 
@@ -309,6 +318,8 @@ impl ReplayRendererPanel {
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
+            events: Vec::new(),
+            _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
             seek,
@@ -329,6 +340,81 @@ impl ReplayRendererPanel {
         let State::Ready(track) = &mut self.state else { return };
         track.battle_start = GameClock(start);
         track.battle_end = end.map(GameClock);
+    }
+
+    /// Reads what happened in the battle, which the event controls step
+    /// between.
+    ///
+    /// Its own task rather than part of the bake: it is a second walk of the
+    /// replay, and the viewport is worth showing before it finishes.
+    fn start_event_scan(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
+        self._events = Some(cx.spawn(async move |this, cx| {
+            let read =
+                cx.background_spawn(async move { crate::minimap_preview::extract_events(&path, &game_data) }).await;
+            let _ = this.update(cx, |this, cx| {
+                match read {
+                    Ok(events) => this.events = events,
+                    // The viewport still plays; only the event controls are
+                    // worse off, and they stay refused.
+                    Err(reason) => tracing::warn!("replay renderer: the battle's events could not be read: {reason}"),
+                }
+                cx.notify();
+            });
+        }));
+    }
+
+    /// A viewport with `events` already read, at the elapsed clocks given.
+    #[cfg(test)]
+    fn seed_events_for_test(&mut self, at: &[f32]) {
+        use wows_replay_insights::timeline::TimelineEventKind;
+        use wows_replays::types::ElapsedClock;
+        self.events = at
+            .iter()
+            .map(|seconds| TimelineEvent {
+                clock: ElapsedClock(*seconds),
+                kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
+            })
+            .collect();
+    }
+
+    /// The event before where playback is, if there is one.
+    ///
+    /// Half a second back, as the egui renderer looks: without it, landing on
+    /// an event and pressing back again would find the same one.
+    fn previous_event(&self) -> Option<&TimelineEvent> {
+        let here = self.elapsed_now()?;
+        self.events.iter().rev().find(|event| event.clock.seconds() < here - 0.5)
+    }
+
+    fn next_event(&self) -> Option<&TimelineEvent> {
+        let here = self.elapsed_now()?;
+        self.events.iter().find(|event| event.clock.seconds() > here)
+    }
+
+    /// How far into the battle playback is, which is what an event's clock is
+    /// measured against.
+    fn elapsed_now(&self) -> Option<f32> {
+        self.track().map(|track| track.elapsed_at(self.at))
+    }
+
+    /// Moves playback to `event` and says what it was.
+    fn go_to_event(&mut self, at: f32, said: String, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(track) = self.track() else { return };
+        let frame = track.frame_at(at + track.battle_start.seconds());
+        self.go_to(frame, window, cx);
+        crate::toast::info(said, window, cx);
+    }
+
+    fn jump_to_previous_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(event) = self.previous_event() else { return };
+        let (at, said) = (event.clock.seconds(), format_timeline_event(event));
+        self.go_to_event(at, said, window, cx);
+    }
+
+    fn jump_to_next_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(event) = self.next_event() else { return };
+        let (at, said) = (event.clock.seconds(), format_timeline_event(event));
+        self.go_to_event(at, said, window, cx);
     }
 
     fn start_bake(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
@@ -445,6 +531,8 @@ impl ReplayRendererPanel {
             "down" => self.step_speed(-1, window, cx),
             "left" if !shift => self.seek_by(-SEEK_STEP, window, cx),
             "right" if !shift => self.seek_by(SEEK_STEP, window, cx),
+            "left" => self.jump_to_previous_event(window, cx),
+            "right" => self.jump_to_next_event(window, cx),
             _ => return,
         }
         cx.stop_propagation();
@@ -1010,6 +1098,10 @@ impl Render for ReplayRendererPanel {
 
         let ready = matches!(self.state, State::Ready(_));
         let last_frame = self.frame_count().saturating_sub(1);
+        // Refused until the second walk has read the battle, and at whichever
+        // end of it there is nothing further to step to.
+        let has_previous = self.previous_event().is_some();
+        let has_next = self.next_event().is_some();
         let transport = h_flex()
             .flex_none()
             .gap_2()
@@ -1025,6 +1117,14 @@ impl Render for ReplayRendererPanel {
                     .disabled(!ready)
                     .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
                     .on_click(cx.listener(|this, _event, window, cx| this.go_to(0, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-previous-event")
+                    .child(crate::icons::icon(crate::icons::REWIND))
+                    .compact()
+                    .disabled(!ready || !has_previous)
+                    .tooltip(t!("ui.renderer.controls.previous_event").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.jump_to_previous_event(window, cx))),
             )
             .child(
                 Button::new("replay-renderer-back-10s")
@@ -1052,6 +1152,14 @@ impl Render for ReplayRendererPanel {
                     .disabled(!ready)
                     .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
                     .on_click(cx.listener(|this, _event, window, cx| this.seek_by(SEEK_STEP, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-next-event")
+                    .child(crate::icons::icon(crate::icons::FAST_FORWARD))
+                    .compact()
+                    .disabled(!ready || !has_next)
+                    .tooltip(t!("ui.renderer.controls.next_event").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.jump_to_next_event(window, cx))),
             )
             .child(
                 Button::new("replay-renderer-jump-to-end")
@@ -1930,6 +2038,85 @@ mod tests {
                 assert!(panel.dragging.is_none(), "the whole map has nowhere to drag to");
             })
             .expect("the window is open");
+    }
+
+    /// A viewport inside a `Root`, which is what the toast layer needs, with
+    /// its entity kept so a test can drive it.
+    fn viewport_in_root(
+        cx: &mut TestAppContext,
+        clocks: Vec<f32>,
+    ) -> (gpui_kit::WindowHandle<gpui_kit::component::Root>, gpui_kit::Entity<ReplayRendererPanel>) {
+        cx.update(gpui_kit::init);
+        let panel = std::cell::RefCell::new(None);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            let view = cx.new(|cx| ReplayRendererPanel::ready_for_test(clocks, window, cx));
+            *panel.borrow_mut() = Some(view.clone());
+            let view: gpui_kit::AnyView = view.into();
+            gpui_kit::component::Root::new(view, window, cx)
+        });
+        let panel = panel.borrow_mut().take().expect("the viewport was built inside the window");
+        (window, panel)
+    }
+
+    /// The event controls step to the next thing that happened, and stop at
+    /// each end of the battle.
+    ///
+    /// Stepping back looks half a second behind the clock, as the egui
+    /// renderer does: without that, landing on an event and pressing back
+    /// again would find the same one and never move.
+    #[gpui_kit::test]
+    fn the_event_controls_step_between_what_happened(cx: &mut TestAppContext) {
+        // Half-second frames over two minutes of recording.
+        let clocks: Vec<f32> = (0..240).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport_in_root(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            panel.update(cx, |panel, cx| {
+                // The battle starts forty seconds into the recording, so an
+                // event at 10s of battle is at 50s of track.
+                panel.set_battle_window(40.0, Some(110.0));
+                panel.seed_events_for_test(&[10.0, 30.0, 60.0]);
+
+                assert!(panel.previous_event().is_none(), "nothing happened before the battle began");
+                panel.jump_to_next_event(window, cx);
+                assert_eq!(panel.clock_label(), "00:10");
+
+                panel.jump_to_next_event(window, cx);
+                assert_eq!(panel.clock_label(), "00:30");
+
+                // Back from an event finds the one before it, not itself.
+                panel.jump_to_previous_event(window, cx);
+                assert_eq!(panel.clock_label(), "00:10");
+
+                panel.set_at(239, cx);
+                assert!(panel.next_event().is_none(), "nothing happened after the last one");
+            });
+        })
+        .expect("the window is open");
+    }
+
+    /// With no events read yet, the controls have nowhere to go.
+    ///
+    /// The second walk of the replay lands after the viewport opens, and a
+    /// control that jumped to the start of the battle in the meantime would
+    /// read as broken.
+    #[gpui_kit::test]
+    fn the_event_controls_do_nothing_until_the_battle_has_been_read(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..40).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport_in_root(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            panel.update(cx, |panel, cx| {
+                panel.go_to(10, window, cx);
+                assert!(panel.previous_event().is_none());
+                assert!(panel.next_event().is_none());
+
+                panel.jump_to_next_event(window, cx);
+                panel.jump_to_previous_event(window, cx);
+                assert_eq!(panel.at, 10, "playback stayed where it was");
+            });
+        })
+        .expect("the window is open");
     }
 
     /// Playing advances through the track and stops at the end rather than

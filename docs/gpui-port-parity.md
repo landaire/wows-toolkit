@@ -135,11 +135,22 @@ kept so the next audit does not re-report them.
     rasterised, so a request that arrives while a frame is still being drawn
     is remembered and made once it lands; dropping it left the map showing a
     zoom the reader had already moved past.
-  - Still absent, in rough order of what would be missed: the
-    previous/next-event buttons and their Shift+Left/Right shortcuts, and the
-    event timeline panel, all of which want the timeline scan that today
-    lives inside the egui crate (`replay::timeline`) and would have to move to
-    a shared crate first; codec, prefer-CPU and include-pre-battle on export;
+  - Previous and next event are on the transport, with Shift+Left and
+    Shift+Right beside them, and each jump says what it landed on. Stepping
+    back looks half a second behind the clock, as the egui renderer does, so
+    landing on an event and pressing back again finds the one before it rather
+    than itself. The events come from a second walk of the replay started
+    after the bake, so the viewport still opens as soon as the track is ready
+    and the controls stay refused until it lands.
+    `replay::timeline` moved out of the egui crate to
+    `wows_replay_insights::timeline` for this, so both front ends read the same
+    events; only the egui list and its filter bar stayed behind. That needed
+    `advantage.rs` moved down to `wows-core` first, since `minimap-renderer`
+    already depends on `wows-replay-insights` and the timeline reads team
+    advantage -- it is game logic over game types, so `wows-core` is where it
+    belongs anyway.
+  - Still absent, in rough order of what would be missed: the event timeline
+    panel; codec, prefer-CPU and include-pre-battle on export;
     the per-ship context menu (trail and range toggles, Show Realtime Armor);
     the roster, consumable, build and team-advantage hover readouts; the
     annotation toolbar and everything collab draws over the map (pings,

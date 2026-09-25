@@ -1,6 +1,8 @@
 #![allow(clippy::too_many_arguments)]
 
-pub mod advantage;
+/// Team advantage, which is game logic rather than drawing: it lives in
+/// `wows-core` so the timeline can read it without depending on a renderer.
+pub use wows_core::advantage;
 #[cfg(feature = "rendering")]
 pub mod assets;
 pub mod codec;
