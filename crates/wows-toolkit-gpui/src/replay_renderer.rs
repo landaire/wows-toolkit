@@ -42,12 +42,18 @@ use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::viewport::MAX_ZOOM;
+use wows_minimap_renderer::viewport::MIN_ZOOM;
+use wows_minimap_renderer::viewport::MapViewport;
 use wows_replays::types::GameClock;
 
 use crate::replay_inspector::GameDataCache;
@@ -77,6 +83,10 @@ const SPEEDS: [f32; 6] = [1.0, 5.0, 10.0, 20.0, 40.0, 60.0];
 /// through.
 const DEFAULT_SPEED: f32 = 20.0;
 
+/// How far the skip controls and the left and right keys move, in seconds of
+/// game time. The egui renderer's own step.
+const SEEK_STEP: f32 = 10.0;
+
 /// What the viewport is doing.
 enum State {
     /// Reading the replay and walking the battle.
@@ -89,6 +99,12 @@ enum State {
 struct Track {
     frames: Vec<Vec<DrawCommand>>,
     clocks: Vec<GameClock>,
+    /// When the battle proper began. Recording starts at the loading screen,
+    /// so the clock a frame carries runs ahead of the one the game showed by
+    /// this much.
+    battle_start: GameClock,
+    /// When the battle ended, if the replay ran that far.
+    battle_end: Option<GameClock>,
 }
 
 impl Track {
@@ -99,6 +115,27 @@ impl Track {
     /// The game time `index` was drawn at, in seconds.
     fn seconds_at(&self, index: usize) -> f32 {
         self.clocks.get(index).map(|clock| clock.seconds()).unwrap_or(0.0)
+    }
+
+    /// How far into the battle `index` is, which is the clock the game showed.
+    fn elapsed_at(&self, index: usize) -> f32 {
+        self.seconds_at(index) - self.battle_start.seconds()
+    }
+
+    /// The last frame drawn at or before `seconds` of game time.
+    ///
+    /// Clocks ascend, so this is a partition point. A time before the first
+    /// frame lands on that frame rather than nowhere.
+    fn frame_at(&self, seconds: f32) -> usize {
+        self.clocks.partition_point(|clock| clock.seconds() <= seconds).saturating_sub(1)
+    }
+
+    /// Where a clock sits along the track, as a fraction of its length.
+    ///
+    /// `None` when the track is too short to have a length to sit along.
+    fn position_of(&self, clock: GameClock) -> Option<f32> {
+        let last = self.len().checked_sub(1).filter(|last| *last > 0)?;
+        Some((self.frame_at(clock.seconds()) as f32 / last as f32).clamp(0.0, 1.0))
     }
 }
 
@@ -149,6 +186,20 @@ pub struct ReplayRendererPanel {
     /// [`RenderOptions`]: the egui viewer keeps it beside them for the same
     /// reason, since it gates a command rather than a layer.
     show_dead_ships: bool,
+    /// Which part of the map the viewport shows.
+    view: MapViewport,
+    /// The zoom control beside the transport, which moves with the wheel.
+    zoom: Entity<SliderState>,
+    _zoom_subscription: Option<Subscription>,
+    /// Where the frame sits on screen, recorded as it is painted. A pointer
+    /// position means nothing without it, and only the painter knows.
+    drawn: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// Where a drag of the map last was, in window coordinates.
+    dragging: Option<Point<Pixels>>,
+    /// Set when a frame was asked for while one was still being drawn. The
+    /// draw in flight starts another as it finishes, so what ends up on
+    /// screen is the last thing asked for rather than the first.
+    redraw_wanted: bool,
     focus_handle: FocusHandle,
 }
 
@@ -182,6 +233,8 @@ impl ReplayRendererPanel {
     ) -> Self {
         let seek = cx.new(|_| seek_slider(0));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
+        let zoom = cx.new(|_| zoom_slider());
+        let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
 
         let mut panel = Self {
             path: path.clone(),
@@ -199,6 +252,12 @@ impl ReplayRendererPanel {
             // first is exactly what is in it.
             options: wows_minimap_renderer::frame_track::bake_options(),
             show_dead_ships: true,
+            view: MapViewport::default(),
+            zoom,
+            _zoom_subscription: Some(zoom_subscription),
+            drawn: Rc::new(Cell::new(None)),
+            dragging: None,
+            redraw_wanted: false,
             speed: DEFAULT_SPEED,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -222,12 +281,16 @@ impl ReplayRendererPanel {
     pub(crate) fn ready_for_test(clocks: Vec<f32>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let seek = cx.new(|_| seek_slider(clocks.len().saturating_sub(1)));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
+        let zoom = cx.new(|_| zoom_slider());
+        let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
         Self {
             path: PathBuf::new(),
             title: SharedString::from("test"),
             state: State::Ready(Track {
                 frames: vec![Vec::new(); clocks.len()],
                 clocks: clocks.into_iter().map(GameClock).collect(),
+                battle_start: GameClock(0.0),
+                battle_end: None,
             }),
             renderer: None,
             frame: None,
@@ -241,6 +304,12 @@ impl ReplayRendererPanel {
             // first is exactly what is in it.
             options: wows_minimap_renderer::frame_track::bake_options(),
             show_dead_ships: true,
+            view: MapViewport::default(),
+            zoom,
+            _zoom_subscription: Some(zoom_subscription),
+            drawn: Rc::new(Cell::new(None)),
+            dragging: None,
+            redraw_wanted: false,
             speed: DEFAULT_SPEED,
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
@@ -250,6 +319,16 @@ impl ReplayRendererPanel {
             _rebuilt_seek: None,
             focus_handle: cx.focus_handle(),
         }
+    }
+
+    /// Says when the battle inside an already-ready track ran.
+    ///
+    /// Test-only: a baked track carries this from the replay itself.
+    #[cfg(test)]
+    pub(crate) fn set_battle_window(&mut self, start: f32, end: Option<f32>) {
+        let State::Ready(track) = &mut self.state else { return };
+        track.battle_start = GameClock(start);
+        track.battle_end = end.map(GameClock);
     }
 
     fn start_bake(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
@@ -310,10 +389,65 @@ impl ReplayRendererPanel {
 
     /// The number of frames in the baked track, or zero while it is baking.
     fn frame_count(&self) -> usize {
+        self.track().map(Track::len).unwrap_or(0)
+    }
+
+    /// The baked battle, once the bake has landed.
+    fn track(&self) -> Option<&Track> {
         match &self.state {
-            State::Ready(track) => track.len(),
-            _ => 0,
+            State::Ready(track) => Some(track),
+            _ => None,
         }
+    }
+
+    /// Moves playback to `at` and takes the bar with it.
+    ///
+    /// The transport's own controls move both; only the bar itself moves one
+    /// without the other, since it is already where it put itself.
+    fn go_to(&mut self, at: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_at(at, cx);
+        self.sync_seek(window, cx);
+    }
+
+    /// Moves playback `delta` seconds of game time from where it is.
+    fn seek_by(&mut self, delta: f32, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(track) = self.track() else { return };
+        let at = track.frame_at(track.seconds_at(self.at) + delta);
+        self.go_to(at, window, cx);
+    }
+
+    /// Moves one rung along the speed ladder, in the direction of `step`.
+    ///
+    /// Nothing happens at either end: the ladder is what the transport
+    /// offers, and there is no speed past its ends to move to.
+    fn step_speed(&mut self, step: i32, window: &mut Window, cx: &mut Context<Self>) {
+        let here = SPEEDS.iter().position(|speed| (speed - self.speed).abs() < f32::EPSILON);
+        let Some(here) = here else { return };
+        let Some(next) = here.checked_add_signed(step as isize).and_then(|index| SPEEDS.get(index)) else {
+            return;
+        };
+        self.set_speed(*next, window, cx);
+    }
+
+    /// The transport's keyboard, which is the egui renderer's own.
+    ///
+    /// A held key repeats, which is how a reader scrubs; only the keys the
+    /// transport claims stop here, so the rest reach whatever else is
+    /// listening.
+    fn on_key(&mut self, event: &gpui_kit::KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.state, State::Ready(_)) {
+            return;
+        }
+        let shift = event.keystroke.modifiers.shift;
+        match event.keystroke.key.as_str() {
+            "space" => self.toggle_playing(window, cx),
+            "up" => self.step_speed(1, window, cx),
+            "down" => self.step_speed(-1, window, cx),
+            "left" if !shift => self.seek_by(-SEEK_STEP, window, cx),
+            "right" if !shift => self.seek_by(SEEK_STEP, window, cx),
+            _ => return,
+        }
+        cx.stop_propagation();
     }
 
     /// Asks for the current frame to be drawn, unless one already is.
@@ -322,7 +456,13 @@ impl ReplayRendererPanel {
     /// moved back with the image, so a tick that arrives while a frame is
     /// still being drawn simply does nothing and the next one catches up.
     fn draw_current(&mut self, cx: &mut Context<Self>) {
-        let Some(renderer) = self.renderer.take() else { return };
+        let Some(renderer) = self.renderer.take() else {
+            // A drag asks for frames faster than one can be drawn. Dropping
+            // the last of them leaves the map showing a zoom the reader has
+            // already moved past.
+            self.redraw_wanted = true;
+            return;
+        };
         let State::Ready(track) = &self.state else {
             self.renderer = Some(renderer);
             return;
@@ -334,6 +474,7 @@ impl ReplayRendererPanel {
 
         let options = self.options.clone();
         let show_dead_ships = self.show_dead_ships;
+        let view = self.view;
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
                 // Filtered here rather than at bake time: a toggle then costs
@@ -344,7 +485,7 @@ impl ReplayRendererPanel {
                     .collect();
                 let image = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    to_image(drawing.render(&shown))
+                    to_image(drawing.render_at(view, &shown))
                 };
                 (renderer, image)
             });
@@ -353,6 +494,9 @@ impl ReplayRendererPanel {
                 this.renderer = Some(renderer);
                 this.frame = Some(image);
                 cx.notify();
+                if std::mem::take(&mut this.redraw_wanted) {
+                    this.draw_current(cx);
+                }
             });
         })
         .detach();
@@ -576,11 +720,183 @@ impl ReplayRendererPanel {
         self.set_at(value.start().round().max(0.) as usize, cx);
     }
 
-    /// Where playback has reached, as "M:SS / M:SS" of game time.
+    /// Shows a different part of the map, and redraws the frame on screen.
+    ///
+    /// Redrawn rather than left for the next tick: a zoom whose effect only
+    /// arrived with playback would read as not having worked while paused.
+    fn set_view(&mut self, view: MapViewport, window: &mut Window, cx: &mut Context<Self>) {
+        if view == self.view {
+            return;
+        }
+        self.view = view;
+        self.zoom.update(cx, |slider, cx| slider.set_value(view.zoom(), window, cx));
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// How many screen pixels one pixel of the drawn frame covers.
+    ///
+    /// `None` before the frame has been painted once, which is the only time
+    /// nothing knows where it is.
+    fn drawn_scale(&self) -> Option<f32> {
+        let bounds = self.drawn.get()?;
+        let frame = self.frame.as_ref()?;
+        let size = frame.size(0);
+        let (width, height) = (size.width.0 as f32, size.height.0 as f32);
+        if width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        // The frame is drawn to fit inside its element without being
+        // stretched, so one scale covers both directions.
+        Some((bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height))
+    }
+
+    /// Where in the drawn map a window position falls, in the map's own
+    /// pixels.
+    ///
+    /// `None` when the pointer is not over the map: on the HUD strip, or in
+    /// the margin beside a frame that does not fill its element.
+    fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let bounds = self.drawn.get()?;
+        let frame = self.frame.as_ref()?;
+        let scale = self.drawn_scale()?;
+        let size = frame.size(0);
+        let drawn_width = size.width.0 as f32 * scale;
+        let drawn_height = size.height.0 as f32 * scale;
+        let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - drawn_width) / 2.0;
+        let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - drawn_height) / 2.0;
+
+        let x = (position.x.as_f32() - left) / scale - MAP_ORIGIN.0;
+        let y = (position.y.as_f32() - top) / scale - MAP_ORIGIN.1;
+        let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
+        (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
+    }
+
+    /// The wheel zooms about whatever is under the pointer.
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(at) = self.map_point(event.position) else { return };
+        let delta = event.delta.pixel_delta(SCROLL_LINE).y.as_f32();
+        if delta == 0.0 {
+            return;
+        }
+        let zoom = self.view.zoom() * (1.0 + delta * ZOOM_PER_PIXEL);
+        self.set_view(self.view.zoomed_about(zoom, at), window, cx);
+        cx.stop_propagation();
+    }
+
+    /// A drag of the map moves it under the pointer.
+    ///
+    /// Only once there is somewhere to drag to: at the whole map, a drag
+    /// would do nothing and holding it would swallow the click.
+    fn on_drag_start(&mut self, event: &MouseDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        if self.view.is_whole_map() || self.map_point(event.position).is_none() {
+            return;
+        }
+        self.dragging = Some(event.position);
+    }
+
+    fn on_drag_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(from) = self.dragging else { return };
+        if !event.dragging() {
+            self.dragging = None;
+            return;
+        }
+        let Some(scale) = self.drawn_scale() else { return };
+        let delta = ((event.position.x - from.x).as_f32() / scale, (event.position.y - from.y).as_f32() / scale);
+        self.dragging = Some(event.position);
+        self.set_view(self.view.dragged(delta), window, cx);
+    }
+
+    fn on_drag_end(&mut self, _event: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+        self.dragging = None;
+    }
+
+    /// A double-click puts the whole map back.
+    fn on_viewport_click(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if event.click_count() < 2 {
+            return;
+        }
+        self.set_view(MapViewport::default(), window, cx);
+    }
+
+    /// The zoom control moves about the middle of what is on screen, as the
+    /// egui renderer's does: there is no pointer to zoom about.
+    fn on_zoom(
+        &mut self,
+        _state: &Entity<SliderState>,
+        event: &gpui_kit::component::slider::SliderEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let gpui_kit::component::slider::SliderEvent::Change(value) = event else { return };
+        let middle = wows_minimap_renderer::MINIMAP_SIZE as f32 / 2.0;
+        self.set_view(self.view.zoomed_about(value.start(), (middle, middle)), window, cx);
+    }
+
+    /// What the viewport shows of the map. Test-only: production code reaches
+    /// the field.
+    #[cfg(test)]
+    pub(crate) fn view(&self) -> MapViewport {
+        self.view
+    }
+
+    /// Where the frame was painted. Test-only: the painter fills this in, and
+    /// a test has no painter.
+    #[cfg(test)]
+    pub(crate) fn set_drawn_for_test(&mut self, bounds: Bounds<Pixels>) {
+        self.drawn.set(Some(bounds));
+    }
+
+    /// A viewport with a frame the size the renderer produces, laid out at
+    /// exactly that size, so a window position is a frame position.
+    #[cfg(test)]
+    fn seed_frame_for_test(&mut self) {
+        let width = wows_minimap_renderer::MINIMAP_SIZE;
+        let height = wows_minimap_renderer::CANVAS_HEIGHT;
+        self.frame = Some(to_image(image::RgbImage::new(width, height)));
+        self.set_drawn_for_test(gpui_kit::Bounds {
+            origin: gpui_kit::point(px(0.), px(0.)),
+            size: gpui_kit::size(px(width as f32), px(height as f32)),
+        });
+    }
+
+    /// The marks on the seek bar for where the battle began and ended.
+    ///
+    /// A replay records from the loading screen on and often past the last
+    /// shot, so the battle proper is a stretch inside the track rather than
+    /// the whole of it. Empty while the bake is still running, and an end the
+    /// replay never recorded has no mark.
+    fn battle_ticks(&self) -> Vec<AnyElement> {
+        let Some(track) = self.track() else { return Vec::new() };
+        [Some(track.battle_start), track.battle_end]
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .filter_map(|(index, clock)| {
+                let position = track.position_of(clock)?;
+                Some(
+                    div()
+                        .id(("replay-renderer-battle-tick", index))
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(relative(position))
+                        .w(TICK_WIDTH)
+                        .bg(crate::theme::text_dim())
+                        .into_any_element(),
+                )
+            })
+            .collect()
+    }
+
+    /// Where playback has reached, as the clock the game showed.
+    ///
+    /// Elapsed rather than absolute: a replay records from the loading screen
+    /// on, so the raw clock opens at something like 0:40 on a battle that has
+    /// not started.
     fn clock_label(&self) -> String {
-        let State::Ready(track) = &self.state else { return String::new() };
-        let last = track.len().saturating_sub(1);
-        format!("{} / {}", mmss(track.seconds_at(self.at)), mmss(track.seconds_at(last)))
+        let Some(track) = self.track() else { return String::new() };
+        mmss(track.elapsed_at(self.at))
     }
 }
 
@@ -593,10 +909,11 @@ fn speed_label(speed: f32) -> String {
     }
 }
 
-/// Seconds of game time as the clock the game shows.
+/// Seconds of game time as the clock the game shows, zero-padded as the egui
+/// renderer pads it.
 fn mmss(seconds: f32) -> String {
     let seconds = seconds.max(0.0) as u32;
-    format!("{}:{:02}", seconds / 60, seconds % 60)
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 impl Drop for ReplayRendererPanel {
@@ -658,20 +975,41 @@ impl Render for ReplayRendererPanel {
                 .child(div().text_sm().text_color(crate::theme::text_dim()).child(reason.clone()))
                 .into_any_element(),
             State::Ready(_) => match self.frame.clone() {
-                Some(frame) => div()
-                    .id("replay-renderer-viewport")
-                    .test_support()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(img(frame).size_full())
-                    .into_any_element(),
+                Some(frame) => {
+                    let drawn = Rc::clone(&self.drawn);
+                    div()
+                        .id("replay-renderer-viewport")
+                        .test_support()
+                        .relative()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .when(!self.view.is_whole_map(), |this| this.cursor_grab())
+                        .child(img(frame).size_full())
+                        // Where the frame landed, which is the only way a
+                        // pointer position can be turned into a map one.
+                        .child(
+                            canvas(
+                                move |bounds, _window, _cx| drawn.set(Some(bounds)),
+                                |_bounds, _state, _window, _cx| {},
+                            )
+                            .absolute()
+                            .inset_0(),
+                        )
+                        .on_scroll_wheel(cx.listener(Self::on_scroll))
+                        .on_mouse_down(MouseButton::Left, cx.listener(Self::on_drag_start))
+                        .on_mouse_move(cx.listener(Self::on_drag_move))
+                        .on_mouse_up(MouseButton::Left, cx.listener(Self::on_drag_end))
+                        .on_click(cx.listener(Self::on_viewport_click))
+                        .into_any_element()
+                }
                 None => div().size_full().into_any_element(),
             },
         };
 
         let ready = matches!(self.state, State::Ready(_));
+        let last_frame = self.frame_count().saturating_sub(1);
         let transport = h_flex()
             .flex_none()
             .gap_2()
@@ -680,6 +1018,22 @@ impl Render for ReplayRendererPanel {
             .py_1()
             .border_t_1()
             .border_color(border)
+            .child(
+                Button::new("replay-renderer-jump-to-start")
+                    .child(crate::icons::icon(crate::icons::SKIP_BACK))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.go_to(0, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-back-10s")
+                    .child(crate::icons::icon(crate::icons::CLOCK_COUNTER_CLOCKWISE))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.back_10s").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.seek_by(-SEEK_STEP, window, cx))),
+            )
             .child(
                 Button::new("replay-renderer-play")
                     .icon(if self.playing { IconName::Pause } else { IconName::Play })
@@ -691,6 +1045,23 @@ impl Render for ReplayRendererPanel {
                     )
                     .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
             )
+            .child(
+                Button::new("replay-renderer-forward-10s")
+                    .child(crate::icons::icon(crate::icons::CLOCK_CLOCKWISE))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
+                    .on_click(cx.listener(|this, _event, window, cx| this.seek_by(SEEK_STEP, window, cx))),
+            )
+            .child(
+                Button::new("replay-renderer-jump-to-end")
+                    .child(crate::icons::icon(crate::icons::SKIP_FORWARD))
+                    .compact()
+                    .disabled(!ready)
+                    .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
+                    .on_click(cx.listener(move |this, _event, window, cx| this.go_to(last_frame, window, cx))),
+            )
+            .child(crate::ui::rule_v(cx))
             .child(
                 Button::new("replay-renderer-export")
                     .child(crate::icons::icon(crate::icons::DOWNLOAD_SIMPLE))
@@ -718,11 +1089,18 @@ impl Render for ReplayRendererPanel {
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_to_clipboard(cx))),
             )
             .child(crate::ui::rule_v(cx))
-            .child(div().flex_1().min_w(px(0.)).child(Slider::new(&self.seek).disabled(!ready)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .relative()
+                    .child(Slider::new(&self.seek).disabled(!ready))
+                    .children(self.battle_ticks()),
+            )
             .child(
                 div()
                     .flex_none()
-                    .w(CLOCK_WIDTH)
+                    .w(if self.export.is_some() { EXPORT_WIDTH } else { CLOCK_WIDTH })
                     .text_xs()
                     .text_color(crate::theme::text_dim())
                     // While an export runs it says how far it has got rather
@@ -742,6 +1120,18 @@ impl Render for ReplayRendererPanel {
                     .into_any_element()
             }))
             .child(crate::ui::rule_v(cx))
+            .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS)))
+            .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
+            .child(
+                Button::new("replay-renderer-zoom-reset")
+                    .label(t!("ui.buttons.reset").into_owned())
+                    .compact()
+                    .disabled(!ready || self.view.is_whole_map())
+                    .on_click(
+                        cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
+                    ),
+            )
+            .child(crate::ui::rule_v(cx))
             .children(SPEEDS.map(|speed| {
                 let chosen = (self.speed - speed).abs() < f32::EPSILON;
                 crate::ui::selectable(
@@ -759,14 +1149,40 @@ impl Render for ReplayRendererPanel {
         v_flex()
             .id("replay-renderer")
             .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(|this, event, window, cx| this.on_key(event, window, cx)))
             .size_full()
             .child(div().flex_1().min_h(px(0.)).child(body))
             .child(transport)
     }
 }
 
-/// Room for "MM:SS / MM:SS" without the transport shifting as it counts.
-const CLOCK_WIDTH: Pixels = px(86.);
+/// Room for "MM:SS" without the transport shifting as it counts.
+const CLOCK_WIDTH: Pixels = px(44.);
+
+/// Room for an export's frame count, which is wider than a clock.
+const EXPORT_WIDTH: Pixels = px(86.);
+
+/// How wide a battle-start or battle-end mark is drawn on the seek bar.
+const TICK_WIDTH: Pixels = px(1.5);
+
+/// Room for the zoom control. Narrow: the seek bar is what the transport is
+/// mostly for, and it takes whatever is left.
+const ZOOM_WIDTH: Pixels = px(90.);
+
+/// Where the map's top-left corner sits in a rendered frame.
+///
+/// The renderer reserves a strip above the map for the score bar and the
+/// timer, and none beside it: a preview is built with no side panel, so the
+/// map starts at the frame's left edge.
+const MAP_ORIGIN: (f32, f32) = (0.0, wows_minimap_renderer::HUD_HEIGHT as f32);
+
+/// How much one line of wheel travel is worth, for a wheel that reports lines
+/// rather than pixels.
+const SCROLL_LINE: Pixels = px(20.);
+
+/// How much of a zoom one pixel of wheel travel is. The egui renderer's own
+/// rate, so the wheel feels the same in both.
+const ZOOM_PER_PIXEL: f32 = 0.01;
 
 /// Why a battle could not be played back.
 #[derive(Debug, thiserror::Error)]
@@ -783,7 +1199,13 @@ fn bake(
     cancel: &AtomicBool,
 ) -> Result<(Track, SharedPreviewRenderer), RenderError> {
     let baked = crate::minimap_preview::bake_track(path, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL)?;
-    Ok((Track { frames: baked.frames, clocks: baked.clocks }, baked.renderer))
+    let track = Track {
+        frames: baked.frames,
+        clocks: baked.clocks,
+        battle_start: baked.battle_start,
+        battle_end: baked.battle_end,
+    };
+    Ok((track, baked.renderer))
 }
 
 /// One rasterised frame, as an image gpui can draw.
@@ -1058,6 +1480,14 @@ fn seek_slider(last: usize) -> SliderState {
     SliderState::new().min(0.).max(last.max(1) as f32).step(1.).default_value(0.)
 }
 
+/// The zoom control, over what the renderer can draw.
+///
+/// A tenth of a step, because a zoom is a magnification rather than a count
+/// of anything: a whole-number step would jump the map.
+fn zoom_slider() -> SliderState {
+    SliderState::new().min(MIN_ZOOM).max(MAX_ZOOM).step(0.1).default_value(MIN_ZOOM)
+}
+
 #[cfg(test)]
 mod tests {
     use gpui_kit::AppContext;
@@ -1073,13 +1503,14 @@ mod tests {
     /// The transport reads in the clock the game shows, not in seconds.
     #[test]
     fn game_time_reads_as_minutes_and_seconds() {
-        assert_eq!(mmss(0.0), "0:00");
-        assert_eq!(mmss(9.4), "0:09");
-        assert_eq!(mmss(75.0), "1:15");
+        assert_eq!(mmss(0.0), "00:00");
+        assert_eq!(mmss(9.4), "00:09");
+        assert_eq!(mmss(75.0), "01:15");
         assert_eq!(mmss(1205.0), "20:05");
-        // A clock that has gone negative is a bug elsewhere, not a reason to
-        // print a minus sign here.
-        assert_eq!(mmss(-3.0), "0:00");
+        // The battle clock runs backwards from the loading screen, so a frame
+        // before the battle started reads as its beginning rather than as a
+        // minus sign.
+        assert_eq!(mmss(-3.0), "00:00");
     }
 
     /// The transport opens at the speed the egui renderer opens at, over the
@@ -1126,6 +1557,146 @@ mod tests {
                     slider.step_value() <= (slider.max_value() - slider.min_value()) / 2.0,
                     "a step that coarse can only reach the ends"
                 );
+            })
+            .expect("the window is open");
+    }
+
+    /// The clock reads the battle's own time, not the recording's.
+    ///
+    /// A replay starts recording on the loading screen, so the raw clock of
+    /// the first frame is already a good half-minute in. The egui renderer
+    /// subtracts the battle's start; a port that did not would open a battle
+    /// at 00:40.
+    #[gpui_kit::test]
+    fn the_clock_counts_from_the_battle_rather_than_the_recording(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let clocks: Vec<f32> = (0..40).map(|frame| frame as f32 * 5.0).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.set_battle_window(40.0, Some(160.0));
+                assert_eq!(panel.clock_label(), "00:00", "the first frame is the loading screen, not minus 40s");
+
+                // Frame 10 is 50s of recording, which is 10s of battle.
+                panel.go_to(10, window, cx);
+                assert_eq!(panel.clock_label(), "00:10");
+            })
+            .expect("the window is open");
+    }
+
+    /// The skip controls move by game time, not by frames.
+    ///
+    /// A track is sampled at a fixed interval, so ten seconds is however many
+    /// frames that interval divides into; a control that stepped frames would
+    /// move a different distance on every replay.
+    #[gpui_kit::test]
+    fn a_ten_second_skip_moves_ten_seconds(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        // Half-second frames, as a bake produces.
+        let clocks: Vec<f32> = (0..200).map(|frame| frame as f32 * 0.5).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.go_to(0, window, cx);
+                panel.seek_by(10.0, window, cx);
+                assert_eq!(panel.at, 20, "twenty half-second frames");
+
+                panel.seek_by(-10.0, window, cx);
+                assert_eq!(panel.at, 0);
+
+                // Neither end runs off the track.
+                panel.seek_by(-10.0, window, cx);
+                assert_eq!(panel.at, 0);
+                panel.go_to(199, window, cx);
+                panel.seek_by(10.0, window, cx);
+                assert_eq!(panel.at, 199);
+            })
+            .expect("the window is open");
+    }
+
+    /// The bar follows the transport's own controls.
+    ///
+    /// Only a drag of the bar moves playback without moving the bar, since it
+    /// is already where the reader put it. A jump that left the thumb behind
+    /// would read as not having worked.
+    #[gpui_kit::test]
+    fn a_jump_takes_the_scrubber_with_it(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let clocks: Vec<f32> = (0..40).map(|frame| frame as f32 * 5.0).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.go_to(39, window, cx);
+                assert_eq!(panel.at, 39);
+                assert_eq!(panel.seek.read(cx).value().start(), 39.0);
+
+                panel.go_to(0, window, cx);
+                assert_eq!(panel.seek.read(cx).value().start(), 0.0);
+            })
+            .expect("the window is open");
+    }
+
+    /// The speed keys walk the offered ladder and stop at its ends.
+    #[gpui_kit::test]
+    fn the_speed_keys_walk_the_ladder(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5, 1.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                assert_eq!(panel.speed, 20.0);
+                panel.step_speed(1, window, cx);
+                assert_eq!(panel.speed, 40.0);
+                panel.step_speed(1, window, cx);
+                assert_eq!(panel.speed, 60.0);
+                panel.step_speed(1, window, cx);
+                assert_eq!(panel.speed, 60.0, "there is no rung past the top of the ladder");
+
+                for _ in 0..5 {
+                    panel.step_speed(-1, window, cx);
+                }
+                assert_eq!(panel.speed, 1.0, "nor below its bottom");
+            })
+            .expect("the window is open");
+    }
+
+    /// The bar marks where the battle began and ended.
+    ///
+    /// A replay records from the loading screen on and often past the last
+    /// shot, so those marks are what tell a reader which stretch of the bar
+    /// is the battle.
+    #[gpui_kit::test]
+    fn the_seek_bar_marks_the_battle_inside_the_recording(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        // A hundred half-second frames: fifty seconds of recording.
+        let clocks: Vec<f32> = (0..101).map(|frame| frame as f32 * 0.5).collect();
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                panel.set_battle_window(10.0, Some(40.0));
+                assert_eq!(panel.battle_ticks().len(), 2);
+
+                let track = panel.track().expect("the track is ready");
+                assert_eq!(track.position_of(super::GameClock(10.0)), Some(0.2));
+                assert_eq!(track.position_of(super::GameClock(40.0)), Some(0.8));
+
+                // A replay cut short before the battle ended has one mark.
+                panel.set_battle_window(10.0, None);
+                assert_eq!(panel.battle_ticks().len(), 1);
             })
             .expect("the window is open");
     }
@@ -1230,6 +1801,137 @@ mod tests {
         .expect("the window is open");
     }
 
+    /// A wheel over the map zooms about what is under the pointer, which is
+    /// what makes a zoom feel like it is following the reader rather than the
+    /// corner of the map.
+    #[gpui_kit::test]
+    fn the_wheel_zooms_about_what_is_under_the_pointer(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::ScrollDelta;
+        use gpui_kit::ScrollWheelEvent;
+        use gpui_kit::TouchPhase;
+        use gpui_kit::point;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                // A point on the map, and the same point in window
+                // coordinates: the frame reserves a strip above the map.
+                let on_map = (200.0_f32, 300.0_f32);
+                let at = point(px(on_map.0), px(on_map.1 + super::MAP_ORIGIN.1));
+                let before = panel.view().to_map(on_map.0, on_map.1);
+
+                let event = ScrollWheelEvent {
+                    position: at,
+                    delta: ScrollDelta::Pixels(point(px(0.), px(120.))),
+                    modifiers: Modifiers::default(),
+                    touch_phase: TouchPhase::Moved,
+                };
+                panel.on_scroll(&event, window, cx);
+
+                assert!(panel.view().zoom() > 1.0, "the wheel zoomed in");
+                let after = panel.view().to_map(on_map.0, on_map.1);
+                assert!(
+                    (before.0 - after.0).abs() < 1.0 && (before.1 - after.1).abs() < 1.0,
+                    "the map did not slide out from under the pointer: {before:?} then {after:?}"
+                );
+            })
+            .expect("the window is open");
+    }
+
+    /// A wheel outside the map does nothing.
+    ///
+    /// The strip above the map carries the score bar and the timer, which do
+    /// not zoom; a wheel there has no map point to zoom about.
+    #[gpui_kit::test]
+    fn a_wheel_over_the_hud_does_not_zoom(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::ScrollDelta;
+        use gpui_kit::ScrollWheelEvent;
+        use gpui_kit::TouchPhase;
+        use gpui_kit::point;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                let event = ScrollWheelEvent {
+                    position: point(px(200.), px(4.)),
+                    delta: ScrollDelta::Pixels(point(px(0.), px(120.))),
+                    modifiers: Modifiers::default(),
+                    touch_phase: TouchPhase::Moved,
+                };
+                panel.on_scroll(&event, window, cx);
+                assert!(panel.view().is_whole_map());
+            })
+            .expect("the window is open");
+    }
+
+    /// The zoom control moves the view, and Reset puts the whole map back.
+    #[gpui_kit::test]
+    fn the_zoom_control_and_reset_agree_with_the_view(cx: &mut TestAppContext) {
+        use gpui_kit::component::slider::SliderEvent;
+        use gpui_kit::component::slider::SliderValue;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                let state = panel.zoom.clone();
+                panel.on_zoom(&state, &SliderEvent::Change(SliderValue::Single(4.0)), window, cx);
+                assert_eq!(panel.view().zoom(), 4.0);
+                assert!(!panel.view().is_whole_map());
+                assert_eq!(panel.zoom.read(cx).value().start(), 4.0, "the control says what the view shows");
+
+                panel.set_view(super::MapViewport::default(), window, cx);
+                assert!(panel.view().is_whole_map());
+                assert_eq!(panel.zoom.read(cx).value().start(), 1.0, "and Reset takes the control with it");
+            })
+            .expect("the window is open");
+    }
+
+    /// Dragging the whole map does nothing: there is nowhere to drag to.
+    #[gpui_kit::test]
+    fn the_whole_map_does_not_drag(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::MouseButton;
+        use gpui_kit::MouseDownEvent;
+        use gpui_kit::point;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                let press = MouseDownEvent {
+                    button: MouseButton::Left,
+                    position: point(px(200.), px(300.)),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                };
+                panel.on_drag_start(&press, window, cx);
+                assert!(panel.dragging.is_none(), "the whole map has nowhere to drag to");
+            })
+            .expect("the window is open");
+    }
+
     /// Playing advances through the track and stops at the end rather than
     /// running past it, and the clock reads the game time of where it got to.
     #[gpui_kit::test]
@@ -1241,11 +1943,7 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                assert_eq!(
-                    panel.clock_label(),
-                    "0:00 / 1:01",
-                    "it opens at the start, and says how long the battle is"
-                );
+                assert_eq!(panel.clock_label(), "00:00", "it opens at the start of the battle");
                 panel.toggle_playing(window, cx);
                 assert!(panel.playing);
             })
@@ -1261,7 +1959,7 @@ mod tests {
             .update(cx, |panel, _window, _cx| {
                 assert_eq!(panel.at, 2, "playback reached the last frame");
                 assert!(!panel.playing, "and stopped there rather than running past it");
-                assert_eq!(panel.clock_label(), "1:01 / 1:01");
+                assert_eq!(panel.clock_label(), "01:01");
             })
             .expect("the window is open");
     }
@@ -1277,7 +1975,7 @@ mod tests {
 
         window
             .update(cx, |panel, window, cx| {
-                assert_eq!(panel.clock_label(), "0:00 / 0:00");
+                assert_eq!(panel.clock_label(), "00:00");
                 panel.toggle_playing(window, cx);
                 panel.set_at(5, cx);
                 assert_eq!(panel.at, 0, "there is nowhere to seek to");

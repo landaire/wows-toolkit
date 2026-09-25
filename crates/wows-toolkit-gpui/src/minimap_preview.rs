@@ -27,6 +27,7 @@ use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_minimap_renderer::renderer::MinimapRenderer;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
+use wows_replays::types::GameClock;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
 use wowsunpack::game_params::provider::GameMetadataProvider;
@@ -176,10 +177,17 @@ pub struct BakedTrack {
     /// One entry per kept frame, each the commands that draw it.
     pub frames: Vec<Vec<DrawCommand>>,
     /// The game clock each of those frames was taken at.
-    pub clocks: Vec<wows_replays::types::GameClock>,
+    pub clocks: Vec<GameClock>,
     /// The renderer they are drawn through, bound to the build and map the
     /// replay was recorded on.
     pub renderer: SharedPreviewRenderer,
+    /// When the battle proper began. A replay starts recording during the
+    /// loading screen, so the clock a frame carries runs ahead of the clock
+    /// the game showed by this much.
+    pub battle_start: GameClock,
+    /// When `BattleEnd` arrived, if it did. Absent on a replay that was cut
+    /// short.
+    pub battle_end: Option<GameClock>,
 }
 
 /// Walks `path`'s battle once, keeping the draw commands of up to `budget`
@@ -223,6 +231,13 @@ pub fn bake_track(
 
     let mut sink = TrackSink::with_budget(budget);
     build_frame_track(&mut session, &mut renderer, frame_interval, cancel, &mut sink);
+    let (battle_start, battle_end) = {
+        let view = session.world_mut().view();
+        // A replay with no BattleStart packet was recorded from the loading
+        // screen onwards with nothing to offset against, so its clock is
+        // already elapsed time.
+        (view.battle_start_clock().unwrap_or(GameClock(0.0)), view.battle_end_clock())
+    };
     session.finish();
 
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -230,7 +245,7 @@ pub fn bake_track(
     }
 
     let clocks = sink.kept_clocks().to_vec();
-    Ok(BakedTrack { frames: sink.finish(), clocks, renderer: target })
+    Ok(BakedTrack { frames: sink.finish(), clocks, renderer: target, battle_start, battle_end })
 }
 
 /// The map `map_name` names, with nothing drawn over it.

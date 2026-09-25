@@ -298,6 +298,7 @@ fn draw_capture_point(
     invader_color: Option<[u8; 3]>,
     flag_icon: Option<&RgbaImage>,
     fonts: &GameFonts,
+    scale: f32,
 ) {
     // Base filled circle with owner's color
     draw_filled_circle(pm, x, y, radius, color, alpha);
@@ -347,13 +348,13 @@ fn draw_capture_point(
 
     // Centered label: icon for base-type, text for domination
     if let Some(icon) = flag_icon {
-        draw_icon(pm, icon, x, y);
+        draw_icon(pm, icon, x, y, scale);
     } else {
-        let scale = fonts.scale(16.0);
-        let (tw, th) = text_size(scale, &fonts.primary, label);
+        let label_scale = fonts.scale(16.0 * scale);
+        let (tw, th) = text_size(label_scale, &fonts.primary, label);
         let tx = x as i32 - tw as i32 / 2;
         let ty = y as i32 - th as i32 / 2;
-        draw_text_shadow(pm, [255, 255, 255], tx, ty, scale, &fonts.primary, label);
+        draw_text_shadow(pm, [255, 255, 255], tx, ty, label_scale, &fonts.primary, label);
     }
 }
 
@@ -366,8 +367,9 @@ fn draw_ship_labels(
     ship_name: Option<&str>,
     name_color: Option<[u8; 3]>,
     fonts: &GameFonts,
+    scale: f32,
 ) {
-    let line_height = 12i32;
+    let line_height = (12.0 * scale).round().max(1.0) as i32;
     let line_count = player_name.is_some() as i32 + ship_name.is_some() as i32;
     if line_count == 0 {
         return;
@@ -380,11 +382,11 @@ fn draw_ship_labels(
     let y = y.round() as i32;
 
     // Position lines above the icon (icon radius ~12px)
-    let base_y = y - 14 - line_count * line_height;
+    let base_y = y - (14.0 * scale).round() as i32 - line_count * line_height;
     let mut cur_y = base_y;
 
     if let Some(name) = player_name {
-        let (font, scale) = fonts.font_and_scale(name, 10.0);
+        let (font, scale) = fonts.font_and_scale(name, 10.0 * scale);
         let color = if !color_on_ship { name_color.unwrap_or([255, 255, 255]) } else { [255, 255, 255] };
         let (w, _) = text_size(scale, font, name);
         let tx = x - w as i32 / 2;
@@ -392,7 +394,7 @@ fn draw_ship_labels(
         cur_y += line_height;
     }
     if let Some(name) = ship_name {
-        let (font, scale) = fonts.font_and_scale(name, 10.0);
+        let (font, scale) = fonts.font_and_scale(name, 10.0 * scale);
         let color = name_color.unwrap_or([255, 255, 255]);
         let (w, _) = text_size(scale, font, name);
         let tx = x - w as i32 / 2;
@@ -409,11 +411,12 @@ fn draw_health_bar(
     fill_color: [u8; 3],
     bg_color: [u8; 3],
     bg_alpha: f32,
+    scale: f32,
 ) {
-    let bar_w = 20.0f32;
-    let bar_h = 3.0f32;
+    let bar_w = 20.0 * scale;
+    let bar_h = 3.0 * scale;
     let bar_x = x - bar_w / 2.0;
-    let bar_y = y + 10.0;
+    let bar_y = y + 10.0 * scale;
 
     let fill_w = (fraction.clamp(0.0, 1.0) * bar_w).round();
 
@@ -431,7 +434,17 @@ fn draw_health_bar(
 ///
 /// Uses tiny-skia's bilinear-filtered transform compositing for smooth rotation
 /// and sub-pixel placement.
-fn draw_ship_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, yaw: f32, color: Option<[u8; 3]>, opacity: f32) {
+#[allow(clippy::too_many_arguments)]
+fn draw_ship_icon(
+    pm: &mut Pixmap,
+    icon: &RgbaImage,
+    x: f32,
+    y: f32,
+    yaw: f32,
+    color: Option<[u8; 3]>,
+    opacity: f32,
+    scale: f32,
+) {
     let iw = icon.width();
     let ih = icon.height();
     let cx = iw as f32 / 2.0;
@@ -468,10 +481,11 @@ fn draw_ship_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, yaw: f32, c
     // Screen rotation: R = PI/2 - yaw, converted to degrees for tiny-skia.
     let angle_deg = (std::f32::consts::FRAC_PI_2 - yaw).to_degrees();
 
-    // Build transform: translate icon center to destination, then rotate
-    let tx = x - cx;
-    let ty = y - cy;
-    let transform = Transform::from_translate(tx, ty).post_rotate_at(angle_deg, x, y);
+    // Grow about the destination, put the icon's centre on it, then rotate
+    // around it. An icon grows with the map, as the egui renderer's does.
+    let transform = Transform::from_scale(scale, scale)
+        .post_translate(x - cx * scale, y - cy * scale)
+        .post_rotate_at(angle_deg, x, y);
 
     let paint = PixmapPaint { opacity, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
 
@@ -528,14 +542,14 @@ fn make_ship_icon_outline(icon: &RgbaImage, thickness: u32, color: [u8; 3], alph
 }
 
 /// Draw a plane/consumable icon (pre-colored RGBA, no rotation).
-fn draw_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32) {
+fn draw_icon(pm: &mut Pixmap, icon: &RgbaImage, x: f32, y: f32, scale: f32) {
     let iw = icon.width();
     let ih = icon.height();
     let Some(icon_pm) = rgba_to_pixmap(icon) else { return };
-    let tx = x - iw as f32 / 2.0;
-    let ty = y - ih as f32 / 2.0;
+    let transform =
+        Transform::from_scale(scale, scale).post_translate(x - iw as f32 * scale / 2.0, y - ih as f32 * scale / 2.0);
     let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Bilinear };
-    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, Transform::from_translate(tx, ty), None);
+    pm.draw_pixmap(0, 0, icon_pm.as_ref(), &paint, transform, None);
 }
 
 /// Draw the team score bar at the top of the frame.
@@ -870,7 +884,7 @@ fn draw_kill_feed(
         x += gap * 2;
         if let Some(cause_icon) = death_cause_icons.get(cause_key) {
             let cause_center_y = icon_y + cause_icon_size / 2;
-            draw_icon(pm, cause_icon, (x + cause_icon_size / 2) as f32, cause_center_y as f32);
+            draw_icon(pm, cause_icon, (x + cause_icon_size / 2) as f32, cause_center_y as f32, 1.0);
         }
         x += cause_w as i32 + gap * 2;
 
@@ -1219,55 +1233,118 @@ fn draw_chat_overlay(
 }
 
 /// Draw the 10x10 grid overlay with labels.
-fn draw_grid_at(pm: &mut Pixmap, minimap_size: u32, x_off: u32, y_off: u32, fonts: &GameFonts) {
+/// Draws the map's ten-by-ten grid and its row and column labels.
+///
+/// Lines and labels sit in map space, so they move and grow with the map when
+/// it is zoomed; the stroke does not, which is what keeps a line one pixel
+/// wide at every zoom. The egui renderer's grid behaves the same way.
+fn draw_grid(pm: &mut Pixmap, viewport: MapViewport, fonts: &GameFonts) {
     let font = &fonts.primary;
-    let cell = minimap_size as f32 / 10.0;
+    let cell = MINIMAP_SIZE as f32 / 10.0;
     let grid_color = [180, 180, 180];
     let alpha = 0.25f32;
     let label_scale = fonts.scale(11.0);
-    let x_off_f = x_off as f32;
 
-    // Draw 9 interior lines in each direction
     for i in 1..10 {
-        let pos = (i as f32 * cell).round();
-        // Vertical line
+        let offset = i as f32 * cell;
         draw_line(
             pm,
-            x_off_f + pos,
-            y_off as f32,
-            x_off_f + pos,
-            (y_off + minimap_size) as f32,
+            viewport.x(offset),
+            viewport.y(0.0),
+            viewport.x(offset),
+            viewport.y(MINIMAP_SIZE as f32),
             grid_color,
             alpha,
             1.0,
         );
-        // Horizontal line
         draw_line(
             pm,
-            x_off_f,
-            pos + y_off as f32,
-            x_off_f + minimap_size as f32,
-            pos + y_off as f32,
+            viewport.x(0.0),
+            viewport.y(offset),
+            viewport.x(MINIMAP_SIZE as f32),
+            viewport.y(offset),
             grid_color,
             alpha,
             1.0,
         );
     }
 
-    // Labels: numbers 1-10 across the top, letters A-J down the left
     for i in 0..10 {
         let label = format!("{}", i + 1);
-        let x = (x_off_f + i as f32 * cell + cell / 2.0 - 3.0) as i32;
-        let y = y_off as i32 + 2;
+        let x = viewport.x(i as f32 * cell + cell / 2.0 - 3.0) as i32;
+        let y = viewport.y(2.0) as i32;
         draw_text_shadow(pm, [255, 255, 255], x, y, label_scale, font, &label);
     }
     let labels_row = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'];
     for (i, &ch) in labels_row.iter().enumerate() {
         let label = ch.to_string();
-        let x = x_off as i32 + 3i32;
-        let y = y_off as i32 + (i as f32 * cell + cell / 2.0 - 5.0) as i32;
+        let x = viewport.x(3.0) as i32;
+        let y = viewport.y(i as f32 * cell + cell / 2.0 - 5.0) as i32;
         draw_text_shadow(pm, [255, 255, 255], x, y, label_scale, font, &label);
     }
+}
+
+/// The drawn map at `viewport`: the art resampled to the window, with the
+/// grid over it.
+///
+/// Sampled through the viewport rather than cropped and resized, because the
+/// window's edges do not fall on whole source pixels and a crop would have to
+/// round them.
+fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> Pixmap {
+    let size = MINIMAP_SIZE;
+    let mut art = RgbImage::from_pixel(size, size, Rgb([30, 40, 60]));
+    if viewport.is_whole_map() {
+        // The art is already drawn at the map's own size, so the whole map is
+        // a copy. Resampling it would land on the same pixels at four times
+        // the cost, and every preview and every exported frame pays this.
+        for y in 0..size.min(map.height()) {
+            for x in 0..size.min(map.width()) {
+                art.put_pixel(x, y, *map.get_pixel(x, y));
+            }
+        }
+    } else if map.width() > 0 && map.height() > 0 {
+        for y in 0..size {
+            for x in 0..size {
+                let (sx, sy) = viewport.to_map(x as f32, y as f32);
+                art.put_pixel(x, y, sample_bilinear(map, sx, sy));
+            }
+        }
+    }
+    let mut base = rgb_to_pixmap(&art);
+    draw_grid(&mut base, viewport, fonts);
+    base
+}
+
+/// `image` at a fractional point, blended from the four pixels around it.
+///
+/// Zooming magnifies, so nearest sampling would show the map's own pixels as
+/// squares. A point outside the image takes the nearest edge pixel, which
+/// only happens on the half-pixel border.
+fn sample_bilinear(image: &RgbImage, x: f32, y: f32) -> Rgb<u8> {
+    let (width, height) = (image.width(), image.height());
+    let clamp_x = |value: i64| value.clamp(0, width as i64 - 1) as u32;
+    let clamp_y = |value: i64| value.clamp(0, height as i64 - 1) as u32;
+
+    let x0 = x.floor();
+    let y0 = y.floor();
+    let fx = x - x0;
+    let fy = y - y0;
+    let (x0, y0) = (x0 as i64, y0 as i64);
+
+    let corners = [
+        image.get_pixel(clamp_x(x0), clamp_y(y0)).0,
+        image.get_pixel(clamp_x(x0 + 1), clamp_y(y0)).0,
+        image.get_pixel(clamp_x(x0), clamp_y(y0 + 1)).0,
+        image.get_pixel(clamp_x(x0 + 1), clamp_y(y0 + 1)).0,
+    ];
+    let weights = [(1.0 - fx) * (1.0 - fy), fx * (1.0 - fy), (1.0 - fx) * fy, fx * fy];
+
+    let mut out = [0u8; 3];
+    for (channel, value) in out.iter_mut().enumerate() {
+        let sum: f32 = corners.iter().zip(weights).map(|(corner, weight)| corner[channel] as f32 * weight).sum();
+        *value = sum.round().clamp(0.0, 255.0) as u8;
+    }
+    Rgb(out)
 }
 
 /// Draw a large centered battle result text with a colored glow effect.
@@ -1561,7 +1638,7 @@ fn draw_team_roster(
                 };
                 let cx_center = cx + frag_icon_size * 0.5;
                 let cy_center = icon_y_top + frag_icon_size * 0.5;
-                draw_icon(pm, &tinted, cx_center, cy_center);
+                draw_icon(pm, &tinted, cx_center, cy_center, 1.0);
                 cx += frag_icon_size + frag_gap;
             }
             draw_text(pm, stats_color, cx as i32, row_top as i32, name_scale, &fonts.primary, &kt);
@@ -1585,7 +1662,7 @@ fn draw_team_roster(
                 let opacity = if row.is_dead { 0.55 } else { 1.0 };
                 let cx = inner_x + class_icon_size * 0.5;
                 let cy = ship_row_y + ship_scale.y * 0.5;
-                draw_ship_icon(pm, &resized, cx, cy, icon_yaw, tint, opacity);
+                draw_ship_icon(pm, &resized, cx, cy, icon_yaw, tint, opacity, 1.0);
                 inner_x + class_icon_size + class_icon_padding
             } else {
                 inner_x
@@ -1696,7 +1773,7 @@ fn draw_team_roster(
                     for px in img.pixels_mut() {
                         px.0[3] = (px.0[3] as f32 * dim) as u8;
                     }
-                    draw_icon(pm, &img, icon_x + icon_size * 0.5, strip_y + icon_size * 0.5);
+                    draw_icon(pm, &img, icon_x + icon_size * 0.5, strip_y + icon_size * 0.5, 1.0);
                 } else {
                     draw_filled_rect(pm, icon_x, strip_y, icon_size, icon_size, [60, 60, 60], 0.7);
                 }
@@ -1723,14 +1800,13 @@ fn draw_team_roster(
     }
 }
 
-// ── ImageTarget (RenderTarget implementation) ──────────────────────────────
-
 use crate::CANVAS_HEIGHT;
 use crate::HUD_HEIGHT;
 use crate::MINIMAP_SIZE;
 use crate::TEAM_ROSTER_WIDTH;
 
 use crate::config::RenderOptions;
+use crate::viewport::MapViewport;
 
 /// Which side panel the CLI canvas should reserve space for. Mirrors the
 /// runtime decision the desktop renderer makes from
@@ -1766,8 +1842,22 @@ pub type ShipIcon = RgbaImage;
 /// Implements `RenderTarget` by dispatching `DrawCommand`s to tiny-skia primitives.
 pub struct ImageTarget {
     canvas: Pixmap,
-    /// Pre-built background: map image + grid overlay. Cloned at start of each frame.
-    base_canvas: Pixmap,
+    /// The map art, kept so the drawn map can be rebuilt when the viewport
+    /// moves.
+    map_art: RgbImage,
+    /// Which part of the map frames show.
+    viewport: MapViewport,
+    /// The drawn map with its grid, at the current viewport. Cloned at the
+    /// start of each frame.
+    map_base: Pixmap,
+    /// What map-space commands draw on this frame.
+    ///
+    /// A layer of its own rather than the canvas, because it is exactly the
+    /// map's rectangle: a zoomed-in ship near an edge is clipped by the layer
+    /// instead of being painted over the score bar.
+    map_layer: Pixmap,
+    /// Whether the layer holds anything not yet composited onto the canvas.
+    map_dirty: bool,
     /// Width of the minimap area (excludes side panels). Always `MINIMAP_SIZE`.
     map_width: u32,
     /// Horizontal offset (in canvas pixels) from the canvas's left edge to the
@@ -1879,15 +1969,8 @@ impl ImageTarget {
             }
         };
 
-        // Pre-build the base canvas: dark background + map + grid
-        let mut base_rgb = RgbImage::from_pixel(canvas_width, CANVAS_HEIGHT, Rgb([20, 25, 35]));
-        for y in 0..map.height().min(MINIMAP_SIZE) {
-            for x in 0..map.width().min(MINIMAP_SIZE) {
-                base_rgb.put_pixel(x + map_x_offset, y + HUD_HEIGHT, *map.get_pixel(x, y));
-            }
-        }
-        let mut base = rgb_to_pixmap(&base_rgb);
-        draw_grid_at(&mut base, MINIMAP_SIZE, map_x_offset, HUD_HEIGHT, &fonts);
+        let viewport = MapViewport::default();
+        let map_base = build_map_base(&map, viewport, &fonts);
 
         let ship_icon_outlines = ship_icons
             .iter()
@@ -1896,7 +1979,11 @@ impl ImageTarget {
 
         Self {
             canvas: Pixmap::new(canvas_width, CANVAS_HEIGHT).unwrap(),
-            base_canvas: base,
+            map_layer: map_base.clone(),
+            map_base,
+            map_art: map,
+            viewport,
+            map_dirty: true,
             map_width: MINIMAP_SIZE,
             map_x_offset,
             hud_width,
@@ -1920,6 +2007,47 @@ impl ImageTarget {
         self.text_resolver = resolver;
     }
 
+    /// Which part of the map frames show.
+    pub fn map_viewport(&self) -> MapViewport {
+        self.viewport
+    }
+
+    /// Shows `viewport`'s part of the map from the next frame on.
+    ///
+    /// Redrawing the map art at the new zoom costs a resample, so a viewport
+    /// that has not moved is left alone; a drag asks for the same one many
+    /// times.
+    pub fn set_map_viewport(&mut self, viewport: MapViewport) {
+        if viewport == self.viewport {
+            return;
+        }
+        self.viewport = viewport;
+        self.map_base = build_map_base(&self.map_art, viewport, &self.fonts);
+    }
+
+    /// Puts what the map layer holds onto the canvas.
+    ///
+    /// Called before anything that is not a map element, so the HUD lands on
+    /// top of the map whatever order the commands arrive in. The layer is
+    /// left empty rather than reloaded, so a map element that arrives after a
+    /// HUD element composites over it rather than under it.
+    fn flush_map(&mut self) {
+        if !self.map_dirty {
+            return;
+        }
+        let paint = PixmapPaint { opacity: 1.0, blend_mode: BlendMode::SourceOver, quality: FilterQuality::Nearest };
+        self.canvas.draw_pixmap(
+            self.map_x_offset as i32,
+            HUD_HEIGHT as i32,
+            self.map_layer.as_ref(),
+            &paint,
+            Transform::identity(),
+            None,
+        );
+        self.map_layer.data_mut().fill(0);
+        self.map_dirty = false;
+    }
+
     /// Access the current frame as an RGB image (converted from Pixmap).
     pub fn frame(&self) -> RgbImage {
         pixmap_to_rgb(&self.canvas)
@@ -1931,23 +2059,79 @@ impl ImageTarget {
     }
 }
 
+/// What a frame starts as, everywhere the map and the HUD do not reach.
+const CANVAS_BACKGROUND: [u8; 3] = [20, 25, 35];
+
+/// Whether `cmd` draws on the map rather than over it.
+///
+/// The map's own elements move and grow with the viewport and are clipped to
+/// the map's rectangle; the score bar, timer, kill feed, chat, results and
+/// side panels do none of those things.
+fn is_map_command(cmd: &DrawCommand) -> bool {
+    matches!(
+        cmd,
+        DrawCommand::ShotTracer { .. }
+            | DrawCommand::ShotTracerTip { .. }
+            | DrawCommand::SecondaryShotTracer { .. }
+            | DrawCommand::SecondaryShotTracerTip { .. }
+            | DrawCommand::Torpedo { .. }
+            | DrawCommand::Smoke { .. }
+            | DrawCommand::BuffZone { .. }
+            | DrawCommand::CapturePoint { .. }
+            | DrawCommand::CameraDirection { .. }
+            | DrawCommand::Building { .. }
+            | DrawCommand::WeatherZone { .. }
+            | DrawCommand::Ship { .. }
+            | DrawCommand::HealthBar { .. }
+            | DrawCommand::DeadShip { .. }
+            | DrawCommand::Plane { .. }
+            | DrawCommand::ConsumableRadius { .. }
+            | DrawCommand::PatrolRadius { .. }
+            | DrawCommand::ConsumableIcons { .. }
+            | DrawCommand::PositionTrail { .. }
+            | DrawCommand::ShipConfigCircle { .. }
+    )
+}
+
 impl RenderTarget for ImageTarget {
     fn begin_frame(&mut self) {
-        self.canvas = self.base_canvas.clone();
+        // Everything outside the map is this one colour; the map is a layer
+        // of its own, so that it can be drawn at a zoom without the rest of
+        // the canvas moving.
+        self.canvas.fill(tiny_skia::Color::from_rgba8(
+            CANVAS_BACKGROUND[0],
+            CANVAS_BACKGROUND[1],
+            CANVAS_BACKGROUND[2],
+            255,
+        ));
+        self.map_layer = self.map_base.clone();
+        // The map art itself still has to reach the canvas, even for a frame
+        // with nothing drawn on it.
+        self.map_dirty = true;
         self.placed_labels.clear();
     }
 
     fn draw(&mut self, cmd: &DrawCommand) {
-        let y_off = HUD_HEIGHT as f32;
-        let x_off = self.map_x_offset as f32;
+        // Map elements go on the layer, which is the map's own rectangle;
+        // everything else goes on the canvas, over whatever the layer holds.
+        if is_map_command(cmd) {
+            self.map_dirty = true;
+        } else {
+            self.flush_map();
+        }
+        let view = self.viewport;
+        // What a map-space length is drawn at. Radii, icons, bars and the
+        // labels beside them grow with the map; stroke widths do not, which
+        // is what keeps a line readable at every zoom.
+        let grow = view.zoom();
         match cmd {
             DrawCommand::ShotTracer { from, to, color } => {
                 draw_line(
-                    &mut self.canvas,
-                    from.x + x_off,
-                    from.y + y_off,
-                    to.x + x_off,
-                    to.y + y_off,
+                    &mut self.map_layer,
+                    view.x(from.x),
+                    view.y(from.y),
+                    view.x(to.x),
+                    view.y(to.y),
                     *color,
                     1.0,
                     1.5,
@@ -1956,21 +2140,21 @@ impl RenderTarget for ImageTarget {
             DrawCommand::ShotTracerTip { at, color } => {
                 // A bit wider than the 1.5px tracer line so the ammo color is noticeable.
                 draw_filled_circle(
-                    &mut self.canvas,
-                    at.x + x_off,
-                    at.y + y_off,
-                    1.9,
+                    &mut self.map_layer,
+                    view.x(at.x),
+                    view.y(at.y),
+                    1.9 * grow,
                     *color,
                     crate::draw_command::SHOT_TIP_ALPHA,
                 );
             }
             DrawCommand::SecondaryShotTracer { from, to, color } => {
                 draw_line(
-                    &mut self.canvas,
-                    from.x + x_off,
-                    from.y + y_off,
-                    to.x + x_off,
-                    to.y + y_off,
+                    &mut self.map_layer,
+                    view.x(from.x),
+                    view.y(from.y),
+                    view.x(to.x),
+                    view.y(to.y),
                     *color,
                     crate::draw_command::SECONDARY_SHOT_ALPHA,
                     1.5,
@@ -1978,41 +2162,48 @@ impl RenderTarget for ImageTarget {
             }
             DrawCommand::SecondaryShotTracerTip { at, color } => {
                 draw_filled_circle(
-                    &mut self.canvas,
-                    at.x + x_off,
-                    at.y + y_off,
-                    1.9,
+                    &mut self.map_layer,
+                    view.x(at.x),
+                    view.y(at.y),
+                    1.9 * grow,
                     *color,
                     crate::draw_command::SECONDARY_SHOT_ALPHA,
                 );
             }
             DrawCommand::Torpedo { pos, color } => {
-                draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 2.5, *color, 1.0);
+                draw_filled_circle(&mut self.map_layer, view.x(pos.x), view.y(pos.y), 2.5 * grow, *color, 1.0);
             }
             DrawCommand::Smoke { pos, radius, color, alpha } => {
-                draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, *radius as f32, *color, *alpha);
+                draw_filled_circle(
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    view.length(*radius as f32),
+                    *color,
+                    *alpha,
+                );
             }
             DrawCommand::BuffZone { pos, radius, color, alpha, marker_name } => {
-                let cx = pos.x + x_off;
-                let cy = pos.y + y_off;
-                let r = *radius as f32;
+                let cx = view.x(pos.x);
+                let cy = view.y(pos.y);
+                let r = view.length(*radius as f32);
                 // Filled circle
-                draw_filled_circle(&mut self.canvas, cx, cy, r, *color, *alpha);
+                draw_filled_circle(&mut self.map_layer, cx, cy, r, *color, *alpha);
                 // Border ring
-                draw_circle_outline(&mut self.canvas, cx, cy, r, *color, 0.6, 1.5);
+                draw_circle_outline(&mut self.map_layer, cx, cy, r, *color, 0.6, 1.5);
                 // Draw powerup icon centered on zone
                 if let Some(name) = marker_name
                     && let Some(icon) = self.powerup_icons.get(name.as_str())
                 {
-                    draw_icon(&mut self.canvas, icon, cx, cy);
+                    draw_icon(&mut self.map_layer, icon, cx, cy, grow);
                 }
             }
             DrawCommand::CapturePoint { pos, radius, color, alpha, label, progress, invader_color, flag_icon } => {
                 draw_capture_point(
-                    &mut self.canvas,
-                    pos.x + x_off,
-                    pos.y + y_off,
-                    *radius as f32,
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    view.length(*radius as f32),
                     *color,
                     *alpha,
                     label,
@@ -2020,32 +2211,34 @@ impl RenderTarget for ImageTarget {
                     *invader_color,
                     flag_icon.as_ref(),
                     &self.fonts,
+                    grow,
                 );
             }
             DrawCommand::CameraDirection { pos, yaw, color, length, .. } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
-                let dx = *length as f32 * yaw.cos();
-                let dy = -*length as f32 * yaw.sin();
-                draw_line(&mut self.canvas, x, y, x + dx, y + dy, *color, 0.7, 1.0);
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                let reach = view.length(*length as f32);
+                let dx = reach * yaw.cos();
+                let dy = -reach * yaw.sin();
+                draw_line(&mut self.map_layer, x, y, x + dx, y + dy, *color, 0.7, 1.0);
             }
             DrawCommand::Building { pos, color, icon_type, relation, .. } => {
                 // Try to render an icon; fall back to a dot if no icon is available
                 let icon_key = icon_type.map(|t| format!("{}_{}", t.icon_name(), relation.icon_suffix()));
                 let icon = icon_key.as_ref().and_then(|k| self.building_icons.get(k));
                 if let Some(icon) = icon {
-                    draw_icon(&mut self.canvas, icon, pos.x + x_off, pos.y + y_off);
+                    draw_icon(&mut self.map_layer, icon, view.x(pos.x), view.y(pos.y), grow);
                 } else {
-                    draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 2.5, *color, 1.0);
+                    draw_filled_circle(&mut self.map_layer, view.x(pos.x), view.y(pos.y), 2.5 * grow, *color, 1.0);
                 }
             }
             DrawCommand::WeatherZone { pos, radius } => {
                 // Semi-transparent light gray circle for weather zones (squalls/storms)
                 draw_filled_circle(
-                    &mut self.canvas,
-                    pos.x + x_off,
-                    pos.y + y_off,
-                    *radius as f32,
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
+                    view.length(*radius as f32),
                     [255, 255, 255],
                     0.25,
                 );
@@ -2065,8 +2258,8 @@ impl RenderTarget for ImageTarget {
                 name_color,
                 ..
             } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
 
                 let fallback_key = match (*visibility, *is_self) {
                     (ShipVisibility::Visible, true) => "Auxiliary_self",
@@ -2092,37 +2285,39 @@ impl RenderTarget for ImageTarget {
                 };
 
                 if *is_detected_teammate && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
-                    draw_ship_icon(&mut self.canvas, outline, x, y, *yaw, None, 1.0);
+                    draw_ship_icon(&mut self.map_layer, outline, x, y, *yaw, None, 1.0, grow);
                 }
                 if *is_disconnected && let Some(outline) = self.ship_icon_outlines.get(icon_key) {
-                    draw_ship_icon(&mut self.canvas, outline, x, y, *yaw, Some([255, 60, 60]), 1.0);
+                    draw_ship_icon(&mut self.map_layer, outline, x, y, *yaw, Some([255, 60, 60]), 1.0, grow);
                 }
 
-                draw_ship_icon(&mut self.canvas, icon, x, y, *yaw, color.map(|c| c), *opacity);
+                draw_ship_icon(&mut self.map_layer, icon, x, y, *yaw, color.map(|c| c), *opacity, grow);
                 draw_ship_labels(
-                    &mut self.canvas,
+                    &mut self.map_layer,
                     x,
                     y,
                     player_name.as_deref(),
                     ship_name.as_deref(),
                     *name_color,
                     &self.fonts,
+                    grow,
                 );
             }
             DrawCommand::HealthBar { pos, fraction, fill_color, background_color, background_alpha, .. } => {
                 draw_health_bar(
-                    &mut self.canvas,
-                    pos.x + x_off,
-                    pos.y + y_off,
+                    &mut self.map_layer,
+                    view.x(pos.x),
+                    view.y(pos.y),
                     *fraction,
                     *fill_color,
                     *background_color,
                     *background_alpha,
+                    grow,
                 );
             }
             DrawCommand::DeadShip { pos, yaw, species, color, is_self, .. } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
 
                 let fallback_key = if *is_self { "Auxiliary_dead_self" } else { "Auxiliary_dead" };
                 let icon = if let Some(sp) = species.as_ref() {
@@ -2139,53 +2334,56 @@ impl RenderTarget for ImageTarget {
                     return;
                 };
 
-                draw_ship_icon(&mut self.canvas, icon, x, y, *yaw, color.map(|c| c), 1.0);
+                draw_ship_icon(&mut self.map_layer, icon, x, y, *yaw, color.map(|c| c), 1.0, grow);
             }
             DrawCommand::Plane { pos, icon_key, player_name, ship_name, .. } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
                 let Some(icon) = self.plane_icons.get(icon_key) else {
                     tracing::warn!(icon_key, "Missing plane icon, skipping");
                     return;
                 };
-                draw_icon(&mut self.canvas, icon, x, y);
+                draw_icon(&mut self.map_layer, icon, x, y, grow);
                 draw_ship_labels(
-                    &mut self.canvas,
+                    &mut self.map_layer,
                     x,
                     y,
                     player_name.as_deref(),
                     ship_name.as_deref(),
                     None,
                     &self.fonts,
+                    grow,
                 );
             }
             DrawCommand::ConsumableRadius { pos, radius_px, color, alpha, .. } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                let radius = view.length(*radius_px as f32);
                 // Semi-transparent filled circle
-                draw_filled_circle(&mut self.canvas, x, y, *radius_px as f32, *color, *alpha);
+                draw_filled_circle(&mut self.map_layer, x, y, radius, *color, *alpha);
                 // Outline for visibility
-                draw_circle_outline(&mut self.canvas, x, y, *radius_px as f32, *color, 0.5, 2.0);
+                draw_circle_outline(&mut self.map_layer, x, y, radius, *color, 0.5, 2.0);
             }
             DrawCommand::PatrolRadius { pos, radius_px, color, alpha, .. } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
                 // Filled circle only, no outline
-                draw_filled_circle(&mut self.canvas, x, y, *radius_px as f32, *color, *alpha);
+                draw_filled_circle(&mut self.map_layer, x, y, view.length(*radius_px as f32), *color, *alpha);
             }
             DrawCommand::ConsumableIcons { pos, icon_keys, has_hp_bar, .. } => {
-                let x = (pos.x + x_off).round() as i32;
-                let y = (pos.y + y_off).round() as i32;
-                let base_y = if *has_hp_bar { y + 28 } else { y + 26 };
-                let icon_size = 28i32;
-                let gap = 1i32;
+                let x = view.x(pos.x).round() as i32;
+                let y = view.y(pos.y).round() as i32;
+                let below = if *has_hp_bar { 28.0 } else { 26.0 };
+                let base_y = y + (below * grow).round() as i32;
+                let icon_size = (28.0 * grow).round().max(1.0) as i32;
+                let gap = (1.0 * grow).round().max(1.0) as i32;
                 let count = icon_keys.len() as i32;
                 let total_w = count * icon_size + (count - 1) * gap;
                 let start_x = x - total_w / 2 + icon_size / 2;
                 for (i, icon_key) in icon_keys.iter().enumerate() {
                     if let Some(icon) = self.consumable_icons.get(icon_key) {
                         let ix = start_x + i as i32 * (icon_size + gap);
-                        draw_icon(&mut self.canvas, icon, ix as f32, base_y as f32);
+                        draw_icon(&mut self.map_layer, icon, ix as f32, base_y as f32, grow);
                     }
                 }
             }
@@ -2256,6 +2454,7 @@ impl RenderTarget for ImageTarget {
                             &resized,
                             (x + icon_size / 2) as f32,
                             (buff_y + icon_size / 2) as f32,
+                            1.0,
                         );
                         if *count > 1 {
                             let label = format!("{}", count);
@@ -2310,6 +2509,7 @@ impl RenderTarget for ImageTarget {
                             &resized,
                             (x + icon_size / 2) as f32,
                             (buff_y + icon_size / 2) as f32,
+                            1.0,
                         );
                         x -= gap;
                     }
@@ -2317,28 +2517,28 @@ impl RenderTarget for ImageTarget {
             }
             DrawCommand::PositionTrail { points, .. } => {
                 for (pos, color) in points {
-                    draw_filled_circle(&mut self.canvas, pos.x + x_off, pos.y + y_off, 1.0, *color, 1.0);
+                    draw_filled_circle(&mut self.map_layer, view.x(pos.x), view.y(pos.y), grow, *color, 1.0);
                 }
             }
             DrawCommand::ShipConfigCircle { pos, radius_px, color, alpha, dashed, label, .. } => {
-                let x = pos.x + x_off;
-                let y = pos.y + y_off;
-                let r = *radius_px;
+                let x = view.x(pos.x);
+                let y = view.y(pos.y);
+                let r = view.length(*radius_px);
                 if *dashed {
-                    draw_dashed_circle(&mut self.canvas, x, y, r, *color, *alpha, 1.0);
+                    draw_dashed_circle(&mut self.map_layer, x, y, r, *color, *alpha, 1.0);
                 } else {
-                    draw_circle_outline(&mut self.canvas, x, y, r, *color, *alpha, 1.0);
+                    draw_circle_outline(&mut self.map_layer, x, y, r, *color, *alpha, 1.0);
                 }
                 if let Some(text) = label {
                     let font = self.fonts.font_for_text(text);
-                    let scale = self.fonts.scale(11.0);
+                    let scale = self.fonts.scale(11.0 * grow);
                     let (tw, th) = text_size(scale, font, text);
                     let tw = tw as i32;
                     let th = th as i32;
                     let cx = x as i32;
                     let cy = y as i32;
-                    let ri = *radius_px as i32;
-                    let gap = 3;
+                    let ri = r as i32;
+                    let gap = (3.0 * grow).round().max(1.0) as i32;
 
                     // 8 candidate angles: top, top-right, right, bottom-right, bottom, bottom-left, left, top-left
                     let candidates: [(f32, f32); 8] = [
@@ -2387,7 +2587,7 @@ impl RenderTarget for ImageTarget {
                     }
 
                     self.placed_labels.push(best);
-                    draw_text_shadow(&mut self.canvas, *color, best[0], best[1], scale, font, text);
+                    draw_text_shadow(&mut self.map_layer, *color, best[0], best[1], scale, font, text);
                 }
             }
             DrawCommand::KillFeed { entries } => {
@@ -2906,6 +3106,7 @@ impl RenderTarget for ImageTarget {
                                     cause_icon,
                                     (cx + icon_size / 2) as f32,
                                     cause_center_y as f32,
+                                    1.0,
                                 );
                                 cx += icon_size + gap;
                             }
@@ -3044,6 +3245,118 @@ impl RenderTarget for ImageTarget {
     }
 
     fn end_frame(&mut self) {
-        // No-op — frame is ready to read via frame()
+        self.flush_map();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::map_data::MinimapPos;
+    use crate::viewport::MapViewport;
+
+    /// A target with no game files behind it: no map art, no icons, and
+    /// whatever font the machine has. `None` where it has none.
+    fn target() -> Option<ImageTarget> {
+        let fonts = crate::assets::test_fonts()?;
+        Some(ImageTarget::new(
+            None,
+            fonts,
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+            HashMap::new(),
+        ))
+    }
+
+    /// The pixel at `x`, `y` of a finished frame.
+    fn pixel(frame: &RgbImage, x: u32, y: u32) -> [u8; 3] {
+        frame.get_pixel(x, y).0
+    }
+
+    /// A torpedo sits where the viewport says it does, and is drawn at all.
+    ///
+    /// The positive half of the clipping test below: without it, a test that
+    /// found nothing on the HUD would pass even if nothing were drawn.
+    #[test]
+    fn a_map_element_lands_where_the_viewport_puts_it() {
+        let Some(mut target) = target() else { return };
+        target.set_map_viewport(MapViewport::new(4.0, (0.0, 0.0)));
+        target.begin_frame();
+        target.draw(&DrawCommand::Torpedo { pos: MinimapPos { x: 50.0, y: 50.0 }, color: [255, 0, 0] });
+        target.end_frame();
+
+        let frame = target.frame();
+        // Four times its map position, and the map starts below the HUD.
+        let (x, y) = (200, 200 + HUD_HEIGHT);
+        assert_eq!(pixel(&frame, x, y), [255, 0, 0], "the torpedo is where the zoom puts it");
+    }
+
+    /// A map element the viewport pushes off the map does not reach the strip
+    /// the score bar and the timer live on.
+    ///
+    /// The map draws on a layer of its own for exactly this: the layer is the
+    /// map's rectangle, so anything outside it is clipped rather than painted
+    /// over the HUD.
+    #[test]
+    fn a_map_element_pushed_off_the_map_does_not_reach_the_hud() {
+        let Some(mut target) = target() else { return };
+        // Panned far enough down that a torpedo near the top of the map would
+        // land two hundred pixels above the map's own top edge.
+        target.set_map_viewport(MapViewport::new(4.0, (0.0, 400.0)));
+        target.begin_frame();
+        target.draw(&DrawCommand::Torpedo { pos: MinimapPos { x: 50.0, y: 50.0 }, color: [255, 0, 0] });
+        target.end_frame();
+
+        let frame = target.frame();
+        for y in 0..HUD_HEIGHT {
+            for x in 0..frame.width() {
+                assert_eq!(pixel(&frame, x, y), [20, 25, 35], "nothing was drawn on the HUD strip at {x},{y}");
+            }
+        }
+    }
+
+    /// Going back to the whole map leaves no trace of the zoom.
+    ///
+    /// One renderer is shared by every preview of a map, so a frame drawn
+    /// zoomed must not change what the next plain frame looks like.
+    #[test]
+    fn a_viewport_is_not_remembered_between_frames() {
+        let (Some(mut zoomed), Some(mut plain)) = (target(), target()) else { return };
+
+        zoomed.set_map_viewport(MapViewport::new(6.0, (300.0, 120.0)));
+        zoomed.begin_frame();
+        zoomed.draw(&DrawCommand::Torpedo { pos: MinimapPos { x: 60.0, y: 60.0 }, color: [255, 0, 0] });
+        zoomed.end_frame();
+
+        zoomed.set_map_viewport(MapViewport::default());
+        zoomed.begin_frame();
+        zoomed.end_frame();
+
+        plain.begin_frame();
+        plain.end_frame();
+
+        assert_eq!(zoomed.frame(), plain.frame(), "the frame is the one a renderer that never zoomed draws");
+    }
+
+    /// The map itself reaches the canvas, on a frame with nothing drawn on it.
+    ///
+    /// The layer is composited rather than drawn straight onto the canvas, so
+    /// a frame that carried no commands at all could have been left blank.
+    #[test]
+    fn a_frame_with_no_commands_still_carries_the_map() {
+        let Some(mut target) = target() else { return };
+        target.begin_frame();
+        target.end_frame();
+
+        let frame = target.frame();
+        // The stand-in map art the target falls back to, which is not the
+        // background the canvas starts as.
+        assert_eq!(pixel(&frame, 400, 400 + HUD_HEIGHT), [30, 40, 60]);
+        assert_eq!(pixel(&frame, 400, 4), [20, 25, 35], "and the HUD strip is still the background");
     }
 }
