@@ -4,6 +4,7 @@
 //! stream I/O, token encoding, and validation logic for the collab protocol.
 //! It is usable from both the desktop app and the WASM web client.
 
+pub mod drawing;
 pub mod geometry;
 pub mod protocol;
 pub mod types;

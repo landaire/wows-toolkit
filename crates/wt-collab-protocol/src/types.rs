@@ -7,7 +7,7 @@
 ///
 /// Coordinates are in minimap pixel space (0..760 native, but annotations
 /// may extend slightly beyond for off-edge drawings).
-#[derive(Clone, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum Annotation {
     Ship { pos: [f32; 2], yaw: f32, species: String, friendly: bool, config: Option<AnnotationShipConfig> },
     FreehandStroke { points: Vec<[f32; 2]>, color: [u8; 4], width: f32 },
@@ -25,7 +25,7 @@ pub enum Annotation {
 /// coefficients, and which range circles are visible.  Coefficients are pre-computed
 /// products of all relevant captain skills / modernizations so the protocol layer
 /// stays independent of game-data structures.
-#[derive(Clone, Debug, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AnnotationShipConfig {
     /// `GameParamId` as raw `u64`.  0 = unassigned.
     pub param_id: u64,
@@ -44,7 +44,7 @@ pub struct AnnotationShipConfig {
 }
 
 /// Range circle visibility flags for an annotation ship.
-#[derive(Clone, Debug, Default, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct AnnotationRangeFilter {
     pub detection: bool,
     pub main_battery: bool,
