@@ -9,6 +9,9 @@
 //! other.
 
 use crate::types::Annotation;
+use wows_minimap_renderer::draw_command::AnnotationShape;
+use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::map_data::MinimapPos;
 
 /// Below this a segment is a point, and its own start is the nearest thing on
 /// it.
@@ -250,6 +253,111 @@ pub fn km_to_minimap_distance(km: f32, space_size: f32) -> f32 {
     world / space_size * wows_minimap_renderer::MINIMAP_SIZE as f32
 }
 
+/// How long an arrow's head is, relative to the line's width.
+const ARROW_HEAD_LENGTH: f32 = 6.0;
+
+/// How wide it is, relative to its length.
+const ARROW_HEAD_SPREAD: f32 = 0.6;
+
+fn at(point: [f32; 2]) -> MinimapPos {
+    MinimapPos { x: point[0], y: point[1] }
+}
+
+fn run(points: &[[f32; 2]]) -> Vec<MinimapPos> {
+    points.iter().map(|point| at(*point)).collect()
+}
+
+/// What to draw for `annotation`, in the order it should be drawn.
+///
+/// The target knows three shapes, so the drawing tools turn into those here
+/// rather than every renderer learning each tool. An arrow is two commands:
+/// its shaft and its filled head. A ship annotation draws nothing yet -- it
+/// is an icon and a set of range circles rather than a shape, and it needs
+/// the ship's own game data.
+pub fn annotation_commands(annotation: &Annotation) -> Vec<DrawCommand> {
+    match annotation {
+        Annotation::Ship { .. } => Vec::new(),
+        Annotation::FreehandStroke { points, color, width } => {
+            vec![DrawCommand::Annotation {
+                shape: AnnotationShape::Polyline { points: run(points) },
+                color: *color,
+                width: *width,
+            }]
+        }
+        Annotation::Line { start, end, color, width } | Annotation::Measurement { start, end, color, width } => {
+            vec![DrawCommand::Annotation {
+                shape: AnnotationShape::Polyline { points: vec![at(*start), at(*end)] },
+                color: *color,
+                width: *width,
+            }]
+        }
+        Annotation::Circle { center, radius, color, width, filled } => {
+            vec![DrawCommand::Annotation {
+                shape: AnnotationShape::Circle { center: at(*center), radius: *radius, filled: *filled },
+                color: *color,
+                width: *width,
+            }]
+        }
+        Annotation::Rectangle { center, half_size, rotation, color, width, filled } => {
+            let (sin, cos) = rotation.sin_cos();
+            let corners: Vec<[f32; 2]> = [[-1.0_f32, -1.0_f32], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]]
+                .into_iter()
+                .map(|[sx, sy]| {
+                    let (x, y) = (sx * half_size[0], sy * half_size[1]);
+                    [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
+                })
+                .collect();
+            vec![DrawCommand::Annotation {
+                shape: AnnotationShape::Polygon { points: run(&corners), filled: *filled },
+                color: *color,
+                width: *width,
+            }]
+        }
+        Annotation::Triangle { center, radius, rotation, color, width, filled } => {
+            let corners = triangle_corners(*center, *radius, *rotation);
+            vec![DrawCommand::Annotation {
+                shape: AnnotationShape::Polygon { points: run(&corners), filled: *filled },
+                color: *color,
+                width: *width,
+            }]
+        }
+        Annotation::Arrow { points, color, width } => {
+            let mut commands = vec![DrawCommand::Annotation {
+                shape: AnnotationShape::Polyline { points: run(points) },
+                color: *color,
+                width: *width,
+            }];
+            if let Some(head) = arrow_head(points, *width) {
+                commands.push(DrawCommand::Annotation {
+                    shape: AnnotationShape::Polygon { points: run(&head), filled: true },
+                    color: *color,
+                    width: *width,
+                });
+            }
+            commands
+        }
+    }
+}
+
+/// The three corners of an arrow's head, or `None` for a stroke with no tip
+/// to put one on.
+fn arrow_head(points: &[[f32; 2]], width: f32) -> Option<[[f32; 2]; 3]> {
+    let tip = *points.last()?;
+    if points.len() < 2 {
+        return None;
+    }
+    let forward = arrow_direction(points);
+    let length = width * ARROW_HEAD_LENGTH;
+    let across = [-forward[1], forward[0]];
+    let base = [tip[0] - forward[0] * length, tip[1] - forward[1] * length];
+    let spread = length * ARROW_HEAD_SPREAD;
+    Some([
+        tip,
+        [base[0] + across[0] * spread, base[1] + across[1] * spread],
+        [base[0] - across[0] * spread, base[1] - across[1] * spread],
+    ])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -363,6 +471,116 @@ mod tests {
     fn a_stroke_of_two_points_is_left_alone() {
         let drawn = vec![[0.0, 0.0], [10.0, 10.0]];
         assert_eq!(smooth_freehand(drawn.clone()), drawn);
+    }
+
+    fn shapes(annotation: &Annotation) -> Vec<AnnotationShape> {
+        annotation_commands(annotation)
+            .into_iter()
+            .map(|command| match command {
+                DrawCommand::Annotation { shape, .. } => shape,
+                other => panic!("an annotation draws annotations, got {other:?}"),
+            })
+            .collect()
+    }
+
+    /// A rectangle is drawn as its four turned corners, and those corners are
+    /// where hit testing says the rectangle is.
+    #[test]
+    fn a_rectangle_is_drawn_where_it_is_measured() {
+        let rect = Annotation::Rectangle {
+            center: [100.0, 100.0],
+            half_size: [20.0, 10.0],
+            rotation: std::f32::consts::FRAC_PI_4,
+            color: [255, 255, 255, 255],
+            width: 2.0,
+            filled: false,
+        };
+
+        let drawn = shapes(&rect);
+        let [AnnotationShape::Polygon { points, filled }] = &drawn[..] else {
+            panic!("a rectangle draws one polygon, got {drawn:?}");
+        };
+        assert!(!filled);
+        assert_eq!(points.len(), 4);
+        for corner in points {
+            assert!(
+                annotation_distance(&rect, [corner.x, corner.y]) < 0.01,
+                "a drawn corner is on the rectangle: {corner:?}"
+            );
+        }
+        // And the corners are actually turned, not axis-aligned.
+        assert!(points.iter().all(|corner| (corner.x - 100.0).abs() > 0.01));
+    }
+
+    /// A triangle draws the same three corners its hit test measures to.
+    #[test]
+    fn a_triangle_draws_the_corners_it_is_measured_by() {
+        let triangle = Annotation::Triangle {
+            center: [50.0, 50.0],
+            radius: 12.0,
+            rotation: 0.3,
+            color: [0, 255, 0, 200],
+            width: 1.5,
+            filled: true,
+        };
+
+        let drawn = shapes(&triangle);
+        let [AnnotationShape::Polygon { points, filled }] = &drawn[..] else {
+            panic!("a triangle draws one polygon, got {drawn:?}");
+        };
+        assert!(filled);
+        let corners = triangle_corners([50.0, 50.0], 12.0, 0.3);
+        for (drawn, expected) in points.iter().zip(corners) {
+            assert!((drawn.x - expected[0]).abs() < 0.01 && (drawn.y - expected[1]).abs() < 0.01);
+        }
+    }
+
+    /// An arrow is its shaft and a filled head at the tip, pointing the way
+    /// the stroke was going.
+    #[test]
+    fn an_arrow_draws_a_shaft_and_a_head_at_its_tip() {
+        let arrow = Annotation::Arrow {
+            points: vec![[0.0, 0.0], [30.0, 0.0], [60.0, 0.0]],
+            color: [255, 0, 0, 255],
+            width: 2.0,
+        };
+
+        let drawn = shapes(&arrow);
+        let [AnnotationShape::Polyline { points: shaft }, AnnotationShape::Polygon { points: head, filled }] =
+            &drawn[..]
+        else {
+            panic!("an arrow draws a shaft and a head, got {drawn:?}");
+        };
+        assert!(filled, "the head is solid");
+        assert_eq!(shaft.len(), 3);
+        assert_eq!(head.len(), 3);
+
+        // The head starts at the tip and lies behind it, along the stroke.
+        assert!((head[0].x - 60.0).abs() < 0.01 && head[0].y.abs() < 0.01);
+        assert!(head[1].x < 60.0 && head[2].x < 60.0, "the barbs trail the tip");
+        assert!(head[1].y * head[2].y < 0.0, "one either side of the shaft");
+    }
+
+    /// A stroke of one point has no direction and so grows no head, rather
+    /// than drawing a spike in an arbitrary direction.
+    #[test]
+    fn an_arrow_of_one_point_grows_no_head() {
+        let stub = Annotation::Arrow { points: vec![[5.0, 5.0]], color: [255, 0, 0, 255], width: 2.0 };
+        assert_eq!(shapes(&stub).len(), 1, "the shaft alone");
+    }
+
+    /// A ship annotation is an icon and its range circles rather than a
+    /// shape, so it draws nothing here rather than something wrong.
+    #[test]
+    fn a_ship_annotation_draws_nothing_yet() {
+        let ship = Annotation::Ship {
+            pos: [10.0, 10.0],
+            yaw: 0.0,
+            species: "Cruiser".to_string(),
+            friendly: true,
+            config: None,
+        };
+        assert!(annotation_commands(&ship).is_empty());
     }
 
     /// Minimap distance and kilometres convert back to each other.

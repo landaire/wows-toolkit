@@ -628,6 +628,33 @@ pub enum DrawCommand {
     /// Per-team roster panel: list of ships with HP, name, and consumable slots.
     /// Positioned in a gutter beside the map (left or right depending on `side`).
     TeamRoster { side: RosterSide, x: i32, y: i32, width: i32, height: i32, rows: Vec<RosterRow> },
+    /// Something a reader drew on the map, rather than something the battle
+    /// did. One command per shape; a drawn arrow is its shaft and its head.
+    Annotation { shape: AnnotationShape, color: [u8; 4], width: f32 },
+}
+
+/// What a drawn annotation is, in minimap space.
+///
+/// Three shapes rather than one per drawing tool: a rectangle and a triangle
+/// are both closed runs of points, and an arrow is a run with a filled head,
+/// so the tools turn into these rather than the target learning each of them.
+#[derive(Debug, Clone)]
+#[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
+pub enum AnnotationShape {
+    /// An open run of points.
+    Polyline {
+        points: Vec<MinimapPos>,
+    },
+    /// A closed run of points, outlined or filled.
+    Polygon {
+        points: Vec<MinimapPos>,
+        filled: bool,
+    },
+    Circle {
+        center: MinimapPos,
+        radius: f32,
+        filled: bool,
+    },
 }
 
 /// Which gutter a [`DrawCommand::TeamRoster`] sits in.

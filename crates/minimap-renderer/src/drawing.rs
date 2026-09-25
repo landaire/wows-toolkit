@@ -28,6 +28,7 @@ use crate::assets::GameFonts;
 use crate::SHIP_ICON_OUTLINE_THICKNESS;
 
 use crate::draw_command::ActivityFeedKind;
+use crate::draw_command::AnnotationShape;
 use crate::draw_command::ChatEntry;
 use crate::draw_command::DrawCommand;
 use crate::draw_command::FontHint;
@@ -217,6 +218,42 @@ fn draw_line(pm: &mut Pixmap, x1: f32, y1: f32, x2: f32, y2: f32, color: [u8; 3]
     let Some(path) = pb.finish() else { return };
     let paint = color_paint(color, alpha);
     let stroke = Stroke { width, line_cap: LineCap::Round, line_join: LineJoin::Round, miter_limit: 4.0, dash: None };
+    pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+}
+
+/// Stroke or fill a run of points, closing it first when it is a polygon.
+///
+/// A width in map space rather than on screen: a reader drew the line over
+/// the map, so it belongs to the map and thickens with it, unlike the
+/// renderer's own strokes.
+fn draw_run(pm: &mut Pixmap, points: &[(f32, f32)], closed: bool, filled: bool, color: [u8; 4], width: f32) {
+    if points.len() < 2 {
+        return;
+    }
+    let mut pb = PathBuilder::new();
+    pb.move_to(points[0].0, points[0].1);
+    for point in &points[1..] {
+        pb.line_to(point.0, point.1);
+    }
+    if closed {
+        pb.close();
+    }
+    let Some(path) = pb.finish() else { return };
+
+    let rgb = [color[0], color[1], color[2]];
+    let alpha = color[3] as f32 / 255.0;
+    let paint = color_paint(rgb, alpha);
+    if filled {
+        pm.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+        return;
+    }
+    let stroke = Stroke {
+        width: width.max(0.1),
+        line_cap: LineCap::Round,
+        line_join: LineJoin::Round,
+        miter_limit: 4.0,
+        dash: None,
+    };
     pm.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
 }
 
@@ -2142,6 +2179,7 @@ fn is_map_command(cmd: &DrawCommand) -> bool {
             | DrawCommand::ConsumableIcons { .. }
             | DrawCommand::PositionTrail { .. }
             | DrawCommand::ShipConfigCircle { .. }
+            | DrawCommand::Annotation { .. }
     )
 }
 
@@ -2565,6 +2603,32 @@ impl RenderTarget for ImageTarget {
                             1.0,
                         );
                         x -= gap;
+                    }
+                }
+            }
+            DrawCommand::Annotation { shape, color, width } => {
+                let rgb = [color[0], color[1], color[2]];
+                let alpha = color[3] as f32 / 255.0;
+                // A drawn line thickens with the map it was drawn on, so its
+                // width is a map length rather than a stroke width.
+                let drawn_width = width * grow;
+                match shape {
+                    AnnotationShape::Polyline { points } => {
+                        let points: Vec<(f32, f32)> = points.iter().map(|at| (view.x(at.x), view.y(at.y))).collect();
+                        draw_run(&mut self.map_layer, &points, false, false, *color, drawn_width);
+                    }
+                    AnnotationShape::Polygon { points, filled } => {
+                        let points: Vec<(f32, f32)> = points.iter().map(|at| (view.x(at.x), view.y(at.y))).collect();
+                        draw_run(&mut self.map_layer, &points, true, *filled, *color, drawn_width);
+                    }
+                    AnnotationShape::Circle { center, radius, filled } => {
+                        let (x, y) = (view.x(center.x), view.y(center.y));
+                        let radius = view.length(*radius);
+                        if *filled {
+                            draw_filled_circle(&mut self.map_layer, x, y, radius, rgb, alpha);
+                        } else {
+                            draw_circle_outline(&mut self.map_layer, x, y, radius, rgb, alpha, drawn_width);
+                        }
                     }
                 }
             }

@@ -1157,18 +1157,26 @@ impl ReplayRendererPanel {
         let view = self.view;
         let trail_hidden = self.trail_hidden.clone();
         let ship_ranges = self.ship_ranges.clone();
+        // Drawn over the battle rather than by it, so they are not filtered
+        // with it and they go on last.
+        let drawn_on: Vec<DrawCommand> =
+            self.collab.annotations().iter().flat_map(wt_collab_client::geometry::annotation_commands).collect();
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
                 // Filtered here rather than at bake time: a toggle then costs
                 // one frame rather than another walk of the battle.
                 // Trails first, so they sit behind everything, as the egui
                 // renderer draws them.
-                let shown: Vec<DrawCommand> = trails
+                let mut shown: Vec<DrawCommand> = trails
                     .into_iter()
                     .chain(commands)
                     .filter(|command| should_draw_command(command, &options, show_dead_ships))
                     .filter(|command| per_ship_allows(command, &trail_hidden, &ship_ranges))
                     .collect();
+                // After the battle's own map layers, so a drawn line is not
+                // buried under a ship, and before the HUD, which the target
+                // puts on top of everything on the map.
+                shown.extend(drawn_on);
                 let (image, regions) = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
                     let (frame, regions) = drawing.render_regions(view, &shown);
@@ -4081,6 +4089,50 @@ mod tests {
     fn a_playback_bake_carries_the_rosters() {
         assert!(super::playback_options().show_team_rosters);
         assert!(!super::playback_options_hidden().show_team_rosters, "but a viewport opens without them");
+    }
+
+    /// What a session has drawn reaches the frame, over the battle rather
+    /// than filtered with it.
+    #[gpui_kit::test]
+    fn what_a_session_has_drawn_is_put_on_the_frame(cx: &mut TestAppContext) {
+        use super::DrawCommand;
+        use wows_minimap_renderer::config::should_draw_command;
+        use wt_collab_client::types::Annotation;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        state.lock().current_annotation_sync = Some(wt_collab_client::AnnotationSyncState {
+            annotations: vec![Annotation::Circle {
+                center: [400.0, 300.0],
+                radius: 40.0,
+                color: [255, 0, 0, 255],
+                width: 2.0,
+                filled: false,
+            }],
+            ..Default::default()
+        });
+        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel
+        });
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                let drawn: Vec<DrawCommand> = panel
+                    .collab
+                    .annotations()
+                    .iter()
+                    .flat_map(wt_collab_client::geometry::annotation_commands)
+                    .collect();
+                assert_eq!(drawn.len(), 1, "the circle became one command");
+                // No display option hides what a reader drew deliberately.
+                let hidden = super::playback_options_hidden();
+                assert!(should_draw_command(&drawn[0], &hidden, false), "and nothing filters it out");
+            })
+            .expect("the window is open");
     }
 
     /// A ping is shed only once its ripple has run out.
