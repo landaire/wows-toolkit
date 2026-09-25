@@ -1140,6 +1140,9 @@ jump_to_end = "Jump to end"
 save_as_video = "Save as Video"
 copy_to_clipboard = "Render Video to Clipboard"
 
+[ui.renderer.annotations]
+title = "Drawing Tools"
+
 [ui.renderer.settings]
 title = "Display Settings"
 hp_bars = "HP Bars"

@@ -465,6 +465,33 @@ impl CollabLink {
         state.lock().current_annotation_sync.as_ref().map(|sync| sync.annotations.clone()).unwrap_or_default()
     }
 
+    /// Puts `annotation` on the map for everyone in the session.
+    pub fn add_annotation(&self, annotation: wt_collab_client::types::Annotation) {
+        let Some(tx) = &self.local_tx else { return };
+        let owner = self.state.as_ref().map(|state| state.lock().my_user_id).unwrap_or_default();
+        let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::new_annotation(
+            annotation, owner,
+        )));
+    }
+
+    /// Takes the annotation at `index` of [`Self::annotations`] off the map.
+    ///
+    /// By index because that is what a hit test answers, and by id on the
+    /// wire because the session is keyed that way and another peer may have
+    /// added one in between.
+    pub fn erase_annotation(&self, index: usize) {
+        let Some(tx) = &self.local_tx else { return };
+        let Some(state) = &self.state else { return };
+        let id = {
+            let held = state.lock();
+            let Some(sync) = held.current_annotation_sync.as_ref() else { return };
+            let Some(id) = sync.ids.get(index).copied() else { return };
+            id
+        };
+        let _ = tx
+            .send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Remove { board_id: None, id }));
+    }
+
     /// Forgets the pings whose ripple has finished.
     ///
     /// The session collects them and nothing else takes them out, so a
@@ -481,6 +508,74 @@ impl CollabLink {
     pub(crate) fn for_test(state: Arc<Mutex<SessionState>>) -> (Self, std::sync::mpsc::Receiver<LocalEvent>) {
         let (tx, rx) = std::sync::mpsc::channel();
         (Self { state: Some(state), local_tx: Some(tx) }, rx)
+    }
+}
+
+#[cfg(test)]
+mod annotation_tests {
+    use super::*;
+    use wt_collab_client::AnnotationSyncState;
+    use wt_collab_client::types::Annotation;
+
+    fn circle(radius: f32) -> Annotation {
+        Annotation::Circle { center: [10.0, 10.0], radius, color: [255, 0, 0, 255], width: 2.0, filled: false }
+    }
+
+    /// A drawn shape reaches the session under an id of its own, so two peers
+    /// drawing at once do not overwrite each other.
+    #[test]
+    fn a_drawn_shape_goes_to_the_session_under_its_own_id() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+
+        link.add_annotation(circle(5.0));
+        link.add_annotation(circle(6.0));
+
+        let ids: Vec<u64> = events
+            .try_iter()
+            .map(|event| match event {
+                LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set { id, .. }) => id,
+                _ => panic!("drawing a shape sends an annotation"),
+            })
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1], "each gets its own id");
+    }
+
+    /// Rubbing one out names the id the session knows it by, not where it
+    /// happened to sit in the list.
+    #[test]
+    fn rubbing_one_out_names_the_id_the_session_knows() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![circle(5.0), circle(6.0)],
+            ids: vec![77, 88],
+            ..Default::default()
+        });
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+
+        link.erase_annotation(1);
+        let sent: Vec<u64> = events
+            .try_iter()
+            .map(|event| match event {
+                LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Remove { id, .. }) => id,
+                _ => panic!("rubbing one out sends a removal"),
+            })
+            .collect();
+        assert_eq!(sent, vec![88]);
+    }
+
+    /// An index past what the session holds sends nothing, rather than
+    /// rubbing out whatever happens to be last.
+    #[test]
+    fn an_index_the_session_does_not_have_rubs_nothing_out() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().current_annotation_sync =
+            Some(AnnotationSyncState { annotations: vec![circle(5.0)], ids: vec![77], ..Default::default() });
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+
+        link.erase_annotation(9);
+        assert!(events.try_iter().next().is_none());
     }
 }
 

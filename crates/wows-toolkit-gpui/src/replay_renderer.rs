@@ -72,6 +72,9 @@ use wows_replay_insights::timeline::row_tone;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::TeamId;
+use wt_collab_client::drawing::Drawn;
+use wt_collab_client::drawing::Stroke;
+use wt_collab_client::drawing::Tool;
 
 use crate::replay_inspector::GameDataCache;
 
@@ -226,6 +229,11 @@ pub struct ReplayRendererPanel {
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
     collab: crate::collab::CollabLink,
+    /// The tool in hand and whatever it has drawn so far.
+    drawing: wt_collab_client::drawing::Drawing,
+    /// Where the pointer last was on the map, which is what a part-drawn
+    /// shape is previewed against.
+    pointer_at: Option<[f32; 2]>,
     /// The redraw a running session needs, held only while there is one.
     _collab_tick: Option<Task<()>>,
     /// Kept so the viewport can build the canvas a layer asks for: the team
@@ -338,6 +346,8 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
+            pointer_at: None,
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -419,6 +429,8 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
+            pointer_at: None,
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -1159,8 +1171,15 @@ impl ReplayRendererPanel {
         let ship_ranges = self.ship_ranges.clone();
         // Drawn over the battle rather than by it, so they are not filtered
         // with it and they go on last.
-        let drawn_on: Vec<DrawCommand> =
+        let mut drawn_on: Vec<DrawCommand> =
             self.collab.annotations().iter().flat_map(wt_collab_client::geometry::annotation_commands).collect();
+        // The shape under the pointer is drawn the same way the finished one
+        // will be, so what a reader sees while dragging is what they get.
+        if let Some(at) = self.pointer_at
+            && let Some(part_drawn) = self.drawing.in_progress(at)
+        {
+            drawn_on.extend(wt_collab_client::geometry::annotation_commands(&part_drawn));
+        }
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
                 // Filtered here rather than at bake time: a toggle then costs
@@ -1544,11 +1563,44 @@ impl ReplayRendererPanel {
     ///
     /// Only once there is somewhere to drag to: at the whole map, a drag
     /// would do nothing and holding it would swallow the click.
-    fn on_drag_start(&mut self, event: &MouseDownEvent, _window: &mut Window, _cx: &mut Context<Self>) {
-        if self.view.is_whole_map() || self.map_point(event.position).is_none() {
+    fn on_drag_start(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(at) = self.map_point(event.position) else { return };
+        // A tool in hand takes the drag: a reader dragging to draw is not
+        // asking to pan the map under their line.
+        if self.has_tool() {
+            self.stroke(Stroke::Began { at: [at.0, at.1] }, cx);
+            return;
+        }
+        if self.view.is_whole_map() {
             return;
         }
         self.dragging = Some(event.position);
+    }
+
+    /// Takes up `tool`, dropping whatever was half-drawn.
+    fn take_up(&mut self, tool: Tool, cx: &mut Context<Self>) {
+        self.drawing.set_tool(tool);
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Whether a drawing tool is in hand, which is what decides who gets the
+    /// pointer.
+    fn has_tool(&self) -> bool {
+        *self.drawing.tool() != wt_collab_client::drawing::Tool::None
+    }
+
+    /// Hands a pointer event to the tool and does what it drew.
+    fn stroke(&mut self, stroke: Stroke, cx: &mut Context<Self>) {
+        let existing = self.collab.annotations();
+        match self.drawing.handle(stroke, &existing) {
+            Some(Drawn::Added(annotation)) => self.collab.add_annotation(annotation),
+            Some(Drawn::Erased(index)) => self.collab.erase_annotation(index),
+            None => {}
+        }
+        // The frame carries the part-drawn shape, so every stroke redraws.
+        self.draw_current(cx);
+        cx.notify();
     }
 
     fn on_drag_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -1567,12 +1619,27 @@ impl ReplayRendererPanel {
         self.set_view(self.view.dragged(delta), window, cx);
     }
 
-    fn on_drag_end(&mut self, _event: &MouseUpEvent, _window: &mut Window, _cx: &mut Context<Self>) {
+    fn on_drag_end(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.dragging = None;
+        if self.has_tool()
+            && self.drawing.is_drawing()
+            && let Some(at) = self.map_point(event.position)
+        {
+            self.stroke(Stroke::Ended { at: [at.0, at.1] }, cx);
+        }
     }
 
     /// A double-click puts the whole map back.
     fn on_viewport_click(&mut self, event: &ClickEvent, window: &mut Window, cx: &mut Context<Self>) {
+        // A tool that places rather than drags wants the click, and a
+        // double-click must not put the whole map back under a half-drawn
+        // shape.
+        if self.has_tool() {
+            if let Some(at) = self.map_point(event.position()) {
+                self.stroke(Stroke::Clicked { at: [at.0, at.1] }, cx);
+            }
+            return;
+        }
         if event.click_count() < 2 {
             return;
         }
@@ -1879,6 +1946,7 @@ impl Render for ReplayRendererPanel {
                     .tooltip(t!("ui.replay.renderer.export_video").into_owned())
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
             )
+            .child(tools_popover(&cx.entity(), self, cx))
             .child(render_options_popover(&cx.entity(), self, cx))
             .child(timeline_popover(&cx.entity(), self, cx))
             .when(!self.popped_out, |this| {
@@ -2141,6 +2209,11 @@ fn per_ship_allows(
         _ => true,
     }
 }
+
+/// What a tool draws with until the reader says otherwise: the white and the
+/// width the egui toolbar opens on.
+const DEFAULT_INK: [u8; 4] = [255, 255, 255, 255];
+const DEFAULT_NIB: f32 = 2.0;
 
 /// How long a ping stays on the map, in seconds.
 const PING_SECONDS: f32 = 1.0;
@@ -2552,6 +2625,130 @@ const TOGGLES: &[Toggle] = &[
         },
     },
 ];
+
+/// The tools the toolbar offers, in the order the egui toolbar offers them.
+///
+/// Selecting is `Tool::None`: nothing is being drawn, so the pointer goes to
+/// the map as it otherwise would.
+const TOOLS: &[ToolButton] = &[
+    ToolButton { id: "replay-renderer-tool-select", glyph: crate::icons::CURSOR, tool: || Tool::None },
+    ToolButton { id: "replay-renderer-tool-arrow", glyph: crate::icons::ARROW_BEND_UP_RIGHT, tool: || Tool::Arrow },
+    ToolButton { id: "replay-renderer-tool-freehand", glyph: crate::icons::PAINT_BRUSH, tool: || Tool::Freehand },
+    ToolButton { id: "replay-renderer-tool-line", glyph: crate::icons::LINE_SEGMENT, tool: || Tool::Line },
+    ToolButton {
+        id: "replay-renderer-tool-circle",
+        glyph: crate::icons::CIRCLE,
+        tool: || Tool::Circle { filled: false },
+    },
+    ToolButton {
+        id: "replay-renderer-tool-rectangle",
+        glyph: crate::icons::SQUARE,
+        tool: || Tool::Rectangle { filled: false },
+    },
+    ToolButton {
+        id: "replay-renderer-tool-triangle",
+        glyph: crate::icons::TRIANGLE,
+        tool: || Tool::Triangle { filled: false },
+    },
+    ToolButton { id: "replay-renderer-tool-measure", glyph: crate::icons::RULER, tool: || Tool::Measurement },
+    ToolButton { id: "replay-renderer-tool-eraser", glyph: crate::icons::ERASER, tool: || Tool::Eraser },
+];
+
+/// One button on the toolbar: what it shows and what it puts in hand.
+struct ToolButton {
+    id: &'static str,
+    glyph: &'static str,
+    tool: fn() -> Tool,
+}
+
+/// What a tool draws with, as the egui toolbar offers it.
+const INKS: &[(&str, [u8; 4])] = &[
+    ("replay-renderer-ink-white", [255, 255, 255, 255]),
+    ("replay-renderer-ink-gray", [160, 160, 160, 255]),
+    ("replay-renderer-ink-red", [230, 50, 50, 255]),
+    ("replay-renderer-ink-orange", [240, 140, 30, 255]),
+    ("replay-renderer-ink-yellow", [240, 230, 50, 255]),
+    ("replay-renderer-ink-green", [50, 200, 50, 255]),
+    ("replay-renderer-ink-blue", [50, 120, 230, 255]),
+    ("replay-renderer-ink-purple", [180, 60, 230, 255]),
+    ("replay-renderer-ink-pink", [255, 130, 180, 255]),
+];
+
+/// The drawing tools, on the transport beside the gear.
+///
+/// Refused without a session: an annotation is something everyone in one
+/// sees, and there is nowhere to put one otherwise.
+fn tools_popover(
+    panel: &Entity<ReplayRendererPanel>,
+    view: &ReplayRendererPanel,
+    cx: &Context<ReplayRendererPanel>,
+) -> AnyElement {
+    let _ = cx;
+    let owner = panel.clone();
+    let in_session = view.collab.is_active();
+    let chosen = view.drawing.tool().clone();
+    let ink = view.drawing.color();
+
+    Popover::new("replay-renderer-tools")
+        .trigger(
+            Button::new("replay-renderer-tools-toggle")
+                .child(crate::icons::icon(crate::icons::NOTE_PENCIL))
+                .compact()
+                .disabled(!in_session)
+                .tooltip(t!("ui.renderer.annotations.title").into_owned()),
+        )
+        .content(move |_state, _window, _cx| {
+            let owner = owner.clone();
+            let chosen = chosen.clone();
+            v_flex()
+                .w(px(230.))
+                .p_2()
+                .gap_2()
+                .child(h_flex().gap_1().flex_wrap().children(TOOLS.iter().map(|button| {
+                    let owner = owner.clone();
+                    let tool = button.tool;
+                    let on = same_tool(&chosen, &tool());
+                    crate::ui::selectable(
+                        button.id,
+                        on,
+                        Button::new(button.id).child(crate::icons::icon(button.glyph)).compact().selected(on).on_click(
+                            move |_event, _window, cx: &mut App| {
+                                owner.update(cx, |panel, cx| panel.take_up(tool(), cx));
+                            },
+                        ),
+                    )
+                })))
+                .child(crate::ui::rule_h(_cx))
+                .child(h_flex().gap_1().flex_wrap().children(INKS.iter().map(|(id, color)| {
+                    let owner = owner.clone();
+                    let color = *color;
+                    let on = ink == color;
+                    div()
+                        .id(*id)
+                        .test_support()
+                        .size(px(18.))
+                        .rounded(px(3.))
+                        .bg(rgb(u32::from_be_bytes([0, color[0], color[1], color[2]])))
+                        .when(on, |this| this.border_2().border_color(gpui_kit::white()))
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            owner.update(cx, |panel, cx| {
+                                panel.drawing.set_color(color);
+                                cx.notify();
+                            });
+                        })
+                })))
+                .into_any_element()
+        })
+        .into_any_element()
+}
+
+/// Whether two tools are the same one, ignoring whether a shape is filled.
+///
+/// A reader pressing the circle button while the circle tool is in hand is
+/// not choosing a different tool, so the button reads as already chosen.
+fn same_tool(chosen: &Tool, other: &Tool) -> bool {
+    std::mem::discriminant(chosen) == std::mem::discriminant(other)
+}
 
 /// The gear on the transport: what the viewport draws of what it baked.
 ///
@@ -4131,6 +4328,107 @@ mod tests {
                 // No display option hides what a reader drew deliberately.
                 let hidden = super::playback_options_hidden();
                 assert!(should_draw_command(&drawn[0], &hidden, false), "and nothing filters it out");
+            })
+            .expect("the window is open");
+    }
+
+    /// Drawing with a tool sends what it drew to the session, and the
+    /// pointer goes to the tool rather than to panning the map.
+    #[gpui_kit::test]
+    fn a_tool_in_hand_draws_rather_than_pans(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::MouseButton;
+        use gpui_kit::MouseDownEvent;
+        use gpui_kit::MouseUpEvent;
+        use gpui_kit::point;
+        use wt_collab_client::drawing::Tool;
+        use wt_collab_client::peer::LocalAnnotationEvent;
+        use wt_collab_client::peer::LocalEvent;
+        use wt_collab_client::types::Annotation;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                let zoomed = super::MapViewport::new(2.0, (100.0, 100.0));
+                panel.set_view(zoomed, window, cx);
+                panel.take_up(Tool::Line, cx);
+
+                let from = panel.element_point((200.0, 200.0)).expect("a point the viewport is showing");
+                let to = panel.element_point((300.0, 260.0)).expect("and another");
+                let press = MouseDownEvent {
+                    button: MouseButton::Left,
+                    position: point(from.0, from.1),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                };
+                panel.on_drag_start(&press, window, cx);
+                assert!(panel.dragging.is_none(), "the drag went to the tool, not to a pan");
+                assert_eq!(panel.view, zoomed, "so the map did not move");
+
+                let release = MouseUpEvent {
+                    button: MouseButton::Left,
+                    position: point(to.0, to.1),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                };
+                panel.on_drag_end(&release, window, cx);
+            })
+            .expect("the window is open");
+
+        let drawn: Vec<Annotation> = sent
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(LocalAnnotationEvent::Set { annotation, .. }) => Some(annotation),
+                _ => None,
+            })
+            .collect();
+        let [Annotation::Line { start, end, .. }] = &drawn[..] else {
+            panic!("the line tool sent one line, got {drawn:?}");
+        };
+        assert!((start[0] - 200.0).abs() < 1.0 && (start[1] - 200.0).abs() < 1.0, "drawn in map space: {start:?}");
+        assert!((end[0] - 300.0).abs() < 1.0 && (end[1] - 260.0).abs() < 1.0, "{end:?}");
+    }
+
+    /// Without a tool in hand a drag still pans, so drawing does not cost the
+    /// reader the map.
+    #[gpui_kit::test]
+    fn without_a_tool_a_drag_still_pans(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::MouseButton;
+        use gpui_kit::MouseDownEvent;
+        use gpui_kit::point;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.set_view(super::MapViewport::new(2.0, (100.0, 100.0)), window, cx);
+                let at = panel.element_point((200.0, 200.0)).expect("a point the viewport is showing");
+                let press = MouseDownEvent {
+                    button: MouseButton::Left,
+                    position: point(at.0, at.1),
+                    modifiers: Modifiers::default(),
+                    click_count: 1,
+                    first_mouse: false,
+                };
+                panel.on_drag_start(&press, window, cx);
+                assert!(panel.dragging.is_some());
             })
             .expect("the window is open");
     }
