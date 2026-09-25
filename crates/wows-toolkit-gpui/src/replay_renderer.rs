@@ -122,6 +122,8 @@ struct Track {
     battle_start: GameClock,
     /// When the battle ended, if the replay ran that far.
     battle_end: Option<GameClock>,
+    /// Where the map's top-left corner sits in these frames.
+    map_origin: (f32, f32),
 }
 
 impl Track {
@@ -369,6 +371,7 @@ impl ReplayRendererPanel {
                 clocks: clocks.into_iter().map(GameClock).collect(),
                 battle_start: GameClock(0.0),
                 battle_end: None,
+                map_origin: (0.0, wows_minimap_renderer::HUD_HEIGHT as f32),
             }),
             renderer: None,
             frame: None,
@@ -552,10 +555,8 @@ impl ReplayRendererPanel {
         if drawn.0 < 0.0 || drawn.0 >= span || drawn.1 < 0.0 || drawn.1 >= span {
             return None;
         }
-        Some((
-            px(left.as_f32() + (drawn.0 + MAP_ORIGIN.0) * scale),
-            px(top.as_f32() + (drawn.1 + MAP_ORIGIN.1) * scale),
-        ))
+        let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
+        Some((px(left.as_f32() + (drawn.0 + origin.0) * scale), px(top.as_f32() + (drawn.1 + origin.1) * scale)))
     }
 
     /// Where the frame's HUD strip lands inside the viewport element.
@@ -1321,8 +1322,9 @@ impl ReplayRendererPanel {
         let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - drawn_width) / 2.0;
         let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - drawn_height) / 2.0;
 
-        let x = (position.x.as_f32() - left) / scale - MAP_ORIGIN.0;
-        let y = (position.y.as_f32() - top) / scale - MAP_ORIGIN.1;
+        let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
+        let x = (position.x.as_f32() - left) / scale - origin.0;
+        let y = (position.y.as_f32() - top) / scale - origin.1;
         let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
         (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
     }
@@ -1974,12 +1976,12 @@ pub(crate) struct ShipMenu {
 /// mostly for, and it takes whatever is left.
 const ZOOM_WIDTH: Pixels = px(90.);
 
-/// Where the map's top-left corner sits in a rendered frame.
+/// Where the map's corner sits before a track says otherwise.
 ///
 /// The renderer reserves a strip above the map for the score bar and the
-/// timer, and none beside it: a preview is built with no side panel, so the
-/// map starts at the frame's left edge.
-const MAP_ORIGIN: (f32, f32) = (0.0, wows_minimap_renderer::HUD_HEIGHT as f32);
+/// timer; a side panel would also move the map right, which is why a baked
+/// track carries its own origin rather than every caller assuming this one.
+const DEFAULT_MAP_ORIGIN: (f32, f32) = (0.0, wows_minimap_renderer::HUD_HEIGHT as f32);
 
 /// How much one line of wheel travel is worth, for a wheel that reports lines
 /// rather than pixels.
@@ -2038,6 +2040,7 @@ fn bake(
         clocks: baked.clocks,
         battle_start: baked.battle_start,
         battle_end: baked.battle_end,
+        map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
     };
     Ok((track, baked.renderer))
 }
@@ -3009,7 +3012,7 @@ mod tests {
                 // A point on the map, and the same point in window
                 // coordinates: the frame reserves a strip above the map.
                 let on_map = (200.0_f32, 300.0_f32);
-                let at = point(px(on_map.0), px(on_map.1 + super::MAP_ORIGIN.1));
+                let at = point(px(on_map.0), px(on_map.1 + super::DEFAULT_MAP_ORIGIN.1));
                 let before = panel.view().to_map(on_map.0, on_map.1);
 
                 let event = ScrollWheelEvent {
@@ -3515,7 +3518,7 @@ mod tests {
                 for zoom in [1.0_f32, 3.5] {
                     panel.set_view(super::MapViewport::new(zoom, (40.0, 90.0)), window, cx);
 
-                    let at = point(px(300.), px(200.0 + super::MAP_ORIGIN.1));
+                    let at = point(px(300.), px(200.0 + super::DEFAULT_MAP_ORIGIN.1));
                     let on_map = panel.map_point(at).expect("the pointer is over the map");
                     let (left, top) = panel.element_point(on_map).expect("and the map point is on screen");
 

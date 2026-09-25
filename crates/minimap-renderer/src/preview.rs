@@ -80,6 +80,12 @@ impl PreviewRenderer {
         self.target.canvas_size()
     }
 
+    /// Where the map's top-left corner sits in the frames this renderer
+    /// produces.
+    pub fn map_origin(&self) -> (u32, u32) {
+        self.target.map_origin()
+    }
+
     /// One frame of `commands`, drawn over the whole map.
     pub fn render(&mut self, commands: &[DrawCommand]) -> RgbImage {
         self.render_at(MapViewport::default(), commands)

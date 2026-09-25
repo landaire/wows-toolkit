@@ -190,6 +190,9 @@ pub struct BakedTrack {
     /// When `BattleEnd` arrived, if it did. Absent on a replay that was cut
     /// short.
     pub battle_end: Option<GameClock>,
+    /// Where the map's top-left corner sits in these frames. The layout
+    /// decides it, and a side panel moves it.
+    pub map_origin: (u32, u32),
 }
 
 /// The events of `path`'s battle, in the order they happened.
@@ -272,7 +275,8 @@ pub fn bake_track(
     }
 
     let clocks = sink.kept_clocks().to_vec();
-    Ok(BakedTrack { frames: sink.finish(), clocks, renderer: target, battle_start, battle_end })
+    let map_origin = target.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
+    Ok(BakedTrack { frames: sink.finish(), clocks, renderer: target, battle_start, battle_end, map_origin })
 }
 
 /// The map `map_name` names, with nothing drawn over it.
