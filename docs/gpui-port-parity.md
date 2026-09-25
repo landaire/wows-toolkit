@@ -287,9 +287,17 @@ kept so the next audit does not re-report them.
       egui undo does when it sends its whole list back as a full sync. A
       turn is snapshotted as the handle is taken hold of rather than when it
       is let go, since a turn reaches the session as the pointer moves.
-      What remains is the ship annotation, which is an icon and a set of
-      range circles rather than a shape and so needs the ship's own game
-      data.
+      A ship can be placed too, from the same five classes the egui toolbar
+      offers, for either side. It draws as `DrawCommand::Ship`, the
+      renderer's own ship command, so a placed ship is drawn from the same
+      icons as a real one and carries its name above it; it answers to no
+      entity and no player, which is what keeps it out of anything keyed by
+      either. The viewport picks ships out of the baked frame rather than
+      out of what is drawn over it, so a placed one is never mistaken for a
+      ship in the battle.
+      What remains of the ship annotation is its range circles, which are
+      read out of the ship's own game data rather than off the annotation,
+      and the chooser that assigns a ship to one.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
