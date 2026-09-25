@@ -49,6 +49,7 @@ use super::load::GameDataStatus;
 use super::load::spawn_startup_preload;
 use super::panel::AutoExport;
 use super::panel::PanelSetup;
+use super::panel::RenderRequested;
 use super::panel::ReplayPanel;
 use crate::replay_renderer::RendererEvent;
 use crate::replay_renderer::ReplayRendererPanel;
@@ -128,6 +129,9 @@ pub struct ReplayInspectorView {
     /// Held so a viewport's request for its own window still reaches this
     /// view; a dropped subscription is a silent button.
     renderer_events: Vec<Subscription>,
+    /// Held for each open replay panel, so its Actions menu can reach this
+    /// view. Swept with the panels themselves.
+    panel_events: Vec<Subscription>,
     /// Whether the viewports have been told there is a session. Only a change
     /// is worth pushing, and this is read every draw.
     session_shared: bool,
@@ -255,6 +259,7 @@ impl ReplayInspectorView {
             current_replay: None,
             open_renderers: HashMap::new(),
             renderer_events: Vec::new(),
+            panel_events: Vec::new(),
             session_shared: false,
             personal_rating: None,
             debug_mode: false,
@@ -457,6 +462,12 @@ impl ReplayInspectorView {
         let setup =
             PanelSetup { path: path.clone(), game_data, debug: self.debug_mode, columns, personal_rating, auto_export };
         let panel = cx.new(|cx| ReplayPanel::new(setup, window, cx));
+        // A panel's Actions menu can ask for its own replay to be rendered,
+        // which is this view's to do: it owns the dock the viewport opens in.
+        self.panel_events.push(cx.subscribe_in(&panel, window, |this, _panel, event: &RenderRequested, window, cx| {
+            let RenderRequested(path) = event;
+            this.render_replay(path.clone(), window, cx);
+        }));
         self.open_panels.insert(path.clone(), panel.downgrade());
         self.current_replay = Some(path);
         self.dock_area.update(cx, |dock_area, cx| {
@@ -963,16 +974,14 @@ impl Render for ReplayInspectorView {
 
         let entity = cx.entity();
 
-        // What a header Render acts on: the replay showing in the dock, or
-        // the one last opened when none is.
-        let renderable = self.replaceable_panel(cx).map(|shown| shown.path).or_else(|| self.current_replay.clone());
-
         // Header toolbar: mirrors the egui app's `build_replay_header`
         // (`ui/replay_parser/mod.rs:3657`) -- manual file open, autoload
-        // checkbox, grouping selector, column-filter checkboxes, Render, the
-        // session popover -- in the same left-to-right order. The Tactics
-        // Board button that header also carries is not ported: it opens a
-        // board this app has no drawing surface for.
+        // checkbox, grouping selector, column-filter checkboxes, the session
+        // popover -- in the same left-to-right order. Rendering a replay is
+        // not here: it belongs to a replay, and an opened one carries it in
+        // its own Actions menu. The Tactics Board button that header also
+        // carries is not ported: it opens a board this app has no drawing
+        // surface for.
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
@@ -989,20 +998,6 @@ impl Render for ReplayInspectorView {
             .border_b_1()
             .border_color(cx.theme().border)
             .child(session)
-            .child({
-                let path = renderable.clone();
-                Button::new("replay-header-render")
-                    .icon(IconName::Frame)
-                    .label(t!("ui.replay.context.render_replay").to_string())
-                    .compact()
-                    // Nothing open is nothing to render.
-                    .disabled(path.is_none())
-                    .on_click(cx.listener(move |this, _event: &ClickEvent, window, cx| {
-                        if let Some(path) = path.clone() {
-                            this.render_replay(path, window, cx);
-                        }
-                    }))
-            })
             .child(
                 Button::new("replay-header-open-manually")
                     .icon(IconName::FolderOpen)
@@ -1149,8 +1144,10 @@ mod tests {
             window.render_frame(cx);
 
             assert!(window.try_find("collab-session-toggle").is_some(), "the session control is on the header");
-            // Nothing is open, so there is nothing to render.
-            assert!(window.try_find("replay-header-render").is_some(), "the render control is on the header");
+            // Rendering belongs to a replay, so an opened one carries it in
+            // its own Actions menu rather than the header carrying it for
+            // whichever replay happens to be showing.
+            assert!(window.try_find("replay-header-render").is_none(), "rendering is not a header control");
             // The rest of the header still draws beside it.
             assert!(window.try_find("replay-header-open-manually").is_some());
             assert!(window.try_find("replay-header-auto-load-latest").is_some());
