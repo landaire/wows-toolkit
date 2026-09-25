@@ -19,6 +19,7 @@ pub mod peer;
 
 /// The wire protocol and its validation, re-exported so a caller needs one
 /// dependency rather than two.
+pub use wt_collab_protocol::geometry;
 pub use wt_collab_protocol::protocol;
 pub use wt_collab_protocol::types;
 pub use wt_collab_protocol::validation;

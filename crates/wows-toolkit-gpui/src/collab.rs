@@ -459,6 +459,12 @@ impl CollabLink {
         }
     }
 
+    /// What everyone in the session has drawn on the map.
+    pub fn annotations(&self) -> Vec<wt_collab_client::types::Annotation> {
+        let Some(state) = &self.state else { return Vec::new() };
+        state.lock().current_annotation_sync.as_ref().map(|sync| sync.annotations.clone()).unwrap_or_default()
+    }
+
     /// Forgets the pings whose ripple has finished.
     ///
     /// The session collects them and nothing else takes them out, so a

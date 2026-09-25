@@ -427,5 +427,8 @@ pub fn should_draw_command(cmd: &DrawCommand, opts: &RenderOptions, show_dead_sh
         | DrawCommand::StatsRibbons { .. }
         | DrawCommand::StatsActivityFeed { .. } => opts.show_stats_panel,
         DrawCommand::TeamRoster { .. } => opts.show_team_rosters,
+        // Not a layer of the battle but what a reader drew over it, so no
+        // display option hides it: they put it there deliberately.
+        DrawCommand::Annotation { .. } => true,
     }
 }

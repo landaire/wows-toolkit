@@ -316,6 +316,39 @@ pub fn draw_command_to_shapes(
             });
         }
 
+        DrawCommand::Annotation { shape, color, width } => {
+            use wows_minimap_renderer::draw_command::AnnotationShape;
+
+            // A drawn line was put on the map, so it thickens with the map
+            // rather than holding a screen width as the renderer's own
+            // strokes do.
+            let drawn = color_from_rgba([color[0], color[1], color[2]], color[3] as f32 / 255.0);
+            let stroke = Stroke::new(transform.scale_distance(*width), drawn);
+            match shape {
+                AnnotationShape::Polyline { points } => {
+                    let points: Vec<Pos2> = points.iter().map(|at| transform.minimap_to_screen(at)).collect();
+                    shapes.push(Shape::line(points, stroke));
+                }
+                AnnotationShape::Polygon { points, filled } => {
+                    let points: Vec<Pos2> = points.iter().map(|at| transform.minimap_to_screen(at)).collect();
+                    if *filled {
+                        shapes.push(Shape::convex_polygon(points, drawn, Stroke::NONE));
+                    } else {
+                        shapes.push(Shape::closed_line(points, stroke));
+                    }
+                }
+                AnnotationShape::Circle { center, radius, filled } => {
+                    let center = transform.minimap_to_screen(center);
+                    let radius = transform.scale_distance(*radius);
+                    if *filled {
+                        shapes.push(Shape::circle_filled(center, radius, drawn));
+                    } else {
+                        shapes.push(Shape::circle_stroke(center, radius, stroke));
+                    }
+                }
+            }
+        }
+
         DrawCommand::ShotTracerTip { at, color } => {
             let p = transform.minimap_to_screen(at);
             // Tip a bit wider than the tracer line so the ammo color is noticeable
