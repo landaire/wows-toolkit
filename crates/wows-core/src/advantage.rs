@@ -702,3 +702,107 @@ mod tests {
         assert!((bd.team1_pps - 1.2).abs() < 0.01);
     }
 }
+
+/// One line of the advantage breakdown: what the factor is called, and which
+/// way it went.
+pub struct BreakdownRow {
+    /// The translation key naming the factor.
+    pub label_key: &'static str,
+    /// The difference between the teams, as the breakdown shows it: a signed
+    /// tenth, or "0" where neither team gained.
+    pub contribution: String,
+}
+
+/// How much each factor moved the advantage, in the order a reader reads them.
+///
+/// A factor neither team scored on is left out rather than shown as zero; the
+/// total is always there. `None` where a team has been eliminated, which is
+/// not a balance of factors but an outcome.
+pub fn breakdown_rows(breakdown: &AdvantageBreakdown) -> Option<Vec<BreakdownRow>> {
+    if breakdown.team_eliminated {
+        return None;
+    }
+    let mut rows = Vec::new();
+    let factors = [
+        ("ui.renderer.advantage.score_projection", breakdown.score_projection),
+        ("ui.renderer.advantage.fleet_power", breakdown.fleet_power),
+        ("ui.renderer.advantage.strategic_threat", breakdown.strategic_threat),
+    ];
+    for (label_key, value) in factors {
+        if value.0 == 0.0 && value.1 == 0.0 {
+            continue;
+        }
+        rows.push(BreakdownRow { label_key, contribution: contribution(value) });
+    }
+    rows.push(BreakdownRow { label_key: "ui.renderer.advantage.total", contribution: contribution(breakdown.total) });
+    Some(rows)
+}
+
+/// A pair of per-team points as the difference between them.
+fn contribution(value: (f32, f32)) -> String {
+    let diff = value.0 - value.1;
+    if diff > 0.0 {
+        format!("+{diff:.1}")
+    } else if diff < 0.0 {
+        format!("{diff:.1}")
+    } else {
+        "0".to_string()
+    }
+}
+
+#[cfg(test)]
+mod breakdown_tests {
+    use super::*;
+
+    fn breakdown() -> AdvantageBreakdown {
+        AdvantageBreakdown {
+            score_projection: (6.0, 2.0),
+            fleet_power: (0.0, 0.0),
+            strategic_threat: (1.0, 4.0),
+            total: (7.0, 6.0),
+            hp_data_reliable: true,
+            team_eliminated: false,
+            ..Default::default()
+        }
+    }
+
+    /// The breakdown reads as the difference between the teams, and leaves out
+    /// a factor neither of them scored on.
+    #[test]
+    fn a_factor_neither_team_scored_on_is_left_out() {
+        let rows = breakdown_rows(&breakdown()).expect("nobody was eliminated");
+        let labels: Vec<&str> = rows.iter().map(|row| row.label_key).collect();
+        assert_eq!(
+            labels,
+            [
+                "ui.renderer.advantage.score_projection",
+                "ui.renderer.advantage.strategic_threat",
+                "ui.renderer.advantage.total",
+            ],
+            "fleet power was zero for both, so it is not a line"
+        );
+
+        assert_eq!(rows[0].contribution, "+4.0", "ahead reads as a gain");
+        assert_eq!(rows[1].contribution, "-3.0", "behind reads as a loss");
+        assert_eq!(rows[2].contribution, "+1.0");
+    }
+
+    /// A factor both teams scored the same on is still a line, reading zero:
+    /// it was contested, which is not the same as absent.
+    #[test]
+    fn a_contested_factor_reads_zero_rather_than_vanishing() {
+        let mut breakdown = breakdown();
+        breakdown.fleet_power = (3.0, 3.0);
+        let rows = breakdown_rows(&breakdown).expect("nobody was eliminated");
+        let fleet = rows.iter().find(|row| row.label_key == "ui.renderer.advantage.fleet_power");
+        assert_eq!(fleet.expect("fleet power is a line").contribution, "0");
+    }
+
+    /// An eliminated team is an outcome, not a balance of factors.
+    #[test]
+    fn an_eliminated_team_has_no_breakdown() {
+        let mut breakdown = breakdown();
+        breakdown.team_eliminated = true;
+        assert!(breakdown_rows(&breakdown).is_none());
+    }
+}
