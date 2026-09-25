@@ -235,7 +235,16 @@ kept so the next audit does not re-report them.
       ping finishes its ripple while this app sits still; the egui renderer
       reaches the same place by asking for a repaint while a ping is alive.
       What is still absent is the toolbar itself, which is a drawing editor
-      -- tools, selection, transforms -- and its own piece of work.
+      -- tools, selection, transforms -- and its own piece of work. Its first
+      piece is in: the maths an annotation needs (how near a point is to each
+      of the eight shapes, which way an arrow's head faces, and the
+      simplify-then-smooth a freehand stroke is tidied by) is
+      `wt_collab_protocol::geometry`, over the wire types rather than egui's,
+      and the egui app now reaches its own through it. Neither front end
+      carries a second copy of a formula. What remains is drawing the shapes
+      -- the port rasterises frames, so they want draw commands rather than
+      elements, which also makes them zoom, clip and export with everything
+      else -- and then the tools that make them.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
