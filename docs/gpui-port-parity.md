@@ -241,10 +241,22 @@ kept so the next audit does not re-report them.
       simplify-then-smooth a freehand stroke is tidied by) is
       `wt_collab_protocol::geometry`, over the wire types rather than egui's,
       and the egui app now reaches its own through it. Neither front end
-      carries a second copy of a formula. What remains is drawing the shapes
-      -- the port rasterises frames, so they want draw commands rather than
-      elements, which also makes them zoom, clip and export with everything
-      else -- and then the tools that make them.
+      carries a second copy of a formula. The drawing is in too:
+      `DrawCommand::Annotation` carries one of three shapes (an open run of
+      points, a closed one, or a circle), because a rectangle and a triangle
+      are both closed runs and an arrow is a run with a filled head, so the
+      tools turn into those rather than every target learning each tool.
+      `geometry::annotation_commands` does that turning, and the viewport
+      puts what the session holds on the frame after the battle's own layers,
+      so a drawn line sits over a ship and under the HUD, and zooms, clips
+      and exports with everything else. A drawn width is a map length, so it
+      thickens with the map as the egui renderer's does, and no display
+      option hides an annotation: a reader put it there deliberately. The
+      egui converter grew the same arm, so a web client draws them too.
+      What remains is the toolbar itself -- the tools that make the shapes,
+      selection and transforms -- and the ship annotation, which is an icon
+      and a set of range circles rather than a shape and so needs the ship's
+      own game data.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
