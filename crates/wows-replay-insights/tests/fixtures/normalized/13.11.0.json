@@ -83,6 +83,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -128,6 +129,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Tovey:",
@@ -286,6 +288,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 406
     },
@@ -348,6 +351,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -393,6 +397,7 @@
       "heal_count": 0,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Riccardi:",
@@ -555,6 +560,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 147
     },
@@ -613,6 +619,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -649,6 +656,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Pohl:",
@@ -815,6 +823,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 211
     },
@@ -877,6 +886,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -922,6 +932,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Spee:",
@@ -1121,6 +1132,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 340
     },
@@ -1179,6 +1191,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -1215,6 +1228,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Nakhimov:",
@@ -1413,6 +1427,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 187
     },
@@ -1479,6 +1494,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -1533,6 +1549,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Knight:",
@@ -1699,6 +1716,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 213
     },
@@ -1748,6 +1766,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -1775,6 +1794,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Upham:",
@@ -2011,6 +2031,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 293
     },
@@ -2064,6 +2085,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -2100,6 +2122,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Spruance:",
@@ -2294,6 +2317,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 458
     },
@@ -2343,6 +2367,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -2370,6 +2395,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Warrender:",
@@ -2611,6 +2637,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 445
     },
@@ -2669,6 +2696,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -2705,6 +2733,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Ghormley:",
@@ -2934,6 +2963,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 342
     },
@@ -2992,6 +3022,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -3028,6 +3059,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Miaoulis:",
@@ -3291,6 +3323,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 349
     },
@@ -3350,6 +3383,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -3377,6 +3411,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": true,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": ":Bouvet:",
@@ -3596,6 +3631,7 @@
         "num_tier_1_skills": 0,
         "skill_points": 0
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 493
     },
@@ -3933,6 +3969,7 @@
       },
       "clan": "UBB",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -3978,6 +4015,7 @@
       "heal_count": 3,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "ubb1_Bull",
@@ -4403,6 +4441,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 19
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -4728,6 +4767,7 @@
       },
       "clan": "AQQ",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -4764,6 +4804,7 @@
       "heal_count": 3,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "_BLITZ_WING_",
@@ -5077,6 +5118,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 21
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -5405,6 +5447,7 @@
       },
       "clan": "UBB",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -5443,6 +5486,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "ubb1_mckee1",
@@ -5738,6 +5782,7 @@
         "num_tier_1_skills": 6,
         "skill_points": 14
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -6005,6 +6050,7 @@
       },
       "clan": "TEAMS",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -6032,6 +6078,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": true,
       "is_test_ship": false,
       "name": "ikula",
@@ -6476,6 +6523,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 6
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -6731,6 +6779,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -6765,6 +6814,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Xorgius",
@@ -7123,6 +7173,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 14
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     }
