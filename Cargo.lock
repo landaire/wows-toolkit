@@ -14539,6 +14539,7 @@ dependencies = [
  "data-encoding",
  "flate2",
  "jiff",
+ "nalgebra",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
