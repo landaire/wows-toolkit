@@ -272,10 +272,16 @@ kept so the next audit does not re-report them.
       can_rotate, Selection}` are shared, so both front ends move a shape the
       same way, and a selection is trimmed against the list each click
       because another peer can rub something out from under it.
-      What remains is the rotation handle (the maths is shared, the handle
-      itself is not drawn yet), the undo the egui toolbar carries, and the
-      ship annotation, which is an icon and a set of range circles rather
-      than a shape and so needs the ship's own game data.
+      A shape that faces somewhere carries a rotation handle above it, drawn
+      as an element rather than into the frame: it is a control, so it keeps
+      its size at every zoom and stays out of an exported video. Dragging it
+      turns the shape about the middle of its own bounds.
+      `drawing::{annotation_bounds, bearing}` are shared, and the bearing
+      keeps the convention a stored rotation already carries (zero up the
+      map, growing anticlockwise) rather than a tidier one.
+      What remains is the undo the egui toolbar carries, and the ship
+      annotation, which is an icon and a set of range circles rather than a
+      shape and so needs the ship's own game data.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
