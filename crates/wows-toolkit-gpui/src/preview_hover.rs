@@ -28,6 +28,13 @@ use crate::minimap_preview::FRAME_INTERVAL;
 use crate::minimap_preview::PreviewFrames;
 use crate::replay_inspector::GameDataCache;
 
+/// How long a preview goes without a new frame before the bake behind it
+/// reads as stuck rather than busy.
+///
+/// Comfortably longer than the gap between frames a bake produces, so a
+/// spinner never flickers over a preview that is merely slow.
+const STALLED_AFTER: std::time::Duration = std::time::Duration::from_millis(1500);
+
 /// A baked preview and where it is in its loop.
 struct Shown {
     /// The row this track was baked for. Held here because the track outlives
@@ -36,6 +43,9 @@ struct Shown {
     path: PathBuf,
     frames: PreviewFrames,
     started: Instant,
+    /// When the newest frame arrived. A bake that has stopped producing them
+    /// is what a spinner over a playing preview is for.
+    last_frame: Instant,
 }
 
 /// The hover state behind one surface's preview: what is being watched, what
@@ -117,10 +127,43 @@ impl PreviewHover {
         self.baking
     }
 
+    /// Whether the bake has stopped feeding the preview.
+    ///
+    /// A bake keeps running after the first frame, so a spinner shown for
+    /// the whole of it sits over a preview that is already playing and says
+    /// nothing. It is worth showing only once the frames stop arriving.
+    pub fn is_stalled(&self) -> bool {
+        if !self.baking {
+            return false;
+        }
+        match &self.shown {
+            // Nothing to play yet: the bake has produced nothing, which is
+            // what a reader is waiting on.
+            None => true,
+            Some(shown) => shown.last_frame.elapsed() > STALLED_AFTER,
+        }
+    }
+
     /// Whether a row is under the pointer at all, dwelled or not.
     #[cfg(test)]
     pub(crate) fn is_watching(&self) -> bool {
         self.dwell.is_watching()
+    }
+
+    /// Ages the newest frame by `by`, so a test can reach the case a bake
+    /// has stopped feeding the preview without waiting for one to.
+    #[cfg(test)]
+    pub(crate) fn age_last_frame_for_test(&mut self, by: std::time::Duration) {
+        if let Some(shown) = self.shown.as_mut() {
+            shown.last_frame -= by;
+        }
+    }
+
+    /// Seeds a preview that is playing while its bake runs on. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_playing_for_test(&mut self, path: PathBuf, frames: PreviewFrames) {
+        self.baking = true;
+        self.shown = Some(Shown { path, frames, started: Instant::now(), last_frame: Instant::now() });
     }
 
     /// How many frames the current preview has. Test-only.
@@ -157,7 +200,8 @@ impl PreviewHover {
         // track is still here; there is nothing to bake or to wait for.
         if self.cached.as_ref().is_some_and(|(cached, _)| cached == &path) {
             let (_, frames) = self.cached.take().expect("the cache was just checked");
-            self.shown = Some(Shown { path: path.clone(), frames, started: Instant::now() });
+            self.shown =
+                Some(Shown { path: path.clone(), frames, started: Instant::now(), last_frame: Instant::now() });
             self.start_ticker(cx, field);
             cx.notify();
             return;
@@ -248,7 +292,12 @@ impl PreviewHover {
                     let _ = view.update(cx, |view, cx| {
                         let this = field(view);
                         this.drop_shown();
-                        this.shown = Some(Shown { path: path.clone(), frames, started: Instant::now() });
+                        this.shown = Some(Shown {
+                            path: path.clone(),
+                            frames,
+                            started: Instant::now(),
+                            last_frame: Instant::now(),
+                        });
                         cx.notify();
                     });
                 }
@@ -286,7 +335,12 @@ impl PreviewHover {
                     if this.shown.is_some() {
                         return;
                     }
-                    this.shown = Some(Shown { path: path.clone(), frames: map, started: Instant::now() });
+                    this.shown = Some(Shown {
+                        path: path.clone(),
+                        frames: map,
+                        started: Instant::now(),
+                        last_frame: Instant::now(),
+                    });
                     cx.notify();
                 });
             }
@@ -305,11 +359,13 @@ impl PreviewHover {
                             path: path.clone(),
                             frames: PreviewFrames::streaming(),
                             started: Instant::now(),
+                            last_frame: Instant::now(),
                         });
                         this.start_ticker(cx, field);
                     }
                     if let Some(shown) = this.shown.as_mut() {
                         shown.frames.push(frame);
+                        shown.last_frame = Instant::now();
                     }
                     cx.notify();
                 });
@@ -356,5 +412,29 @@ impl PreviewHover {
                 }
             }
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A bake keeps running after the first frame, so a spinner shown for
+    /// all of it sits over a preview that is already playing. It is worth
+    /// showing only before there is anything to play, or once the frames
+    /// have stopped arriving.
+    #[test]
+    fn the_spinner_waits_for_a_stall_rather_than_the_whole_bake() {
+        let mut hover = PreviewHover::default();
+        assert!(!hover.is_stalled(), "nothing is being baked");
+
+        hover.baking = true;
+        assert!(hover.is_stalled(), "a bake with nothing to play yet is what a reader is waiting on");
+
+        hover.seed_playing_for_test(PathBuf::from("a.wowsreplay"), PreviewFrames::streaming());
+        assert!(!hover.is_stalled(), "a preview that is playing does not need one");
+
+        hover.age_last_frame_for_test(STALLED_AFTER + std::time::Duration::from_millis(1));
+        assert!(hover.is_stalled(), "until the frames stop arriving");
     }
 }

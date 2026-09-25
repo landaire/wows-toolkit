@@ -1239,15 +1239,19 @@ impl Render for ReplayBrowser {
         // build already open, with the spinner over it until the battle is
         // ready to play -- the same two stages the egui popup shows
         // (`preview_popup.rs`).
-        let baking = self.preview.is_baking();
-        let preview_map: Option<AnyElement> = match (self.preview.frame(), baking) {
-            (Some(frame), baking) => Some(
+        // Shown only while the bake has nothing to play, or has stopped
+        // feeding one: a spinner held over a preview that is already
+        // running says nothing, and the egui popup drops it the moment the
+        // first frame lands.
+        let stalled = self.preview.is_stalled();
+        let preview_map: Option<AnyElement> = match (self.preview.frame(), self.preview.is_baking()) {
+            (Some(frame), _) => Some(
                 div()
                     .relative()
                     .w(px(PREVIEW_SIZE))
                     .h(px(PREVIEW_SIZE))
                     .child(img(frame).w(px(PREVIEW_SIZE)).h(px(PREVIEW_SIZE)))
-                    .when(baking, |this| {
+                    .when(stalled, |this| {
                         this.child(
                             h_flex().absolute().inset_0().items_center().justify_center().child(Spinner::new().large()),
                         )

@@ -998,7 +998,7 @@ impl ReplayRendererPanel {
     /// Opens the per-ship menu on whatever was right-clicked.
     fn on_right_click(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let Some(at) = self.map_point(event.position) else { return };
-        self.menu_for = self.ship_at(at);
+        self.menu_for = self.ship_at(at).map(|menu| ShipMenu { at: event.position, ..menu });
         cx.notify();
     }
 
@@ -1034,7 +1034,9 @@ impl ReplayRendererPanel {
                 continue;
             }
             if best.as_ref().is_none_or(|(nearest, _)| away < *nearest) {
-                best = Some((away, ShipMenu { entity_id: *entity_id, player_name: name }));
+                // The caller puts the menu where the pointer was; a pick has
+                // no position of its own.
+                best = Some((away, ShipMenu { entity_id: *entity_id, player_name: name, at: Point::default() }));
             }
         }
         best.map(|(_, menu)| menu)
@@ -1170,6 +1172,14 @@ impl ReplayRendererPanel {
         self.options.show_ship_config = true;
         self.draw_current(cx);
         cx.notify();
+    }
+
+    /// Turns all of one ship's ranges on, or all of them off.
+    ///
+    /// The six switches one at a time is six clicks to ask a question that
+    /// is usually all-or-nothing, which is why the egui menu offers both.
+    pub(crate) fn set_every_range_for(&mut self, player: &str, on: bool, cx: &mut Context<Self>) {
+        self.set_ranges_for(player, |filter| *filter = if on { ALL_RANGES } else { NO_RANGES }, cx);
     }
 
     /// Turns every ship's ranges on.
@@ -2691,137 +2701,159 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
         })
     };
 
+    let at = menu.at;
     Some(
-        div()
-            .absolute()
-            .top_2()
-            .right_2()
-            .w(px(220.))
-            .p_2()
-            .rounded_md()
-            .border_1()
-            .border_color(crate::theme::border_bright())
-            .bg(crate::theme::surface())
-            .child(
-                v_flex()
-                    .gap_1()
+        deferred(
+            anchored().position(at).snap_to_window_with_margin(px(8.)).child(
+                div()
+                    .w(px(220.))
+                    .p_2()
+                    .rounded_md()
+                    .border_1()
+                    .border_color(crate::theme::border_bright())
+                    .bg(crate::theme::surface())
                     .child(
-                        h_flex()
-                            .justify_between()
-                            .items_center()
-                            .child(div().text_xs().font_weight(FontWeight::BOLD).child(player.clone()))
+                        v_flex()
+                            .gap_1()
+                            .child(
+                                h_flex()
+                                    .justify_between()
+                                    .items_center()
+                                    .child(div().text_xs().font_weight(FontWeight::BOLD).child(player.clone()))
+                                    .child({
+                                        let owner = owner.clone();
+                                        Button::new("replay-renderer-ship-menu-close")
+                                            .child(crate::icons::icon(crate::icons::X))
+                                            .compact()
+                                            .on_click(move |_event, _window, cx: &mut App| {
+                                                owner.update(cx, |panel, cx| panel.close_ship_menu(cx));
+                                            })
+                                    }),
+                            )
                             .child({
                                 let owner = owner.clone();
-                                Button::new("replay-renderer-ship-menu-close")
-                                    .child(crate::icons::icon(crate::icons::X))
+                                let player = player.clone();
+                                Checkbox::new("replay-renderer-ship-trail")
+                                    .label(t!("ui.renderer.context.show_trail").to_string())
+                                    .checked(trail_on)
+                                    .on_click(move |checked, _window, cx: &mut App| {
+                                        let checked = *checked;
+                                        let player = player.clone();
+                                        owner.update(cx, |panel, cx| panel.set_trail_shown(&player, checked, cx));
+                                    })
+                            })
+                            .children(view.has_armor_to_show(menu.entity_id).then(|| {
+                                let owner = owner.clone();
+                                let entity_id = menu.entity_id;
+                                Button::new("replay-renderer-ship-armor")
+                                    .label(t!("ui.renderer.context.realtime_armor").into_owned())
                                     .compact()
                                     .on_click(move |_event, _window, cx: &mut App| {
-                                        owner.update(cx, |panel, cx| panel.close_ship_menu(cx));
+                                        owner.update(cx, |panel, cx| panel.show_armor(entity_id, cx));
                                     })
-                            }),
-                    )
-                    .child({
-                        let owner = owner.clone();
-                        let player = player.clone();
-                        Checkbox::new("replay-renderer-ship-trail")
-                            .label(t!("ui.renderer.context.show_trail").to_string())
-                            .checked(trail_on)
-                            .on_click(move |checked, _window, cx: &mut App| {
-                                let checked = *checked;
-                                let player = player.clone();
-                                owner.update(cx, |panel, cx| panel.set_trail_shown(&player, checked, cx));
-                            })
-                    })
-                    .children(view.has_armor_to_show(menu.entity_id).then(|| {
-                        let owner = owner.clone();
-                        let entity_id = menu.entity_id;
-                        Button::new("replay-renderer-ship-armor")
-                            .label(t!("ui.renderer.context.realtime_armor").into_owned())
-                            .compact()
-                            .on_click(move |_event, _window, cx: &mut App| {
-                                owner.update(cx, |panel, cx| panel.show_armor(entity_id, cx));
-                            })
-                    }))
-                    .child({
-                        let owner = owner.clone();
-                        let player = player.clone();
-                        Button::new("replay-renderer-ship-only-trail")
-                            .label(t!("ui.renderer.context.disable_other_trails").into_owned())
-                            .compact()
-                            .on_click(move |_event, _window, cx: &mut App| {
-                                let player = player.clone();
-                                owner.update(cx, |panel, cx| panel.only_trail(&player, cx));
-                            })
-                    })
-                    .child(
-                        div()
-                            .pt_1()
-                            .text_xs()
-                            .text_color(crate::theme::text_dim())
-                            .child(t!("ui.renderer.context.ranges").into_owned()),
-                    )
-                    .child(range_switch(
-                        "replay-renderer-range-detection",
-                        "ui.renderer.context.detection",
-                        ranges.detection,
-                        |filter, on| filter.detection = on,
-                    ))
-                    .child(range_switch(
-                        "replay-renderer-range-main",
-                        "ui.renderer.context.main_battery",
-                        ranges.main_battery,
-                        |filter, on| filter.main_battery = on,
-                    ))
-                    .child(range_switch(
-                        "replay-renderer-range-secondary",
-                        "ui.renderer.context.secondary",
-                        ranges.secondary_battery,
-                        |filter, on| filter.secondary_battery = on,
-                    ))
-                    .child(range_switch(
-                        "replay-renderer-range-torpedo",
-                        "ui.renderer.context.torpedo",
-                        ranges.torpedo,
-                        |filter, on| filter.torpedo = on,
-                    ))
-                    .child(range_switch(
-                        "replay-renderer-range-radar",
-                        "ui.renderer.context.radar",
-                        ranges.radar,
-                        |filter, on| filter.radar = on,
-                    ))
-                    .child(range_switch(
-                        "replay-renderer-range-hydro",
-                        "ui.renderer.context.hydro",
-                        ranges.hydro,
-                        |filter, on| filter.hydro = on,
-                    ))
-                    .child(
-                        h_flex()
-                            .gap_1()
+                            }))
                             .child({
                                 let owner = owner.clone();
                                 let player = player.clone();
-                                Button::new("replay-renderer-only-ranges")
-                                    .label(t!("ui.renderer.context.disable_other_ranges").into_owned())
+                                Button::new("replay-renderer-ship-only-trail")
+                                    .label(t!("ui.renderer.context.disable_other_trails").into_owned())
                                     .compact()
                                     .on_click(move |_event, _window, cx: &mut App| {
                                         let player = player.clone();
-                                        owner.update(cx, |panel, cx| panel.only_ranges(&player, cx));
+                                        owner.update(cx, |panel, cx| panel.only_trail(&player, cx));
                                     })
                             })
+                            .child(
+                                div()
+                                    .pt_1()
+                                    .text_xs()
+                                    .text_color(crate::theme::text_dim())
+                                    .child(t!("ui.renderer.context.ranges").into_owned()),
+                            )
+                            .child(range_switch(
+                                "replay-renderer-range-detection",
+                                "ui.renderer.context.detection",
+                                ranges.detection,
+                                |filter, on| filter.detection = on,
+                            ))
+                            .child(range_switch(
+                                "replay-renderer-range-main",
+                                "ui.renderer.context.main_battery",
+                                ranges.main_battery,
+                                |filter, on| filter.main_battery = on,
+                            ))
+                            .child(range_switch(
+                                "replay-renderer-range-secondary",
+                                "ui.renderer.context.secondary",
+                                ranges.secondary_battery,
+                                |filter, on| filter.secondary_battery = on,
+                            ))
+                            .child(range_switch(
+                                "replay-renderer-range-torpedo",
+                                "ui.renderer.context.torpedo",
+                                ranges.torpedo,
+                                |filter, on| filter.torpedo = on,
+                            ))
+                            .child(range_switch(
+                                "replay-renderer-range-radar",
+                                "ui.renderer.context.radar",
+                                ranges.radar,
+                                |filter, on| filter.radar = on,
+                            ))
+                            .child(range_switch(
+                                "replay-renderer-range-hydro",
+                                "ui.renderer.context.hydro",
+                                ranges.hydro,
+                                |filter, on| filter.hydro = on,
+                            ))
                             .child({
                                 let owner = owner.clone();
-                                Button::new("replay-renderer-all-ranges")
-                                    .label(t!("ui.renderer.context.enable_all_ranges").into_owned())
+                                let player = player.clone();
+                                let all_on = ranges == ALL_RANGES;
+                                Button::new("replay-renderer-every-range")
+                                    .label(
+                                        if all_on {
+                                            t!("ui.renderer.context.disable_all")
+                                        } else {
+                                            t!("ui.renderer.context.enable_all")
+                                        }
+                                        .into_owned(),
+                                    )
                                     .compact()
                                     .on_click(move |_event, _window, cx: &mut App| {
-                                        owner.update(cx, |panel, cx| panel.all_ranges(cx));
+                                        let player = player.clone();
+                                        owner.update(cx, |panel, cx| panel.set_every_range_for(&player, !all_on, cx));
                                     })
-                            }),
+                            })
+                            .child(
+                                h_flex()
+                                    .gap_1()
+                                    .child({
+                                        let owner = owner.clone();
+                                        let player = player.clone();
+                                        Button::new("replay-renderer-only-ranges")
+                                            .label(t!("ui.renderer.context.disable_other_ranges").into_owned())
+                                            .compact()
+                                            .on_click(move |_event, _window, cx: &mut App| {
+                                                let player = player.clone();
+                                                owner.update(cx, |panel, cx| panel.only_ranges(&player, cx));
+                                            })
+                                    })
+                                    .child({
+                                        let owner = owner.clone();
+                                        Button::new("replay-renderer-all-ranges")
+                                            .label(t!("ui.renderer.context.enable_all_ranges").into_owned())
+                                            .compact()
+                                            .on_click(move |_event, _window, cx: &mut App| {
+                                                owner.update(cx, |panel, cx| panel.all_ranges(cx));
+                                            })
+                                    }),
+                            ),
                     ),
-            )
-            .into_any_element(),
+            ),
+        )
+        .with_priority(1)
+        .into_any_element(),
     )
 }
 
@@ -2904,6 +2936,9 @@ const ALL_RANGES: ShipConfigFilter = ShipConfigFilter {
 pub(crate) struct ShipMenu {
     pub entity_id: EntityId,
     pub player_name: String,
+    /// Where the right-click landed, which is where the menu opens: a menu
+    /// about one ship belongs beside that ship, not in a corner.
+    pub at: Point<Pixels>,
 }
 
 /// Room for the zoom control. Narrow: the seek bar is what the transport is
