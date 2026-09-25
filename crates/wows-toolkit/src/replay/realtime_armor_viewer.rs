@@ -399,10 +399,7 @@ impl RealtimeArmorViewer {
     /// `Ry(+θ)` rotates +X toward −Z (right-hand rule), so the BigWorld
     /// forward rotation is `Ry(−yaw)` and its inverse is `Ry(+yaw)`.
     fn inverse_ship_rotation(yaw: f32, pitch: f32, roll: f32) -> Rotation3<f32> {
-        let ry = Rotation3::from_axis_angle(&Vec3::y_axis(), yaw);
-        let rx = Rotation3::from_axis_angle(&Vec3::x_axis(), pitch);
-        let rz = Rotation3::from_axis_angle(&Vec3::z_axis(), roll);
-        rz * rx * ry
+        wows_replay_insights::hull_impact::into_hull_frame(yaw, pitch, roll)
     }
 
     /// Remap from BigWorld body-frame to GLTF mesh-space (partial).
@@ -416,7 +413,7 @@ impl RealtimeArmorViewer {
     /// For directions, a subsequent Z-negation is needed to account for the
     /// GLTF exporter's left->right-handed conversion (`positions.push([x, y, -z])`).
     fn axis_remap() -> Rotation3<f32> {
-        Rotation3::from_axis_angle(&Vec3::y_axis(), -std::f32::consts::FRAC_PI_2)
+        wows_replay_insights::hull_impact::into_model_axes()
     }
 
     /// Transform a world-space position to model-space given ship position and

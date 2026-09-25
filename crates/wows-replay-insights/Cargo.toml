@@ -18,6 +18,9 @@ wows_replays = { workspace = true, default-features = false, features = ["parsin
 wows-battle-world = { workspace = true, default-features = false }
 tracing = { workspace = true }
 thiserror = { workspace = true }
+# Placing a hit on a hull means undoing the ship's own rotation, and the
+# conventions that depends on are easier to state with real rotations.
+nalgebra = "0.34"
 serde = { workspace = true, features = ["derive"], optional = true }
 serde_json = { workspace = true, optional = true }
 jiff = { workspace = true, features = ["serde"], optional = true }

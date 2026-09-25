@@ -7,7 +7,7 @@
 #[cfg(feature = "battle-report")]
 pub mod battle_report;
 
-#[cfg(feature = "battle-report")]
+pub mod hull_impact;
 pub mod personal_rating;
 pub mod timeline;
 
