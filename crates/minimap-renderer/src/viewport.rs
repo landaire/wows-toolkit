@@ -24,11 +24,12 @@ pub const MAX_ZOOM: f32 = 10.0;
 pub struct MapViewport {
     zoom: f32,
     pan: (f32, f32),
+    widen: f32,
 }
 
 impl Default for MapViewport {
     fn default() -> Self {
-        Self { zoom: MIN_ZOOM, pan: (0.0, 0.0) }
+        Self { zoom: MIN_ZOOM, pan: (0.0, 0.0), widen: 1.0 }
     }
 }
 
@@ -39,10 +40,39 @@ impl MapViewport {
     /// it is clamped rather than refused: a drag that runs off the edge stops
     /// there.
     pub fn new(zoom: f32, pan: (f32, f32)) -> Self {
+        Self::shaped(zoom, pan, 1.0)
+    }
+
+    /// The same, on a window `widen` times wider than it is tall.
+    fn shaped(zoom: f32, pan: (f32, f32), widen: f32) -> Self {
         let zoom = if zoom.is_finite() { zoom.clamp(MIN_ZOOM, MAX_ZOOM) } else { MIN_ZOOM };
-        let span = MINIMAP_SIZE as f32 * (zoom - 1.0);
-        let hold = |value: f32| if value.is_finite() { value.clamp(0.0, span) } else { 0.0 };
-        Self { zoom, pan: (hold(pan.0), hold(pan.1)) }
+        // A window cannot be wider than the map it looks at: at zoom Z the
+        // map is Z times the window's height, so that is as wide as it can
+        // be asked to be.
+        let widen = if widen.is_finite() { widen.clamp(1.0, zoom) } else { 1.0 };
+        let across = MINIMAP_SIZE as f32 * (zoom - widen);
+        let down = MINIMAP_SIZE as f32 * (zoom - 1.0);
+        let hold = |value: f32, span: f32| if value.is_finite() { value.clamp(0.0, span) } else { 0.0 };
+        Self { zoom, pan: (hold(pan.0, across), hold(pan.1, down)), widen }
+    }
+
+    /// How many times wider than tall the window is.
+    ///
+    /// One at rest, so a frame is square and an exported video is the shape
+    /// every other one is.
+    pub fn widen(&self) -> f32 {
+        self.widen
+    }
+
+    /// The same window, stretched toward `aspect` as far as the zoom allows.
+    ///
+    /// A viewport wider than it is tall leaves the map with empty space
+    /// either side of it. Zoomed in there is map to put there, so the window
+    /// widens to take it; at rest there is not, and it stays square. What is
+    /// between the two follows the zoom, so the sides fill gradually rather
+    /// than snapping open.
+    pub fn widened(&self, aspect: f32) -> Self {
+        Self::shaped(self.zoom, self.pan, aspect)
     }
 
     pub fn zoom(&self) -> f32 {
@@ -82,6 +112,11 @@ impl MapViewport {
         ((x + self.pan.0) / self.zoom, (y + self.pan.1) / self.zoom)
     }
 
+    /// How wide the drawn map is, in drawn pixels.
+    pub fn drawn_width(&self) -> f32 {
+        MINIMAP_SIZE as f32 * self.widen
+    }
+
     /// The window at `zoom` that keeps whatever is under the drawn point
     /// `at` where it is.
     ///
@@ -90,14 +125,14 @@ impl MapViewport {
     pub fn zoomed_about(&self, zoom: f32, at: (f32, f32)) -> Self {
         let (map_x, map_y) = self.to_map(at.0, at.1);
         let zoom = if zoom.is_finite() { zoom.clamp(MIN_ZOOM, MAX_ZOOM) } else { MIN_ZOOM };
-        Self::new(zoom, (map_x * zoom - at.0, map_y * zoom - at.1))
+        Self::shaped(zoom, (map_x * zoom - at.0, map_y * zoom - at.1), self.widen)
     }
 
     /// The window moved by a drag of `delta` drawn pixels.
     ///
     /// The map follows the pointer, so the window moves against it.
     pub fn dragged(&self, delta: (f32, f32)) -> Self {
-        Self::new(self.zoom, (self.pan.0 - delta.0, self.pan.1 - delta.1))
+        Self::shaped(self.zoom, (self.pan.0 - delta.0, self.pan.1 - delta.1), self.widen)
     }
 }
 
@@ -115,6 +150,57 @@ mod tests {
         let span = MINIMAP_SIZE as f32;
         assert_eq!(doubled.dragged((-10_000.0, -10_000.0)).pan(), (span, span), "the far corner, not past it");
         assert_eq!(doubled.dragged((10_000.0, 10_000.0)).pan(), (0.0, 0.0), "and the near one");
+    }
+
+    /// At rest the window is square however wide the viewport is: there is
+    /// no more map to put beside it, so widening would show background.
+    #[test]
+    fn the_whole_map_stays_square() {
+        let whole = MapViewport::default().widened(16.0 / 9.0);
+        assert_eq!(whole.widen(), 1.0);
+        assert_eq!(whole.drawn_width(), MINIMAP_SIZE as f32);
+    }
+
+    /// Zoomed in there is map either side to take, so the window widens to
+    /// the shape it is asked for.
+    #[test]
+    fn a_zoomed_window_takes_the_width_it_is_offered() {
+        let wide = MapViewport::new(4.0, (0.0, 0.0)).widened(16.0 / 9.0);
+        assert!((wide.widen() - 16.0 / 9.0).abs() < 1e-4, "{}", wide.widen());
+        assert!((wide.drawn_width() - MINIMAP_SIZE as f32 * 16.0 / 9.0).abs() < 1e-2);
+    }
+
+    /// Between the two it follows the zoom, so the sides fill gradually
+    /// rather than snapping open: a window cannot be wider than the map it
+    /// is looking at.
+    #[test]
+    fn widening_is_held_to_what_the_zoom_has_to_show() {
+        let part_way = MapViewport::new(1.3, (0.0, 0.0)).widened(16.0 / 9.0);
+        assert!((part_way.widen() - 1.3).abs() < 1e-4, "held to the zoom: {}", part_way.widen());
+
+        // And the map never runs out from under the window: the widest it
+        // can be is the whole map's width.
+        let widest = MapViewport::new(2.0, (0.0, 0.0)).widened(99.0);
+        assert_eq!(widest.widen(), 2.0);
+        assert_eq!(widest.pan().0, 0.0, "which leaves nowhere to pan across to");
+    }
+
+    /// A wider window has less room to pan across, since it already shows
+    /// more of the map.
+    #[test]
+    fn a_wider_window_has_less_to_pan_across() {
+        let square = MapViewport::new(4.0, (10_000.0, 10_000.0));
+        let wide = square.widened(2.0);
+        assert!(wide.pan().0 < square.pan().0, "{:?} against {:?}", wide.pan(), square.pan());
+        assert_eq!(wide.pan().1, square.pan().1, "and the same room up and down");
+    }
+
+    /// A drag and a wheel keep the shape the window was given.
+    #[test]
+    fn moving_a_wide_window_keeps_it_wide() {
+        let wide = MapViewport::new(4.0, (100.0, 100.0)).widened(1.5);
+        assert_eq!(wide.dragged((10.0, 10.0)).widen(), 1.5);
+        assert_eq!(wide.zoomed_about(6.0, (10.0, 10.0)).widen(), 1.5);
     }
 
     /// Zoom is held to what the renderer can draw.

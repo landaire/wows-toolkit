@@ -1329,7 +1329,8 @@ fn draw_grid(pm: &mut Pixmap, viewport: MapViewport, fonts: &GameFonts) {
 /// round them.
 fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> Pixmap {
     let size = MINIMAP_SIZE;
-    let mut art = RgbImage::from_pixel(size, size, Rgb([30, 40, 60]));
+    let width = drawn_map_width(viewport);
+    let mut art = RgbImage::from_pixel(width, size, Rgb([30, 40, 60]));
     if viewport.is_whole_map() {
         // The art is already drawn at the map's own size, so the whole map is
         // a copy. Resampling it would land on the same pixels at four times
@@ -1341,7 +1342,7 @@ fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> P
         }
     } else if map.width() > 0 && map.height() > 0 {
         for y in 0..size {
-            for x in 0..size {
+            for x in 0..width {
                 let (sx, sy) = viewport.to_map(x as f32, y as f32);
                 art.put_pixel(x, y, sample_bilinear(map, sx, sy));
             }
@@ -1350,6 +1351,14 @@ fn build_map_base(map: &RgbImage, viewport: MapViewport, fonts: &GameFonts) -> P
     let mut base = rgb_to_pixmap(&art);
     draw_grid(&mut base, viewport, fonts);
     base
+}
+
+/// How wide the drawn map is, in whole pixels.
+///
+/// A window wider than it is tall is drawn on a wider layer: the map it
+/// shows is wider, not squeezed into the same square.
+pub fn drawn_map_width(viewport: MapViewport) -> u32 {
+    (viewport.drawn_width().round() as u32).max(1)
 }
 
 /// `image` at a fractional point, blended from the four pixels around it.
@@ -1912,6 +1921,9 @@ pub struct ImageTarget {
     /// the minimap so the score bar can stretch across both gutters; with the
     /// stats panel (or no side panel) it's just the minimap width.
     hud_width: u32,
+    /// Which gutters this canvas was laid out with, which is what says
+    /// whether there is room either side to widen into.
+    layout: SidePanelLayout,
     fonts: GameFonts,
     ship_icons: HashMap<String, ShipIcon>,
     /// Pre-computed gold outline halos for ship icons. Same keys as `ship_icons`;
@@ -2032,6 +2044,7 @@ impl ImageTarget {
             map_width: MINIMAP_SIZE,
             map_x_offset,
             hud_width,
+            layout,
             fonts,
             ship_icons,
             ship_icon_outlines,
@@ -2082,6 +2095,19 @@ impl ImageTarget {
         }
         self.viewport = viewport;
         self.map_base = build_map_base(&self.map_art, viewport, &self.fonts);
+        // A wider window needs a wider canvas to put it on. Only where there
+        // is room for one: the gutters a side panel takes are already spoken
+        // for, so a viewport showing them keeps its shape.
+        let wanted = match self.layout {
+            SidePanelLayout::None => self.map_base.width(),
+            _ => self.canvas.width(),
+        };
+        if wanted != self.canvas.width()
+            && let Some(canvas) = Pixmap::new(wanted, CANVAS_HEIGHT)
+        {
+            self.canvas = canvas;
+            self.hud_width = wanted;
+        }
     }
 
     /// Puts what the map layer holds onto the canvas.

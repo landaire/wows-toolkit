@@ -8,6 +8,8 @@
 pub mod battle_report;
 
 pub mod hull_impact;
+
+#[cfg(feature = "battle-report")]
 pub mod personal_rating;
 pub mod timeline;
 
