@@ -85,6 +85,16 @@ pub enum LocalAnnotationEvent {
     Clear { board_id: Option<u64> },
 }
 
+impl LocalAnnotationEvent {
+    /// A new annotation, under an id nothing else in the session holds.
+    ///
+    /// Drawn at random rather than counted up: every peer mints its own, and
+    /// two of them drawing at once must not land on the same number.
+    pub fn new_annotation(annotation: Annotation, owner: u64) -> Self {
+        Self::Set { board_id: None, id: rand::random(), annotation, owner }
+    }
+}
+
 /// Per-ship range overrides: vec of (entity_id, filter) pairs.
 pub type RangeOverrideUpdate =
     Vec<(wows_replays::types::EntityId, wows_minimap_renderer::draw_command::ShipConfigFilter)>;
