@@ -52,10 +52,25 @@ impl PreviewRenderer {
     /// `version` selects the asset layout, which moved between builds; the
     /// loaders fall back on their own when it is absent.
     pub fn new(vfs: &VfsPath, version: Option<&Version>, map_name: &str) -> Result<Self, PreviewRenderError> {
+        Self::with_layout(vfs, version, map_name, crate::drawing::SidePanelLayout::None)
+    }
+
+    /// Loads the assets a preview of `map_name` needs, on a canvas laid out
+    /// for `layout`.
+    ///
+    /// The layout decides the canvas width and where the map sits in it, so a
+    /// viewport that shows the team rosters needs its own renderer rather
+    /// than the one every hover preview of that map shares.
+    pub fn with_layout(
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        map_name: &str,
+        layout: crate::drawing::SidePanelLayout,
+    ) -> Result<Self, PreviewRenderError> {
         let map_image = assets::load_map_image(map_name, vfs)
             .ok_or_else(|| PreviewRenderError::NoMapArt { map: map_name.to_string() })?;
 
-        let target = ImageTarget::new(
+        let target = ImageTarget::with_side_panel(
             Some(map_image),
             assets::load_game_fonts(vfs),
             assets::load_ship_icons(vfs, version),
@@ -70,6 +85,7 @@ impl PreviewRenderer {
             // own target uses (`main.rs`). Zero would resize them to nothing.
             assets::load_death_cause_icons(vfs, assets::ICON_SIZE, version),
             assets::load_powerup_icons(vfs, assets::ICON_SIZE, version),
+            layout,
         );
 
         Ok(Self { target })
