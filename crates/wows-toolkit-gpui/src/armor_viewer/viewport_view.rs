@@ -512,6 +512,13 @@ pub struct ViewportView {
     pub(crate) popover_scroll: ScrollHandle,
     /// The currently hovered armor plate from CPU picking, if any.
     hovered: Option<HoverInfo>,
+    /// The camera orbits currently drawn, so a pointer resting on one can be
+    /// told which it is. Rebuilt with the overlay that drew them.
+    ring_hovers: Vec<camera_rings::RingHover>,
+    /// What the orbit under the pointer reads as, and where to anchor it.
+    /// An orbit takes the tooltip from the plate behind it, which still
+    /// picks for a click.
+    hovered_ring: Option<(SharedString, Point<Pixels>)>,
     /// The overlay mesh highlighting `hovered`'s plate, if any, so it can be
     /// removed/replaced when the hovered plate changes.
     hover_highlight: Option<(PlateKey, MeshId)>,
@@ -683,6 +690,8 @@ impl ViewportView {
             expanded_parts: HashSet::new(),
             popover_scroll: ScrollHandle::new(),
             hovered: None,
+            ring_hovers: Vec::new(),
+            hovered_ring: None,
             hover_highlight: None,
             sidebar_highlight: None,
             mesh_triangle_info: Vec::new(),
@@ -980,6 +989,8 @@ impl ViewportView {
         self.expanded_parts.clear();
         self.hovered = None;
         self.hover_highlight = None;
+        self.hovered_ring = None;
+        self.ring_hovers.clear();
         self.sidebar_highlight = None;
         // `part_visibility` absent means visible and `hull_visibility`
         // absent means hidden (see their field docs), so only the
@@ -1460,8 +1471,13 @@ impl ViewportView {
         // doesn't fight with (or waste CPU during) an orbit/pan; any hover
         // from before the drag started is cleared so the tooltip/highlight
         // don't sit stale over a moving model.
-        let plate_hover_changed =
-            if self.drag.is_none() { self.update_plate_hover(event.position) } else { self.clear_plate_hover() };
+        let plate_hover_changed = if self.drag.is_none() {
+            let ring_changed = self.update_ring_hover(event.position);
+            self.update_plate_hover(event.position) || ring_changed
+        } else {
+            let ring_changed = self.clear_ring_hover();
+            self.clear_plate_hover() || ring_changed
+        };
 
         if camera_changed || hover_changed || plate_hover_changed {
             cx.notify();
@@ -1770,6 +1786,36 @@ impl ViewportView {
             self.rebuild_hover_highlight(&key);
         }
         true
+    }
+
+    /// Reads the camera orbit under the pointer, if it is resting on one.
+    ///
+    /// Screen-space rather than a pick: an orbit is drawn a few centimetres
+    /// wide, and a ray would miss it at every angle a ship is looked at
+    /// from. Returns whether what it reads changed.
+    fn update_ring_hover(&mut self, position: Point<Pixels>) -> bool {
+        if self.ring_hovers.is_empty() {
+            return self.clear_ring_hover();
+        }
+        let Some(bounds) = self.last_bounds else { return self.clear_ring_hover() };
+        let rect = view_rect_from_bounds(bounds);
+        let camera = &self.viewport.camera;
+        let viewport = &self.viewport;
+        let found = camera_rings::nearest_ring_label(
+            &self.ring_hovers,
+            |point| camera.project_to_screen(viewport.pos_to_world_space(point), rect).map(|at| [at.x, at.y]),
+            [position.x.as_f32(), position.y.as_f32()],
+        )
+        .map(SharedString::from);
+
+        let changed = found.as_ref() != self.hovered_ring.as_ref().map(|(label, _)| label);
+        self.hovered_ring = found.map(|label| (label, position));
+        changed
+    }
+
+    /// Forgets the orbit under the pointer. Returns whether there was one.
+    fn clear_ring_hover(&mut self) -> bool {
+        self.hovered_ring.take().is_some()
     }
 
     /// Clears any hovered plate, tooltip, and highlight overlay. Returns
@@ -2135,11 +2181,13 @@ impl ViewportView {
             &self.active_camo_textures,
             &self.active_camo_uvs,
         );
+        self.ring_hovers.clear();
         if self.camera_rings.shown
-            && let Some((_, trajectory)) =
+            && let Some((mode, trajectory)) =
                 armor.camera_trajectories.iter().find(|(name, _)| Some(name) == self.camera_rings.mode.as_ref())
         {
             let request = camera_rings::RingRequest {
+                mode,
                 trajectory,
                 fov: self.camera_rings.fov,
                 height: self.camera_rings.height,
@@ -2151,10 +2199,11 @@ impl ViewportView {
                 // states until a ship is found that says otherwise.
                 waterline_dy: 0.0,
             };
-            let (vertices, indices) = camera_rings::build_camera_rings(&request);
+            let (vertices, indices, hovers) = camera_rings::build_camera_rings(&request);
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
             }
+            self.ring_hovers = hovers;
         }
 
         // Scaled to the camera so a marker stays readable as the view pulls
@@ -2583,6 +2632,8 @@ impl ViewportView {
         self.undo_stack.clear();
         self.hovered = None;
         self.hover_highlight = None;
+        self.hovered_ring = None;
+        self.ring_hovers.clear();
         self.sidebar_highlight = None;
 
         let (active_camo_textures, active_camo_uvs) =
@@ -2794,7 +2845,24 @@ impl Render for ViewportView {
         // gpui's own `anchored()`/`deferred()` primitives (the same ones the
         // context menu below and gpui-component's managed tooltips use)
         // rather than hand-measuring the tooltip's size.
-        let tooltip_overlay = self.hovered.as_ref().map(|hover| {
+        let ring_overlay = self.hovered_ring.as_ref().map(|(label, cursor)| {
+            let theme = cx.theme();
+            let anchor_pos = point(cursor.x + TOOLTIP_CURSOR_OFFSET, cursor.y + TOOLTIP_CURSOR_OFFSET);
+            let element = div()
+                .bg(theme.background)
+                .border_1()
+                .border_color(theme.border)
+                .rounded(theme.radius)
+                .px_2()
+                .py_1()
+                .text_xs()
+                .children(label.lines().map(|line| div().child(line.to_string())));
+            deferred(anchored().position(anchor_pos).snap_to_window_with_margin(px(8.)).child(element))
+                .with_priority(0)
+                .into_any_element()
+        });
+
+        let tooltip_overlay = self.hovered.as_ref().filter(|_| self.hovered_ring.is_none()).map(|hover| {
             let theme = cx.theme();
             let (background, border, radius, muted) =
                 (theme.background, theme.border, theme.radius, theme.muted_foreground);
@@ -2903,6 +2971,7 @@ impl Render for ViewportView {
             .child(image_child)
             .child(overlay)
             .when_some(tooltip_overlay, |this, t| this.child(t))
+            .when_some(ring_overlay, |this, t| this.child(t))
             .when_some(export_overlay, |this, o| this.child(o))
             .context_menu(move |mut menu, _window, _cx| {
                 let Some(hover) = hovered_for_menu.clone() else { return menu };

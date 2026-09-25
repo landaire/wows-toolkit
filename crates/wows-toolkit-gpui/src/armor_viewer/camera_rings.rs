@@ -41,8 +41,77 @@ const OUTER_COLOR: [f32; 4] = [1.0, 0.6, 0.1, 1.0];
 /// context for the one actually selected, rather than a third reading.
 const EXTREME_ALPHA: f32 = 0.25;
 
+/// How near the pointer has to come to an orbit's drawn curve to read it.
+///
+/// Measured on screen rather than by raycast: the orbits are drawn a few
+/// centimetres wide, which no pick would reliably land on.
+const HOVER_THRESHOLD_PX: f32 = 8.0;
+
+/// One drawn orbit and what it reads as, for a pointer resting on it.
+pub(crate) struct RingHover {
+    pub label: String,
+    pub ring: CameraRing,
+    pub waterline_dy: f32,
+}
+
+/// What an orbit reads as: which mode it belongs to, which of the two orbits
+/// it is, at which field of view, and the numbers behind it.
+pub(crate) fn ring_label(mode: &str, kind: &str, fov_tag: &str, ring: &CameraRing) -> String {
+    format!(
+        "{mode} {kind} ({fov_tag})
+y {:.2}  semiH {:.2}  semiV {:.2}",
+        ring.pos_center.y, ring.semi_axes.x, ring.semi_axes.y
+    )
+}
+
+/// What the orbit nearest `cursor` reads as, if the pointer is near one.
+///
+/// `project` puts a point of the orbit where it is drawn on screen, and
+/// answers `None` for one behind the camera. The distance is measured to the
+/// drawn curve rather than to the orbit's centre, so resting on the far side
+/// of a ring reads it just as the near side does.
+pub(crate) fn nearest_ring_label(
+    hovers: &[RingHover],
+    project: impl Fn(Vec3) -> Option<[f32; 2]>,
+    cursor: [f32; 2],
+) -> Option<&str> {
+    let mut best: Option<(f32, &str)> = None;
+    for hover in hovers {
+        let points: Vec<Option<[f32; 2]>> =
+            sample_ring(&hover.ring, hover.waterline_dy, RING_SEGMENTS).into_iter().map(&project).collect();
+        let mut nearest = f32::MAX;
+        for step in 0..points.len() {
+            if let (Some(from), Some(to)) = (points[step], points[(step + 1) % points.len()]) {
+                nearest = nearest.min(distance_to_segment(cursor, from, to));
+            }
+        }
+        if best.is_none_or(|(was, _)| nearest < was) {
+            best = Some((nearest, hover.label.as_str()));
+        }
+    }
+    best.filter(|(distance, _)| *distance <= HOVER_THRESHOLD_PX).map(|(_, label)| label)
+}
+
+/// How far `point` is from the segment `from`-`to`, in the same units.
+fn distance_to_segment(point: [f32; 2], from: [f32; 2], to: [f32; 2]) -> f32 {
+    let along = [to[0] - from[0], to[1] - from[1]];
+    let length_squared = along[0] * along[0] + along[1] * along[1];
+    let to_point = [point[0] - from[0], point[1] - from[1]];
+    // A segment of no length is a point, and its own start is the nearest
+    // thing on it.
+    let travel = if length_squared <= f32::EPSILON {
+        0.0
+    } else {
+        ((to_point[0] * along[0] + to_point[1] * along[1]) / length_squared).clamp(0.0, 1.0)
+    };
+    let nearest = [from[0] + along[0] * travel, from[1] + along[1] * travel];
+    ((point[0] - nearest[0]).powi(2) + (point[1] - nearest[1]).powi(2)).sqrt()
+}
+
 /// What to draw for one mode, and how it was asked for.
 pub(crate) struct RingRequest<'a> {
+    /// The mode these orbits belong to, which is what a hover names them by.
+    pub mode: &'a str,
     pub trajectory: &'a CameraTrajectory,
     /// Where between the field-of-view extremes the camera is, 0 to 1.
     pub fov: f32,
@@ -62,30 +131,36 @@ pub(crate) struct RingRequest<'a> {
 
 /// The overlay for one camera mode: the orbits at the selected field of view,
 /// the same orbits at both extremes of it, and the zoom path if asked for.
-pub(crate) fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec<u32>) {
+///
+/// The orbits are handed back alongside the mesh so a pointer resting on one
+/// can be told which it is without the caller laying them out again.
+pub(crate) fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec<u32>, Vec<RingHover>) {
     let mut vertices: Vec<Vertex> = Vec::new();
     let mut indices: Vec<u32> = Vec::new();
+    let mut hovers: Vec<RingHover> = Vec::new();
     let dy = request.waterline_dy;
+    let mode = request.mode;
 
-    let mut draw = |ring: &CameraRing, color: [f32; 4], markers: bool| {
-        let (mut v, i) = build_ring_mesh(ring, dy, color, markers);
+    let mut draw = |ring: CameraRing, kind: &str, fov_tag: &str, color: [f32; 4], markers: bool| {
+        let (mut v, i) = build_ring_mesh(&ring, dy, color, markers);
         let base = vertices.len() as u32;
         indices.extend(i.into_iter().map(|index| index + base));
         vertices.append(&mut v);
+        hovers.push(RingHover { label: ring_label(mode, kind, fov_tag, &ring), ring, waterline_dy: dy });
     };
 
     // The selected orbit solid, the extremes faint: the reader is choosing
     // between them, so only one should read as the answer.
-    draw(&request.trajectory.resolve(request.fov, request.height), INNER_COLOR, true);
-    for fov in [0.0_f32, 1.0] {
-        draw(&request.trajectory.resolve(fov, request.height), faded(INNER_COLOR), false);
+    draw(request.trajectory.resolve(request.fov, request.height), "inner", CURRENT_FOV, INNER_COLOR, true);
+    for (fov, tag) in [(0.0_f32, MIN_FOV), (1.0, MAX_FOV)] {
+        draw(request.trajectory.resolve(fov, request.height), "inner", tag, faded(INNER_COLOR), false);
     }
 
     if let Some(outer) = request.trajectory.resolve_outer(request.fov, request.height) {
-        draw(&outer, OUTER_COLOR, true);
-        for fov in [0.0_f32, 1.0] {
+        draw(outer, "outer", CURRENT_FOV, OUTER_COLOR, true);
+        for (fov, tag) in [(0.0_f32, MIN_FOV), (1.0, MAX_FOV)] {
             if let Some(outer) = request.trajectory.resolve_outer(fov, request.height) {
-                draw(&outer, faded(OUTER_COLOR), false);
+                draw(outer, "outer", tag, faded(OUTER_COLOR), false);
             }
         }
     }
@@ -107,8 +182,13 @@ pub(crate) fn build_camera_rings(request: &RingRequest<'_>) -> (Vec<Vertex>, Vec
         }
     }
 
-    (vertices, indices)
+    (vertices, indices, hovers)
 }
+
+/// How a hover names the field of view an orbit was resolved at.
+const CURRENT_FOV: &str = "current FOV";
+const MIN_FOV: &str = "FOV min";
+const MAX_FOV: &str = "FOV max";
 
 fn faded(color: [f32; 4]) -> [f32; 4] {
     at_alpha(color, EXTREME_ALPHA)
@@ -229,6 +309,58 @@ mod tests {
 
     fn ring(center_y: f32, semi_x: f32, semi_y: f32) -> CameraRing {
         CameraRing { pos_center: ParamVec3 { x: 0.0, y: center_y, z: 0.0 }, semi_axes: Vec2 { x: semi_x, y: semi_y } }
+    }
+
+    /// A flattened projection, so a ring's own coordinates are its screen
+    /// ones and a distance can be read off by hand.
+    fn flat(point: Vec3) -> Option<[f32; 2]> {
+        Some([point.x, point.z])
+    }
+
+    fn hover(label: &str, ring: CameraRing) -> RingHover {
+        RingHover { label: label.to_string(), ring, waterline_dy: 0.0 }
+    }
+
+    /// A label names the orbit and carries the numbers behind it, which is
+    /// what the reader is comparing between modes.
+    #[test]
+    fn a_ring_reads_as_its_mode_its_orbit_and_its_measurements() {
+        let label = ring_label("Observe", "outer", "FOV max", &ring(3.4, 6.55, 9.6));
+
+        assert!(label.contains("Observe outer (FOV max)"), "{label}");
+        assert!(label.contains("y 3.40"), "{label}");
+        assert!(label.contains("semiH 6.55"), "{label}");
+        assert!(label.contains("semiV 9.60"), "{label}");
+    }
+
+    /// A pointer on an orbit's drawn curve reads it, and one out in open
+    /// space reads nothing.
+    #[test]
+    fn an_orbit_is_read_from_its_curve_rather_than_its_centre() {
+        let hovers = [hover("outer orbit", ring(0.0, 30.0, 20.0))];
+
+        assert_eq!(nearest_ring_label(&hovers, flat, [30.0, 0.0]), Some("outer orbit"), "on the curve");
+        assert_eq!(nearest_ring_label(&hovers, flat, [0.0, 0.0]), None, "the centre is not the ring");
+        assert_eq!(nearest_ring_label(&hovers, flat, [80.0, 0.0]), None, "and neither is open water");
+    }
+
+    /// With two orbits drawn the nearer one is read, not the first.
+    #[test]
+    fn the_nearer_of_two_orbits_is_the_one_read() {
+        let hovers = [hover("inner", ring(0.0, 10.0, 10.0)), hover("outer", ring(0.0, 30.0, 30.0))];
+
+        assert_eq!(nearest_ring_label(&hovers, flat, [30.0, 0.0]), Some("outer"));
+        assert_eq!(nearest_ring_label(&hovers, flat, [10.0, 0.0]), Some("inner"));
+    }
+
+    /// An orbit swinging behind the camera still reads from the part of it
+    /// that is on screen.
+    #[test]
+    fn an_orbit_half_off_screen_still_reads() {
+        let hovers = [hover("inner", ring(0.0, 30.0, 20.0))];
+        let half = |point: Vec3| if point.x < 0.0 { None } else { Some([point.x, point.z]) };
+
+        assert_eq!(nearest_ring_label(&hovers, half, [30.0, 0.0]), Some("inner"));
     }
 
     /// The ellipse is an ellipse: its extents follow the two semi-axes
