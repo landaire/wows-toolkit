@@ -24,6 +24,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
+use crate::armor_viewer::catalog::ShipEntry;
 use crate::minimap_preview::SharedPreviewRenderer;
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -248,6 +249,16 @@ pub struct ReplayRendererPanel {
     moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
     /// The shape being turned by its handle, and what it was before.
     turning: Option<(usize, wt_collab_client::types::Annotation)>,
+    /// The box a ship is looked up in, to give a placed one an identity.
+    ship_search: Entity<InputState>,
+    _ship_search: Option<Subscription>,
+    /// What has been typed into it, and what that matched. Recomputed as it
+    /// is typed rather than while the popover is built, which happens over
+    /// and over and cannot reach the catalogue mutably.
+    ship_query: String,
+    matched_ships: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
+    /// Every ship the loaded build knows, built once when first asked for.
+    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
     /// What the session held before each change this viewport made, newest
     /// last. Bounded: a session left open all evening must not grow a
     /// history of every stroke in it.
@@ -332,6 +343,15 @@ impl ReplayRendererPanel {
         let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
         let event_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
+        let ship_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
+        let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.ship_query = state.read(cx).value().to_string();
+                this.matched_ships = this.matching_ships();
+                cx.notify();
+            }
+        });
         let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
                 this.event_filter.search = state.read(cx).value().to_string();
@@ -369,6 +389,11 @@ impl ReplayRendererPanel {
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
             turning: None,
+            ship_search,
+            _ship_search: Some(ship_search_subscription),
+            ship_query: String::new(),
+            matched_ships: Vec::new(),
+            ship_catalog: None,
             history: Vec::new(),
             _collab_tick: None,
             game_data: None,
@@ -414,6 +439,15 @@ impl ReplayRendererPanel {
         let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
         let event_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
+        let ship_search =
+            cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.renderer.annotations.ship_hint").into_owned()));
+        let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
+            if matches!(event, InputEvent::Change) {
+                this.ship_query = state.read(cx).value().to_string();
+                this.matched_ships = this.matching_ships();
+                cx.notify();
+            }
+        });
         let event_search_subscription = cx.subscribe(&event_search, |this, state, event, cx| {
             if matches!(event, InputEvent::Change) {
                 this.event_filter.search = state.read(cx).value().to_string();
@@ -460,6 +494,11 @@ impl ReplayRendererPanel {
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
             turning: None,
+            ship_search,
+            _ship_search: Some(ship_search_subscription),
+            ship_query: String::new(),
+            matched_ships: Vec::new(),
+            ship_catalog: None,
             history: Vec::new(),
             _collab_tick: None,
             game_data: None,
@@ -1723,6 +1762,86 @@ impl ReplayRendererPanel {
         circles
     }
 
+    /// Every ship the loaded build knows, built the first time one is
+    /// looked up rather than when the viewport opens.
+    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+        if let Some(catalog) = &self.ship_catalog {
+            return Some(std::rc::Rc::clone(catalog));
+        }
+        let loaded = self.game_data.as_ref()?.newest_loaded()?;
+        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
+        Some(catalog)
+    }
+
+    /// The ships whose names match what has been typed, with the class each
+    /// belongs to. Empty until something is typed, since every ship at once
+    /// is not a choice.
+    fn matching_ships(&mut self) -> Vec<(wowsunpack::game_params::types::Species, ShipEntry)> {
+        let query = self.ship_query.trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let Some(catalog) = self.ships() else { return Vec::new() };
+        let mut found = Vec::new();
+        for nation in &catalog.nations {
+            for class in &nation.classes {
+                for ship in &class.ships {
+                    if ship.search_name.contains(&query) {
+                        found.push((class.species, ship.clone()));
+                        if found.len() >= SHIP_MATCHES {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// Gives the picked ship an identity, which is what its ranges are read
+    /// from.
+    fn name_picked_ship(
+        &mut self,
+        species: wowsunpack::game_params::types::Species,
+        ship: &ShipEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use wowsunpack::game_params::types::GameParamProvider as _;
+
+        let Some(index) = self.picked.single() else { return };
+        let annotations = self.collab.annotations();
+        let Some(wt_collab_client::types::Annotation::Ship { pos, yaw, friendly, .. }) = annotations.get(index) else {
+            return;
+        };
+        let Some(loaded) = self.game_data.as_ref().and_then(|cache| cache.newest_loaded()) else { return };
+        let provider = loaded.provider();
+        let Some(param) = provider.game_param_by_index(&ship.param_index) else { return };
+
+        self.remember();
+        self.collab.update_annotation(
+            index,
+            wt_collab_client::types::Annotation::Ship {
+                pos: *pos,
+                yaw: *yaw,
+                species: format!("{species:?}"),
+                friendly: *friendly,
+                config: Some(wt_collab_client::types::AnnotationShipConfig {
+                    param_id: param.id().raw(),
+                    ship_name: ship.display_name.clone(),
+                    // Stock hull and no modifiers until the reader says
+                    // otherwise, which is where the egui chooser leaves it.
+                    ..Default::default()
+                }),
+            },
+        );
+        self.ship_query.clear();
+        self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
+        self.draw_current(cx);
+        cx.notify();
+    }
+
     /// Remembers what the session holds, before changing it.
     fn remember(&mut self) {
         if !self.collab.is_active() {
@@ -2451,6 +2570,9 @@ fn per_ship_allows(
     }
 }
 
+/// How many ships a search offers at once.
+const SHIP_MATCHES: usize = 10;
+
 /// How many changes back an undo can reach.
 const HISTORY_DEPTH: usize = 32;
 
@@ -2979,6 +3101,9 @@ fn tools_popover(
     let chosen = view.drawing.tool().clone();
     let ink = view.drawing.color();
     let undoable = !view.history.is_empty();
+    let picked_ship = picked_ship(view);
+    let matches = view.matched_ships.clone();
+    let search = view.ship_search.clone();
 
     Popover::new("replay-renderer-tools")
         .trigger(
@@ -3009,6 +3134,7 @@ fn tools_popover(
                         ),
                     )
                 })))
+                .children(picked_ship.clone().map(|named| ship_chooser(&owner, &search, named, matches.clone(), _cx)))
                 .child(crate::ui::rule_h(_cx))
                 .child(species_row(&owner, &chosen, true))
                 .child(species_row(&owner, &chosen, false))
@@ -3046,6 +3172,53 @@ fn tools_popover(
                 .into_any_element()
         })
         .into_any_element()
+}
+
+/// The box a placed ship is given an identity in, shown only while one is
+/// picked out.
+///
+/// A ship's ranges are read from its own game data, so until one is chosen
+/// there is nothing to read; the egui chooser is the same search over the
+/// same catalogue.
+fn ship_chooser(
+    panel: &Entity<ReplayRendererPanel>,
+    search: &Entity<InputState>,
+    named: Option<String>,
+    matches: Vec<(wowsunpack::game_params::types::Species, ShipEntry)>,
+    cx: &App,
+) -> AnyElement {
+    v_flex()
+        .gap_1()
+        .child(crate::ui::rule_h(cx))
+        .child(
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(named.unwrap_or_else(|| t!("ui.renderer.annotations.no_ship").into_owned())),
+        )
+        .child(Input::new(search).small())
+        .children(matches.into_iter().map(|(species, ship)| {
+            let owner = panel.clone();
+            Button::new(gpui_kit::SharedString::from(format!("replay-renderer-ship-{}", ship.param_index)))
+                .label(format!("{} {}", crate::armor_viewer::catalog::tier_roman(ship.tier), ship.display_name))
+                .compact()
+                .on_click(move |_event, window, cx: &mut App| {
+                    let ship = ship.clone();
+                    owner.update(cx, |panel, cx| panel.name_picked_ship(species, &ship, window, cx));
+                })
+        }))
+        .into_any_element()
+}
+
+/// Whether the picked shape is a ship, and what it is called if one has been
+/// chosen for it.
+fn picked_ship(view: &ReplayRendererPanel) -> Option<Option<String>> {
+    let index = view.picked.single()?;
+    let annotations = view.collab.annotations();
+    let wt_collab_client::types::Annotation::Ship { config, .. } = annotations.get(index)? else {
+        return None;
+    };
+    Some(config.as_ref().map(|config| config.ship_name.clone()).filter(|name| !name.is_empty()))
 }
 
 /// Whether two tools are the same one, ignoring whether a shape is filled.
@@ -5007,6 +5180,74 @@ mod tests {
         // And it draws as a ship rather than as nothing.
         let drawn = wt_collab_client::geometry::annotation_commands(&placed[0]);
         assert!(matches!(drawn.as_slice(), [super::DrawCommand::Ship { .. }]), "{drawn:?}");
+    }
+
+    /// Naming a placed ship gives it an identity, which is what its ranges
+    /// are read from, and leaves everything else about it alone.
+    #[gpui_kit::test]
+    fn naming_a_placed_ship_gives_it_an_identity(cx: &mut TestAppContext) {
+        use wt_collab_client::AnnotationSyncState;
+        use wt_collab_client::peer::LocalAnnotationEvent;
+        use wt_collab_client::peer::LocalEvent;
+        use wt_collab_client::types::Annotation;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        state.lock().current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![Annotation::Ship {
+                pos: [300.0, 400.0],
+                yaw: 0.5,
+                species: "Cruiser".to_string(),
+                friendly: false,
+                config: None,
+            }],
+            ids: vec![11],
+            owners: vec![3],
+            ..Default::default()
+        });
+        let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                // Nothing to choose a ship for until one is picked out.
+                assert!(super::picked_ship(panel).is_none());
+                panel.picked.click(&panel.collab.annotations(), [300.0, 400.0], false);
+                assert_eq!(super::picked_ship(panel), Some(None), "picked, and unnamed");
+            })
+            .expect("the window is open");
+
+        // Nothing was sent by picking alone.
+        assert!(sent.try_iter().next().is_none(), "picking a shape changes nothing");
+
+        window
+            .update(cx, |panel, window, cx| {
+                let ship = crate::armor_viewer::catalog::ShipEntry {
+                    param_index: "PRSC610".to_string(),
+                    display_name: "Moskva".to_string(),
+                    search_name: "moskva".to_string(),
+                    tier: 10,
+                };
+                // Without game data loaded there is no param to resolve, so
+                // nothing is sent rather than a ship with an id of nothing.
+                panel.name_picked_ship(wowsunpack::game_params::types::Species::Cruiser, &ship, window, cx);
+            })
+            .expect("the window is open");
+
+        let updates: Vec<Annotation> = sent
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(LocalAnnotationEvent::Set { annotation, .. }) => Some(annotation),
+                _ => None,
+            })
+            .collect();
+        assert!(updates.is_empty(), "a ship with no game data behind it is not named: {updates:?}");
     }
 
     /// A ping is shed only once its ripple has run out.
