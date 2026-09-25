@@ -1143,6 +1143,8 @@ copy_to_clipboard = "Render Video to Clipboard"
 [ui.renderer.annotations]
 title = "Drawing Tools"
 undo = "Undo"
+ship_hint = "Find a ship"
+no_ship = "No ship chosen"
 
 [ui.renderer.settings]
 title = "Display Settings"
