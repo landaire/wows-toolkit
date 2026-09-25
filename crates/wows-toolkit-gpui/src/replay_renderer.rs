@@ -30,6 +30,7 @@ use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::IconName;
+use gpui_kit::component::IndexPath;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
@@ -42,6 +43,11 @@ use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::progress::Progress;
+use gpui_kit::component::searchable_list::SearchableVec;
+use gpui_kit::component::select::Select;
+use gpui_kit::component::select::SelectEvent;
+use gpui_kit::component::select::SelectState;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
@@ -189,6 +195,10 @@ pub struct ReplayRendererPanel {
     at: usize,
     playing: bool,
     speed: f32,
+    /// The speed control. A dropdown, as the egui renderer's is: six
+    /// buttons take the width of the whole ladder to say one number.
+    speed_select: Entity<SelectState<SearchableVec<SpeedItem>>>,
+    _speed_select: Option<Subscription>,
     seek: Entity<SliderState>,
     /// Set when this panel is dropped, so a bake in flight stops walking a
     /// battle nobody is waiting for.
@@ -324,6 +334,28 @@ struct ConsumableHover {
 pub struct ExportProgress {
     pub done: u64,
     pub total: u64,
+    pub stage: ExportStage,
+}
+
+/// Which part of an export is running.
+///
+/// Muxing happens after the last frame and can take a noticeable while on a
+/// long battle, so saying so is the difference between a bar that has
+/// stopped and one that is nearly done.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExportStage {
+    Encoding,
+    Muxing,
+}
+
+impl ExportStage {
+    /// What the overlay calls it, worded as the egui renderer words it.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Encoding => "ui.renderer.encoding",
+            Self::Muxing => "ui.renderer.muxing",
+        }
+    }
 }
 
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
@@ -363,6 +395,17 @@ impl ReplayRendererPanel {
         let seek = cx.new(|_| seek_slider(0));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         let zoom = cx.new(|_| zoom_slider());
+        let speed_select = cx.new(|cx| {
+            let ladder = SearchableVec::new((0..SPEEDS.len()).map(SpeedItem).collect::<Vec<_>>());
+            SelectState::new(ladder, Some(IndexPath::new(speed_index(DEFAULT_SPEED))), window, cx).searchable(false)
+        });
+        let speed_subscription = cx.subscribe_in(&speed_select, window, |this, _state, event, window, cx| {
+            // `Confirm(None)` is the cleared case, which this control cannot
+            // produce: it is not cleanable and always holds a speed.
+            let SelectEvent::Confirm(Some(index)) = event else { return };
+            let Some(speed) = SPEEDS.get(*index).copied() else { return };
+            this.set_speed(speed, window, cx);
+        });
         let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
         let event_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
@@ -436,6 +479,8 @@ impl ReplayRendererPanel {
             _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
+            speed_select,
+            _speed_select: Some(speed_subscription),
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
@@ -461,6 +506,17 @@ impl ReplayRendererPanel {
         let seek = cx.new(|_| seek_slider(clocks.len().saturating_sub(1)));
         let seek_subscription = cx.subscribe_in(&seek, window, Self::on_seek);
         let zoom = cx.new(|_| zoom_slider());
+        let speed_select = cx.new(|cx| {
+            let ladder = SearchableVec::new((0..SPEEDS.len()).map(SpeedItem).collect::<Vec<_>>());
+            SelectState::new(ladder, Some(IndexPath::new(speed_index(DEFAULT_SPEED))), window, cx).searchable(false)
+        });
+        let speed_subscription = cx.subscribe_in(&speed_select, window, |this, _state, event, window, cx| {
+            // `Confirm(None)` is the cleared case, which this control cannot
+            // produce: it is not cleanable and always holds a speed.
+            let SelectEvent::Confirm(Some(index)) = event else { return };
+            let Some(speed) = SPEEDS.get(*index).copied() else { return };
+            this.set_speed(speed, window, cx);
+        });
         let zoom_subscription = cx.subscribe_in(&zoom, window, Self::on_zoom);
         let event_search =
             cx.new(|cx| InputState::new(window, cx).placeholder(t!("ui.replay.timeline_search_hint").into_owned()));
@@ -543,6 +599,8 @@ impl ReplayRendererPanel {
             _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
+            speed_select,
+            _speed_select: Some(speed_subscription),
             seek,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
@@ -735,6 +793,59 @@ impl ReplayRendererPanel {
                         .h(anchor.1 - handle.1)
                         .bg(gpui_kit::rgb(0xFFFF64)),
                 )
+                .into_any_element(),
+        )
+    }
+
+    /// How far an export has got, over the video.
+    ///
+    /// Over it rather than in the transport, because the transport is a row
+    /// of controls that are all refused while one runs, and a number tucked
+    /// in among them is not where a reader looks to see how long is left.
+    fn export_overlay(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let progress = self.export?;
+        let theme = cx.theme();
+        let body = v_flex()
+            .w(px(300.))
+            .gap_1()
+            .px_3()
+            .py_2()
+            .rounded(theme.radius)
+            .bg(theme.background.opacity(0.85))
+            .border_1()
+            .border_color(theme.border);
+
+        let body = if progress.total == 0 {
+            // Nothing to measure against yet: the encoder is still starting.
+            body.child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(Spinner::new())
+                    .child(div().text_xs().child(t!("ui.renderer.preparing_export").into_owned())),
+            )
+        } else {
+            let done = progress.done.min(progress.total) as f32 / progress.total as f32;
+            body.child(div().text_xs().child(format!(
+                "{} ({}/{})",
+                t!(progress.stage.label()),
+                progress.done,
+                progress.total
+            )))
+            .child(Progress::new("replay-renderer-export-progress").value(done * 100.0))
+        };
+
+        Some(
+            div()
+                .id("replay-renderer-export-overlay")
+                .test_support()
+                .absolute()
+                .top_2()
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(body)
                 .into_any_element(),
         )
     }
@@ -1463,7 +1574,7 @@ impl ReplayRendererPanel {
         };
 
         self.export_failure = None;
-        self.export = Some(ExportProgress { done: 0, total: frames.len() as u64 });
+        self.export = Some(ExportProgress { done: 0, total: frames.len() as u64, stage: ExportStage::Encoding });
         self.playing = false;
         cx.notify();
 
@@ -1588,6 +1699,10 @@ impl ReplayRendererPanel {
             return;
         }
         self.speed = speed;
+        // The keys walk the ladder too, so the dropdown is told rather than
+        // left showing the speed before last.
+        let index = speed_index(speed);
+        self.speed_select.update(cx, |state, cx| state.set_selected_value(&index, window, cx));
         // The ticker's interval is fixed when it starts, so a speed change
         // replaces it rather than waiting for the next tick.
         if self.playing {
@@ -2189,6 +2304,41 @@ impl ReplayRendererPanel {
         let Some(track) = self.track() else { return String::new() };
         mmss(track.elapsed_at(self.at))
     }
+
+    /// How long the battle runs for, as the clock would read at its end.
+    fn length_label(&self) -> String {
+        let Some(track) = self.track() else { return String::new() };
+        mmss(track.elapsed_at(track.len().saturating_sub(1)))
+    }
+
+    /// Where playback has reached and how much there is, which is what says
+    /// whether the end is near without reading the bar.
+    fn clock_and_length(&self) -> String {
+        let Some(_) = self.track() else { return String::new() };
+        format!("{} / {}", self.clock_label(), self.length_label())
+    }
+}
+
+/// One speed in the dropdown, named by where it sits in [`SPEEDS`] rather
+/// than by its own value: a float is a poor thing to match a selection on.
+#[derive(Clone)]
+pub(crate) struct SpeedItem(usize);
+
+impl gpui_kit::component::searchable_list::SearchableListItem for SpeedItem {
+    type Value = usize;
+
+    fn title(&self) -> SharedString {
+        SharedString::from(speed_label(SPEEDS[self.0]))
+    }
+
+    fn value(&self) -> &Self::Value {
+        &self.0
+    }
+}
+
+/// Where `speed` sits in the ladder.
+fn speed_index(speed: f32) -> usize {
+    SPEEDS.iter().position(|offered| (offered - speed).abs() < f32::EPSILON).unwrap_or_default()
 }
 
 /// A speed as the transport labels it: no trailing zero on a whole one.
@@ -2305,6 +2455,7 @@ impl Render for ReplayRendererPanel {
                                         .into(),
                                 ))
                         }))
+                        .children(self.export_overlay(cx))
                         .children(self.collab_overlay())
                         .children(self.rotation_handle_overlay(cx))
                         .children(self.consumable_reading(cx))
@@ -2435,16 +2586,10 @@ impl Render for ReplayRendererPanel {
             .child(
                 div()
                     .flex_none()
-                    .w(if self.export.is_some() { EXPORT_WIDTH } else { CLOCK_WIDTH })
+                    .w(CLOCK_WIDTH)
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    // While an export runs it says how far it has got rather
-                    // than where playback is: the transport is held and the
-                    // clock would sit still.
-                    .child(match self.export {
-                        Some(progress) => format!("{} / {}", progress.done, progress.total),
-                        None => self.clock_label(),
-                    }),
+                    .child(self.clock_and_length()),
             )
             .children(self.export_failure.as_ref().map(|reason| {
                 div()
@@ -2467,19 +2612,14 @@ impl Render for ReplayRendererPanel {
                     ),
             )
             .child(crate::ui::rule_v(cx))
-            .children(SPEEDS.map(|speed| {
-                let chosen = (self.speed - speed).abs() < f32::EPSILON;
-                crate::ui::selectable(
-                    ("replay-renderer-speed", (speed * 10.0) as usize),
-                    chosen,
-                    Button::new(("replay-renderer-speed-button", (speed * 10.0) as usize))
-                        .label(speed_label(speed))
-                        .compact()
-                        .disabled(!ready)
-                        .selected(chosen)
-                        .on_click(cx.listener(move |this, _event, window, cx| this.set_speed(speed, window, cx))),
-                )
-            }));
+            .child(
+                crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                    Select::new(&self.speed_select)
+                        .id("replay-renderer-speed")
+                        .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
+                        .small(),
+                ),
+            );
 
         v_flex()
             .id("replay-renderer")
@@ -2493,11 +2633,11 @@ impl Render for ReplayRendererPanel {
     }
 }
 
-/// Room for "MM:SS" without the transport shifting as it counts.
-const CLOCK_WIDTH: Pixels = px(44.);
+/// Room for "MM:SS / MM:SS" without the transport shifting as it counts.
+const CLOCK_WIDTH: Pixels = px(88.);
 
-/// Room for an export's frame count, which is wider than a clock.
-const EXPORT_WIDTH: Pixels = px(86.);
+/// Room for the widest speed the ladder offers.
+const SPEED_WIDTH: Pixels = px(72.);
 
 /// How wide a battle-start or battle-end mark is drawn on the seek bar.
 const TICK_WIDTH: Pixels = px(1.5);
@@ -2930,8 +3070,11 @@ fn encode_track(
     for (index, commands) in frames.iter().enumerate() {
         let image = drawing.render(commands);
         encoder.submit_frame(&image).map_err(|err| err.to_string())?;
-        let _ = progress.unbounded_send(ExportProgress { done: index as u64 + 1, total });
+        let _ = progress.unbounded_send(ExportProgress { done: index as u64 + 1, total, stage: ExportStage::Encoding });
     }
+    // Said before rather than after, because finishing is the part that
+    // takes a while with nothing else to show for it.
+    let _ = progress.unbounded_send(ExportProgress { done: total, total, stage: ExportStage::Muxing });
     encoder.finish_submitted().map_err(|err| err.to_string())
 }
 
@@ -5445,6 +5588,99 @@ mod tests {
         // viewer is told to draw it again.
         window.update(cx, |panel, _window, cx| panel.set_at(1, cx)).expect("the window is open");
         assert_eq!(told.get(), 1, "a step backwards asks for the hull again");
+    }
+
+    /// The clock says where playback is and how long the battle runs, so
+    /// the end is visible without reading the bar.
+    #[gpui_kit::test]
+    fn the_clock_says_where_playback_is_and_how_long_there_is(cx: &mut TestAppContext) {
+        // Half-second frames over a minute of recording.
+        let clocks: Vec<f32> = (0..120).map(|frame| frame as f32 * 0.5).collect();
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(clocks, window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                // The battle starts forty seconds into the recording, so the
+                // clock counts from there and so does the length.
+                panel.set_battle_window(40.0, None);
+                assert_eq!(panel.clock_label(), "00:00", "the loading screen is not minus forty");
+                assert_eq!(panel.length_label(), "00:19", "and the battle runs to the end of the track");
+                assert_eq!(panel.clock_and_length(), "00:00 / 00:19");
+
+                panel.set_at(100, cx);
+                assert_eq!(panel.clock_and_length(), "00:10 / 00:19", "the length does not move with playback");
+            })
+            .expect("the window is open");
+    }
+
+    /// The speed keys walk the ladder, and the dropdown follows them rather
+    /// than being left showing the speed before last.
+    #[gpui_kit::test]
+    fn the_speed_dropdown_follows_the_keys(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                assert_eq!(panel.speed, super::DEFAULT_SPEED);
+                assert_eq!(
+                    panel.speed_select.read(cx).selected_value().copied(),
+                    Some(super::speed_index(super::DEFAULT_SPEED)),
+                    "the dropdown opens on the speed the viewport does"
+                );
+
+                panel.set_speed(5.0, window, cx);
+                assert_eq!(
+                    panel.speed_select.read(cx).selected_value().copied(),
+                    Some(super::speed_index(5.0)),
+                    "and follows a change made anywhere else"
+                );
+            })
+            .expect("the window is open");
+    }
+
+    /// An export says how far it has got over the video, and says which part
+    /// of the work is running: muxing comes after the last frame and takes a
+    /// noticeable while with nothing else to show for it.
+    #[gpui_kit::test]
+    fn an_export_reports_its_progress_over_the_video(cx: &mut TestAppContext) {
+        use super::ExportProgress;
+        use super::ExportStage;
+
+        cx.update(gpui_kit::init);
+        let panel = std::cell::RefCell::new(None);
+        let window = cx.open_window(size(px(900.), px(700.)), |window, cx| {
+            let view = cx.new(|cx| {
+                let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+                panel.seed_frame_for_test();
+                panel
+            });
+            *panel.borrow_mut() = Some(view.clone());
+            let view: gpui_kit::AnyView = view.into();
+            gpui_kit::component::Root::new(view, window, cx)
+        });
+        let panel = panel.borrow_mut().take().expect("the viewport was built inside the window");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-renderer-export-overlay").is_none(), "nothing is being exported");
+
+            panel.update(cx, |panel, cx| {
+                panel.export = Some(ExportProgress { done: 40, total: 100, stage: ExportStage::Encoding });
+                cx.notify();
+            });
+            window.render_frame(cx);
+            assert!(window.try_find("replay-renderer-export-overlay").is_some(), "the bar is over the video");
+        })
+        .expect("the window is open");
+
+        assert_eq!(ExportStage::Encoding.label(), "ui.renderer.encoding");
+        assert_eq!(ExportStage::Muxing.label(), "ui.renderer.muxing", "and the wait after the last frame is named");
     }
 
     /// A ping is shed only once its ripple has run out.

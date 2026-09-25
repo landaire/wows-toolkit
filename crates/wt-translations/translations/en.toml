@@ -1140,6 +1140,7 @@ next_event = "Next event (Shift+Right)"
 jump_to_end = "Jump to end"
 save_as_video = "Save as Video"
 copy_to_clipboard = "Render Video to Clipboard"
+speed = "Playback speed"
 
 [ui.renderer.annotations]
 title = "Drawing Tools"
