@@ -2478,14 +2478,12 @@ impl Render for ReplayRendererPanel {
         // end of it there is nothing further to step to.
         let has_previous = self.previous_event().is_some();
         let has_next = self.next_event().is_some();
-        let transport = h_flex()
+        let controls = h_flex()
             .flex_none()
             .gap_2()
             .items_center()
             .px_2()
-            .py_1()
-            .border_t_1()
-            .border_color(border)
+            .pb_1()
             .child(
                 Button::new("replay-renderer-jump-to-start")
                     .child(crate::icons::icon(crate::icons::SKIP_BACK))
@@ -2545,6 +2543,37 @@ impl Render for ReplayRendererPanel {
                     .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
                     .on_click(cx.listener(move |this, _event, window, cx| this.go_to(last_frame, window, cx))),
             )
+            .child(
+                div()
+                    .flex_none()
+                    .w(CLOCK_WIDTH)
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(self.clock_and_length()),
+            )
+            // Everything past here is not playback, so it sits at the far
+            // end rather than between the reader and the transport.
+            .child(div().flex_1().min_w(px(0.)))
+            .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS)))
+            .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
+            .child(
+                Button::new("replay-renderer-zoom-reset")
+                    .label(t!("ui.buttons.reset").into_owned())
+                    .compact()
+                    .disabled(!ready || self.view.is_whole_map())
+                    .on_click(
+                        cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
+                    ),
+            )
+            .child(crate::ui::rule_v(cx))
+            .child(
+                crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                    Select::new(&self.speed_select)
+                        .id("replay-renderer-speed")
+                        .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
+                        .small(),
+                ),
+            )
             .child(crate::ui::rule_v(cx))
             .child(
                 Button::new("replay-renderer-export")
@@ -2573,53 +2602,32 @@ impl Render for ReplayRendererPanel {
                     .disabled(!ready || self.export.is_some())
                     .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_to_clipboard(cx))),
-            )
-            .child(crate::ui::rule_v(cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .relative()
-                    .child(Slider::new(&self.seek).disabled(!ready))
-                    .children(self.battle_ticks()),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(CLOCK_WIDTH)
-                    .text_xs()
-                    .text_color(crate::theme::text_dim())
-                    .child(self.clock_and_length()),
-            )
+            );
+
+        // The scrubber has a row to itself, as a video player gives it: a
+        // bar sharing a row with a dozen controls is both hard to aim at and
+        // hard to read a position off.
+        let scrubber = div().id("replay-renderer-scrubber").test_support().flex_none().px_2().pt_1().child(
+            div().relative().w_full().child(Slider::new(&self.seek).disabled(!ready)).children(self.battle_ticks()),
+        );
+
+        let transport = v_flex()
+            .flex_none()
+            .border_t_1()
+            .border_color(border)
             .children(self.export_failure.as_ref().map(|reason| {
+                // A whole row, because a codec's complaint is a sentence and
+                // squeezing one between the controls pushes them about.
                 div()
-                    .flex_none()
+                    .px_2()
+                    .pt_1()
                     .text_xs()
                     .text_color(rgb(crate::theme::semantic().error))
                     .child(reason.clone())
                     .into_any_element()
             }))
-            .child(crate::ui::rule_v(cx))
-            .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS)))
-            .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
-            .child(
-                Button::new("replay-renderer-zoom-reset")
-                    .label(t!("ui.buttons.reset").into_owned())
-                    .compact()
-                    .disabled(!ready || self.view.is_whole_map())
-                    .on_click(
-                        cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
-                    ),
-            )
-            .child(crate::ui::rule_v(cx))
-            .child(
-                crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
-                    Select::new(&self.speed_select)
-                        .id("replay-renderer-speed")
-                        .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
-                        .small(),
-                ),
-            );
+            .child(scrubber)
+            .child(controls);
 
         v_flex()
             .id("replay-renderer")
@@ -5775,6 +5783,29 @@ mod controls {
             window.click("replay-renderer-play", cx);
             window.render_frame(cx);
             assert!(panel.read(cx).playing, "the play control starts playback");
+        })
+        .expect("the window is open");
+    }
+
+    /// The transport is two rows, with the scrubber above the controls, as
+    /// a video player lays them out: a bar sharing a row with a dozen
+    /// controls is both hard to aim at and hard to read a position off.
+    #[gpui_kit::test]
+    fn the_scrubber_has_a_row_above_the_controls(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..120).map(|frame| frame as f32 * 0.5).collect();
+        let (window, _panel) = viewport(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let scrubber = window.find("replay-renderer-scrubber").bounds();
+            let play = window.find("replay-renderer-play").bounds();
+
+            assert!(
+                scrubber.bottom() <= play.origin.y,
+                "the scrubber row ends before the controls begin: {scrubber:?} then {play:?}"
+            );
+            // And it is a row of its own, spanning far more than a control.
+            assert!(scrubber.size.width > play.size.width * 4., "{scrubber:?}");
         })
         .expect("the window is open");
     }
