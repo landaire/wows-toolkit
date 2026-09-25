@@ -2818,21 +2818,7 @@ fn hp_bar_color(fraction: f32) -> [u8; 3] {
 
 /// Convert HSV hue (0-360) to RGB with full saturation and value.
 /// Used for position trail rainbow coloring (240=blue → 0=red).
-fn hue_to_rgb(hue: f32) -> [u8; 3] {
-    let h = hue / 60.0;
-    let i = h.floor() as i32;
-    let f = h - i as f32;
-    let q = (1.0 - f) * 255.0;
-    let t = f * 255.0;
-    match i % 6 {
-        0 => [255, t as u8, 0],
-        1 => [q as u8, 255, 0],
-        2 => [0, 255, t as u8],
-        3 => [0, q as u8, 255],
-        4 => [t as u8, 0, 255],
-        _ => [255, 0, q as u8],
-    }
-}
+use crate::frame_track::hue_to_rgb;
 
 fn species_key(species: &Recognized<Species>) -> Option<String> {
     species.known().map(|s| s.name()).or_else(|| species.unknown().map(String::as_str)).map(String::from)
