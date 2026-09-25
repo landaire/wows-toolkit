@@ -295,9 +295,20 @@ kept so the next audit does not re-report them.
       either. The viewport picks ships out of the baked frame rather than
       out of what is drawn over it, so a placed one is never mistaken for a
       ship in the battle.
-      What remains of the ship annotation is its range circles, which are
-      read out of the ship's own game data rather than off the annotation,
-      and the chooser that assigns a ship to one.
+      A placed ship shows its ranges too. The split is that the annotation
+      decides which circles the reader asked for and what coefficients their
+      build applies, while the ranges themselves are read out of the ship's
+      own game data, which only a front end has: so
+      `geometry::ship_range_commands` takes ranges already resolved, and the
+      viewport resolves them through `Vehicle::resolve_ranges` as the frame
+      is drawn. A build's coefficient moves the ring and the figure beside
+      it together. `ShipConfigCircleKind::style` now holds the colour,
+      opacity and dashing that the renderer had inline at six places, so a
+      circle drawn for a ship in the battle and one drawn for a placed ship
+      cannot come out different colours.
+      What remains of the ship annotation is the chooser that assigns a ship
+      to one: until a ship is chosen there is nothing to read ranges from,
+      so the circles stay empty.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
