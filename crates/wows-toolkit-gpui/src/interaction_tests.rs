@@ -1763,6 +1763,50 @@ fn opening_the_palette_puts_its_search_field_on_screen(cx: &mut TestAppContext) 
     .expect("the test window stays open");
 }
 
+/// How many palettes are on screen.
+fn palettes_open(window: &gpui_kit::Window) -> usize {
+    gpui_kit::base::test_support::snapshots(window)
+        .iter()
+        .filter(|element| element.path().last() == Some(&gpui_kit::ElementId::from(PALETTE)))
+        .count()
+}
+
+/// The palette opens on the shortcuts the egui app takes: ctrl+p and ctrl+k,
+/// both without shift.
+#[gpui_kit::test]
+fn the_palette_opens_on_the_shortcut(cx: &mut TestAppContext) {
+    for shortcut in ["ctrl-p", "ctrl-k"] {
+        let (window, _app) = open_app_in_root(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_eq!(palettes_open(window), 0, "closed until {shortcut} is pressed");
+            window.press(shortcut, cx);
+            window.render_frame(cx);
+            assert_eq!(palettes_open(window), 1, "{shortcut} opens it");
+        })
+        .expect("the test window stays open");
+    }
+}
+
+/// Reaching for the palette while one is already up leaves one, not two.
+#[gpui_kit::test]
+fn the_palette_does_not_stack_on_itself(cx: &mut TestAppContext) {
+    let (window, app) = open_app_in_root(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        app.update(cx, |app, cx| app.open_palette(window, cx));
+        window.render_frame(cx);
+        assert_eq!(palettes_open(window), 1);
+
+        app.update(cx, |app, cx| app.open_palette(window, cx));
+        window.render_frame(cx);
+        assert_eq!(palettes_open(window), 1, "the second ask replaces the first rather than piling on it");
+    })
+    .expect("the test window stays open");
+}
+
 /// Confirming a palette entry does what the entry says.
 ///
 /// The dialog itself is the component library's; what this owns is the list

@@ -614,6 +614,13 @@ impl App {
 
     /// Opens the command palette over the window.
     pub(crate) fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // Reaching for the palette while one is already up must not stack a
+        // second over it. Closed rather than counted: a dialog can go by the
+        // Escape key or a click outside it without this hearing, so a flag
+        // saying whether one is open would eventually say the wrong thing
+        // and refuse to open the palette at all.
+        window.close_all_dialogs(cx);
+
         let palette = self.palette.clone();
         let entries = Rc::clone(&self.palette_entries);
         let owner = cx.weak_entity();
@@ -2297,9 +2304,8 @@ impl Render for App {
                 }
                 match (modifiers.shift, event.keystroke.key.as_str()) {
                     (true, "d") => this.toggle_debug_mode(cx),
-                    // Both of the two conventions, since the egui app answers
-                    // to ctrl+shift+p and every other application to ctrl+k.
-                    (true, "p") | (false, "k") => this.open_palette(window, cx),
+                    // Both, as the egui app takes both.
+                    (false, "p") | (false, "k") => this.open_palette(window, cx),
                     _ => {}
                 }
             }))
