@@ -139,6 +139,9 @@ pub struct ArmorViewerPane {
     /// gating the legend overlay exactly like the egui app's `any_ship_loaded`
     /// check (`ui/tab.rs`'s `tab.loaded_armor.is_some()`).
     ship_loaded: bool,
+    /// Hits a replay viewport asked for, waiting for the ship they belong on
+    /// to finish loading.
+    pending_hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
     /// The floating Armor Thickness legend's visibility/collapsed/position
     /// state; see the module doc and `legend.rs`.
     legend: LegendState,
@@ -207,6 +210,7 @@ impl ArmorViewerPane {
             bundle: BundleState::NotStarted,
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
+            pending_hits: Vec::new(),
             legend: LegendState::default(),
             unported_defaults: UnportedDefaults::default(),
             ship_load_generation: 0,
@@ -740,6 +744,29 @@ impl ArmorViewerPane {
         .detach();
     }
 
+    /// Shows `param_index`'s armor with the hits it had taken, for a replay
+    /// viewport that asked for one.
+    ///
+    /// The hits are held rather than drawn here: the viewport they belong on
+    /// only exists once the ship's armor has finished loading.
+    pub fn show_with_hits(
+        &mut self,
+        param_index: String,
+        display_name: String,
+        hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+        cx: &mut Context<Self>,
+    ) {
+        self.pending_hits = hits;
+        let active = self.dock.read(cx).active_viewport();
+        if is_ship_already_loaded(active.read(cx).loaded_param_index(), &param_index) {
+            // Already showing it, so only what it has taken has changed.
+            let hits = std::mem::take(&mut self.pending_hits);
+            active.update(cx, |view, cx| view.show_hits(hits, cx));
+            return;
+        }
+        self.start_ship_load(param_index, display_name, cx);
+    }
+
     fn start_ship_load(&mut self, param_index: String, display_name: String, cx: &mut Context<Self>) {
         let BundleState::Ready(bundle) = &self.bundle else {
             tracing::warn!("armor viewer: ship selected before ship assets finished loading");
@@ -801,6 +828,12 @@ impl ArmorViewerPane {
                     // selection for this (possibly new) ship.
                     viewport.set_reload_source(bundle, param_index, display_name.clone());
                     viewport.show_armor(Arc::new(armor), cx);
+                    // After the armor, because showing it starts the ship
+                    // again and would drop them.
+                    let hits = std::mem::take(&mut self.pending_hits);
+                    if !hits.is_empty() {
+                        viewport.show_hits(hits, cx);
+                    }
                 });
             }
             Err(e) => {

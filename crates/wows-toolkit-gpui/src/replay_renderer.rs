@@ -64,6 +64,7 @@ use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
 use wows_replay_insights::timeline::EventTone;
 use wows_replay_insights::timeline::KIND_COUNT;
+use wows_replay_insights::timeline::PreExtractedHit;
 use wows_replay_insights::timeline::TimelineEvent;
 use wows_replay_insights::timeline::TimelineFilter;
 use wows_replay_insights::timeline::format_timeline_event;
@@ -295,6 +296,10 @@ pub struct ReplayRendererPanel {
     /// What happened in the battle, once the second walk has read it. Empty
     /// until then, which is what leaves the event controls refused.
     events: Vec<TimelineEvent>,
+    /// What each ship took, from the same walk. Keyed by the entity the
+    /// frame's own ship commands carry, so a ship the reader points at is
+    /// looked up directly.
+    shots: HashMap<EntityId, wows_replay_insights::timeline::ShipShotTimeline>,
     _events: Option<Task<()>>,
     /// Set when a frame was asked for while one was still being drawn. The
     /// draw in flight starts another as it finishes, so what ends up on
@@ -319,11 +324,17 @@ pub struct ExportProgress {
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
 
 /// What the viewport asks of whoever is hosting it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub enum RendererEvent {
     /// Move this viewport into a window of its own. The dock cannot do that
     /// itself: it does not own the window list.
     PopOut,
+    /// Show a ship's armor with what it had taken by where playback is.
+    ///
+    /// The viewport owns neither the armor viewer nor the tab it sits in, so
+    /// it says which ship and hands over the hits rather than opening
+    /// anything itself.
+    ShowArmor { param_index: String, display_name: String, hits: Vec<PreExtractedHit> },
 }
 
 impl EventEmitter<RendererEvent> for ReplayRendererPanel {}
@@ -408,6 +419,7 @@ impl ReplayRendererPanel {
             viewer_team: None,
             events_read: false,
             events: Vec::new(),
+            shots: HashMap::new(),
             _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
@@ -513,6 +525,7 @@ impl ReplayRendererPanel {
             viewer_team: None,
             events_read: false,
             events: Vec::new(),
+            shots: HashMap::new(),
             _events: None,
             redraw_wanted: false,
             speed: DEFAULT_SPEED,
@@ -560,9 +573,10 @@ impl ReplayRendererPanel {
                 cx.background_spawn(async move { crate::minimap_preview::extract_events(&path, &game_data) }).await;
             let _ = this.update(cx, |this, cx| {
                 match read {
-                    Ok(read) => {
+                    Ok((read, shots)) => {
                         this.events = read.events;
                         this.viewer_team = read.viewer_team;
+                        this.shots = shots;
                         this.events_read = true;
                     }
                     // The viewport still plays; only the event controls are
@@ -898,6 +912,49 @@ impl ReplayRendererPanel {
             }
         }
         best.map(|(_, menu)| menu)
+    }
+
+    /// Which ship the menu's entity was in, and what it is called, when the
+    /// build knows.
+    ///
+    /// Read off the roster the frame already carries: a ship command says
+    /// who is in it but not which ship it is, and the roster says both.
+    fn armor_target(&self, entity_id: EntityId) -> Option<(String, String)> {
+        use wowsunpack::game_params::types::GameParamProvider as _;
+
+        let track = self.track()?;
+        let commands = track.frames.get(self.at)?;
+        let param_id = commands.iter().find_map(|command| {
+            let DrawCommand::TeamRoster { rows, .. } = command else { return None };
+            rows.iter().find(|row| row.entity_id == entity_id)?.ship_param_id
+        })?;
+        let loaded = self.game_data.as_ref()?.newest_loaded()?;
+        let param = loaded.provider().game_param_by_id(param_id)?;
+        Some((param.index().to_string(), param.name().to_string()))
+    }
+
+    /// What the menu's ship had taken by where playback is, for an armor
+    /// viewer to draw.
+    fn hits_so_far(&self, entity_id: EntityId) -> Vec<PreExtractedHit> {
+        let Some(timeline) = self.shots.get(&entity_id) else { return Vec::new() };
+        let Some(track) = self.track() else { return Vec::new() };
+        timeline.hits_through(GameClock(track.seconds_at(self.at))).to_vec()
+    }
+
+    /// Asks for an armor viewer on the ship the menu is open for.
+    pub(crate) fn show_armor(&mut self, entity_id: EntityId, cx: &mut Context<Self>) {
+        let Some((param_index, display_name)) = self.armor_target(entity_id) else { return };
+        cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: self.hits_so_far(entity_id) });
+        self.close_ship_menu(cx);
+    }
+
+    /// Whether the menu's ship has anything an armor viewer could show.
+    ///
+    /// Only a ship the battle recorded hits on, since the viewer's whole
+    /// point is where those landed.
+    pub(crate) fn has_armor_to_show(&self, entity_id: EntityId) -> bool {
+        self.shots.get(&entity_id).is_some_and(|timeline| !timeline.hits.is_empty())
+            && self.armor_target(entity_id).is_some()
     }
 
     /// Whether `player` has a trail drawn.
@@ -2467,6 +2524,16 @@ fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) ->
                                 owner.update(cx, |panel, cx| panel.set_trail_shown(&player, checked, cx));
                             })
                     })
+                    .children(view.has_armor_to_show(menu.entity_id).then(|| {
+                        let owner = owner.clone();
+                        let entity_id = menu.entity_id;
+                        Button::new("replay-renderer-ship-armor")
+                            .label(t!("ui.renderer.context.realtime_armor").into_owned())
+                            .compact()
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                owner.update(cx, |panel, cx| panel.show_armor(entity_id, cx));
+                            })
+                    }))
                     .child({
                         let owner = owner.clone();
                         let player = player.clone();
@@ -5248,6 +5315,36 @@ mod tests {
             })
             .collect();
         assert!(updates.is_empty(), "a ship with no game data behind it is not named: {updates:?}");
+    }
+
+    /// The armor item is offered only for a ship the battle recorded hits
+    /// on, since where those landed is the whole point of the viewer.
+    #[gpui_kit::test]
+    fn the_armor_item_is_offered_only_for_a_ship_that_was_hit(cx: &mut TestAppContext) {
+        use std::collections::BTreeMap;
+        use wows_replay_insights::timeline::ShipShotTimeline;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        let hit_ship = wows_replays::types::EntityId::from(7u32);
+        let untouched = wows_replays::types::EntityId::from(8u32);
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                assert!(!panel.has_armor_to_show(hit_ship), "before the battle has been read");
+
+                // A ship with a timeline but nothing in it was never hit.
+                panel.shots.insert(untouched, ShipShotTimeline { hits: Vec::new(), health_history: BTreeMap::new() });
+                assert!(!panel.has_armor_to_show(untouched), "a timeline with no hits is not an offer");
+
+                // Asking for one anyway is refused rather than opening an
+                // empty viewer: without game data there is no ship to load.
+                panel.show_armor(untouched, _cx);
+            })
+            .expect("the window is open");
     }
 
     /// A ping is shed only once its ripple has run out.

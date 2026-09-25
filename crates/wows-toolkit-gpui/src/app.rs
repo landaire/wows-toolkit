@@ -326,6 +326,16 @@ impl App {
         });
         // A column toggle or the listing's collapse is a preference, so the
         // tab says when one changed and the row is written here.
+        // A viewport asked for an armor viewer on one of the battle's
+        // ships: the tab it lives in is this view's to switch to.
+        let show_armor_requested = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
+            let crate::replay_inspector::view::ShowArmorRequested { param_index, display_name, hits } = event;
+            let (param_index, display_name, hits) = (param_index.clone(), display_name.clone(), hits.clone());
+            this.active_tab = AppTab::ArmorViewer;
+            this.armor_pane.update(cx, |pane, cx| pane.show_with_hits(param_index, display_name, hits, cx));
+            cx.notify();
+        });
+
         let replay_settings_changed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
             let ReplaySettingsChanged(settings) = event;
             let settings = settings.clone();
@@ -385,6 +395,7 @@ impl App {
             settings_scroll: ScrollHandle::new(),
             _subscriptions: vec![
                 subscription,
+                show_armor_requested,
                 replay_settings_changed,
                 wows_dir_edited,
                 proxy_edited,
