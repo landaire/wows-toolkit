@@ -191,7 +191,7 @@ kept so the next audit does not re-report them.
     cannot word a factor differently. The port hovers the whole strip rather
     than the label's own rectangle: the label is drawn into the frame by the
     renderer, so there is no element of its own to rest a pointer on.
-  - Three things are still absent, and each is a feature the port lacks the
+  - Two things are still absent, and each is a feature the port lacks the
     plumbing for rather than a control left unwired. What each needs first:
     - **Show Realtime Armor** from the per-ship menu. The egui app opens an
       armor viewer bound to a `RealtimeArmorBridge` that streams shot hits at
@@ -210,21 +210,22 @@ kept so the next audit does not re-report them.
       `RealtimeArmorBridge`. What is left is the drawing: somewhere on the
       hull to put those hits, and a way to open a viewer on a ship the
       renderer names.
-    - **Roster, consumable and build hover readouts.** A hover needs the
-      target to report where it drew each consumable icon, which it does now:
-      `ImageTarget::drawn_regions` records a `DrawnRegion` per icon, keyed to
-      the roster row it belongs to, so a front end can put a hover over one
-      without repeating the layout and drifting from it. The canvas is ready
-      too: renderers are kept per `SidePanelLayout`, a playback bake carries
-      the roster commands (their coordinates are fixed, so they do not depend
-      on the canvas), a viewport moves itself onto the wider canvas when a
-      layer asks for it, and the map's corner is no longer assumed.
-      What is actually missing is a reason for the rosters to appear at all.
-      The egui renderer has no toggle for them: they come from a saved
-      setting, and turn on by themselves for merged replays, which are "the
-      whole point of having alt perspectives". The port's viewport has
-      neither, so these hovers sit behind whichever is ported first. A gear
-      toggle instead would be an invention rather than parity.
+    - [done] **Team rosters, and reading a consumable by resting on it.** The
+      gear carries a Team Rosters switch, as the egui display settings do,
+      and the two clear each other because the rosters and the stats panel
+      want the same gutters. Turning it on is a wider canvas rather than
+      another layer, so the viewport moves itself onto the renderer for that
+      layout. `ImageTarget::drawn_regions` records a `DrawnRegion` per
+      consumable icon as it draws it, handed back with the frame it belongs
+      to, so a hover reads the row and icon off the roster command the frame
+      already holds rather than repeating the layout. What it reads is
+      `draw_command::consumable_lines`, which the egui tooltip reads too, so
+      the two cannot word a charge count differently.
+      Still absent is the player-build popover, which needs a build pipeline
+      the port does not have; a hover that could only ever say "build data
+      not available" would read as broken rather than as parity. The stats
+      panel has no switch either: its silhouettes are one of the loads a bake
+      skips to stay cheap, so it would draw an empty gutter.
     - **The annotation toolbar.** Peers' cursors and their pings are drawn
       now: `wt-collab-client` already tracked both, so the work was a
       `CollabLink` the viewport holds (inert without a session, and handed on
