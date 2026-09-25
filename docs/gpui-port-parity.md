@@ -279,9 +279,17 @@ kept so the next audit does not re-report them.
       `drawing::{annotation_bounds, bearing}` are shared, and the bearing
       keeps the convention a stored rotation already carries (zero up the
       map, growing anticlockwise) rather than a tidier one.
-      What remains is the undo the egui toolbar carries, and the ship
-      annotation, which is an icon and a set of range circles rather than a
-      shape and so needs the ship's own game data.
+      Undo is on the toolbar as it is on the egui one. `drawing::undo_plan`
+      works out what to send by id rather than by position: the list is
+      shared, so a peer adding or rubbing something out shifts every index
+      after it. The snapshot is restored exactly, which takes off anything
+      added since -- a peer's drawing included -- because that is what the
+      egui undo does when it sends its whole list back as a full sync. A
+      turn is snapshotted as the handle is taken hold of rather than when it
+      is let go, since a turn reaches the session as the pointer moves.
+      What remains is the ship annotation, which is an icon and a set of
+      range circles rather than a shape and so needs the ship's own game
+      data.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
