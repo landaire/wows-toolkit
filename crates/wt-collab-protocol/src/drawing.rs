@@ -324,6 +324,114 @@ pub fn nearest_within(annotations: &[Annotation], at: [f32; 2], reach: f32) -> O
         .map(|(index, _)| index)
 }
 
+/// How near a click has to be to pick something out.
+const PICK_REACH: f32 = 15.0;
+
+/// Moves `annotation` by `delta`, in minimap space.
+pub fn move_annotation(annotation: &mut Annotation, delta: [f32; 2]) {
+    let shift = |point: &mut [f32; 2]| {
+        point[0] += delta[0];
+        point[1] += delta[1];
+    };
+    match annotation {
+        Annotation::Ship { pos, .. } => shift(pos),
+        Annotation::FreehandStroke { points, .. } | Annotation::Arrow { points, .. } => {
+            points.iter_mut().for_each(shift)
+        }
+        Annotation::Line { start, end, .. } | Annotation::Measurement { start, end, .. } => {
+            shift(start);
+            shift(end);
+        }
+        Annotation::Circle { center, .. }
+        | Annotation::Rectangle { center, .. }
+        | Annotation::Triangle { center, .. } => shift(center),
+    }
+}
+
+/// Whether `annotation` has a bearing that can be turned.
+///
+/// A circle looks the same at every angle and a stroke carries its own
+/// bearing in its points, so neither takes a rotation.
+pub fn can_rotate(annotation: &Annotation) -> bool {
+    matches!(annotation, Annotation::Ship { .. } | Annotation::Rectangle { .. } | Annotation::Triangle { .. })
+}
+
+/// Turns `annotation` to face `angle`, if it is one that faces anywhere.
+pub fn rotate_annotation(annotation: &mut Annotation, angle: f32) {
+    match annotation {
+        Annotation::Ship { yaw, .. } => *yaw = angle,
+        Annotation::Rectangle { rotation, .. } | Annotation::Triangle { rotation, .. } => *rotation = angle,
+        _ => {}
+    }
+}
+
+/// What the reader has picked out to move or turn.
+///
+/// Indices into the session's own list, so a caller reads the annotations
+/// themselves from wherever it holds them.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Selection {
+    picked: Vec<usize>,
+}
+
+impl Selection {
+    /// Picks out whatever is under `at`, if anything is near enough.
+    ///
+    /// `add` is whether the reader is building a selection up rather than
+    /// replacing it, which is ctrl-click in both front ends. A click on
+    /// nothing clears the selection, unless they were adding to it.
+    pub fn click(&mut self, annotations: &[Annotation], at: [f32; 2], add: bool) {
+        let Some(found) = nearest_within(annotations, at, PICK_REACH) else {
+            if !add {
+                self.clear();
+            }
+            return;
+        };
+        if !add {
+            self.picked = vec![found];
+            return;
+        }
+        match self.picked.iter().position(|picked| *picked == found) {
+            Some(at) => {
+                self.picked.remove(at);
+            }
+            None => self.picked.push(found),
+        }
+    }
+
+    /// What is picked out, in the order it was picked.
+    pub fn picked(&self) -> &[usize] {
+        &self.picked
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.picked.is_empty()
+    }
+
+    /// The one thing picked out, when exactly one is.
+    ///
+    /// A rotation handle belongs to a single shape: turning several at once
+    /// about their own middles is not what a handle on one of them means.
+    pub fn single(&self) -> Option<usize> {
+        match self.picked.as_slice() {
+            [only] => Some(*only),
+            _ => None,
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.picked.clear();
+    }
+
+    /// Forgets anything picked out that is past the end of `annotations`.
+    ///
+    /// The session's list is shared, so another peer rubbing something out
+    /// can leave a selection pointing past the end of it.
+    pub fn retain_within(&mut self, annotations: &[Annotation]) {
+        self.picked.retain(|picked| *picked < annotations.len());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +448,99 @@ mod tests {
         drawing.handle(Stroke::Began { at: from }, &[]);
         drawing.handle(Stroke::Moved { at: to, straight: false }, &[]);
         drawing.handle(Stroke::Ended { at: to }, &[])
+    }
+
+    fn line(start: [f32; 2], end: [f32; 2]) -> Annotation {
+        Annotation::Line { start, end, color: WHITE, width: 2.0 }
+    }
+
+    /// Moving a shape moves every part of it, not just where it is anchored.
+    #[test]
+    fn moving_a_shape_moves_the_whole_of_it() {
+        let mut stroke =
+            Annotation::FreehandStroke { points: vec![[0.0, 0.0], [10.0, 10.0]], color: WHITE, width: 2.0 };
+        move_annotation(&mut stroke, [5.0, -5.0]);
+        let Annotation::FreehandStroke { points, .. } = &stroke else { panic!("still a stroke") };
+        assert_eq!(points, &vec![[5.0, -5.0], [15.0, 5.0]]);
+
+        let mut measurement = Annotation::Measurement { start: [0.0, 0.0], end: [10.0, 0.0], color: WHITE, width: 2.0 };
+        move_annotation(&mut measurement, [1.0, 2.0]);
+        let Annotation::Measurement { start, end, .. } = &measurement else { panic!("still a measurement") };
+        assert_eq!((*start, *end), ([1.0, 2.0], [11.0, 2.0]), "both ends, not just the first");
+    }
+
+    /// Only a shape with a bearing can be turned; the rest are left alone
+    /// rather than quietly gaining a rotation nothing draws.
+    #[test]
+    fn only_a_shape_with_a_bearing_turns() {
+        let mut rect = Annotation::Rectangle {
+            center: [0.0, 0.0],
+            half_size: [5.0, 5.0],
+            rotation: 0.0,
+            color: WHITE,
+            width: 2.0,
+            filled: false,
+        };
+        assert!(can_rotate(&rect));
+        rotate_annotation(&mut rect, 1.25);
+        let Annotation::Rectangle { rotation, .. } = &rect else { panic!("still a rectangle") };
+        assert_eq!(*rotation, 1.25);
+
+        let mut circle =
+            Annotation::Circle { center: [0.0, 0.0], radius: 5.0, color: WHITE, width: 2.0, filled: false };
+        assert!(!can_rotate(&circle));
+        rotate_annotation(&mut circle, 1.25);
+        assert!(matches!(circle, Annotation::Circle { .. }), "and it is untouched");
+    }
+
+    /// A click picks out what it landed on, and a click on open water lets
+    /// go of what was picked.
+    #[test]
+    fn a_click_picks_out_what_it_landed_on() {
+        let annotations = vec![line([0.0, 0.0], [100.0, 0.0]), line([0.0, 100.0], [100.0, 100.0])];
+        let mut picked = Selection::default();
+
+        picked.click(&annotations, [50.0, 2.0], false);
+        assert_eq!(picked.picked(), [0]);
+
+        picked.click(&annotations, [50.0, 98.0], false);
+        assert_eq!(picked.picked(), [1], "a plain click replaces rather than adds");
+
+        picked.click(&annotations, [50.0, 50.0], false);
+        assert!(picked.is_empty(), "and open water lets go");
+    }
+
+    /// Adding to a selection takes one in and out again, and a click on open
+    /// water while adding leaves what is picked alone.
+    #[test]
+    fn adding_to_a_selection_takes_one_in_and_out() {
+        let annotations = vec![line([0.0, 0.0], [100.0, 0.0]), line([0.0, 100.0], [100.0, 100.0])];
+        let mut picked = Selection::default();
+
+        picked.click(&annotations, [50.0, 2.0], true);
+        picked.click(&annotations, [50.0, 98.0], true);
+        assert_eq!(picked.picked(), [0, 1]);
+        assert_eq!(picked.single(), None, "two is not one");
+
+        picked.click(&annotations, [50.0, 2.0], true);
+        assert_eq!(picked.picked(), [1], "the second click lets that one go");
+        assert_eq!(picked.single(), Some(1));
+
+        picked.click(&annotations, [50.0, 50.0], true);
+        assert_eq!(picked.picked(), [1], "open water while adding changes nothing");
+    }
+
+    /// A peer rubbing something out cannot leave a selection pointing past
+    /// the end of the list.
+    #[test]
+    fn a_selection_does_not_outlive_what_it_picked() {
+        let annotations = vec![line([0.0, 0.0], [100.0, 0.0]), line([0.0, 100.0], [100.0, 100.0])];
+        let mut picked = Selection::default();
+        picked.click(&annotations, [50.0, 2.0], true);
+        picked.click(&annotations, [50.0, 98.0], true);
+
+        picked.retain_within(&annotations[..1]);
+        assert_eq!(picked.picked(), [0]);
     }
 
     /// A drag that went nowhere draws nothing, so a click with the line tool

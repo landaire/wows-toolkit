@@ -474,6 +474,28 @@ impl CollabLink {
         )));
     }
 
+    /// Replaces the annotation at `index` of [`Self::annotations`], keeping
+    /// the id the session knows it by.
+    ///
+    /// For a shape the reader has moved or turned: sending a new id would
+    /// leave the old one on everyone else's map beside the new one.
+    pub fn update_annotation(&self, index: usize, annotation: wt_collab_client::types::Annotation) {
+        let Some(tx) = &self.local_tx else { return };
+        let Some(state) = &self.state else { return };
+        let (id, owner) = {
+            let held = state.lock();
+            let Some(sync) = held.current_annotation_sync.as_ref() else { return };
+            let Some(id) = sync.ids.get(index).copied() else { return };
+            (id, sync.owners.get(index).copied().unwrap_or_default())
+        };
+        let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set {
+            board_id: None,
+            id,
+            annotation,
+            owner,
+        }));
+    }
+
     /// Takes the annotation at `index` of [`Self::annotations`] off the map.
     ///
     /// By index because that is what a hit test answers, and by id on the
