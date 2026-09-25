@@ -664,6 +664,11 @@ impl ReplayRendererPanel {
             self.renderer = Some(renderer);
             return;
         };
+        let trails = if self.options.show_trails {
+            wows_minimap_renderer::frame_track::trails_through(&track.frames[..=self.at.min(track.len() - 1)])
+        } else {
+            Vec::new()
+        };
         let Some(commands) = track.frames.get(self.at).cloned() else {
             self.renderer = Some(renderer);
             return;
@@ -676,8 +681,11 @@ impl ReplayRendererPanel {
             let drawn = cx.background_spawn(async move {
                 // Filtered here rather than at bake time: a toggle then costs
                 // one frame rather than another walk of the battle.
-                let shown: Vec<DrawCommand> = commands
+                // Trails first, so they sit behind everything, as the egui
+                // renderer draws them.
+                let shown: Vec<DrawCommand> = trails
                     .into_iter()
+                    .chain(commands)
                     .filter(|command| should_draw_command(command, &options, show_dead_ships))
                     .collect();
                 let image = {
@@ -1702,6 +1710,12 @@ const TOGGLES: &[Toggle] = &[
         label: "ui.renderer.settings.buff_counters",
         read: |o, _| o.show_buffs,
         write: |o, _, v| o.show_buffs = v,
+    },
+    Toggle {
+        id: "renderer-opt-trails",
+        label: "ui.renderer.settings.heat_trail",
+        read: |o, _| o.show_trails,
+        write: |o, _, v| o.show_trails = v,
     },
     Toggle {
         id: "renderer-opt-ship-ranges",

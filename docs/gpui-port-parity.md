@@ -168,9 +168,10 @@ kept so the next audit does not re-report them.
     display toggle rather than another walk of the battle, and the reader can
     change whose ranges they are looking at afterwards. Trails are still left
     out of the bake on purpose: a trail command carries every point so far, so
-    one per frame would cost the square of the track's length. Deriving a
-    trail at raster time from the track's own ship positions is the way to
-    close that one.
+    one per frame would cost the square of the track's length. They are
+    derived instead, by `trails_through` reading the ship positions already in
+    the frames behind the one being drawn, which costs one walk of them and is
+    what Heat Trail switches on.
   - Still absent, in rough order of what would be missed:
     the per-ship context menu (trail and range toggles, Show Realtime Armor),
     which also wants right-click picking of a ship on the drawn map;
