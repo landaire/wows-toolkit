@@ -27,6 +27,7 @@ use wows_minimap_renderer::frame_track::bake_options;
 use wows_minimap_renderer::frame_track::build_frame_track;
 use wows_minimap_renderer::preview::PreviewRenderer;
 use wows_minimap_renderer::renderer::MinimapRenderer;
+use wows_replay_insights::timeline::ShipShotTimeline;
 use wows_replay_insights::timeline::TimelineExtractionResult;
 use wows_replays::ReplayFile;
 use wows_replays::game_constants::GameConstants;
@@ -253,7 +254,10 @@ pub struct BakedTrack {
 pub fn extract_events(
     path: &std::path::Path,
     game_data: &crate::replay_inspector::GameDataCache,
-) -> Result<TimelineExtractionResult, PreviewError> {
+) -> Result<
+    (TimelineExtractionResult, std::collections::HashMap<wows_replays::types::EntityId, ShipShotTimeline>),
+    PreviewError,
+> {
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
@@ -262,7 +266,9 @@ pub fn extract_events(
     let loaded =
         game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
 
-    Ok(wows_replay_insights::timeline::extract_timeline_events(
+    // One walk for both: the shots come off the same scan as the events, so
+    // reading them costs nothing beyond keeping them.
+    Ok(wows_replay_insights::timeline::extract_timeline_and_shots(
         &replay,
         loaded.provider(),
         Some(loaded.base_constants()),

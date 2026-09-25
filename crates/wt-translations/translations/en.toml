@@ -1127,6 +1127,7 @@ disable_all = "Disable All"
 disable_other_ranges = "Disable All Other Ranges"
 enable_all_ranges = "Enable All Ships' Ranges"
 show_armor = "Show Realtime Armor"
+realtime_armor = "Show Realtime Armor"
 
 [ui.renderer.controls]
 jump_to_start = "Jump to start"

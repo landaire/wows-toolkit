@@ -201,6 +201,16 @@ enum OpenTarget {
 
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 
+/// A viewport asked for an armor viewer on one of the battle's ships, with
+/// what that ship had taken by where playback is.
+pub struct ShowArmorRequested {
+    pub param_index: String,
+    pub display_name: String,
+    pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+}
+
+impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}
+
 impl ReplayInspectorView {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let browser = cx.new(ReplayBrowser::new);
@@ -604,7 +614,8 @@ impl ReplayInspectorView {
         }
     }
 
-    /// Answers a viewport that asked for a window of its own.
+    /// Answers a viewport that asked for a window of its own, or for an
+    /// armor viewer on one of the battle's ships.
     fn on_renderer_event(
         &mut self,
         panel: &Entity<ReplayRendererPanel>,
@@ -612,8 +623,16 @@ impl ReplayInspectorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let RendererEvent::PopOut = event;
-        self.pop_out_renderer(panel.clone(), window, cx);
+        match event {
+            RendererEvent::PopOut => self.pop_out_renderer(panel.clone(), window, cx),
+            // Passed further up: the armor viewer is another tab, which this
+            // view does not own either.
+            RendererEvent::ShowArmor { param_index, display_name, hits } => cx.emit(ShowArmorRequested {
+                param_index: param_index.clone(),
+                display_name: display_name.clone(),
+                hits: hits.clone(),
+            }),
+        }
     }
 
     /// Moves a viewport out of the dock and into a window of its own.

@@ -512,6 +512,9 @@ pub struct ViewportView {
     pub(crate) popover_scroll: ScrollHandle,
     /// The currently hovered armor plate from CPU picking, if any.
     hovered: Option<HoverInfo>,
+    /// What this ship had taken when a replay viewport asked for it, drawn
+    /// over the hull as the overlays are.
+    hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
     /// The camera orbits currently drawn, so a pointer resting on one can be
     /// told which it is. Rebuilt with the overlay that drew them.
     ring_hovers: Vec<camera_rings::RingHover>,
@@ -690,6 +693,7 @@ impl ViewportView {
             expanded_parts: HashSet::new(),
             popover_scroll: ScrollHandle::new(),
             hovered: None,
+            hits: Vec::new(),
             ring_hovers: Vec::new(),
             hovered_ring: None,
             hover_highlight: None,
@@ -1111,6 +1115,25 @@ impl ViewportView {
         self.camera_rings = settings;
         self.reupload_current_armor(cx);
         cx.notify();
+    }
+
+    /// Draws what the ship had taken, replacing whatever was drawn before.
+    ///
+    /// A step backwards in playback cannot be undrawn hit by hit, so a
+    /// viewport hands over the whole set each time rather than what changed.
+    pub(crate) fn show_hits(
+        &mut self,
+        hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+        cx: &mut Context<Self>,
+    ) {
+        self.hits = hits;
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// How many hits are drawn on the hull.
+    pub(crate) fn hits_drawn(&self) -> usize {
+        self.hits.len()
     }
 
     /// Whether the openings in the armor are marked, and how many there
@@ -2204,6 +2227,13 @@ impl ViewportView {
                 self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
             }
             self.ring_hovers = hovers;
+        }
+
+        if !self.hits.is_empty() {
+            let (vertices, indices) = super::hits::build_markers(&self.hits, armor.center(), Some(armor.bounds));
+            if !indices.is_empty() {
+                self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+            }
         }
 
         // Scaled to the camera so a marker stays readable as the view pulls

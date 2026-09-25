@@ -44,6 +44,7 @@ pub(crate) mod camo;
 pub mod catalog;
 pub mod dock;
 mod gaps;
+mod hits;
 pub mod legend;
 mod load_ship;
 pub mod pane;
