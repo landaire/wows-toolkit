@@ -1028,3 +1028,73 @@ mod state_tests {
         assert!(!failed_state().should_start());
     }
 }
+
+impl ShipShotTimeline {
+    /// The hits this ship had taken by `clock`.
+    ///
+    /// The scan that fills a timeline walks the battle forwards, so the hits
+    /// are in clock order and the answer is a prefix of them.
+    pub fn hits_through(&self, clock: GameClock) -> &[PreExtractedHit] {
+        let taken = self.hits.partition_point(|hit| hit.clock.seconds() <= clock.seconds());
+        &self.hits[..taken]
+    }
+
+    /// The hits that landed between `after` and `clock`.
+    ///
+    /// What a viewport that has already drawn everything up to `after` needs,
+    /// so a step forward costs the hits it gained rather than all of them.
+    pub fn hits_between(&self, after: GameClock, clock: GameClock) -> &[PreExtractedHit] {
+        let from = self.hits.partition_point(|hit| hit.clock.seconds() <= after.seconds());
+        let to = self.hits.partition_point(|hit| hit.clock.seconds() <= clock.seconds());
+        self.hits.get(from..to.max(from)).unwrap_or(&[])
+    }
+
+    /// What this ship's health was at `clock`.
+    ///
+    /// The last reading at or before it, because health is only recorded when
+    /// it changes. `None` before the first reading, which is a ship that has
+    /// not been seen yet.
+    pub fn health_at(&self, clock: GameClock) -> Option<&HealthSnapshot> {
+        self.health_history.range(..=clock).next_back().map(|(_, snapshot)| snapshot)
+    }
+}
+
+#[cfg(test)]
+mod shot_timeline_tests {
+    use super::*;
+
+    fn timeline() -> ShipShotTimeline {
+        let mut health_history = std::collections::BTreeMap::new();
+        health_history.insert(GameClock(10.0), HealthSnapshot { health: 15400.0, max_health: 15400.0 });
+        health_history.insert(GameClock(40.0), HealthSnapshot { health: 10358.0, max_health: 15400.0 });
+        ShipShotTimeline { hits: Vec::new(), health_history }
+    }
+
+    /// Health reads the last value at or before the clock, because it is only
+    /// recorded when it changes.
+    #[test]
+    fn health_holds_its_last_reading() {
+        let timeline = timeline();
+        assert!(timeline.health_at(GameClock(5.0)).is_none(), "before the ship was seen");
+        assert_eq!(timeline.health_at(GameClock(10.0)).expect("a reading").health, 15400.0);
+        assert_eq!(timeline.health_at(GameClock(39.0)).expect("a reading").health, 15400.0, "still the old one");
+        assert_eq!(timeline.health_at(GameClock(40.0)).expect("a reading").health, 10358.0);
+        assert_eq!(timeline.health_at(GameClock(600.0)).expect("a reading").health, 10358.0, "and it holds");
+    }
+
+    /// An empty timeline answers without reaching past its own end.
+    #[test]
+    fn an_empty_timeline_has_nothing_to_give() {
+        let timeline = timeline();
+        assert!(timeline.hits_through(GameClock(100.0)).is_empty());
+        assert!(timeline.hits_between(GameClock(0.0), GameClock(100.0)).is_empty());
+    }
+
+    /// Asking for a window that runs backwards gives nothing rather than
+    /// panicking on the slice.
+    #[test]
+    fn a_backwards_window_is_empty() {
+        let timeline = timeline();
+        assert!(timeline.hits_between(GameClock(90.0), GameClock(10.0)).is_empty());
+    }
+}
