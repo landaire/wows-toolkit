@@ -199,7 +199,11 @@ kept so the next audit does not re-report them.
       pipeline at all -- no `ResolvedShotHit`, no bridge, no per-ship shot
       timeline -- so this is that pipeline, not a button.
       `extract_timeline_and_shots` already hands back the per-ship timelines,
-      so the data half is shared and ready.
+      and `ShipShotTimeline` now answers the questions a viewport asks of one
+      -- the hits taken by a clock, the hits gained since the last one, and
+      the health at a clock -- so the data half is shared and ready. What is
+      missing is the armor viewer's side: somewhere to put the hits, and a
+      way to open a viewer on a ship the renderer names.
     - **Roster, consumable and build hover readouts.** Two things stand in
       the way. A hover needs the target to report where it drew each
       consumable icon, and `ImageTarget` reports no geometry beyond the map's
