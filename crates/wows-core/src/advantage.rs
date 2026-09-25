@@ -69,8 +69,7 @@ impl TeamState {
     }
 }
 
-// Re-export from wowsunpack so existing `crate::advantage::AdvantageLevel` paths keep working.
-pub use wowsunpack::game_types::AdvantageLevel;
+pub use crate::game_types::AdvantageLevel;
 
 /// Which team has the advantage, if any.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -4,6 +4,7 @@
 //! consumers (e.g. a wasm viewer) can depend on just the types without pulling
 //! in the heavy unpacking/parsing stack that lives in `wowsunpack`.
 
+pub mod advantage;
 pub mod game_constants;
 pub mod game_types;
 pub mod recognized;

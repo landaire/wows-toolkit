@@ -20,6 +20,12 @@ pub fn failed(message: impl Into<gpui_kit::SharedString>, window: &mut Window, c
     window.push_notification(Notification::error(message), cx);
 }
 
+/// Something worth reading that nobody asked for, such as what a jump landed
+/// on.
+pub fn info(message: impl Into<gpui_kit::SharedString>, window: &mut Window, cx: &mut gpui_kit::App) {
+    window.push_notification(Notification::info(message), cx);
+}
+
 /// Something is wrong but nothing was lost.
 pub fn warn(message: impl Into<gpui_kit::SharedString>, window: &mut Window, cx: &mut gpui_kit::App) {
     window.push_notification(Notification::warning(message), cx);

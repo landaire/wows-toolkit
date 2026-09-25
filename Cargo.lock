@@ -14677,6 +14677,7 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "wows-battle-world",
+ "wows-core",
  "wows-data-mgr",
  "wows-replay-insights",
  "wows_replays",
