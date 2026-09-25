@@ -240,6 +240,8 @@ pub struct ReplayRendererPanel {
     /// looked like then. Kept so a move is one update at the end rather than
     /// one per pixel of the drag.
     moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
+    /// The shape being turned by its handle, and what it was before.
+    turning: Option<(usize, wt_collab_client::types::Annotation)>,
     /// The redraw a running session needs, held only while there is one.
     _collab_tick: Option<Task<()>>,
     /// Kept so the viewport can build the canvas a layer asks for: the team
@@ -356,6 +358,7 @@ impl ReplayRendererPanel {
             pointer_at: None,
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
+            turning: None,
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -441,6 +444,7 @@ impl ReplayRendererPanel {
             pointer_at: None,
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
+            turning: None,
             _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
@@ -615,6 +619,40 @@ impl ReplayRendererPanel {
             )
             .with_priority(1)
             .into_any_element(),
+        )
+    }
+
+    /// The handle a picked shape is turned by, drawn over the frame.
+    ///
+    /// An element rather than part of the frame: it is a control rather than
+    /// something drawn on the map, so it keeps its size at every zoom and
+    /// stays out of an exported video.
+    fn rotation_handle_overlay(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let index = self.picked.single()?;
+        let annotation = self.collab.annotations().get(index)?.clone();
+        if !wt_collab_client::drawing::can_rotate(&annotation) {
+            return None;
+        }
+        let (handle, anchor) = self.rotation_handle(&annotation)?;
+        let _ = cx;
+        Some(
+            div()
+                .absolute()
+                .left(handle.0 - HANDLE_RADIUS)
+                .top(handle.1 - HANDLE_RADIUS)
+                .child(div().size(HANDLE_RADIUS * 2.0).rounded_full().bg(gpui_kit::rgb(0xFFFF64)))
+                // The stem back to the shape, so the handle reads as
+                // belonging to it rather than floating over the map.
+                .child(
+                    div()
+                        .absolute()
+                        .left(HANDLE_RADIUS)
+                        .top(HANDLE_RADIUS)
+                        .w(px(1.))
+                        .h(anchor.1 - handle.1)
+                        .bg(gpui_kit::rgb(0xFFFF64)),
+                )
+                .into_any_element(),
         )
     }
 
@@ -1581,6 +1619,11 @@ impl ReplayRendererPanel {
             self.stroke(Stroke::Began { at: [at.0, at.1] }, cx);
             return;
         }
+        // The handle over a picked shape turns it rather than moving it.
+        if let Some((index, annotation)) = self.handle_under(event.position) {
+            self.turning = Some((index, annotation));
+            return;
+        }
         // Nor is one dragging something they have already picked out.
         if !self.picked.is_empty() {
             self.moving = Some(([at.0, at.1], self.collab.annotations()));
@@ -1590,6 +1633,39 @@ impl ReplayRendererPanel {
             return;
         }
         self.dragging = Some(event.position);
+    }
+
+    /// The shape whose rotation handle is under `position`, if the pointer
+    /// is on one.
+    ///
+    /// A handle belongs to a single picked shape that has a bearing at all:
+    /// turning several at once about their own middles is not what one
+    /// handle means, and a circle looks the same at every angle.
+    fn handle_under(&self, position: Point<Pixels>) -> Option<(usize, wt_collab_client::types::Annotation)> {
+        let index = self.picked.single()?;
+        let annotation = self.collab.annotations().get(index)?.clone();
+        if !wt_collab_client::drawing::can_rotate(&annotation) {
+            return None;
+        }
+        let (handle, _) = self.rotation_handle(&annotation)?;
+        let reach = HANDLE_RADIUS + px(8.);
+        let away = (position.x - handle.0).as_f32().hypot((position.y - handle.1).as_f32());
+        (away < reach.as_f32()).then_some((index, annotation))
+    }
+
+    /// Where a shape's rotation handle sits in the element, and where the
+    /// line to it starts.
+    ///
+    /// Above the shape by a fixed number of pixels rather than a map
+    /// distance, so the handle stays the same size and the same reach away
+    /// at every zoom, as the egui renderer's does.
+    fn rotation_handle(
+        &self,
+        annotation: &wt_collab_client::types::Annotation,
+    ) -> Option<((Pixels, Pixels), (Pixels, Pixels))> {
+        let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(annotation);
+        let anchor = self.element_point(((left + right) / 2.0, top))?;
+        Some(((anchor.0, anchor.1 - HANDLE_DISTANCE), anchor))
     }
 
     /// Takes up `tool`, dropping whatever was half-drawn.
@@ -1623,6 +1699,34 @@ impl ReplayRendererPanel {
         if self.update_consumable_hover(event.position) {
             cx.notify();
         }
+        self.pointer_at = self.map_point(event.position).map(|(x, y)| [x, y]);
+
+        // A handle being held turns the shape it belongs to.
+        if let Some((index, before)) = self.turning.clone()
+            && event.dragging()
+            && let Some(at) = self.pointer_at
+        {
+            let [left, top, right, bottom] = wt_collab_client::drawing::annotation_bounds(&before);
+            let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
+            let mut turned = before;
+            wt_collab_client::drawing::rotate_annotation(&mut turned, wt_collab_client::drawing::bearing(middle, at));
+            self.collab.update_annotation(index, turned);
+            self.draw_current(cx);
+            cx.notify();
+            return;
+        }
+
+        // A tool in hand builds its shape from the drag rather than panning.
+        if self.has_tool() {
+            if self.drawing.is_drawing()
+                && event.dragging()
+                && let Some(at) = self.pointer_at
+            {
+                self.stroke(Stroke::Moved { at, straight: event.modifiers.shift }, cx);
+            }
+            return;
+        }
+
         let Some(from) = self.dragging else { return };
         if !event.dragging() {
             self.dragging = None;
@@ -1641,6 +1745,14 @@ impl ReplayRendererPanel {
             && let Some(at) = self.map_point(event.position)
         {
             self.stroke(Stroke::Ended { at: [at.0, at.1] }, cx);
+            return;
+        }
+        // A turn, like a move, is one update at the end.
+        if let Some((index, _)) = self.turning.take() {
+            if let Some(annotation) = self.collab.annotations().get(index) {
+                self.collab.update_annotation(index, annotation.clone());
+            }
+            cx.notify();
             return;
         }
         // The session hears about a move once, when it is over, rather than
@@ -1894,6 +2006,7 @@ impl Render for ReplayRendererPanel {
                                 ))
                         }))
                         .children(self.collab_overlay())
+                        .children(self.rotation_handle_overlay(cx))
                         .children(self.consumable_reading(cx))
                         .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_ping))
                         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
@@ -2253,6 +2366,11 @@ fn per_ship_allows(
         _ => true,
     }
 }
+
+/// How big a rotation handle is drawn, and how far above the shape it sits.
+/// The egui renderer's own figures, in screen pixels at any zoom.
+const HANDLE_RADIUS: Pixels = px(5.);
+const HANDLE_DISTANCE: Pixels = px(25.);
 
 /// What a tool draws with until the reader says otherwise: the white and the
 /// width the egui toolbar opens on.
@@ -4570,6 +4688,66 @@ mod tests {
         };
         assert_eq!(*id, 4242, "under the id the session already knows");
         assert!((center[0] - 240.0).abs() < 1.0 && (center[1] - 230.0).abs() < 1.0, "moved by the drag: {center:?}");
+    }
+
+    /// A part-drawn shape reaches the frame, so a reader dragging sees what
+    /// they are about to get rather than nothing until they let go.
+    #[gpui_kit::test]
+    fn a_part_drawn_shape_reaches_the_frame(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::MouseButton;
+        use gpui_kit::MouseDownEvent;
+        use gpui_kit::MouseMoveEvent;
+        use gpui_kit::point;
+        use wt_collab_client::drawing::Tool;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.take_up(Tool::Circle { filled: false }, cx);
+                let from = panel.element_point((200.0, 200.0)).expect("a point the viewport is showing");
+                let to = panel.element_point((240.0, 200.0)).expect("and another");
+
+                panel.on_drag_start(
+                    &MouseDownEvent {
+                        button: MouseButton::Left,
+                        position: point(from.0, from.1),
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    },
+                    window,
+                    cx,
+                );
+                panel.on_drag_move(
+                    &MouseMoveEvent {
+                        position: point(to.0, to.1),
+                        pressed_button: Some(MouseButton::Left),
+                        modifiers: Modifiers::default(),
+                    },
+                    window,
+                    cx,
+                );
+
+                assert_eq!(panel.pointer_at.map(|at| at[0].round()), Some(240.0), "the pointer is followed");
+                let part_drawn = panel.drawing.in_progress(panel.pointer_at.expect("the pointer is on the map"));
+                let Some(wt_collab_client::types::Annotation::Circle { center, radius, .. }) = part_drawn else {
+                    panic!("a circle is part-drawn, got {part_drawn:?}");
+                };
+                assert!((center[0] - 200.0).abs() < 1.0 && (center[1] - 200.0).abs() < 1.0, "{center:?}");
+                assert!((radius - 40.0).abs() < 1.0, "as wide as the drag has gone: {radius}");
+            })
+            .expect("the window is open");
     }
 
     /// A ping is shed only once its ripple has run out.
