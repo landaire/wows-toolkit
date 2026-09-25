@@ -24,6 +24,7 @@ use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::h_flex;
+use gpui_kit::component::menu::ContextMenuExt;
 use gpui_kit::component::menu::DropdownMenu;
 use gpui_kit::component::menu::PopupMenu;
 use gpui_kit::component::menu::PopupMenuItem;
@@ -1288,6 +1289,12 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     let background = if layout.selected { Some(cx.theme().selection) } else { crate::ui::stripe(ix, cx) };
     let entity = layout.entity.clone();
     let select_entity = layout.entity.clone();
+    // The same actions the row's own button offers, on the row itself: a
+    // right-click is where a reader reaches for them, and aiming at one
+    // column's small button to get at a player is a poor substitute.
+    let menu_entity = layout.entity.clone();
+    let menu_row = ActionsMenuData::from_row(row);
+    let debug = layout.debug;
     h_flex()
         .id(ix)
         .w_full()
@@ -1314,6 +1321,9 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
+        // Wraps the row, so it goes last: the menu is a container around
+        // what it belongs to rather than a style on it.
+        .context_menu(move |menu, _window, _cx| build_actions_menu(menu, &menu_row, debug, menu_entity.clone()))
         .into_any_element()
 }
 
@@ -1343,6 +1353,9 @@ impl Render for PlayerTable {
         // section's total all read the same number.
         self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.width_of(*col)).collect();
         let scroll_width: f32 = scroll_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
+        // Where the scrolling portion starts, which is where its own bar
+        // belongs: the sticky columns to its left do not move.
+        let sticky_width: f32 = sticky_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
 
         let header = h_flex()
             .w_full()
@@ -1415,5 +1428,17 @@ impl Render for PlayerTable {
             }))
             .child(v_flex().size_full().child(header).child(list(self.list_state.clone(), render_item).flex_1()))
             .child(Scrollbar::vertical(&self.list_state))
+            // Along the bottom of the scrolling columns. Without it there is
+            // nothing to say the table runs past its right edge, and a
+            // reader has no reason to look.
+            .child(
+                div()
+                    .absolute()
+                    .left(px(sticky_width))
+                    .right_0()
+                    .bottom_0()
+                    .h(px(12.))
+                    .child(Scrollbar::horizontal(&self.h_scroll)),
+            )
     }
 }
