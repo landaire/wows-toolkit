@@ -17,6 +17,7 @@ use image::RgbImage;
 use wows_battle_world::ids::ShotTracking;
 use wows_battle_world::merged::MergedReplays;
 use wows_minimap_renderer::assets;
+use wows_minimap_renderer::config::RenderOptions;
 use wows_minimap_renderer::draw_command::DrawCommand;
 use wows_minimap_renderer::frame_track::PREVIEW_FPS;
 use wows_minimap_renderer::frame_track::SNAPSHOTS_PER_SECOND;
@@ -229,6 +230,7 @@ pub fn bake_track(
     cancel: &AtomicBool,
     budget: usize,
     frame_interval: f32,
+    options: RenderOptions,
 ) -> Result<BakedTrack, PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
@@ -245,7 +247,7 @@ pub fn bake_track(
         assets::load_map_info(&map_name, vfs).ok_or_else(|| PreviewError::NoMapInfo { map: map_name.clone() })?;
 
     let session_version = Version::from_client_exe(&replay.meta.clientVersionFromExe);
-    let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, bake_options());
+    let mut renderer = MinimapRenderer::new(Some(map_info), provider, session_version, options);
     renderer.set_fonts(assets::load_game_fonts(vfs));
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version))?;
 

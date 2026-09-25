@@ -1405,6 +1405,34 @@ const SCROLL_LINE: Pixels = px(20.);
 /// rate, so the wheel feels the same in both.
 const ZOOM_PER_PIXEL: f32 = 0.01;
 
+/// What a playback viewport bakes.
+///
+/// The hover preview's set plus every ship's range circles. They are per-frame
+/// and small, so keeping them costs little, and a viewport that did not bake
+/// them could not offer them at all. Trails are still left out: a trail
+/// command carries every point so far, so baking one per frame would cost the
+/// square of the track's length.
+fn playback_options() -> RenderOptions {
+    RenderOptions {
+        show_ship_config: true,
+        // Every ship's, so the reader can choose whose to look at afterwards
+        // rather than re-baking to change their mind.
+        ship_config_visibility: wows_minimap_renderer::draw_command::ShipConfigVisibility::Filtered(
+            std::sync::Arc::new(|_entity| {
+                Some(wows_minimap_renderer::draw_command::ShipConfigFilter {
+                    detection: true,
+                    main_battery: true,
+                    secondary_battery: true,
+                    torpedo: true,
+                    radar: true,
+                    hydro: true,
+                })
+            }),
+        ),
+        ..wows_minimap_renderer::frame_track::bake_options()
+    }
+}
+
 /// Why a battle could not be played back.
 #[derive(Debug, thiserror::Error)]
 pub enum RenderError {
@@ -1419,7 +1447,8 @@ fn bake(
     game_data: &GameDataCache,
     cancel: &AtomicBool,
 ) -> Result<(Track, SharedPreviewRenderer), RenderError> {
-    let baked = crate::minimap_preview::bake_track(path, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL)?;
+    let baked =
+        crate::minimap_preview::bake_track(path, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL, playback_options())?;
     let track = Track {
         frames: baked.frames,
         clocks: baked.clocks,
@@ -1673,6 +1702,12 @@ const TOGGLES: &[Toggle] = &[
         label: "ui.renderer.settings.buff_counters",
         read: |o, _| o.show_buffs,
         write: |o, _, v| o.show_buffs = v,
+    },
+    Toggle {
+        id: "renderer-opt-ship-ranges",
+        label: "ui.renderer.settings.ship_ranges",
+        read: |o, _| o.show_ship_config,
+        write: |o, _, v| o.show_ship_config = v,
     },
     Toggle {
         id: "renderer-opt-advantage",
@@ -2683,6 +2718,55 @@ mod tests {
             });
         })
         .expect("the window is open");
+    }
+
+    /// A playback bake carries every ship's range circles, so the viewport can
+    /// offer them without walking the battle again.
+    ///
+    /// The bake reads a real replay against a real game install. Run with:
+    ///
+    /// ```text
+    /// WOWS_RENDERER_TEST_REPLAY="E:\WoWs\World_of_Warships\replays\some.wowsreplay"     /// WOWS_RENDERER_TEST_GAME_DIR="E:\WoWs\World_of_Warships"     /// cargo test -p wows-toolkit-gpui -- --ignored a_playback_bake_carries_every_ships_ranges
+    /// ```
+    #[test]
+    #[ignore = "needs a local game install and a replay; see the doc comment for the run command"]
+    fn a_playback_bake_carries_every_ships_ranges() {
+        use std::collections::HashSet;
+        use std::path::PathBuf;
+        use std::sync::atomic::AtomicBool;
+
+        use super::DrawCommand;
+        use crate::replay_inspector::GameDataCache;
+
+        let replay = std::env::var("WOWS_RENDERER_TEST_REPLAY").expect("set WOWS_RENDERER_TEST_REPLAY to a replay");
+        let game_dir =
+            std::env::var("WOWS_RENDERER_TEST_GAME_DIR").expect("set WOWS_RENDERER_TEST_GAME_DIR to a WoWs install");
+
+        let cache = GameDataCache::new(PathBuf::from(game_dir));
+        let cancel = AtomicBool::new(false);
+        let baked = crate::minimap_preview::bake_track(
+            std::path::Path::new(&replay),
+            &cache,
+            &cancel,
+            super::TRACK_BUDGET,
+            super::BAKE_INTERVAL,
+            super::playback_options(),
+        )
+        .expect("the replay bakes");
+
+        let mut ships: HashSet<String> = HashSet::new();
+        let mut kinds: HashSet<String> = HashSet::new();
+        for commands in &baked.frames {
+            for command in commands {
+                if let DrawCommand::ShipConfigCircle { player_name, kind, .. } = command {
+                    ships.insert(player_name.clone());
+                    kinds.insert(format!("{kind:?}"));
+                }
+            }
+        }
+
+        assert!(ships.len() > 1, "every ship's ranges are baked, not just the replay owner's: got {ships:?}");
+        assert!(kinds.len() > 1, "and more than one kind of range: got {kinds:?}");
     }
 
     /// Playing advances through the track and stops at the end rather than

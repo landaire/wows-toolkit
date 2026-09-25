@@ -164,8 +164,16 @@ kept so the next audit does not re-report them.
     back to software rather than failing the export. Leaving the pre-battle
     phase out trims the frames before the battle's own start rather than
     re-baking.
+  - A playback viewport bakes every ship's range circles, so Ship Ranges is a
+    display toggle rather than another walk of the battle, and the reader can
+    change whose ranges they are looking at afterwards. Trails are still left
+    out of the bake on purpose: a trail command carries every point so far, so
+    one per frame would cost the square of the track's length. Deriving a
+    trail at raster time from the track's own ship positions is the way to
+    close that one.
   - Still absent, in rough order of what would be missed:
-    the per-ship context menu (trail and range toggles, Show Realtime Armor);
+    the per-ship context menu (trail and range toggles, Show Realtime Armor),
+    which also wants right-click picking of a ship on the drawn map;
     the roster, consumable, build and team-advantage hover readouts; the
     annotation toolbar and everything collab draws over the map (pings,
     remote cursors, shared annotations). The stats panel, team rosters, ship
