@@ -354,6 +354,7 @@
       },
       "clan": "--LC-",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -390,6 +391,7 @@
       "heal_count": 3,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "patoux62",
@@ -737,6 +739,7 @@
         "num_tier_1_skills": 4,
         "skill_points": 20
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     },
@@ -1064,6 +1067,7 @@
       },
       "clan": "-4-2-",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -1109,6 +1113,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "GoNeCraZyOne",
@@ -1491,6 +1496,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 465
     },
@@ -1837,6 +1843,7 @@
       },
       "clan": "FSO",
       "clan_color_rgb": 13427940,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -1891,6 +1898,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Qeran",
@@ -2233,6 +2241,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 10
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     },
@@ -2529,6 +2538,7 @@
       },
       "clan": "-AD-",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -2574,6 +2584,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Kune",
@@ -2841,6 +2852,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 347
     },
@@ -3178,6 +3190,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -3223,6 +3236,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "AcidCat",
@@ -3523,6 +3537,7 @@
         "num_tier_1_skills": 4,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 268
     },
@@ -3814,6 +3829,7 @@
       },
       "clan": "_UCR_",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -3857,6 +3873,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "lagislut",
@@ -3974,6 +3991,7 @@
         "num_tier_1_skills": 5,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 279
     },
@@ -4301,6 +4319,7 @@
       },
       "clan": "WOPA",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -4346,6 +4365,7 @@
       "heal_count": 0,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "SirTomes",
@@ -4617,6 +4637,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 14
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 749
     },
@@ -4920,6 +4941,7 @@
       },
       "clan": "ROEL",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -4956,6 +4978,7 @@
       "heal_count": 3,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Misudumi07",
@@ -5225,6 +5248,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 500
     },
@@ -5518,6 +5542,7 @@
       },
       "clan": "W33DS",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -5554,6 +5579,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "lauri_steel",
@@ -5770,6 +5796,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 16
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 334
     },
@@ -6046,6 +6073,7 @@
       },
       "clan": "WH1TE",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -6082,6 +6110,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "medobedo12",
@@ -6244,6 +6273,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 11
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 204
     },
@@ -6573,6 +6603,7 @@
       },
       "clan": "1DFV",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -6600,6 +6631,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Aequitas1974",
@@ -6913,6 +6945,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 523
     },
@@ -7203,6 +7236,7 @@
       },
       "clan": "ORAC",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -7246,6 +7280,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "ORAC_1",
@@ -7536,6 +7571,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 21
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     },
@@ -7878,6 +7914,7 @@
       },
       "clan": "NGUL",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -7923,6 +7960,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "VenetheGreat",
@@ -8226,6 +8264,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 195
     },
@@ -8554,6 +8593,7 @@
       },
       "clan": "N_SM",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -8590,6 +8630,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "coco_736",
@@ -8854,6 +8895,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 286
     },
@@ -9158,6 +9200,7 @@
       },
       "clan": "FVTP",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -9185,6 +9228,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Eisen_03",
@@ -9521,6 +9565,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     },
@@ -9834,6 +9879,7 @@
       },
       "clan": "LEEUW",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -9870,6 +9916,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": true,
       "is_test_ship": false,
       "name": "tommanl",
@@ -10296,6 +10343,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     },
@@ -10623,6 +10671,7 @@
       },
       "clan": "SAKUR",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -10668,6 +10717,7 @@
       "heal_count": 4,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Origami__",
@@ -11046,6 +11096,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 796
     },
@@ -11350,6 +11401,7 @@
       },
       "clan": "I401",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -11377,6 +11429,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "xsavierz",
@@ -11863,6 +11916,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 18
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     },
@@ -12162,6 +12216,7 @@
       },
       "clan": "_B_B",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -12214,6 +12269,7 @@
       "heal_count": 0,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "wivlis_2021",
@@ -12542,6 +12598,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 18
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 827
     },
@@ -12845,6 +12902,7 @@
       },
       "clan": "-ITA_",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -12881,6 +12939,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "dimapoet1984",
@@ -13111,6 +13170,7 @@
         "num_tier_1_skills": 6,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 286
     },
@@ -13430,6 +13490,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -13457,6 +13518,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "IvanDok2",
@@ -13868,6 +13930,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 13
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 753
     },
@@ -14180,6 +14243,7 @@
       },
       "clan": "TR_UA",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -14225,6 +14289,7 @@
       "heal_count": 0,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Veloraptos",
@@ -14487,6 +14552,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 19
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 178
     },
@@ -14800,6 +14866,7 @@
       },
       "clan": "-EUL-",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -14836,6 +14903,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "nanfangzhainan",
@@ -15248,6 +15316,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 706
     },
@@ -15556,6 +15625,7 @@
       },
       "clan": "SCROT",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 4,
@@ -15592,6 +15662,7 @@
       "heal_count": 4,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "ARCHAL_1939",
@@ -15939,6 +16010,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": true,
       "team_id": 1,
       "time_lived_secs": null
     }

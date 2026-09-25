@@ -310,6 +310,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -355,6 +356,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "what_are_you_looking_for",
@@ -625,6 +627,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 8
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 481
     },
@@ -903,6 +906,7 @@
       },
       "clan": "BB-TH",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -930,6 +934,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Tee_gaface",
@@ -1134,6 +1139,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 9
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 275
     },
@@ -1430,6 +1436,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -1475,6 +1482,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "shj220",
@@ -1785,6 +1793,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 11
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 746
     },
@@ -2077,6 +2086,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -2113,6 +2123,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Kleivn",
@@ -2420,6 +2431,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 10
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 629
     },
@@ -2691,6 +2703,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -2736,6 +2749,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Azzam12314",
@@ -2967,6 +2981,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 3
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 366
     },
@@ -3308,6 +3323,7 @@
       },
       "clan": "HAC",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -3362,6 +3378,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Hunterkiller67",
@@ -3736,6 +3753,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 16
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 793
     },
@@ -4068,6 +4086,7 @@
       },
       "clan": "VNR",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -4113,6 +4132,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "JuliusMozartius",
@@ -4311,6 +4331,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 10
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 276
     },
@@ -4639,6 +4660,7 @@
       },
       "clan": "KMC",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -4677,6 +4699,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "kanata2199",
@@ -5100,6 +5123,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 739
     },
@@ -5433,6 +5457,7 @@
       },
       "clan": "TJP",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -5469,6 +5494,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Minami_TT",
@@ -5733,6 +5759,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 297
     },
@@ -6060,6 +6087,7 @@
       },
       "clan": "RSTC",
       "clan_color_rgb": 12511165,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -6105,6 +6133,7 @@
       "heal_count": 0,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": true,
       "name": "Mikanagi_Chiyako",
@@ -6537,6 +6566,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 19
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -6864,6 +6894,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -6909,6 +6940,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "kagetuki_kun",
@@ -7181,6 +7213,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 12
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 489
     },
@@ -7477,6 +7510,7 @@
       },
       "clan": "AMNS",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -7522,6 +7556,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "dobauijenii",
@@ -7835,6 +7870,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 18
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 284
     },
@@ -8164,6 +8200,7 @@
       },
       "clan": "-AWE-",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 10,
@@ -8191,6 +8228,7 @@
       "heal_count": 7,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": true,
       "is_test_ship": false,
       "name": "kommander1",
@@ -8561,6 +8599,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 21
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 518
     },
@@ -8879,6 +8918,7 @@
       },
       "clan": "NGC7",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -8915,6 +8955,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Sakurajima_Mayi_1202",
@@ -9333,6 +9374,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 10
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 1022
     },
@@ -9615,6 +9657,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -9651,6 +9694,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "baiye_ntd",
@@ -10055,6 +10099,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 6
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 701
     },
@@ -10338,6 +10383,7 @@
       },
       "clan": "-GN-",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -10383,6 +10429,7 @@
       "heal_count": 4,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "The_peanuts_angel",
@@ -10850,6 +10897,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 13
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 814
     },
@@ -11137,6 +11185,7 @@
       },
       "clan": "TJP",
       "clan_color_rgb": 13408614,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -11173,6 +11222,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "MK_Formidable",
@@ -11485,6 +11535,7 @@
         "num_tier_1_skills": 2,
         "skill_points": 15
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 582
     },
@@ -11789,6 +11840,7 @@
       },
       "clan": "WORL",
       "clan_color_rgb": 11776947,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -11816,6 +11868,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "miku_official_",
@@ -12194,6 +12247,7 @@
         "num_tier_1_skills": 3,
         "skill_points": 15
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 632
     },
@@ -12471,6 +12525,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 0,
@@ -12498,6 +12553,7 @@
       "heal_count": null,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "fadli_2005",
@@ -12890,6 +12946,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 8
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -13170,6 +13227,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -13224,6 +13282,7 @@
       "heal_count": 3,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "xiaoyaoxiaoyang",
@@ -13669,6 +13728,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 1
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     },
@@ -13977,6 +14037,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 1,
@@ -14013,6 +14074,7 @@
       "heal_count": 1,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "AhnDante",
@@ -14291,6 +14353,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 10
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 549
     },
@@ -14603,6 +14666,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -14648,6 +14712,7 @@
       "heal_count": 2,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "ELEN_2026",
@@ -14952,6 +15017,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 18
       },
+      "survived": false,
       "team_id": 1,
       "time_lived_secs": 489
     },
@@ -15264,6 +15330,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 3,
@@ -15309,6 +15376,7 @@
       "heal_count": 4,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "KhrlNdya",
@@ -15575,6 +15643,7 @@
         "num_tier_1_skills": 1,
         "skill_points": 8
       },
+      "survived": false,
       "team_id": 0,
       "time_lived_secs": 848
     },
@@ -15898,6 +15967,7 @@
       },
       "clan": "",
       "clan_color_rgb": 0,
+      "connection": null,
       "consumables": [
         {
           "charges_used": 2,
@@ -15934,6 +16004,7 @@
       "heal_count": 3,
       "is_abuser": false,
       "is_bot": false,
+      "is_hidden_profile": false,
       "is_self": false,
       "is_test_ship": false,
       "name": "Harry_J_2026",
@@ -16166,6 +16237,7 @@
         "num_tier_1_skills": 6,
         "skill_points": 8
       },
+      "survived": true,
       "team_id": 0,
       "time_lived_secs": null
     }
