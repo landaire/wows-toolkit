@@ -215,10 +215,22 @@ kept so the next audit does not re-report them.
       A hit whose victim was not being watched is refused rather than placed
       from a guess, for the same reason. The egui viewer delegates its own
       two rotations to it, so there is one copy of the conventions.
-      What is left is the rest of the drawing: the per-ship shot timelines on
-      the viewport (the same single walk that reads the events can return
-      them), an item on the per-ship menu, opening a viewer on the ship it
-      names, and the markers themselves.
+      The rest is in. The walk that reads the battle's events returns the
+      per-ship shot timelines from the same pass, so keeping them costs
+      nothing. The per-ship menu offers Show Realtime Armor, but only for a
+      ship the battle recorded hits on, since where those landed is the whole
+      point of the viewer; which ship it was comes off the roster the frame
+      already carries, because a ship command says who is in it but not which
+      ship it is. Choosing it hands the hits up to the tab the armor viewer
+      lives in, since the viewport owns neither. Each hit is drawn as a small
+      cross of three bars rather than a sphere: it reads at any angle, it is
+      not mistaken for part of the ship, and its size is a setting. Every hit
+      is the one colour, because what kind of hit it was is the penetration
+      checker's answer and colouring them here would claim something the
+      markers do not know. A hit the viewport cannot place is left unmarked.
+      What remains is the rest of the egui window's furniture: the shot log
+      beside the hull, the health readout, and following playback live rather
+      than taking the hits as they stand when the viewer opens.
     - [done] **Team rosters, and reading a consumable by resting on it.** The
       gear carries a Team Rosters switch, as the egui display settings do,
       and the two clear each other because the rosters and the stats panel
