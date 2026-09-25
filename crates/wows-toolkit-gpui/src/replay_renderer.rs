@@ -2575,6 +2575,7 @@ fn render_options_popover(
                 .w(px(240.))
                 .max_h(px(420.))
                 .id("replay-renderer-settings-list")
+                .test_support()
                 .overflow_y_scroll()
                 .p_2()
                 .child(v_flex().gap_0().children(TOGGLES.iter().map(|toggle| {
@@ -2847,6 +2848,7 @@ fn timeline_rows(
 
     div()
         .id("replay-renderer-timeline-list")
+        .test_support()
         .max_h(px(400.))
         .overflow_y_scroll()
         .child(v_flex().gap_0().children(rows.into_iter().enumerate().map(|(index, row)| {
@@ -2854,6 +2856,7 @@ fn timeline_rows(
             let at = row.at;
             div()
                 .id(("replay-renderer-timeline-row", index))
+                .test_support()
                 .flex()
                 .gap_2()
                 .px_1()
@@ -4094,5 +4097,176 @@ mod tests {
 
         link.drop_stale_pings(Duration::from_millis(100));
         assert!(state.lock().pings.is_empty(), "and it goes once it has run out");
+    }
+}
+
+/// Driving the viewport's own controls, rather than the methods behind them.
+///
+/// The rest of this file's tests call a handler directly, which says nothing
+/// about whether the control that calls it is on screen, enabled, or wired to
+/// it at all. These click the elements, so a control that stops being drawn
+/// or starts refusing a click fails a test rather than only being noticed by
+/// someone looking at it.
+#[cfg(test)]
+mod controls {
+    use super::ReplayRendererPanel;
+    use gpui_kit::AppContext;
+    use gpui_kit::Entity;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::WindowHandle;
+    use gpui_kit::component::Root;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt;
+
+    /// A viewport mounted the way production mounts it, wide enough that the
+    /// whole transport is in one frame: the harness refuses to click what it
+    /// cannot see.
+    fn viewport(cx: &mut TestAppContext, clocks: Vec<f32>) -> (WindowHandle<Root>, Entity<ReplayRendererPanel>) {
+        cx.update(gpui_kit::init);
+        let panel = std::cell::RefCell::new(None);
+        let window = cx.open_window(size(px(1400.), px(700.)), |window, cx| {
+            let view = cx.new(|cx| ReplayRendererPanel::ready_for_test(clocks, window, cx));
+            *panel.borrow_mut() = Some(view.clone());
+            let view: gpui_kit::AnyView = view.into();
+            Root::new(view, window, cx)
+        });
+        let panel = panel.borrow_mut().take().expect("the viewport was built inside the window");
+        (window, panel)
+    }
+
+    /// Every transport control is drawn, takes a click, and does what it says.
+    #[gpui_kit::test]
+    fn the_transport_controls_are_drawn_and_take_a_click(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..120).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            for control in [
+                "replay-renderer-play",
+                "replay-renderer-jump-to-start",
+                "replay-renderer-jump-to-end",
+                "replay-renderer-back-10s",
+                "replay-renderer-forward-10s",
+                "replay-renderer-previous-event",
+                "replay-renderer-next-event",
+                "replay-renderer-settings-toggle",
+                "replay-renderer-timeline-toggle",
+                "replay-renderer-export",
+                "replay-renderer-pop-out",
+                "replay-renderer-zoom-reset",
+            ] {
+                assert!(window.try_find(control).is_some(), "{control} is drawn");
+            }
+
+            window.click("replay-renderer-jump-to-end", cx);
+            window.render_frame(cx);
+            assert_eq!(panel.read(cx).at, 119, "the end of the track");
+
+            window.click("replay-renderer-back-10s", cx);
+            window.render_frame(cx);
+            assert_eq!(panel.read(cx).at, 99, "ten seconds is twenty half-second frames");
+
+            window.click("replay-renderer-jump-to-start", cx);
+            window.render_frame(cx);
+            assert_eq!(panel.read(cx).at, 0);
+
+            window.click("replay-renderer-play", cx);
+            window.render_frame(cx);
+            assert!(panel.read(cx).playing, "the play control starts playback");
+        })
+        .expect("the window is open");
+    }
+
+    /// The event controls refuse a click until the battle has been read,
+    /// rather than doing nothing and looking broken.
+    #[gpui_kit::test]
+    fn the_event_controls_refuse_until_the_battle_has_been_read(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..120).map(|frame| frame as f32 * 0.5).collect();
+        let (window, panel) = viewport(cx, clocks);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            // A refused button is drawn but takes no focus, which is how the
+            // harness sees one: gpui-kit's Button publishes no disabled flag,
+            // so a refused control reads as having no focus state at all
+            // while one that would take a click reads as unfocused.
+            assert!(window.find("replay-renderer-next-event").focused().is_none(), "refused while nothing is read");
+            assert!(window.find("replay-renderer-previous-event").focused().is_none());
+
+            window.click("replay-renderer-next-event", cx);
+            window.render_frame(cx);
+            assert_eq!(panel.read(cx).at, 0, "and clicking it moves nothing");
+
+            panel.update(cx, |panel, cx| {
+                panel.seed_events_for_test(&[10.0, 30.0]);
+                panel.events_read = true;
+                cx.notify();
+            });
+            window.render_frame(cx);
+            assert!(
+                window.find("replay-renderer-next-event").focused().is_some(),
+                "and takes a click once the battle is read"
+            );
+
+            window.click("replay-renderer-next-event", cx);
+            window.render_frame(cx);
+            assert!(panel.read(cx).at > 0, "which steps to the first thing that happened");
+        })
+        .expect("the window is open");
+    }
+
+    /// The gear opens, and the switches inside it reach what the viewport
+    /// draws.
+    #[gpui_kit::test]
+    fn the_gear_opens_and_its_switches_reach_the_frame(cx: &mut TestAppContext) {
+        let (window, panel) = viewport(cx, vec![0.0, 30.0]);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("renderer-opt-team-rosters").is_none(), "nothing is open yet");
+
+            window.click("replay-renderer-settings-toggle", cx);
+            window.render_frame(cx);
+
+            for switch in ["renderer-opt-hp-bars", "renderer-opt-trails", "renderer-opt-team-rosters"] {
+                assert!(window.try_find(switch).is_some(), "{switch} is in the open gear");
+            }
+
+            let was = panel.read(cx).options.show_hp_bars;
+            window.click("renderer-opt-hp-bars", cx);
+            window.render_frame(cx);
+            assert_eq!(panel.read(cx).options.show_hp_bars, !was, "the switch reaches what is drawn");
+        })
+        .expect("the window is open");
+    }
+
+    /// The timeline opens and lists what happened.
+    #[gpui_kit::test]
+    fn the_timeline_opens_and_lists_the_battle(cx: &mut TestAppContext) {
+        let clocks: Vec<f32> = (0..120).map(|frame| frame as f32 * 0.5).collect();
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(700.)), |window, cx| {
+            let view = cx.new(|cx| {
+                let mut panel = ReplayRendererPanel::ready_for_test(clocks, window, cx);
+                panel.seed_events_for_test(&[10.0, 30.0, 50.0]);
+                panel.events_read = true;
+                panel
+            });
+            let view: gpui_kit::AnyView = view.into();
+            Root::new(view, window, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+
+            window.click("replay-renderer-timeline-toggle", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("replay-renderer-timeline-list").is_some(), "the list is open");
+            assert!(window.try_find(("replay-renderer-timeline-row", 0usize)).is_some(), "with a row per event");
+            assert!(window.try_find(("replay-renderer-timeline-row", 2usize)).is_some());
+        })
+        .expect("the window is open");
     }
 }
