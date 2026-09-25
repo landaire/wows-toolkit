@@ -11,8 +11,11 @@
 //! it; the text is still edited in the input beside it.
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::component::menu::DropdownMenu as _;
 use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -197,7 +200,7 @@ pub fn pill_strip(
     cache: &NameCache,
     selection: &Selection,
     cx: &App,
-    on_segment: impl Fn(NodePath, EditablePart, &mut App) + Clone + 'static,
+    on_choice: impl Fn(String, &mut Window, &mut App) + Clone + 'static,
     on_structure: impl Fn(NodePath, StructuralEdit, &mut Window, &mut App) + Clone + 'static,
 ) -> Option<AnyElement> {
     let stream = tokens::tokenize(expr, cache);
@@ -230,25 +233,49 @@ pub fn pill_strip(
                     // which is the part the reader is looking for.
                     let dimmed = !matches!(segment.role, SegmentRole::Value);
                     let part = EditablePart::of(segment.role);
-                    let editable = !choices(expr, &token.path, part).is_empty();
-                    let path = token.path.clone();
-                    let open = on_segment.clone();
+                    let offered = choices(expr, &token.path, part);
+                    let id = index * SEGMENTS_PER_PILL + slot;
+
+                    // A divider between the cells, as the egui bar draws
+                    // them: one run of words is hard to tell the parts of.
+                    if slot > 0 {
+                        pill = pill.child(div().flex_none().w(px(1.)).h(px(14.)).bg(border));
+                    }
+
+                    // A segment offers a pick only where there is something
+                    // to pick; a free value is typed in the bar instead, as
+                    // it is in the egui one.
+                    if offered.is_empty() {
+                        pill = pill.child(
+                            div()
+                                .id(("search-pill-segment", id))
+                                .test_support()
+                                .px_1()
+                                .text_xs()
+                                .when(dimmed, |this| this.text_color(crate::theme::text_dim()))
+                                .when(!dimmed, |this| this.font_weight(FontWeight::MEDIUM))
+                                .child(segment.text.clone()),
+                        );
+                        continue;
+                    }
+
+                    let take = on_choice.clone();
                     pill = pill.child(
-                        div()
-                            .id(("search-pill-segment", index * SEGMENTS_PER_PILL + slot))
-                            .test_support()
-                            .text_xs()
-                            .when(dimmed, |this| this.text_color(crate::theme::text_dim()))
-                            .when(!dimmed, |this| this.font_weight(FontWeight::MEDIUM))
-                            // A segment is a handle only where there is
-                            // something to pick; a free value is typed in the
-                            // bar instead, as it is in the egui one.
-                            .when(editable, |this| {
-                                this.cursor_pointer()
-                                    .underline()
-                                    .on_click(move |_event, _window, cx: &mut App| open(path.clone(), part, cx))
-                            })
-                            .child(segment.text.clone()),
+                        Button::new(("search-pill-segment", id))
+                            .label(segment.text.clone())
+                            .ghost()
+                            .compact()
+                            .dropdown_menu(move |menu, _window, _cx| {
+                                offered.iter().fold(menu, |menu, choice| {
+                                    let take = take.clone();
+                                    let taken = choice.taken.clone();
+                                    menu.item(
+                                        PopupMenuItem::new(choice.label.clone())
+                                            .checked(choice.current)
+                                            .on_click(move |_event, window, cx| take(taken.clone(), window, cx)),
+                                    )
+                                })
+                            }),
                     );
                 }
                 row.child(pill_with_menu(pill, index, &token.path, expr, selection, on_structure.clone()))

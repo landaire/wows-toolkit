@@ -12,7 +12,6 @@ use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
-use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::calendar::Calendar;
@@ -29,7 +28,6 @@ use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 
-use crate::search_pills::EditablePart;
 use crate::search_pills::StructuralEdit;
 use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query::SortColumn;
@@ -325,9 +323,6 @@ pub struct SearchView {
     /// past one would restore a query that no longer follows from what is in
     /// the bar.
     redo: Vec<String>,
-    /// The pill segment whose picker is open, and which part of it. `None`
-    /// when none is.
-    editing: Option<(NodePath, EditablePart)>,
     /// Names the pills read ids back as. Filled from the same lookups the
     /// result table uses, so a pill and a row name a ship the same way.
     name_cache: wows_toolkit_viewmodel::query_bar::label::NameCache,
@@ -411,7 +406,6 @@ impl SearchView {
             selection: Selection::default(),
             undo: Vec::new(),
             redo: Vec::new(),
-            editing: None,
             name_cache: Default::default(),
             sort: SortSpec::default(),
             hits: Vec::new(),
@@ -712,19 +706,10 @@ impl SearchView {
             .collect()
     }
 
-    /// Opens the picker for a pill segment, or closes it when that segment's
-    /// is the one already open.
-    fn toggle_picker(&mut self, path: NodePath, part: EditablePart, cx: &mut Context<Self>) {
-        let same = self.editing.as_ref().is_some_and(|(open, open_part)| open == &path && *open_part == part);
-        self.editing = if same { None } else { Some((path, part)) };
-        cx.notify();
-    }
-
     /// Puts `query` in the bar and runs it: the bar exists to show matches,
     /// and leaving the old ones under an edited query would be showing the
     /// wrong ones.
     fn take_edit(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.editing = None;
         self.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
         self.run(cx);
     }
@@ -1409,8 +1394,8 @@ impl Render for SearchView {
                     &self.name_cache,
                     &self.selection,
                     cx,
-                    move |path, part, cx| {
-                        entity.update(cx, |this, cx| this.toggle_picker(path, part, cx));
+                    move |taken, window, cx| {
+                        entity.update(cx, |this, cx| this.take_edit(taken, window, cx));
                     },
                     move |path, edit, window, cx| {
                         structure_entity.update(cx, |this, cx| this.apply_structural_edit(path, edit, window, cx));
@@ -1418,29 +1403,6 @@ impl Render for SearchView {
                 )
             })
             .map(|strip| div().id("search-pills").test_support().w_full().px(px(20.)).child(strip));
-
-        // The picker for whichever pill segment was clicked.
-        let picker = self.editing.as_ref().and_then(|(path, part)| {
-            let offered = crate::search_pills::choices(self.reading.as_ref()?, path, *part);
-            (!offered.is_empty()).then(|| {
-                h_flex().w_full().flex_wrap().gap_1().px(px(20.)).children(offered.into_iter().enumerate().map(
-                    |(index, choice)| {
-                        let taken = choice.taken.clone();
-                        selectable(
-                            ("search-choice", index),
-                            choice.current,
-                            Button::new(("search-choice-button", index))
-                                .label(choice.label)
-                                .compact()
-                                .selected(choice.current)
-                                .on_click(cx.listener(move |this, _event, window, cx| {
-                                    this.take_edit(taken.clone(), window, cx)
-                                })),
-                        )
-                    },
-                ))
-            })
-        });
 
         // The completions hang under the input as a dropdown, the way the
         // egui bar's do, rather than as a row of buttons pushing the results
@@ -1568,7 +1530,6 @@ impl Render for SearchView {
             .on_key_down(cx.listener(Self::on_bar_key))
             .child(entry_row)
             .when_some(pills, |this, pills| this.child(pills))
-            .when_some(picker, |this, rows| this.child(rows))
             .when_some(calendar, |this, calendar| this.child(calendar))
             .when_some(dropdown, |this, rows| this.child(rows))
             .when_some(parse_error, |this, strip| this.child(strip));

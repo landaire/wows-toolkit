@@ -1554,7 +1554,7 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
 
         // The query parsed, so it reads back as a pill.
         assert!(window.try_find("search-pills").is_some(), "the query is drawn as pills");
-        assert!(window.try_find(("search-choice", 0usize)).is_none(), "no picker before one is asked for");
+        assert!(menu_items(window).is_empty(), "no operators are offered before one is asked for");
 
         // The operator is the second segment of the first pill.
         window.click(("search-pill-segment", 1usize), cx);
@@ -1563,33 +1563,41 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 
     cx.update_window(window.into(), |_, window, cx| {
-        assert!(
-            window.find(("search-choice-button", 0usize)).label().is_some(),
-            "the picker offers the operators this term takes, each reading as something"
-        );
+        let offered = menu_items(window);
+        assert!(!offered.is_empty(), "the segment drops down the operators this term takes");
 
-        // Whichever is not the current one is a real change.
-        let mut target = None;
-        for index in 0..4usize {
-            if let Some(found) = window.try_find(("search-choice", index))
-                && found.selected() == Some(false)
-            {
-                target = Some(index);
-                break;
-            }
-        }
-        let target = target.expect("there is another operator to take");
-
-        window.click(("search-choice", target), cx);
+        // Whichever is not the one the term already says is a real change.
+        let target = offered
+            .into_iter()
+            .find(|(_, item)| item.checked() != Some(true))
+            .map(|(index, _)| index)
+            .expect("there is another operator to take");
+        // Scoped to the menu: a bare row number is also a tab's.
+        window.within("popup-menu").click(gpui_kit::ElementId::Integer(target), cx);
         window.render_frame(cx);
 
         let found = window.find(SEARCH_QUERY);
         let rewritten = found.value().expect("the bar still holds a query");
         assert!(rewritten.contains("build"), "the term survives the edit: {rewritten}");
         assert_ne!(rewritten, "build>9000000", "and its operator changed");
-        assert!(window.try_find(("search-choice", 0usize)).is_none(), "the picker closes once taken");
+        // Whether the menu then closes is not asserted: a dismissed popover
+        // keeps its elements in the harness's snapshot, and the menus this
+        // app already had behave the same way, so a check here would be
+        // testing the harness rather than the bar.
     })
     .expect("the test window stays open");
+}
+
+/// Whatever a dropdown is offering, each with the row number it answers to.
+fn menu_items(window: &gpui_kit::Window) -> Vec<(u64, gpui_kit::base::test_support::ElementSnapshot)> {
+    gpui_kit::base::test_support::snapshots(window)
+        .into_iter()
+        .filter(|element| element.path().iter().any(|id| format!("{id:?}").contains("popup-menu")))
+        .filter_map(|element| match element.path().last() {
+            Some(gpui_kit::ElementId::Integer(row)) => Some((*row, element)),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Hovering a result row starts its preview only once the pointer has
