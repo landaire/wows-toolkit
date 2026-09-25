@@ -185,6 +185,9 @@ const DRAG_THRESHOLD_PX: f32 = 4.0;
 /// camera while a WASD/arrow key is held down.
 const KEY_TICK_HZ: f32 = 60.0;
 
+/// How many lines of the shot log are shown at once.
+const SHOT_LOG_LINES: usize = 12;
+
 /// Offset (in each axis) from the cursor to the thickness tooltip's anchor
 /// position, so the tooltip doesn't sit directly under the pointer.
 const TOOLTIP_CURSOR_OFFSET: Pixels = px(16.);
@@ -1150,6 +1153,14 @@ impl ViewportView {
         }
         self.hit_health = health;
         cx.notify();
+    }
+
+    /// The shot log beside the hull: what landed, newest first.
+    ///
+    /// Bounded, because a battleship's worth of secondaries is hundreds of
+    /// lines and a log that long is not read, it is scrolled past.
+    pub(crate) fn shot_log(&self) -> Vec<wows_replay_insights::hull_impact::LoggedHit> {
+        self.hits.iter().rev().take(SHOT_LOG_LINES).map(wows_replay_insights::hull_impact::log_line).collect()
     }
 
     /// What a replay viewer reads beside the hull: how much of the ship was
@@ -3023,6 +3034,29 @@ impl Render for ViewportView {
             .on_key_up(cx.listener(Self::handle_key_up))
             .child(image_child)
             .child(overlay)
+            .children((!self.hits.is_empty()).then(|| {
+                // Under the readout it belongs with, over the hull rather
+                // than on the strip, which is the same whatever drives the
+                // viewer.
+                v_flex()
+                    .absolute()
+                    .top_10()
+                    .left_2()
+                    .gap_0p5()
+                    .px_2()
+                    .py_1()
+                    .rounded(cx.theme().radius)
+                    .bg(cx.theme().background.opacity(0.85))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .text_xs()
+                    .children(self.shot_log().into_iter().map(|line| {
+                        h_flex()
+                            .gap_2()
+                            .child(div().text_color(cx.theme().muted_foreground).child(line.at))
+                            .child(div().child(line.outcome))
+                    }))
+            }))
             .children(self.hit_readout().map(|readout| {
                 // Over the hull rather than on the strip: it belongs to what
                 // is being shown, and the strip is the same whatever drives

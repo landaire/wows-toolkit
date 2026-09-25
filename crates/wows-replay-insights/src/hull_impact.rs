@@ -12,7 +12,11 @@ use nalgebra::Rotation3;
 use nalgebra::Vector3;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::VictimPose;
+use wowsunpack::game_types::ShellHitType;
 use wowsunpack::game_types::WorldPos;
+use wowsunpack::recognized::Recognized;
+
+use crate::timeline::PreExtractedHit;
 
 type Vec3 = Vector3<f32>;
 
@@ -84,6 +88,45 @@ pub fn place(
     })
 }
 
+/// One line of a shot log: when a shell landed and what it did.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LoggedHit {
+    /// The battle clock it landed at, as "MM:SS".
+    pub at: String,
+    /// What the shell did, worded the way both viewers word it.
+    pub outcome: &'static str,
+}
+
+/// What `hit` reads as in a shot log.
+///
+/// Worded here so a log in one viewer cannot call a shatter something else
+/// than a log in the other. An outcome the build does not name reads as
+/// unknown rather than being left out: a hit that happened is worth a line
+/// whether or not this build has a word for it.
+pub fn log_line(hit: &PreExtractedHit) -> LoggedHit {
+    LoggedHit { at: mmss(hit.clock.seconds()), outcome: outcome_of(hit) }
+}
+
+fn outcome_of(hit: &PreExtractedHit) -> &'static str {
+    match hit.hit.hit.hit_type.shell_hit {
+        Recognized::Known(ShellHitType::Normal) => "Penetration",
+        Recognized::Known(ShellHitType::MajorHit) => "Citadel",
+        Recognized::Known(ShellHitType::Ricochet) => "Ricochet",
+        Recognized::Known(ShellHitType::NoPenetration) => "Shatter",
+        Recognized::Known(ShellHitType::Overpenetration) => "Overpenetration",
+        Recognized::Known(ShellHitType::ExitOverpenetration) => "Exit",
+        Recognized::Known(ShellHitType::Underwater) => "Underwater",
+        Recognized::Known(ShellHitType::None) | Recognized::Unknown(_) => "Unknown",
+    }
+}
+
+/// A battle clock as the game shows it. Before the battle began reads as its
+/// start rather than as a minus sign.
+fn mmss(seconds: f32) -> String {
+    let seconds = seconds.max(0.0) as u32;
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -153,6 +196,16 @@ mod tests {
 
         assert!((at[2] - 100.0).abs() < NEAR, "held at the bow: {at:?}");
         assert!((at[1] - 30.0).abs() < NEAR, "but its height is left alone");
+    }
+
+    /// A clock reads as the game shows it, and before the battle began reads
+    /// as its start rather than as a minus sign.
+    #[test]
+    fn a_log_line_reads_the_clock_the_game_shows() {
+        assert_eq!(mmss(0.0), "00:00");
+        assert_eq!(mmss(9.7), "00:09");
+        assert_eq!(mmss(75.0), "01:15");
+        assert_eq!(mmss(-4.0), "00:00");
     }
 
     /// An impact whose victim was not being watched is refused rather than
