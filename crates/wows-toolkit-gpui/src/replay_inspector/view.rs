@@ -128,6 +128,9 @@ pub struct ReplayInspectorView {
     /// Held so a viewport's request for its own window still reaches this
     /// view; a dropped subscription is a silent button.
     renderer_events: Vec<Subscription>,
+    /// Whether the viewports have been told there is a session. Only a change
+    /// is worth pushing, and this is read every draw.
+    session_shared: bool,
     /// The expected-values table every replay tab rates its players against,
     /// loaded once per session beside the Stats tab's copy (`App::
     /// apply_session_stats`). Held here rather than fetched per tab so a
@@ -234,6 +237,7 @@ impl ReplayInspectorView {
             current_replay: None,
             open_renderers: HashMap::new(),
             renderer_events: Vec::new(),
+            session_shared: false,
             personal_rating: None,
             debug_mode: false,
             replay_settings: ReplaySettings::default(),
@@ -567,13 +571,37 @@ impl ReplayInspectorView {
             .map(|stem| stem.to_string_lossy().into_owned())
             .unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned())
             .into();
-        let panel = cx.new(|cx| ReplayRendererPanel::new(path.clone(), title, game_data, window, cx));
+        let link = self.collab.link();
+        let panel = cx.new(|cx| {
+            let mut panel = ReplayRendererPanel::new(path.clone(), title, game_data, window, cx);
+            panel.seed_collab(link);
+            panel
+        });
         self.renderer_events.push(cx.subscribe_in(&panel, window, Self::on_renderer_event));
         self.open_renderers.insert(path, panel.downgrade());
         self.dock_area.update(cx, |dock_area, cx| {
             dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
         });
         cx.notify();
+    }
+
+    /// Hands every open viewport this app's end of the session, when whether
+    /// there is one has changed.
+    ///
+    /// A session can start or stop while a viewport is open, and a viewport
+    /// built before one started would otherwise never hear about it.
+    fn share_session_with_renderers(&mut self, cx: &mut Context<Self>) {
+        let active = self.collab.is_active();
+        if active == self.session_shared {
+            return;
+        }
+        self.session_shared = active;
+        let link = self.collab.link();
+        for panel in self.open_renderers.values() {
+            if let Some(panel) = panel.upgrade() {
+                panel.update(cx, |panel, cx| panel.set_collab(link.clone(), cx));
+            }
+        }
     }
 
     /// Answers a viewport that asked for a window of its own.
@@ -920,6 +948,7 @@ impl Render for ReplayInspectorView {
         // The session's event inbox is unbounded, so it is drained here every
         // draw rather than left to grow for as long as the session runs.
         self.collab.poll();
+        self.share_session_with_renderers(cx);
         let session = crate::collab_popover::render(self, &entity, cx);
         let replay_header = h_flex()
             .flex_none()

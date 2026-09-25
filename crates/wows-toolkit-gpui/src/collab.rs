@@ -12,6 +12,7 @@ use gpui_kit::App;
 use gpui_kit::AsyncApp;
 use gpui_kit::Entity;
 use parking_lot::Mutex;
+use wt_collab_client::PeerPing;
 use wt_collab_client::PeerRole;
 use wt_collab_client::Permissions;
 use wt_collab_client::SessionCommand;
@@ -19,8 +20,10 @@ use wt_collab_client::SessionEvent;
 use wt_collab_client::SessionState;
 use wt_collab_client::SessionStatus;
 use wt_collab_client::SessionWaker;
+use wt_collab_client::UserCursor;
 use wt_collab_client::peer::HostParams;
 use wt_collab_client::peer::JoinParams;
+use wt_collab_client::peer::LocalEvent;
 use wt_collab_client::peer::PeerMode;
 use wt_collab_client::peer::PeerSessionHandle;
 
@@ -140,6 +143,15 @@ impl CollabState {
     }
 
     /// What the host has locked.
+    /// What a viewport needs of the session: where peers are pointing, and
+    /// somewhere to say where this app is pointing.
+    pub fn link(&self) -> CollabLink {
+        CollabLink {
+            state: Some(Arc::clone(&self.state)),
+            local_tx: self.handle.as_ref().map(|handle| handle.local_tx.clone()),
+        }
+    }
+
     pub fn permissions(&self) -> Permissions {
         self.state.lock().permissions.clone()
     }
@@ -398,5 +410,52 @@ mod tests {
         assert!(collab.token().is_none());
         assert!(!collab.token_revealed);
         assert_eq!(collab.status(), SessionStatus::Idle);
+    }
+}
+
+/// A viewport's end of a collab session.
+///
+/// Cloneable and inert without a session, so a viewport holds one whether or
+/// not anyone is connected and does not have to be told when that changes.
+#[derive(Clone, Default)]
+pub struct CollabLink {
+    state: Option<Arc<Mutex<SessionState>>>,
+    local_tx: Option<std::sync::mpsc::Sender<LocalEvent>>,
+}
+
+impl CollabLink {
+    /// Whether there is a session to talk to.
+    pub fn is_active(&self) -> bool {
+        self.local_tx.is_some()
+    }
+
+    /// Where every other peer's pointer is, in minimap space.
+    ///
+    /// Our own is left out: the reader can already see their own pointer.
+    pub fn peer_cursors(&self) -> Vec<UserCursor> {
+        let Some(state) = &self.state else { return Vec::new() };
+        let state = state.lock();
+        let mine = state.my_user_id;
+        state.cursors.iter().filter(|cursor| cursor.user_id != mine && cursor.pos.is_some()).cloned().collect()
+    }
+
+    /// The pings peers have dropped on the map recently.
+    pub fn peer_pings(&self) -> Vec<PeerPing> {
+        let Some(state) = &self.state else { return Vec::new() };
+        state.lock().pings.clone()
+    }
+
+    /// Says where this app's pointer is, or that it has left the map.
+    pub fn report_cursor(&self, pos: Option<[f32; 2]>) {
+        if let Some(tx) = &self.local_tx {
+            let _ = tx.send(LocalEvent::CursorPosition(pos));
+        }
+    }
+
+    /// Drops a ping on the map for everyone in the session.
+    pub fn send_ping(&self, pos: [f32; 2]) {
+        if let Some(tx) = &self.local_tx {
+            let _ = tx.send(LocalEvent::Ping(pos));
+        }
     }
 }
