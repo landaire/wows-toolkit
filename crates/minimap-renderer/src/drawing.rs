@@ -2007,6 +2007,14 @@ impl ImageTarget {
         self.text_resolver = resolver;
     }
 
+    /// Where the map's top-left corner sits in a frame.
+    ///
+    /// The strip above it carries the score bar and the timer; the gutter
+    /// beside it carries the team rosters, when there are any.
+    pub fn map_origin(&self) -> (u32, u32) {
+        (self.map_x_offset, HUD_HEIGHT)
+    }
+
     /// Which part of the map frames show.
     pub fn map_viewport(&self) -> MapViewport {
         self.viewport

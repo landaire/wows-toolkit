@@ -200,12 +200,17 @@ kept so the next audit does not re-report them.
       timeline -- so this is that pipeline, not a button.
       `extract_timeline_and_shots` already hands back the per-ship timelines,
       so the data half is shared and ready.
-    - **Roster, consumable and build hover readouts.** The renderer draws the
-      roster into the frame, so a hover needs the target to report where it
-      drew each consumable icon; `ImageTarget` reports no geometry. Turning
-      rosters on also switches the canvas to `SidePanelLayout::TeamRosters`,
-      which widens it, so this changes the viewport's whole geometry rather
-      than adding a layer.
+    - **Roster, consumable and build hover readouts.** Two things stand in
+      the way. A hover needs the target to report where it drew each
+      consumable icon, and `ImageTarget` reports no geometry beyond the map's
+      own corner. And rosters are not a layer that can be switched on at
+      raster time: they need the canvas built as
+      `SidePanelLayout::TeamRosters`, which widens it and moves the map right,
+      so a viewport showing them needs a renderer of its own rather than the
+      one shared with every hover preview of that map. The map's corner is no
+      longer assumed -- `ImageTarget::map_origin` reports it and a baked track
+      carries it -- so the projections are ready for a layout that moves the
+      map.
     - **The annotation toolbar.** Peers' cursors and their pings are drawn
       now: `wt-collab-client` already tracked both, so the work was a
       `CollabLink` the viewport holds (inert without a session, and handed on
