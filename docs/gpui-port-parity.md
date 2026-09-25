@@ -186,16 +186,28 @@ kept so the next audit does not re-report them.
     cannot word a factor differently. The port hovers the whole strip rather
     than the label's own rectangle: the label is drawn into the frame by the
     renderer, so there is no element of its own to rest a pointer on.
-  - Still absent, in rough order of what would be missed:
-    Show Realtime Armor from the per-ship menu, which wants the realtime armor
-    bridge (shot hits streamed to an armor viewer as playback advances) that
-    the port does not have yet;
-    the roster, consumable and build hover readouts, which want roster data
-    the baked track does not carry; the
-    annotation toolbar and everything collab draws over the map (pings,
-    remote cursors, shared annotations). The stats panel, team rosters, ship
-    ranges and position trails are outside `bake_options`, so they are not in
-    the track and cannot be switched on without widening the bake.
+  - Three things are still absent, and each is a feature the port lacks the
+    plumbing for rather than a control left unwired. What each needs first:
+    - **Show Realtime Armor** from the per-ship menu. The egui app opens an
+      armor viewer bound to a `RealtimeArmorBridge` that streams shot hits at
+      it as playback advances. The port's armor viewer has no shot-hit
+      pipeline at all -- no `ResolvedShotHit`, no bridge, no per-ship shot
+      timeline -- so this is that pipeline, not a button.
+      `extract_timeline_and_shots` already hands back the per-ship timelines,
+      so the data half is shared and ready.
+    - **Roster, consumable and build hover readouts.** The renderer draws the
+      roster into the frame, so a hover needs the target to report where it
+      drew each consumable icon; `ImageTarget` reports no geometry. Turning
+      rosters on also switches the canvas to `SidePanelLayout::TeamRosters`,
+      which widens it, so this changes the viewport's whole geometry rather
+      than adding a layer.
+    - **The annotation toolbar and what collab draws over the map.** Pings and
+      remote cursors are minimap-space points, so the projection this port
+      already has would place them; what is missing is that `CollabState`
+      surfaces no cursor or ping stream, only session and peer state. The
+      toolbar itself is a drawing editor (tools, selection, transforms), which
+      is its own piece of work.
+    The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
     `MapTransform` as it goes, so map elements zoom while the HUD does not;
