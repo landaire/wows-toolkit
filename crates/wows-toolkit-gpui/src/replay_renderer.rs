@@ -220,6 +220,8 @@ pub struct ReplayRendererPanel {
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
     collab: crate::collab::CollabLink,
+    /// The redraw a running session needs, held only while there is one.
+    _collab_tick: Option<Task<()>>,
     /// Kept so the viewport can build the canvas a layer asks for: the team
     /// rosters need gutters the canvas it opened with does not have.
     game_data: Option<GameDataCache>,
@@ -322,6 +324,7 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
             export_settings: ExportSettings::default(),
@@ -400,6 +403,7 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            _collab_tick: None,
             game_data: None,
             layout: wows_minimap_renderer::drawing::SidePanelLayout::None,
             export_settings: ExportSettings::default(),
@@ -487,16 +491,53 @@ impl ReplayRendererPanel {
             .collect();
     }
 
-    /// Hands a viewport being built its end of the session, before it has a
-    /// context to notify through.
-    pub fn seed_collab(&mut self, link: crate::collab::CollabLink) {
+    /// Hands a viewport being built its end of the session.
+    pub fn seed_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
         self.collab = link;
+        self.follow_collab(cx);
     }
 
     /// Hands this viewport a session to talk to, or takes one away.
     pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
         self.collab = link;
+        self.follow_collab(cx);
         cx.notify();
+    }
+
+    /// Starts or stops the redraw a running session needs.
+    ///
+    /// A peer's pointer and their pings move without this app touching
+    /// anything, and a view only redraws when it is told to. Without this a
+    /// peer's cursor sits wherever it was when playback last moved, and a
+    /// ping freezes part-way through its ripple and never leaves the map.
+    /// The egui renderer reaches the same place by asking for a repaint
+    /// while a ping is alive.
+    fn follow_collab(&mut self, cx: &mut Context<Self>) {
+        if !self.collab.is_active() {
+            self._collab_tick = None;
+            return;
+        }
+        if self._collab_tick.is_some() {
+            return;
+        }
+        self._collab_tick = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(COLLAB_TICK).await;
+                let running = this
+                    .update(cx, |this, cx| {
+                        if !this.collab.is_active() {
+                            return false;
+                        }
+                        this.collab.drop_stale_pings(Duration::from_secs_f32(PING_SECONDS));
+                        cx.notify();
+                        true
+                    })
+                    .unwrap_or(false);
+                if !running {
+                    return;
+                }
+            }
+        }));
     }
 
     /// Where the peers' pointers and their pings are, in element space.
@@ -1982,6 +2023,10 @@ fn per_ship_allows(
 
 /// How long a ping stays on the map, in seconds.
 const PING_SECONDS: f32 = 1.0;
+
+/// How often a running session redraws, which is what moves a peer's cursor
+/// and carries a ping through its ripple.
+const COLLAB_TICK: Duration = Duration::from_millis(33);
 
 /// How wide a ping's ring grows, in element pixels.
 const PING_RADIUS: f32 = 26.0;
@@ -3723,5 +3768,66 @@ mod tests {
                 assert_eq!(panel.at, 0, "there is nowhere to seek to");
             })
             .expect("the window is open");
+    }
+
+    /// A viewport in a session redraws on its own.
+    ///
+    /// A peer's pointer moves and their pings ripple while this app sits
+    /// still, and a paused viewport is told to redraw by nothing else, so
+    /// what the last redraw happened to catch would stay on the map. The
+    /// tick shedding a finished ping is what makes it visible from here.
+    #[gpui_kit::test]
+    fn a_running_session_redraws_without_being_touched(cx: &mut TestAppContext) {
+        use std::time::Duration;
+
+        cx.update(gpui_kit::init);
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_secs(5));
+        crate::collab::push_ping_aged(&state, [20.0, 20.0], Duration::ZERO);
+        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        let window = cx.open_window(size(px(600.), px(400.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_collab(link, cx);
+            panel
+        });
+
+        assert_eq!(state.lock().pings.len(), 2, "both are there before the session has ticked");
+
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+
+        let held = state.lock();
+        assert_eq!(held.pings.len(), 1, "the finished ripple is shed");
+        assert_eq!(held.pings[0].pos, [20.0, 20.0], "and the one still running is kept");
+        drop(held);
+
+        // Handing back an inert link stops it: a viewport with no session
+        // must not sit redrawing for nothing.
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.set_collab(crate::collab::CollabLink::default(), cx);
+            })
+            .expect("the window is open");
+        crate::collab::push_ping_aged(&state, [30.0, 30.0], Duration::from_secs(5));
+        cx.executor().advance_clock(Duration::from_millis(200));
+        cx.run_until_parked();
+        assert_eq!(state.lock().pings.len(), 2, "nothing is shed once the session has gone");
+    }
+
+    /// A ping is shed only once its ripple has run out.
+    #[test]
+    fn a_ping_outlives_its_own_frame() {
+        use std::time::Duration;
+
+        let state = std::sync::Arc::new(parking_lot::Mutex::new(wt_collab_client::SessionState::default()));
+        crate::collab::push_ping_aged(&state, [10.0, 10.0], Duration::from_millis(200));
+        let (link, _sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
+
+        link.drop_stale_pings(Duration::from_secs_f32(super::PING_SECONDS));
+        assert_eq!(state.lock().pings.len(), 1, "a fifth of a second into a one-second ripple");
+
+        link.drop_stale_pings(Duration::from_millis(100));
+        assert!(state.lock().pings.is_empty(), "and it goes once it has run out");
     }
 }
