@@ -28,6 +28,8 @@ wows-toolkit-config = { path = "../wows-toolkit-config" }
 # The collaborative session mesh, shared with the egui app so both front ends
 # run one implementation.
 wt-collab-client = { workspace = true }
+# A peer's ping carries the session's clock, which is this one.
+web-time = { workspace = true }
 parking_lot = "0.12.5"
 # The Settings tab reports and manages the game-data cache the egui app
 # writes: its size, its builds, and the remote repository it came from.

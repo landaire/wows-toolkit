@@ -574,7 +574,7 @@ impl ReplayInspectorView {
         let link = self.collab.link();
         let panel = cx.new(|cx| {
             let mut panel = ReplayRendererPanel::new(path.clone(), title, game_data, window, cx);
-            panel.seed_collab(link);
+            panel.seed_collab(link, cx);
             panel
         });
         self.renderer_events.push(cx.subscribe_in(&panel, window, Self::on_renderer_event));

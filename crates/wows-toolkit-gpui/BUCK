@@ -53,6 +53,7 @@ workspace_binary(
         "//third-party/rust:tracing-subscriber",
         "//third-party/rust:twitch_api",
         "//third-party/rust:unidecode",
+        "//third-party/rust:web-time",
         "//third-party/rust:wgpu",
     ],
     # gpui embeds its application manifest from its own build script, which

@@ -458,4 +458,31 @@ impl CollabLink {
             let _ = tx.send(LocalEvent::Ping(pos));
         }
     }
+
+    /// Forgets the pings whose ripple has finished.
+    ///
+    /// The session collects them and nothing else takes them out, so a
+    /// session left running carries every ping anyone has dropped in it. The
+    /// egui renderer sheds them in the same place, as it draws.
+    pub fn drop_stale_pings(&self, life: std::time::Duration) {
+        let Some(state) = &self.state else { return };
+        state.lock().pings.retain(|ping| ping.time.elapsed() < life);
+    }
+
+    /// A link onto `state` that reports as active with no peer task behind
+    /// it. The receiver is what the viewport's own messages arrive on.
+    #[cfg(test)]
+    pub(crate) fn for_test(state: Arc<Mutex<SessionState>>) -> (Self, std::sync::mpsc::Receiver<LocalEvent>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        (Self { state: Some(state), local_tx: Some(tx) }, rx)
+    }
+}
+
+/// Puts a ping dropped `age` ago into `state`.
+///
+/// Here rather than beside the test that wants it: a ping's clock is
+/// `web_time`, which is this module's dependency rather than a viewport's.
+#[cfg(test)]
+pub(crate) fn push_ping_aged(state: &Arc<Mutex<SessionState>>, pos: [f32; 2], age: std::time::Duration) {
+    state.lock().pings.push(PeerPing { user_id: 7, color: [255, 0, 0], pos, time: web_time::Instant::now() - age });
 }
