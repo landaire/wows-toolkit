@@ -49,14 +49,9 @@ pub struct DrawCommandTextures<'a> {
 /// an output buffer; the caller attaches `Response::on_hover_ui` to each.
 pub struct ConsumableHoverRegion {
     pub rect: Rect,
-    pub icon_key: String,
-    pub display_name: String,
-    pub description: String,
-    pub total_charges: wows_minimap_renderer::draw_command::ChargeCount,
-    pub charges_used: u32,
-    pub work_time_secs: f32,
-    pub reload_time_secs: f32,
-    pub active_remaining_secs: Option<f32>,
+    /// The roster's own entry, so a tooltip reads it through
+    /// `draw_command::consumable_lines` rather than restating its fields.
+    pub consumable: wows_minimap_renderer::draw_command::RosterConsumable,
 }
 
 /// A hoverable region over a roster row's player-name header. The desktop
@@ -2369,17 +2364,7 @@ pub fn draw_command_to_shapes(
                         let is_exhausted = matches!(charges_remaining, RosterCharge::Finite(0));
                         let is_active = cons.active_remaining_secs.is_some();
                         if let Some(sink) = hover_sink.as_deref_mut() {
-                            sink.push(ConsumableHoverRegion {
-                                rect: icon_rect,
-                                icon_key: cons.icon_key.clone(),
-                                display_name: cons.display_name.clone(),
-                                description: cons.description.clone(),
-                                total_charges: cons.total_charges,
-                                charges_used: cons.charges_used,
-                                work_time_secs: cons.work_time_secs,
-                                reload_time_secs: cons.reload_time_secs,
-                                active_remaining_secs: cons.active_remaining_secs,
-                            });
+                            sink.push(ConsumableHoverRegion { rect: icon_rect, consumable: cons.clone() });
                         }
 
                         if let Some(tex) = icons.get(&cons.icon_key) {

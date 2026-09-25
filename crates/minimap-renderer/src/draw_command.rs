@@ -760,6 +760,39 @@ pub struct RosterConsumable {
     pub availability: ConsumableAvailability,
 }
 
+/// What a hover over one of a roster's consumable icons reads.
+///
+/// Built here rather than in either front end: both show the same lines, and
+/// a difference between them would be a difference in what the replay says.
+pub struct ConsumableLines {
+    pub name: String,
+    pub charges: String,
+    /// How long it runs and how long until the next charge. Absent for a
+    /// consumable that states neither.
+    pub timing: Option<String>,
+    /// How much of an activation is left, while one is running.
+    pub active: Option<String>,
+    /// The in-game tooltip text, empty when the build ships no translation.
+    pub description: String,
+}
+
+/// What `consumable` reads as under a pointer.
+pub fn consumable_lines(consumable: &RosterConsumable) -> ConsumableLines {
+    let name =
+        if consumable.display_name.is_empty() { consumable.icon_key.clone() } else { consumable.display_name.clone() };
+    let charges = match consumable.total_charges {
+        ChargeCount::Unlimited => "Charges: inf".to_string(),
+        ChargeCount::Finite(total) => {
+            format!("Charges: {} / {}", total.saturating_sub(consumable.charges_used), total)
+        }
+    };
+    let timing = (consumable.work_time_secs > 0.0 || consumable.reload_time_secs > 0.0).then(|| {
+        format!("Duration: {:.0}s   Cooldown: {:.0}s", consumable.work_time_secs, consumable.reload_time_secs)
+    });
+    let active = consumable.active_remaining_secs.map(|left| format!("Active: {left:.0}s remaining"));
+    ConsumableLines { name, charges, timing, active, description: consumable.description.clone() }
+}
+
 /// Mirror of `wowsunpack::game_types::ChargeCount` for the draw command
 /// layer. Kept local so this crate avoids a full wowsunpack dep when
 /// built with `rendering` off.
@@ -840,4 +873,76 @@ pub trait RenderTarget {
 
     /// Finalize the current frame. After this call, the frame is ready to read/encode.
     fn end_frame(&mut self);
+}
+
+#[cfg(test)]
+mod consumable_reading_tests {
+    use super::ChargeCount;
+    use super::ConsumableAvailability;
+    use super::RosterConsumable;
+    use super::consumable_lines;
+
+    fn consumable() -> RosterConsumable {
+        RosterConsumable {
+            icon_key: "PCY009_CrashCrewPremium".to_string(),
+            display_name: "Repair Party".to_string(),
+            description: "Restores hit points.".to_string(),
+            total_charges: ChargeCount::Finite(4),
+            charges_used: 1,
+            work_time_secs: 28.0,
+            reload_time_secs: 80.0,
+            active_remaining_secs: None,
+            availability: ConsumableAvailability::Ready,
+        }
+    }
+
+    /// Charges read as what is left of what there was, which is what a
+    /// reader is counting.
+    #[test]
+    fn charges_read_as_what_is_left() {
+        assert_eq!(consumable_lines(&consumable()).charges, "Charges: 3 / 4");
+    }
+
+    /// A consumable with no limit says so rather than showing a number it
+    /// does not have.
+    #[test]
+    fn an_unlimited_consumable_says_so() {
+        let unlimited = RosterConsumable { total_charges: ChargeCount::Unlimited, ..consumable() };
+        assert_eq!(consumable_lines(&unlimited).charges, "Charges: inf");
+    }
+
+    /// Spending more charges than there were cannot read as a negative
+    /// count: the roster is built from a battle that may have been rejoined.
+    #[test]
+    fn spending_past_the_last_charge_reads_as_none_left() {
+        let spent = RosterConsumable { charges_used: 9, ..consumable() };
+        assert_eq!(consumable_lines(&spent).charges, "Charges: 0 / 4");
+    }
+
+    /// Timing is shown only by a consumable that states one.
+    #[test]
+    fn a_consumable_that_states_no_timing_shows_none() {
+        let lines = consumable_lines(&consumable());
+        assert_eq!(lines.timing.as_deref(), Some("Duration: 28s   Cooldown: 80s"));
+
+        let untimed = RosterConsumable { work_time_secs: 0.0, reload_time_secs: 0.0, ..consumable() };
+        assert!(consumable_lines(&untimed).timing.is_none());
+    }
+
+    /// What is left of an activation is shown only while one is running.
+    #[test]
+    fn the_active_line_is_there_only_while_it_runs() {
+        assert!(consumable_lines(&consumable()).active.is_none());
+
+        let running = RosterConsumable { active_remaining_secs: Some(12.4), ..consumable() };
+        assert_eq!(consumable_lines(&running).active.as_deref(), Some("Active: 12s remaining"));
+    }
+
+    /// A build with no translation for a consumable falls back to the key it
+    /// is looked up by, rather than reading as a nameless icon.
+    #[test]
+    fn an_untranslated_consumable_reads_as_its_key() {
+        let untranslated = RosterConsumable { display_name: String::new(), ..consumable() };
+        assert_eq!(consumable_lines(&untranslated).name, "PCY009_CrashCrewPremium");
+    }
 }

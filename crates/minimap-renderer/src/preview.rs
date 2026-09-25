@@ -114,12 +114,25 @@ impl PreviewRenderer {
     /// is shared by every preview of a map: one that remembered a zoom would
     /// zoom the others with it.
     pub fn render_at(&mut self, viewport: MapViewport, commands: &[DrawCommand]) -> RgbImage {
+        self.render_regions(viewport, commands).0
+    }
+
+    /// The same, with what the frame drew that a pointer can rest on.
+    ///
+    /// Handed back with the frame rather than kept: one renderer is shared by
+    /// every preview of a map, so regions left on it would belong to whichever
+    /// frame was drawn last.
+    pub fn render_regions(
+        &mut self,
+        viewport: MapViewport,
+        commands: &[DrawCommand],
+    ) -> (RgbImage, Vec<crate::drawing::DrawnRegion>) {
         self.target.set_map_viewport(viewport);
         self.target.begin_frame();
         for command in commands {
             self.target.draw(command);
         }
         self.target.end_frame();
-        self.target.frame()
+        (self.target.frame(), self.target.drawn_regions().to_vec())
     }
 }
