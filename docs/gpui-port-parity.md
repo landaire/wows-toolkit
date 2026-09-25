@@ -207,9 +207,18 @@ kept so the next audit does not re-report them.
       answers what it had taken by the moment playback is showing, reporting a
       step forward as the hits it gained and a step backwards as "draw the
       hull again", which is the part the egui app keeps tangled inside
-      `RealtimeArmorBridge`. What is left is the drawing: somewhere on the
-      hull to put those hits, and a way to open a viewer on a ship the
-      renderer names.
+      `RealtimeArmorBridge`. Where on the hull a hit goes is settled and
+      shared: `wows_replay_insights::hull_impact` undoes the ship's own
+      rotation and changes axes, which is the part that must not be
+      re-derived -- a sign error puts the hit on the other side of the ship,
+      where it still lands on real plating and still reads as a measurement.
+      A hit whose victim was not being watched is refused rather than placed
+      from a guess, for the same reason. The egui viewer delegates its own
+      two rotations to it, so there is one copy of the conventions.
+      What is left is the rest of the drawing: the per-ship shot timelines on
+      the viewport (the same single walk that reads the events can return
+      them), an item on the per-ship menu, opening a viewer on the ship it
+      names, and the markers themselves.
     - [done] **Team rosters, and reading a consumable by resting on it.** The
       gear carries a Team Rosters switch, as the egui display settings do,
       and the two clear each other because the rosters and the stats panel
