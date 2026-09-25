@@ -180,9 +180,18 @@ kept so the next audit does not re-report them.
     the layer on and clearing the last one puts it away again. Show Realtime
     Armor is not on it yet: that opens the armor viewer on a ship, which is a
     tab away rather than a filter.
+  - The team-advantage breakdown reads on hover over the strip the score bar
+    is drawn in. The rows themselves moved to `wows_core::advantage`
+    (`breakdown_rows`), which the egui tooltip now reads too, so the two
+    cannot word a factor differently. The port hovers the whole strip rather
+    than the label's own rectangle: the label is drawn into the frame by the
+    renderer, so there is no element of its own to rest a pointer on.
   - Still absent, in rough order of what would be missed:
-    Show Realtime Armor from the per-ship menu;
-    the roster, consumable, build and team-advantage hover readouts; the
+    Show Realtime Armor from the per-ship menu, which wants the realtime armor
+    bridge (shot hits streamed to an armor viewer as playback advances) that
+    the port does not have yet;
+    the roster, consumable and build hover readouts, which want roster data
+    the baked track does not carry; the
     annotation toolbar and everything collab draws over the map (pings,
     remote cursors, shared annotations). The stats panel, team rosters, ship
     ranges and position trails are outside `bake_options`, so they are not in

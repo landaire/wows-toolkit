@@ -1979,48 +1979,33 @@ impl ReplayRendererViewer {
                                     egui::Sense::hover(),
                                 );
                                 resp.on_hover_ui(|ui| {
-                                    let bd = breakdown;
-                                    let fmt_contrib = |val: (f32, f32)| -> String {
-                                        let diff = val.0 - val.1;
-                                        if diff > 0.0 {
-                                            format!("+{:.1}", diff)
-                                        } else if diff < 0.0 {
-                                            format!("{:.1}", diff)
-                                        } else {
-                                            "0".to_string()
-                                        }
-                                    };
-                                    let is_nonzero = |val: (f32, f32)| val.0 != 0.0 || val.1 != 0.0;
                                     ui.label(egui::RichText::new(t!("ui.renderer.advantage.breakdown").as_ref()).strong());
                                     ui.separator();
-                                    if bd.team_eliminated {
-                                        ui.label(t!("ui.renderer.advantage.team_eliminated"));
-                                    } else {
-                                        egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
-                                            if is_nonzero(bd.score_projection) {
-                                                ui.label(t!("ui.renderer.advantage.score_projection"));
-                                                ui.label(fmt_contrib(bd.score_projection));
-                                                ui.end_row();
+                                    match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
+                                        None => {
+                                            ui.label(t!("ui.renderer.advantage.team_eliminated"));
+                                        }
+                                        Some(rows) => {
+                                            egui::Grid::new("adv_grid").num_columns(2).show(ui, |ui| {
+                                                let last = rows.len().saturating_sub(1);
+                                                for (index, row) in rows.iter().enumerate() {
+                                                    // The total is the last row, and is set apart.
+                                                    if index == last {
+                                                        ui.separator();
+                                                        ui.separator();
+                                                        ui.end_row();
+                                                        ui.label(egui::RichText::new(t!(row.label_key).as_ref()).strong());
+                                                        ui.label(egui::RichText::new(&row.contribution).strong());
+                                                    } else {
+                                                        ui.label(t!(row.label_key));
+                                                        ui.label(&row.contribution);
+                                                    }
+                                                    ui.end_row();
+                                                }
+                                            });
+                                            if !breakdown.hp_data_reliable {
+                                                ui.small(t!("ui.renderer.advantage.hp_incomplete"));
                                             }
-                                            if is_nonzero(bd.fleet_power) {
-                                                ui.label(t!("ui.renderer.advantage.fleet_power"));
-                                                ui.label(fmt_contrib(bd.fleet_power));
-                                                ui.end_row();
-                                            }
-                                            if is_nonzero(bd.strategic_threat) {
-                                                ui.label(t!("ui.renderer.advantage.strategic_threat"));
-                                                ui.label(fmt_contrib(bd.strategic_threat));
-                                                ui.end_row();
-                                            }
-                                            ui.separator();
-                                            ui.separator();
-                                            ui.end_row();
-                                            ui.label(egui::RichText::new(t!("ui.renderer.advantage.total").as_ref()).strong());
-                                            ui.label(egui::RichText::new(fmt_contrib(bd.total)).strong());
-                                            ui.end_row();
-                                        });
-                                        if !bd.hp_data_reliable {
-                                            ui.small(t!("ui.renderer.advantage.hp_incomplete"));
                                         }
                                     }
                                 });

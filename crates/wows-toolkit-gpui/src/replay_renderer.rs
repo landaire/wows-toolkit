@@ -403,6 +403,19 @@ impl ReplayRendererPanel {
         }
     }
 
+    /// Replaces the frame on screen's commands.
+    ///
+    /// Test-only: a baked track carries these from the battle.
+    #[cfg(test)]
+    pub(crate) fn set_frame_commands_for_test(&mut self, commands: Vec<DrawCommand>) {
+        let at = self.at;
+        if let State::Ready(track) = &mut self.state
+            && let Some(frame) = track.frames.get_mut(at)
+        {
+            *frame = commands;
+        }
+    }
+
     /// Says when the battle inside an already-ready track ran.
     ///
     /// Test-only: a baked track carries this from the replay itself.
@@ -450,6 +463,50 @@ impl ReplayRendererPanel {
                 kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
             })
             .collect();
+    }
+
+    /// Where the frame's HUD strip lands inside the viewport element.
+    ///
+    /// The frame is drawn to fit without stretching, so it is letterboxed:
+    /// the strip is not at the element's own top edge.
+    fn hud_strip(&self) -> Option<(Pixels, Pixels, Pixels)> {
+        let bounds = self.drawn.get()?;
+        let frame = self.frame.as_ref()?;
+        let scale = self.drawn_scale()?;
+        let size = frame.size(0);
+        let drawn_width = size.width.0 as f32 * scale;
+        let drawn_height = size.height.0 as f32 * scale;
+        let left = (bounds.size.width.as_f32() - drawn_width) / 2.0;
+        let top = (bounds.size.height.as_f32() - drawn_height) / 2.0;
+        Some((px(left), px(top), px(HUD_STRIP_HEIGHT * scale)))
+    }
+
+    /// What the advantage reads, for the frame on screen.
+    ///
+    /// The label itself is drawn into the frame by the renderer, so there is
+    /// no element of its own to rest a pointer on; the strip it sits in is
+    /// what the reader hovers instead.
+    pub(crate) fn advantage_hover(&self) -> Option<Vec<String>> {
+        let track = self.track()?;
+        let commands = track.frames.get(self.at)?;
+        let breakdown = commands.iter().find_map(|command| match command {
+            DrawCommand::TeamAdvantage { level: Some(_), breakdown, .. } => Some(breakdown),
+            _ => None,
+        })?;
+
+        let mut lines = vec![t!("ui.renderer.advantage.breakdown").into_owned()];
+        match wows_minimap_renderer::advantage::breakdown_rows(breakdown) {
+            None => lines.push(t!("ui.renderer.advantage.team_eliminated").into_owned()),
+            Some(rows) => {
+                for row in rows {
+                    lines.push(format!("{}  {}", t!(row.label_key), row.contribution));
+                }
+                if !breakdown.hp_data_reliable {
+                    lines.push(t!("ui.renderer.advantage.hp_incomplete").into_owned());
+                }
+            }
+        }
+        Some(lines)
     }
 
     /// Opens the per-ship menu on whatever was right-clicked.
@@ -1359,6 +1416,23 @@ impl Render for ReplayRendererPanel {
                             .absolute()
                             .inset_0(),
                         )
+                        .children(self.hud_strip().zip(self.advantage_hover()).map(|((left, top, height), lines)| {
+                            div()
+                                .id("replay-renderer-advantage-hover")
+                                .absolute()
+                                .left(left)
+                                .top(top)
+                                .right(left)
+                                .h(height)
+                                .tooltip(hover_lines(
+                                    lines
+                                        .join(
+                                            "
+",
+                                        )
+                                        .into(),
+                                ))
+                        }))
                         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                         .on_scroll_wheel(cx.listener(Self::on_scroll))
                         .on_mouse_down(MouseButton::Left, cx.listener(Self::on_drag_start))
@@ -1715,6 +1789,10 @@ fn per_ship_allows(
         _ => true,
     }
 }
+
+/// The strip the renderer reserves above the map, which is where the score
+/// bar and the advantage label are drawn.
+const HUD_STRIP_HEIGHT: f32 = wows_minimap_renderer::HUD_HEIGHT as f32;
 
 /// How near a right-click has to land to have meant a ship, in map pixels.
 /// A ship icon is about this wide.
@@ -3227,6 +3305,48 @@ mod tests {
         assert!(!super::per_ship_allows(&trail("hidden_player"), &hidden, &ranges));
         assert!(super::per_ship_allows(&circle("ranged_player"), &hidden, &ranges));
         assert!(!super::per_ship_allows(&circle("unranged_player"), &hidden, &ranges), "a ship nobody asked for");
+    }
+
+    /// The advantage hover reads the breakdown out of the frame on screen.
+    ///
+    /// The label is drawn into the frame by the renderer, so there is nothing
+    /// to hover that knows what it says; this reads the command behind it.
+    #[gpui_kit::test]
+    fn the_advantage_hover_reads_the_frames_own_breakdown(cx: &mut TestAppContext) {
+        use wows_minimap_renderer::advantage::AdvantageBreakdown;
+        use wowsunpack::game_types::AdvantageLevel;
+
+        use super::DrawCommand;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                assert!(panel.advantage_hover().is_none(), "a frame with no advantage has nothing to say");
+
+                let breakdown = AdvantageBreakdown {
+                    score_projection: (6.0, 2.0),
+                    total: (6.0, 2.0),
+                    hp_data_reliable: false,
+                    ..Default::default()
+                };
+                panel.set_frame_commands_for_test(vec![DrawCommand::TeamAdvantage {
+                    level: Some(AdvantageLevel::Weak),
+                    color: [255, 255, 255],
+                    breakdown,
+                }]);
+
+                let lines = panel.advantage_hover().expect("the frame carries an advantage");
+                assert!(lines.iter().any(|line| line.contains("+4.0")), "the difference is shown: {lines:?}");
+                assert!(
+                    lines.iter().any(|line| line.contains("incomplete")),
+                    "and that the HP data was not reliable: {lines:?}"
+                );
+            })
+            .expect("the window is open");
     }
 
     /// Playing advances through the track and stops at the end rather than
