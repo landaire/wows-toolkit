@@ -213,6 +213,12 @@ pub struct ReplayRendererPanel {
     /// Where the frame sits on screen, recorded as it is painted. A pointer
     /// position means nothing without it, and only the painter knows.
     drawn: Rc<Cell<Option<Bounds<Pixels>>>>,
+    /// What the frame on screen drew that a pointer can rest on. Comes back
+    /// with the frame, because the renderer that drew it is shared.
+    regions: Vec<wows_minimap_renderer::drawing::DrawnRegion>,
+    /// The consumable icon under the pointer, and where to anchor its
+    /// reading.
+    hovered_consumable: Option<(ConsumableHover, Point<Pixels>)>,
     /// Where a drag of the map last was, in window coordinates.
     dragging: Option<Point<Pixels>>,
     /// The map point last reported to the session, so an unmoved pointer is
@@ -258,6 +264,12 @@ pub struct ReplayRendererPanel {
     /// screen is the last thing asked for rather than the first.
     redraw_wanted: bool,
     focus_handle: FocusHandle,
+}
+
+/// What a hover over a roster's consumable icon reads, and whose it is.
+struct ConsumableHover {
+    player: String,
+    lines: wows_minimap_renderer::draw_command::ConsumableLines,
 }
 
 /// How far an export has got, in frames.
@@ -321,6 +333,8 @@ impl ReplayRendererPanel {
             zoom,
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
+            regions: Vec::new(),
+            hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
@@ -400,6 +414,8 @@ impl ReplayRendererPanel {
             zoom,
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
+            regions: Vec::new(),
+            hovered_consumable: None,
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
@@ -538,6 +554,46 @@ impl ReplayRendererPanel {
                 }
             }
         }));
+    }
+
+    /// What the consumable icon under the pointer reads, over the frame.
+    ///
+    /// Anchored at the pointer rather than at the icon: a roster row's icons
+    /// are a few pixels apart, and a reading over the row would cover the
+    /// ones beside the one being read.
+    fn consumable_reading(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let (hover, at) = self.hovered_consumable.as_ref()?;
+        let theme = cx.theme();
+        let lines = &hover.lines;
+        let body = v_flex()
+            .gap_0p5()
+            .w(px(280.))
+            .bg(theme.background)
+            .border_1()
+            .border_color(theme.border)
+            .rounded(theme.radius)
+            .p_2()
+            .child(div().text_sm().font_weight(FontWeight::BOLD).child(lines.name.clone()))
+            .child(div().text_xs().child(hover.player.clone()))
+            .child(div().text_xs().child(lines.charges.clone()))
+            .children(lines.timing.clone().map(|line| div().text_xs().child(line)))
+            .children(lines.active.clone().map(|line| div().text_xs().child(line)))
+            .children((!lines.description.is_empty()).then(|| {
+                v_flex()
+                    .gap_1()
+                    .child(crate::ui::rule_h(cx))
+                    .child(div().text_xs().text_color(crate::theme::text_dim()).child(lines.description.clone()))
+            }));
+        Some(
+            deferred(
+                anchored()
+                    .position(point(at.x + px(16.), at.y + px(16.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(body),
+            )
+            .with_priority(1)
+            .into_any_element(),
+        )
     }
 
     /// Where the peers' pointers and their pings are, in element space.
@@ -1113,16 +1169,18 @@ impl ReplayRendererPanel {
                     .filter(|command| should_draw_command(command, &options, show_dead_ships))
                     .filter(|command| per_ship_allows(command, &trail_hidden, &ship_ranges))
                     .collect();
-                let image = {
+                let (image, regions) = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-                    to_image(drawing.render_at(view, &shown))
+                    let (frame, regions) = drawing.render_regions(view, &shown);
+                    (to_image(frame), regions)
                 };
-                (renderer, image)
+                (renderer, image, regions)
             });
-            let (renderer, image) = drawn.await;
+            let (renderer, image, regions) = drawn.await;
             let _ = this.update(cx, |this, cx| {
                 this.renderer = Some(renderer);
                 this.frame = Some(image);
+                this.regions = regions;
                 cx.notify();
                 if std::mem::take(&mut this.redraw_wanted) {
                     this.draw_current(cx);
@@ -1403,6 +1461,20 @@ impl ReplayRendererPanel {
     /// What a zoom about the pointer needs, since it re-anchors on a drawn
     /// point rather than a map one.
     fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let (x, y) = self.canvas_point(position)?;
+        let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
+        let (x, y) = (x - origin.0, y - origin.1);
+        let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
+        (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
+    }
+
+    /// Where a pointer position lands on the whole rasterised canvas, which
+    /// is the map and whatever gutters are beside it.
+    ///
+    /// `None` before the frame has been painted once. Not clamped to the
+    /// canvas: a caller asks what is there, and the answer for a point off
+    /// the edge is nothing.
+    fn canvas_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
         let bounds = self.drawn.get()?;
         let frame = self.frame.as_ref()?;
         let scale = self.drawn_scale()?;
@@ -1411,12 +1483,41 @@ impl ReplayRendererPanel {
         let drawn_height = size.height.0 as f32 * scale;
         let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - drawn_width) / 2.0;
         let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - drawn_height) / 2.0;
+        Some(((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale))
+    }
 
-        let origin = self.track().map(|track| track.map_origin).unwrap_or(DEFAULT_MAP_ORIGIN);
-        let x = (position.x.as_f32() - left) / scale - origin.0;
-        let y = (position.y.as_f32() - top) / scale - origin.1;
-        let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
-        (x >= 0.0 && x < span && y >= 0.0 && y < span).then_some((x, y))
+    /// What the roster icon under the pointer reads as, if it is on one.
+    ///
+    /// The region says which row and which of its icons; the rest is read off
+    /// the roster command the frame already holds, so a reading cannot drift
+    /// from what was drawn.
+    fn consumable_at(&self, position: Point<Pixels>) -> Option<ConsumableHover> {
+        use wows_minimap_renderer::drawing::RegionKind;
+
+        let at = self.canvas_point(position)?;
+        let region = self.regions.iter().find(|region| region.contains(at))?;
+        let RegionKind::RosterConsumable { entity_id, index } = region.kind;
+        let track = self.track()?;
+        let commands = track.frames.get(self.at)?;
+        for command in commands {
+            let DrawCommand::TeamRoster { rows, .. } = command else { continue };
+            let Some(row) = rows.iter().find(|row| row.entity_id == entity_id) else { continue };
+            let Some(consumable) = row.consumables.get(index) else { continue };
+            return Some(ConsumableHover {
+                player: row.player_name.clone(),
+                lines: wows_minimap_renderer::draw_command::consumable_lines(consumable),
+            });
+        }
+        None
+    }
+
+    /// Reads the roster icon under the pointer. Returns whether it changed.
+    fn update_consumable_hover(&mut self, position: Point<Pixels>) -> bool {
+        let found = self.consumable_at(position);
+        let changed = found.as_ref().map(|hover| (&hover.player, &hover.lines.name))
+            != self.hovered_consumable.as_ref().map(|(hover, _)| (&hover.player, &hover.lines.name));
+        self.hovered_consumable = found.map(|hover| (hover, position));
+        changed
     }
 
     /// The wheel zooms about whatever is under the pointer.
@@ -1444,6 +1545,9 @@ impl ReplayRendererPanel {
 
     fn on_drag_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.report_cursor(event.position, cx);
+        if self.update_consumable_hover(event.position) {
+            cx.notify();
+        }
         let Some(from) = self.dragging else { return };
         if !event.dragging() {
             self.dragging = None;
@@ -1493,6 +1597,14 @@ impl ReplayRendererPanel {
     #[cfg(test)]
     pub(crate) fn set_drawn_for_test(&mut self, bounds: Bounds<Pixels>) {
         self.drawn.set(Some(bounds));
+    }
+
+    /// Replaces what the frame on screen drew that a pointer can rest on.
+    ///
+    /// Test-only: a rasterised frame comes with its own.
+    #[cfg(test)]
+    pub(crate) fn set_regions_for_test(&mut self, regions: Vec<wows_minimap_renderer::drawing::DrawnRegion>) {
+        self.regions = regions;
     }
 
     /// A viewport with a frame the size the renderer produces, laid out at
@@ -1663,6 +1775,7 @@ impl Render for ReplayRendererPanel {
                                 ))
                         }))
                         .children(self.collab_overlay())
+                        .children(self.consumable_reading(cx))
                         .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_ping))
                         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                         .on_scroll_wheel(cx.listener(Self::on_scroll))
@@ -2272,10 +2385,11 @@ struct Toggle {
 
 /// What the viewport can be told to draw.
 ///
-/// Only the commands the track actually holds: `bake_options` leaves the
-/// stats panel, the team rosters, ship-range circles and position trails out
-/// of it (they cost a roster or a whole match history per frame), so a switch
-/// for those would do nothing and is not offered.
+/// Only the commands the track actually holds. A playback bake adds the team
+/// rosters and every ship's range circles to `bake_options`; the stats panel
+/// is still left out, because its silhouettes are one of the loads a bake
+/// skips to stay cheap, so a switch for it would draw an empty gutter and is
+/// not offered. Position trails are derived at raster time rather than baked.
 const TOGGLES: &[Toggle] = &[
     Toggle {
         id: "renderer-opt-hp-bars",
@@ -2414,6 +2528,20 @@ const TOGGLES: &[Toggle] = &[
         label: "ui.renderer.settings.team_advantage",
         read: |o, _| o.show_advantage,
         write: |o, _, v| o.show_advantage = v,
+    },
+    Toggle {
+        id: "renderer-opt-team-rosters",
+        label: "ui.renderer.settings.team_rosters",
+        read: |o, _| o.show_team_rosters,
+        // The rosters sit in gutters either side of the map, which the
+        // stats panel wants for itself, so turning one on clears the other
+        // as the egui checkboxes do.
+        write: |o, _, v| {
+            o.show_team_rosters = v;
+            if v {
+                o.show_stats_panel = false;
+            }
+        },
     },
 ];
 
@@ -3813,6 +3941,143 @@ mod tests {
         cx.executor().advance_clock(Duration::from_millis(200));
         cx.run_until_parked();
         assert_eq!(state.lock().pings.len(), 2, "nothing is shed once the session has gone");
+    }
+
+    /// A roster icon reads what the frame drew, looked up through the region
+    /// the target recorded as it drew it.
+    #[gpui_kit::test]
+    fn a_roster_icon_reads_what_the_frame_drew(cx: &mut TestAppContext) {
+        use gpui_kit::point;
+        use wows_minimap_renderer::draw_command::ChargeCount;
+        use wows_minimap_renderer::draw_command::ConsumableAvailability;
+        use wows_minimap_renderer::draw_command::RosterConsumable;
+        use wows_minimap_renderer::draw_command::RosterRow;
+        use wows_minimap_renderer::draw_command::RosterSide;
+        use wows_minimap_renderer::drawing::DrawnRegion;
+        use wows_minimap_renderer::drawing::RegionKind;
+
+        use super::DrawCommand;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        let entity_id = wows_replays::types::EntityId::from(7u32);
+        let consumable = |name: &str| RosterConsumable {
+            icon_key: format!("PCY_{name}"),
+            display_name: name.to_string(),
+            description: String::new(),
+            total_charges: ChargeCount::Finite(3),
+            charges_used: 0,
+            work_time_secs: 0.0,
+            reload_time_secs: 0.0,
+            active_remaining_secs: None,
+            availability: ConsumableAvailability::Ready,
+        };
+
+        window
+            .update(cx, |panel, _window, _cx| {
+                panel.seed_frame_for_test();
+                panel.set_frame_commands_for_test(vec![DrawCommand::TeamRoster {
+                    side: RosterSide::Friendly,
+                    x: 0,
+                    y: 0,
+                    width: 200,
+                    height: 400,
+                    rows: vec![RosterRow {
+                        entity_id,
+                        team_id: 0,
+                        player_name: "gapedd".to_string(),
+                        clan_tag: None,
+                        clan_color: None,
+                        ship_name: "Smaland".to_string(),
+                        ship_param_id: None,
+                        class_icon_key: None,
+                        species: None,
+                        hp_current: 100.0,
+                        hp_max: 100.0,
+                        hp_healable: 0.0,
+                        hp_healable_per_charge: 0.0,
+                        heal_availability: ConsumableAvailability::Unavailable,
+                        is_dead: false,
+                        is_self: false,
+                        is_spotted: false,
+                        is_disconnected: false,
+                        kills: 0,
+                        damage_dealt: 0.0,
+                        seconds_since_damage: None,
+                        consumables: vec![consumable("Damage Control"), consumable("Repair Party")],
+                    }],
+                }]);
+                // The frame is laid out at its own size, so a canvas pixel is
+                // a window pixel.
+                panel.set_regions_for_test(vec![
+                    DrawnRegion {
+                        rect: [10.0, 10.0, 20.0, 20.0],
+                        kind: RegionKind::RosterConsumable { entity_id, index: 0 },
+                    },
+                    DrawnRegion {
+                        rect: [40.0, 10.0, 20.0, 20.0],
+                        kind: RegionKind::RosterConsumable { entity_id, index: 1 },
+                    },
+                ]);
+
+                let first = panel.consumable_at(point(px(15.), px(15.))).expect("the pointer is on the first icon");
+                assert_eq!(first.lines.name, "Damage Control");
+                assert_eq!(first.player, "gapedd", "and it says whose it is");
+
+                let second = panel.consumable_at(point(px(45.), px(15.))).expect("and on the second");
+                assert_eq!(second.lines.name, "Repair Party", "the index picks the icon, not the row");
+
+                assert!(panel.consumable_at(point(px(32.), px(15.))).is_none(), "between two icons is neither");
+                assert!(panel.consumable_at(point(px(400.), px(400.))).is_none(), "and the map is not a roster");
+            })
+            .expect("the window is open");
+    }
+
+    /// The rosters and the stats panel compete for the same gutters, so
+    /// turning one on clears the other, as the egui checkboxes do.
+    #[test]
+    fn the_rosters_and_the_stats_panel_do_not_share_the_gutters() {
+        let toggle = super::TOGGLES
+            .iter()
+            .find(|toggle| toggle.id == "renderer-opt-team-rosters")
+            .expect("the rosters have a switch");
+        let mut options = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..super::playback_options() };
+        let mut dead = true;
+
+        (toggle.write)(&mut options, &mut dead, true);
+        assert!(options.show_team_rosters);
+        assert!(!options.show_stats_panel, "the stats panel gives the gutter up");
+
+        (toggle.write)(&mut options, &mut dead, false);
+        assert!(!options.show_team_rosters);
+        assert!(!options.show_stats_panel, "and turning the rosters off does not bring it back");
+    }
+
+    /// Turning the rosters on is a wider canvas rather than another layer, so
+    /// the layout has to follow the switch.
+    #[test]
+    fn the_canvas_follows_the_gutter_layer_that_is_on() {
+        use wows_minimap_renderer::drawing::SidePanelLayout;
+
+        let plain = super::playback_options_hidden();
+        assert_eq!(crate::minimap_preview::layout_for(&plain), SidePanelLayout::None);
+
+        let rosters = wows_minimap_renderer::RenderOptions { show_team_rosters: true, ..plain.clone() };
+        assert_eq!(crate::minimap_preview::layout_for(&rosters), SidePanelLayout::TeamRosters);
+
+        let stats = wows_minimap_renderer::RenderOptions { show_stats_panel: true, ..plain };
+        assert_eq!(crate::minimap_preview::layout_for(&stats), SidePanelLayout::StatsPanel);
+    }
+
+    /// A playback bake carries the rosters, or the switch would have nothing
+    /// to show.
+    #[test]
+    fn a_playback_bake_carries_the_rosters() {
+        assert!(super::playback_options().show_team_rosters);
+        assert!(!super::playback_options_hidden().show_team_rosters, "but a viewport opens without them");
     }
 
     /// A ping is shed only once its ripple has run out.

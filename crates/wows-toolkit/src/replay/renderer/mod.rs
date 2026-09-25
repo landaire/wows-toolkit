@@ -1879,7 +1879,7 @@ impl ReplayRendererViewer {
                         for (idx, region) in out.consumable_hover_regions.iter().enumerate() {
                             let id = egui::Id::new(("roster_consumable_hover", idx));
                             let hover_resp = ui.interact(region.rect, id, egui::Sense::hover());
-                            let tex = textures.icons.consumable_icons.get(&region.icon_key);
+                            let tex = textures.icons.consumable_icons.get(&region.consumable.icon_key);
                             hover_resp.on_hover_ui(|ui| {
                                 roster_consumable_tooltip(ui, region, tex);
                             });
@@ -3425,7 +3425,7 @@ fn roster_consumable_tooltip(
     region: &wt_collab_egui::draw_commands::ConsumableHoverRegion,
     icon: Option<&TextureHandle>,
 ) {
-    use wows_minimap_renderer::draw_command::ChargeCount;
+    let lines = wows_minimap_renderer::draw_command::consumable_lines(&region.consumable);
 
     ui.set_max_width(280.0);
     ui.horizontal(|ui| {
@@ -3433,28 +3433,19 @@ fn roster_consumable_tooltip(
             ui.image((tex.id(), Vec2::splat(48.0)));
         }
         ui.vertical(|ui| {
-            let name =
-                if region.display_name.is_empty() { region.icon_key.clone() } else { region.display_name.clone() };
-            ui.label(egui::RichText::new(name).strong());
-            let charges_line = match region.total_charges {
-                ChargeCount::Unlimited => "Charges: inf".to_string(),
-                ChargeCount::Finite(total) => {
-                    let remaining = total.saturating_sub(region.charges_used);
-                    format!("Charges: {} / {}", remaining, total)
-                }
-            };
-            ui.label(charges_line);
+            ui.label(egui::RichText::new(lines.name).strong());
+            ui.label(lines.charges);
         });
     });
-    if region.work_time_secs > 0.0 || region.reload_time_secs > 0.0 {
-        ui.label(format!("Duration: {:.0}s   Cooldown: {:.0}s", region.work_time_secs, region.reload_time_secs));
+    if let Some(timing) = lines.timing {
+        ui.label(timing);
     }
-    if let Some(remaining) = region.active_remaining_secs {
-        ui.label(format!("Active: {:.0}s remaining", remaining));
+    if let Some(active) = lines.active {
+        ui.label(active);
     }
-    if !region.description.is_empty() {
+    if !lines.description.is_empty() {
         ui.separator();
-        ui.label(&region.description);
+        ui.label(&lines.description);
     }
 }
 

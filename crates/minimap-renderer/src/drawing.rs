@@ -2087,9 +2087,9 @@ const CANVAS_BACKGROUND: [u8; 3] = [20, 25, 35];
 /// Something drawn into a frame that a reader can rest a pointer on.
 ///
 /// A target draws the rosters itself, so nothing outside it knows where a
-/// consumable icon or a player's name ended up. Recording them as they are
-/// drawn is what lets a front end put a hover over one without repeating the
-/// layout and drifting from it.
+/// consumable icon ended up. Recording them as they are drawn is what lets a
+/// front end put a hover over one without repeating the layout and drifting
+/// from it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DrawnRegion {
     /// Left, top, width and height in canvas pixels.
@@ -2112,8 +2112,6 @@ pub enum RegionKind {
     /// own `consumables`, so the caller reads the rest off the command it
     /// already has.
     RosterConsumable { entity_id: EntityId, index: usize },
-    /// A roster row's player name, which is what a build popover hangs on.
-    RosterPlayer { entity_id: EntityId },
 }
 
 /// Whether `cmd` draws on the map rather than over it.
