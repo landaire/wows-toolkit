@@ -306,9 +306,14 @@ kept so the next audit does not re-report them.
       opacity and dashing that the renderer had inline at six places, so a
       circle drawn for a ship in the battle and one drawn for a placed ship
       cannot come out different colours.
-      What remains of the ship annotation is the chooser that assigns a ship
-      to one: until a ship is chosen there is nothing to read ranges from,
-      so the circles stay empty.
+      The chooser that assigns a ship to a placed one is on the toolbar,
+      shown while one is picked out: the same search over the same catalogue
+      the armor viewer lists ships from, matched on the folded name each
+      entry carries. Choosing one sets the class and the identity and leaves
+      the build stock, which is where the egui chooser leaves it. The
+      matches are worked out as the box is typed in rather than while the
+      toolbar is built, because the toolbar is built over and over and
+      cannot reach the catalogue mutably.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
