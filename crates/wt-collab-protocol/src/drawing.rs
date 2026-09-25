@@ -365,6 +365,61 @@ pub fn rotate_annotation(annotation: &mut Annotation, angle: f32) {
     }
 }
 
+/// How big a ship annotation's icon is drawn, in minimap space.
+///
+/// The renderer's `assets::ICON_SIZE` is the same figure, but it is behind
+/// that crate's rendering feature and this one does not rasterise anything.
+const SHIP_ICON: f32 = (wows_minimap_renderer::MINIMAP_SIZE * 3 / 128) as f32;
+
+/// The rectangle `annotation` occupies in minimap space, as left, top, right
+/// and bottom.
+///
+/// Around the drawn shape rather than around its anchor: a rectangle turned
+/// on its corner reaches further than its own half size, and a handle placed
+/// over its middle would sit inside it.
+pub fn annotation_bounds(annotation: &Annotation) -> [f32; 4] {
+    fn around(points: impl IntoIterator<Item = [f32; 2]>) -> [f32; 4] {
+        let mut bounds = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
+        for point in points {
+            bounds[0] = bounds[0].min(point[0]);
+            bounds[1] = bounds[1].min(point[1]);
+            bounds[2] = bounds[2].max(point[0]);
+            bounds[3] = bounds[3].max(point[1]);
+        }
+        bounds
+    }
+    fn square(center: [f32; 2], half: f32) -> [f32; 4] {
+        [center[0] - half, center[1] - half, center[0] + half, center[1] + half]
+    }
+
+    match annotation {
+        Annotation::Ship { pos, .. } => square(*pos, SHIP_ICON / 2.0),
+        Annotation::FreehandStroke { points, .. } | Annotation::Arrow { points, .. } => around(points.iter().copied()),
+        Annotation::Line { start, end, .. } | Annotation::Measurement { start, end, .. } => around([*start, *end]),
+        Annotation::Circle { center, radius, .. } => square(*center, *radius),
+        Annotation::Rectangle { center, half_size, rotation, .. } => {
+            let (sin, cos) = rotation.sin_cos();
+            around([[-1.0_f32, -1.0_f32], [1.0, -1.0], [1.0, 1.0], [-1.0, 1.0]].into_iter().map(|[sx, sy]| {
+                let (x, y) = (sx * half_size[0], sy * half_size[1]);
+                [center[0] + x * cos - y * sin, center[1] + x * sin + y * cos]
+            }))
+        }
+        Annotation::Triangle { center, radius, rotation, .. } => {
+            around(crate::geometry::triangle_corners(*center, *radius, *rotation))
+        }
+    }
+}
+
+/// Which way `at` lies from `center`, as the angle a turned shape takes.
+///
+/// Zero points up the map and the angle grows anticlockwise, so west is a
+/// quarter turn and east is minus one. That is what the egui renderer
+/// measures and what a stored rotation already means, so the convention is
+/// its own rather than a nicer one.
+pub fn bearing(center: [f32; 2], at: [f32; 2]) -> f32 {
+    -(at[0] - center[0]).atan2(-(at[1] - center[1]))
+}
+
 /// What the reader has picked out to move or turn.
 ///
 /// Indices into the session's own list, so a caller reads the annotations
@@ -491,6 +546,53 @@ mod tests {
         assert!(!can_rotate(&circle));
         rotate_annotation(&mut circle, 1.25);
         assert!(matches!(circle, Annotation::Circle { .. }), "and it is untouched");
+    }
+
+    /// A shape's bounds go round what is drawn, so a turned rectangle
+    /// reaches past its own half size.
+    #[test]
+    fn bounds_go_round_the_drawn_shape() {
+        let rect = |rotation: f32| Annotation::Rectangle {
+            center: [100.0, 100.0],
+            half_size: [20.0, 10.0],
+            rotation,
+            color: WHITE,
+            width: 2.0,
+            filled: false,
+        };
+
+        let [left, top, right, bottom] = annotation_bounds(&rect(0.0));
+        assert!((left - 80.0).abs() < 1e-3 && (right - 120.0).abs() < 1e-3);
+        assert!((top - 90.0).abs() < 1e-3 && (bottom - 110.0).abs() < 1e-3);
+
+        let [left, _, right, _] = annotation_bounds(&rect(std::f32::consts::FRAC_PI_4));
+        assert!(right - left > 40.0, "turned on its corner it reaches further: {}", right - left);
+    }
+
+    /// A stroke's bounds go round every point of it.
+    #[test]
+    fn a_strokes_bounds_hold_all_of_it() {
+        let stroke = Annotation::FreehandStroke {
+            points: vec![[10.0, 50.0], [30.0, 10.0], [20.0, 90.0]],
+            color: WHITE,
+            width: 2.0,
+        };
+        assert_eq!(annotation_bounds(&stroke), [10.0, 10.0, 30.0, 90.0]);
+    }
+
+    /// A bearing is measured from up the map, growing anticlockwise, which
+    /// is the convention a stored rotation already carries.
+    #[test]
+    fn a_bearing_starts_up_the_map_and_grows_clockwise() {
+        let center = [100.0, 100.0];
+        let quarter = std::f32::consts::FRAC_PI_2;
+        assert!(bearing(center, [100.0, 50.0]).abs() < 1e-4, "straight up is zero");
+        assert!((bearing(center, [50.0, 100.0]) - quarter).abs() < 1e-4, "west is a quarter turn");
+        assert!((bearing(center, [150.0, 100.0]) + quarter).abs() < 1e-4, "and east is minus one");
+        assert!(
+            (bearing(center, [100.0, 150.0]).abs() - std::f32::consts::PI).abs() < 1e-4,
+            "straight down is half a turn, either way round"
+        );
     }
 
     /// A click picks out what it landed on, and a click on open water lets
