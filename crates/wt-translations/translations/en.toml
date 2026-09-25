@@ -1142,6 +1142,7 @@ copy_to_clipboard = "Render Video to Clipboard"
 
 [ui.renderer.annotations]
 title = "Drawing Tools"
+undo = "Undo"
 
 [ui.renderer.settings]
 title = "Display Settings"

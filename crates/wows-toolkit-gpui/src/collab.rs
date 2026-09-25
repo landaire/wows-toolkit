@@ -474,6 +474,43 @@ impl CollabLink {
         )));
     }
 
+    /// Everything the session holds, with the ids and owners it keys them
+    /// by. What a snapshot for undo is taken of.
+    pub fn annotations_held(&self) -> Vec<wt_collab_client::drawing::Held> {
+        let Some(state) = &self.state else { return Vec::new() };
+        let held = state.lock();
+        let Some(sync) = held.current_annotation_sync.as_ref() else { return Vec::new() };
+        sync.annotations
+            .iter()
+            .enumerate()
+            .map(|(at, annotation)| wt_collab_client::drawing::Held {
+                id: sync.ids.get(at).copied().unwrap_or_default(),
+                owner: sync.owners.get(at).copied().unwrap_or_default(),
+                annotation: annotation.clone(),
+            })
+            .collect()
+    }
+
+    /// Puts the session back the way `was` had it.
+    pub fn restore(&self, was: &[wt_collab_client::drawing::Held]) {
+        use wt_collab_client::drawing::Change;
+        use wt_collab_client::peer::LocalAnnotationEvent;
+
+        let Some(tx) = &self.local_tx else { return };
+        for change in wt_collab_client::drawing::undo_plan(was, &self.annotations_held()) {
+            let event = match change {
+                Change::Set(held) => LocalAnnotationEvent::Set {
+                    board_id: None,
+                    id: held.id,
+                    annotation: held.annotation,
+                    owner: held.owner,
+                },
+                Change::Remove(id) => LocalAnnotationEvent::Remove { board_id: None, id },
+            };
+            let _ = tx.send(LocalEvent::Annotation(event));
+        }
+    }
+
     /// Replaces the annotation at `index` of [`Self::annotations`], keeping
     /// the id the session knows it by.
     ///

@@ -324,6 +324,50 @@ pub fn nearest_within(annotations: &[Annotation], at: [f32; 2], reach: f32) -> O
         .map(|(index, _)| index)
 }
 
+/// One annotation as the session holds it: what it is, and the id and owner
+/// it is keyed by.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Held {
+    pub id: u64,
+    pub owner: u64,
+    pub annotation: Annotation,
+}
+
+/// One change to put the session back the way it was.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Change {
+    /// Put this back, under the id it had.
+    Set(Held),
+    /// Take this one off again.
+    Remove(u64),
+}
+
+/// What it would take to put `current` back to `was`.
+///
+/// By id rather than by position: the list is shared, so a peer adding or
+/// rubbing something out shifts every index after it, and an undo that
+/// worked on positions would move the wrong shapes. Only what actually
+/// differs is returned, so undoing a change nobody made sends nothing.
+///
+/// The snapshot is restored exactly, which takes off anything added since,
+/// a peer's drawing included. That is what an undo means in the egui app
+/// too, where it sends its whole list back as a full sync.
+pub fn undo_plan(was: &[Held], current: &[Held]) -> Vec<Change> {
+    let mut changes = Vec::new();
+    for held in was {
+        match current.iter().find(|other| other.id == held.id) {
+            Some(now) if now == held => {}
+            _ => changes.push(Change::Set(held.clone())),
+        }
+    }
+    for held in current {
+        if !was.iter().any(|other| other.id == held.id) {
+            changes.push(Change::Remove(held.id));
+        }
+    }
+    changes
+}
+
 /// How near a click has to be to pick something out.
 const PICK_REACH: f32 = 15.0;
 
@@ -593,6 +637,63 @@ mod tests {
             (bearing(center, [100.0, 150.0]).abs() - std::f32::consts::PI).abs() < 1e-4,
             "straight down is half a turn, either way round"
         );
+    }
+
+    fn held(id: u64, annotation: Annotation) -> Held {
+        Held { id, owner: 7, annotation }
+    }
+
+    /// Undoing puts back what was taken off, under the id it had.
+    #[test]
+    fn undoing_puts_back_what_was_taken_off() {
+        let was = vec![held(1, line([0.0, 0.0], [10.0, 0.0])), held(2, line([0.0, 5.0], [10.0, 5.0]))];
+        let current = vec![was[0].clone()];
+
+        assert_eq!(undo_plan(&was, &current), vec![Change::Set(was[1].clone())]);
+    }
+
+    /// And takes off what was added.
+    #[test]
+    fn undoing_takes_off_what_was_added() {
+        let was = vec![held(1, line([0.0, 0.0], [10.0, 0.0]))];
+        let mut current = was.clone();
+        current.push(held(2, line([0.0, 5.0], [10.0, 5.0])));
+
+        assert_eq!(undo_plan(&was, &current), vec![Change::Remove(2)]);
+    }
+
+    /// A shape that was moved goes back where it was, under the same id.
+    #[test]
+    fn undoing_puts_a_moved_shape_back() {
+        let was = vec![held(1, line([0.0, 0.0], [10.0, 0.0]))];
+        let mut moved = was[0].clone();
+        move_annotation(&mut moved.annotation, [50.0, 50.0]);
+
+        assert_eq!(undo_plan(&was, &[moved]), vec![Change::Set(was[0].clone())]);
+    }
+
+    /// Undoing works by id, so a peer adding one of their own in between
+    /// does not make the undo move the wrong shape. Restoring the snapshot
+    /// exactly also takes the peer's off, as the egui full sync does.
+    #[test]
+    fn undoing_is_not_thrown_off_by_what_a_peer_did() {
+        let mine = held(1, line([0.0, 0.0], [10.0, 0.0]));
+        let was = vec![mine.clone()];
+        // A peer's shape landed first in the list, and mine was moved.
+        let mut moved = mine.clone();
+        move_annotation(&mut moved.annotation, [50.0, 50.0]);
+        let current = vec![held(99, line([0.0, 9.0], [10.0, 9.0])), moved];
+
+        let plan = undo_plan(&was, &current);
+        assert!(plan.contains(&Change::Set(mine)), "mine goes back: {plan:?}");
+        assert!(plan.contains(&Change::Remove(99)), "and the peer's is taken off, as it was not there before");
+    }
+
+    /// Undoing a change nobody made sends nothing.
+    #[test]
+    fn undoing_nothing_sends_nothing() {
+        let was = vec![held(1, line([0.0, 0.0], [10.0, 0.0]))];
+        assert!(undo_plan(&was, &was).is_empty());
     }
 
     /// A click picks out what it landed on, and a click on open water lets
