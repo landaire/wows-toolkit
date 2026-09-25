@@ -253,10 +253,22 @@ kept so the next audit does not re-report them.
       thickens with the map as the egui renderer's does, and no display
       option hides an annotation: a reader put it there deliberately. The
       egui converter grew the same arm, so a web client draws them too.
-      What remains is the toolbar itself -- the tools that make the shapes,
-      selection and transforms -- and the ship annotation, which is an icon
-      and a set of range circles rather than a shape and so needs the ship's
-      own game data.
+      The tools are in as well. What a tool does with a pointer is
+      `wt_collab_protocol::drawing`: a line needs two points far enough apart
+      to mean anything, a freehand stroke is tidied before it is kept, an
+      arrow drawn with shift held keeps only where it began and where the
+      pointer is. A tool in hand takes the drag, so a reader drawing is not
+      panning the map under their own line, and the part-drawn shape is put
+      on the frame through the same conversion the finished one uses, so what
+      they see while dragging is what they get. The toolbar is a popover
+      beside the gear, refused without a session because an annotation is
+      something everyone in one sees. The icons are the egui toolbar's own
+      Phosphor codepoints rather than approximations.
+      What remains is selection and the transforms that go with it (moving,
+      rotating and rubbing out by handle rather than by the eraser), the undo
+      the egui toolbar carries, and the ship annotation, which is an icon and
+      a set of range circles rather than a shape and so needs the ship's own
+      game data.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a
