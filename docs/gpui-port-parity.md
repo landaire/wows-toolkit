@@ -172,6 +172,11 @@ kept so the next audit does not re-report them.
     derived instead, by `trails_through` reading the ship positions already in
     the frames behind the one being drawn, which costs one walk of them and is
     what Heat Trail switches on.
+  - A pointer position and a map position are different spaces once the map
+    is zoomed, and `map_point` now returns map space with `drawn_point` kept
+    for the wheel, which anchors on a drawn point. Picking compared the two
+    directly before that, so it agreed only at zoom 1 and picked the wrong
+    ship, or none, as soon as the reader zoomed in.
   - Right-clicking a ship opens its own menu: its trail, its six ranges, and
     the "only this one" shortcuts for both. Picking reads the frame on screen
     and takes the nearest ship within an icon's width, so it picks what the
@@ -201,12 +206,13 @@ kept so the next audit does not re-report them.
       rosters on also switches the canvas to `SidePanelLayout::TeamRosters`,
       which widens it, so this changes the viewport's whole geometry rather
       than adding a layer.
-    - **The annotation toolbar and what collab draws over the map.** Pings and
-      remote cursors are minimap-space points, so the projection this port
-      already has would place them; what is missing is that `CollabState`
-      surfaces no cursor or ping stream, only session and peer state. The
-      toolbar itself is a drawing editor (tools, selection, transforms), which
-      is its own piece of work.
+    - **The annotation toolbar.** Peers' cursors and their pings are drawn
+      now: `wt-collab-client` already tracked both, so the work was a
+      `CollabLink` the viewport holds (inert without a session, and handed on
+      when one starts or stops while a viewport is open) and the projection
+      from map space back to the element. A middle-click drops a ping. What is
+      still absent is the toolbar itself, which is a drawing editor -- tools,
+      selection, transforms -- and its own piece of work.
     The stats panel and team rosters remain outside `bake_options`.
   - Zoom and pan was the one gap that was not a matter of wiring. The egui
     renderer converts draw commands to shapes itself and applies a

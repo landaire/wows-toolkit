@@ -213,6 +213,11 @@ pub struct ReplayRendererPanel {
     drawn: Rc<Cell<Option<Bounds<Pixels>>>>,
     /// Where a drag of the map last was, in window coordinates.
     dragging: Option<Point<Pixels>>,
+    /// The map point last reported to the session, so an unmoved pointer is
+    /// not sent again.
+    reported_cursor: Option<[f32; 2]>,
+    /// This viewport's end of a collab session. Inert until one is running.
+    collab: crate::collab::CollabLink,
     /// What an export is encoded with.
     export_settings: ExportSettings,
     /// Ships whose trail the reader has hidden, by player name, which is what
@@ -308,6 +313,8 @@ impl ReplayRendererPanel {
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
+            reported_cursor: None,
+            collab: crate::collab::CollabLink::default(),
             export_settings: ExportSettings::default(),
             trail_hidden: HashSet::new(),
             ship_ranges: HashMap::new(),
@@ -380,6 +387,8 @@ impl ReplayRendererPanel {
             _zoom_subscription: Some(zoom_subscription),
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
+            reported_cursor: None,
+            collab: crate::collab::CollabLink::default(),
             export_settings: ExportSettings::default(),
             trail_hidden: HashSet::new(),
             ship_ranges: HashMap::new(),
@@ -465,6 +474,90 @@ impl ReplayRendererPanel {
             .collect();
     }
 
+    /// Hands a viewport being built its end of the session, before it has a
+    /// context to notify through.
+    pub fn seed_collab(&mut self, link: crate::collab::CollabLink) {
+        self.collab = link;
+    }
+
+    /// Hands this viewport a session to talk to, or takes one away.
+    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+        self.collab = link;
+        cx.notify();
+    }
+
+    /// Where the peers' pointers and their pings are, in element space.
+    ///
+    /// Drawn as elements over the frame rather than into it: they are not
+    /// part of the battle, and they move between rasters.
+    fn collab_overlay(&self) -> Vec<AnyElement> {
+        let mut over: Vec<AnyElement> = Vec::new();
+        for cursor in self.collab.peer_cursors() {
+            let Some(pos) = cursor.pos else { continue };
+            let Some((left, top)) = self.element_point((pos[0], pos[1])) else { continue };
+            let color: gpui_kit::Hsla =
+                rgb(u32::from_be_bytes([0, cursor.color[0], cursor.color[1], cursor.color[2]])).into();
+            over.push(
+                div()
+                    .absolute()
+                    .left(left)
+                    .top(top)
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .items_center()
+                            .child(div().size(px(8.)).rounded_full().bg(color))
+                            .child(div().text_xs().text_color(color).child(cursor.name.clone())),
+                    )
+                    .into_any_element(),
+            );
+        }
+        for ping in self.collab.peer_pings() {
+            let Some((left, top)) = self.element_point((ping.pos[0], ping.pos[1])) else { continue };
+            let color: gpui_kit::Hsla =
+                rgb(u32::from_be_bytes([0, ping.color[0], ping.color[1], ping.color[2]])).into();
+            // A ping is a ring that grows and fades over its first second, as
+            // the egui renderer's ripple does.
+            let age = ping.time.elapsed().as_secs_f32();
+            if age > PING_SECONDS {
+                continue;
+            }
+            let grown = PING_RADIUS * (0.3 + age / PING_SECONDS);
+            over.push(
+                div()
+                    .absolute()
+                    .left(px(left.as_f32() - grown))
+                    .top(px(top.as_f32() - grown))
+                    .size(px(grown * 2.0))
+                    .rounded_full()
+                    .border_2()
+                    .border_color(color.opacity(1.0 - age / PING_SECONDS))
+                    .into_any_element(),
+            );
+        }
+        over
+    }
+
+    /// Where a map point lands inside the viewport element.
+    ///
+    /// The inverse of [`Self::map_point`], which is what puts a peer's cursor
+    /// where they are pointing rather than where the pointer happens to be.
+    /// `None` before the frame has been painted once, and for a point the
+    /// viewport is not currently showing.
+    fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
+        let scale = self.drawn_scale()?;
+        let (left, top, _) = self.hud_strip()?;
+        let drawn = (self.view.x(at.0), self.view.y(at.1));
+        let span = wows_minimap_renderer::MINIMAP_SIZE as f32;
+        if drawn.0 < 0.0 || drawn.0 >= span || drawn.1 < 0.0 || drawn.1 >= span {
+            return None;
+        }
+        Some((
+            px(left.as_f32() + (drawn.0 + MAP_ORIGIN.0) * scale),
+            px(top.as_f32() + (drawn.1 + MAP_ORIGIN.1) * scale),
+        ))
+    }
+
     /// Where the frame's HUD strip lands inside the viewport element.
     ///
     /// The frame is drawn to fit without stretching, so it is letterboxed:
@@ -507,6 +600,36 @@ impl ReplayRendererPanel {
             }
         }
         Some(lines)
+    }
+
+    /// Tells the session where this app's pointer is on the map.
+    ///
+    /// Sent only while a session is running, and only when it has moved to a
+    /// different map point: a pointer crossing a zoomed-in map would otherwise
+    /// send a message per pixel.
+    fn report_cursor(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if !self.collab.is_active() {
+            return;
+        }
+        let at = self.map_point(position).map(|(x, y)| [x, y]);
+        let moved = match (self.reported_cursor, at) {
+            (Some(was), Some(now)) => (was[0] - now[0]).abs() >= 1.0 || (was[1] - now[1]).abs() >= 1.0,
+            (None, None) => false,
+            _ => true,
+        };
+        if !moved {
+            return;
+        }
+        self.reported_cursor = at;
+        self.collab.report_cursor(at);
+        let _ = cx;
+    }
+
+    /// Drops a ping where the pointer is, for everyone in the session.
+    fn on_ping(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some((x, y)) = self.map_point(event.position) else { return };
+        self.collab.send_ping([x, y]);
+        let _ = cx;
     }
 
     /// Opens the per-ship menu on whatever was right-clicked.
@@ -1170,12 +1293,25 @@ impl ReplayRendererPanel {
         Some((bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height))
     }
 
-    /// Where in the drawn map a window position falls, in the map's own
-    /// pixels.
+    /// Where in the map a window position falls, in the map's own pixels.
+    ///
+    /// Map space, not the drawn layer: this is what a ship's position and a
+    /// peer's cursor are both in, so it is what they can be compared against
+    /// at any zoom.
     ///
     /// `None` when the pointer is not over the map: on the HUD strip, or in
     /// the margin beside a frame that does not fill its element.
     fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let (x, y) = self.drawn_point(position)?;
+        Some(self.view.to_map(x, y))
+    }
+
+    /// Where in the drawn map a window position falls, after the zoom and pan
+    /// have been applied.
+    ///
+    /// What a zoom about the pointer needs, since it re-anchors on a drawn
+    /// point rather than a map one.
+    fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
         let bounds = self.drawn.get()?;
         let frame = self.frame.as_ref()?;
         let scale = self.drawn_scale()?;
@@ -1193,7 +1329,7 @@ impl ReplayRendererPanel {
 
     /// The wheel zooms about whatever is under the pointer.
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(at) = self.map_point(event.position) else { return };
+        let Some(at) = self.drawn_point(event.position) else { return };
         let delta = event.delta.pixel_delta(SCROLL_LINE).y.as_f32();
         if delta == 0.0 {
             return;
@@ -1215,6 +1351,7 @@ impl ReplayRendererPanel {
     }
 
     fn on_drag_move(&mut self, event: &MouseMoveEvent, window: &mut Window, cx: &mut Context<Self>) {
+        self.report_cursor(event.position, cx);
         let Some(from) = self.dragging else { return };
         if !event.dragging() {
             self.dragging = None;
@@ -1433,6 +1570,8 @@ impl Render for ReplayRendererPanel {
                                         .into(),
                                 ))
                         }))
+                        .children(self.collab_overlay())
+                        .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_ping))
                         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                         .on_scroll_wheel(cx.listener(Self::on_scroll))
                         .on_mouse_down(MouseButton::Left, cx.listener(Self::on_drag_start))
@@ -1789,6 +1928,12 @@ fn per_ship_allows(
         _ => true,
     }
 }
+
+/// How long a ping stays on the map, in seconds.
+const PING_SECONDS: f32 = 1.0;
+
+/// How wide a ping's ring grows, in element pixels.
+const PING_RADIUS: f32 = 26.0;
 
 /// The strip the renderer reserves above the map, which is where the score
 /// bar and the advantage label are drawn.
@@ -3345,6 +3490,121 @@ mod tests {
                     lines.iter().any(|line| line.contains("incomplete")),
                     "and that the HP data was not reliable: {lines:?}"
                 );
+            })
+            .expect("the window is open");
+    }
+
+    /// A map point projects to where the pointer that named it was, so a
+    /// peer's cursor lands where they are pointing.
+    ///
+    /// This is the inverse of the picking projection; the two have to agree or
+    /// a shared pointer drifts from what it is over.
+    #[gpui_kit::test]
+    fn a_map_point_and_a_pointer_position_agree_both_ways(cx: &mut TestAppContext) {
+        use gpui_kit::point;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+
+                for zoom in [1.0_f32, 3.5] {
+                    panel.set_view(super::MapViewport::new(zoom, (40.0, 90.0)), window, cx);
+
+                    let at = point(px(300.), px(200.0 + super::MAP_ORIGIN.1));
+                    let on_map = panel.map_point(at).expect("the pointer is over the map");
+                    let (left, top) = panel.element_point(on_map).expect("and the map point is on screen");
+
+                    assert!((left.as_f32() - at.x.as_f32()).abs() < 0.5, "x at zoom {zoom}");
+                    assert!((top.as_f32() - at.y.as_f32()).abs() < 0.5, "y at zoom {zoom}");
+                }
+            })
+            .expect("the window is open");
+    }
+
+    /// A map point the viewport is not showing has nowhere to be drawn.
+    #[gpui_kit::test]
+    fn a_point_outside_the_view_is_not_placed(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                assert!(panel.element_point((10.0, 10.0)).is_some(), "the whole map shows its corner");
+
+                // Zoomed into the far corner, the near one is off screen.
+                panel.set_view(super::MapViewport::new(4.0, (2304.0, 2304.0)), window, cx);
+                assert!(panel.element_point((10.0, 10.0)).is_none());
+            })
+            .expect("the window is open");
+    }
+
+    /// Right-clicking a ship picks it at any zoom.
+    ///
+    /// A pointer position and a ship's position have to be compared in the
+    /// same space. Picking used to compare a drawn-layer point against a
+    /// map-space one, so it only agreed at zoom 1 and picked the wrong ship,
+    /// or none, as soon as the reader zoomed in.
+    #[gpui_kit::test]
+    fn a_ship_is_picked_at_any_zoom(cx: &mut TestAppContext) {
+        use gpui_kit::Modifiers;
+        use gpui_kit::MouseButton;
+        use gpui_kit::MouseDownEvent;
+        use gpui_kit::point;
+        use wows_minimap_renderer::ShipVisibility;
+        use wows_minimap_renderer::map_data::MinimapPos;
+
+        use super::DrawCommand;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.seed_frame_for_test();
+                let on_map = MinimapPos { x: 300.0, y: 400.0 };
+                panel.set_frame_commands_for_test(vec![DrawCommand::Ship {
+                    entity_id: wows_replays::types::EntityId::from(7u32),
+                    pos: on_map,
+                    yaw: 0.0,
+                    species: None,
+                    color: None,
+                    visibility: ShipVisibility::Visible,
+                    opacity: 1.0,
+                    is_self: false,
+                    player_name: Some("gapedd".into()),
+                    ship_name: None,
+                    is_detected_teammate: false,
+                    is_disconnected: false,
+                    name_color: None,
+                }]);
+
+                for zoom in [1.0_f32, 2.0, 5.0] {
+                    panel.set_view(super::MapViewport::new(zoom, (200.0, 300.0)), window, cx);
+                    let Some((left, top)) = panel.element_point((on_map.x, on_map.y)) else {
+                        continue;
+                    };
+                    let press = MouseDownEvent {
+                        button: MouseButton::Right,
+                        position: point(left, top),
+                        modifiers: Modifiers::default(),
+                        click_count: 1,
+                        first_mouse: false,
+                    };
+                    panel.on_right_click(&press, window, cx);
+                    let picked = panel.ship_menu().map(|menu| menu.player_name.clone());
+                    assert_eq!(picked.as_deref(), Some("gapedd"), "at zoom {zoom}");
+                    panel.close_ship_menu(cx);
+                }
             })
             .expect("the window is open");
     }
