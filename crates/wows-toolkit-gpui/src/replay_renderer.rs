@@ -46,6 +46,8 @@ use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use std::cell::Cell;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::rc::Rc;
 
 use gpui_kit::prelude::FluentBuilder;
@@ -55,6 +57,7 @@ use wows_minimap_renderer::RenderOptions;
 use wows_minimap_renderer::VideoCodec;
 use wows_minimap_renderer::config::should_draw_command;
 use wows_minimap_renderer::draw_command::DrawCommand;
+use wows_minimap_renderer::draw_command::ShipConfigFilter;
 use wows_minimap_renderer::viewport::MAX_ZOOM;
 use wows_minimap_renderer::viewport::MIN_ZOOM;
 use wows_minimap_renderer::viewport::MapViewport;
@@ -66,6 +69,7 @@ use wows_replay_insights::timeline::format_timeline_event;
 use wows_replay_insights::timeline::kind_label_key;
 use wows_replay_insights::timeline::row_text;
 use wows_replay_insights::timeline::row_tone;
+use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wowsunpack::game_types::TeamId;
 
@@ -211,6 +215,15 @@ pub struct ReplayRendererPanel {
     dragging: Option<Point<Pixels>>,
     /// What an export is encoded with.
     export_settings: ExportSettings,
+    /// Ships whose trail the reader has hidden, by player name, which is what
+    /// a trail command carries.
+    trail_hidden: HashSet<String>,
+    /// Which ranges the reader wants for a ship, by player name. A ship with
+    /// no entry shows none, which is what keeps the map readable until they
+    /// ask for one.
+    ship_ranges: HashMap<String, ShipConfigFilter>,
+    /// The ship a context menu is open for, and where it was opened.
+    menu_for: Option<ShipMenu>,
     /// Which of the battle's events the timeline shows.
     event_filter: TimelineFilter,
     /// The timeline's search box.
@@ -296,6 +309,9 @@ impl ReplayRendererPanel {
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
             export_settings: ExportSettings::default(),
+            trail_hidden: HashSet::new(),
+            ship_ranges: HashMap::new(),
+            menu_for: None,
             event_filter: TimelineFilter::default(),
             event_search,
             _event_search: Some(event_search_subscription),
@@ -365,6 +381,9 @@ impl ReplayRendererPanel {
             drawn: Rc::new(Cell::new(None)),
             dragging: None,
             export_settings: ExportSettings::default(),
+            trail_hidden: HashSet::new(),
+            ship_ranges: HashMap::new(),
+            menu_for: None,
             event_filter: TimelineFilter::default(),
             event_search,
             _event_search: Some(event_search_subscription),
@@ -431,6 +450,138 @@ impl ReplayRendererPanel {
                 kind: TimelineEventKind::AdvantageChanged { label: format!("at {seconds}"), is_friendly: true },
             })
             .collect();
+    }
+
+    /// Opens the per-ship menu on whatever was right-clicked.
+    fn on_right_click(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some(at) = self.map_point(event.position) else { return };
+        self.menu_for = self.ship_at(at);
+        cx.notify();
+    }
+
+    /// Closes the per-ship menu.
+    pub(crate) fn close_ship_menu(&mut self, cx: &mut Context<Self>) {
+        if self.menu_for.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The ship a menu is open for.
+    pub(crate) fn ship_menu(&self) -> Option<&ShipMenu> {
+        self.menu_for.as_ref()
+    }
+
+    /// The ship drawn nearest `at`, if one is close enough to have been meant.
+    ///
+    /// Reads the frame on screen rather than the whole track: a right-click
+    /// picks what the reader can see.
+    fn ship_at(&self, at: (f32, f32)) -> Option<ShipMenu> {
+        let track = self.track()?;
+        let commands = track.frames.get(self.at)?;
+        let mut best: Option<(f32, ShipMenu)> = None;
+        for command in commands {
+            let (pos, player_name, entity_id) = match command {
+                DrawCommand::Ship { pos, player_name, entity_id, .. }
+                | DrawCommand::DeadShip { pos, player_name, entity_id, .. } => (pos, player_name, entity_id),
+                _ => continue,
+            };
+            let Some(name) = player_name.clone() else { continue };
+            let away = ((pos.x - at.0).powi(2) + (pos.y - at.1).powi(2)).sqrt();
+            if away > PICK_RADIUS {
+                continue;
+            }
+            if best.as_ref().is_none_or(|(nearest, _)| away < *nearest) {
+                best = Some((away, ShipMenu { entity_id: *entity_id, player_name: name }));
+            }
+        }
+        best.map(|(_, menu)| menu)
+    }
+
+    /// Whether `player` has a trail drawn.
+    pub(crate) fn trail_shown(&self, player: &str) -> bool {
+        !self.trail_hidden.contains(player)
+    }
+
+    /// Shows or hides one ship's trail.
+    ///
+    /// Turning one on turns the trails on, since a reader who asked for this
+    /// ship's trail meant to see it; hiding the last one turns them off again
+    /// rather than leaving an empty layer switched on.
+    pub(crate) fn set_trail_shown(&mut self, player: &str, shown: bool, cx: &mut Context<Self>) {
+        if shown {
+            self.trail_hidden.remove(player);
+            self.options.show_trails = true;
+        } else {
+            self.trail_hidden.insert(player.to_owned());
+            if self.drawn_ships().iter().all(|name| self.trail_hidden.contains(name)) {
+                self.options.show_trails = false;
+            }
+        }
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Hides every trail but `player`'s.
+    pub(crate) fn only_trail(&mut self, player: &str, cx: &mut Context<Self>) {
+        self.trail_hidden = self.drawn_ships().into_iter().filter(|name| name != player).collect();
+        self.options.show_trails = true;
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Which ranges `player` has on.
+    pub(crate) fn ranges_for(&self, player: &str) -> ShipConfigFilter {
+        self.ship_ranges.get(player).copied().unwrap_or(NO_RANGES)
+    }
+
+    /// Changes which ranges one ship shows.
+    pub(crate) fn set_ranges_for(
+        &mut self,
+        player: &str,
+        apply: impl FnOnce(&mut ShipConfigFilter),
+        cx: &mut Context<Self>,
+    ) {
+        let mut filter = self.ranges_for(player);
+        apply(&mut filter);
+        self.ship_ranges.insert(player.to_owned(), filter);
+        // Ranges are drawn at all only while some ship has one.
+        self.options.show_ship_config = self.ship_ranges.values().any(|filter| *filter != NO_RANGES);
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Leaves only `player`'s ranges on.
+    pub(crate) fn only_ranges(&mut self, player: &str, cx: &mut Context<Self>) {
+        let keep = self.ranges_for(player);
+        let keep = if keep == NO_RANGES { ALL_RANGES } else { keep };
+        self.ship_ranges.clear();
+        self.ship_ranges.insert(player.to_owned(), keep);
+        self.options.show_ship_config = true;
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Turns every ship's ranges on.
+    pub(crate) fn all_ranges(&mut self, cx: &mut Context<Self>) {
+        self.ship_ranges = self.drawn_ships().into_iter().map(|name| (name, ALL_RANGES)).collect();
+        self.options.show_ship_config = true;
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// The ships drawn in the frame on screen, by player name.
+    fn drawn_ships(&self) -> Vec<String> {
+        let Some(track) = self.track() else { return Vec::new() };
+        let Some(commands) = track.frames.get(self.at) else { return Vec::new() };
+        commands
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::Ship { player_name, .. } | DrawCommand::DeadShip { player_name, .. } => {
+                    player_name.clone()
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     /// The events the filter admits, newest last.
@@ -677,6 +828,8 @@ impl ReplayRendererPanel {
         let options = self.options.clone();
         let show_dead_ships = self.show_dead_ships;
         let view = self.view;
+        let trail_hidden = self.trail_hidden.clone();
+        let ship_ranges = self.ship_ranges.clone();
         cx.spawn(async move |this, cx| {
             let drawn = cx.background_spawn(async move {
                 // Filtered here rather than at bake time: a toggle then costs
@@ -687,6 +840,7 @@ impl ReplayRendererPanel {
                     .into_iter()
                     .chain(commands)
                     .filter(|command| should_draw_command(command, &options, show_dead_ships))
+                    .filter(|command| per_ship_allows(command, &trail_hidden, &ship_ranges))
                     .collect();
                 let image = {
                     let mut drawing = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -1205,6 +1359,7 @@ impl Render for ReplayRendererPanel {
                             .absolute()
                             .inset_0(),
                         )
+                        .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                         .on_scroll_wheel(cx.listener(Self::on_scroll))
                         .on_mouse_down(MouseButton::Left, cx.listener(Self::on_drag_start))
                         .on_mouse_move(cx.listener(Self::on_drag_move))
@@ -1377,6 +1532,8 @@ impl Render for ReplayRendererPanel {
 
         v_flex()
             .id("replay-renderer")
+            .relative()
+            .children(ship_menu(&cx.entity(), self))
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(|this, event, window, cx| this.on_key(event, window, cx)))
             .size_full()
@@ -1393,6 +1550,202 @@ const EXPORT_WIDTH: Pixels = px(86.);
 
 /// How wide a battle-start or battle-end mark is drawn on the seek bar.
 const TICK_WIDTH: Pixels = px(1.5);
+
+/// The menu a right-click on a ship opens: its trail and its ranges.
+///
+/// Drawn over the viewport rather than beside it, because it belongs to the
+/// ship that was clicked.
+fn ship_menu(panel: &Entity<ReplayRendererPanel>, view: &ReplayRendererPanel) -> Option<AnyElement> {
+    let menu = view.ship_menu()?;
+    let player = menu.player_name.clone();
+    let trail_on = view.trail_shown(&player);
+    let ranges = view.ranges_for(&player);
+    let owner = panel.clone();
+
+    let range_switch = |id: &'static str, label: &'static str, on: bool, set: fn(&mut ShipConfigFilter, bool)| {
+        let owner = panel.clone();
+        let player = player.clone();
+        Checkbox::new(id).label(t!(label).to_string()).checked(on).on_click(move |checked, _window, cx: &mut App| {
+            let checked = *checked;
+            let player = player.clone();
+            owner.update(cx, |panel, cx| panel.set_ranges_for(&player, |filter| set(filter, checked), cx));
+        })
+    };
+
+    Some(
+        div()
+            .absolute()
+            .top_2()
+            .right_2()
+            .w(px(220.))
+            .p_2()
+            .rounded_md()
+            .border_1()
+            .border_color(crate::theme::border_bright())
+            .bg(crate::theme::surface())
+            .child(
+                v_flex()
+                    .gap_1()
+                    .child(
+                        h_flex()
+                            .justify_between()
+                            .items_center()
+                            .child(div().text_xs().font_weight(FontWeight::BOLD).child(player.clone()))
+                            .child({
+                                let owner = owner.clone();
+                                Button::new("replay-renderer-ship-menu-close")
+                                    .child(crate::icons::icon(crate::icons::X))
+                                    .compact()
+                                    .on_click(move |_event, _window, cx: &mut App| {
+                                        owner.update(cx, |panel, cx| panel.close_ship_menu(cx));
+                                    })
+                            }),
+                    )
+                    .child({
+                        let owner = owner.clone();
+                        let player = player.clone();
+                        Checkbox::new("replay-renderer-ship-trail")
+                            .label(t!("ui.renderer.context.show_trail").to_string())
+                            .checked(trail_on)
+                            .on_click(move |checked, _window, cx: &mut App| {
+                                let checked = *checked;
+                                let player = player.clone();
+                                owner.update(cx, |panel, cx| panel.set_trail_shown(&player, checked, cx));
+                            })
+                    })
+                    .child({
+                        let owner = owner.clone();
+                        let player = player.clone();
+                        Button::new("replay-renderer-ship-only-trail")
+                            .label(t!("ui.renderer.context.disable_other_trails").into_owned())
+                            .compact()
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                let player = player.clone();
+                                owner.update(cx, |panel, cx| panel.only_trail(&player, cx));
+                            })
+                    })
+                    .child(
+                        div()
+                            .pt_1()
+                            .text_xs()
+                            .text_color(crate::theme::text_dim())
+                            .child(t!("ui.renderer.context.ranges").into_owned()),
+                    )
+                    .child(range_switch(
+                        "replay-renderer-range-detection",
+                        "ui.renderer.context.detection",
+                        ranges.detection,
+                        |filter, on| filter.detection = on,
+                    ))
+                    .child(range_switch(
+                        "replay-renderer-range-main",
+                        "ui.renderer.context.main_battery",
+                        ranges.main_battery,
+                        |filter, on| filter.main_battery = on,
+                    ))
+                    .child(range_switch(
+                        "replay-renderer-range-secondary",
+                        "ui.renderer.context.secondary",
+                        ranges.secondary_battery,
+                        |filter, on| filter.secondary_battery = on,
+                    ))
+                    .child(range_switch(
+                        "replay-renderer-range-torpedo",
+                        "ui.renderer.context.torpedo",
+                        ranges.torpedo,
+                        |filter, on| filter.torpedo = on,
+                    ))
+                    .child(range_switch(
+                        "replay-renderer-range-radar",
+                        "ui.renderer.context.radar",
+                        ranges.radar,
+                        |filter, on| filter.radar = on,
+                    ))
+                    .child(range_switch(
+                        "replay-renderer-range-hydro",
+                        "ui.renderer.context.hydro",
+                        ranges.hydro,
+                        |filter, on| filter.hydro = on,
+                    ))
+                    .child(
+                        h_flex()
+                            .gap_1()
+                            .child({
+                                let owner = owner.clone();
+                                let player = player.clone();
+                                Button::new("replay-renderer-only-ranges")
+                                    .label(t!("ui.renderer.context.disable_other_ranges").into_owned())
+                                    .compact()
+                                    .on_click(move |_event, _window, cx: &mut App| {
+                                        let player = player.clone();
+                                        owner.update(cx, |panel, cx| panel.only_ranges(&player, cx));
+                                    })
+                            })
+                            .child({
+                                let owner = owner.clone();
+                                Button::new("replay-renderer-all-ranges")
+                                    .label(t!("ui.renderer.context.enable_all_ranges").into_owned())
+                                    .compact()
+                                    .on_click(move |_event, _window, cx: &mut App| {
+                                        owner.update(cx, |panel, cx| panel.all_ranges(cx));
+                                    })
+                            }),
+                    ),
+            )
+            .into_any_element(),
+    )
+}
+
+/// Whether the reader has asked for this ship's trail or this range.
+///
+/// The global switches decide whether a layer is drawn at all; this decides
+/// whose, which is what the per-ship menu changes.
+fn per_ship_allows(
+    command: &DrawCommand,
+    trail_hidden: &HashSet<String>,
+    ship_ranges: &HashMap<String, ShipConfigFilter>,
+) -> bool {
+    match command {
+        DrawCommand::PositionTrail { player_name, .. } => {
+            player_name.as_ref().is_none_or(|name| !trail_hidden.contains(name))
+        }
+        DrawCommand::ShipConfigCircle { player_name, kind, .. } => {
+            ship_ranges.get(player_name).is_some_and(|filter| filter.is_enabled(kind))
+        }
+        _ => true,
+    }
+}
+
+/// How near a right-click has to land to have meant a ship, in map pixels.
+/// A ship icon is about this wide.
+const PICK_RADIUS: f32 = 14.0;
+
+/// A ship showing none of its ranges.
+const NO_RANGES: ShipConfigFilter = ShipConfigFilter {
+    detection: false,
+    main_battery: false,
+    secondary_battery: false,
+    torpedo: false,
+    radar: false,
+    hydro: false,
+};
+
+/// A ship showing all of them.
+const ALL_RANGES: ShipConfigFilter = ShipConfigFilter {
+    detection: true,
+    main_battery: true,
+    secondary_battery: true,
+    torpedo: true,
+    radar: true,
+    hydro: true,
+};
+
+/// The ship a context menu is open for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ShipMenu {
+    pub entity_id: EntityId,
+    pub player_name: String,
+}
 
 /// Room for the zoom control. Narrow: the seek bar is what the transport is
 /// mostly for, and it takes whatever is left.
@@ -2781,6 +3134,99 @@ mod tests {
 
         assert!(ships.len() > 1, "every ship's ranges are baked, not just the replay owner's: got {ships:?}");
         assert!(kinds.len() > 1, "and more than one kind of range: got {kinds:?}");
+    }
+
+    /// Turning one ship's ranges on draws ranges; turning the last one off
+    /// stops drawing them.
+    ///
+    /// The global switch is what decides whether the layer is drawn at all,
+    /// so leaving it on with nothing selected would be a layer that shows
+    /// nothing, and leaving it off would ignore the ship that was asked for.
+    #[gpui_kit::test]
+    fn asking_for_one_ships_ranges_turns_the_layer_on_and_off_with_it(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                assert!(!panel.options().show_ship_config, "nothing is asked for yet");
+                assert_eq!(panel.ranges_for("gapedd"), super::NO_RANGES);
+
+                panel.set_ranges_for("gapedd", |filter| filter.detection = true, cx);
+                assert!(panel.options().show_ship_config);
+                assert!(panel.ranges_for("gapedd").detection);
+                assert!(!panel.ranges_for("someone_else").detection, "only the ship that was asked for");
+
+                panel.set_ranges_for("gapedd", |filter| filter.detection = false, cx);
+                assert!(!panel.options().show_ship_config, "the last one off puts the layer away");
+            })
+            .expect("the window is open");
+    }
+
+    /// Hiding a trail is per ship, and the layer follows the last one.
+    #[gpui_kit::test]
+    fn hiding_the_last_trail_puts_the_layer_away(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 0.5], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                assert!(panel.trail_shown("gapedd"), "a ship shows its trail until it is hidden");
+
+                panel.set_trail_shown("gapedd", true, cx);
+                assert!(panel.options().show_trails, "asking for one turns trails on");
+
+                // The test track carries no ship commands, so every drawn ship
+                // is hidden the moment this one is.
+                panel.set_trail_shown("gapedd", false, cx);
+                assert!(!panel.trail_shown("gapedd"));
+                assert!(!panel.options().show_trails);
+            })
+            .expect("the window is open");
+    }
+
+    /// The per-ship filters decide whose trail and whose ranges are drawn.
+    #[test]
+    fn the_per_ship_filters_decide_whose_layers_are_drawn() {
+        use std::collections::HashMap;
+        use std::collections::HashSet;
+
+        use wows_minimap_renderer::draw_command::ShipConfigCircleKind;
+        use wows_minimap_renderer::map_data::MinimapPos;
+
+        use super::DrawCommand;
+
+        let mut hidden = HashSet::new();
+        hidden.insert("hidden_player".to_string());
+        let mut ranges = HashMap::new();
+        ranges.insert("ranged_player".to_string(), super::ALL_RANGES);
+
+        let trail = |name: &str| DrawCommand::PositionTrail {
+            entity_id: wows_replays::types::EntityId::from(1u32),
+            player_name: Some(name.to_string()),
+            points: Vec::new(),
+        };
+        let circle = |name: &str| DrawCommand::ShipConfigCircle {
+            entity_id: wows_replays::types::EntityId::from(1u32),
+            pos: MinimapPos { x: 0.0, y: 0.0 },
+            radius_px: 10.0,
+            color: [0, 0, 0],
+            alpha: 1.0,
+            dashed: false,
+            label: None,
+            kind: ShipConfigCircleKind::Detection,
+            player_name: name.to_string(),
+            is_self: false,
+        };
+
+        assert!(super::per_ship_allows(&trail("shown_player"), &hidden, &ranges));
+        assert!(!super::per_ship_allows(&trail("hidden_player"), &hidden, &ranges));
+        assert!(super::per_ship_allows(&circle("ranged_player"), &hidden, &ranges));
+        assert!(!super::per_ship_allows(&circle("unranged_player"), &hidden, &ranges), "a ship nobody asked for");
     }
 
     /// Playing advances through the track and stops at the end rather than

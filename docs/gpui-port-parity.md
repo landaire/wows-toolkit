@@ -172,9 +172,16 @@ kept so the next audit does not re-report them.
     derived instead, by `trails_through` reading the ship positions already in
     the frames behind the one being drawn, which costs one walk of them and is
     what Heat Trail switches on.
+  - Right-clicking a ship opens its own menu: its trail, its six ranges, and
+    the "only this one" shortcuts for both. Picking reads the frame on screen
+    and takes the nearest ship within an icon's width, so it picks what the
+    reader can see. The global switches decide whether a layer is drawn at
+    all and follow the per-ship choices, so asking for one ship's ranges turns
+    the layer on and clearing the last one puts it away again. Show Realtime
+    Armor is not on it yet: that opens the armor viewer on a ship, which is a
+    tab away rather than a filter.
   - Still absent, in rough order of what would be missed:
-    the per-ship context menu (trail and range toggles, Show Realtime Armor),
-    which also wants right-click picking of a ship on the drawn map;
+    Show Realtime Armor from the per-ship menu;
     the roster, consumable, build and team-advantage hover readouts; the
     annotation toolbar and everything collab draws over the map (pings,
     remote cursors, shared annotations). The stats panel, team rosters, ship
