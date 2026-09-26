@@ -1288,11 +1288,18 @@ fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Search, cx);
+        window.render_frame(cx);
         window.click(SEARCH_QUERY, cx);
         window.input("outcome=win", cx);
+        window.press("enter", cx);
         window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
 
-        assert!(window.try_find(("search-pill-segment", 0usize)).is_some(), "the query reads back as a pill");
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(("search-pill-segment", 0usize)).is_some(), "a finished term reads back as a pill");
     })
     .expect("the test window stays open");
 
@@ -1316,11 +1323,8 @@ fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
         })
         .expect("the test window stays open");
 
-    let negated = cx
-        .update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            window.find(SEARCH_QUERY).value().expect("the bar has text").to_string()
-        })
+    let negated = window
+        .update(cx, |app, _window, cx| app.search().read(cx).query_for_test(cx))
         .expect("the test window stays open");
 
     assert_ne!(negated, "outcome=win", "negating the pill changed the query");
@@ -1346,16 +1350,57 @@ fn a_pill_can_be_negated_from_its_own_menu(cx: &mut TestAppContext) {
         })
         .expect("the test window stays open");
 
-    cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        let text = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
-        assert_eq!(text, "outcome=win", "negating twice is the query it started from");
-    })
-    .expect("the test window stays open");
+    window
+        .update(cx, |app, _window, cx| {
+            let text = app.search().read(cx).query_for_test(cx);
+            assert_eq!(text, "outcome=win", "negating twice is the query it started from");
+        })
+        .expect("the test window stays open");
 }
 
-/// A date field is picked from a calendar rather than from the list of values
-/// the index happens to hold.
+/// A term stays in the box while it is being typed and becomes a pill when it
+/// is finished, and Backspace over an empty box takes the pill back off. The
+/// egui bar keeps the same two apart and reads the key the same way.
+#[gpui_kit::test]
+fn a_finished_term_becomes_a_pill_and_backspace_takes_it_back(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.render_frame(cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("outcome=win", cx);
+        window.render_frame(cx);
+
+        assert!(
+            window.try_find(("search-pill-segment", 0usize)).is_none(),
+            "a term still being typed is text, not a pill"
+        );
+        assert_eq!(window.find(SEARCH_QUERY).value(), Some("outcome=win"), "and it is in the box");
+
+        window.press("enter", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find(("search-pill-segment", 0usize)).is_some(), "the finished term reads back as a pill");
+        assert_eq!(window.find(SEARCH_QUERY).value().unwrap_or_default(), "", "and the box is clear for the next term");
+
+        window.press("backspace", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    cx.run_until_parked();
+
+    let left = window
+        .update(cx, |app, _window, cx| app.search().read(cx).query_for_test(cx))
+        .expect("the test window stays open");
+    assert_eq!(left, "", "Backspace with nothing to erase took the pill off");
+}
+
 /// Undo steps back through structural edits, and redo steps forward again.
 ///
 /// Only structural edits: typing has the text field's own undo, and pushing
@@ -1371,9 +1416,13 @@ fn the_query_bar_steps_back_and_forward_through_structural_edits(cx: &mut TestAp
         show_tab(window, AppTab::Search, cx);
         window.click(SEARCH_QUERY, cx);
         window.input("outcome=win", cx);
+        window.press("enter", cx);
         window.render_frame(cx);
     })
     .expect("the test window stays open");
+    // Finishing the term is the edit that puts it on the stack, so the walk
+    // starts from a bar that holds one pill.
+    cx.run_until_parked();
 
     let expr = wows_toolkit_config::index::query_text::parse_query("outcome=win").expect("the query parses");
     let cache = wows_toolkit_viewmodel::query_bar::label::NameCache::default();
@@ -1386,18 +1435,15 @@ fn the_query_bar_steps_back_and_forward_through_structural_edits(cx: &mut TestAp
     window
         .update(cx, |app, window, cx| {
             app.search().clone().update(cx, |search, cx| {
-                assert!(!search.can_undo(), "nothing has been edited yet");
+                assert!(!search.can_redo(), "nothing has been stepped back from yet");
                 search.apply_structural_edit(pill, crate::search_pills::StructuralEdit::Negate, window, cx);
                 assert!(search.can_undo(), "the edit is on the stack");
             });
         })
         .expect("the test window stays open");
 
-    let negated = cx
-        .update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            window.find(SEARCH_QUERY).value().expect("the bar has text").to_string()
-        })
+    let negated = window
+        .update(cx, |app, _window, cx| app.search().read(cx).query_for_test(cx))
         .expect("the test window stays open");
     assert_ne!(negated, "outcome=win");
 
@@ -1407,31 +1453,32 @@ fn the_query_bar_steps_back_and_forward_through_structural_edits(cx: &mut TestAp
         })
         .expect("the test window stays open");
 
-    cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        let text = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
-        assert_eq!(text, "outcome=win", "undo restored the query the edit replaced");
-    })
-    .expect("the test window stays open");
+    window
+        .update(cx, |app, _window, cx| {
+            let text = app.search().read(cx).query_for_test(cx);
+            assert_eq!(text, "outcome=win", "undo restored the query the edit replaced");
+        })
+        .expect("the test window stays open");
 
     window
         .update(cx, |app, window, cx| {
             app.search().clone().update(cx, |search, cx| {
-                assert!(!search.can_undo(), "the stack is empty again");
-                assert!(search.can_redo(), "and what was undone can be redone");
+                assert!(search.can_redo(), "what was undone can be redone");
                 search.redo_edit(window, cx);
             });
         })
         .expect("the test window stays open");
 
-    cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        let text = window.find(SEARCH_QUERY).value().expect("the bar has text").to_string();
-        assert_eq!(text, negated, "redo put the edit back");
-    })
-    .expect("the test window stays open");
+    window
+        .update(cx, |app, _window, cx| {
+            let text = app.search().read(cx).query_for_test(cx);
+            assert_eq!(text, negated, "redo put the edit back");
+        })
+        .expect("the test window stays open");
 }
 
+/// A date field is picked from a calendar rather than from the list of values
+/// the index happens to hold.
 #[gpui_kit::test]
 fn a_date_field_opens_a_calendar_instead_of_the_completions(cx: &mut TestAppContext) {
     let window = open_app(cx);
@@ -1506,7 +1553,7 @@ fn the_bar_recalls_what_was_run_before(cx: &mut TestAppContext) {
         window.render_frame(cx);
         // A second query, so the first is one step further back.
         window.click(SEARCH_QUERY, cx);
-        window.press("ctrl-a", cx);
+        window.press("backspace", cx);
         window.input("survived:false", cx);
         window.press("enter", cx);
         window.render_frame(cx);
@@ -1518,24 +1565,30 @@ fn the_bar_recalls_what_was_run_before(cx: &mut TestAppContext) {
         window.render_frame(cx);
         window.press("up", cx);
         window.render_frame(cx);
-        assert_eq!(
-            window.find(SEARCH_QUERY).value(),
-            Some("survived:false"),
-            "the first Up recalls the query that was just run"
-        );
-        window.press("up", cx);
-        window.render_frame(cx);
-        assert_eq!(window.find(SEARCH_QUERY).value(), Some("outcome:win"), "the second goes one further back");
-        window.press("down", cx);
-        window.press("down", cx);
-        window.render_frame(cx);
-        assert_eq!(
-            window.find(SEARCH_QUERY).value(),
-            Some("survived:false"),
-            "walking back out leaves the bar as it was found"
-        );
     })
     .expect("the test window stays open");
+
+    let recalled = |cx: &mut TestAppContext| {
+        window
+            .update(cx, |app, _window, cx| app.search().read(cx).query_for_test(cx))
+            .expect("the test window stays open")
+    };
+    assert_eq!(recalled(cx), "survived:false", "the first Up recalls the query that was just run");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.press("up", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    assert_eq!(recalled(cx), "outcome:win", "the second goes one further back");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.press("down", cx);
+        window.press("down", cx);
+        window.render_frame(cx);
+    })
+    .expect("the test window stays open");
+    assert_eq!(recalled(cx), "survived:false", "walking back out leaves the bar as it was found");
 }
 
 /// A pill's operator segment opens a picker, and taking a different operator
@@ -1543,6 +1596,21 @@ fn the_bar_recalls_what_was_run_before(cx: &mut TestAppContext) {
 #[gpui_kit::test]
 fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
     let window = open_app(cx);
+
+    // The operator the term does not already say, read off the same choices
+    // the menu is built from: a row picked by name is known to be one of this
+    // menu's, and what it should leave in the bar is known with it.
+    let expr = wows_toolkit_config::index::query_text::parse_query("build>9000000").expect("the query parses");
+    let cache = wows_toolkit_viewmodel::query_bar::label::NameCache::default();
+    let tokens = wows_toolkit_viewmodel::query_bar::tokens::tokenize(&expr, &cache);
+    let pill = wows_toolkit_viewmodel::query_bar::select::pill_paths(&tokens)
+        .into_iter()
+        .next()
+        .expect("the query draws one pill");
+    let wanted = crate::search_pills::choices(&expr, &pill, crate::search_pills::EditablePart::Operator)
+        .into_iter()
+        .find(|choice| !choice.current)
+        .expect("the term takes more than one operator");
 
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Search, cx);
@@ -1566,26 +1634,30 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
         let offered = menu_items(window);
         assert!(!offered.is_empty(), "the segment drops down the operators this term takes");
 
-        // Whichever is not the one the term already says is a real change.
         let target = offered
             .into_iter()
-            .find(|(_, item)| item.checked() != Some(true))
+            .find(|(_, item)| item.label() == Some(wanted.label.as_str()))
             .map(|(index, _)| index)
-            .expect("there is another operator to take");
+            .expect("the menu offers the operator that was asked for");
         // Scoped to the menu: a bare row number is also a tab's.
         window.within("popup-menu").click(gpui_kit::ElementId::Integer(target), cx);
         window.render_frame(cx);
-
-        let found = window.find(SEARCH_QUERY);
-        let rewritten = found.value().expect("the bar still holds a query");
-        assert!(rewritten.contains("build"), "the term survives the edit: {rewritten}");
-        assert_ne!(rewritten, "build>9000000", "and its operator changed");
-        // Whether the menu then closes is not asserted: a dismissed popover
-        // keeps its elements in the harness's snapshot, and the menus this
-        // app already had behave the same way, so a check here would be
-        // testing the harness rather than the bar.
     })
     .expect("the test window stays open");
+    // The row acts through the popover's dismissal, which is an effect rather
+    // than part of the click.
+    cx.run_until_parked();
+
+    window
+        .update(cx, |app, _window, cx| {
+            let rewritten = app.search().read(cx).query_for_test(cx);
+            assert_eq!(rewritten, wanted.taken, "the term kept its field and value and took the operator");
+            // Whether the menu then closes is not asserted: a dismissed
+            // popover keeps its elements in the harness's snapshot, and the
+            // menus this app already had behave the same way, so a check
+            // here would be testing the harness rather than the bar.
+        })
+        .expect("the test window stays open");
 }
 
 /// Whatever a dropdown is offering, each with the row number it answers to.

@@ -195,6 +195,11 @@ fn value_choices(expr: &MatchExpr, path: &[usize]) -> Vec<Choice> {
 /// `on_segment` is handed the path of a clicked pill and which part of it was
 /// clicked, together with the app it was clicked in, which is what opens the
 /// picker for it.
+/// `caret` is the text box the reader types into, placed where the token
+/// stream says the caret goes: after the pills, or in the slot of the pill
+/// being retyped. The egui bar puts a real editor in that slot for the same
+/// reason -- one bar, rather than a box with its own reading underneath it.
+#[allow(clippy::too_many_arguments)]
 pub fn pill_strip(
     expr: &MatchExpr,
     cache: &NameCache,
@@ -202,15 +207,14 @@ pub fn pill_strip(
     cx: &App,
     on_choice: impl Fn(String, &mut Window, &mut App) + Clone + 'static,
     on_structure: impl Fn(NodePath, StructuralEdit, &mut Window, &mut App) + Clone + 'static,
+    caret: AnyElement,
 ) -> Option<AnyElement> {
     let stream = tokens::tokenize(expr, cache);
-    if stream.is_empty() {
-        return None;
-    }
 
     let theme = cx.theme();
     let (border, accent, muted) = (theme.border, theme.accent, theme.foreground);
 
+    let mut caret = Some(caret);
     let mut row = h_flex().flex_wrap().gap_1().items_center();
     for (index, token) in stream.iter().enumerate() {
         row = match &token.kind {
@@ -293,8 +297,7 @@ pub fn pill_strip(
                     .child(div().text_xs().text_color(crate::theme::text_faint()).child("[")),
             ),
             TokenKind::QuantClose => row.child(div().text_xs().text_color(crate::theme::text_faint()).child("]")),
-            // The caret is the text input itself here, not a token to draw.
-            TokenKind::Caret => row,
+            TokenKind::Caret => row.child(caret.take().unwrap_or_else(|| div().into_any_element())),
         };
     }
 

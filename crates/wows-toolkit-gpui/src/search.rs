@@ -256,15 +256,29 @@ enum SearchState {
 
 pub struct SearchView {
     query_input: Entity<InputState>,
+    /// Set by Enter, acted on where a window is at hand: turning the typed
+    /// term into a pill clears the box, and clearing a box needs one.
+    pending_commit: bool,
+    /// The part of the query that has been turned into pills. What is in the
+    /// box is the rest: the term still being typed.
+    ///
+    /// The egui bar keeps the same two apart -- a `MatchExpr` it draws as
+    /// pills and a `pending` buffer its caret edits -- which is what makes a
+    /// finished term leave the text and become a pill rather than being
+    /// mirrored under it.
+    committed: String,
     /// What the caret fragment may be completed to, and the bar text they
     /// were built from. Refreshed in `render` when the two disagree rather
     /// than from an input event: a completion taken by click changes the text
     /// too, and one path that notices covers both.
     completions: Vec<crate::search_pills::Completion>,
     completion_source: String,
-    /// What the query says as it is typed, which is what the pills read back.
+    /// The committed query, which is what the pills read back. Rewritten by
+    /// every edit that lands on a pill and by a term the box commits; typing
+    /// does not touch it.
+    ///
     /// Separate from `expr`, which is the query the results on screen came
-    /// from: editing the text must not relabel results it has not been run
+    /// from: editing the bar must not relabel results it has not been run
     /// against.
     reading: Option<wows_toolkit_config::index::query_ast::MatchExpr>,
     /// The calendar a date field is picked from. Held rather than built per
@@ -384,6 +398,8 @@ impl SearchView {
 
         Self {
             query_input,
+            committed: String::new(),
+            pending_commit: false,
             calendar,
             completions: Vec::new(),
             completion_source: String::new(),
@@ -497,9 +513,51 @@ impl SearchView {
         self.set_query_text(query_text::print_query(&expr), window, cx);
     }
 
+    /// The whole query, for a test reading the bar back: the pills hold
+    /// most of it and the box only the term being typed.
+    #[cfg(test)]
+    pub(crate) fn query_for_test(&self, cx: &App) -> String {
+        self.full_query(cx)
+    }
+
+    /// The whole query: what the pills hold and what is being typed after
+    /// them.
+    fn full_query(&self, cx: &App) -> String {
+        let pending = self.query_input.read(cx).value();
+        let pending = pending.trim();
+        match (self.committed.trim(), pending) {
+            ("", rest) => rest.to_string(),
+            (pills, "") => pills.to_string(),
+            (pills, rest) => format!("{pills} {rest}"),
+        }
+    }
+
+    /// Turns what has been typed into a pill.
+    ///
+    /// The egui bar does this on Enter rather than as each character lands:
+    /// a term half typed is not a filter, and a pill that appeared at
+    /// "map:oce" would take the caret away mid-word.
+    fn commit_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let whole = self.full_query(cx);
+        if query_text::parse_query(&whole).is_err() {
+            // Not a query yet, so there is nothing to make a pill of. It
+            // stays in the box with its error showing.
+            self.run(cx);
+            return;
+        }
+        self.remember_for_undo(cx);
+        self.committed = whole;
+        self.query_input.update(cx, |state, cx| state.set_value("", window, cx));
+        self.reading = query_text::parse_query(&self.committed).ok();
+        self.completions.clear();
+        self.completions_open = false;
+        self.run(cx);
+        cx.notify();
+    }
+
     /// Puts the query as it stands on the undo stack.
     fn remember_for_undo(&mut self, cx: &Context<Self>) {
-        let current = self.query_input.read(cx).value().to_string();
+        let current = self.full_query(cx);
         if self.undo.last() == Some(&current) {
             return;
         }
@@ -524,7 +582,7 @@ impl SearchView {
     /// Steps back to the query before the last structural edit.
     pub(crate) fn undo_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(previous) = self.undo.pop() else { return };
-        self.redo.push(self.query_input.read(cx).value().to_string());
+        self.redo.push(self.full_query(cx));
         // The paths a selection holds name places in the tree being replaced.
         self.selection.clear();
         self.set_query_text(previous, window, cx);
@@ -533,15 +591,16 @@ impl SearchView {
     /// Steps forward again to a query that was undone.
     pub(crate) fn redo_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(next) = self.redo.pop() else { return };
-        self.undo.push(self.query_input.read(cx).value().to_string());
+        self.undo.push(self.full_query(cx));
         self.selection.clear();
         self.set_query_text(next, window, cx);
     }
 
     /// Replaces the bar's text with `text` and runs it.
     fn set_query_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.query_input.update(cx, |state, cx| state.set_value(text, window, cx));
-        self.reading = query_text::parse_query(self.query_input.read(cx).value().as_ref()).ok();
+        self.committed = text;
+        self.query_input.update(cx, |state, cx| state.set_value("", window, cx));
+        self.reading = query_text::parse_query(&self.committed).ok();
         self.run(cx);
         cx.notify();
     }
@@ -600,6 +659,9 @@ impl SearchView {
                 self.completion_cursor = None;
                 cx.notify();
             }
+            // Nothing left to erase in the box, so the key means the filter
+            // before the caret. The egui bar reads it the same way.
+            "backspace" if self.query_input.read(cx).value().is_empty() => self.delete_at_caret(window, cx),
             "enter" => {
                 let Some(at) = self.completion_cursor else { return };
                 let Some(taken) = self.offered_completions().get(at).map(|row| row.replacement.clone()) else {
@@ -612,6 +674,27 @@ impl SearchView {
         }
     }
 
+    /// Takes the pill before the caret, or the selection where there is one.
+    fn delete_at_caret(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(mut expr) = self.reading.clone() else { return };
+        if self.selection.is_empty() {
+            let tokens = wows_toolkit_viewmodel::query_bar::tokens::tokenize(&expr, &self.name_cache);
+            let Some(target) = select::step(&select::pill_paths(&tokens), None, true) else { return };
+            if !select::addresses_node(&expr, &target) {
+                return;
+            }
+            let mut one = Selection::default();
+            one.set_one(target);
+            select::delete(&mut expr, &one);
+        } else {
+            select::delete(&mut expr, &self.selection);
+        }
+        select::canonicalise(&mut expr);
+        self.remember_for_undo(cx);
+        self.selection.clear();
+        self.set_query_text(query_text::print_query(&expr), window, cx);
+    }
+
     /// Puts an older (positive delta) or newer query in the bar.
     ///
     /// Walking past the newest restores the text the walk started from, so
@@ -622,7 +705,7 @@ impl SearchView {
         }
         let (at, started_from) = match self.history_walk.take() {
             Some((at, started_from)) => (at as isize + delta, started_from),
-            None if delta > 0 => (0, self.query_input.read(cx).value().to_string()),
+            None if delta > 0 => (0, self.full_query(cx)),
             // Down with no walk in progress is not a recall.
             None => return,
         };
@@ -640,12 +723,13 @@ impl SearchView {
             }
         };
 
-        self.query_input.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+        self.committed = text;
+        self.query_input.update(cx, |state, cx| state.set_value("", window, cx));
         // The bar was not typed at, so the dropdown stays shut: the arrows
         // are walking the history, not a list of completions.
-        self.reading = query_text::parse_query(&text).ok();
-        self.completions = crate::search_pills::completions(&text);
-        self.completion_source = text;
+        self.reading = query_text::parse_query(&self.committed).ok();
+        self.completions.clear();
+        self.completion_source = String::new();
         self.completion_cursor = None;
         self.completions_open = false;
         self.history_walk = (at >= 0).then_some((at as usize, started_from));
@@ -706,20 +790,12 @@ impl SearchView {
             .collect()
     }
 
-    /// Puts `query` in the bar and runs it: the bar exists to show matches,
-    /// and leaving the old ones under an edited query would be showing the
-    /// wrong ones.
-    fn take_edit(&mut self, query: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.query_input.update(cx, |state, cx| state.set_value(query, window, cx));
-        self.run(cx);
-    }
-
-    /// Puts `query` in the bar and runs it.
+    /// Puts `query` in the bar as pills and runs it.
     ///
     /// For a caller outside the tab -- the command palette's seeded searches,
     /// which are a query the reader can then edit rather than a fixed result.
     pub(crate) fn run_query(&mut self, query: &str, window: &mut Window, cx: &mut Context<Self>) {
-        self.take_edit(query.to_string(), window, cx);
+        self.set_query_text(query.to_string(), window, cx);
     }
 
     /// What the preview is showing, if anything. Test-only.
@@ -749,17 +825,15 @@ impl SearchView {
         self.preview.leave(cx);
     }
 
-    /// Re-reads the bar when its text has changed: what the query says, and
-    /// what the fragment under the caret may be completed to.
+    /// Re-reads what the fragment under the caret may be completed to.
     ///
-    /// The query is parsed on every edit, not only when it is run, so the
-    /// pills read back what is being typed the way the egui bar's do.
+    /// Only the box: the pills come from the committed query, which typing
+    /// leaves alone until a term is finished.
     fn refresh_bar(&mut self, cx: &mut Context<Self>) {
         let text = self.query_input.read(cx).value().to_string();
         if text == self.completion_source {
             return;
         }
-        self.reading = query_text::parse_query(&text).ok();
         self.completions = crate::search_pills::completions(&text);
         self.completion_source = text.clone();
         // Typing moves the caret off whatever row was highlighted, and an
@@ -827,10 +901,11 @@ impl SearchView {
                 self.completions_open = false;
                 self.completion_cursor = None;
                 self.remember_query(cx);
-                self.run(cx);
+                self.pending_commit = true;
+                cx.notify();
             }
             InputEvent::Change => {
-                let text = self.query_input.read(cx).value().to_string();
+                let text = self.full_query(cx);
                 if text == self.last_run_query {
                     return;
                 }
@@ -1076,7 +1151,7 @@ impl SearchView {
     /// query that does not parse reports where rather than searching for it
     /// literally.
     fn run(&mut self, cx: &mut Context<Self>) {
-        self.last_run_query = self.query_input.read(cx).value().to_string();
+        self.last_run_query = self.full_query(cx);
         // Bumped first: every exit below changes what is on screen, and a
         // search already in flight must not land over it.
         self.generation = self.generation.wrapping_add(1);
@@ -1086,7 +1161,7 @@ impl SearchView {
         // pills is something the bar can do with no database open, and an
         // index that is not there says nothing about whether the query is
         // well formed.
-        let text = self.query_input.read(cx).value().trim().to_string();
+        let text = self.full_query(cx);
         let expr = match query_text::parse_query(&text) {
             Ok(expr) => expr,
             Err(err) => {
@@ -1321,6 +1396,11 @@ fn rating_color(pr: f64) -> Hsla {
 
 impl Render for SearchView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Enter asked for the typed term to become a pill; this is where
+        // there is a window to clear the box with.
+        if std::mem::take(&mut self.pending_commit) {
+            self.commit_typed(window, cx);
+        }
         self.preview.release_dropped(window);
         self.open_saved_query(window, cx);
         self.load_column_widths(cx);
@@ -1331,6 +1411,37 @@ impl Render for SearchView {
         // The input's own rectangle, recorded as it is laid out, so the
         // dropdown below can be anchored to its left edge and bottom.
         let measure = cx.weak_entity();
+        // One bar: the terms that have been finished are pills and the one
+        // being typed is a box sitting among them, where the token stream
+        // says the caret goes. The egui bar is laid out the same way.
+        let entity = cx.entity();
+        let caret = div()
+            .min_w(px(120.))
+            .flex_1()
+            .child(Input::new(&self.query_input).id("search-query").small().appearance(false))
+            .into_any_element();
+        let pills = match self.reading.as_ref() {
+            Some(expr) => {
+                let entity = entity.clone();
+                let structure_entity = entity.clone();
+                crate::search_pills::pill_strip(
+                    expr,
+                    &self.name_cache,
+                    &self.selection,
+                    cx,
+                    move |taken, window, cx| {
+                        entity.update(cx, |this, cx| this.set_query_text(taken, window, cx));
+                    },
+                    move |path, edit, window, cx| {
+                        structure_entity.update(cx, |this, cx| this.apply_structural_edit(path, edit, window, cx));
+                    },
+                    caret,
+                )
+            }
+            // Nothing finished yet, so the bar is the box on its own.
+            None => Some(caret),
+        };
+
         let entry_row = h_flex()
             .w_full()
             .gap_2()
@@ -1354,9 +1465,16 @@ impl Render for SearchView {
             )
             .child(
                 div()
+                    .id("search-pills")
+                    .test_support()
                     .flex_1()
                     .relative()
-                    .child(Input::new(&self.query_input).id("search-query").small().w_full())
+                    .px_2()
+                    .py_0p5()
+                    .rounded(cx.theme().radius)
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .children(pills)
                     .child(
                         canvas(
                             move |bounds, _window, cx| {
@@ -1377,32 +1495,8 @@ impl Render for SearchView {
                 Button::new("search-run")
                     .label(t!("ui.tabs.search").to_string())
                     .compact()
-                    .on_click(cx.listener(|this, _event, _window, cx| this.run(cx))),
+                    .on_click(cx.listener(|this: &mut Self, _event, window, cx| this.commit_typed(window, cx))),
             );
-
-        // What the query the user typed actually says, read back through the
-        // same rules the egui bar draws its pills with.
-        let entity = cx.entity();
-        let pills = self
-            .reading
-            .as_ref()
-            .and_then(|expr| {
-                let entity = entity.clone();
-                let structure_entity = entity.clone();
-                crate::search_pills::pill_strip(
-                    expr,
-                    &self.name_cache,
-                    &self.selection,
-                    cx,
-                    move |taken, window, cx| {
-                        entity.update(cx, |this, cx| this.take_edit(taken, window, cx));
-                    },
-                    move |path, edit, window, cx| {
-                        structure_entity.update(cx, |this, cx| this.apply_structural_edit(path, edit, window, cx));
-                    },
-                )
-            })
-            .map(|strip| div().id("search-pills").test_support().w_full().px(px(20.)).child(strip));
 
         // The completions hang under the input as a dropdown, the way the
         // egui bar's do, rather than as a row of buttons pushing the results
@@ -1529,7 +1623,6 @@ impl Render for SearchView {
             .border_color(border)
             .on_key_down(cx.listener(Self::on_bar_key))
             .child(entry_row)
-            .when_some(pills, |this, pills| this.child(pills))
             .when_some(calendar, |this, calendar| this.child(calendar))
             .when_some(dropdown, |this, rows| this.child(rows))
             .when_some(parse_error, |this, strip| this.child(strip));
