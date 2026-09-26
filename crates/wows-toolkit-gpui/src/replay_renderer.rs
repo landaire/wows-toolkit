@@ -2637,7 +2637,7 @@ impl Render for ReplayRendererPanel {
         // The scrubber has a row to itself, as a video player gives it: a
         // bar sharing a row with a dozen controls is both hard to aim at and
         // hard to read a position off.
-        let scrubber = div().id("replay-renderer-scrubber").test_support().flex_none().px_2().pt_1().child(
+        let scrubber = div().id("replay-renderer-scrubber").test_support().flex_none().px(THUMB_INSET).pt_1().child(
             div().relative().w_full().child(Slider::new(&self.seek).disabled(!ready)).children(self.battle_ticks()),
         );
 
@@ -2673,6 +2673,15 @@ impl Render for ReplayRendererPanel {
 
 /// Room for "MM:SS / MM:SS" without the transport shifting as it counts.
 const CLOCK_WIDTH: Pixels = px(88.);
+
+/// How far the scrubber is held in from the edges.
+///
+/// A slider's thumb is drawn eight pixels left of where it sits and grows a
+/// ring outside that under the pointer. At the very start of a track all of
+/// that hangs off the left of the row, over the panel's edge and under
+/// whatever is beside it, so this row starts further in than the rest of the
+/// transport.
+const THUMB_INSET: Pixels = px(13.);
 
 /// Room for the widest speed the ladder offers.
 const SPEED_WIDTH: Pixels = px(72.);
