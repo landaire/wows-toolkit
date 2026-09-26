@@ -13,6 +13,8 @@
 //! `wows-battle-world`, which carry no instrumentation, supply absolute
 //! numbers.
 
+pub mod memory;
+
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;

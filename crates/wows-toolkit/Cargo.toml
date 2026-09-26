@@ -173,6 +173,11 @@ name = "profile_replay"
 path = "src/bin/profile_replay.rs"
 required-features = ["profile-bins"]
 
+[[bin]]
+name = "profile_memory"
+path = "src/bin/profile_memory.rs"
+required-features = ["profile-bins"]
+
 [features]
 default = ["logging"]
 shipbuilds_debugging = []
