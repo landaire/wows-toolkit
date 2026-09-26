@@ -122,6 +122,7 @@ use wows_replays::types::AccountId;
 
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replay_insights::fire_chance::analysis::PerShipFireChance;
+use wows_toolkit_viewmodel::breakdown;
 use wows_toolkit_viewmodel::fire_chance::TallyRow;
 use wows_toolkit_viewmodel::fire_chance::fire_chance_battle_tally_rows;
 use wows_toolkit_viewmodel::fire_chance::fire_chance_formula_lines;
@@ -5767,26 +5768,10 @@ impl egui_dock::TabViewer for ReplayTabViewer<'_> {
     }
 }
 
-/// Rebuilds a monospace breakdown block ("Label   : 1,234") from a per-type
-/// value lookup, in `descriptions` order, skipping zero entries. `get` reads the
-/// value for a key; the column width matches the widest present label + 1,
-/// reproducing the original inline hover formatting exactly.
+/// A per-type breakdown as one padded block, for a tooltip that has no columns
+/// to line up in.
 fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], locale: &str, get: F) -> String {
-    let longest_width =
-        descriptions.iter().filter(|(key, _)| get(key) > 0).map(|(_, desc)| desc.len()).max().unwrap_or_default() + 1;
-    descriptions
-        .iter()
-        .filter_map(|(key, description)| {
-            let num = get(key);
-            if num > 0 {
-                let num_str = separate_number(num, Some(locale));
-                Some(format!("{description:<longest_width$}: {num_str}"))
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+    breakdown::padded_text(&breakdown::rows(descriptions, Some(locale), get))
 }
 
 /// A count-and-label listing on screen: counts right-aligned in their own

@@ -47,6 +47,7 @@ use super::icons::IconCache;
 use super::model::PlayerRow;
 use super::model::separate_number;
 use super::table::text_width;
+use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::fire_chance;
 
 /// Multiplier for a detail-list item's `ElementId`
@@ -78,12 +79,12 @@ enum DamageDirection {
 /// that column has nothing to show (so `table.rs` leaves the column's cell at
 /// its collapsed height). Mirrors the egui app's per-column
 /// `if 0.0 < expandedness { match column { ... } }` arms (`mod.rs:1834-2088`):
-/// each column draws its own detail under its own cell -- Name's achievements/
-/// ribbons/damage-events under Name, Skills' build under Skills, the damage
-/// breakdowns under ActualDamage/ReceivedDamage, and the Potential/Spotting/
-/// Hits hover text under those columns. `all_rows` resolves a damage
-/// interaction's victim/attacker `db_id` into a ship name, and `alt_held`
-/// turns the breakdown's percentages around.
+/// each column draws its own detail under its own cell -- Name's achievements,
+/// ribbons, damage events and effective fire chance under Name, Skills' build
+/// under Skills, the damage breakdowns under ActualDamage/ReceivedDamage, and
+/// the Potential/Spotting/Hits breakdowns under those columns. `all_rows`
+/// resolves a damage interaction's victim/attacker `db_id` into a ship name,
+/// and `alt_held` turns the breakdown's percentages around.
 #[allow(clippy::too_many_arguments)]
 pub fn render_column_detail(
     ix: usize,
@@ -93,21 +94,19 @@ pub fn render_column_detail(
     icons: &IconCache,
     debug: bool,
     alt_held: bool,
-    cx: &App,
 ) -> Option<AnyElement> {
     match col {
         ReplayColumn::Name => render_name_section(ix, row, debug, icons),
-        ReplayColumn::Kills => render_fire_chance_section(ix, row, debug),
         ReplayColumn::Skills => render_build_section(ix, row, debug, icons),
-        ReplayColumn::ActualDamage => {
-            render_damage_section(ix, row, all_rows, debug, DamageDirection::Dealt, alt_held, cx)
-        }
+        ReplayColumn::ActualDamage => render_damage_section(row, all_rows, debug, DamageDirection::Dealt, alt_held),
         ReplayColumn::ReceivedDamage => {
-            render_damage_section(ix, row, all_rows, debug, DamageDirection::Received, alt_held, cx)
+            render_damage_section(row, all_rows, debug, DamageDirection::Received, alt_held)
         }
-        ReplayColumn::PotentialDamage => render_nda_gated_hover(row.potential_damage_hover_text.as_deref(), row, debug),
-        ReplayColumn::Hits => render_nda_gated_hover(row.hits_hover_text.as_deref(), row, debug),
-        ReplayColumn::SpottingDamage => row.spotting_damage_hover_text.as_deref().map(multiline_body),
+        ReplayColumn::PotentialDamage => {
+            render_nda_gated_breakdown(row.potential_damage_breakdown.as_deref(), row, debug)
+        }
+        ReplayColumn::Hits => render_nda_gated_breakdown(row.hits_breakdown.as_deref(), row, debug),
+        ReplayColumn::SpottingDamage => row.spotting_damage_breakdown.as_deref().map(breakdown_grid),
         _ => None,
     }
 }
@@ -130,48 +129,63 @@ pub(super) fn expanded_detail_width(col: ReplayColumn, row: &PlayerRow, debug: b
     match col {
         ReplayColumn::Name => name_section_width(row, debug, window),
         ReplayColumn::Skills => build_section_width(row, debug, window),
-        ReplayColumn::ActualDamage => nda_gated_text_width(row.actual_damage_hover_text.as_deref(), row, debug, window),
+        ReplayColumn::ActualDamage => {
+            nda_gated_breakdown_width(row.actual_damage_breakdown.as_deref(), row, debug, window)
+        }
         ReplayColumn::ReceivedDamage => {
-            nda_gated_text_width(row.received_damage_hover_text.as_deref(), row, debug, window)
+            nda_gated_breakdown_width(row.received_damage_breakdown.as_deref(), row, debug, window)
         }
         ReplayColumn::PotentialDamage => {
-            nda_gated_text_width(row.potential_damage_hover_text.as_deref(), row, debug, window)
+            nda_gated_breakdown_width(row.potential_damage_breakdown.as_deref(), row, debug, window)
         }
-        ReplayColumn::Hits => nda_gated_text_width(row.hits_hover_text.as_deref(), row, debug, window),
+        ReplayColumn::Hits => nda_gated_breakdown_width(row.hits_breakdown.as_deref(), row, debug, window),
         ReplayColumn::SpottingDamage => {
-            row.spotting_damage_hover_text.as_deref().map(|text| multiline_width(text, window)).unwrap_or(0.0)
+            row.spotting_damage_breakdown.as_deref().map(|rows| breakdown_grid_width(rows, window)).unwrap_or(0.0)
         }
         _ => 0.0,
     }
 }
 
-/// Widest line of a `\n`-separated block, matching how `multiline_body`/
-/// `hover_paragraph` render one `div` per line rather than a single wrapped
-/// paragraph.
+/// Widest line of a newline-separated block.
 fn multiline_width(text: &str, window: &mut Window) -> f32 {
     text.split('\n').map(|line| text_width(line.into(), window, false)).fold(0.0_f32, f32::max)
 }
 
-/// Mirrors `render_nda_gated_hover` (Potential/Hits) and the NDA gate at the
-/// top of `render_damage_section` (ActualDamage/ReceivedDamage): the NDA
-/// placeholder's width when stats are hidden, otherwise the widest line of
-/// `text`.
-fn nda_gated_text_width(text: Option<&str>, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+/// Mirrors `render_nda_gated_breakdown` (Potential/Hits) and the NDA gate at
+/// the top of `render_damage_section` (ActualDamage/ReceivedDamage): the NDA
+/// placeholder's width when stats are hidden, otherwise the grid's.
+fn nda_gated_breakdown_width(rows: Option<&[BreakdownRow]>, row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
     if row.should_hide_stats() && !debug {
         return text_width(NDA.into(), window, false);
     }
-    text.map(|t| multiline_width(t, window)).unwrap_or(0.0)
+    rows.map(|rows| breakdown_grid_width(rows, window)).unwrap_or(0.0)
+}
+
+/// Mirrors `breakdown_grid`: the widest label, the 8px gap between the two
+/// columns, and the widest value.
+fn breakdown_grid_width(rows: &[BreakdownRow], window: &mut Window) -> f32 {
+    if rows.is_empty() {
+        return 0.0;
+    }
+    let mut labels = 0.0_f32;
+    let mut values = 0.0_f32;
+    for row in rows {
+        labels = labels.max(text_width(row.label.clone().into(), window, false));
+        values = values.max(text_width(row.value.clone().into(), window, false));
+    }
+    labels + BREAKDOWN_GAP + values
 }
 
 /// Mirrors `render_name_section`: the section headings, each achievement/
-/// ribbon row's icon-box-plus-label width (`icon_label_row_width`), and the
-/// damage-event lines (or the NDA placeholder when hidden).
+/// ribbon row's icon-box-plus-label width (`icon_label_row_width`), the
+/// damage-event grid (or the NDA placeholder when hidden), and the
+/// fire-chance block.
 fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
     let has_achievements = !row.achievements.is_empty();
     let has_ribbons = !row.ribbons.is_empty();
     let has_damage_events =
         row.fires.is_some() || row.floods.is_some() || row.citadels.is_some() || row.crits.is_some();
-    if !has_achievements && !has_ribbons && !has_damage_events {
+    if !has_achievements && !has_ribbons && !has_damage_events && row.fire_chance.is_none() {
         return 0.0;
     }
 
@@ -209,33 +223,67 @@ fn name_section_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 
         if row.should_hide_stats() && !debug {
             max_w = max_w.max(text_width(NDA.into(), window, false));
         } else {
-            if let Some(fires) = row.fires {
-                max_w =
-                    max_w.max(text_width(format!("{}: {}", t!("ui.replay.column.fires"), fires).into(), window, false));
-            }
-            if let Some(floods) = row.floods {
-                max_w = max_w.max(text_width(
-                    format!("{}: {}", t!("ui.replay.column.floods"), floods).into(),
-                    window,
-                    false,
-                ));
-            }
-            if let Some(citadels) = row.citadels {
-                max_w = max_w.max(text_width(
-                    format!("{}: {}", t!("ui.replay.column.citadels"), citadels).into(),
-                    window,
-                    false,
-                ));
-            }
-            if let Some(crits) = row.crits {
-                max_w =
-                    max_w.max(text_width(format!("{}: {}", t!("ui.replay.column.crits"), crits).into(), window, false));
-            }
+            max_w = max_w.max(breakdown_grid_width(&damage_event_rows(row), window));
         }
+    }
+
+    max_w.max(fire_chance_width(row, debug, window))
+}
+
+/// Mirrors `render_fire_chance_section`: its heading, the line it stands down
+/// to when there is nothing to state, the headline (the fire glyph, the counts,
+/// the expected figure and the copy button), the formula lines, the tally rows
+/// and the per-ship rows.
+fn fire_chance_width(row: &PlayerRow, debug: bool, window: &mut Window) -> f32 {
+    let Some(fire_chance) = row.fire_chance.as_ref() else { return 0.0 };
+
+    let mut max_w = text_width(t!("ui.replay.sections.fire_chance").into_owned().into(), window, true);
+    if row.should_hide_stats() && !debug {
+        return max_w.max(text_width(NDA.into(), window, false));
+    }
+    if fire_chance.eligible_hits == 0 {
+        return max_w.max(text_width(
+            t!("ui.replay.sections.fire_chance_no_eligible_hits").into_owned().into(),
+            window,
+            false,
+        ));
+    }
+
+    let counts =
+        text_width(fire_chance::counts_text(fire_chance.fires, fire_chance.eligible_hits).into(), window, true);
+    let expected = fire_chance::expected_fires_text(fire_chance)
+        .map(|text| text_width(text.into(), window, false))
+        .unwrap_or_default();
+    max_w = max_w.max(HEADLINE_CHROME + counts + expected);
+    max_w = max_w.max(text_width(fire_chance::ships_text(fire_chance).into_owned().into(), window, false));
+
+    for line in fire_chance::fire_chance_formula_lines(fire_chance, &raw_source) {
+        max_w = max_w.max(text_width(line.into(), window, false));
+    }
+
+    let mut tally_width = |rows: &[fire_chance::TallyRow]| {
+        for row in rows {
+            let label = text_width(row.label.to_string().into(), window, false);
+            max_w = max_w.max(TALLY_COUNT_WIDTH.as_f32() + BREAKDOWN_GAP + row.depth as f32 * 12.0 + label);
+        }
+    };
+    tally_width(&fire_chance::fire_chance_battle_tally_rows(fire_chance));
+    tally_width(&fire_chance::fire_chance_ribbon_rows(fire_chance));
+
+    for ship in fire_chance::sorted_per_ship(fire_chance) {
+        let counts = text_width(fire_chance::counts_text(ship.fires, ship.eligible_hits).into(), window, false);
+        max_w = max_w.max(FIRE_CHANCE_SHIP_WIDTH.as_f32() + BREAKDOWN_GAP + counts);
+    }
+    if let Some(line) = fire_chance::no_target_ship_line(fire_chance) {
+        max_w = max_w.max(text_width(line.into(), window, false));
     }
 
     max_w
 }
+
+/// The fire glyph, the copy button and the gaps around them, which is what the
+/// fire-chance headline holds besides its two figures.
+const HEADLINE_CHROME: f32 = 56.0;
 
 /// Pure width formula for `icon_label_row`: the icon box, the 8px icon-to-
 /// label gap (`icon_label_row`'s `gap(px(8.))`), then the label text.
@@ -357,23 +405,31 @@ fn consumables_width(gap_2: f32) -> f32 {
     NAME_COL + gap_2 + COUNT_COL + gap_2 + COUNT_COL
 }
 
-/// Potential-damage / Hits expanded content: the column's hover text shown
+/// Potential-damage / Hits expanded content: the column's own breakdown shown
 /// inline, NDA-gated exactly like the egui arms (`mod.rs:1983-1989, 2077-2082`)
 /// -- an NDA placeholder when the row's stats are hidden and debug is off,
-/// otherwise the hover text (or nothing when there is none).
-fn render_nda_gated_hover(text: Option<&str>, row: &PlayerRow, debug: bool) -> Option<AnyElement> {
+/// otherwise the grid (or nothing when there is no breakdown).
+fn render_nda_gated_breakdown(rows: Option<&[BreakdownRow]>, row: &PlayerRow, debug: bool) -> Option<AnyElement> {
     if row.should_hide_stats() && !debug {
         return Some(nda_text());
     }
-    text.map(multiline_body)
+    rows.map(breakdown_grid)
 }
 
-/// Plain multi-line body text (one `div` per `\n`-separated line), matching
-/// the egui app's `ui.label(hover_text)` for the Potential/Spotting/Hits
-/// expanded arms, which render newlines as separate lines.
-fn multiline_body(text: &str) -> AnyElement {
-    v_flex().gap_0().text_xs().children(text.split('\n').map(|line| div().child(line.to_string()))).into_any_element()
+/// A label-and-value listing: labels in one column and values in another, so
+/// the two line up in the proportional font the rest of the row uses.
+fn breakdown_grid(rows: &[BreakdownRow]) -> AnyElement {
+    h_flex()
+        .gap(px(BREAKDOWN_GAP))
+        .items_start()
+        .text_xs()
+        .child(v_flex().gap_px().children(rows.iter().map(|row| div().child(row.label.clone()))))
+        .child(v_flex().gap_px().items_end().children(rows.iter().map(|row| div().child(row.value.clone()))))
+        .into_any_element()
 }
+
+/// Between a breakdown grid's two columns.
+const BREAKDOWN_GAP: f32 = 8.0;
 
 fn section_heading(text: String) -> AnyElement {
     div().text_xs().font_weight(FontWeight::BOLD).child(text).into_any_element()
@@ -471,11 +527,6 @@ fn icon_label_row(
         .into_any_element()
 }
 
-/// Name-column expanded content: achievements ("name (Nx)" once a count
-/// exceeds 1), ribbons (sorted by name, with the RIBBON_BULGE-after-
-/// RIBBON_MAIN_CALIBER one-off reorder), and the fires/floods/citadels/crits
-/// damage-event counts, NDA-gated. Mirrors `mod.rs`'s `ReplayColumn::Name`
-/// expanded arm.
 /// The effective-fire-chance block under the recording player's row.
 ///
 /// Only that row carries a result, so every other expands to nothing here.
@@ -632,12 +683,17 @@ const FIRE_CHANCE_SHIP_WIDTH: Pixels = px(160.);
 /// Keeps one row's per-ship element ids clear of the next row's.
 const FIRE_CHANCE_SHIP_STRIDE: usize = 64;
 
+/// Name-column expanded content: achievements ("name (Nx)" once a count
+/// exceeds 1), ribbons (sorted by name, with the RIBBON_BULGE-after-
+/// RIBBON_MAIN_CALIBER one-off reorder), the fires/floods/citadels/crits
+/// damage-event counts, NDA-gated, and then the effective fire chance.
+/// Mirrors `mod.rs`'s `ReplayColumn::Name` expanded arm.
 fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &IconCache) -> Option<AnyElement> {
     let has_achievements = !row.achievements.is_empty();
     let has_ribbons = !row.ribbons.is_empty();
     let has_damage_events =
         row.fires.is_some() || row.floods.is_some() || row.citadels.is_some() || row.crits.is_some();
-    if !has_achievements && !has_ribbons && !has_damage_events {
+    if !has_achievements && !has_ribbons && !has_damage_events && row.fire_chance.is_none() {
         return None;
     }
 
@@ -673,22 +729,37 @@ fn render_name_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Icon
         if row.should_hide_stats() && !debug {
             col = col.child(nda_text());
         } else {
-            if let Some(fires) = row.fires {
-                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.fires"), fires)));
-            }
-            if let Some(floods) = row.floods {
-                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.floods"), floods)));
-            }
-            if let Some(citadels) = row.citadels {
-                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.citadels"), citadels)));
-            }
-            if let Some(crits) = row.crits {
-                col = col.child(body_text(format!("{}: {}", t!("ui.replay.column.crits"), crits)));
-            }
+            col = col.child(breakdown_grid(&damage_event_rows(row)));
         }
     }
 
+    // The effective fire chance closes the column, which is where the egui
+    // block sits (`mod.rs:2206-2215`).
+    if let Some(fire_chance) = render_fire_chance_section(row_ix, row, debug) {
+        if has_achievements || has_ribbons || has_damage_events {
+            col = col.child(Separator::horizontal());
+        }
+        col = col.child(fire_chance);
+    }
+
     Some(col.into_any_element())
+}
+
+/// The damage events a row records, as a breakdown: one line per event kind
+/// the battle produced.
+fn damage_event_rows(row: &PlayerRow) -> Vec<BreakdownRow> {
+    let events = [
+        (t!("ui.replay.column.fires"), row.fires),
+        (t!("ui.replay.column.floods"), row.floods),
+        (t!("ui.replay.column.citadels"), row.citadels),
+        (t!("ui.replay.column.crits"), row.crits),
+    ];
+    events
+        .into_iter()
+        .filter_map(|(label, count)| {
+            count.map(|count| BreakdownRow { label: label.into_owned(), value: separate_number(count) })
+        })
+        .collect()
 }
 
 /// One-off fix ported verbatim from the egui app: insert RIBBON_BULGE (torp
@@ -1034,41 +1105,37 @@ fn consumable_row(row_ix: usize, idx: usize, consumable: &ConsumableResult, icon
 }
 
 /// ActualDamage/ReceivedDamage expanded content: the per-ammo-type breakdown
-/// paragraph (`row.actual_damage_hover_text`/`received_damage_hover_text`),
-/// then per-victim (or per-attacker) interaction lines,
-/// `"{ship}: {amount} ({pct}%)"`, sorted by amount descending, skipping zero
-/// entries. NDA-gated like the collapsed cell (`should_hide_stats() &&
+/// (`row.actual_damage_breakdown`/`received_damage_breakdown`), then a
+/// per-victim (or per-attacker) grid of `amount (pct%)` against ship name,
+/// sorted by amount descending, skipping zero entries. NDA-gated like the collapsed cell (`should_hide_stats() &&
 /// !debug`), mirroring the egui app's `dealt_damage_details`/
 /// `received_damage_details`. No heading: each side sits under its own column
 /// (ActualDamage/ReceivedDamage), so the column header already names it, just
 /// as in egui.
-#[allow(clippy::too_many_arguments)]
 fn render_damage_section(
-    ix: usize,
     row: &PlayerRow,
     all_rows: &[PlayerRow],
     debug: bool,
     direction: DamageDirection,
     alt_held: bool,
-    cx: &App,
 ) -> Option<AnyElement> {
     if row.should_hide_stats() && !debug {
         return Some(nda_text());
     }
 
-    let hover_text = match direction {
-        DamageDirection::Dealt => row.actual_damage_hover_text.as_ref(),
-        DamageDirection::Received => row.received_damage_hover_text.as_ref(),
+    let breakdown = match direction {
+        DamageDirection::Dealt => row.actual_damage_breakdown.as_deref(),
+        DamageDirection::Received => row.received_damage_breakdown.as_deref(),
     };
     let interactions = row.damage_interactions.as_ref();
-    if hover_text.is_none() && interactions.is_none() {
+    if breakdown.is_none() && interactions.is_none() {
         return None;
     }
 
     let mut col = v_flex().gap_1();
 
-    if let Some(text) = hover_text {
-        col = col.child(hover_paragraph(text, cx));
+    if let Some(rows) = breakdown {
+        col = col.child(breakdown_grid(rows));
         if interactions.is_some() {
             col = col.child(Separator::horizontal());
         }
@@ -1077,38 +1144,25 @@ fn render_damage_section(
     if let Some(interactions) = interactions {
         let mut entries: Vec<_> = interactions.iter().collect();
         entries.sort_by_key(|(_, interaction)| std::cmp::Reverse(interaction_amount(interaction, direction)));
-        for (idx, (account_id, interaction)) in entries.into_iter().enumerate() {
-            let amount = interaction_amount(interaction, direction);
-            if amount == 0 {
-                continue;
-            }
-            let Some(other) = all_rows.iter().find(|r| r.db_id == *account_id) else {
-                continue;
-            };
-            let pct = interaction_percentage(interaction, direction, alt_held);
-            col = col.child(div().id(("replay-interaction", ix * DETAIL_ID_STRIDE + idx)).text_xs().child(format!(
-                "{}: {} ({pct:.0}%)",
-                other.ship_name,
-                separate_number(amount)
-            )));
-        }
+        let per_ship: Vec<BreakdownRow> = entries
+            .into_iter()
+            .filter_map(|(account_id, interaction)| {
+                let amount = interaction_amount(interaction, direction);
+                if amount == 0 {
+                    return None;
+                }
+                let other = all_rows.iter().find(|r| r.db_id == *account_id)?;
+                let pct = interaction_percentage(interaction, direction, alt_held);
+                Some(BreakdownRow {
+                    label: other.ship_name.clone(),
+                    value: format!("{} ({pct:.0}%)", separate_number(amount)),
+                })
+            })
+            .collect();
+        col = col.child(breakdown_grid(&per_ship));
     }
 
     Some(col.into_any_element())
-}
-
-/// The ammo-type damage breakdown as a monospace paragraph, one line per
-/// `\n`-separated entry, matching the mono styling `table.rs`'s
-/// `hover_tooltip` uses for the same text when it shows as the collapsed
-/// cell's hover tooltip.
-fn hover_paragraph(text: &str, cx: &App) -> AnyElement {
-    let mono_font_family = cx.theme().mono_font_family.clone();
-    v_flex()
-        .gap_0()
-        .text_xs()
-        .font_family(mono_font_family)
-        .children(text.split('\n').map(|line| div().child(line.to_string())))
-        .into_any_element()
 }
 
 fn interaction_amount(interaction: &DamageInteraction, direction: DamageDirection) -> u64 {
@@ -1147,14 +1201,53 @@ mod tests {
     use wowsunpack::game_params::types::SkillPointCost;
 
     use super::DamageDirection;
+    use super::IconCache;
     use super::MODULE_ICON_SIZE;
+    use super::ReplayColumn;
     use super::consumables_width;
+    use super::damage_event_rows;
     use super::fit_dims;
     use super::icon_label_row_width;
     use super::interaction_amount;
     use super::interaction_percentage;
+    use super::render_column_detail;
     use super::reorder_bulge_after_main_caliber;
     use super::skill_grid_width;
+    use crate::replay_inspector::test_support::base_row;
+    use crate::replay_inspector::test_support::fire_chance_result;
+    use wows_replays::types::Relation;
+
+    /// The block expands under Name, after the damage events, which is where
+    /// the egui app puts it; Kills has nothing of its own to show.
+    #[test]
+    fn the_fire_chance_block_expands_under_the_name_column() {
+        let mut row = base_row(1, Relation::new(0), true);
+        row.fire_chance = Some(fire_chance_result());
+        let icons = IconCache::new();
+
+        assert!(
+            render_column_detail(0, ReplayColumn::Name, &row, &[], &icons, false, false).is_some(),
+            "the Name column carries it"
+        );
+        assert!(
+            render_column_detail(0, ReplayColumn::Kills, &row, &[], &icons, false, false).is_none(),
+            "and the Kills column does not"
+        );
+    }
+
+    /// A breakdown lists what a battle produced and leaves out what it did
+    /// not, so the grid draws a line per kind that has something behind it.
+    #[test]
+    fn the_damage_event_grid_lists_only_the_events_a_row_recorded() {
+        let mut row = base_row(1, Relation::new(1), false);
+        row.fires = Some(4);
+        row.citadels = Some(2);
+
+        let rows = damage_event_rows(&row);
+
+        assert_eq!(rows.len(), 2, "got {rows:?}");
+        assert_eq!(rows[1].value, "2", "the counts read as numbers: {rows:?}");
+    }
 
     #[test]
     fn fit_dims_keeps_a_wide_ribbon_short() {

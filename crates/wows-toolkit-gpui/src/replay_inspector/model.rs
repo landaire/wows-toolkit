@@ -45,6 +45,8 @@ use wows_replays::types::GameClock;
 use wows_replays::types::GameParamId;
 use wows_replays::types::Relation;
 use wows_replays::types::TeamId;
+use wows_toolkit_viewmodel::breakdown;
+use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 use wows_toolkit_viewmodel::twitch::SniperCandidate;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::TranslationKey;
@@ -118,12 +120,12 @@ pub struct PlayerRow {
     pub actual_damage: Option<u64>,
     pub actual_damage_report: Option<Damage>,
     pub actual_damage_text: Option<String>,
-    pub actual_damage_hover_text: Option<String>,
+    pub actual_damage_breakdown: Option<Vec<BreakdownRow>>,
 
     pub hits: Option<u64>,
     pub hits_report: Option<Hits>,
     pub hits_text: Option<String>,
-    pub hits_hover_text: Option<String>,
+    pub hits_breakdown: Option<Vec<BreakdownRow>>,
 
     pub spotting_damage: Option<u64>,
     pub spotting_damage_text: Option<String>,
@@ -132,19 +134,19 @@ pub struct PlayerRow {
     /// list, which `NormalizedBattleReport` does not carry. Only the numeric
     /// total (`spotting_damage`) survives; this is a documented, narrow gap
     /// (self player only, hover text only).
-    pub spotting_damage_hover_text: Option<String>,
+    pub spotting_damage_breakdown: Option<Vec<BreakdownRow>>,
 
     pub potential_damage: Option<u64>,
     pub potential_damage_text: Option<String>,
     /// `None` in the self-player controller-fallback case for the same
-    /// reason as `spotting_damage_hover_text`; `Some` whenever server
+    /// reason as `spotting_damage_breakdown`; `Some` whenever server
     /// results are present (fully reproducible from `ServerResults`).
-    pub potential_damage_hover_text: Option<String>,
+    pub potential_damage_breakdown: Option<Vec<BreakdownRow>>,
     pub potential_damage_report: Option<PotentialDamage>,
 
     pub received_damage: Option<u64>,
     pub received_damage_text: Option<String>,
-    pub received_damage_hover_text: Option<String>,
+    pub received_damage_breakdown: Option<Vec<BreakdownRow>>,
     pub received_damage_report: Option<Damage>,
     pub damage_interactions: Option<HashMap<AccountId, DamageInteraction>>,
 
@@ -656,21 +658,11 @@ pub fn separate_number<T: Into<i128>>(n: T) -> String {
     out
 }
 
-/// Rebuilds a monospace-style breakdown block ("Label   : 1,234") from a
-/// per-type value lookup, in `descriptions` order, skipping zero entries.
-/// Ported from `ui/replay_parser/mod.rs::breakdown_hover_string` (values
-/// only; the monospace `RichText` wrapper is a render-layer concern).
-fn breakdown_hover_string<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], get: F) -> String {
-    let longest_width =
-        descriptions.iter().filter(|(key, _)| get(key) > 0).map(|(_, desc)| desc.len()).max().unwrap_or_default() + 1;
-    descriptions
-        .iter()
-        .filter_map(|(key, description)| {
-            let num = get(key);
-            if num > 0 { Some(format!("{description:<longest_width$}: {}", separate_number(num))) } else { None }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
+/// The lines a per-type breakdown lists, in the description table's own
+/// order. Values group the way every other number in this app does, which
+/// is why the shared helper is given no locale.
+fn breakdown_rows<F: Fn(&str) -> u64>(descriptions: &[(&str, &str)], get: F) -> Vec<BreakdownRow> {
+    breakdown::rows(descriptions, None, get)
 }
 
 impl PlayerRow {
@@ -702,42 +694,40 @@ impl PlayerRow {
         let observed_damage = np.observed_results.damage;
         let observed_damage_text = separate_number(observed_damage);
 
-        let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_hover_text) = match server {
+        let (actual_damage, actual_damage_report, actual_damage_text, actual_damage_breakdown) = match server {
             Some(sr) if sr.damage.is_some() => {
                 let damage_number = sr.damage.expect("damage present");
                 let text = separate_number(damage_number);
-                let hover = breakdown_hover_string(&DAMAGE_DESCRIPTIONS, |key| {
-                    sr.damage_by_type.get(key).copied().unwrap_or(0)
-                });
-                (Some(damage_number), Some(sr.damage_details.clone()), Some(text), Some(hover))
+                let lines =
+                    breakdown_rows(&DAMAGE_DESCRIPTIONS, |key| sr.damage_by_type.get(key).copied().unwrap_or(0));
+                (Some(damage_number), Some(sr.damage_details.clone()), Some(text), Some(lines))
             }
             _ => (None, None, None, None),
         };
 
-        let (hits, hits_report, hits_text, hits_hover_text) = match server {
+        let (hits, hits_report, hits_text, hits_breakdown) = match server {
             Some(sr) => {
                 let hits_number = sr.hits.unwrap_or(0);
                 let text = separate_number(hits_number);
-                let hover =
-                    breakdown_hover_string(&HITS_DESCRIPTIONS, |key| sr.hits_by_type.get(key).copied().unwrap_or(0));
-                (sr.hits, Some(sr.hits_details.clone()), Some(text), Some(hover))
+                let lines = breakdown_rows(&HITS_DESCRIPTIONS, |key| sr.hits_by_type.get(key).copied().unwrap_or(0));
+                (sr.hits, Some(sr.hits_details.clone()), Some(text), Some(lines))
             }
             None => (None, None, None, None),
         };
 
-        let (received_damage, received_damage_text, received_damage_hover_text, received_damage_report) = match server {
+        let (received_damage, received_damage_text, received_damage_breakdown, received_damage_report) = match server {
             Some(sr) => {
                 let total = sr.received_damage;
                 let text = separate_number(total);
-                let hover = breakdown_hover_string(&RECEIVED_DAMAGE_DESCRIPTIONS, |key| {
+                let lines = breakdown_rows(&RECEIVED_DAMAGE_DESCRIPTIONS, |key| {
                     sr.received_damage_by_type.get(key).copied().unwrap_or(0)
                 });
-                (Some(total), Some(text), Some(hover), Some(sr.received_damage_details.clone()))
+                (Some(total), Some(text), Some(lines), Some(sr.received_damage_details.clone()))
             }
             None => (None, None, None, None),
         };
 
-        // The hover breakdown is always None; see the field doc comment.
+        // The breakdown is always None; see the field doc comment.
         let spotting_damage = np.spotting_damage();
         let spotting_damage_text = spotting_damage.map(separate_number);
 
@@ -745,7 +735,7 @@ impl PlayerRow {
         let potential_damage_text = potential_damage.map(separate_number);
         // Only the results object carries a breakdown; the controller total
         // the recording player falls back to is a single figure.
-        let (potential_damage_hover_text, potential_damage_report) = match server {
+        let (potential_damage_breakdown, potential_damage_report) = match server {
             Some(sr) => {
                 let total = sr.potential_damage;
                 let art = sr.potential_damage_details.artillery;
@@ -755,14 +745,14 @@ impl PlayerRow {
                 // report drops; recover it from the total (total == art +
                 // tpd + air + dbomb by construction).
                 let dbomb = total.saturating_sub(art + tpd + air);
-                let hover = breakdown_hover_string(&POTENTIAL_DAMAGE_DESCRIPTIONS, |key| match key {
+                let lines = breakdown_rows(&POTENTIAL_DAMAGE_DESCRIPTIONS, |key| match key {
                     "agro_art" => art,
                     "agro_tpd" => tpd,
                     "agro_air" => air,
                     "agro_dbomb" => dbomb,
                     _ => 0,
                 });
-                (Some(hover), Some(sr.potential_damage_details.clone()))
+                (Some(lines), Some(sr.potential_damage_details.clone()))
             }
             None => (None, None),
         };
@@ -830,21 +820,21 @@ impl PlayerRow {
             actual_damage,
             actual_damage_report,
             actual_damage_text,
-            actual_damage_hover_text,
+            actual_damage_breakdown,
             hits,
             hits_report,
             hits_text,
-            hits_hover_text,
+            hits_breakdown,
             spotting_damage,
             spotting_damage_text,
-            spotting_damage_hover_text: None,
+            spotting_damage_breakdown: None,
             potential_damage,
             potential_damage_text,
-            potential_damage_hover_text,
+            potential_damage_breakdown,
             potential_damage_report,
             received_damage,
             received_damage_text,
-            received_damage_hover_text,
+            received_damage_breakdown,
             received_damage_report,
             damage_interactions,
             fires,
@@ -934,14 +924,14 @@ mod tests {
 
         let self_row = model.rows.iter().find(|r| r.is_self).expect("self row present");
         assert!(self_row.actual_damage_report.is_some());
-        assert!(self_row.actual_damage_hover_text.is_some());
+        assert!(self_row.actual_damage_breakdown.is_some());
         assert!(self_row.received_damage_report.is_some());
         assert_eq!(self_row.fires, Some(1));
 
         let enemy_row = model.rows.iter().find(|r| !r.is_self).expect("enemy row present");
         assert!(enemy_row.actual_damage.is_none());
         assert!(enemy_row.actual_damage_report.is_none());
-        assert!(enemy_row.actual_damage_hover_text.is_none());
+        assert!(enemy_row.actual_damage_breakdown.is_none());
         assert!(enemy_row.fires.is_none());
     }
 
