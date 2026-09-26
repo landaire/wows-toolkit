@@ -1347,30 +1347,9 @@ mod tests {
 
     /// The recording player's row carries the fire-chance block, and nobody
     /// else's does: the statistic is about the shells this client fired.
-    #[gpui_kit::test]
-    fn the_fire_chance_block_is_on_the_recording_player_s_row(cx: &mut TestAppContext) {
-        use std::collections::BTreeMap;
-        use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
-
-        let fire_chance = EffectiveFireChance {
-            he_shells_fired: 120,
-            hits: 60,
-            narrowed: BTreeMap::new(),
-            he_hits_on_a_ship: 40,
-            hits_without_a_target_ship: 0,
-            not_applicable: 0,
-            eligible_hits: 40,
-            fires: 3,
-            expected_fires: Some(4.2),
-            per_ship: Vec::new(),
-            exclusions: BTreeMap::new(),
-            section_predictions: Vec::new(),
-            set_fire_ribbons: 3,
-            unattributed_fires: 0,
-            unattributed_reasons: BTreeMap::new(),
-            formula_base: Some(0.12),
-            formula: Vec::new(),
-        };
+    #[test]
+    fn the_fire_chance_block_is_on_the_recording_player_s_row() {
+        let fire_chance = crate::replay_inspector::test_support::fire_chance_result();
 
         let mut model = model_at_expected_values();
         model.set_fire_chance(Some(fire_chance));
@@ -1393,8 +1372,8 @@ mod tests {
             Some("expected 4.2 fires")
         );
 
-        // The panel draws it without a window of its own to open.
-        let _ = cx;
+        // Which column the block expands under is
+        // `expanded::the_fire_chance_block_expands_under_the_name_column`.
     }
 
     /// The line under the header names the match, and a replay with no

@@ -21,6 +21,32 @@ use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
 use super::model::PlayerRow;
 
+/// An effective-fire-chance result with enough behind it to state a rate: 3
+/// fires out of 40 eligible hits, against 4.2 expected.
+pub(crate) fn fire_chance_result() -> wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
+    use std::collections::BTreeMap;
+
+    wows_replay_insights::fire_chance::analysis::EffectiveFireChance {
+        he_shells_fired: 120,
+        hits: 60,
+        narrowed: BTreeMap::new(),
+        he_hits_on_a_ship: 40,
+        hits_without_a_target_ship: 0,
+        not_applicable: 0,
+        eligible_hits: 40,
+        fires: 3,
+        expected_fires: Some(4.2),
+        per_ship: Vec::new(),
+        exclusions: BTreeMap::new(),
+        section_predictions: Vec::new(),
+        set_fire_ribbons: 3,
+        unattributed_fires: 0,
+        unattributed_reasons: BTreeMap::new(),
+        formula_base: Some(0.12),
+        formula: Vec::new(),
+    }
+}
+
 /// A minimal `PlayerRow` with every field at its "absent/zero" default.
 /// Callers override the handful of fields relevant to what they're testing
 /// via struct-update syntax: `PlayerRow { actual_damage: Some(1), ..base_row(1, Relation::new(2), false) }`.
@@ -58,21 +84,21 @@ pub(crate) fn base_row(db_id: i64, relation: Relation, is_self: bool) -> PlayerR
         actual_damage: None,
         actual_damage_report: None,
         actual_damage_text: None,
-        actual_damage_hover_text: None,
+        actual_damage_breakdown: None,
         hits: None,
         hits_report: None,
         hits_text: None,
-        hits_hover_text: None,
+        hits_breakdown: None,
         spotting_damage: None,
         spotting_damage_text: None,
-        spotting_damage_hover_text: None,
+        spotting_damage_breakdown: None,
         potential_damage: None,
         potential_damage_text: None,
-        potential_damage_hover_text: None,
+        potential_damage_breakdown: None,
         potential_damage_report: None,
         received_damage: None,
         received_damage_text: None,
-        received_damage_hover_text: None,
+        received_damage_breakdown: None,
         received_damage_report: None,
         damage_interactions: None,
         fires: None,

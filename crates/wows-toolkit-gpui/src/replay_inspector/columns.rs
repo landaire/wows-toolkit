@@ -7,6 +7,7 @@
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::Relation;
 use wows_toolkit_config::ReplaySettings;
+use wows_toolkit_viewmodel::breakdown;
 
 use super::model::PlayerRow;
 pub use super::model::separate_number;
@@ -296,8 +297,8 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             Some(_) if nda_active => CellValue::plain(NDA),
             Some(text) => {
                 let mut cell = CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row)));
-                if let Some(hover) = row.actual_damage_hover_text.as_ref() {
-                    cell = cell.with_hover(hover.clone());
+                if let Some(hover) = row.actual_damage_breakdown.as_ref() {
+                    cell = cell.with_hover(breakdown::padded_text(hover));
                 }
                 cell
             }
@@ -307,8 +308,8 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             Some(_) if nda_active => CellValue::plain(NDA),
             Some(text) => {
                 let mut cell = CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row)));
-                if let Some(hover) = row.received_damage_hover_text.as_ref() {
-                    cell = cell.with_hover(hover.clone());
+                if let Some(hover) = row.received_damage_breakdown.as_ref() {
+                    cell = cell.with_hover(breakdown::padded_text(hover));
                 }
                 cell
             }
@@ -317,8 +318,8 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
         ReplayColumn::SpottingDamage => match row.spotting_damage_text.as_ref() {
             Some(text) => {
                 let mut cell = CellValue::plain(text.clone());
-                if let Some(hover) = row.spotting_damage_hover_text.as_ref() {
-                    cell = cell.with_hover(hover.clone());
+                if let Some(hover) = row.spotting_damage_breakdown.as_ref() {
+                    cell = cell.with_hover(breakdown::padded_text(hover));
                 }
                 cell
             }
@@ -328,8 +329,8 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             Some(_) if nda_active => CellValue::plain(NDA),
             Some(text) => {
                 let mut cell = CellValue::plain(text.clone());
-                if let Some(hover) = row.potential_damage_hover_text.as_ref() {
-                    cell = cell.with_hover(hover.clone());
+                if let Some(hover) = row.potential_damage_breakdown.as_ref() {
+                    cell = cell.with_hover(breakdown::padded_text(hover));
                 }
                 cell
             }
@@ -339,8 +340,8 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             Some(_) if nda_active => CellValue::plain(NDA),
             Some(text) => {
                 let mut cell = CellValue::colored(text.clone(), ColorRole::Player(player_color_kind(row)));
-                if let Some(hover) = row.hits_hover_text.as_ref() {
-                    cell = cell.with_hover(hover.clone());
+                if let Some(hover) = row.hits_breakdown.as_ref() {
+                    cell = cell.with_hover(breakdown::padded_text(hover));
                 }
                 cell
             }
@@ -365,6 +366,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
 mod tests {
     use wows_replay_insights::personal_rating::PersonalRatingResult;
     use wows_replays::types::Relation;
+    use wows_toolkit_viewmodel::breakdown::BreakdownRow;
 
     use super::*;
     use crate::replay_inspector::test_support::base_row;
@@ -453,7 +455,7 @@ mod tests {
         let row = PlayerRow {
             is_test_ship: true,
             actual_damage_text: Some("50,000".to_string()),
-            actual_damage_hover_text: Some("AP: 50,000".to_string()),
+            actual_damage_breakdown: Some(vec![BreakdownRow { label: "AP".to_string(), value: "50,000".to_string() }]),
             ..base_row(1, Relation::new(2), false)
         };
 
@@ -463,7 +465,7 @@ mod tests {
 
         let debug_visible = cell_value(&row, ReplayColumn::ActualDamage, true);
         assert_eq!(debug_visible.text, "50,000");
-        assert_eq!(debug_visible.hover.as_deref(), Some("AP: 50,000"));
+        assert_eq!(debug_visible.hover.as_deref(), Some("AP : 50,000"));
     }
 
     #[test]

@@ -422,9 +422,17 @@ kept so the next audit does not re-report them.
   and Show Replay Controls are in the listing's row menu instead. The match
   timeline and the other-team perspective are not ported at all.
 - [done] Alt turns the damage breakdown's percentages around.
-- [done] The Effective Fire Chance block is under the recording player's row:
-  the counts, the expected figure beside them, the ships they cover, and a row
-  per target ship. The geometry resolution and the analysis call moved to
+- [done] An expanded row's breakdowns are grids: labels in one column and
+  figures in another, rather than the padded `label   : value` block the egui
+  app draws them as. The lines themselves come from
+  `wows_toolkit_viewmodel::breakdown`, which the egui app's tooltips pad back
+  into one string, so both read the same lines in the same order. The damage
+  events, the ammo-type breakdowns, the potential and hits breakdowns, and the
+  per-victim damage lines all read this way.
+- [done] The Effective Fire Chance block is under the recording player's row,
+  in the Name column after its damage events, which is where the egui block
+  sits: the counts, the expected figure beside them, the ships they cover, and
+  a row per target ship. The geometry resolution and the analysis call moved to
   `wows_replay_insights::fire_chance::sections`, and the wording to
   `wows_toolkit_viewmodel::fire_chance`, so the two apps share both. The cache
   directory is the one the egui app already writes, so a build resolved by

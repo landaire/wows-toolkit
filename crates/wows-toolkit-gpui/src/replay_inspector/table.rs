@@ -1211,13 +1211,12 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
 /// `AutoSizeMode::Never`. Row height comes from the tallest such cell (flex).
 /// Collapsed rows return the bare cell (no wrapping `v_flex`), keeping the
 /// non-expanded layout byte-for-byte what it was.
-fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout, cx: &App) -> AnyElement {
+fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     let collapsed = render_cell(ix, col, row, layout);
     if !layout.is_expanded {
         return collapsed;
     }
-    match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held, cx)
-    {
+    match expanded::render_column_detail(ix, col, row, layout.all_rows, layout.icons, layout.debug, layout.alt_held) {
         Some(detail) => v_flex()
             .w(layout.column_widths[col as usize])
             .flex_none()
@@ -1273,7 +1272,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     let align_top = layout.is_expanded;
     let mut sticky = h_flex().flex_none().map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.sticky_columns {
-        sticky = sticky.child(render_column_cell(ix, col, row, layout, cx));
+        sticky = sticky.child(render_column_cell(ix, col, row, layout));
     }
 
     let mut scrolling = h_flex()
@@ -1281,7 +1280,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
         .flex_none()
         .map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.scroll_columns {
-        scrolling = scrolling.child(render_column_cell(ix, col, row, layout, cx));
+        scrolling = scrolling.child(render_column_cell(ix, col, row, layout));
     }
 
     // Selection is what a ctrl+click leaves behind, over the stripe; the
