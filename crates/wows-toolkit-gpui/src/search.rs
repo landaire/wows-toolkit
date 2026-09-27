@@ -798,6 +798,12 @@ impl SearchView {
         self.set_query_text(query.to_string(), window, cx);
     }
 
+    /// Seeds a bake in flight with nothing to show yet. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_baking_preview_for_test(&mut self, path: PathBuf) {
+        self.preview.seed_baking_for_test(path);
+    }
+
     /// What the preview is showing, if anything. Test-only.
     #[cfg(test)]
     pub(crate) fn preview_frame_count(&self) -> Option<usize> {
@@ -1757,17 +1763,25 @@ impl Render for SearchView {
                 .into_any_element()
         };
 
-        // The dwelled row's battle, played back. Absent until the pointer has
-        // rested on a row whose build is loaded.
-        let preview = self.preview.frame().map(|frame| {
-            div()
-                .id("search-preview")
-                .test_support()
-                .flex_none()
-                .p_1()
-                .border_t_1()
-                .border_color(border)
-                .child(img(frame).w(px(PREVIEW_WIDTH)).h(px(PREVIEW_WIDTH)))
+        // The dwelled row's battle, played back. The strip goes up as soon as a
+        // bake starts, holding open water until the first frame lands: a strip
+        // that appeared with the frame would resize the results under the
+        // pointer that asked for it.
+        let preview_art: Option<AnyElement> = match self.preview.frame() {
+            Some(frame) => Some(img(frame).w(px(PREVIEW_WIDTH)).h(px(PREVIEW_WIDTH)).into_any_element()),
+            None if self.preview.is_baking() => Some(
+                div()
+                    .id("search-preview-placeholder")
+                    .test_support()
+                    .w(px(PREVIEW_WIDTH))
+                    .h(px(PREVIEW_WIDTH))
+                    .bg(crate::preview_hover::MAP_PLACEHOLDER)
+                    .into_any_element(),
+            ),
+            None => None,
+        };
+        let preview = preview_art.map(|art| {
+            div().id("search-preview").test_support().flex_none().p_1().border_t_1().border_color(border).child(art)
         });
 
         let status = match &self.state {

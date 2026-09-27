@@ -80,6 +80,15 @@ pub struct PreviewHover {
     _ticker: Option<Task<()>>,
 }
 
+/// What a preview occupies before its first frame arrives.
+///
+/// Ocean's water, which is the one map that is nothing but water: every pixel of
+/// `spaces/00_CO_ocean` is this colour. A preview that starts as open water and
+/// then becomes the real map does not jump the way one that starts as a hole in
+/// the panel does.
+pub const MAP_PLACEHOLDER: gpui_kit::Rgba =
+    gpui_kit::Rgba { r: 0x06 as f32 / 255., g: 0x27 as f32 / 255., b: 0x2e as f32 / 255., a: 1. };
+
 impl Default for PreviewHover {
     fn default() -> Self {
         Self {
@@ -157,6 +166,14 @@ impl PreviewHover {
         if let Some(shown) = self.shown.as_mut() {
             shown.last_frame -= by;
         }
+    }
+
+    /// Seeds a bake in flight that has produced nothing yet. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_baking_for_test(&mut self, path: PathBuf) {
+        self.baking = true;
+        self.shown = None;
+        self.watched = Some((path, Instant::now()));
     }
 
     /// Seeds a preview that is playing while its bake runs on. Test-only.

@@ -164,7 +164,6 @@ fn measure_column_widths(
     for &col in &model.columns {
         let header_w = text_width(column_label(col).into(), window, true);
         let content_w = match col {
-            ReplayColumn::Actions => header_w,
             ReplayColumn::Name => {
                 let mut max_w = header_w;
                 for row in &model.rows {
@@ -220,9 +219,8 @@ fn measure_column_widths(
 
 /// Header label for a column, matching the egui app's `ui.replay.column.*`
 /// English strings.
-const fn column_label_key(col: ReplayColumn) -> &'static str {
+pub(super) const fn column_label_key(col: ReplayColumn) -> &'static str {
     match col {
-        ReplayColumn::Actions => "ui.replay.actions",
         ReplayColumn::Name => "ui.replay.column.player_name",
         ReplayColumn::ShipName => "ui.replay.column.ship_name",
         ReplayColumn::Skills => "ui.replay.column.skills",
@@ -252,7 +250,7 @@ fn column_label(col: ReplayColumn) -> String {
 /// Time Lived.
 fn column_sort(col: ReplayColumn) -> Option<SortColumn> {
     match col {
-        ReplayColumn::Actions | ReplayColumn::Skills | ReplayColumn::TimeLived => None,
+        ReplayColumn::Skills | ReplayColumn::TimeLived => None,
         ReplayColumn::Name => Some(SortColumn::Name),
         ReplayColumn::ShipName => Some(SortColumn::ShipName),
         ReplayColumn::PersonalRating => Some(SortColumn::PersonalRating),
@@ -406,7 +404,11 @@ const COLUMN_DRAG_MIN: Pixels = px(28.);
 /// The port's own row, not one the egui app reads: its table carries explicit
 /// per-column ranges and keeps its widths in egui's own memory, so there is
 /// nothing shared to write to.
-const COLUMN_WIDTHS_KEY: &str = "replay_column_widths";
+/// Positional: one entry per column in `ReplayColumn::ALL` order. The key
+/// carries a version because of that -- dropping the Actions column shifted
+/// every index, and the stored list would otherwise be read onto the wrong
+/// columns.
+const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v2";
 
 /// The width of the strip on a header's trailing edge that starts a drag.
 const RESIZE_GRIP: Pixels = px(6.);
@@ -1049,7 +1051,7 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
     }
 }
 
-/// Builds the Actions column's `...` menu items, mirroring the egui app's
+/// Builds a row's actions menu, mirroring the egui app's
 /// `ReplayColumn::Actions` arm (`ui/replay_parser/mod.rs` ~1681-1799)
 /// item-for-item: the ship-config "Open Build in Browser"/"Copy Build Link"/
 /// "Copy Short Build Link" trio (shown for non-enemy rows or in debug, and
@@ -1096,7 +1098,7 @@ impl ActionsMenuData {
     }
 }
 
-/// Builds the Actions column's `...` menu items, mirroring the egui app's
+/// Builds a row's actions menu, mirroring the egui app's
 /// `ReplayColumn::Actions` arm (`ui/replay_parser/mod.rs` ~1681-1799)
 /// item-for-item: the ship-config "Open Build in Browser"/"Copy Build Link"/
 /// "Copy Short Build Link" trio (shown for non-enemy rows or in debug, and
@@ -1172,30 +1174,59 @@ fn build_actions_menu(
 }
 
 /// The Actions column's cell: a ghost icon-only `...` button that opens
-/// `build_actions_menu`'s per-row popup menu on click. `ix` keys the
-/// trigger's `ElementId` so every row's button/popover state is independent.
-/// `entity` is threaded through to `build_actions_menu` so its "View Raw
-/// Player Metadata" item can emit `PlayerTableEvent::ViewRawJson` on it. Only
-/// the menu's own small `ActionsMenuData` is cloned out of `row` (see its doc
-/// comment), not the whole `PlayerRow`.
-fn actions_cell(ix: usize, row: &PlayerRow, debug: bool, entity: Entity<PlayerTable>, width: f32) -> AnyElement {
+/// The dots that open one row's actions, revealed while the pointer is on that
+/// row.
+///
+/// Laid over the row's trailing edge rather than given a column of its own: the
+/// actions are about the row under the pointer, and a column of buttons charges
+/// every row's width for something only the hovered one can be used on. The same
+/// items are on the row's right-click menu, and the chat pane reveals its copy
+/// button the same way (`chat.rs::render_message`).
+///
+/// `ix` keys the trigger's `ElementId` so every row's popover state is its own,
+/// and `group` ties the reveal to that row's hover. `entity` is threaded through
+/// to `build_actions_menu` for the raw-metadata item's event. Only the menu's own
+/// small `ActionsMenuData` is cloned out of `row` (see its doc comment), not the
+/// whole `PlayerRow`.
+fn row_actions(
+    ix: usize,
+    row: &PlayerRow,
+    debug: bool,
+    entity: Entity<PlayerTable>,
+    group: SharedString,
+    sticky_width: f32,
+) -> AnyElement {
     let row = ActionsMenuData::from_row(row);
-    let trigger = Button::new(("replay-row-actions", ix)).ghost().xsmall().icon(IconName::Ellipsis);
+    let trigger = Button::new(("replay-row-actions", ix))
+        .ghost()
+        .xsmall()
+        .icon(IconName::Ellipsis)
+        .tooltip(t!("ui.replay.row_actions_hint").to_string());
     let menu_button =
         trigger.dropdown_menu(move |menu, _window, _cx| build_actions_menu(menu, &row, debug, entity.clone()));
 
-    div().w(px(width)).flex_none().px_1().child(menu_button).into_any_element()
+    div()
+        .absolute()
+        .inset_0()
+        .left(px(sticky_width - ROW_ACTIONS_WIDTH))
+        .w(px(ROW_ACTIONS_WIDTH))
+        .h(px(ROW_ACTIONS_WIDTH))
+        .invisible()
+        .group_hover(group, |this| this.visible())
+        .child(menu_button)
+        .into_any_element()
 }
 
-/// One column's collapsed cell, dispatching to the Name/Skills/Actions
-/// special-cased layouts and falling back to the generic `cell_element` for
-/// everything else.
+/// Room for the dots at the end of the columns that do not scroll.
+const ROW_ACTIONS_WIDTH: f32 = 24.0;
+
+/// One column's collapsed cell, dispatching to the Name/Skills special-cased
+/// layouts and falling back to the generic `cell_element` for everything else.
 fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout) -> AnyElement {
     let width = layout.column_widths[col as usize].as_f32();
     match col {
         ReplayColumn::Name => name_cell(ix, row, layout, width),
         ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width),
-        ReplayColumn::Actions => actions_cell(ix, row, layout.debug, layout.entity.clone(), width),
         _ => cell_element(ix, col, cell_value(row, col, layout.debug), width),
     }
 }
@@ -1274,6 +1305,10 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     for &col in layout.sticky_columns {
         sticky = sticky.child(render_column_cell(ix, col, row, layout));
     }
+    // The dots sit at the trailing edge of the columns that do not scroll, so
+    // they are in the same place whatever the table is scrolled to. Measured
+    // rather than guessed: a dragged column moves them.
+    let sticky_width: f32 = layout.sticky_columns.iter().map(|col| layout.column_widths[*col as usize].as_f32()).sum();
 
     let mut scrolling = h_flex()
         .w(px(layout.scroll_width))
@@ -1288,14 +1323,17 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     let background = if layout.selected { Some(cx.theme().selection) } else { crate::ui::stripe(ix, cx) };
     let entity = layout.entity.clone();
     let select_entity = layout.entity.clone();
-    // The same actions the row's own button offers, on the row itself: a
-    // right-click is where a reader reaches for them, and aiming at one
-    // column's small button to get at a player is a poor substitute.
+    // A right-click anywhere on the row opens the same menu the dots do: it is
+    // where a reader reaches for a row's actions, and the dots are what says so.
     let menu_entity = layout.entity.clone();
     let menu_row = ActionsMenuData::from_row(row);
     let debug = layout.debug;
+    let group = SharedString::from(format!("replay-row-{ix}"));
     h_flex()
         .id(ix)
+        .test_support()
+        .group(group.clone())
+        .relative()
         .w_full()
         .py_0p5()
         .map(|el| if align_top { el.items_start() } else { el.items_center() })
@@ -1320,6 +1358,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
+        .child(row_actions(ix, row, layout.debug, layout.entity.clone(), group, sticky_width))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
         .context_menu(move |menu, _window, _cx| build_actions_menu(menu, &menu_row, debug, menu_entity.clone()))

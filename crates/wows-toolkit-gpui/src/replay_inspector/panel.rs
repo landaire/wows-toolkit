@@ -1239,7 +1239,8 @@ mod tests {
                 .into_iter()
                 .find(|element| element.label() == Some(t!("ui.replay.context.render_replay").as_ref()))
                 .expect("the menu offers to render the replay");
-            window.click(render.path().last().expect("a menu item has an id").clone(), cx);
+            // Scoped to the menu: a table row answers to a bare row number too.
+            window.within("popup-menu").click(render.path().last().expect("a menu item has an id").clone(), cx);
         })
         .expect("the window is open");
 
@@ -1343,6 +1344,64 @@ mod tests {
             before.origin.x,
             after.origin.x
         );
+    }
+
+    /// A row's actions live on the row, not in a column: the table has no
+    /// Actions header, the dots that open them are hidden until the pointer is
+    /// on that row, and they open the same menu the right-click does.
+    #[gpui_kit::test]
+    fn a_rows_actions_are_on_the_row_rather_than_in_a_column(cx: &mut TestAppContext) {
+        assert!(
+            !ReplayColumn::ALL
+                .iter()
+                .any(|col| crate::replay_inspector::table::column_label_key(*col) == "ui.replay.column.actions"),
+            "no column is headed Actions, so no width is charged for one"
+        );
+
+        // The fixture rows carry no links, so a menu built from one would be
+        // empty for reasons that have nothing to do with where its trigger sits.
+        let mut model = model_at_expected_values();
+        model.rows[0].wows_numbers_url = Some("https://wows-numbers.com/player/1,Someone/".to_owned());
+
+        cx.update(gpui_kit::init);
+        let window = cx
+            .open_window(size(px(1400.), px(600.)), |window, cx| ReplayPanel::loaded_for_test(model, None, window, cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(crate::interaction_tests::menu_items(window).is_empty(), "nothing is offered yet");
+            assert!(
+                !window.find(("replay-row-actions", 0usize)).visible(),
+                "the dots stay out of the way until the row is pointed at"
+            );
+
+            // The pointer on the row is what reveals them. Scoped: the row sits
+            // inside its own context-menu wrapper, which is where its bare
+            // index id lives.
+            window.within("context-menu-Integer(0)").hover(gpui_kit::ElementId::Integer(0), cx);
+            window.render_frame(cx);
+            assert!(window.find(("replay-row-actions", 0usize)).visible(), "and are there once it is");
+
+            window.click(("replay-row-actions", 0usize), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+
+        cx.update_window(window.into(), |_, window, cx| {
+            // Twice: the popover opens on the first frame and its rows are laid
+            // out on the next.
+            window.render_frame(cx);
+            window.render_frame(cx);
+            let offered = crate::interaction_tests::menu_items(window);
+            assert!(!offered.is_empty(), "the dots drop down that player's actions");
+            assert!(
+                offered.iter().any(|(_, item)| item.label().is_some_and(|label| label.contains("WoWs Numbers"))),
+                "including the lookup every row has, got {:?}",
+                offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect::<Vec<_>>()
+            );
+        })
+        .expect("the window is open");
     }
 
     /// The recording player's row carries the fire-chance block, and nobody

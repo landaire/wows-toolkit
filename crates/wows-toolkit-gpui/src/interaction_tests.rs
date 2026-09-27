@@ -1661,7 +1661,7 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
 }
 
 /// Whatever a dropdown is offering, each with the row number it answers to.
-fn menu_items(window: &gpui_kit::Window) -> Vec<(u64, gpui_kit::base::test_support::ElementSnapshot)> {
+pub(crate) fn menu_items(window: &gpui_kit::Window) -> Vec<(u64, gpui_kit::base::test_support::ElementSnapshot)> {
     gpui_kit::base::test_support::snapshots(window)
         .into_iter()
         .filter(|element| element.path().iter().any(|id| format!("{id:?}").contains("popup-menu")))
@@ -1710,6 +1710,42 @@ fn a_result_row_previews_only_after_the_pointer_settles(cx: &mut TestAppContext)
             });
         })
         .expect("the test window stays open");
+}
+
+/// The results strip is reserved as soon as a preview is coming, holding open
+/// water until the first frame lands: a strip that appeared with the frame would
+/// resize the results under the pointer that asked for it.
+#[gpui_kit::test]
+fn the_preview_strip_holds_its_space_before_the_first_frame(cx: &mut TestAppContext) {
+    use std::path::PathBuf;
+
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-preview").is_none(), "nothing is hovered, so there is no strip");
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, _window, cx| {
+            app.search().update(cx, |search, cx| {
+                search.seed_baking_preview_for_test(PathBuf::from("a.wowsreplay"));
+                cx.notify();
+            });
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("search-preview").is_some(), "the strip is up before anything has been baked");
+        assert!(
+            window.try_find("search-preview-placeholder").is_some(),
+            "holding the map's space rather than collapsing to nothing"
+        );
+    })
+    .expect("the test window stays open");
 }
 
 /// A dock whose group holds several panels draws a tab strip over them. Without

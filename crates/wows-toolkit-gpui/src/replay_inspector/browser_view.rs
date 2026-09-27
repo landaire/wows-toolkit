@@ -343,6 +343,12 @@ impl GameData {
 impl EventEmitter<ReplayBrowserEvent> for ReplayBrowser {}
 
 impl ReplayBrowser {
+    /// Seeds a bake in flight with nothing to show yet. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_baking_preview_for_test(&mut self, path: std::path::PathBuf) {
+        self.preview.seed_baking_for_test(path);
+    }
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         Self {
@@ -1258,10 +1264,16 @@ impl Render for ReplayBrowser {
                     })
                     .into_any_element(),
             ),
+            // Open water while the bake has nothing to show: the preview then
+            // becomes the real map in place, rather than appearing out of a
+            // hole in the panel.
             (None, true) => Some(
                 h_flex()
+                    .id("replay-preview-placeholder")
+                    .test_support()
                     .w(px(PREVIEW_SIZE))
                     .h(px(PREVIEW_SIZE))
+                    .bg(crate::preview_hover::MAP_PLACEHOLDER)
                     .items_center()
                     .justify_center()
                     .child(Spinner::new().large())
@@ -1492,6 +1504,49 @@ mod tests {
                 assert_eq!(browser.selection(), vec![c], "a plain click replaces the set");
             });
         });
+    }
+
+    /// A preview that has nothing to show yet holds open water, so the popup
+    /// becomes the real map in place instead of appearing out of nothing.
+    #[gpui_kit::test]
+    fn a_preview_with_nothing_to_show_yet_holds_open_water(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::px;
+        use gpui_kit::size;
+        use std::path::PathBuf;
+
+        use gpui_kit::test::TestWindowExt as _;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), |_window, cx| super::ReplayBrowser::new(cx));
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("replay-preview-placeholder").is_none(),
+                "nothing is being baked, so there is no preview to hold space for"
+            );
+        })
+        .expect("the test window stays open");
+
+        window
+            .update(cx, |browser, _window, cx| {
+                browser.seed_baking_preview_for_test(PathBuf::from("a.wowsreplay"));
+                cx.notify();
+            })
+            .expect("the test window stays open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let placeholder = window.find("replay-preview-placeholder");
+            assert_eq!(
+                placeholder.bounds().size.width,
+                px(super::PREVIEW_SIZE),
+                "and it is the size the map will be, so nothing moves when it lands"
+            );
+            assert_eq!(placeholder.bounds().size.height, px(super::PREVIEW_SIZE));
+        })
+        .expect("the test window stays open");
     }
 
     use super::is_finished_replay;

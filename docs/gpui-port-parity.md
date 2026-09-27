@@ -417,6 +417,12 @@ kept so the next audit does not re-report them.
   egui app rewrites the whole table when it saves, so a battle recorded here
   while it is running is lost on its next save; started afterwards, it reads
   what the port wrote.
+- [changed] A player row's actions are on the row rather than in a column. The
+  egui table gives them an Actions column of `...` buttons; here the same items
+  are on the row's right-click menu, with dots revealed over the trailing edge
+  of the columns that do not scroll while the pointer is on that row (the chat
+  pane reveals its copy button the same way). The table gets that column's width
+  back, and the actions stay where the row is.
 - [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match
@@ -449,6 +455,12 @@ kept so the next audit does not re-report them.
 - [done] Chat now copies its whole transcript and saves it to a file.
 - [done] A row's words are the preview popup's own caption, which goes up as
   soon as the row is hovered rather than waiting for a map.
+- [changed] A preview that has nothing to show yet holds Ocean's water colour at
+  the size the map will be, in the listing popup and in the Search tab's strip.
+  The egui popup draws the row's map straight away where it can and its own dark
+  background where it cannot; here the placeholder means the preview becomes the
+  real map in place rather than appearing out of a hole in the panel, and the
+  Search strip no longer resizes the results when the first frame lands.
 - [done] The listing collapses and expands from a caret rail beside it, and
   the state is kept in the `listing_collapsed` field the shared replay
   settings row already declares. Its width was already draggable; it is still

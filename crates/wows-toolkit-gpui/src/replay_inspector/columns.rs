@@ -13,12 +13,13 @@ use super::model::PlayerRow;
 pub use super::model::separate_number;
 
 /// All displayable columns in the replay player list, in the same
-/// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`).
+/// declaration order as the egui app's `ReplayColumn` (`sorting.rs:101`) minus
+/// its `Actions` column: a row's actions are on the row itself here, revealed
+/// on hover and on a right-click, so they need no column of their own.
 /// `default_columns` re-sorts to this order after filtering, matching
 /// `update_visible_columns`.
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ReplayColumn {
-    Actions,
     Name,
     ShipName,
     Skills,
@@ -38,8 +39,7 @@ pub enum ReplayColumn {
 }
 
 impl ReplayColumn {
-    pub const ALL: [ReplayColumn; 17] = [
-        ReplayColumn::Actions,
+    pub const ALL: [ReplayColumn; 16] = [
         ReplayColumn::Name,
         ReplayColumn::ShipName,
         ReplayColumn::Skills,
@@ -242,7 +242,6 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
     let nda_active = row.should_hide_stats() && !debug;
 
     match col {
-        ReplayColumn::Actions => CellValue::plain(""),
         ReplayColumn::Name => {
             let mut parts = Vec::new();
             if let Some(div) = row.division_label.as_ref() {
@@ -397,7 +396,7 @@ mod tests {
         // stays off here too.
         assert!(!columns.contains(&ReplayColumn::ObservedDamage));
         // Always-on columns remain, in declaration order.
-        assert_eq!(columns.first(), Some(&ReplayColumn::Actions));
+        assert_eq!(columns.first(), Some(&ReplayColumn::Name));
         assert!(columns.contains(&ReplayColumn::Name));
         assert!(columns.contains(&ReplayColumn::PersonalRating));
     }
