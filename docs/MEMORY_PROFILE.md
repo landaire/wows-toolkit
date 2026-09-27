@@ -4,7 +4,7 @@ What the egui app holds, measured 2026-09-26 with `profile_memory` (`crates/wows
 
 ```
 cargo run --profile profiling --features profile-bins,dhat-heap --bin profile_memory -- <scenario> [count]
-  scenarios: builds reload tabs parses tracker unpacker maps armor
+  scenarios: builds reload tabs parses tracker listing encounters unpacker maps armor
   WOWS_DIR / WOWS_BUILDS_DIR / WOWS_REPLAY_DIR point it at data
 ```
 
@@ -59,6 +59,43 @@ What looks like a leak in a long session is retention by design:
 3. **The minimap cache has no bound.** `RendererAssetCache::maps` is keyed by
    (version, map name) and only grows; the GPU-side `RendererTextureCache::maps`
    beside it is capped at 6.
+
+## What scales with replay count
+
+Nothing above grows with how many replays a directory holds. These do.
+
+`listing 20000` and `encounters 20000` measure them; `WOWS_TRACKER_POOL` sets how
+many distinct accounts the synthetic roster is drawn from, which is what the
+tracker's cost turns on.
+
+| Structure | Per unit | At 20,000 replays |
+| --- | --- | --- |
+| Workspace listing (files map, index summaries, sorted rows, group trees) | ~1.5 KB per replay | +29 MiB |
+| Player tracker, mostly first meetings (273K distinct accounts) | ~0.75 KB per account | 202 MiB |
+| Player tracker, heavy repeats (20K accounts, 23 meetings each) | ~35 B per encounter | 35 MiB |
+| Tracker as JSON | | 16-62 MiB |
+
+The listing is fine: a directory of 20,000 replays costs 29 MiB to list, and the
+row widgets drawn from it are LRU-bound to three viewports.
+
+The player tracker is not. Its cost is driven by distinct accounts met, at
+~0.75 KB apiece, and a random-battle player meets 23 new-ish names per battle:
+
+- 20,000 battles measured **202 MiB** live across 1.09M blocks, growing linearly
+  (2,000 battles = 28 MiB).
+- `save_tracked_players` serialises the whole tracker to one JSON string on
+  every save, and the save task runs on a **5-second timer** whether or not
+  anything changed. At that size the string is **62 MiB**, so each save allocates
+  and frees 62 MiB, and `LAST_TRACKER_JSON` keeps another 62 MiB resident for the
+  unchanged-comparison. The tracker's real steady-state cost is therefore live
+  tree plus one JSON copy, with a second copy churning every five seconds.
+- When it has changed, that 62 MiB goes into SQLite as a single setting value,
+  and startup reads and parses it back.
+
+`sent_replays` and `session_stats` share the shape of the save problem without
+the size: both snapshot every row and `DELETE` + re-`INSERT` the whole table on
+every save. At 10,000 uploaded replays or a "add every replay to session stats"
+run, that is a full table rewrite every five seconds.
 
 ## What is already bounded
 
