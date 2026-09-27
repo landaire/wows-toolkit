@@ -7,6 +7,7 @@
 pub mod clans;
 pub mod history;
 pub mod live;
+pub mod store;
 
 /// How loudly a number of encounters reads.
 ///

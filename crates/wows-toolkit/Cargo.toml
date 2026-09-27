@@ -185,8 +185,8 @@ mod_manager = ["dep:tar", "dep:scopeguard"]
 logging = ["dep:tracing-subscriber", "dep:tracing-appender"]
 panic_handler = []
 dhat-heap = ["dep:dhat"]
-# Stage-timing binaries (`profile_replay`). Kept off by default so release
-# builds don't carry the instrumentation module.
+# Stage-timing and memory binaries (`profile_replay`, `profile_memory`). Kept
+# off by default so release builds don't carry the instrumentation module.
 profile-bins = []
 # Opt in to rav1e's hand-tuned x86 SIMD for AV1 (~3x faster encode). Requires
 # NASM at build time, so it's off by default to keep local builds NASM-free;

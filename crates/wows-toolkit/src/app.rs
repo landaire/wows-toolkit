@@ -1453,6 +1453,15 @@ impl WowsToolkitApp {
             );
             state.shutdown_tx = Some(shutdown_tx);
             state.save_task_handle = Some(handle);
+
+            // The tracker's own tables are read above; a database still holding
+            // it as the old settings blob is imported behind the window.
+            crate::db::load::spawn_tracker_import(
+                &state.runtime,
+                wows_toolkit_config::db_path(),
+                state.tab_state.player_tracker.clone(),
+                cc.egui_ctx.clone(),
+            );
         }
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);

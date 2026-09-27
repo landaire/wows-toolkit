@@ -29,8 +29,8 @@ use crate::ui::replay_parser::Replay;
 const MIB: f64 = 1024.0 * 1024.0;
 
 /// The scenarios [`run`] knows, for the usage line and the argument error.
-pub const SCENARIOS: [&str; 10] =
-    ["builds", "reload", "tabs", "parses", "tracker", "listing", "encounters", "unpacker", "maps", "armor"];
+pub const SCENARIOS: [&str; 11] =
+    ["builds", "reload", "tabs", "parses", "tracker", "listing", "encounters", "import", "unpacker", "maps", "armor"];
 
 /// What the process was holding at one point in a scenario.
 #[derive(Clone, Copy, Default)]
@@ -295,10 +295,10 @@ fn tracker(deps: &ReplayDependencies, paths: &[PathBuf], mut report: Report) {
 
     let guard = tracker.read();
     let players = guard.tracked_players.len();
-    let serialized = serde_json::to_vec(&*guard).map(|bytes| bytes.len()).unwrap_or_default();
+    let encounters: usize = guard.tracked_players.values().map(|player| player.arena_ids.len()).sum();
     drop(guard);
     println!("\ntracked players: {players}");
-    println!("serialized tracker: {:.1} MiB", serialized as f64 / MIB);
+    println!("encounters recorded: {encounters}");
 
     drop(tracker);
     report.step("dropped the tracker");
@@ -332,6 +332,53 @@ fn unpacker(data: &SharedBuildData, mut report: Report) {
             report.step("dropped assets.bin");
         }
         Err(err) => println!("  assets.bin unavailable: {err}"),
+    }
+}
+
+/// A tracker holding `count` battles' worth of encounters, drawn from a pool of
+/// `pool` accounts.
+///
+/// Mirrors the per-player writes `ingest_roster` makes: one timestamp and one
+/// arena id per battle per player met, both kept forever.
+fn synthetic_tracker(count: usize, pool: u64) -> PlayerTracker {
+    let mut tracker = PlayerTracker::default();
+    build_encounters(&mut tracker, count, pool, |_, _| {});
+    tracker
+}
+
+fn build_encounters(tracker: &mut PlayerTracker, count: usize, pool: u64, mut on_battle: impl FnMut(usize, usize)) {
+    use jiff::Timestamp;
+    use wows_replays::types::AccountId;
+    use wows_replays::types::ArenaId;
+
+    /// Players on the roster besides the recording one, which is what a battle
+    /// adds an encounter for.
+    const ROSTER: usize = 23;
+
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    for battle in 0..count {
+        let arena_id = ArenaId::from(battle as i64);
+        let timestamp = Timestamp::from_second(1_600_000_000 + battle as i64 * 900).expect("a timestamp in range");
+        for _ in 0..ROSTER {
+            let account = AccountId((next() % pool) as i64);
+            let tracked = tracker.tracked_players.entry(account).or_default();
+            if tracked.timestamps.is_empty() {
+                tracked.last_name = format!("Player_{}", account.0);
+                tracked.clan = "RAIN".to_string();
+            }
+            tracked.db_id = account;
+            tracked.clan_id = 12345;
+            tracked.timestamps.insert(timestamp);
+            tracked.arena_ids.insert(arena_id);
+        }
+        on_battle(battle, tracker.tracked_players.len());
     }
 }
 
@@ -420,10 +467,6 @@ fn listing(data: &SharedBuildData, count: usize, mut report: Report) {
 /// server population turn up again and again -- so the distinct-player count
 /// grows more slowly than the encounter count does.
 fn encounters(count: usize, mut report: Report) {
-    use jiff::Timestamp;
-    use wows_replays::types::AccountId;
-    use wows_replays::types::ArenaId;
-
     /// Players on the roster besides the recording one, which is what a battle
     /// adds an encounter for.
     const ROSTER: usize = 23;
@@ -434,46 +477,104 @@ fn encounters(count: usize, mut report: Report) {
     let pool: u64 = std::env::var("WOWS_TRACKER_POOL").ok().and_then(|v| v.parse().ok()).unwrap_or(400_000);
 
     let mut tracker = PlayerTracker::default();
-    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
-    let mut next = || {
-        seed ^= seed << 13;
-        seed ^= seed >> 7;
-        seed ^= seed << 17;
-        seed
-    };
-
-    for battle in 0..count {
-        let arena_id = ArenaId::from(battle as i64);
-        let timestamp = Timestamp::from_second(1_600_000_000 + battle as i64 * 900).expect("a timestamp in range");
-        for _ in 0..ROSTER {
-            let account = AccountId((next() % pool) as i64);
-            let tracked = tracker.tracked_players.entry(account).or_default();
-            if tracked.timestamps.is_empty() {
-                tracked.last_name = format!("Player_{}", account.0);
-                tracked.clan = "RAIN".to_string();
-            }
-            tracked.db_id = account;
-            tracked.clan_id = 12345;
-            tracked.timestamps.insert(timestamp);
-            tracked.arena_ids.insert(arena_id);
-        }
+    build_encounters(&mut tracker, count, pool, |battle, players| {
         if (battle + 1).is_multiple_of(count.max(10) / 10) {
-            report.step(&format!("{} battles, {} players", battle + 1, tracker.tracked_players.len()));
+            report.step(&format!("{} battles, {players} players", battle + 1));
         }
-    }
+    });
 
-    let serialized = serde_json::to_vec(&tracker).map(|bytes| bytes.len()).unwrap_or_default();
-    report.step("serialized the tracker (the settings save path)");
+    // What a whole-tracker write costs to build, which is what a bulk
+    // repopulate or a cleared tracker asks the save path for. A battle's own
+    // save states 23 accounts and their two keys apiece.
+    let mut pending = wows_toolkit_viewmodel::player_tracker::tracked::Pending::default();
+    pending.everything_changed();
+    let write = wows_toolkit_viewmodel::player_tracker::store::write_for(&pending, &tracker.tracked_players);
+    report.step("built a whole-tracker write");
     println!(
         "
 pool: {pool} accounts"
     );
     println!("players: {}", tracker.tracked_players.len());
     println!("encounters: {}", count * ROSTER);
-    println!("serialized: {:.1} MiB", serialized as f64 / MIB);
+    println!(
+        "rows in a whole write: {} players, {} arenas, {} timestamps",
+        write.players.len(),
+        write.arenas.len(),
+        write.timestamps.len()
+    );
 
+    drop(write);
+    report.step("dropped the write");
     drop(tracker);
     report.step("dropped the tracker");
+}
+
+/// What the one-time move of a stored tracker into its tables costs, at
+/// `count` battles' worth of players.
+///
+/// The upgrade path every reader with history takes once, so what matters here
+/// is the wall clock: it runs while the app starts.
+fn import(count: usize, mut report: Report) {
+    use wows_toolkit_viewmodel::player_tracker::tracked;
+
+    let directory = match tempfile::tempdir() {
+        Ok(directory) => directory,
+        Err(err) => {
+            println!("  no temporary directory: {err}");
+            return;
+        }
+    };
+
+    let tracker = synthetic_tracker(count, 400_000);
+    report.step(&format!("{} players in memory", tracker.tracked_players.len()));
+
+    // The blob an older build stored: the whole tracker as one JSON string
+    // under one settings key.
+    let blob = match serde_json::to_string(&tracker) {
+        Ok(blob) => blob,
+        Err(err) => {
+            println!("  the tracker would not encode: {err}");
+            return;
+        }
+    };
+    report.step(&format!("the old blob built ({:.1} MiB)", blob.len() as f64 / MIB));
+
+    let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+        Ok(runtime) => runtime,
+        Err(err) => {
+            println!("  no runtime: {err}");
+            return;
+        }
+    };
+    let outcome = runtime.block_on(async {
+        let pool =
+            wows_toolkit_config::open_db_at(&directory.path().join("import.db")).await.expect("the database opens");
+        wows_toolkit_config::queries::set_setting(&pool, tracked::SETTING_KEY, &blob).await.expect("the blob stores");
+        let started = std::time::Instant::now();
+        let imported = wows_toolkit_viewmodel::player_tracker::store::import_blob_once(&pool).await;
+        let elapsed = started.elapsed();
+        let read_started = std::time::Instant::now();
+        let players = wows_toolkit_viewmodel::player_tracker::store::load(&pool).await.map(|players| players.len());
+        (imported, elapsed, players, read_started.elapsed())
+    });
+
+    report.step("imported");
+    let (imported, elapsed, players, read) = outcome;
+    match imported {
+        Ok(imported) => println!(
+            "
+import: {imported:?} in {:.1}s",
+            elapsed.as_secs_f64()
+        ),
+        Err(err) => println!(
+            "
+import failed: {err}"
+        ),
+    }
+    match players {
+        Ok(players) => println!("read back: {players} players in {:.1}s", read.as_secs_f64()),
+        Err(err) => println!("read back failed: {err}"),
+    }
 }
 
 /// Minimap art decoded through the renderer's asset cache, one map at a time.
@@ -591,6 +692,11 @@ pub fn run(scenario: &str, wows_dir: PathBuf, dump_dir: String, replay_dir: Path
             drop(cache);
             let report = Report::new();
             encounters(count, report);
+        }
+        "import" => {
+            drop(cache);
+            let report = Report::new();
+            import(count, report);
         }
         "listing" | "unpacker" | "maps" | "armor" => {
             // The browser and the renderer both work off one build's data, so

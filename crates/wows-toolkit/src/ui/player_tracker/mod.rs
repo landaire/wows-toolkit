@@ -65,11 +65,27 @@ pub(crate) enum MatchStatsState {
     Failed(String),
 }
 
-/// Every stored field defaults: the GPUI port writes this same blob to
-/// annotate players, and a field it does not carry must cost that field
-/// rather than the whole tracker. Without defaults a missing key fails the
-/// whole deserialize, and the periodic save then writes an empty tracker over
-/// every player and note.
+/// The Historical and Clans table settings, persisted one key apiece.
+///
+/// Only this app has them, which is why they are not in the shared
+/// [`ViewModes`](wows_toolkit_viewmodel::player_tracker::tracked::ViewModes):
+/// the port would have to write keys it knows nothing about to keep them.
+#[derive(Debug, Default)]
+pub struct TrackerPrefs {
+    pub sort_order: SortedBy,
+    pub clan_sort_order: ClanSortedBy,
+    pub player_filter: String,
+}
+
+impl TrackerPrefs {
+    pub const SORT_ORDER_KEY: &'static str = "player_tracker.sort_order";
+    pub const CLAN_SORT_ORDER_KEY: &'static str = "player_tracker.clan_sort_order";
+    pub const PLAYER_FILTER_KEY: &'static str = "player_tracker.player_filter";
+}
+
+/// Every stored field defaults: a tracker read out of a database written by an
+/// older build comes from one JSON blob, and a field it does not carry must
+/// cost that field rather than the whole tracker.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct PlayerTracker {
     #[serde(default)]
@@ -122,6 +138,11 @@ pub struct PlayerTracker {
     /// cache would carry no more information than a zeroed one.
     #[serde(skip)]
     pub(crate) encounter_version: u64,
+
+    /// What has moved since the last write. The save task drains it and writes
+    /// those rows, rather than the whole tracker.
+    #[serde(skip)]
+    pub(crate) pending: wows_toolkit_viewmodel::player_tracker::tracked::Pending,
 
     /// The index answers the clan aggregates are counted over, fetched only
     /// when the tracker ingests or the index gains rows: the queries behind
@@ -236,6 +257,24 @@ impl PlayerTracker {
         self.encounter_version = self.encounter_version.saturating_add(1);
     }
 
+    /// The table settings as they stand, for the save path.
+    pub fn prefs(&self) -> TrackerPrefs {
+        TrackerPrefs {
+            sort_order: self.sort_order,
+            clan_sort_order: self.clan_sort_order,
+            player_filter: self.player_filter.clone(),
+        }
+    }
+
+    /// The shared view settings as they stand.
+    pub fn view_modes(&self) -> wows_toolkit_viewmodel::player_tracker::tracked::ViewModes {
+        wows_toolkit_viewmodel::player_tracker::tracked::ViewModes {
+            win_rate_mode: self.win_rate_mode,
+            current_match_view_mode: self.current_match_view_mode,
+            show_division_mates: self.show_division_mates,
+        }
+    }
+
     pub fn update_from_replay(&mut self, replay: &Replay) {
         let Some(report) = replay.battle_report.as_ref() else {
             return;
@@ -279,6 +318,10 @@ impl PlayerTracker {
         let tracked_players = &mut self.tracked_players;
         let mut ingested_any = false;
         let mut marked_any = false;
+        // Collected as the roster is walked and recorded after it: the loop
+        // holds `tracked_players` mutably, and the change record is a sibling
+        // field of it.
+        let mut touched: Vec<AccountId> = Vec::with_capacity(players.len());
 
         for player in players {
             let player_state = state_of(player);
@@ -309,6 +352,9 @@ impl PlayerTracker {
             }
 
             if tracked_player.arena_ids.contains(&arena_id) {
+                if is_division_mate {
+                    touched.push(player_state.db_id());
+                }
                 continue;
             }
             // Past that guard this battle is new for the player, whether or not
@@ -318,7 +364,7 @@ impl PlayerTracker {
             let mut update_metadata = false;
 
             if let Some(last_seen) = tracked_player.timestamps.first()
-                && *last_seen < timestamp
+                && last_seen < timestamp
             {
                 update_metadata = true;
             }
@@ -342,6 +388,12 @@ impl PlayerTracker {
             tracked_player.clan_id = player_state.clan_id();
             tracked_player.timestamps.insert(timestamp);
             tracked_player.arena_ids.insert(arena_id);
+            touched.push(player_state.db_id());
+        }
+
+        for account in touched {
+            self.pending.identity_changed(account);
+            self.pending.encounter_changed(account, arena_id, timestamp);
         }
 
         // A fresh mark changes which encounters the tables count just as much as
@@ -477,17 +529,11 @@ mod tests {
     /// writes an empty one over everything.
     #[test]
     fn a_blob_carrying_only_players_still_reads_as_a_tracker() {
-        use std::collections::HashMap;
-        use wows_toolkit_viewmodel::player_tracker::tracked;
+        let blob = r#"{"tracked_players":{"7":{"db_id":7,"last_name":"","names":[],"clan_id":0,"clan":"",
+            "timestamps":[],"arena_ids":[],"notes":"camps"}}}"#;
 
-        let mut players = HashMap::new();
-        players.insert(
-            AccountId(7),
-            TrackedPlayer { db_id: AccountId(7), notes: "camps".to_string(), ..TrackedPlayer::default() },
-        );
-        let blob = tracked::blob_with_players("", &players).expect("the blob encodes");
+        let tracker: PlayerTracker = serde_json::from_str(blob).expect("the tracker reads back");
 
-        let tracker: PlayerTracker = serde_json::from_str(&blob).expect("the tracker reads back");
         assert_eq!(tracker.tracked_players.len(), 1, "the players survive");
         assert_eq!(tracker.tracked_players[&AccountId(7)].notes, "camps");
     }
@@ -773,7 +819,7 @@ mod tests {
         assert_eq!(player.last_name, "Enemy");
         assert_eq!(player.clan, "RAIN");
         assert_eq!(player.clan_id, 7);
-        assert_eq!(player.timestamps.iter().copied().collect::<Vec<_>>(), vec![timestamp]);
+        assert_eq!(player.timestamps.iter().collect::<Vec<_>>(), vec![timestamp]);
         assert_eq!(player.arena_ids.len(), 1);
         assert_eq!(player.notes, "", "a player saved before notes existed loads without any");
 

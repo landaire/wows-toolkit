@@ -23,7 +23,12 @@ use crate::window::WindowSettings;
 /// We use WAL journal mode for better read concurrency (although this is a
 /// single-writer desktop app, WAL is still faster for mixed read/write).
 pub async fn open_db() -> Result<SqlitePool, sqlx::Error> {
-    let db_path = db_path();
+    open_db_at(&db_path()).await
+}
+
+/// The same, for a database somewhere other than the app's own directory: a
+/// tool or a test that must not touch the reader's data.
+pub async fn open_db_at(db_path: &std::path::Path) -> Result<SqlitePool, sqlx::Error> {
     info!("Opening database at {}", db_path.display());
 
     // Ensure parent directory exists.
@@ -32,7 +37,7 @@ pub async fn open_db() -> Result<SqlitePool, sqlx::Error> {
     }
 
     let options = SqliteConnectOptions::new()
-        .filename(&db_path)
+        .filename(db_path)
         .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Normal)

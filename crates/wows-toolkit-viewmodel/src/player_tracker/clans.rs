@@ -170,7 +170,6 @@ mod tests {
     use crate::player_tracker::ClanSort;
     use crate::player_tracker::ClanSortColumn;
     use crate::player_tracker::SortOrder;
-    use std::collections::BTreeSet;
 
     fn at(minute: i64) -> Timestamp {
         Timestamp::from_second(1_700_000_000 + minute * 60).expect("a valid timestamp")
@@ -180,7 +179,7 @@ mod tests {
         TrackedPlayer {
             clan: clan.to_string(),
             arena_ids: encounters.iter().map(|(arena, _)| ArenaId::from(*arena)).collect(),
-            timestamps: encounters.iter().map(|(_, minute)| at(*minute)).collect::<BTreeSet<_>>(),
+            timestamps: encounters.iter().map(|(_, minute)| at(*minute)).collect(),
             ..TrackedPlayer::default()
         }
     }

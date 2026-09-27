@@ -4,7 +4,7 @@ What the egui app holds, measured 2026-09-26 with `profile_memory` (`crates/wows
 
 ```
 cargo run --profile profiling --features profile-bins,dhat-heap --bin profile_memory -- <scenario> [count]
-  scenarios: builds reload tabs parses tracker listing encounters unpacker maps armor
+  scenarios: builds reload tabs parses tracker listing encounters import unpacker maps armor
   WOWS_DIR / WOWS_BUILDS_DIR / WOWS_REPLAY_DIR point it at data
 ```
 
@@ -71,31 +71,47 @@ tracker's cost turns on.
 | Structure | Per unit | At 20,000 replays |
 | --- | --- | --- |
 | Workspace listing (files map, index summaries, sorted rows, group trees) | ~1.5 KB per replay | +29 MiB |
-| Player tracker, mostly first meetings (273K distinct accounts) | ~0.75 KB per account | 202 MiB |
-| Player tracker, heavy repeats (20K accounts, 23 meetings each) | ~35 B per encounter | 35 MiB |
-| Tracker as JSON | | 16-62 MiB |
+| Player tracker, mostly first meetings (273K distinct accounts) | ~0.55 KB per account | 150 MiB |
+| Player tracker, heavy repeats (20K accounts, 23 meetings each) | ~25 B per encounter | 26 MiB |
 
 The listing is fine: a directory of 20,000 replays costs 29 MiB to list, and the
 row widgets drawn from it are LRU-bound to three viewports.
 
-The player tracker is not. Its cost is driven by distinct accounts met, at
-~0.75 KB apiece, and a random-battle player meets 23 new-ish names per battle:
+The player tracker grows with distinct accounts met, at ~0.55 KB apiece, and a
+random-battle player meets 23 new-ish names per battle: 20,000 battles measured
+**150 MiB** live across 1.09M blocks, still linear (2,000 battles = 20 MiB).
+That is what the tracker costs to hold; it no longer costs anything to save.
 
-- 20,000 battles measured **202 MiB** live across 1.09M blocks, growing linearly
-  (2,000 battles = 28 MiB).
-- `save_tracked_players` serialises the whole tracker to one JSON string on
-  every save, and the save task runs on a **5-second timer** whether or not
-  anything changed. At that size the string is **62 MiB**, so each save allocates
-  and frees 62 MiB, and `LAST_TRACKER_JSON` keeps another 62 MiB resident for the
-  unchanged-comparison. The tracker's real steady-state cost is therefore live
-  tree plus one JSON copy, with a second copy churning every five seconds.
-- When it has changed, that 62 MiB goes into SQLite as a single setting value,
-  and startup reads and parses it back.
+It used to. Until the `tracked_player*` tables existed the tracker was one JSON
+blob in the settings table, and `save_tracked_players` serialised the whole of
+it on every save, on a 5-second timer, whether anything had changed or not. At
+20,000 battles that string measured **62 MiB**: allocated and freed every five
+seconds, with a second copy held resident in `LAST_TRACKER_JSON` for the
+unchanged-comparison, and written into one SQLite row whenever it differed.
+Rows replaced it: a save now states the accounts that moved (23 players and 46
+encounter rows for a battle) and opens no transaction when nothing did. The write
+is built under the tracker's own lock, so nothing copies the map to make one.
+The in-memory sets went from `BTreeSet` to sorted `Vec`s in the same pass, which
+is the 202 -> 150 MiB above.
 
-`sent_replays` and `session_stats` share the shape of the save problem without
-the size: both snapshot every row and `DELETE` + re-`INSERT` the whole table on
-every save. At 10,000 uploaded replays or a "add every replay to session stats"
-run, that is a full table rewrite every five seconds.
+The one-time import of a stored blob runs behind the window, not in front of it
+(`spawn_tracker_import`), and on a connection of its own so the app's single
+pooled connection stays free for everything else: **11 s** for 273K players and
+920K encounters, 0.4 s for 43K players. `import <battles>` measures it against a
+database of its own.
+
+It folds into whatever is stored rather than replacing it, and the blob is
+deleted only once the rows are checked back inside the same transaction. Both
+matter: a battle that ends in the first seconds of a launch is written by the save
+task, so an import that replaced rows would drop it and one that refused over
+them would strand the blob for good. `db::load::tests` drives that case, and the
+merge that keeps a returning player's stored note beside the encounter just
+recorded for them.
+
+`sent_replays` and `session_stats` still have the shape of the old save problem
+without the size: both snapshot every row and `DELETE` + re-`INSERT` the whole
+table on every save. At 10,000 uploaded replays or an "add every replay to
+session stats" run, that is a full table rewrite every five seconds.
 
 ## What is already bounded
 

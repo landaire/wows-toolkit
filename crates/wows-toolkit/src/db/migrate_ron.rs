@@ -12,6 +12,9 @@ use tracing::info;
 use tracing::trace;
 
 use crate::tab_state::TabState;
+use crate::ui::player_tracker::ClanSortedBy;
+use crate::ui::player_tracker::SortedBy;
+use wows_toolkit_viewmodel::player_tracker::tracked::ViewModes;
 
 use super::queries;
 use super::save::SaveContext;
@@ -58,6 +61,9 @@ pub async fn save_tab_state_to_db(pool: &SqlitePool, ts: &TabState) -> Result<()
 /// and then sets the `migration_completed` flag.
 pub async fn migrate_tab_state_to_db(pool: &SqlitePool, tab_state: &TabState) -> Result<(), sqlx::Error> {
     info!("Starting migration from app.ron to SQLite...");
+    // The tracker read out of app.ron has recorded no changes, and a save
+    // writes what changed: without this the migration would write no players.
+    tab_state.player_tracker.write().pending.everything_changed();
     save_tab_state_to_db(pool, tab_state).await?;
     super::set_migrated(pool).await?;
     info!("Migration from app.ron to SQLite completed successfully");
@@ -263,47 +269,65 @@ async fn save_session_stats(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), 
     Ok(())
 }
 
-/// Save tracked players.
-/// The tracker as this process last wrote it, so an unchanged one is not
-/// written again.
+/// The view settings and table settings as this process last wrote them.
 ///
-/// The save task runs on a timer whether or not anything changed, and the
-/// GPUI port writes the same key to annotate players. Rewriting an unchanged
-/// tracker would replace those annotations with this process's stale copy of
-/// them.
-static LAST_TRACKER_JSON: parking_lot::Mutex<Option<String>> = parking_lot::Mutex::new(None);
+/// The save task runs on a timer whether or not anything changed, and the view
+/// settings are shared with the GPUI port: rewriting them unchanged would
+/// replace a toggle made there with this process's copy of it. They are small
+/// enough to compare rather than track.
+static LAST_TRACKER_SETTINGS: parking_lot::Mutex<Option<(ViewModes, TrackerPrefsSnapshot)>> =
+    parking_lot::Mutex::new(None);
 
-/// Writes the tracker, unless this process already wrote exactly it.
+/// What of `TrackerPrefs` is compared, which is all of it.
+type TrackerPrefsSnapshot = (SortedBy, ClanSortedBy, String);
+
+/// Writes what has changed in the tracker since the last save.
 ///
-/// A tracker that has changed here still wins: each app holds the whole
-/// document, so the last writer of a changed one replaces it. What this stops
-/// is an *unchanged* one overwriting the other app's edits.
+/// Rows, not a document: the tracker used to be one JSON blob in the settings
+/// table, rewritten whenever anything in it moved, and at a few hundred thousand
+/// accounts that was tens of megabytes per save. A save with nothing to write
+/// opens no transaction.
 async fn save_tracked_players(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx::Error> {
-    let json = {
-        let pt = ctx.player_tracker.read();
-        serde_json::to_string(&*pt).ok()
+    use crate::ui::player_tracker::TrackerPrefs;
+    use wows_toolkit_viewmodel::player_tracker::store;
+
+    // Built under the lock, which is also what keeps the write and the change
+    // record describing the same tracker. The rows are what moved, so this is
+    // small; cloning the players to build it outside the lock would copy the
+    // whole tracker on every save, which is the cost this change is about.
+    let (attempted, write, prefs, modes) = {
+        let tracker = ctx.player_tracker.read();
+        let attempted = tracker.pending.clone();
+        let write = (!attempted.is_empty()).then(|| store::write_for(&attempted, &tracker.tracked_players));
+        (attempted, write, tracker.prefs(), tracker.view_modes())
     };
 
-    match json {
-        Some(json) => {
-            // Compared against what this process last wrote, not against what
-            // is stored: the port's own write makes the two differ, and
-            // rewriting then would be exactly the clobber this avoids. The
-            // guard is dropped before the await so the future stays `Send`.
-            let unchanged = LAST_TRACKER_JSON.lock().as_deref() == Some(json.as_str());
-            if unchanged {
-                trace!("  player tracker unchanged, not written");
-                return Ok(());
-            }
-            queries::set_setting(pool, "player_tracker_data", &json).await?;
-            *LAST_TRACKER_JSON.lock() = Some(json);
-        }
-        None => {
-            error!("Failed to serialize player tracker");
-        }
+    if let Some(write) = write {
+        wows_toolkit_config::tracker::apply_tracker_write(pool, &write).await?;
+        // Forgotten only now: a change dropped by a write that failed, or that
+        // never returned, is one nothing else would state again. Anything
+        // recorded while the write ran stays pending.
+        ctx.player_tracker.write().pending.forget(&attempted);
+        trace!("  saved the player tracker's changes");
     }
 
-    trace!("  saved player tracker");
+    let snapshot = (prefs.sort_order, prefs.clan_sort_order, prefs.player_filter.clone());
+    let unchanged = LAST_TRACKER_SETTINGS.lock().as_ref().is_some_and(|(last_modes, last_prefs)| {
+        last_modes.win_rate_mode == modes.win_rate_mode
+            && last_modes.current_match_view_mode == modes.current_match_view_mode
+            && last_modes.show_division_mates == modes.show_division_mates
+            && *last_prefs == snapshot
+    });
+    if unchanged {
+        return Ok(());
+    }
+
+    store::store_view_modes(pool, modes).await?;
+    queries::set_setting(pool, TrackerPrefs::SORT_ORDER_KEY, &prefs.sort_order).await?;
+    queries::set_setting(pool, TrackerPrefs::CLAN_SORT_ORDER_KEY, &prefs.clan_sort_order).await?;
+    queries::set_setting(pool, TrackerPrefs::PLAYER_FILTER_KEY, &prefs.player_filter).await?;
+    *LAST_TRACKER_SETTINGS.lock() = Some((modes, snapshot));
+
     Ok(())
 }
 
