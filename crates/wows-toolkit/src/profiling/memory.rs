@@ -29,7 +29,8 @@ use crate::ui::replay_parser::Replay;
 const MIB: f64 = 1024.0 * 1024.0;
 
 /// The scenarios [`run`] knows, for the usage line and the argument error.
-pub const SCENARIOS: [&str; 8] = ["builds", "reload", "tabs", "parses", "tracker", "unpacker", "maps", "armor"];
+pub const SCENARIOS: [&str; 10] =
+    ["builds", "reload", "tabs", "parses", "tracker", "listing", "encounters", "unpacker", "maps", "armor"];
 
 /// What the process was holding at one point in a scenario.
 #[derive(Clone, Copy, Default)]
@@ -334,6 +335,147 @@ fn unpacker(data: &SharedBuildData, mut report: Report) {
     }
 }
 
+/// What a listing of `count` replays costs, in the structures a workspace keeps
+/// for one: the files map, the index summaries, the sorted rows and the tree's
+/// own path maps.
+///
+/// Synthetic paths and metadata of realistic length, since what is being
+/// measured is the shape of the structures rather than any one directory's
+/// contents.
+fn listing(data: &SharedBuildData, count: usize, mut report: Report) {
+    use wows_toolkit_config::index::rows::MatchOutcome;
+    use wows_toolkit_config::index::rows::RowSummary;
+    use wows_toolkit_config::index::rows::WorkspaceId;
+    use wows_toolkit_viewmodel::listing_row::ListedReplay;
+
+    let Some(provider) = data.read().game_metadata.clone() else {
+        println!("  this build has no game metadata");
+        return;
+    };
+
+    let root = PathBuf::from("E:/WoWs/World_of_Warships/replays");
+    let paths: Vec<PathBuf> = (0..count)
+        .map(|i| root.join(format!("2026{:04}_{:06}_PBSB510-Thunderer_40_Okinawa_{i}.wowsreplay", i % 1231, i)))
+        .collect();
+
+    let mut workspace = crate::ui::replay_parser::ReplayWorkspace::new(Some(root));
+
+    let files: std::collections::HashMap<PathBuf, Arc<ListedReplay>> = paths
+        .iter()
+        .map(|path| {
+            let listed = ListedReplay {
+                ship_id: Some(wows_replays::types::GameParamId::from(4_288_190_416u32)),
+                map_name: "spaces/40_Okinawa".to_string(),
+                game_type: "RandomBattle".to_string(),
+                scenario: "Domination".to_string(),
+                date_time: "17.08.2026 11:46:44".to_string(),
+                build: Some(13_187_581),
+            };
+            (path.clone(), Arc::new(listed))
+        })
+        .collect();
+    workspace.set_replay_files(Some(files));
+    report.step(&format!("{count} listed files"));
+
+    let summaries: std::collections::HashMap<PathBuf, RowSummary> = paths
+        .iter()
+        .map(|path| {
+            let summary = RowSummary {
+                outcome: MatchOutcome::Win,
+                self_damage: Some(112_345),
+                self_kills: Some(2),
+                self_survived: Some(true),
+                self_pr: Some(1543.0),
+                division_id: None,
+                division_mates: Vec::new(),
+                results_available: true,
+                file_mtime: Some(1_760_000_000),
+            };
+            (path.clone(), summary)
+        })
+        .collect();
+    workspace.set_row_summaries(summaries);
+    report.step(&format!("{count} index summaries"));
+
+    let rows = workspace.listing_rows().map(|rows| rows.len()).unwrap_or_default();
+    report.step(&format!("{rows} sorted rows"));
+
+    for mode in [crate::ui::replay_parser::GroupedListing::Date, crate::ui::replay_parser::GroupedListing::Ship] {
+        let groups = workspace
+            .listing_groups(WorkspaceId::LIVE, mode, &provider, Some("en"))
+            .map(|groups| groups.groups.len())
+            .unwrap_or_default();
+        report.step(&format!("{groups} {mode:?} groups and their tree ids"));
+    }
+
+    drop(workspace);
+    report.step("dropped the workspace");
+}
+
+/// What the player tracker holds after `count` battles.
+///
+/// Mirrors the per-player writes `ingest_roster` makes: one timestamp and one
+/// arena id per battle per player met, both kept forever. The roster is drawn
+/// from a pool sized the way a real one repeats -- the same clans and the same
+/// server population turn up again and again -- so the distinct-player count
+/// grows more slowly than the encounter count does.
+fn encounters(count: usize, mut report: Report) {
+    use jiff::Timestamp;
+    use wows_replays::types::AccountId;
+    use wows_replays::types::ArenaId;
+
+    /// Players on the roster besides the recording one, which is what a battle
+    /// adds an encounter for.
+    const ROSTER: usize = 23;
+    // How many distinct accounts the roster is drawn from. A player met once is
+    // the expensive case (a set node apiece, barely filled) and a player met
+    // hundreds of times the cheap one, so the two ends are worth bracketing:
+    // WOWS_TRACKER_POOL sets it, and the default is the expensive end.
+    let pool: u64 = std::env::var("WOWS_TRACKER_POOL").ok().and_then(|v| v.parse().ok()).unwrap_or(400_000);
+
+    let mut tracker = PlayerTracker::default();
+    let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed
+    };
+
+    for battle in 0..count {
+        let arena_id = ArenaId::from(battle as i64);
+        let timestamp = Timestamp::from_second(1_600_000_000 + battle as i64 * 900).expect("a timestamp in range");
+        for _ in 0..ROSTER {
+            let account = AccountId((next() % pool) as i64);
+            let tracked = tracker.tracked_players.entry(account).or_default();
+            if tracked.timestamps.is_empty() {
+                tracked.last_name = format!("Player_{}", account.0);
+                tracked.clan = "RAIN".to_string();
+            }
+            tracked.db_id = account;
+            tracked.clan_id = 12345;
+            tracked.timestamps.insert(timestamp);
+            tracked.arena_ids.insert(arena_id);
+        }
+        if (battle + 1).is_multiple_of(count.max(10) / 10) {
+            report.step(&format!("{} battles, {} players", battle + 1, tracker.tracked_players.len()));
+        }
+    }
+
+    let serialized = serde_json::to_vec(&tracker).map(|bytes| bytes.len()).unwrap_or_default();
+    report.step("serialized the tracker (the settings save path)");
+    println!(
+        "
+pool: {pool} accounts"
+    );
+    println!("players: {}", tracker.tracked_players.len());
+    println!("encounters: {}", count * ROSTER);
+    println!("serialized: {:.1} MiB", serialized as f64 / MIB);
+
+    drop(tracker);
+    report.step("dropped the tracker");
+}
+
 /// Minimap art decoded through the renderer's asset cache, one map at a time.
 ///
 /// The cache is keyed by game version and map name with no bound, so what this
@@ -445,7 +587,12 @@ pub fn run(scenario: &str, wows_dir: PathBuf, dump_dir: String, replay_dir: Path
             let report = Report::new();
             reload(&wows_dir, &dump_dir, build, count, report);
         }
-        "unpacker" | "maps" | "armor" => {
+        "encounters" => {
+            drop(cache);
+            let report = Report::new();
+            encounters(count, report);
+        }
+        "listing" | "unpacker" | "maps" | "armor" => {
             // The browser and the renderer both work off one build's data, so
             // the run needs the live install's build loaded first.
             let Some(build) = live_build(&wows_dir) else {
@@ -458,6 +605,7 @@ pub fn run(scenario: &str, wows_dir: PathBuf, dump_dir: String, replay_dir: Path
             };
             let report = Report::new();
             match scenario {
+                "listing" => listing(&data, count, report),
                 "unpacker" => unpacker(&data, report),
                 "maps" => maps(&data, count, report),
                 _ => armor(&data, report),
