@@ -57,7 +57,6 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::query_text;
 use wows_toolkit_config::index::rows::ClanCorrection;
 use wows_toolkit_config::index::rows::PlayerFacet;
-use wows_toolkit_config::queries;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsOut;
 use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
 use wows_toolkit_viewmodel::personal_rating;
@@ -85,6 +84,7 @@ use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
 use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
+use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked;
 use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
 use wows_toolkit_viewmodel::player_tracker::visible_player_rows;
@@ -505,17 +505,24 @@ impl PlayerTrackerView {
         }));
     }
 
-    /// Reads the notes the two apps share. Called once the config database
+    /// Reads the players the two apps share. Called once the config database
     /// is open.
     fn load_tracked_players(&mut self, pool: SqlitePool, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
-            let stored =
-                runtime::spawn(cx, async move { queries::get_setting::<String>(&pool, tracked::SETTING_KEY).await })
-                    .await;
+            let read = runtime::spawn(cx, async move {
+                // A database written before the tracker had tables still holds
+                // it as one settings blob; whichever app opens first imports it.
+                if let Err(err) = store::import_blob_once(&pool).await {
+                    tracing::warn!("player tracker: the stored blob was not imported: {err}");
+                }
+                let players = store::load(&pool).await;
+                let modes = store::load_view_modes(&pool).await;
+                players.map(|players| (players, modes))
+            })
+            .await;
 
-            let Ok(Some(json)) = stored else { return };
-            match (tracked::players_from_blob(&json), tracked::view_modes_from_blob(&json)) {
-                (Ok(players), Ok(modes)) => {
+            match read {
+                Ok(Ok((players, modes))) => {
                     let _ = this.update(cx, |this, cx| {
                         this.tracked = players;
                         this.win_rate_mode = modes.win_rate_mode;
@@ -524,15 +531,16 @@ impl PlayerTrackerView {
                         cx.notify();
                     });
                 }
-                // Left unloaded rather than shown as empty: a write from here
-                // would then replace the players it could not read.
-                (Err(err), _) | (_, Err(err)) => {
+                // Left unloaded rather than shown as empty: a note written from
+                // here would then be the only row an account has.
+                Ok(Err(err)) => {
                     let _ = this.update(cx, |this, cx| {
                         this.note_error = Some(err.to_string());
                         cx.notify();
                     });
                     tracing::warn!("player tracker: the stored players could not be read: {err}");
                 }
+                Err(err) => tracing::warn!("player tracker: the read did not run: {err}"),
             }
         })
         .detach();
@@ -645,33 +653,42 @@ impl PlayerTrackerView {
         entry.notes = note;
 
         let Some(pool) = crate::settings_store::pool(cx) else { return };
-        let players = self.tracked.clone();
+        // One account's row, which is all a note changes. The whole map used to
+        // go out on every keystroke's save.
+        let mut pending = tracked::Pending::default();
+        pending.note_changed(account);
+        let players: HashMap<AccountId, TrackedPlayer> =
+            self.tracked.get(&account).map(|player| (account, player.clone())).into_iter().collect();
         // Bumped per write so a slower earlier save cannot land over a later
-        // one; the snapshot each carries is whole, so the last write wins.
+        // one.
         self.note_generation = self.note_generation.wrapping_add(1);
         let generation = self.note_generation;
 
-        self._note_save = Some(cx.spawn(async move |this, cx| {
-            let written = runtime::spawn(cx, async move { write_notes(&pool, &players).await }).await;
+        self._note_save =
+            Some(cx.spawn(async move |this, cx| {
+                let written = runtime::spawn(cx, async move {
+                    store::save(&pool, &pending, &players).await.map_err(NoteError::Write)
+                })
+                .await;
 
-            let failed = match written {
-                Ok(Ok(())) => None,
-                Ok(Err(err)) => Some(err.to_string()),
-                Err(err) => Some(err.to_string()),
-            };
-            let _ = this.update(cx, |this, cx| {
-                if this.note_generation != generation {
-                    return;
-                }
-                if let Some(reason) = failed {
-                    tracing::warn!("player tracker: the note was not saved: {reason}");
-                    this.note_error = Some(reason);
-                } else {
-                    this.note_error = None;
-                }
-                cx.notify();
-            });
-        }));
+                let failed = match written {
+                    Ok(Ok(())) => None,
+                    Ok(Err(err)) => Some(err.to_string()),
+                    Err(err) => Some(err.to_string()),
+                };
+                let _ = this.update(cx, |this, cx| {
+                    if this.note_generation != generation {
+                        return;
+                    }
+                    if let Some(reason) = failed {
+                        tracing::warn!("player tracker: the note was not saved: {reason}");
+                        this.note_error = Some(reason);
+                    } else {
+                        this.note_error = None;
+                    }
+                    cx.notify();
+                });
+            }));
     }
 
     /// Looks up which of this battle's players the index has met before.
@@ -1240,13 +1257,7 @@ impl PlayerTrackerView {
         };
 
         cx.spawn(async move |_this, cx| {
-            let written = runtime::spawn(cx, async move {
-                let existing: Option<String> =
-                    queries::try_get_setting(&pool, tracked::SETTING_KEY).await.map_err(NoteError::Read)?;
-                let blob = tracked::blob_with_view_modes(existing.as_deref().unwrap_or_default(), modes)?;
-                queries::set_setting(&pool, tracked::SETTING_KEY, &blob).await.map_err(NoteError::Write)
-            })
-            .await;
+            let written = runtime::spawn(cx, async move { store::store_view_modes(&pool, modes).await }).await;
 
             if let Ok(Err(err)) = written {
                 tracing::warn!("player tracker: the view settings were not saved: {err}");
@@ -2059,26 +2070,8 @@ fn tint_rgb(tint: PlayerTint) -> u32 {
 /// Why a note could not be saved.
 #[derive(Debug, thiserror::Error)]
 enum NoteError {
-    #[error("the stored players could not be read, so they were left alone")]
-    Read(#[source] wows_toolkit_config::queries::SettingError),
-    #[error(transparent)]
-    Blob(#[from] tracked::BlobError),
     #[error("the players could not be written")]
     Write(#[source] sqlx::Error),
-}
-
-/// Replaces the stored players with `players`, keeping every other field the
-/// blob carries.
-///
-/// A read that fails leaves the blob alone: the alternative is writing this
-/// app's snapshot over a tracker it could not see, which loses every
-/// encounter and note the other app recorded.
-async fn write_notes(pool: &SqlitePool, players: &HashMap<AccountId, TrackedPlayer>) -> Result<(), NoteError> {
-    let existing: Option<String> =
-        queries::try_get_setting(pool, tracked::SETTING_KEY).await.map_err(NoteError::Read)?;
-
-    let blob = tracked::blob_with_players(existing.as_deref().unwrap_or_default(), players)?;
-    queries::set_setting(pool, tracked::SETTING_KEY, &blob).await.map_err(NoteError::Write)
 }
 
 /// One player row's note affordance: the note itself as a tooltip when there

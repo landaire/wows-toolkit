@@ -18,6 +18,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:rust-i18n",
     "//third-party/rust:serde",
     "//third-party/rust:serde_json",
+    "//third-party/rust:sqlx",
     "//third-party/rust:thiserror",
     "//third-party/rust:thousands",
     "//third-party/rust:tracing",
@@ -40,5 +41,8 @@ workspace_test(
     # The date assertions read a fixed zone through ZoneGuard, which the config
     # crate only compiles under test-support.
     deps = [d for d in VIEWMODEL_DEPS if d != "//crates/wows-toolkit-config:wows_toolkit_config"] +
-           ["//crates/wows-toolkit-config:wows_toolkit_config_test_support"],
+           [
+               "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
+               "//third-party/rust:tokio",
+           ],
 )

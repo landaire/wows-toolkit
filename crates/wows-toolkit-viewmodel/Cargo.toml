@@ -41,9 +41,12 @@ thousands = "0.2.0"
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 wows_replays = { workspace = true }
 wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "fire-sections"] }
+sqlx = { workspace = true }
 wows-toolkit-config = { workspace = true }
 
 [dev-dependencies]
+# The store's tests drive a real in-memory database, which needs an executor.
+tokio = { version = "1.53", features = ["rt", "macros"] }
 wowsunpack = { workspace = true, features = ["arc", "vfs-mmap", "parsing", "rkyv", "models", "json"] }
 # `ZoneGuard`, so the query bar's date assertions read a fixed zone rather than
 # the machine's.

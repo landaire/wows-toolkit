@@ -299,8 +299,14 @@ impl HistoricalTable<'_> {
             ui.label(t!("ui.player_tracker.notes_hint"));
 
             // `view` is a snapshot, so the editor takes its own mutable borrow here.
+            let mut edited = false;
             if let Some(player) = self.tracker.tracked_players.get_mut(&view.account_id) {
-                ui.add(egui::TextEdit::multiline(&mut player.notes).desired_width(f32::INFINITY).desired_rows(3));
+                edited = ui
+                    .add(egui::TextEdit::multiline(&mut player.notes).desired_width(f32::INFINITY).desired_rows(3))
+                    .changed();
+            }
+            if edited {
+                self.tracker.pending.note_changed(view.account_id);
             }
         });
 
@@ -469,6 +475,9 @@ impl ToolkitTabViewer<'_> {
                         // the replay it parses or from `populate_from_index`.
                         player_tracker.tracked_players.clear();
                         player_tracker.note_encounters_changed();
+                        // Nothing left to list, so the write is the whole
+                        // tracker: the rows it dropped cannot be named.
+                        player_tracker.pending.everything_changed();
                     }
 
                     let selected = &mut player_tracker.filter_time_period;
@@ -628,7 +637,7 @@ mod tests {
     /// one, under both the arena key and the timestamp key.
     fn mark_division(player: &mut TrackedPlayer, nth: usize) {
         let arena_id = ArenaId::new(player.db_id.raw() * 100 + nth as i64);
-        let timestamp = *player.timestamps.iter().nth(nth).expect("the fixture has that many encounters");
+        let timestamp = player.timestamps.iter().nth(nth).expect("the fixture has that many encounters");
         assert!(player.division_encounters.mark(arena_id, timestamp), "the fixture marks each encounter only once");
     }
 

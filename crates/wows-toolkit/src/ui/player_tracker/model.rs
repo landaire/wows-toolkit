@@ -327,6 +327,7 @@ impl PlayerTracker {
         self.division_mates_synced = true;
 
         self.note_encounters_changed();
+        self.pending.everything_changed();
         true
     }
 
@@ -351,10 +352,17 @@ impl PlayerTracker {
         };
 
         let mut marked_any = false;
+        let mut marked: Vec<wows_toolkit_config::index::rows::DivisionMateEncounter> = Vec::new();
         for encounter in encounters {
-            if let Some(player) = self.tracked_players.get_mut(&encounter.account_id) {
-                marked_any |= player.division_encounters.mark(encounter.arena_id, encounter.timestamp);
+            if let Some(player) = self.tracked_players.get_mut(&encounter.account_id)
+                && player.division_encounters.mark(encounter.arena_id, encounter.timestamp)
+            {
+                marked_any = true;
+                marked.push(encounter);
             }
+        }
+        for encounter in marked {
+            self.pending.encounter_changed(encounter.account_id, encounter.arena_id, encounter.timestamp);
         }
         marked_any
     }

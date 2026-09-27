@@ -19,7 +19,6 @@ use crate::db::index::query_text::parse_query;
 use crate::tab_state::TabState;
 use crate::tab_state::WindowKind;
 use crate::tab_state::WindowSettings;
-use crate::ui::player_tracker::PlayerTracker;
 
 use super::queries;
 
@@ -235,26 +234,143 @@ async fn load_session_stats(pool: &SqlitePool, ts: &mut TabState) -> Result<(), 
 
 /// Load tracked players from the database.
 async fn load_tracked_players(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx::Error> {
-    // We stored the entire PlayerTracker as a JSON blob for simplicity
-    // (private fields, complex nested structure).
-    if let Some(json) = queries::get_setting::<String>(pool, "player_tracker_data").await {
-        match serde_json::from_str::<PlayerTracker>(&json) {
-            Ok(pt) => {
-                *ts.player_tracker.write() = pt;
-            }
-            Err(e) => {
-                error!("Failed to deserialize player tracker from DB: {e}");
-            }
+    use wows_toolkit_viewmodel::player_tracker::store;
+
+    // A database written before the tracker had tables still holds it as one
+    // settings blob. Importing it is seconds of writing for a reader with years
+    // of history, so it runs behind the window rather than in front of it; see
+    // [`spawn_tracker_import`].
+    match store::load(pool).await {
+        Ok(players) => ts.player_tracker.write().tracked_players = players,
+        Err(e) => error!("Failed to read the tracked players: {e}"),
+    }
+
+    // Every read happens before the guard is taken: the tracker's lock must not
+    // be held across an await.
+    let modes = store::load_view_modes(pool).await;
+    let prefs = load_tracker_prefs(pool).await;
+    let period = queries::get_setting(pool, "player_tracker.filter_time_period").await;
+    {
+        let mut tracker = ts.player_tracker.write();
+        tracker.win_rate_mode = modes.win_rate_mode;
+        tracker.current_match_view_mode = modes.current_match_view_mode;
+        tracker.show_division_mates = modes.show_division_mates;
+        tracker.sort_order = prefs.sort_order;
+        tracker.clan_sort_order = prefs.clan_sort_order;
+        tracker.player_filter = prefs.player_filter;
+        if let Some(period) = period {
+            tracker.filter_time_period = period;
         }
     }
 
-    // Restore filter_time_period from settings.
-    if let Some(v) = queries::get_setting(pool, "player_tracker.filter_time_period").await {
-        ts.player_tracker.write().filter_time_period = v;
-    }
-
-    info!("  loaded player tracker");
+    info!("  loaded {} tracked players", ts.player_tracker.read().tracked_players.len());
     Ok(())
+}
+
+/// Moves a tracker stored as the old settings blob into its tables, off the
+/// startup path.
+///
+/// On a connection of its own: the app's pool holds a single connection, and a
+/// write of a million rows takes it for long enough that every other query --
+/// the index reads the tracker tab runs on the UI thread among them -- would
+/// wait behind it. WAL lets those reads carry on against the pool's connection
+/// while this one writes.
+///
+/// Imported players are merged rather than swapped in: a battle that ended while
+/// the import was running is in memory and not in the blob.
+pub fn spawn_tracker_import(
+    runtime: &std::sync::Arc<tokio::runtime::Runtime>,
+    db_path: std::path::PathBuf,
+    tracker: std::sync::Arc<parking_lot::RwLock<crate::ui::player_tracker::PlayerTracker>>,
+    egui_ctx: egui::Context,
+) {
+    use wows_toolkit_viewmodel::player_tracker::store;
+
+    runtime.spawn(async move {
+        let pool = match wows_toolkit_config::open_db_at(&db_path).await {
+            Ok(pool) => pool,
+            Err(e) => {
+                error!("Failed to open the database for the tracker import: {e}");
+                return;
+            }
+        };
+
+        match store::import_blob_once(&pool).await {
+            Ok(store::Imported::Migrated { players, arenas, timestamps }) => {
+                info!(
+                    "imported {players} tracked players ({arenas} arenas, {timestamps} timestamps) out of the old blob"
+                );
+            }
+            // Nothing to import, and nothing to load that startup did not.
+            Ok(_) => return,
+            // The blob is kept when its import fails, so the next launch tries
+            // again; the tracker holds whatever the tables already had.
+            Err(e) => {
+                error!("Failed to import the stored player tracker: {e}");
+                return;
+            }
+        }
+
+        let imported = match store::load(&pool).await {
+            Ok(imported) => imported,
+            Err(e) => {
+                error!("Failed to read the imported players: {e}");
+                return;
+            }
+        };
+        // Held no longer than the import: a second connection to the same file
+        // is worth a startup, not a session.
+        pool.close().await;
+        drop(pool);
+
+        {
+            let mut tracker = tracker.write();
+            // A battle that ended while the import ran left a player holding
+            // only what that battle reported: no note, no aliases, one
+            // encounter. The imported row is the historical one, so it is the
+            // base and the live one is folded onto it.
+            let mut met_meanwhile = Vec::new();
+            for (account, player) in imported {
+                if let Some(live) = tracker.tracked_players.insert(account, player) {
+                    met_meanwhile.push((account, live));
+                }
+            }
+
+            for (account, live) in met_meanwhile {
+                let Some(player) = tracker.tracked_players.get_mut(&account) else { continue };
+                player.merge_encounters_from(&live);
+
+                // The import replaced the rows that battle had written, so they
+                // are stated again. The two key families are walked apart: they
+                // are unpaired, and zipping them would drop whichever is longer.
+                let arenas: Vec<_> = player.arena_ids.iter().collect();
+                let timestamps: Vec<_> = player.timestamps.iter().collect();
+                tracker.pending.identity_changed(account);
+                for arena_id in arenas {
+                    tracker.pending.arena_changed(account, arena_id);
+                }
+                for timestamp in timestamps {
+                    tracker.pending.timestamp_changed(account, timestamp);
+                }
+            }
+            tracker.note_encounters_changed();
+        }
+        egui_ctx.request_repaint();
+    });
+}
+
+/// The Historical and Clans table settings, each under its own key.
+///
+/// Only this app writes them: the tracker's own view modes are shared with the
+/// port and live in `store`.
+async fn load_tracker_prefs(pool: &SqlitePool) -> crate::ui::player_tracker::TrackerPrefs {
+    use crate::ui::player_tracker::TrackerPrefs;
+
+    TrackerPrefs {
+        sort_order: queries::get_setting(pool, TrackerPrefs::SORT_ORDER_KEY).await.unwrap_or_default(),
+        clan_sort_order: queries::get_setting(pool, TrackerPrefs::CLAN_SORT_ORDER_KEY).await.unwrap_or_default(),
+        player_filter: queries::get_setting(pool, TrackerPrefs::PLAYER_FILTER_KEY).await.unwrap_or_default(),
+    }
 }
 
 /// Load sent replays.
@@ -352,4 +468,172 @@ async fn load_mod_manager(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sq
     }
     info!("  loaded mod manager info");
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use parking_lot::RwLock;
+    use wows_replays::types::AccountId;
+    use wows_replays::types::ArenaId;
+    use wows_toolkit_viewmodel::player_tracker::store;
+    use wows_toolkit_viewmodel::player_tracker::tracked;
+    use wows_toolkit_viewmodel::player_tracker::tracked::TrackedPlayer;
+
+    use crate::ui::player_tracker::PlayerTracker;
+
+    fn runtime() -> Arc<tokio::runtime::Runtime> {
+        Arc::new(tokio::runtime::Builder::new_multi_thread().worker_threads(1).enable_all().build().expect("a runtime"))
+    }
+
+    fn at(second: i64) -> jiff::Timestamp {
+        jiff::Timestamp::from_second(second).expect("a second in range")
+    }
+
+    /// A stored tracker with a note, an alias and two encounters, as an older
+    /// build wrote it.
+    const BLOB: &str = r#"{"tracked_players":{"501":{"last_name":"Enemy","db_id":501,"names":["OldHandle"],
+        "clan_id":7,"clan":"RAIN","timestamps":["2023-11-14T22:13:20Z","2023-11-14T23:13:20Z"],
+        "arena_ids":[100,101],"notes":"camps the corner",
+        "division_encounters":{"arena_ids":[101],"timestamps":["2023-11-14T23:13:20Z"]}}},
+        "show_division_mates":true}"#;
+
+    /// The import brings the blob's players in, notes and aliases and marks
+    /// included, and a battle that ended while it ran keeps its encounter.
+    ///
+    /// This is the path a reader upgrading takes, so it is the one worth
+    /// driving: the merge it performs is what the tracker shows afterwards and
+    /// what the next save writes.
+    #[test]
+    fn importing_keeps_both_the_stored_tracker_and_a_battle_met_meanwhile() {
+        let runtime = runtime();
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db_path = directory.path().join("import.db");
+
+        // The blob an older build left, and nothing else.
+        runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db_at(&db_path).await.expect("the database opens");
+            wows_toolkit_config::queries::set_setting(&pool, tracked::SETTING_KEY, &BLOB.to_owned())
+                .await
+                .expect("the blob stores");
+            pool.close().await;
+        });
+
+        // A battle that ended just after launch. One of its players is the
+        // account the blob already knows, met again: `ingest_roster` records it
+        // with the name that battle reported and nothing else, so the entry in
+        // memory has no note and no aliases. That is the account an import can
+        // overwrite with an empty note, so it is the one worth driving.
+        let tracker = Arc::new(RwLock::new(PlayerTracker::default()));
+        {
+            let mut guard = tracker.write();
+            let mut again =
+                TrackedPlayer { db_id: AccountId(501), last_name: "EnemyRenamed".to_owned(), ..Default::default() };
+            again.arena_ids.insert(ArenaId::new(900));
+            again.timestamps.insert(at(1_700_900_000));
+            guard.tracked_players.insert(AccountId(501), again);
+            guard.pending.identity_changed(AccountId(501));
+            guard.pending.encounter_changed(AccountId(501), ArenaId::new(900), at(1_700_900_000));
+
+            let mut met =
+                TrackedPlayer { db_id: AccountId(902), last_name: "MetJustNow".to_owned(), ..Default::default() };
+            met.arena_ids.insert(ArenaId::new(900));
+            met.timestamps.insert(at(1_700_900_000));
+            guard.tracked_players.insert(AccountId(902), met);
+            guard.pending.identity_changed(AccountId(902));
+            guard.pending.encounter_changed(AccountId(902), ArenaId::new(900), at(1_700_900_000));
+        }
+
+        super::spawn_tracker_import(&runtime, db_path.clone(), Arc::clone(&tracker), egui::Context::default());
+        // The import is the only work on this runtime, so it is finished once
+        // the runtime has nothing left to run.
+        runtime.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(1500)).await });
+
+        let guard = tracker.read();
+        let stored = guard.tracked_players.get(&AccountId(501)).expect("the stored player was imported");
+        assert_eq!(stored.notes, "camps the corner", "the note came across");
+        assert!(stored.names.contains("OldHandle"), "and the alias");
+        assert_eq!(stored.arena_ids.len(), 3, "both stored encounters and the one met meanwhile");
+        assert!(stored.arena_in_division(ArenaId::new(101)), "and the division mark");
+        assert!(!stored.arena_in_division(ArenaId::new(100)));
+        assert_eq!(stored.last_name, "EnemyRenamed", "the newer name a battle reported wins");
+        assert!(stored.names.contains("Enemy"), "and the one it displaced became an alias");
+
+        let met = guard.tracked_players.get(&AccountId(902)).expect("the battle met meanwhile is still tracked");
+        assert_eq!(met.arena_ids.len(), 1, "with its encounter");
+        drop(guard);
+
+        // What the next save writes has to put that battle back on disk: the
+        // import wrote the blob's rows, not this one's.
+        let pending = tracker.read().pending.clone();
+        let players = tracker.read().tracked_players.clone();
+        runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db_at(&db_path).await.expect("the database opens");
+            store::save(&pool, &pending, &players).await.expect("the save lands");
+
+            let read = store::load(&pool).await.expect("the tables read back");
+            let stored = read.get(&AccountId(501)).expect("the imported player is on disk");
+            assert_eq!(stored.notes, "camps the corner", "the imported note is still on disk");
+            assert!(stored.names.contains("OldHandle"));
+            assert_eq!(stored.arena_ids.len(), 3);
+            assert!(stored.arena_in_division(ArenaId::new(101)));
+
+            let met = read.get(&AccountId(902)).expect("and so is the battle met meanwhile");
+            assert_eq!(met.arena_ids.iter().collect::<Vec<_>>(), vec![ArenaId::new(900)]);
+            assert_eq!(met.last_name, "MetJustNow");
+
+            // The blob is gone only because its rows are there.
+            let left: Option<String> =
+                wows_toolkit_config::queries::try_get_setting(&pool, tracked::SETTING_KEY).await.expect("the read");
+            assert!(left.is_none(), "the blob was dropped once its rows were checked");
+            pool.close().await;
+        });
+    }
+
+    /// A battle written to the tables before the import runs does not stop it:
+    /// the import folds in, and neither side loses rows.
+    #[test]
+    fn a_battle_already_on_disk_does_not_block_the_import() {
+        let runtime = runtime();
+        let directory = tempfile::tempdir().expect("a temporary directory");
+        let db_path = directory.path().join("import.db");
+
+        runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db_at(&db_path).await.expect("the database opens");
+            wows_toolkit_config::queries::set_setting(&pool, tracked::SETTING_KEY, &BLOB.to_owned())
+                .await
+                .expect("the blob stores");
+
+            // The save task got there first.
+            let mut met =
+                TrackedPlayer { db_id: AccountId(902), last_name: "MetJustNow".to_owned(), ..Default::default() };
+            met.arena_ids.insert(ArenaId::new(900));
+            met.timestamps.insert(at(1_700_900_000));
+            let players = [(AccountId(902), met)].into_iter().collect();
+            let mut pending = tracked::Pending::default();
+            pending.identity_changed(AccountId(902));
+            pending.encounter_changed(AccountId(902), ArenaId::new(900), at(1_700_900_000));
+            store::save(&pool, &pending, &players).await.expect("the live save lands");
+            pool.close().await;
+        });
+
+        let tracker = Arc::new(RwLock::new(PlayerTracker::default()));
+        super::spawn_tracker_import(&runtime, db_path.clone(), Arc::clone(&tracker), egui::Context::default());
+        runtime.block_on(async { tokio::time::sleep(std::time::Duration::from_millis(1500)).await });
+
+        runtime.block_on(async {
+            let pool = wows_toolkit_config::open_db_at(&db_path).await.expect("the database opens");
+            let read = store::load(&pool).await.expect("the tables read back");
+
+            assert!(read.contains_key(&AccountId(501)), "the blob was imported anyway");
+            assert_eq!(read[&AccountId(501)].notes, "camps the corner");
+            assert!(read.contains_key(&AccountId(902)), "and the battle already on disk survived");
+
+            let left: Option<String> =
+                wows_toolkit_config::queries::try_get_setting(&pool, tracked::SETTING_KEY).await.expect("the read");
+            assert!(left.is_none(), "the blob is gone, so the next launch has nothing to import");
+            pool.close().await;
+        });
+    }
 }

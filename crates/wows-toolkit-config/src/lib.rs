@@ -8,6 +8,7 @@ mod db;
 pub mod index;
 pub mod queries;
 mod settings;
+pub mod tracker;
 mod window;
 
 use std::path::PathBuf;
@@ -18,6 +19,7 @@ pub use db::is_migrated;
 pub use db::load_main_window_settings;
 pub use db::load_startup_setting;
 pub use db::open_db;
+pub use db::open_db_at;
 pub use db::set_migrated;
 pub use settings::ReplayExportFormat;
 pub use settings::ReplayGrouping;
@@ -58,6 +60,19 @@ pub fn storage_dir() -> Option<PathBuf> {
             .or_else(|| home::home_dir().map(|p| p.join(".local").join("share")))
             .map(|p| p.join(APP_NAME.to_lowercase().replace(|c: char| c.is_ascii_whitespace(), "")))
     }
+}
+
+/// An empty database with every migration applied, for a test that needs real
+/// tables rather than hand-written ones.
+#[cfg(feature = "test-support")]
+pub async fn test_pool() -> sqlx::SqlitePool {
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .expect("an in-memory database opens");
+    sqlx::migrate!("./migrations").run(&pool).await.expect("the migrations apply");
+    pool
 }
 
 /// A storage directory chosen for this process in place of the platform one.

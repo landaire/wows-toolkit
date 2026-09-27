@@ -64,6 +64,12 @@ pub async fn set_setting_raw(pool: &SqlitePool, key: &str, json: &str) -> Result
     Ok(())
 }
 
+/// Removes a setting, if it is there.
+pub async fn delete_setting(pool: &SqlitePool, key: &str) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM settings WHERE key = ?1").bind(key).execute(pool).await?;
+    Ok(())
+}
+
 /// A row from the session_stats table.
 #[derive(Debug, sqlx::FromRow)]
 pub struct SessionStatRow {

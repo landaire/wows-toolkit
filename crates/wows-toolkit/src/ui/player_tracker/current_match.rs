@@ -827,10 +827,10 @@ fn render_encounters(ui: &mut egui::Ui, row_data: &LiveRosterRow, ctx: &TeamCont
     };
     let total = player.arena_ids.len();
     let in_range = match ctx.filter_range {
-        Some(range) => player.timestamps.iter().filter(|ts| **ts > range).count(),
+        Some(range) => player.timestamps.iter().filter(|ts| *ts > range).count(),
         None => total,
     };
-    let last = last_seen_text(player.timestamps.last().copied(), ctx.now);
+    let last = last_seen_text(player.timestamps.last(), ctx.now);
 
     let mut text = RichText::new(separate_number(total, Some(ctx.locale)));
     if let Some(color) = encounter_severity_color(ui, in_range) {
