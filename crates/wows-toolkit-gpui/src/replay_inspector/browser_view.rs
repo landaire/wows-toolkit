@@ -349,6 +349,12 @@ impl ReplayBrowser {
         self.preview.seed_baking_for_test(path);
     }
 
+    /// Seeds a row being dwelled on, before any bake. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_dwelling_preview_for_test(&mut self, path: std::path::PathBuf) {
+        self.preview.seed_dwelling_for_test(path);
+    }
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         Self {
@@ -1250,7 +1256,7 @@ impl Render for ReplayBrowser {
         // running says nothing, and the egui popup drops it the moment the
         // first frame lands.
         let stalled = self.preview.is_stalled();
-        let preview_map: Option<AnyElement> = match (self.preview.frame(), self.preview.is_baking()) {
+        let preview_map: Option<AnyElement> = match (self.preview.frame(), self.preview.awaits_preview()) {
             (Some(frame), _) => Some(
                 div()
                     .relative()
@@ -1264,9 +1270,9 @@ impl Render for ReplayBrowser {
                     })
                     .into_any_element(),
             ),
-            // Open water while the bake has nothing to show: the preview then
-            // becomes the real map in place, rather than appearing out of a
-            // hole in the panel.
+            // Open water for as long as a preview is coming: the map then
+            // arrives in place, rather than the popup growing around it. The
+            // spinner waits for a stall, so the dwell itself draws none.
             (None, true) => Some(
                 h_flex()
                     .id("replay-preview-placeholder")
@@ -1507,7 +1513,10 @@ mod tests {
     }
 
     /// A preview that has nothing to show yet holds open water, so the popup
-    /// becomes the real map in place instead of appearing out of nothing.
+    /// becomes the real map in place instead of growing around one.
+    ///
+    /// From the dwell, not from the bake: the bake draws its first map within
+    /// milliseconds of starting, so the wait a reader sees is the one before it.
     #[gpui_kit::test]
     fn a_preview_with_nothing_to_show_yet_holds_open_water(cx: &mut gpui_kit::TestAppContext) {
         use gpui_kit::AppContext as _;
@@ -1529,9 +1538,11 @@ mod tests {
         })
         .expect("the test window stays open");
 
+        // The pointer has settled on a row and the dwell is counting down.
+        // Nothing is being baked yet, and the space is already held.
         window
             .update(cx, |browser, _window, cx| {
-                browser.seed_baking_preview_for_test(PathBuf::from("a.wowsreplay"));
+                browser.seed_dwelling_preview_for_test(PathBuf::from("a.wowsreplay"));
                 cx.notify();
             })
             .expect("the test window stays open");
@@ -1542,9 +1553,23 @@ mod tests {
             assert_eq!(
                 placeholder.bounds().size.width,
                 px(super::PREVIEW_SIZE),
-                "and it is the size the map will be, so nothing moves when it lands"
+                "the space is the size the map will be, so nothing moves when it lands"
             );
             assert_eq!(placeholder.bounds().size.height, px(super::PREVIEW_SIZE));
+        })
+        .expect("the test window stays open");
+
+        // And it stays held once the bake starts.
+        window
+            .update(cx, |browser, _window, cx| {
+                browser.seed_baking_preview_for_test(PathBuf::from("a.wowsreplay"));
+                cx.notify();
+            })
+            .expect("the test window stays open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-preview-placeholder").is_some(), "still held while the bake runs");
         })
         .expect("the test window stays open");
     }

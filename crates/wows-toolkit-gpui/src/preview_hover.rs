@@ -67,6 +67,14 @@ pub struct PreviewHover {
     /// the replay and load the build it was recorded on. Stays set while the
     /// map is shown on its own, which is most of that time.
     baking: bool,
+    /// Whether a preview is on its way at all: the dwell is counting down, or a
+    /// bake is running. Set apart from `baking` because the wait a reader sees
+    /// starts before the bake does, and the space the map will take has to be
+    /// held for the whole of it or the popup jumps when the map lands.
+    ///
+    /// Cleared once a bake has finished, so a replay whose build is not
+    /// installed stops holding space it will never fill.
+    expecting: bool,
     /// The last track baked in full, so moving the pointer away and back is
     /// instant rather than another bake.
     ///
@@ -97,6 +105,7 @@ impl Default for PreviewHover {
             shown: None,
             released: Vec::new(),
             baking: false,
+            expecting: false,
             cached: None,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
@@ -131,9 +140,12 @@ impl PreviewHover {
         self.watched.as_ref().map(|(path, _)| path.as_path())
     }
 
-    /// Whether a preview is being baked for the watched row.
-    pub fn is_baking(&self) -> bool {
-        self.baking
+    /// Whether a preview is on its way for the watched row, dwell included.
+    ///
+    /// What a surface holds the map's space on: a popup that waited for the
+    /// first frame would go up without a map and then grow around one.
+    pub fn awaits_preview(&self) -> bool {
+        self.expecting
     }
 
     /// Whether the bake has stopped feeding the preview.
@@ -172,6 +184,15 @@ impl PreviewHover {
     #[cfg(test)]
     pub(crate) fn seed_baking_for_test(&mut self, path: PathBuf) {
         self.baking = true;
+        self.expecting = true;
+        self.shown = None;
+        self.watched = Some((path, Instant::now()));
+    }
+
+    /// Seeds a row being dwelled on, before any bake. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_dwelling_for_test(&mut self, path: PathBuf) {
+        self.expecting = true;
         self.shown = None;
         self.watched = Some((path, Instant::now()));
     }
@@ -225,7 +246,10 @@ impl PreviewHover {
         }
         cx.notify();
 
+        // No game data is no preview, so nothing is waited for and no space is
+        // held: the popup is the row's words on their own.
         let Some(game_data) = game_data else { return };
+        self.expecting = true;
         self._dwell_timer = Some(cx.spawn(async move |view, cx| {
             cx.background_executor().timer(DWELL).await;
             let _ = view.update(cx, |view, cx| {
@@ -276,6 +300,7 @@ impl PreviewHover {
 
     fn cancel_bake(&mut self) {
         self.baking = false;
+        self.expecting = false;
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
         self._bake = None;
@@ -399,6 +424,9 @@ impl PreviewHover {
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);
                 this.baking = false;
+                // Nothing more is coming, so a replay that produced no preview
+                // stops holding the map's space.
+                this.expecting = false;
                 // Looping only starts once the whole track is here.
                 if let Some(shown) = this.shown.as_mut() {
                     shown.frames.finish();

@@ -419,10 +419,12 @@ kept so the next audit does not re-report them.
   what the port wrote.
 - [changed] A player row's actions are on the row rather than in a column. The
   egui table gives them an Actions column of `...` buttons; here the same items
-  are on the row's right-click menu, with dots revealed over the trailing edge
-  of the columns that do not scroll while the pointer is on that row (the chat
-  pane reveals its copy button the same way). The table gets that column's width
-  back, and the actions stay where the row is.
+  are on the row's right-click menu, with dots revealed at the end of the
+  player's name, between it and the ship, while the pointer is on that row (the
+  chat pane reveals its copy button the same way). The table gets that column's
+  width back, and the actions stay where the row is. Both ways in are headed by
+  `[CLAN] Name -- Ship`, since a right-click menu lands wherever the pointer was
+  and the rows it could have come from are one line apart.
 - [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match
@@ -460,7 +462,10 @@ kept so the next audit does not re-report them.
   The egui popup draws the row's map straight away where it can and its own dark
   background where it cannot; here the placeholder means the preview becomes the
   real map in place rather than appearing out of a hole in the panel, and the
-  Search strip no longer resizes the results when the first frame lands.
+  Search strip no longer resizes the results when the first frame lands. The
+  space is held from the dwell, not from the bake: a bake draws its first map
+  within milliseconds of starting, so the wait a reader sees is the one before
+  it.
 - [done] The listing collapses and expands from a caret rail beside it, and
   the state is kept in the `listing_collapsed` field the shared replay
   settings row already declares. Its width was already draggable; it is still
