@@ -78,7 +78,7 @@ const _: () = assert!(CELL_ID_STRIDE > ReplayColumn::ALL.len(), "CELL_ID_STRIDE 
 /// app's `num_sticky_cols(3)` (`mod.rs:2808`). `default_columns` always
 /// includes these three first and unconditionally, so this always freezes
 /// exactly them.
-const STICKY_COLUMN_COUNT: usize = 3;
+const STICKY_COLUMN_COUNT: usize = 2;
 
 /// Column width bounds, matching the egui app's
 /// `Column::new(100.0).range(10.0..=500.0)` (`mod.rs:2795`).
@@ -1077,6 +1077,10 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// never touches, so cloning the whole struct there was a real per-visible-
 /// row, every-render cost for data the dropdown discards.
 struct ActionsMenuData {
+    /// Who the menu is about, as the row reads: clan tag, name, and ship. A
+    /// menu opened by a right-click carries no other sign of which row it came
+    /// from, and the rows are one line apart.
+    heading: String,
     relation: Relation,
     has_vehicle_entity: bool,
     ship_config_url: Option<String>,
@@ -1085,9 +1089,22 @@ struct ActionsMenuData {
     raw_metadata_json: Option<String>,
 }
 
+/// The menu's heading: `[CLAN] Name -- Ship`, with whichever parts the row has.
+///
+/// A spectator recording has no ship for a row it never saw, and a player
+/// without a clan has no tag; neither leaves a stray separator behind.
+fn heading_for(row: &PlayerRow) -> String {
+    let name = match row.clan_tag.as_deref() {
+        Some(clan) if !clan.is_empty() => format!("{clan} {}", row.display_name),
+        _ => row.display_name.clone(),
+    };
+    if row.ship_name.is_empty() { name } else { format!("{name} -- {}", row.ship_name) }
+}
+
 impl ActionsMenuData {
     fn from_row(row: &PlayerRow) -> Self {
         Self {
+            heading: heading_for(row),
             relation: row.relation,
             has_vehicle_entity: row.has_vehicle_entity,
             ship_config_url: row.ship_config_url.clone(),
@@ -1123,6 +1140,10 @@ fn build_actions_menu(
     debug: bool,
     entity: Entity<PlayerTable>,
 ) -> PopupMenu {
+    // Whose options these are, first: a right-click menu lands wherever the
+    // pointer was, and the rows it could have come from are one line apart.
+    menu = menu.item(PopupMenuItem::label(row.heading.clone())).separator();
+
     let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
 
     if show_ship_config {
@@ -1177,11 +1198,11 @@ fn build_actions_menu(
 /// The dots that open one row's actions, revealed while the pointer is on that
 /// row.
 ///
-/// Laid over the row's trailing edge rather than given a column of its own: the
-/// actions are about the row under the pointer, and a column of buttons charges
-/// every row's width for something only the hovered one can be used on. The same
-/// items are on the row's right-click menu, and the chat pane reveals its copy
-/// button the same way (`chat.rs::render_message`).
+/// Laid over the end of the Name column rather than given a column of its own:
+/// the actions are about one player, the name is what says which, and a column
+/// of buttons would charge every row's width for something only the hovered row
+/// can be used on. The same items are on the row's right-click menu, and the
+/// chat pane reveals its copy button the same way (`chat.rs::render_message`).
 ///
 /// `ix` keys the trigger's `ElementId` so every row's popover state is its own,
 /// and `group` ties the reveal to that row's hover. `entity` is threaded through
@@ -1194,7 +1215,7 @@ fn row_actions(
     debug: bool,
     entity: Entity<PlayerTable>,
     group: SharedString,
-    sticky_width: f32,
+    name_edge: f32,
 ) -> AnyElement {
     let row = ActionsMenuData::from_row(row);
     let trigger = Button::new(("replay-row-actions", ix))
@@ -1208,7 +1229,7 @@ fn row_actions(
     div()
         .absolute()
         .inset_0()
-        .left(px(sticky_width - ROW_ACTIONS_WIDTH))
+        .left(px(name_edge - ROW_ACTIONS_WIDTH))
         .w(px(ROW_ACTIONS_WIDTH))
         .h(px(ROW_ACTIONS_WIDTH))
         .invisible()
@@ -1217,7 +1238,7 @@ fn row_actions(
         .into_any_element()
 }
 
-/// Room for the dots at the end of the columns that do not scroll.
+/// Room for the dots at the end of the name.
 const ROW_ACTIONS_WIDTH: f32 = 24.0;
 
 /// One column's collapsed cell, dispatching to the Name/Skills special-cased
@@ -1305,10 +1326,15 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     for &col in layout.sticky_columns {
         sticky = sticky.child(render_column_cell(ix, col, row, layout));
     }
-    // The dots sit at the trailing edge of the columns that do not scroll, so
-    // they are in the same place whatever the table is scrolled to. Measured
-    // rather than guessed: a dragged column moves them.
-    let sticky_width: f32 = layout.sticky_columns.iter().map(|col| layout.column_widths[*col as usize].as_f32()).sum();
+    // The dots sit at the end of the player's name, between it and the ship:
+    // they are that player's actions, and the name is what says which player.
+    // Measured rather than guessed, since dragging the column moves them.
+    let name_edge: f32 = layout
+        .sticky_columns
+        .iter()
+        .take_while(|col| **col != ReplayColumn::ShipName)
+        .map(|col| layout.column_widths[*col as usize].as_f32())
+        .sum();
 
     let mut scrolling = h_flex()
         .w(px(layout.scroll_width))
@@ -1358,7 +1384,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
-        .child(row_actions(ix, row, layout.debug, layout.entity.clone(), group, sticky_width))
+        .child(row_actions(ix, row, layout.debug, layout.entity.clone(), group, name_edge))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
         .context_menu(move |menu, _window, _cx| build_actions_menu(menu, &menu_row, debug, menu_entity.clone()))

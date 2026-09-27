@@ -1362,6 +1362,9 @@ mod tests {
         // empty for reasons that have nothing to do with where its trigger sits.
         let mut model = model_at_expected_values();
         model.rows[0].wows_numbers_url = Some("https://wows-numbers.com/player/1,Someone/".to_owned());
+        model.rows[0].display_name = "Harvey635".to_owned();
+        model.rows[0].clan_tag = Some("[RAIN]".to_owned());
+        model.rows[0].ship_name = "Fletcher".to_owned();
 
         cx.update(gpui_kit::init);
         let window = cx
@@ -1395,10 +1398,47 @@ mod tests {
             window.render_frame(cx);
             let offered = crate::interaction_tests::menu_items(window);
             assert!(!offered.is_empty(), "the dots drop down that player's actions");
+
+            // Whose options these are, said at the top: a right-click menu
+            // lands wherever the pointer was, and the rows are one line apart.
+            let labels: Vec<String> = offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect();
             assert!(
-                offered.iter().any(|(_, item)| item.label().is_some_and(|label| label.contains("WoWs Numbers"))),
-                "including the lookup every row has, got {:?}",
-                offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect::<Vec<_>>()
+                labels
+                    .iter()
+                    .any(|label| label.contains("[RAIN]") && label.contains("Harvey635") && label.contains("Fletcher")),
+                "the menu names the clan, the player and the ship, got {labels:?}"
+            );
+            assert!(
+                labels.iter().any(|label| label.contains("WoWs Numbers")),
+                "including the lookup every row has, got {labels:?}"
+            );
+        })
+        .expect("the window is open");
+    }
+
+    /// The dots sit at the end of the player's name, before the ship column:
+    /// they are that player's actions, and the name is what says which player.
+    #[gpui_kit::test]
+    fn the_row_dots_sit_between_the_player_and_the_ship(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1400.), px(600.)), |window, cx| {
+            ReplayPanel::loaded_for_test(model_at_expected_values(), None, window, cx)
+        });
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let dots = window.find(("replay-row-actions", 0usize)).bounds();
+            // The grip is the boundary between the Name column and the next
+            // one, and is a findable element where the header itself is not.
+            let boundary = window.find(("replay-header-grip", ReplayColumn::Name as usize)).bounds();
+
+            assert!(
+                dots.origin.x + dots.size.width <= boundary.origin.x + boundary.size.width,
+                "the dots end at the name column's boundary: {dots:?} against {boundary:?}"
+            );
+            assert!(
+                dots.origin.x + dots.size.width > boundary.origin.x - px(8.),
+                "and reach it, rather than sitting somewhere earlier in the row: {dots:?} against {boundary:?}"
             );
         })
         .expect("the window is open");

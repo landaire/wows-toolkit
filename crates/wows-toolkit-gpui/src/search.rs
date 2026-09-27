@@ -1769,7 +1769,7 @@ impl Render for SearchView {
         // pointer that asked for it.
         let preview_art: Option<AnyElement> = match self.preview.frame() {
             Some(frame) => Some(img(frame).w(px(PREVIEW_WIDTH)).h(px(PREVIEW_WIDTH)).into_any_element()),
-            None if self.preview.is_baking() => Some(
+            None if self.preview.awaits_preview() => Some(
                 div()
                     .id("search-preview-placeholder")
                     .test_support()
