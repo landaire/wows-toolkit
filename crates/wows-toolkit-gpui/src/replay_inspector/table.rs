@@ -15,6 +15,7 @@
 //! breakdowns under ActualDamage/ReceivedDamage; see `expanded.rs`).
 
 use std::collections::HashSet;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui_kit::base::TestSupportExt as _;
@@ -75,10 +76,10 @@ const CELL_ID_STRIDE: usize = 32;
 const _: () = assert!(CELL_ID_STRIDE > ReplayColumn::ALL.len(), "CELL_ID_STRIDE must exceed the column count");
 
 /// Columns pinned to the left edge of the table while the rest scroll
-/// horizontally: Actions, Name, ShipName, in that order. Mirrors the egui
-/// app's `num_sticky_cols(3)` (`mod.rs:2808`). `default_columns` always
-/// includes these three first and unconditionally, so this always freezes
-/// exactly them.
+/// horizontally: Name and ShipName, in that order. The egui app pins three
+/// (`num_sticky_cols(3)`, `mod.rs:2808`), the third being its Actions column,
+/// which a row carries itself here. `default_columns` always includes these two
+/// first and unconditionally, so this always freezes exactly them.
 const STICKY_COLUMN_COUNT: usize = 2;
 
 /// Column width bounds, matching the egui app's
@@ -1052,32 +1053,14 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
     }
 }
 
-/// Builds a row's actions menu, mirroring the egui app's
-/// `ReplayColumn::Actions` arm (`ui/replay_parser/mod.rs` ~1681-1799)
-/// item-for-item: the ship-config "Open Build in Browser"/"Copy Build Link"/
-/// "Copy Short Build Link" trio (shown for non-enemy rows or in debug, and
-/// only once the replay observed a vehicle entity, matching the egui gate
-/// exactly), a separator, the WoWS-numbers link, and -- debug only -- "View
-/// Raw Player Metadata". Each item is omitted (not shown disabled) when its
-/// backing URL/JSON is `None`, per this port's "hidden, not a panic" rule for
-/// missing config (`PlayerRow::ship_config_url`'s field doc). "Open"/"WoWS
-/// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
-/// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
-/// external-link glyph the egui app's SHARE icon stood in for; the copy
-/// items write to the clipboard via `cx.write_to_clipboard` and toast
-/// `ui.replay.build.link_copied` as the egui app does, matching
-/// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View
-/// Raw Player Metadata" instead emits `PlayerTableEvent::ViewRawJson` on
-/// `entity`, matching the egui app's behavior of opening a viewer (not
-/// copying) -- `panel.rs` subscribes to that event and shows the payload in
-/// the same `RawJsonPanel`/`SidePanel` side-panel slot the debug header's
-/// "Raw Metadata"/"Raw Results" buttons use.
-/// The handful of `PlayerRow` fields `build_actions_menu` actually reads,
-/// cloned out in `row_actions` instead of the whole row: `PlayerRow` also
-/// carries achievements/ribbons/consumables/build/damage-interaction data
-/// (and `raw_metadata_json`, a full pretty-printed JSON dump) that the menu
-/// never touches, so cloning the whole struct there was a real per-visible-
-/// row, every-render cost for data the dropdown discards.
+/// The handful of `PlayerRow` fields `build_actions_menu` reads, cloned out in
+/// `render_row` instead of the whole row: `PlayerRow` also carries
+/// achievements/ribbons/consumables/build/damage-interaction data (and
+/// `raw_metadata_json`, a full pretty-printed JSON dump) that the menu never
+/// touches, and a row that is on screen builds this on every render.
+///
+/// One per row, shared by the dots and the row's right-click menu through an
+/// `Rc`, since both offer the same items for the same player.
 struct ActionsMenuData {
     /// Who the menu is about, drawn as the row reads.
     heading: MenuHeading,
@@ -1098,23 +1081,32 @@ struct ActionsMenuData {
 #[derive(Clone)]
 struct MenuHeading {
     /// The class icon as the Name cell draws it, tinted to the player. `None`
-    /// until `IconCache` has the asset, which that cell falls back from the
-    /// same way.
+    /// until `IconCache` has the asset.
     icon: Option<Arc<RenderImage>>,
-    /// Stands in for an icon the cache does not have, as in the Name cell.
-    species: SharedString,
+    /// Stands in for an icon the cache does not have, as in the Name cell, so
+    /// it is read only when `icon` is `None`.
+    species: Option<SharedString>,
+    /// The division mark the Name cell draws, for a player who is in one.
+    division: Option<SharedString>,
     clan: Option<SharedString>,
     clan_color: Hsla,
     name: SharedString,
     name_color: Hsla,
-    /// Empty for a row whose ship the recording never saw.
-    ship: SharedString,
+    /// `None` for a row whose ship the recording never saw.
+    ship: Option<SharedString>,
     /// The whole heading in one line, for a screen reader.
     spoken: SharedString,
 }
 
 fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
     let clan: Option<SharedString> = row.clan_tag.as_deref().filter(|clan| !clan.is_empty()).map(SharedString::from);
+    let ship: Option<SharedString> = (!row.ship_name.is_empty()).then(|| row.ship_name.clone().into());
+    let icon = icons.get(row.ship_class, player_color_kind_rgb(player_color_kind(row)));
+    let species: Option<SharedString> = icon
+        .is_none()
+        .then(|| row.ship_species_text.clone())
+        .filter(|species| !species.is_empty())
+        .map(SharedString::from);
 
     let mut spoken = String::new();
     if let Some(clan) = clan.as_ref() {
@@ -1122,49 +1114,79 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
         spoken.push(' ');
     }
     spoken.push_str(&row.display_name);
-    if !row.ship_name.is_empty() {
+    if let Some(ship) = ship.as_ref() {
         spoken.push_str(", ");
-        spoken.push_str(&row.ship_name);
+        spoken.push_str(ship);
     }
 
     MenuHeading {
-        icon: icons.get(row.ship_class, player_color_kind_rgb(player_color_kind(row))),
-        species: row.ship_species_text.clone().into(),
+        icon,
+        species,
+        division: row.division_label.clone().map(SharedString::from),
         clan,
         clan_color: resolve_color(ColorRole::Fixed(row.clan_color_rgb)),
         name: row.display_name.clone().into(),
         name_color: resolve_color(ColorRole::Player(name_color_kind(row))),
-        ship: row.ship_name.clone().into(),
+        ship,
         spoken: spoken.into(),
     }
 }
 
-/// The heading as the menu's first item: the class icon, the clan tag and name
-/// in the colours the row gives them, and the ship on a second line.
+/// The heading as the menu's first item: the division mark, clan tag and name in
+/// the colours the row gives them, and the ship under them behind its class
+/// icon.
+///
+/// The icon rides the ship's own line rather than the whole block, because the
+/// kit indents every item by an icon's width once any item in the menu carries
+/// one (`PopupMenu::render_item`'s `has_left_icon`), and a second icon before
+/// that indent would put the heading's text out of the column the other items'
+/// labels start in.
 fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
-    let mut name_line = h_flex().gap_1().items_center();
+    let mut name_line = h_flex().gap_1().items_center().whitespace_nowrap();
+    if let Some(division) = heading.division.clone() {
+        name_line = name_line.child(div().flex_none().child(division));
+    }
     if let Some(clan) = heading.clan.clone() {
         name_line = name_line.child(div().flex_none().text_color(heading.clan_color).child(clan));
     }
-    name_line = name_line.child(div().text_color(heading.name_color).child(heading.name.clone()));
+    name_line = name_line.child(
+        div()
+            .id("replay-actions-heading-name")
+            .test_support()
+            .overflow_hidden()
+            .text_ellipsis()
+            .text_color(heading.name_color)
+            .child(heading.name.clone()),
+    );
 
-    let mut lines = v_flex().child(name_line);
-    if !heading.ship.is_empty() {
-        lines = lines.child(div().text_xs().text_color(crate::theme::text_dim()).child(heading.ship.clone()));
+    let mut lines = v_flex().min_w(px(0.)).child(name_line);
+    if let Some(ship) = heading.ship.clone() {
+        let mut ship_line = h_flex().gap_1().items_center().whitespace_nowrap();
+        if let Some(image) = heading.icon.clone() {
+            ship_line =
+                ship_line.child(div().flex_none().child(img(image).w(px(SHIP_ICON_WIDTH)).h(px(SHIP_ICON_WIDTH))));
+        } else if let Some(species) = heading.species.clone() {
+            ship_line = ship_line.child(div().flex_none().text_xs().child(species));
+        }
+        lines = lines.child(
+            ship_line.child(
+                div()
+                    .id("replay-actions-heading-ship")
+                    .test_support()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(ship),
+            ),
+        );
     }
-
-    let icon = match heading.icon.clone() {
-        Some(image) => div().flex_none().w(px(16.)).child(img(image).w(px(16.)).h(px(16.))).into_any_element(),
-        None => div().flex_none().text_xs().child(heading.species.clone()).into_any_element(),
-    };
 
     h_flex()
         .id("replay-actions-heading")
         .test_support()
         .aria_label(heading.spoken.clone())
-        .gap_1p5()
         .items_center()
-        .child(icon)
         .child(lines)
         .into_any_element()
 }
@@ -1195,7 +1217,8 @@ impl ActionsMenuData {
 /// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
 /// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
 /// external-link glyph the egui app's SHARE icon stood in for; the copy
-/// items write to the clipboard via `cx.write_to_clipboard`, matching
+/// items write to the clipboard via `cx.write_to_clipboard` and toast
+/// `ui.replay.build.link_copied` as the egui app does, matching
 /// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View
 /// Raw Player Metadata" instead emits `PlayerTableEvent::ViewRawJson` on
 /// `entity`, matching the egui app's behavior of opening a viewer (not
@@ -1279,14 +1302,17 @@ fn build_actions_menu(
 /// chat pane reveals its copy button the same way (`chat.rs::render_message`).
 ///
 /// `ix` keys the trigger's `ElementId` so every row's popover state is its own,
-/// and `group` ties the reveal to that row's hover. `entity` is threaded through
-/// to `build_actions_menu` for the raw-metadata item's event. Only the menu's own
-/// small `ActionsMenuData` is cloned out of `row` (see its doc comment), not the
-/// whole `PlayerRow`.
-fn row_actions(ix: usize, row: &PlayerRow, layout: &RowLayout, group: SharedString, name_edge: f32) -> AnyElement {
+/// and `group` ties the reveal to that row's hover. `layout.entity` is threaded
+/// through to `build_actions_menu` for the raw-metadata item's event.
+fn row_actions(
+    ix: usize,
+    row: Rc<ActionsMenuData>,
+    layout: &RowLayout,
+    group: SharedString,
+    name_edge: f32,
+) -> AnyElement {
     let debug = layout.debug;
     let entity = layout.entity.clone();
-    let row = ActionsMenuData::from_row(row, layout.icons);
     let trigger = Button::new(("replay-row-actions", ix))
         .ghost()
         .xsmall()
@@ -1421,7 +1447,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     // A right-click anywhere on the row opens the same menu the dots do: it is
     // where a reader reaches for a row's actions, and the dots are what says so.
     let menu_entity = layout.entity.clone();
-    let menu_row = ActionsMenuData::from_row(row, layout.icons);
+    let menu_row = Rc::new(ActionsMenuData::from_row(row, layout.icons));
     let debug = layout.debug;
     let group = SharedString::from(format!("replay-row-{ix}"));
     h_flex()
@@ -1453,7 +1479,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
-        .child(row_actions(ix, row, layout, group, name_edge))
+        .child(row_actions(ix, Rc::clone(&menu_row), layout, group, name_edge))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
         .context_menu(move |menu, _window, _cx| build_actions_menu(menu, &menu_row, debug, menu_entity.clone()))

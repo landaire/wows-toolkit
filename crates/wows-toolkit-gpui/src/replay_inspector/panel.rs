@@ -1354,8 +1354,8 @@ mod tests {
         assert!(
             !ReplayColumn::ALL
                 .iter()
-                .any(|col| crate::replay_inspector::table::column_label_key(*col) == "ui.replay.column.actions"),
-            "no column is headed Actions, so no width is charged for one"
+                .any(|col| crate::replay_inspector::table::column_label_key(*col) == "ui.replay.actions"),
+            "no column carries the egui app's Actions heading, so no width is charged for one"
         );
 
         // The fixture rows carry no links, so a menu built from one would be
@@ -1402,25 +1402,21 @@ mod tests {
             // Whose options these are, said at the top: a right-click menu
             // lands wherever the pointer was, and the rows are one line apart.
             // The heading is drawn, so what it says is read off its spoken form.
+            // What it says, read off the heading's spoken form, which is what a
+            // screen reader is given for the same item.
             let heading = window.find("replay-actions-heading");
-            let spoken = heading.label().unwrap_or_default().to_owned();
+            let spoken = heading.label().expect("the heading carries its own label").to_owned();
             assert!(
                 spoken.contains("[RAIN]") && spoken.contains("Harvey635") && spoken.contains("Fletcher"),
                 "the heading names the clan, the player and the ship, got {spoken:?}"
             );
 
-            // Two lines, the ship under the player, rather than one run of text
-            // with punctuation between them: the heading's row is taller than a
-            // row of the same menu that carries one line.
-            let one_line = offered
-                .iter()
-                .find(|(_, item)| item.label().is_some_and(|label| label.contains("WoWs Numbers")))
-                .map(|(_, item)| item.bounds().size.height)
-                .expect("the lookup item is offered");
+            // And where it says it: the ship under the player, not beside it.
+            let name = window.find("replay-actions-heading-name").bounds();
+            let ship = window.find("replay-actions-heading-ship").bounds();
             assert!(
-                heading.bounds().size.height > one_line,
-                "the ship is on a second line: heading {:?} against a one-line item's {one_line:?}",
-                heading.bounds().size.height
+                ship.origin.y >= name.origin.y + name.size.height,
+                "the ship line begins below the name line: {ship:?} against {name:?}"
             );
 
             let labels: Vec<String> = offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect();
