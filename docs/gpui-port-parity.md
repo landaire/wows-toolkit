@@ -22,14 +22,18 @@ kept so the next audit does not re-report them.
   silent. They are the kit's own `Notification`, not a copy of the egui app's
   bottom-right stack. Wired: the game-data load and its empty-replays warning,
   an invalid game directory, a failed replay parse, the Twitch credential, a
-  copied login, path, chat, build link, WG ID, session token and web link, a
-  saved chat, and both export paths (the armor pane's and the viewport's own,
+  copied login, path, chat, build link, WG ID, session token, web link, stats
+  table, chart image, fire-chance breakdown and timeline, a saved chat, a
+  timeline jump, and both export paths (the armor pane's and the viewport's own,
   which only logged). The rest of the egui app's 88 belong to features not
-  ported yet (collab sessions, the replay renderer, the game-data cache,
-  constants, the updater) or to structure the port does not have: its
-  opened_directory/open_no_directory notices are about workspaces, and a
-  missing replay disables the Search row's open button rather than toasting
-  when it is pressed.
+  ported yet (collab sessions, the game-data cache, constants, the updater) or to
+  structure the port does not have: its opened_directory/open_no_directory
+  notices are about workspaces, and a missing replay disables the Search row's
+  open button rather than toasting when it is pressed. A popped-out renderer
+  window is rooted in `window_shell::Shell`, which draws the same three layers
+  `App::render` does, so a panel's messages are shown in its own window as well
+  as in the dock; `toast.rs` refuses (and logs) rather than panicking on a window
+  with no `Root` at all.
 - [done] The command palette is `gpui_kit::component::command` over
   `palette.rs`, on ctrl+k and ctrl+shift+p. The egui palette's cascading
   sub-modes (search a player, a ship, a ship's armor) are not ported.
@@ -430,9 +434,14 @@ kept so the next audit does not re-report them.
   chat pane reveals its copy button the same way). The table gets that column's
   width back, and the actions stay where the row is. Both ways in are headed by
   the player they belong to, since a right-click menu lands wherever the pointer
-  was and the rows it could have come from are one line apart: the ship's class
-  icon, the clan tag and name in the colours the row gives them, and the ship on
-  a second line under them.
+  was and the rows it could have come from are one line apart: the division mark,
+  clan tag and name in the colours the row gives them, and the ship on a second
+  line under them behind its class icon. The icon rides the ship's line because
+  the kit indents every item by an icon's width as soon as any item in the menu
+  carries one. The heading is a disabled item, which the kit skips when the
+  arrows walk the menu; pressing Enter while it is the selection (the kit selects
+  item 0 on the first Down, disabled or not) closes the menu without doing
+  anything, which needs a `PopupMenu::confirm` guard in the kit to fix.
 - [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match

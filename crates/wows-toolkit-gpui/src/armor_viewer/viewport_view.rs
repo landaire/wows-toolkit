@@ -2615,38 +2615,20 @@ impl ViewportView {
 
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = asked.await else { return };
-            let for_log = display_name.clone();
+            let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
                     let result = load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path);
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
-                    result.map(|()| std::fs::metadata(&path).map(|meta| meta.len()).ok())
+                    result.map(|()| {
+                        let size = std::fs::metadata(&path).map(|meta| meta.len()).ok();
+                        (path, size)
+                    })
                 })
                 .await;
 
-            let _ = this.update_in(cx, |_this, window, cx| match written {
-                Ok(size) => {
-                    let message = match size {
-                        Some(bytes) => t!(
-                            "ui.armor.export.exported_with_size",
-                            ship = for_log,
-                            size = wows_toolkit_viewmodel::formatting::byte_size(bytes)
-                        )
-                        .into_owned(),
-                        None => t!("ui.armor.export.exported", ship = for_log).into_owned(),
-                    };
-                    crate::toast::ok(message, window, cx);
-                }
-                Err(err) => {
-                    tracing::error!("armor viewer: failed to export {for_log}: {err}");
-                    crate::toast::failed(
-                        t!("ui.armor.export.export_failed", error = err.to_string()).into_owned(),
-                        window,
-                        cx,
-                    );
-                }
-            });
+            let _ = this.update_in(cx, |_this, window, cx| load_ship::report_export(written, &ship, window, cx));
         })
         .detach();
     }

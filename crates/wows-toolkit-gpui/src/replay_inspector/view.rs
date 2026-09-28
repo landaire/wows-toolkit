@@ -686,7 +686,9 @@ impl ReplayInspectorView {
         let opened = cx.open_window(options, {
             let panel = panel.clone();
             move |window, cx| {
-                let view: AnyView = panel.into();
+                // Through a `Shell` so the panel's toasts and dialogs are drawn
+                // in this window too, not only in the one the dock lives in.
+                let view: AnyView = cx.new(|_cx| crate::window_shell::Shell::new(panel)).into();
                 cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
             }
         });

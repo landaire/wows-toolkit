@@ -231,15 +231,13 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                         .child(copy_button(
                             "collab-copy-token",
                             t!("ui.collab.copy_token").into_owned(),
-                            token,
-                            t!("ui.collab.token_copied").into_owned(),
+                            Copies { value: token, said: t!("ui.collab.token_copied").into_owned() },
                         ))
                         .children(web_link.map(|link| {
                             copy_button(
                                 "collab-copy-web-link",
                                 t!("ui.collab.copy_web_link").into_owned(),
-                                link,
-                                t!("ui.collab.web_link_copied").into_owned(),
+                                Copies { value: link, said: t!("ui.collab.web_link_copied").into_owned() },
                             )
                         })),
                 ),
@@ -318,14 +316,26 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
     body.into_any_element()
 }
 
-/// A button that puts `value` on the clipboard and says so with `said`.
-fn copy_button(id: &'static str, label: String, value: String, said: String) -> AnyElement {
+/// What a copy button puts on the clipboard, and what it says once it has.
+///
+/// One argument rather than two adjacent `String`s: swapping them would compile
+/// and put the announcement on the clipboard.
+struct Copies {
+    value: String,
+    said: String,
+}
+
+/// A button that copies `copies.value` and reports `copies.said`.
+///
+/// Reported at `info`, which is the level the egui collab panel uses for the
+/// same three copies (`replay_parser/mod.rs:4490`).
+fn copy_button(id: &'static str, label: String, copies: Copies) -> AnyElement {
     Button::new(id)
         .label(label)
         .compact()
         .on_click(move |_event, window, cx: &mut App| {
-            cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
-            crate::toast::ok(said.clone(), window, cx);
+            cx.write_to_clipboard(ClipboardItem::new_string(copies.value.clone()));
+            crate::toast::info(copies.said.clone(), window, cx);
         })
         .into_any_element()
 }
