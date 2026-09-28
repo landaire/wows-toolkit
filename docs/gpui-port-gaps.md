@@ -145,17 +145,27 @@ have used it.
 
 ## Reach: surfaces and entry points
 
-14. **Opening another replay directory.** Done in part 2026-09-28: the header
+14. ~~**Opening another replay directory.**~~ Done 2026-09-28: the header
     and the palette both open a directory the reader picks, the listing reads it as
     it is, and the header says which directory that is until the install's own is
     listed again. Everything that works on the install's listing -- previews,
     opening, indexing, the missing-build offer -- works on it.
 
-    Not ported: workspaces, which is the egui app's shape for this. It opens one
-    dock tab per directory, titled by its root, closeable, with "Search these
-    replays" on its context menu (`tab_state.rs:797`, `app.rs:300-311`), and keeps
-    them across launches; here one listing is replaced by another. The port's
-    `AppTab` is a fixed 7-entry strip, so there is also no second Search tab.
+    Workspaces landed the same day: a directory the reader opens is listed in a
+    tab of its own in the inspector's dock, titled by its root and closeable,
+    beside the install's own listing rather than in place of it. The tab carries
+    "Search these replays", which runs the query naming the index source that
+    directory was read under (`query_bar::seed::source_scoped`) and says so when
+    nothing has indexed it yet. Its listing raises the same events the sidebar's
+    does and is handled through the same arm, so a replay opens from an archive
+    exactly as it does from the install. Neither app keeps the open directories
+    across launches; the egui one has the same gap
+    (`tab_state.rs`'s `workspaces` is session state).
+
+    One difference stands: the egui Search tab is a closeable dock tab that can
+    be pushed again, where the port's is a fixed entry in the tab strip and so is
+    always there. Nothing is missing, and there is no second Search tab in either
+    (`Tab::Search` is one variant).
 15. ~~**Drag and drop.**~~ Done 2026-09-28: a replay dropped on the window opens
     in the inspector, a drop that is not one replay says so, and while the drag
     hovers a scrim over the window names the file it would open, or says one at a

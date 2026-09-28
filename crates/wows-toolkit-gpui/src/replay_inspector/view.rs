@@ -171,6 +171,13 @@ pub struct ReplayInspectorView {
     /// The playback viewports open, one per replay, for the same reason
     /// `open_panels` exists: a second ask brings the tab forward.
     open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
+    /// The directories open as tabs of their own, so one is brought forward
+    /// rather than listed twice.
+    open_workspaces: HashMap<PathBuf, WeakEntity<super::workspace::ReplayWorkspace>>,
+    /// The install, kept because a workspace's listing needs it: "Open in Game"
+    /// launches the executable beside it whatever directory is listed.
+    install_dir: String,
+    workspace_events: Vec<Subscription>,
     /// Held so a viewport's request for its own window still reaches this
     /// view; a dropped subscription is a silent button.
     renderer_events: Vec<Subscription>,
@@ -251,6 +258,11 @@ pub struct InspectorSettings {
 /// row back. Carries the whole blob because that is how it is stored.
 pub struct ReplaySettingsChanged(pub ReplaySettings);
 
+/// A workspace asked for its own directory to be searched.
+///
+/// Raised to the app, which owns the Search tab the query is run in.
+pub struct SearchDirectory(pub PathBuf);
+
 /// The listing holds replays from builds nothing on this machine can read.
 ///
 /// Raised to the app, which owns the game-data cache and the jobs that fetch
@@ -281,6 +293,7 @@ enum OpenTarget {
 
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 impl EventEmitter<GameDataMissing> for ReplayInspectorView {}
+impl EventEmitter<SearchDirectory> for ReplayInspectorView {}
 impl EventEmitter<ConstantsUnfit> for ReplayInspectorView {}
 
 /// A viewport asked for an armor viewer on one of the battle's ships, with
@@ -339,6 +352,9 @@ impl ReplayInspectorView {
             open_panels: HashMap::new(),
             current_replay: None,
             open_renderers: HashMap::new(),
+            open_workspaces: HashMap::new(),
+            install_dir: String::new(),
+            workspace_events: Vec::new(),
             renderer_events: Vec::new(),
             panel_events: Vec::new(),
             session_shared: false,
@@ -405,6 +421,7 @@ impl ReplayInspectorView {
         self.replay_settings = replay_settings;
         self.adopt_grouping(grouping, window, cx);
 
+        self.install_dir = wows_dir.clone();
         if wows_dir.is_empty() {
             self.game_data = None;
             self.game_data_status = GameDataStatus::Failed(t!("ui.messages.wows_dir_not_set").into_owned());
@@ -708,24 +725,70 @@ impl ReplayInspectorView {
 
     /// Lists a directory the reader picks, instead of the install's own.
     ///
-    /// The egui app opens each such directory as a workspace of its own; here it
-    /// replaces what the listing shows, and the header says which directory that
-    /// is. Everything else -- previews, opening, indexing -- works on it as it
-    /// does on the install's.
+    /// Opened as a workspace of its own, as the egui app opens one: a tab per
+    /// directory, titled by its root and closeable, so an archive sits beside
+    /// the install's own listing rather than replacing it. Everything else --
+    /// previews, opening, indexing -- works on it as it does on the install's.
     pub(crate) fn open_directory(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let asked = crate::dialog::pick_folder(&t!("ui.replay.open_directory"));
         cx.spawn_in(window, async move |this, cx| {
             let Some(directory) = asked.await else { return };
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.browser.update(cx, |browser, cx| browser.scan_directory(directory.clone(), cx));
-                crate::toast::info(
-                    t!("ui.replay.reading_directory", dir = directory.display().to_string()).into_owned(),
-                    window,
-                    cx,
-                );
-            });
+            let _ = this.update_in(cx, |this, window, cx| this.open_workspace(directory, window, cx));
         })
         .detach();
+    }
+
+    /// Lists `root` in a tab of its own.
+    ///
+    /// A directory already open is brought forward rather than listed twice:
+    /// two tabs on one directory would each watch it and each report the same
+    /// replay appearing.
+    pub(crate) fn open_workspace(&mut self, root: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(open) = self.open_workspaces.get(&root).and_then(|panel| panel.upgrade()) {
+            let id = PanelId::from(open.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            cx.notify();
+            return;
+        }
+
+        let wows_dir = self.install_dir.clone();
+        let workspace = cx.new(|cx| super::workspace::ReplayWorkspace::new(root.clone(), wows_dir, cx));
+        self.workspace_events.push(cx.subscribe_in(&workspace, window, Self::on_workspace_event));
+        self.open_workspaces.insert(root.clone(), workspace.downgrade());
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(workspace), DockPlacement::Center, None, window, cx);
+        });
+        crate::toast::info(
+            t!("ui.replay.reading_directory", dir = root.display().to_string()).into_owned(),
+            window,
+            cx,
+        );
+        cx.notify();
+    }
+
+    /// A workspace tab asked for something.
+    ///
+    /// Its listing's own events are handled the way the sidebar's are, so a
+    /// replay opens from an archive exactly as it does from the install.
+    fn on_workspace_event(
+        &mut self,
+        _workspace: &Entity<super::workspace::ReplayWorkspace>,
+        event: &super::workspace::WorkspaceEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match event {
+            super::workspace::WorkspaceEvent::Listing(listing) => {
+                let listing = listing.clone();
+                // Through the same handler the sidebar's listing goes through,
+                // which is what keeps one behaviour for both.
+                self.on_browser_event(&self.browser.clone(), &listing, window, cx);
+            }
+            super::workspace::WorkspaceEvent::SearchThese(root) => cx.emit(SearchDirectory(root.clone())),
+        }
+        // A tab the reader closed leaves a dead handle behind, which would
+        // otherwise refuse to open that directory again.
+        self.open_workspaces.retain(|_, panel| panel.upgrade().is_some());
     }
 
     /// Writes a video of each marked battle into a directory the reader picks.
