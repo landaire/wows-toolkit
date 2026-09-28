@@ -844,6 +844,11 @@ pub struct IndexableBattle {
     /// does not, which the re-index hint counts.
     pub game_mode_id: Option<i32>,
     pub version_build: Option<u32>,
+    /// Whether the mapping the results were read through belongs to this build.
+    /// Results read through one that does not are never stored: the keys they are
+    /// read by move between builds, so the figures would be wrong rather than
+    /// missing.
+    pub constants_fit: wows_toolkit_viewmodel::index_rows::ConstantsFit,
     /// The ship the recording player was in.
     pub self_ship_id: Option<GameParamId>,
     /// Whether the server results are still to come, which is ordinary for a
@@ -1027,6 +1032,7 @@ pub(crate) fn parse_replay_with_alts(
         arena_id: report.arena_id(),
         game_mode_id: report.game_mode_id().known().map(|mode| mode.id()),
         version_build: version.build_number(),
+        constants_fit: wows_toolkit_viewmodel::index_rows::constants_fit(&constants_json, build, Some(version)),
         self_ship_id: normalized.players.iter().find(|player| player.is_self).map(|player| player.ship_id),
         // The results are pending when the packet stream carries none, which
         // is what a replay of a battle that just ended looks like.

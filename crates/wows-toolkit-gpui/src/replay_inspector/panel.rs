@@ -461,13 +461,19 @@ impl ReplayPanel {
                 mapped_results_json,
                 fire_chance,
                 session_stat: _,
-                // The index reads this from its own pass over the directory,
-                // not from a replay opened for reading.
-                indexable: _,
+                indexable,
                 // Sharing is decided where a replay lands, not where one is
                 // opened: opening a replay is not contributing it.
                 shareable: _,
             }) => {
+                // The mapping the results were read through belongs to another
+                // build, so what the table shows was decoded through keys that may
+                // have moved. The view can fetch one; this can only say so.
+                if indexable.constants_fit == wows_toolkit_viewmodel::index_rows::ConstantsFit::Mismatched
+                    && let Some(build) = indexable.version_build
+                {
+                    cx.emit(ConstantsMismatched { build, version: Some(model.context.version.clone()) });
+                }
                 self.export = Some(export);
                 self.write_auto_export(cx);
                 let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
@@ -570,6 +576,19 @@ impl ReplayPanel {
 }
 
 impl EventEmitter<PanelEvent> for ReplayPanel {}
+
+/// A panel read a battle whose result mapping does not belong to its build.
+///
+/// The panel cannot fetch one; the view that owns it can, and the figures on
+/// screen were read through keys that may have moved until it does.
+pub struct ConstantsMismatched {
+    pub build: u32,
+    /// The version the replay names, which is what a fetch resolves a mapping
+    /// for when the build itself was never published.
+    pub version: Option<String>,
+}
+
+impl EventEmitter<ConstantsMismatched> for ReplayPanel {}
 
 /// A panel asked for its own replay to be rendered.
 ///

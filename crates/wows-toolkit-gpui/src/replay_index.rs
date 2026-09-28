@@ -20,7 +20,6 @@ use wows_toolkit_config::index::rows::IndexWriteMode;
 use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
 use wows_toolkit_config::index::unindexable::Unindexable;
-use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
 
@@ -129,9 +128,10 @@ pub fn index_one(
         self_ship_id: battle.self_ship_id,
         results_pending: battle.results_pending,
         indexed_at,
-        // This pass reads each replay through its own build's data, so the
-        // constants always belong to it.
-        fit: ConstantsFit::Matched,
+        // Judged as the replay was read: a build whose published mapping is not
+        // here yet is read through the nearest one there is, and results read
+        // that way are not worth storing.
+        fit: battle.constants_fit,
     };
 
     let rows = map_rows(&battle.normalized, &context);
