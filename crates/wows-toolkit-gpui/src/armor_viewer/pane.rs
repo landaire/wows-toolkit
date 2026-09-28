@@ -927,17 +927,22 @@ impl ArmorViewerPane {
         param_index: String,
         display_name: String,
         hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
-        incoming: crate::replay_renderer::IncomingContext,
+        incoming: Box<crate::replay_renderer::IncomingContext>,
         cx: &mut Context<Self>,
     ) {
         self.pending_hits = hits;
         self.playback_at = incoming.at;
-        self.incoming = IncomingFire { context: incoming, filter: IncomingFilter::default() };
+        self.incoming =
+            IncomingFire { context: *incoming, filter: IncomingFilter::default(), victim: Some(param_index.clone()) };
         let active = self.dock.read(cx).active_viewport();
         if is_ship_already_loaded(active.read(cx).loaded_param_index(), &param_index) {
             // Already showing it, so only what it has taken has changed.
             let hits = std::mem::take(&mut self.pending_hits);
-            active.update(cx, |view, cx| view.show_hits(hits, cx));
+            active.update(cx, |view, cx| {
+                view.show_hits(hits, cx);
+                let incoming = &self.incoming.context;
+                view.compare_incoming(&incoming.taken, &incoming.shells, cx);
+            });
             return;
         }
         self.start_ship_load(param_index, display_name, cx);
@@ -1018,6 +1023,7 @@ impl ArmorViewerPane {
             Ok(armor) => {
                 self.ship_load = ShipLoadState::Idle;
                 self.ship_loaded = true;
+                let comparing = self.incoming.is_about(&param_index);
                 target_viewport.update(cx, |viewport, cx| {
                     viewport.set_ship_loading(None, cx);
                     // Set before `show_armor`: a reload (Milestone 4 Task 8c)
@@ -1032,6 +1038,10 @@ impl ArmorViewerPane {
                     let hits = std::mem::take(&mut self.pending_hits);
                     if !hits.is_empty() {
                         viewport.show_hits(hits, cx);
+                    }
+                    if comparing {
+                        let incoming = &self.incoming.context;
+                        viewport.compare_incoming(&incoming.taken, &incoming.shells, cx);
                     }
                 });
             }
@@ -1323,6 +1333,29 @@ impl EventEmitter<SeekRequested> for ArmorViewerPane {}
 pub(crate) struct IncomingFire {
     pub(crate) context: crate::replay_renderer::IncomingContext,
     pub(crate) filter: IncomingFilter,
+    /// The ship the log is about. A comparison run against any other hull would
+    /// be about plating those shells never met, which a compare split would
+    /// otherwise do.
+    pub(crate) victim: Option<String>,
+}
+
+impl IncomingFire {
+    /// Whether the log is about `param_index`'s ship.
+    fn is_about(&self, param_index: &str) -> bool {
+        self.victim.as_deref() == Some(param_index)
+    }
+
+    /// What a viewer showing this ship should compare, where it is the ship the
+    /// log is about.
+    pub(crate) fn to_compare(
+        &self,
+        param_index: Option<&str>,
+    ) -> Option<(
+        Vec<wows_replay_insights::timeline::PreExtractedHit>,
+        std::collections::HashMap<wows_replays::types::GameParamId, wowsunpack::game_params::types::ShellInfo>,
+    )> {
+        self.is_about(param_index?).then(|| (self.context.taken.clone(), self.context.shells.clone()))
+    }
 }
 
 /// Which ship an export dialog opens on, and what it opens showing.

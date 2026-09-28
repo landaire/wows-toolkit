@@ -821,6 +821,53 @@ mod tests {
         );
     }
 
+    /// Needs a local game install: pins which way round the exported meshes are.
+    ///
+    /// `hull_impact::into_mesh_space` rests on the bow sitting at -Z, and a sign
+    /// that flips puts every hit marker and every cast shell on the other end of
+    /// the ship while still landing on real plating. Read off Iowa's main
+    /// battery, which has two turrets forward of the origin and one aft. Run as
+    /// `load_ship_armor_against_a_real_install_produces_a_renderable_model`
+    /// documents.
+    #[test]
+    #[ignore = "needs a local game install; see the doc comment for the run command"]
+    fn the_exported_mesh_has_its_bow_at_negative_z() {
+        let wows_dir = std::env::var("WOWS_ARMOR_VIEWER_LOAD_TEST_DIR")
+            .expect("set WOWS_ARMOR_VIEWER_LOAD_TEST_DIR to a WoWs install directory");
+        let wows_dir = std::path::PathBuf::from(wows_dir);
+        let available =
+            wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
+        let build = *available.last().expect("expected at least one installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&wows_dir, build).expect("failed to build the VFS");
+        let metadata = Arc::new(
+            wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
+                .expect("failed to build GameMetadataProvider from the VFS"),
+        );
+        let ship_assets = ShipAssets::from_vfs_with_metadata(&vfs, Arc::clone(&metadata))
+            .expect("failed to load ShipAssets from the VFS");
+        let catalog = crate::armor_viewer::catalog::ShipCatalog::build(&metadata);
+        let ship = catalog
+            .nations
+            .iter()
+            .flat_map(|nation| &nation.classes)
+            .flat_map(|class| &class.ships)
+            .find(|ship| ship.display_name.contains("Iowa"))
+            .expect("expected Iowa in the real catalog");
+        let armor = load_ship_armor_by_param(&ship_assets, &ship.param_index, &ship.display_name)
+            .unwrap_or_else(|e| panic!("failed to load armor for {}: {e}", ship.display_name));
+
+        let mut turrets: Vec<(String, f32)> = armor
+            .hull_meshes
+            .iter()
+            .filter(|mesh| mesh.group == wowsunpack::export::part_group::PartGroup::MainBattery)
+            .filter_map(|mesh| mesh.transform.map(|t| (mesh.name.clone(), t[14])))
+            .collect();
+        turrets.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(turrets.len(), 3, "Iowa carries three main battery mounts: {turrets:?}");
+        assert!(turrets[0].1 < 0.0 && turrets[1].1 < 0.0, "the two forward turrets sit at -Z: {turrets:?}");
+        assert!(turrets[2].1 > 0.0, "and the aft one at +Z: {turrets:?}");
+    }
+
     /// Needs a local game install: exercises the exact synchronous path
     /// `viewport_view::ViewportView::confirm_export`'s background task runs
     /// (`export_options_from_selection` + `export_ship_glb`) end to end

@@ -230,11 +230,30 @@ have used it.
     reached, and a press along it moves playback to that moment. Its shape is
     read by `wows_toolkit_viewmodel::armor::health_strip`, which both apps use.
 
-    Not ported: the sim-agrees marker that says where this port's own simulation
-    and the server disagree, which would mean running a simulation per landed
-    shell where this port runs one per cast arc. Auto-scroll has nothing to
-    scroll: the log is the panel's own list rather than a pane that follows
-    playback.
+    Each armour-piercing shell in the log also carries what this app's own
+    simulation made of it: agrees, an RNG-zone angle where either call is right,
+    or the two verdicts where they differ. The shell is cast back along the way
+    it arrived -- how far it flew and which way it was going come from
+    `wows_replay_insights::hull_impact::shell_arrival`, off the salvo rather
+    than off the post-impact terminal ballistics -- through the hull on screen,
+    and compared by `wows_toolkit_viewmodel::armor::arc::compare_with_server`,
+    which moved out of the egui crate along with `sim_outcome` and the verdict
+    types. Run once as the ship loads, since the log reads the whole battle
+    rather than where playback stands, and only against the hull the shells
+    actually struck. A shell the check cannot answer for is counted and said
+    rather than left as a blank line, and an outcome the simulation does not
+    model no longer reads as agreement.
+
+    Placing an impact on a hull was wrong in both apps and is fixed with it: the
+    exported meshes have their Z negated, so the bow sits at -Z in a mesh while
+    `into_model_axes` leaves it at +Z, and markers were drawn on the other end of
+    the ship. `hull_impact::into_mesh_space` applies that negation for points and
+    directions alike, the egui viewer's `world_to_model` and compass rose read
+    the same frame, and an ignored test pins the sign against Iowa's main
+    battery mounts.
+
+    Auto-scroll has nothing to scroll: the log is the panel's own list rather
+    than a pane that follows playback.
 19. ~~**The menu bar and the status bar.**~~ Done 2026-09-28: the strip's trailing
     end carries Check for Updates, About, Create Issue, Discord and Quit, and a
     status strip along the bottom names the jobs the app owns -- a game-data cache

@@ -983,6 +983,8 @@ deselect = "ยกเลิกการเลือก"
 select_all = "เลือกทั้งหมด"
 no_data = "ข้อมูลกระสุนไม่พร้อมใช้งานแล้ว"
 sim_agrees = "ผลจำลองตรงกัน"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "ไม่มีแผ่นเกราะที่ถูกโจมตี"
 
 # -- ระดับข้อได้เปรียบ --

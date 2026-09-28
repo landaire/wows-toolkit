@@ -939,6 +939,8 @@ deselect = "Seçimi kaldır"
 select_all = "Tümünü Seç"
 no_data = "Mermi verileri artık mevcut değil"
 sim_agrees = "Simülasyon uyuşuyor"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "Zırh isabeti yok"
 
 [advantage]

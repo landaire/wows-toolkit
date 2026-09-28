@@ -10,6 +10,7 @@
 
 use nalgebra::Rotation3;
 use nalgebra::Vector3;
+use wows_core::units::Meters;
 use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
 use wows_replays::analyzer::battle_controller::state::VictimPose;
 use wowsunpack::game_types::ShellHitType;
@@ -33,20 +34,33 @@ pub fn into_hull_frame(yaw: f32, pitch: f32, roll: f32) -> Rotation3<f32> {
     roll * pitch * yaw
 }
 
-/// From the hull's frame to the model's.
+/// From the hull's frame to the ship-model axes GameParams states its own
+/// geometry in.
 ///
-/// In the hull's frame the bow is +X and up is +Y; in the exported model the
-/// bow is +Z, starboard +X and up +Y. This quarter turn maps the one onto
-/// the other.
+/// In the hull's frame the bow is +X and up is +Y; in that ship-model space the
+/// bow is +Z, starboard +X and up +Y. This quarter turn maps the one onto the
+/// other.
 ///
-/// A direction taken through this still needs its Z negated afterwards, to
-/// account for the model exporter turning a left-handed frame into a
-/// right-handed one.
+/// Whatever is taken through this -- a point or a direction -- still needs its
+/// Z negated to reach the space the exported meshes are in; see
+/// [`into_mesh_space`].
 pub fn into_model_axes() -> Rotation3<f32> {
     Rotation3::from_axis_angle(&Vec3::y_axis(), -std::f32::consts::FRAC_PI_2)
 }
 
-/// Where `hit` landed on its victim's model, in the model's own frame.
+/// Into the space the exported armor and hull meshes are in.
+///
+/// `InteractiveArmorMesh::from_armor_model` negates Z on every vertex to leave
+/// BigWorld's left-handed space for a right-handed one, so the bow sits at -Z in
+/// a mesh while GameParams' own ship-model space puts it at +Z. Measured on
+/// Iowa's splash boxes, whose names say which end they are: the bow boxes run
+/// -8.9 to -4.7 and the stern boxes +4.7 to +8.8. A point or a direction drawn
+/// against those meshes has to follow, or it lands on the other end of the ship.
+pub fn into_mesh_space(in_model_axes: Vec3) -> Vec3 {
+    Vec3::new(in_model_axes.x, in_model_axes.y, -in_model_axes.z)
+}
+
+/// Where `hit` landed on its victim's model, in the space the meshes are in.
 ///
 /// `model_center` is where the hull sits in that frame, and `bounds`, when
 /// given, is the hull's extent: an impact is held within it along the two
@@ -79,13 +93,61 @@ pub fn place(
 ) -> Option<[f32; 3]> {
     let pose = pose?;
     let offset = Vec3::new(impact.x - pose.position.x, impact.y - pose.position.y, impact.z - pose.position.z);
-    let in_model = into_model_axes() * (into_hull_frame(pose.yaw, pose.pitch, pose.roll) * offset);
+    let in_model = into_mesh_space(into_model_axes() * (into_hull_frame(pose.yaw, pose.pitch, pose.roll) * offset));
     let center = Vec3::new(model_center[0], model_center[1], model_center[2]);
     let at = center + in_model;
     Some(match bounds {
         Some((low, high)) => [at.x.clamp(low[0], high[0]), at.y, at.z.clamp(low[2], high[2])],
         None => [at.x, at.y, at.z],
     })
+}
+
+/// How far the shell flew, and which way it was going when it arrived.
+///
+/// The two things a simulation of that shell through the hull needs, and both
+/// are read off the salvo it belongs to rather than off the impact: the
+/// terminal-ballistics velocity a hit carries is post-impact, so it says where
+/// the shell went afterwards and not where it came from.
+///
+/// `None` for a hit with no salvo behind it, one whose own shot the salvo does
+/// not list, or one whose victim's pose was not held: each leaves the arrival
+/// unknowable rather than approximate.
+pub fn shell_arrival(hit: &ResolvedShotHit) -> Option<ShellArrival> {
+    let pose = hit.victim_pose.as_ref()?;
+    let salvo = hit.salvo.as_ref()?;
+    let shot = salvo.shots.iter().find(|shot| shot.shot_id == hit.hit.shot_id)?;
+
+    let impact = &hit.hit.position;
+    let travelled = shot.origin.distance_xz(impact);
+    let world = Vec3::new(impact.x - shot.origin.x, impact.y - shot.origin.y, impact.z - shot.origin.z);
+    let in_model = into_mesh_space(into_model_axes() * (into_hull_frame(pose.yaw, pose.pitch, pose.roll) * world));
+
+    let flat = Vec3::new(in_model.x, 0.0, in_model.z);
+    let length = flat.norm();
+    // A shell that came straight down has no bearing to read, and the fall
+    // angle alone does not say which way it was going.
+    if length < 1e-3 {
+        return None;
+    }
+    Some(ShellArrival { travelled, bearing: flat / length })
+}
+
+/// Where a shell came from, in the victim model's own frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShellArrival {
+    /// How far it flew, which is what its arrival speed and angle are solved
+    /// from.
+    ///
+    /// Read by `Vec3::distance_xz`, at 30 m to the world unit. Which scale a
+    /// separation between two distant points is really in is open: `wows_core`'s
+    /// `WorldDistance` measures the same coordinates at 15 for an offset against
+    /// a hull, and says the two are unreconciled. This follows the firing range
+    /// the ballistics solver is already run on, so a shell reads the same here
+    /// as it does in the egui viewer.
+    pub travelled: Meters,
+    /// The way it was going, flattened and normalised: the fall angle belongs
+    /// to the solve rather than to the record.
+    pub bearing: Vec3,
 }
 
 /// One line of a shot log: when a shell landed and what it did.
@@ -130,6 +192,10 @@ fn mmss(seconds: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wows_replays::types::EntityId;
+    use wows_replays::types::GameClock;
+    use wows_replays::types::GameParamId;
+    use wows_replays::types::ShotId;
 
     const NEAR: f32 = 1e-3;
 
@@ -145,14 +211,14 @@ mod tests {
         place(&impact, Some(pose), center, None).expect("a pose was given")
     }
 
-    /// A ship facing east takes a hit ahead of it on its bow, which is +Z in
-    /// the model.
+    /// A ship facing east takes a hit ahead of it on its bow, which is -Z in
+    /// the mesh the viewers draw.
     #[test]
     fn a_hit_ahead_of_the_bow_lands_on_the_bow() {
         let ahead = world(150.0, 0.0, 200.0);
         let at = placed(ahead, &pose(0.0), [0.0, 0.0, 0.0]);
 
-        assert!((at[2] - 50.0).abs() < NEAR, "fifty metres up the bow: {at:?}");
+        assert!((at[2] + 50.0).abs() < NEAR, "fifty units up the bow: {at:?}");
         assert!(at[0].abs() < NEAR, "and nothing to either side");
     }
 
@@ -182,7 +248,7 @@ mod tests {
         let ahead = world(150.0, 0.0, 200.0);
         let at = placed(ahead, &pose(0.0), [1.0, 2.0, 3.0]);
 
-        assert!((at[0] - 1.0).abs() < NEAR && (at[1] - 2.0).abs() < NEAR && (at[2] - 53.0).abs() < NEAR, "{at:?}");
+        assert!((at[0] - 1.0).abs() < NEAR && (at[1] - 2.0).abs() < NEAR && (at[2] + 47.0).abs() < NEAR, "{at:?}");
     }
 
     /// A hit beyond the hull is held at its edge, so a shell that struck
@@ -194,7 +260,7 @@ mod tests {
         let bounds = Some(([-10.0, -5.0, -100.0], [10.0, 20.0, 100.0]));
         let at = place(&far, Some(&pose(0.0)), [0.0, 0.0, 0.0], bounds).expect("a pose was given");
 
-        assert!((at[2] - 100.0).abs() < NEAR, "held at the bow: {at:?}");
+        assert!((at[2] + 100.0).abs() < NEAR, "held at the bow: {at:?}");
         assert!((at[1] - 30.0).abs() < NEAR, "but its height is left alone");
     }
 
@@ -214,5 +280,91 @@ mod tests {
     #[test]
     fn an_impact_with_no_pose_is_refused() {
         assert!(place(&world(150.0, 0.0, 200.0), None, [0.0, 0.0, 0.0], None).is_none());
+    }
+
+    fn shot(origin: WorldPos, shot_id: ShotId) -> wows_replays::analyzer::decoder::ArtilleryShotData {
+        wows_replays::analyzer::decoder::ArtilleryShotData {
+            origin,
+            pitch: 0.0,
+            speed: 800.0,
+            target: WorldPos::new(0.0, 0.0, 0.0),
+            shot_id,
+            gun_barrel_id: 0,
+            server_time_left: 0.0,
+            shooter_height: 10.0,
+            hit_distance: 0.0,
+        }
+    }
+
+    fn landed(origin: WorldPos, impact: WorldPos, pose: Option<VictimPose>) -> ResolvedShotHit {
+        let shot_id = ShotId::from(7u32);
+        let owner_id = EntityId::from(1u32);
+        ResolvedShotHit {
+            clock: GameClock(0.0),
+            hit: wows_replays::analyzer::decoder::ShotHit {
+                owner_id,
+                hit_type: wows_replays::analyzer::decoder::HitType {
+                    collision: Recognized::Unknown("0".into()),
+                    shell_hit: Recognized::Known(ShellHitType::Normal),
+                    raw: 0,
+                },
+                shot_id,
+                position: impact,
+                terminal_ballistics: None,
+            },
+            victim_entity_id: EntityId::from(2u32),
+            salvo: Some(wows_replays::analyzer::decoder::ArtillerySalvo {
+                owner_id,
+                params_id: GameParamId::from(3u32),
+                salvo_id: 0,
+                shots: vec![shot(origin, shot_id)],
+            }),
+            fired_at: None,
+            victim_pose: pose,
+        }
+    }
+
+    /// A shell fired from astern of a ship facing east arrives travelling up
+    /// the hull, which is -Z in the mesh, and flew the distance between the two
+    /// points. The bearing and the placement share a frame, which is the point
+    /// of reading both here.
+    #[test]
+    fn a_shell_from_astern_arrives_up_the_hull() {
+        let hit = landed(world(0.0, 40.0, 200.0), world(100.0, 0.0, 200.0), Some(pose(0.0)));
+        let arrival = shell_arrival(&hit).expect("a salvo and a pose were given");
+
+        // 3 km at the 30 m to the unit `distance_xz` reads a separation at.
+        assert!((arrival.travelled.value() - 3000.0).abs() < 1.0, "{:?}", arrival.travelled);
+        assert!((arrival.bearing.z + 1.0).abs() < NEAR, "up the hull: {:?}", arrival.bearing);
+        assert!(arrival.bearing.x.abs() < NEAR && arrival.bearing.y.abs() < NEAR);
+    }
+
+    /// Turn the ship a quarter and the same shell arrives across it instead.
+    #[test]
+    fn the_same_shell_arrives_abeam_once_the_ship_has_turned() {
+        let hit = landed(world(0.0, 40.0, 200.0), world(100.0, 0.0, 200.0), Some(pose(std::f32::consts::FRAC_PI_2)));
+        let arrival = shell_arrival(&hit).expect("a salvo and a pose were given");
+
+        assert!(arrival.bearing.z.abs() < NEAR, "no longer up the hull: {:?}", arrival.bearing);
+        // The sign matters: port and starboard both land on real plating, so a
+        // mirrored bearing reads as a measurement.
+        assert!((arrival.bearing.x - 1.0).abs() < NEAR, "but across it, to starboard: {:?}", arrival.bearing);
+    }
+
+    /// A hit the salvo does not list the shot of says nothing about where the
+    /// shell came from, and a guess would be read as a measurement.
+    #[test]
+    fn an_arrival_with_no_matching_shot_is_refused() {
+        let mut hit = landed(world(0.0, 40.0, 200.0), world(100.0, 0.0, 200.0), Some(pose(0.0)));
+        hit.salvo.as_mut().expect("built with a salvo").shots.clear();
+        assert!(shell_arrival(&hit).is_none());
+    }
+
+    /// And one whose victim was not being watched is refused for the reason
+    /// the placement is.
+    #[test]
+    fn an_arrival_with_no_pose_is_refused() {
+        let hit = landed(world(0.0, 40.0, 200.0), world(100.0, 0.0, 200.0), None);
+        assert!(shell_arrival(&hit).is_none());
     }
 }

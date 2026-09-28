@@ -427,7 +427,7 @@ impl RealtimeArmorViewer {
     ) -> Vec3 {
         let offset = Vec3::new(world_pos.x - ship_pos.x, world_pos.y - ship_pos.y, world_pos.z - ship_pos.z);
         let body = rot * offset;
-        let remapped = Self::axis_remap() * body;
+        let remapped = wows_replay_insights::hull_impact::into_mesh_space(Self::axis_remap() * body);
         let model = model_center + remapped;
         if let Some((min, max)) = bounds {
             Vec3::new(model.x.clamp(min.x, max.x), model.y, model.z.clamp(min.z, max.z))
@@ -619,14 +619,12 @@ impl RealtimeArmorViewer {
         // Transform both origin and impact to mesh-space via world_to_model.
         let model_impact = Self::world_to_model(&impact_pos, &ship_world_pos, &rot, &model_center, bounds.as_ref());
 
-        // Shell direction: transform the world-space travel vector (impact − origin)
-        // through inverse_ship_rotation + axis_remap, then negate Z to match the
-        // GLTF mesh's right-handed coordinate system (Z-negated during export).
+        // Shell direction: the world-space travel vector (impact - origin) taken
+        // through the same rotation and axis remap the impact point is.
         let world_dir =
             Vec3::new(impact_pos.x - shot.origin.x, impact_pos.y - shot.origin.y, impact_pos.z - shot.origin.z);
         let body_dir = rot * world_dir;
-        let remapped = Self::axis_remap() * body_dir;
-        let mesh_dir = Vec3::new(remapped.x, remapped.y, -remapped.z);
+        let mesh_dir = wows_replay_insights::hull_impact::into_mesh_space(Self::axis_remap() * body_dir);
         let horiz_len = (mesh_dir.x * mesh_dir.x + mesh_dir.z * mesh_dir.z).sqrt();
         if horiz_len < 0.001 {
             return None;
@@ -1268,8 +1266,9 @@ impl RealtimeArmorViewer {
         // directions to screen (right, up) using only the horizontal camera angle.
         //
         // BigWorld: +X = East, +Z = North (from heading conversion: yaw = PI/2 - heading).
-        // Mesh coordinate system (from world_to_model axis remap):
-        //   mesh +Z = BigWorld +X (East) direction at yaw=0
+        // Mesh coordinate system (world_to_model's axis remap, then the
+        // exporter's Z negation in hull_impact::into_mesh_space):
+        //   mesh -Z = BigWorld +X (East) direction at yaw=0
         //   mesh -X = BigWorld +Z (North) direction
         //
         // Camera at azimuth=a looks from direction (sin(a), 0, cos(a)).
@@ -1284,9 +1283,9 @@ impl RealtimeArmorViewer {
         let (sa, ca) = az.sin_cos();
 
         let project_world_dir = |world_x: f32, world_z: f32| -> (f32, f32) {
-            // BigWorld -> mesh: mesh_x = -world_z, mesh_z = +world_x
+            // BigWorld -> mesh: mesh_x = -world_z, mesh_z = -world_x
             let mx = -world_z;
-            let mz = world_x;
+            let mz = -world_x;
             // Project onto screen using camera azimuth
             let screen_x = mx * ca - mz * sa;
             let screen_y = -(mx * sa + mz * ca);

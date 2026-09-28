@@ -476,7 +476,7 @@ impl Viewport3D {
 
         // Keep CPU-side data for picking
         let positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
-        self.pick_data.insert(id, PickableMesh { positions, indices: indices.to_vec() });
+        self.pick_data.insert(id, PickableMesh::new(positions, indices.to_vec()));
 
         self.needs_redraw = true;
         id
@@ -524,7 +524,7 @@ impl Viewport3D {
 
         // Keep CPU-side data for picking
         let positions: Vec<[f32; 3]> = vertices.iter().map(|v| v.position).collect();
-        self.pick_data.insert(id, PickableMesh { positions, indices: indices.to_vec() });
+        self.pick_data.insert(id, PickableMesh::new(positions, indices.to_vec()));
 
         self.needs_redraw = true;
         id
