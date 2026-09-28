@@ -429,6 +429,48 @@ impl App {
         }
     }
 
+    /// Reports what the last run's crash left behind, once.
+    ///
+    /// The egui app shows the same text in its Crash Detected window with a copy
+    /// button and a link to file an issue; this reports it and puts it on the
+    /// clipboard, which is what a reader does with it next.
+    pub(crate) fn report_last_crash(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(report) = crate::logging::take_crash_report() else { return };
+        let copied = report.clone();
+        window.open_alert_dialog(cx, move |alert, _window, _cx| {
+            let copied = copied.clone();
+            alert
+                .title(t!("ui.windows.crash_detected").into_owned())
+                .description(format!("{}\n\n{}", t!("ui.dialogs.crash_message"), copied.trim()))
+                .ok_text(t!("ui.buttons.copy").into_owned())
+                .show_cancel(true)
+                .on_ok(move |_event, window, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(copied.clone()));
+                    crate::toast::ok(t!("ui.stats.copied").into_owned(), window, cx);
+                    true
+                })
+        });
+    }
+
+    /// Puts the newest log file on the clipboard, for a bug report.
+    pub(crate) fn copy_latest_log(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(path) = crate::logging::newest_log() else {
+            crate::toast::warn(t!("ui.messages.log_not_found").into_owned(), window, cx);
+            return;
+        };
+        match std::fs::read_to_string(&path) {
+            Ok(contents) => {
+                let bytes = contents.len() / 1024;
+                let named = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+                cx.write_to_clipboard(ClipboardItem::new_string(contents));
+                crate::toast::ok(t!("ui.messages.log_copied", bytes = bytes, file = named).into_owned(), window, cx);
+            }
+            Err(err) => {
+                crate::toast::failed(t!("ui.messages.log_copy_failed", error = err).into_owned(), window, cx);
+            }
+        }
+    }
+
     /// Offers to fetch the game data a directory of replays needs and this
     /// machine does not have.
     ///
@@ -771,6 +813,7 @@ impl App {
                 self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
             }
             PaletteAction::SearchFor(query) => self.run_search(query.to_string(), window, cx),
+            PaletteAction::CopyLatestLog => self.copy_latest_log(window, cx),
         }
         cx.notify();
     }

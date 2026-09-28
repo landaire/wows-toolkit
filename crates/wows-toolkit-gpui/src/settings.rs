@@ -49,6 +49,8 @@ pub struct GpuiSettings {
     /// `check_for_updates` in the shared database: whether the app looks for a
     /// new release at startup. Defaults on, as the egui app does.
     pub check_for_updates: bool,
+    /// `enable_logging`: whether the session is written to the rotated log file
+    /// beside the executable. Defaults on, as the egui app does.
     pub enable_logging: bool,
     pub data_sharing: DataSharingMode,
     /// Empty means no proxy, which is the absence this setting has always
@@ -103,7 +105,9 @@ impl GpuiSettings {
         let replay = queries::get_setting::<ReplaySettings>(pool, keys::REPLAY_SETTINGS).await.unwrap_or_default();
         let debug_mode = queries::get_setting::<bool>(pool, keys::DEBUG_MODE).await.unwrap_or(false);
         let check_for_updates = queries::get_setting::<bool>(pool, keys::CHECK_FOR_UPDATES).await.unwrap_or(true);
-        let enable_logging = queries::get_setting::<bool>(pool, keys::ENABLE_LOGGING).await.unwrap_or(false);
+        // On, as the egui app defaults it: the log file is what a bug report is
+        // copied from, and a reader who has never touched the setting still gets one.
+        let enable_logging = queries::get_setting::<bool>(pool, keys::ENABLE_LOGGING).await.unwrap_or(true);
         let data_sharing =
             queries::get_setting::<DataSharingMode>(pool, keys::DATA_SHARING_MODE).await.unwrap_or_default();
         // Stored as a nullable string: absent and empty both mean no proxy.

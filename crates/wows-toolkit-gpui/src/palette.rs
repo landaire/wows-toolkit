@@ -23,6 +23,8 @@ pub enum PaletteAction {
     OpenReplayFile,
     /// Put a query in the Search tab's bar and run it.
     SearchFor(&'static str),
+    /// Put the newest log file on the clipboard, for a bug report.
+    CopyLatestLog,
 }
 
 /// One entry: what it is called and what it does.
@@ -60,6 +62,10 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries.push(PaletteEntry {
         label: t!("ui.replay.open_manually").into_owned(),
         action: PaletteAction::OpenReplayFile,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.replay.copy_latest_log").into_owned(),
+        action: PaletteAction::CopyLatestLog,
     });
 
     for (key, choice) in [

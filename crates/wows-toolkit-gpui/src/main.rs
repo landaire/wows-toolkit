@@ -16,6 +16,7 @@ mod http;
 mod icons;
 #[cfg(test)]
 mod interaction_tests;
+mod logging;
 mod minimap_preview;
 mod palette;
 mod personal_rating;
@@ -54,12 +55,16 @@ fn main() {
     // it had been honoured.
     let _cli = cli::parse();
 
-    // `RUST_LOG` overrides; absent that, `info` is the default so the crate's
-    // `tracing::info!`/`warn!`/`error!` calls (scan errors, open-intent logs,
-    // settings-load failures) show up on stderr without extra setup.
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
+    // The log file is what a bug report is copied from, so it is started before
+    // anything that could fail. The setting is read straight from the database:
+    // the app that owns the pool does not exist yet, and a crash here would
+    // otherwise go unrecorded. `RUST_LOG` still governs stderr.
+    let to_file =
+        wows_toolkit_config::load_startup_setting::<bool>(wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING)
+            .unwrap_or(None)
+            .unwrap_or(true);
+    let _log_guard = logging::init(to_file);
+    logging::install_panic_hook();
 
     let app = gpui_kit::platform::application().with_assets(Assets);
     app.run(move |cx| {
@@ -168,6 +173,7 @@ fn main() {
                     .detach();
                 theme::apply_egui_theme(theme_choice, zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
+                    app.report_last_crash(window, cx);
                     app.apply_settings(loaded, window, cx);
                     app.apply_session_stats(session, window, cx);
                     app.start_player_tracker(pool, cx);
