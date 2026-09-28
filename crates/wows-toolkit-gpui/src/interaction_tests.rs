@@ -894,7 +894,7 @@ async fn the_player_tracker_period_is_chosen_from_a_combo(cx: &mut TestAppContex
 
         assert_eq!(
             window.find(TRACKER_PERIOD).value(),
-            Some(TimePeriod::LastDay.label()),
+            Some(period_name(TimePeriod::LastDay).as_str()),
             "the tracker opens on the last day"
         );
         assert_eq!(window.find(TRACKER_PERIOD).expanded(), Some(false));
@@ -909,10 +909,10 @@ async fn the_player_tracker_period_is_chosen_from_a_combo(cx: &mut TestAppContex
 
     // `Select` commits through `defer_in`, so the applied period lands after
     // the dispatch returns.
-    let after_last_day = TimePeriod::ALL[TimePeriod::LastDay as usize + 1].label();
+    let after_last_day = period_name(TimePeriod::ALL[TimePeriod::LastDay as usize + 1]);
     cx.wait_for(window.into(), Duration::from_millis(500), |window, _| {
         window.find(TRACKER_PERIOD).expanded() == Some(false)
-            && window.find(TRACKER_PERIOD).value() == Some(after_last_day)
+            && window.find(TRACKER_PERIOD).value() == Some(after_last_day.as_str())
     })
     .await;
 }
@@ -1661,6 +1661,10 @@ fn a_pill_operator_can_be_changed_from_the_bar(cx: &mut TestAppContext) {
 }
 
 /// Whatever a dropdown is offering, each with the row number it answers to.
+fn period_name(period: TimePeriod) -> String {
+    rust_i18n::t!(period.label_key()).into_owned()
+}
+
 pub(crate) fn menu_items(window: &gpui_kit::Window) -> Vec<(u64, gpui_kit::base::test_support::ElementSnapshot)> {
     gpui_kit::base::test_support::snapshots(window)
         .into_iter()

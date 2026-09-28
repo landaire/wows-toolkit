@@ -71,11 +71,23 @@ impl SearchableListItem for GroupingItem {
     type Value = ReplayGrouping;
 
     fn title(&self) -> SharedString {
-        SharedString::from(self.0.label())
+        SharedString::from(t!(grouping_label_key(self.0)).into_owned())
     }
 
     fn value(&self) -> &Self::Value {
         &self.0
+    }
+}
+
+/// The catalogue key for a grouping's name, so the combo reads in the reader's
+/// language as the egui app's own menu does (`ui/replay_parser/mod.rs:4301`).
+/// `ReplayGrouping::label` is English, which is what the egui *selected* text
+/// still shows.
+const fn grouping_label_key(grouping: ReplayGrouping) -> &'static str {
+    match grouping {
+        ReplayGrouping::Date => "ui.replay.group.date",
+        ReplayGrouping::Ship => "ui.replay.group.ship",
+        ReplayGrouping::None => "ui.replay.group.none",
     }
 }
 
@@ -152,10 +164,9 @@ pub struct ReplayInspectorView {
     /// Session-local copy of the persisted `ReplaySettings`, seeded from the
     /// shared config DB in `apply_settings`. The header toolbar's
     /// column-filter checkboxes read/write this and drive `default_columns`
-    /// off it (`set_column_filter`); its `grouping` field is not consulted
-    /// here after the initial seed -- the live grouping selection lives on
-    /// `browser` (see `set_grouping`). Like `debug_mode`, this crate never
-    /// writes it back to the DB (see `settings.rs`'s module doc).
+    /// off it (`set_column_filter`). The live grouping selection lives on
+    /// `browser`; `set_grouping` keeps this copy and the stored row in step
+    /// with it.
     replay_settings: ReplaySettings,
     /// `AppPreferences.auto_load_latest_replay` in the egui app: seeded from
     /// the shared config DB in `apply_settings`, then flippable at runtime via
@@ -315,7 +326,7 @@ impl ReplayInspectorView {
         self.auto_load_latest_replay = auto_load_latest_replay;
         let grouping = replay_settings.grouping;
         self.replay_settings = replay_settings;
-        self.set_grouping(grouping, window, cx);
+        self.adopt_grouping(grouping, window, cx);
 
         if wows_dir.is_empty() {
             self.game_data = None;
@@ -777,16 +788,21 @@ impl ReplayInspectorView {
         let asked = crate::dialog::pick_file(None, Some(crate::dialog::REPLAYS));
         cx.spawn(async move |this, cx| {
             let Some(file) = asked.await else { return };
-            let _ = this.update_in(cx, |this, window, cx| this.open_replay(file, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| {
+                // What the Settings tab reports as the current replay: the one
+                // the reader named, which is what the egui app writes here too.
+                crate::settings_store::save(wows_toolkit_viewmodel::settings::keys::CURRENT_REPLAY_PATH, &file, cx);
+                this.open_replay(file, window, cx);
+            });
         })
         .detach();
     }
 
-    /// Flips the session "Autoload Latest Replay" flag. Reflects the
-    /// persisted intent only -- see the field's own doc comment for why this
-    /// does not yet start or stop an actual auto-load.
+    /// Flips "Autoload Latest Replay", which the directory watcher reads when a
+    /// replay lands, and writes it to the row the egui app reads.
     fn set_auto_load_latest_replay(&mut self, value: bool, cx: &mut Context<Self>) {
         self.auto_load_latest_replay = value;
+        crate::settings_store::save(wows_toolkit_viewmodel::settings::keys::AUTO_LOAD_LATEST_REPLAY, &value, cx);
         cx.notify();
     }
 
@@ -811,6 +827,15 @@ impl ReplayInspectorView {
     }
 
     fn set_grouping(&mut self, grouping: ReplayGrouping, window: &mut Window, cx: &mut Context<Self>) {
+        self.adopt_grouping(grouping, window, cx);
+        // Written back as the egui header writes it, so the listing is grouped
+        // the same way on the next launch.
+        self.set_column_filter(|settings| settings.grouping = grouping, cx);
+    }
+
+    /// Shows `grouping` without writing it back, for the seed from the stored
+    /// row: announcing that would ask the app to save what it just read.
+    fn adopt_grouping(&mut self, grouping: ReplayGrouping, window: &mut Window, cx: &mut Context<Self>) {
         self.browser.update(cx, |browser, cx| browser.set_grouping(grouping, cx));
         self.grouping_select.update(cx, |state, cx| state.set_selected_value(&grouping, window, cx));
         cx.notify();
@@ -1103,6 +1128,17 @@ mod tests {
 
     /// The test window's height, which the listing is measured against.
     const WINDOW_HEIGHT: gpui_kit::Pixels = px(800.);
+
+    /// Every grouping names a catalogue entry, since the combo draws whatever
+    /// the key resolves to and an absent one draws the key itself.
+    #[test]
+    fn every_grouping_has_a_name_in_the_catalog() {
+        for grouping in super::GROUPINGS {
+            let key = super::grouping_label_key(grouping);
+            let rendered = rust_i18n::t!(key).into_owned();
+            assert_ne!(rendered, key, "no catalog entry for {key}");
+        }
+    }
 
     /// Settings with a directory named, which is all `open_replay` waits on
     /// before it builds a panel. The directory does not have to exist: the

@@ -144,7 +144,7 @@ impl BasePanel for StatsOverviewPanel {
 
 impl Panel for StatsOverviewPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        SharedString::from("Overview")
+        SharedString::from(t!("ui.stats.overview").into_owned())
     }
 }
 
