@@ -852,6 +852,8 @@ impl App {
         let collab_display_name = collab_name.clone();
         self.collab_name_input.update(cx, |state, cx| state.set_value(collab_name, window, cx));
         let cache_dir = settings.game_data_cache_dir.clone();
+        let game_data_cache_dir = cache_dir.clone();
+        let auto_dump_game_data = settings.auto_dump_game_data;
         self.cache_dir_input.update(cx, |state, cx| state.set_value(cache_dir, window, cx));
         // Whatever is known about the cache belongs to the directory the old
         // settings named, which these may not.
@@ -865,6 +867,8 @@ impl App {
         self.replay_inspector.update(cx, |view, cx| {
             let settings = InspectorSettings {
                 wows_dir,
+                game_data_cache_dir,
+                auto_dump_game_data,
                 debug_mode,
                 replay_settings,
                 auto_load_latest_replay,
@@ -1713,11 +1717,15 @@ impl App {
         let auto_load = settings.auto_load_latest_replay;
         let locale = settings.locale.clone();
         let proxy_url = settings.proxy_url.clone();
+        let game_data_cache_dir = settings.game_data_cache_dir.clone();
+        let auto_dump_game_data = settings.auto_dump_game_data;
         let for_unpacker = path.clone();
         let for_tracker = path.clone();
         self.replay_inspector.update(cx, |view, cx| {
             let settings = InspectorSettings {
                 wows_dir: path,
+                game_data_cache_dir,
+                auto_dump_game_data,
                 debug_mode,
                 replay_settings,
                 auto_load_latest_replay: auto_load,

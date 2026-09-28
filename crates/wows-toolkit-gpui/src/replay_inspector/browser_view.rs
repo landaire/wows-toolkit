@@ -1479,7 +1479,7 @@ fn resolve_replays_dir(wows_dir: &Path) -> PathBuf {
 /// Reads the `<last_server_version>...</last_server_version>` node out of a
 /// WoWs `preferences.xml`'s raw contents. Ports
 /// `task/replays.rs::current_build_from_preferences`.
-fn last_server_version(data: &str) -> Option<String> {
+pub(super) fn last_server_version(data: &str) -> Option<String> {
     const OPEN: &str = "<last_server_version>";
     const CLOSE: &str = "</last_server_version>";
     let start = data.find(OPEN)?;

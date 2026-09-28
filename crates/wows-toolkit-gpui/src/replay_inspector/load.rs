@@ -57,6 +57,7 @@ use gpui_kit::Task;
 use serde_json::Value;
 use wows_battle_world::BattleWorld;
 use wows_battle_world::ids::ShotTracking;
+use wows_data_mgr::cas_vfs::BuildCas;
 use wows_replay_insights::battle_report::NormalizedBattleReport;
 use wows_replay_insights::fire_chance::analysis::EffectiveFireChance;
 use wows_replays::ParseError;
@@ -139,6 +140,18 @@ fn load_translations_catalog(wows_dir: &Path, build: u32) -> Option<Catalog> {
     }
 }
 
+/// The English catalogue out of a dumped build, which carries its texts under
+/// `translations/` rather than `res/texts/`.
+fn load_dump_translations(cas: &BuildCas) -> Option<Catalog> {
+    let mo_path = cas.derived_path("translations/en/LC_MESSAGES/global.mo")?;
+    let file = std::fs::File::open(&mo_path)
+        .inspect_err(|err| tracing::warn!(path = %mo_path.display(), error = %err, "no catalog in this dump"))
+        .ok()?;
+    Catalog::parse(file)
+        .inspect_err(|err| tracing::warn!(path = %mo_path.display(), error = ?err, "a dump's catalog would not parse"))
+        .ok()
+}
+
 /// One installed build's `GameMetadataProvider` and base `GameConstants`
 /// (before a replay's own versioned-constants overrides are merged in).
 /// Building this loads that whole build's game data; see [`GameDataCache`].
@@ -184,6 +197,52 @@ impl LoadedGameData {
         let base_constants = GameConstants::from_vfs(&vfs);
 
         Ok(Self { provider, base_constants, vfs })
+    }
+
+    /// Loads a build out of the game-data cache, for a replay recorded on one
+    /// the install no longer has.
+    ///
+    /// The cache is what the Settings tab downloads, validates and repairs, and
+    /// what the egui app writes as it loads builds. Without this the port can
+    /// open only replays from the installed build, which is most of a week's
+    /// worth and none of last year's.
+    ///
+    /// `build` is what the replay asked for; the dump that answers may be a
+    /// different one of the same version, because build numbers are per server
+    /// (the China client ships its own for the same major.minor.patch). The
+    /// params are cached under the dump's own build number for that reason: one
+    /// server's parameters must not answer for another's.
+    fn load_dump(dump_dir: &Path, build: u32) -> Result<Self, ReplayLoadError> {
+        let cas = BuildCas::open(dump_dir).ok_or_else(|| {
+            ReplayLoadError::GameData(format!("no metadata.toml in the dump at {}", dump_dir.display()))
+        })?;
+        let dump_build = cas.metadata().build;
+        if dump_build != build {
+            tracing::info!(
+                requested_build = build,
+                dump_build,
+                version = %cas.metadata().version,
+                "serving a build from a different dump of the same version"
+            );
+        }
+
+        let vfs = cas.vfs();
+        // The dump's own rkyv cache is free where a parse is seconds and
+        // hundreds of megabytes, so it is preferred; `load_game_params` then
+        // falls back to this app's cache and finally to parsing the dump's VFS.
+        let params = match cas.derived_path("game_params.rkyv").as_deref().and_then(game_params_cache::load) {
+            Some(params) => params,
+            None => load_game_params(&vfs, dump_build)?,
+        };
+        let provider = GameMetadataProvider::from_params_with_vfs(params, &vfs)
+            .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+        if let Some(catalog) = load_dump_translations(&cas) {
+            provider.set_translations(catalog);
+        }
+
+        let base_constants = GameConstants::from_vfs(&vfs);
+
+        Ok(Self { provider: Arc::new(provider), base_constants, vfs })
     }
 
     /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk
@@ -245,12 +304,43 @@ type BuildSlot = OnceLock<Result<Arc<LoadedGameData>, ReplayLoadError>>;
 #[derive(Clone)]
 pub struct GameDataCache {
     wows_dir: PathBuf,
+    /// Where the dumped builds are, for a replay the install cannot answer.
+    ///
+    /// `None` only when there is no storage directory at all, which is the one
+    /// case nothing can be cached anywhere.
+    dump_base: Option<PathBuf>,
+    /// Whether a build loaded out of the install is written to that cache, which
+    /// is the `auto_dump_game_data` setting.
+    auto_dump: bool,
     loaded: Arc<Mutex<HashMap<u32, Arc<BuildSlot>>>>,
 }
 
 impl GameDataCache {
     pub fn new(wows_dir: PathBuf) -> Self {
-        Self { wows_dir, loaded: Arc::new(Mutex::new(HashMap::new())) }
+        Self {
+            wows_dir,
+            dump_base: wows_toolkit_config::game_data_dump_base(),
+            auto_dump: false,
+            loaded: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Whether loading a build out of the install also writes it to the cache,
+    /// so the replays recorded on it still open after the game updates.
+    ///
+    /// This is what the `auto_dump_game_data` checkbox governs. Off by default,
+    /// which is the stored default too: a dump is gigabytes.
+    pub fn with_auto_dump(mut self, auto_dump: bool) -> Self {
+        self.auto_dump = auto_dump;
+        self
+    }
+
+    /// Points the cache at the directory the reader chose for it, which is the
+    /// `game_data_cache_dir` row both apps share. An empty string is the
+    /// default location.
+    pub fn with_cache_dir(mut self, custom: &str) -> Self {
+        self.dump_base = wows_toolkit_config::game_data_dump_base_with_override(custom);
+        self
     }
 
     /// `build`'s game data if it is already loaded, without loading it.
@@ -293,12 +383,37 @@ impl GameDataCache {
     /// or the build gets installed mid-session) gets to retry instead of
     /// replaying the same cached failure forever.
     pub fn get_or_load_build(&self, build: u32) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
+        self.get_or_load_build_for(build, None)
+    }
+
+    /// As [`Self::get_or_load_build`], with the version of the replay that is
+    /// asking.
+    ///
+    /// The version is what identifies the data a replay needs when the exact
+    /// build is not cached: build numbers are per server, so the China client
+    /// ships a different one for the same `major.minor.patch` and its dump serves
+    /// just as well. A caller with no version gets the exact build or nothing.
+    pub fn get_or_load_build_for(
+        &self,
+        build: u32,
+        version: Option<&Version>,
+    ) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
+        let hint = version.map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch));
         let slot = {
             let mut guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
             Arc::clone(guard.entry(build).or_insert_with(|| Arc::new(OnceLock::new())))
         };
 
-        let result = slot.get_or_init(|| Self::load_build_checked(&self.wows_dir, build)).clone();
+        let result = slot
+            .get_or_init(|| Self::load_build_checked(&self.wows_dir, self.dump_base.as_deref(), build, hint.as_deref()))
+            .clone();
+
+        // Written after the load rather than during it: the dump reads the same
+        // files, and a reader waiting for a replay should not wait for gigabytes
+        // of copying first.
+        if result.is_ok() && self.auto_dump {
+            self.dump_installed_build(build);
+        }
 
         if result.is_err() {
             let mut guard = self.loaded.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -313,14 +428,65 @@ impl GameDataCache {
     /// (a malformed idx or params blob) surfaces as
     /// [`ReplayLoadError::GameData`] instead of unwinding out of the
     /// `OnceLock` initializer and the background task that runs this.
-    fn load_build_checked(wows_dir: &Path, build: u32) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
+    /// Writes `build` into the game-data cache, if it is the installed build and
+    /// the cache has no dump of it yet.
+    ///
+    /// Only the installed build: a build that came out of the cache is already
+    /// there, and there is nothing else to dump from. The version comes from the
+    /// install's own `preferences.xml`, which is what names the data being
+    /// copied, and a dump already present is left alone.
+    fn dump_installed_build(&self, build: u32) {
+        let Some(dump_base) = self.dump_base.clone() else { return };
+        let Some(version) = installed_version(&self.wows_dir) else {
+            tracing::warn!("auto-dump: the install names no version, so nothing is dumped");
+            return;
+        };
+        if version.build_number() != Some(build) {
+            return;
+        }
+
+        let version_str = format!("{}.{}.{}", version.major, version.minor, version.patch);
+        if wows_data_mgr::dump::dump_exists(&dump_base, &version_str, build) {
+            return;
+        }
+
+        let wows_dir = self.wows_dir.clone();
+        // On a thread of its own: this walks the whole install and writes
+        // gigabytes, and nothing waits for the result.
+        std::thread::Builder::new()
+            .name("auto-dump-game-data".to_owned())
+            .spawn(move || {
+                match wows_data_mgr::dump::dump_renderer_data(&wows_dir, build, &version_str, &dump_base, None, true) {
+                    Ok(()) => {
+                        tracing::info!(build, version = %version_str, "auto-dump: the build is now cached");
+                        copy_constants_into_dump(&dump_base, &version_str, build);
+                    }
+                    Err(err) => tracing::warn!(build, version = %version_str, error = ?err, "auto-dump failed"),
+                }
+            })
+            .map(|_| ())
+            .unwrap_or_else(|err| tracing::warn!(error = %err, "auto-dump: no thread to dump on"));
+    }
+
+    fn load_build_checked(
+        wows_dir: &Path,
+        dump_base: Option<&Path>,
+        build: u32,
+        version: Option<&str>,
+    ) -> Result<Arc<LoadedGameData>, ReplayLoadError> {
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let available = wowsunpack::game_data::list_available_builds(wows_dir)
                 .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
-            if !available.contains(&build) {
-                return Err(ReplayLoadError::UnsupportedVersion { build });
+            if available.contains(&build) {
+                return LoadedGameData::load_build(wows_dir, build);
             }
-            LoadedGameData::load_build(wows_dir, build)
+
+            // Not installed: the game-data cache is asked next, which is what it
+            // is kept for.
+            match dump_base.and_then(|base| dump_for_build(base, build, version)) {
+                Some(dump_dir) => LoadedGameData::load_dump(&dump_dir, build),
+                None => Err(ReplayLoadError::UnsupportedVersion { build }),
+            }
         }));
 
         match outcome {
@@ -328,6 +494,58 @@ impl GameDataCache {
             Err(panic) => Err(ReplayLoadError::GameData(format!("game data load panicked: {}", panic_message(&panic)))),
         }
     }
+}
+
+/// The version the install says it is, from its own `preferences.xml`.
+///
+/// This is what names a dump of it. `None` when the file is absent or names
+/// something that will not parse, in which case nothing can be dumped under a
+/// name that would be found again.
+fn installed_version(wows_dir: &Path) -> Option<Version> {
+    let preferences = std::fs::read_to_string(wows_dir.join("preferences.xml")).ok()?;
+    let version = super::browser_view::last_server_version(&preferences)?;
+    Version::try_from_client_exe(&version)
+}
+
+/// Puts this app's versioned constants in the dump beside the build, so a later
+/// read of that dump decodes with the same mappings this one did.
+fn copy_constants_into_dump(dump_base: &Path, version: &str, build: u32) {
+    let constants = load_versioned_constants(build);
+    if constants.is_null() {
+        return;
+    }
+    let dump_dir = wows_data_mgr::dump::dump_dir(dump_base, version, build);
+    match serde_json::to_vec_pretty(&constants) {
+        Ok(bytes) => {
+            if let Err(err) = std::fs::write(dump_dir.join("constants.json"), bytes) {
+                tracing::warn!(build, error = %err, "auto-dump: the constants were not written beside the dump");
+            }
+        }
+        Err(err) => tracing::warn!(build, error = %err, "auto-dump: the constants would not serialize"),
+    }
+}
+
+/// The dumped build that answers for `build`, if the cache holds one.
+///
+/// Exact by build number where the cache has it. Failing that, the index's own
+/// version fallback picks the nearest build of the same version, which is how a
+/// replay from another server's client is served (`BuildsIndex::resolve_build`).
+/// A cache written before `builds.toml` existed is read by its directory name,
+/// which ends in the build number.
+fn dump_for_build(dump_base: &Path, build: u32, version: Option<&str>) -> Option<PathBuf> {
+    let index = wows_data_mgr::builds::BuildsIndex::load(&dump_base.join("builds.toml"));
+    if let Some((entry, exact)) = index.resolve_build(build, version) {
+        if !exact {
+            tracing::warn!(build, served_by = entry.build, version = %entry.version, "no exact dump for this build");
+        }
+        return Some(dump_base.join(&entry.dir));
+    }
+
+    let suffix = format!("_{build}");
+    std::fs::read_dir(dump_base).ok()?.flatten().map(|entry| entry.path()).find(|path| {
+        path.file_name().and_then(|name| name.to_str()).is_some_and(|name| name.ends_with(&suffix))
+            && path.join("metadata.toml").exists()
+    })
 }
 
 /// Outcome of [`spawn_startup_preload`]: the current installed build's game
@@ -516,7 +734,7 @@ pub(crate) fn parse_replay(
 
     let version = Version::try_from_client_exe(&meta.clientVersionFromExe).ok_or(ReplayLoadError::VersionParse)?;
     let build = version.build_number().ok_or(ReplayLoadError::VersionParse)?;
-    let loaded = game_data.get_or_load_build(build)?;
+    let loaded = game_data.get_or_load_build_for(build, Some(&version))?;
 
     let constants_json = load_versioned_constants(build);
 
@@ -716,6 +934,51 @@ mod session_stat_tests {
 
 #[cfg(test)]
 mod tests {
+    /// A build the install no longer has is answered from the game-data cache:
+    /// by its own number where the cache holds it, by another dump of the same
+    /// version otherwise (build numbers are per server), and by a pre-index
+    /// dump's directory name failing both.
+    #[test]
+    fn a_dump_answers_for_a_build_that_is_not_installed() {
+        let base = tempfile::tempdir().expect("a temp directory");
+        let base = base.path();
+
+        for dir in ["0.10.5_100", "0.10.5_101", "0.9.0_99"] {
+            std::fs::create_dir_all(base.join(dir)).expect("the dump directory is created");
+            std::fs::write(base.join(dir).join("metadata.toml"), "").expect("the dump is marked");
+        }
+        std::fs::write(
+            base.join("builds.toml"),
+            r#"
+[[builds]]
+version = "0.10.5"
+build = 100
+dir = "0.10.5_100"
+dumped_at = "2026-01-01T00:00:00Z"
+
+[[builds]]
+version = "0.10.5"
+build = 101
+dir = "0.10.5_101"
+dumped_at = "2026-01-01T00:00:00Z"
+"#,
+        )
+        .expect("the index is written");
+
+        assert_eq!(super::dump_for_build(base, 100, None), Some(base.join("0.10.5_100")), "exact by build number");
+        assert_eq!(
+            super::dump_for_build(base, 102, Some("0.10.5")),
+            Some(base.join("0.10.5_101")),
+            "the nearest build of the version the replay names"
+        );
+        assert_eq!(super::dump_for_build(base, 102, None), None, "and nothing without a version to fall back on");
+        assert_eq!(
+            super::dump_for_build(base, 99, None),
+            Some(base.join("0.9.0_99")),
+            "a dump the index does not list is found by its directory name"
+        );
+    }
+
     use super::*;
 
     /// Parses a real replay against a real game install. Needs local game

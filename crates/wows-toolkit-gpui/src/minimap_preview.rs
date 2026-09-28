@@ -134,7 +134,7 @@ pub fn renderer_for_replay(
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let loaded = game_data
-        .get_or_load_build(build.get())
+        .get_or_load_build_for(build.get(), Some(&version))
         .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
 
     let renderer = renderer_for(Some(build), &replay.meta.mapName, loaded.vfs(), Some(&version), layout)?;
@@ -233,7 +233,7 @@ pub fn bake_from_file(
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build_at = std::time::Instant::now();
     let loaded = game_data
-        .get_or_load_build(build.get())
+        .get_or_load_build_for(build.get(), Some(&version))
         .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
     tracing::debug!("preview: build {} ready in {:?}", build.get(), build_at.elapsed());
 
@@ -287,7 +287,7 @@ pub fn extract_events(
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let loaded = game_data
-        .get_or_load_build(build.get())
+        .get_or_load_build_for(build.get(), Some(&version))
         .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
 
     // One walk for both: the shots come off the same scan as the events, so
@@ -321,7 +321,7 @@ pub fn bake_track(
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let loaded = game_data
-        .get_or_load_build(build.get())
+        .get_or_load_build_for(build.get(), Some(&version))
         .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
 
     let provider = loaded.provider().as_ref();
