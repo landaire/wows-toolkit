@@ -406,6 +406,9 @@ impl ReplayPanel {
                 // The index reads this from its own pass over the directory,
                 // not from a replay opened for reading.
                 indexable: _,
+                // Sharing is decided where a replay lands, not where one is
+                // opened: opening a replay is not contributing it.
+                shareable: _,
             }) => {
                 self.export = Some(export);
                 self.write_auto_export(cx);

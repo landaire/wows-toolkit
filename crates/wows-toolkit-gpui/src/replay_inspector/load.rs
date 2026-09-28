@@ -663,6 +663,9 @@ pub struct ParsedReplay {
     /// debug toggle is a runtime one, so an ordinary export strips a copy
     /// rather than reparsing.
     pub export: ExportedMatch,
+    /// What the data-sharing setting needs to decide what this battle
+    /// contributes, taken while the report was still open.
+    pub shareable: crate::upload::Shareable,
     pub game_data: Arc<LoadedGameData>,
     /// Pretty-printed replay header/metadata JSON (`ReplayFile::raw_meta`),
     /// for the debug-mode raw-metadata viewer (mirrors the egui app's
@@ -809,6 +812,40 @@ pub(crate) fn parse_replay(
         cache_dir.as_deref(),
     );
 
+    // What sharing needs, taken here because this is the one place the whole
+    // report exists: the payloads are per player, and the report is dropped
+    // below.
+    let shareable = crate::upload::Shareable {
+        game_type: meta.gameType.clone().unwrap_or_default(),
+        version,
+        self_confirmed_non_test: crate::upload::self_is_not_a_test_ship(&report),
+        // The end-of-battle results being in the stream is what says the file is
+        // the whole battle. A parse that stopped early is not evidence of
+        // absence, and the loop above stops on the first packet it cannot read.
+        results: if report.battle_results().is_some() {
+            wows_toolkit_viewmodel::upload::ResultsScan::Present
+        } else if remaining.is_empty() {
+            wows_toolkit_viewmodel::upload::ResultsScan::Absent
+        } else {
+            wows_toolkit_viewmodel::upload::ResultsScan::Truncated
+        },
+        builds: report
+            .players()
+            .iter()
+            .filter(|player| !player.is_bot())
+            .filter_map(|player| {
+                let realm = player.initial_state().realm().filter(|realm| !realm.trim().is_empty())?;
+                wows_toolkit_viewmodel::upload::build_tracker::BuildTrackerPayload::build_from(
+                    player,
+                    realm.to_owned(),
+                    report.version(),
+                    meta.gameType.clone().unwrap_or_default(),
+                    loaded.provider.as_ref(),
+                )
+            })
+            .collect(),
+    };
+
     let export = ExportedMatch::new(&normalized, report.players(), report.game_chat(), true);
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
     // Built here because this is where the build that named the achievements
@@ -833,6 +870,7 @@ pub(crate) fn parse_replay(
         model,
         indexable,
         session_stat,
+        shareable,
         export,
         game_data: loaded,
         raw_metadata_json,

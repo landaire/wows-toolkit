@@ -47,13 +47,21 @@ have used it.
 
 ## Trust: a control that says one thing and does another
 
-5. **The data-sharing radio is inert.** Off / Build data / Replays persists and
-   is shown (`app.rs:1819-1834`) and nothing reads it: there is no ShipBuilds
-   client, no `/api/ship_builds`, no `/api/replays`, no sent-replay ledger
-   (egui: `data/shipbuilds.rs`, `task/replay_upload.rs`, dispatched
-   `app.rs:4712`). A user who selects "send replays" is told they are
-   contributing and nothing is sent; a user who selects "off" gets the same
-   behaviour. This is the most serious divergence on the list after item 1.
+5. **The data-sharing radio.** Done 2026-09-28: a battle that lands is
+   contributed as the setting says -- nothing, the per-player builds to
+   `/api/ship_builds`, or the file itself to `/api/replays` -- and recorded in the
+   `sent_replays` table both apps write, so it is sent once however it was read.
+   The rules (eligible battle types, the test-ship refusal, and the grace window a
+   raw upload waits for results through) moved to
+   `wows_toolkit_viewmodel::upload` with their tests.
+
+   Two things remain. The egui path still carries its own copy of those rules,
+   because this crate's `DataSharingMode` is its own type rather than the
+   viewmodel's; unifying the two lets `task/replay_upload.rs` call the shared
+   module instead. And "Send all replays to ShipBuilds" (the palette's bulk pass
+   over a whole directory, `app.rs:4712`) and the first-run consent dialogs are
+   still absent, so the setting is only acted on for battles that land while the
+   app is open.
 6. **Batch render.** Done in part 2026-09-28: the menu item now runs one
    background batch (`replay_renderer::batch_export`) into a folder the reader
    picks, one file per replay, and reports how many were written and how many
