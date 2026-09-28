@@ -14670,6 +14670,7 @@ dependencies = [
  "wows-toolkit-config",
  "wows_replays",
  "wowsunpack",
+ "wt-collab-protocol",
  "wt-translations",
 ]
 

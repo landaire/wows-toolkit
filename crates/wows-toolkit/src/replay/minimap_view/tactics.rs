@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
@@ -78,324 +77,55 @@ const RESIZE_HANDLE_TOLERANCE: f32 = 8.0;
 /// Default radius for newly added cap points (in BigWorld units).
 /// Typical cap circles are ~5km = ~167 BW units; 150 is a sensible default.
 const DEFAULT_CAP_RADIUS: f32 = 150.0;
-/// Serializable ship configuration for presets (mirrors [`super::AnnotationShipConfig`]).
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct PresetShipConfig {
-    pub param_id: u64,
-    pub ship_name: String,
-    #[serde(default)]
-    pub hull_name: String,
-    #[serde(default = "default_one")]
-    pub vis_coeff: f32,
-    #[serde(default = "default_one")]
-    pub gm_coeff: f32,
-    #[serde(default = "default_one")]
-    pub gs_coeff: f32,
-    #[serde(default)]
-    pub range_filter: PresetRangeFilter,
+use wows_toolkit_viewmodel::tactics::PresetAnnotation;
+use wows_toolkit_viewmodel::tactics::PresetCapPoint;
+/// The preset model is shared with the GPUI port, which reads and writes the
+/// same files (`wows_toolkit_viewmodel::tactics`). What is local here is the
+/// hop between this crate's egui-typed annotations and the wire-shaped ones the
+/// preset stores.
+pub use wows_toolkit_viewmodel::tactics::TacticsPreset;
+use wows_toolkit_viewmodel::tactics::delete_preset;
+use wows_toolkit_viewmodel::tactics::list_preset_names as list_saved_preset_names;
+use wows_toolkit_viewmodel::tactics::load_preset as load_saved_preset;
+use wows_toolkit_viewmodel::tactics::save_preset as save_to_disk;
+
+/// One drawn thing on the board, on its way to or from a preset file.
+fn annotation_to_preset(annotation: &Annotation) -> PresetAnnotation {
+    PresetAnnotation::from_annotation(&wt_collab_egui::types::local_to_wire(annotation))
 }
 
-/// Serializable range filter for presets.
-#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
-struct PresetRangeFilter {
-    #[serde(default)]
-    pub detection: bool,
-    #[serde(default)]
-    pub main_battery: bool,
-    #[serde(default)]
-    pub secondary_battery: bool,
-    #[serde(default)]
-    pub torpedo: bool,
-    #[serde(default)]
-    pub radar: bool,
-    #[serde(default)]
-    pub hydro: bool,
+fn preset_to_annotation(preset: &PresetAnnotation) -> Annotation {
+    wt_collab_egui::types::wire_to_local(preset.to_annotation())
 }
 
-fn default_one() -> f32 {
-    1.0
-}
-
-/// A serializable annotation (mirrors [`Annotation`] but with plain types).
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-enum PresetAnnotation {
-    Ship {
-        pos: [f32; 2],
-        yaw: f32,
-        species: String,
-        friendly: bool,
-        #[serde(default)]
-        config: Option<PresetShipConfig>,
-    },
-    FreehandStroke {
-        points: Vec<[f32; 2]>,
-        color: [u8; 4],
-        width: f32,
-    },
-    Line {
-        start: [f32; 2],
-        end: [f32; 2],
-        color: [u8; 4],
-        width: f32,
-    },
-    Circle {
-        center: [f32; 2],
-        radius: f32,
-        color: [u8; 4],
-        width: f32,
-        filled: bool,
-    },
-    Rectangle {
-        center: [f32; 2],
-        half_size: [f32; 2],
-        rotation: f32,
-        color: [u8; 4],
-        width: f32,
-        filled: bool,
-    },
-    Triangle {
-        center: [f32; 2],
-        radius: f32,
-        rotation: f32,
-        color: [u8; 4],
-        width: f32,
-        filled: bool,
-    },
-    Arrow {
-        points: Vec<[f32; 2]>,
-        color: [u8; 4],
-        width: f32,
-    },
-    Measurement {
-        start: [f32; 2],
-        end: [f32; 2],
-        color: [u8; 4],
-        width: f32,
-    },
-}
-
-impl PresetAnnotation {
-    fn from_annotation(ann: &Annotation) -> Self {
-        match ann {
-            Annotation::Ship { pos, yaw, species, friendly, config } => PresetAnnotation::Ship {
-                pos: [pos.x, pos.y],
-                yaw: *yaw,
-                species: species.clone(),
-                friendly: *friendly,
-                config: config.as_ref().map(|c| PresetShipConfig {
-                    param_id: c.param_id,
-                    ship_name: c.ship_name.clone(),
-                    hull_name: c.hull_name.clone(),
-                    vis_coeff: c.vis_coeff,
-                    gm_coeff: c.gm_coeff,
-                    gs_coeff: c.gs_coeff,
-                    range_filter: PresetRangeFilter {
-                        detection: c.range_filter.detection,
-                        main_battery: c.range_filter.main_battery,
-                        secondary_battery: c.range_filter.secondary_battery,
-                        torpedo: c.range_filter.torpedo,
-                        radar: c.range_filter.radar,
-                        hydro: c.range_filter.hydro,
-                    },
-                }),
-            },
-            Annotation::FreehandStroke { points, color, width } => PresetAnnotation::FreehandStroke {
-                points: points.iter().map(|p| [p.x, p.y]).collect(),
-                color: color.to_array(),
-                width: *width,
-            },
-            Annotation::Line { start, end, color, width } => PresetAnnotation::Line {
-                start: [start.x, start.y],
-                end: [end.x, end.y],
-                color: color.to_array(),
-                width: *width,
-            },
-            Annotation::Circle { center, radius, color, width, filled } => PresetAnnotation::Circle {
-                center: [center.x, center.y],
-                radius: *radius,
-                color: color.to_array(),
-                width: *width,
-                filled: *filled,
-            },
-            Annotation::Rectangle { center, half_size, rotation, color, width, filled } => {
-                PresetAnnotation::Rectangle {
-                    center: [center.x, center.y],
-                    half_size: [half_size.x, half_size.y],
-                    rotation: *rotation,
-                    color: color.to_array(),
-                    width: *width,
-                    filled: *filled,
-                }
-            }
-            Annotation::Triangle { center, radius, rotation, color, width, filled } => PresetAnnotation::Triangle {
-                center: [center.x, center.y],
-                radius: *radius,
-                rotation: *rotation,
-                color: color.to_array(),
-                width: *width,
-                filled: *filled,
-            },
-            Annotation::Arrow { points, color, width } => PresetAnnotation::Arrow {
-                points: points.iter().map(|p| [p.x, p.y]).collect(),
-                color: color.to_array(),
-                width: *width,
-            },
-            Annotation::Measurement { start, end, color, width } => PresetAnnotation::Measurement {
-                start: [start.x, start.y],
-                end: [end.x, end.y],
-                color: color.to_array(),
-                width: *width,
-            },
-        }
-    }
-
-    fn to_annotation(&self) -> Annotation {
-        match self {
-            PresetAnnotation::Ship { pos, yaw, species, friendly, config } => Annotation::Ship {
-                pos: Vec2::new(pos[0], pos[1]),
-                yaw: *yaw,
-                species: species.clone(),
-                friendly: *friendly,
-                config: config.as_ref().map(|c| super::AnnotationShipConfig {
-                    param_id: c.param_id,
-                    ship_name: c.ship_name.clone(),
-                    hull_name: c.hull_name.clone(),
-                    vis_coeff: c.vis_coeff,
-                    gm_coeff: c.gm_coeff,
-                    gs_coeff: c.gs_coeff,
-                    range_filter: super::AnnotationRangeFilter {
-                        detection: c.range_filter.detection,
-                        main_battery: c.range_filter.main_battery,
-                        secondary_battery: c.range_filter.secondary_battery,
-                        torpedo: c.range_filter.torpedo,
-                        radar: c.range_filter.radar,
-                        hydro: c.range_filter.hydro,
-                    },
-                }),
-            },
-            PresetAnnotation::FreehandStroke { points, color, width } => Annotation::FreehandStroke {
-                points: points.iter().map(|p| Vec2::new(p[0], p[1])).collect(),
-                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                width: *width,
-            },
-            PresetAnnotation::Line { start, end, color, width } => Annotation::Line {
-                start: Vec2::new(start[0], start[1]),
-                end: Vec2::new(end[0], end[1]),
-                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                width: *width,
-            },
-            PresetAnnotation::Circle { center, radius, color, width, filled } => Annotation::Circle {
-                center: Vec2::new(center[0], center[1]),
-                radius: *radius,
-                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                width: *width,
-                filled: *filled,
-            },
-            PresetAnnotation::Rectangle { center, half_size, rotation, color, width, filled } => {
-                Annotation::Rectangle {
-                    center: Vec2::new(center[0], center[1]),
-                    half_size: Vec2::new(half_size[0], half_size[1]),
-                    rotation: *rotation,
-                    color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                    width: *width,
-                    filled: *filled,
-                }
-            }
-            PresetAnnotation::Triangle { center, radius, rotation, color, width, filled } => Annotation::Triangle {
-                center: Vec2::new(center[0], center[1]),
-                radius: *radius,
-                rotation: *rotation,
-                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                width: *width,
-                filled: *filled,
-            },
-            PresetAnnotation::Arrow { points, color, width } => Annotation::Arrow {
-                points: points.iter().map(|p| Vec2::new(p[0], p[1])).collect(),
-                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                width: *width,
-            },
-            PresetAnnotation::Measurement { start, end, color, width } => Annotation::Measurement {
-                start: Vec2::new(start[0], start[1]),
-                end: Vec2::new(end[0], end[1]),
-                color: Color32::from_rgba_premultiplied(color[0], color[1], color[2], color[3]),
-                width: *width,
-            },
-        }
-    }
-}
-
-/// A serializable cap point for presets.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-struct PresetCapPoint {
-    index: usize,
-    world_x: f32,
-    world_z: f32,
-    radius: f32,
-    team_id: i64,
-    #[serde(default)]
-    frozen: bool,
-}
-
-/// A saved tactics board preset.
-#[derive(Clone, serde::Serialize, serde::Deserialize)]
-pub struct TacticsPreset {
-    /// User-chosen preset name.
-    pub name: String,
-    /// Map name (e.g. "spaces/16_OC_bees_to_honey").
-    pub map_name: String,
-    /// Map ID.
-    pub map_id: u32,
-    /// Cap points.
-    cap_points: Vec<PresetCapPoint>,
-    /// Annotations.
-    annotations: Vec<PresetAnnotation>,
-}
-
-/// Get the presets directory, creating it if needed.
-fn presets_dir() -> Option<PathBuf> {
-    let storage = crate::storage_dir()?;
-    let dir = storage.join("tactics_presets");
-    std::fs::create_dir_all(&dir).ok()?;
-    Some(dir)
-}
-
-/// List all saved preset names (without extension).
+/// Every saved preset's name.
 fn list_preset_names() -> Vec<String> {
-    let Some(dir) = presets_dir() else { return vec![] };
-    let Ok(entries) = std::fs::read_dir(&dir) else { return vec![] };
-    let mut names: Vec<String> = entries
-        .filter_map(|e| {
-            let e = e.ok()?;
-            let name = e.file_name().to_string_lossy().to_string();
-            name.strip_suffix(".json").map(|s| s.to_string())
-        })
-        .collect();
-    names.sort();
-    names
+    list_saved_preset_names()
 }
 
-/// Save a preset to disk.
+/// Writes a preset, reporting what stopped it.
 fn save_preset(preset: &TacticsPreset) -> Result<(), String> {
-    let dir = presets_dir().ok_or("no storage dir")?;
-    let path = dir.join(format!("{}.json", preset.name));
-    let json = serde_json::to_string_pretty(preset).map_err(|e| e.to_string())?;
-    std::fs::write(path, json).map_err(|e| e.to_string())
+    save_to_disk(preset).map_err(|why| why.to_string())
 }
 
-/// Load a preset from disk.
+/// Reads a preset back, or nothing when it is gone or unreadable.
 fn load_preset(name: &str) -> Option<TacticsPreset> {
-    let dir = presets_dir()?;
-    let path = dir.join(format!("{name}.json"));
-    let data = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&data).ok()
-}
-
-/// Delete a preset from disk.
-fn delete_preset(name: &str) {
-    if let Some(dir) = presets_dir() {
-        let _ = std::fs::remove_file(dir.join(format!("{name}.json")));
+    match load_saved_preset(name) {
+        Ok(preset) => Some(preset),
+        Err(why) => {
+            tracing::warn!(name, %why, "tactics: the preset could not be read");
+            None
+        }
     }
 }
+
+/// Drops a preset.
+fn delete_preset_file(name: &str) {
+    if let Err(why) = delete_preset(name) {
+        tracing::warn!(name, %why, "tactics: the preset could not be dropped");
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 enum CapDragMode {
     Move,
@@ -1107,7 +837,7 @@ impl TacticsBoardViewer {
                         frozen: c.frozen,
                     })
                     .collect(),
-                annotations: ann.annotations.iter().map(PresetAnnotation::from_annotation).collect(),
+                annotations: ann.annotations.iter().map(annotation_to_preset).collect(),
             };
             if let Err(e) = save_preset(&preset) {
                 tracing::warn!("failed to save preset: {e}");
@@ -1185,7 +915,7 @@ impl TacticsBoardViewer {
                         // Load annotations
                         let mut ann = annotation_state_arc.lock();
                         ann.save_undo();
-                        ann.annotations = preset.annotations.iter().map(|a| a.to_annotation()).collect();
+                        ann.annotations = preset.annotations.iter().map(preset_to_annotation).collect();
                         ann.annotation_ids = (0..ann.annotations.len()).map(|_| rand::random()).collect();
                         ann.annotation_owners = vec![0; ann.annotations.len()];
                         ann.clear_selection();
@@ -1203,7 +933,7 @@ impl TacticsBoardViewer {
         // Delete button
         let can_delete = !state.preset_name.is_empty() && state.preset_names.contains(&state.preset_name);
         if ui.add_enabled(can_delete, egui::Button::new("Delete")).clicked() {
-            delete_preset(&state.preset_name);
+            delete_preset_file(&state.preset_name);
             state.preset_names = list_preset_names();
             state.preset_name.clear();
         }
