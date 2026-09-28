@@ -41,7 +41,9 @@ use crate::player_tracker::PlayerTrackerEvent;
 use crate::player_tracker::PlayerTrackerView;
 use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
+use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
+use crate::replay_inspector::view::GameDataMissing;
 use crate::replay_inspector::view::ReplaySettingsChanged;
 
 /// The states the app reports with a message that stays until they are fixed.
@@ -353,6 +355,11 @@ impl App {
             let settings = settings.clone();
             this.edit_replay_settings(cx, move |replay| *replay = settings);
         });
+        // A directory of old replays needs game data this machine may not have.
+        let game_data_missing = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
+            let GameDataMissing(missing) = event;
+            this.offer_missing_game_data(missing.clone(), window, cx);
+        });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         // A "find matches" button on a tracker row asks a question the Search
@@ -410,6 +417,7 @@ impl App {
                 show_armor_requested,
                 armor_followed,
                 replay_settings_changed,
+                game_data_missing,
                 wows_dir_edited,
                 proxy_edited,
                 cache_dir_edited,
@@ -419,6 +427,89 @@ impl App {
                 language_chosen,
             ],
         }
+    }
+
+    /// Offers to fetch the game data a directory of replays needs and this
+    /// machine does not have.
+    ///
+    /// Ports the egui app's download prompt (`app.rs`'s `GameDataDownloadPrompt`)
+    /// down to the choice it exists for: without this the rows are listed and
+    /// silently refuse to open. The egui window also reports each build's remote
+    /// availability and an object count before the reader commits; those are a
+    /// second read of the repository, and are not offered here yet.
+    fn offer_missing_game_data(&mut self, missing: Vec<MissingBuild>, window: &mut Window, cx: &mut Context<Self>) {
+        if missing.is_empty() || self.cache.busy() {
+            return;
+        }
+        let Some(base) = self.cache_base() else {
+            crate::toast::warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned(), window, cx);
+            return;
+        };
+
+        // One line per build, as the prompt's own rows read: the version and
+        // build it would fetch, and how many replays are waiting on it.
+        let rows: Vec<String> = missing
+            .iter()
+            .map(|build| {
+                let named = t!(
+                    "ui.dialogs.download_build_row",
+                    version = build.version.clone().unwrap_or_else(|| "?".to_owned()),
+                    build = build.build
+                );
+                let needed = t!("ui.dialogs.download_replays_needing", count = build.replays);
+                format!("{named} -- {needed}")
+            })
+            .collect();
+        let described = format!("{}\n\n{}", t!("ui.dialogs.download_game_data_intro"), rows.join("\n"));
+
+        let entity = cx.entity().downgrade();
+        let proxy = self.proxy_url();
+        window.open_alert_dialog(cx, move |alert, _window, _cx| {
+            let entity = entity.clone();
+            let missing = missing.clone();
+            let base = base.clone();
+            let proxy = proxy.clone();
+            alert
+                .title(t!("ui.windows.download_game_data").into_owned())
+                .description(described.clone())
+                .show_cancel(true)
+                .on_ok(move |_event, _window, cx| {
+                    let Some(entity) = entity.upgrade() else { return true };
+                    let missing = missing.clone();
+                    let base = base.clone();
+                    let proxy = proxy.clone();
+                    entity.update(cx, |this, cx| this.fetch_missing_game_data(missing, base, proxy, cx));
+                    true
+                })
+        });
+    }
+
+    /// Fetches the named builds into the game-data cache, reporting through the
+    /// same progress line and messages the Settings section uses.
+    fn fetch_missing_game_data(
+        &mut self,
+        missing: Vec<MissingBuild>,
+        base: std::path::PathBuf,
+        proxy: String,
+        cx: &mut Context<Self>,
+    ) {
+        let builds: Vec<wows_data_mgr::download_repo::BuildUpdateStatus> = missing
+            .iter()
+            .map(|build| wows_data_mgr::download_repo::BuildUpdateStatus {
+                build: build.build,
+                version: build.version.clone().unwrap_or_default(),
+            })
+            .collect();
+
+        game_data_cache::download(
+            |this: &mut Self| &mut this.cache,
+            base,
+            builds,
+            proxy,
+            &cx.entity(),
+            cx,
+            |this, outcome, cx| this.cache_job_finished(outcome, cx),
+        );
     }
 
     /// Adopts a language: saved, applied to the catalogue every `t!` reads,

@@ -95,6 +95,10 @@ const SPECTATOR_LABEL: &str = "Spectator";
 struct RawReplay {
     path: PathBuf,
     listed: ListedReplay,
+    /// The `major.minor.patch` the replay names, kept because a build number
+    /// alone does not identify data to fetch: build numbers are per server, so a
+    /// download falls back on the version to find the nearest published build.
+    version: Option<String>,
 }
 
 /// A leaf's path and (usually absent, see the module doc) battle result,
@@ -257,6 +261,11 @@ pub enum ReplayBrowserEvent {
     /// The game has just written a replay into the watched directory, and the
     /// listing now holds it.
     ReplayAppeared(PathBuf),
+    /// The listing holds replays from builds neither the install nor the cache
+    /// can read. The egui app offers to fetch them (`app.rs`'s
+    /// `GameDataDownloadPrompt`); nothing else in the listing says why those rows
+    /// will not open.
+    BuildsMissing(Vec<MissingBuild>),
     /// A replay the listing already held has been written to again, and the
     /// listing now holds the new read. A tab open on it is reading the old one.
     ReplayChanged(PathBuf),
@@ -270,6 +279,18 @@ pub enum ReplayBrowserEvent {
         paths: Vec<PathBuf>,
         replace: bool,
     },
+}
+
+/// A build the listing needs and nothing on this machine has.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingBuild {
+    pub build: u32,
+    /// The version its replays name, for the cross-server fallback when the
+    /// repository has no exact build.
+    pub version: Option<String>,
+    /// How many listed replays were recorded on it, so the reader can judge
+    /// whether the download is worth it.
+    pub replays: usize,
 }
 
 pub struct ReplayBrowser {
@@ -360,6 +381,7 @@ impl ReplayBrowser {
     #[cfg(test)]
     pub(crate) fn seed_listing_for_test(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
         self.files.push(RawReplay {
+            version: None,
             path,
             listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
                 ship_id: None,
@@ -590,6 +612,7 @@ impl ReplayBrowser {
                 this.rebuild_tree(cx);
                 this.watch_replays_dir(replays_dir, generation, cx);
                 this.warm_listed_build(cx);
+                this.report_missing_builds(cx);
                 cx.notify();
             });
         })
@@ -608,6 +631,19 @@ impl ReplayBrowser {
     /// Whether the scan found no replay files at all.
     pub(crate) fn is_empty(&self) -> bool {
         self.files.is_empty()
+    }
+
+    /// Says which of the listed builds nothing on this machine can read.
+    ///
+    /// Checked once per scan rather than per row: the answer is the same for
+    /// every replay of a build, and reading the cache index is a file read.
+    fn report_missing_builds(&mut self, cx: &mut Context<Self>) {
+        let Some(cache) = self.build_cache.clone() else { return };
+        let missing = missing_builds(&self.files, &cache);
+        if missing.is_empty() {
+            return;
+        }
+        cx.emit(ReplayBrowserEvent::BuildsMissing(missing));
     }
 
     fn warm_listed_build(&mut self, cx: &mut Context<Self>) {
@@ -1526,7 +1562,12 @@ fn scan_replay_files(
     let mut out = Vec::with_capacity(total);
     for (read, path) in candidates.into_iter().enumerate() {
         match ReplayFile::meta_from_file(&path) {
-            Ok(meta) => out.push(RawReplay { listed: ListedReplay::from_meta(&meta), path }),
+            Ok(meta) => out.push(RawReplay {
+                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
+                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
+                listed: ListedReplay::from_meta(&meta),
+                path,
+            }),
             Err(err) => tracing::warn!(path = %path.display(), error = ?err, "failed to read replay meta"),
         }
         let done = read + 1;
@@ -1535,6 +1576,26 @@ fn scan_replay_files(
         }
     }
     out
+}
+
+/// The listed builds nothing on this machine can read, with how many replays
+/// each one accounts for.
+///
+/// Ports the set the egui app offers to download after a directory scan
+/// (`app.rs`'s `DirectoryScanned` arm). A replay whose header names no build is
+/// not counted: nothing could be fetched for it.
+fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuild> {
+    let mut counted: std::collections::BTreeMap<u32, MissingBuild> = std::collections::BTreeMap::new();
+    for file in files {
+        let Some(build) = file.listed.build else { continue };
+        let entry = counted.entry(build).or_insert_with(|| MissingBuild { build, version: None, replays: 0 });
+        entry.replays += 1;
+        if entry.version.is_none() {
+            entry.version = file.version.clone();
+        }
+    }
+
+    counted.into_values().filter(|missing| !cache.can_read_build(missing.build, missing.version.as_deref())).collect()
 }
 
 /// The build the most listed replays were recorded on.
@@ -1622,7 +1683,12 @@ async fn read_replay_when_complete(path: PathBuf, cx: &AsyncApp) -> Option<RawRe
         let read = path.clone();
         let parsed = cx.background_spawn(async move { ReplayFile::meta_from_file(&read).ok() }).await;
         if let Some(meta) = parsed {
-            return Some(RawReplay { listed: ListedReplay::from_meta(&meta), path });
+            return Some(RawReplay {
+                version: wowsunpack::data::Version::try_from_client_exe(&meta.clientVersionFromExe)
+                    .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
+                listed: ListedReplay::from_meta(&meta),
+                path,
+            });
         }
     }
     tracing::warn!(path = %path.display(), "replay browser: a new replay never became readable");
@@ -1701,6 +1767,49 @@ mod tests {
             );
         })
         .expect("the test window stays open");
+    }
+
+    /// A build nothing on this machine can read is reported once, with how many
+    /// of the listed replays are waiting on it, so the offer to fetch it can say
+    /// what it is for. A build the cache holds is not reported at all.
+    #[test]
+    fn the_listing_reports_only_the_builds_nothing_can_read() {
+        use std::path::PathBuf;
+
+        let cache_dir = tempfile::tempdir().expect("a temp directory");
+        std::fs::create_dir_all(cache_dir.path().join("0.10.5_100")).expect("the dump directory is created");
+        std::fs::write(cache_dir.path().join("0.10.5_100").join("metadata.toml"), "").expect("the dump is marked");
+
+        let listed = |build: Option<u32>, version: &str| super::RawReplay {
+            path: PathBuf::from(format!("{}-{version}.wowsreplay", build.unwrap_or_default())),
+            version: (!version.is_empty()).then(|| version.to_owned()),
+            listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
+                ship_id: None,
+                map_name: String::new(),
+                game_type: String::new(),
+                scenario: String::new(),
+                date_time: String::new(),
+                build,
+            },
+        };
+
+        let files = vec![
+            listed(Some(100), "0.10.5"),
+            listed(Some(200), "0.11.0"),
+            listed(Some(200), "0.11.0"),
+            // A header naming no build: nothing could be fetched for it.
+            listed(None, ""),
+        ];
+
+        // A directory that is not an install, so only the cache can answer.
+        let cache = super::GameDataCache::new(PathBuf::from("G:/does-not-exist"))
+            .with_cache_dir(&cache_dir.path().to_string_lossy());
+
+        let missing = super::missing_builds(&files, &cache);
+        assert_eq!(missing.len(), 1, "the cached build is not offered, got {missing:?}");
+        assert_eq!(missing[0].build, 200);
+        assert_eq!(missing[0].version.as_deref(), Some("0.11.0"));
+        assert_eq!(missing[0].replays, 2, "both replays of that build are counted");
     }
 
     /// A replay the directory no longer holds leaves the listing, and its

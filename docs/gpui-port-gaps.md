@@ -24,12 +24,15 @@ have used it.
    ported from the egui path: the forward-only constants bridge between loaded
    builds, and the LRU eviction of non-main builds (the port keeps every build it
    has loaded for the session).
-2. **No download offer for a missing build.** The egui app plans and offers the
-   fetch, per build, with replay counts and remote availability
-   (`app.rs:583`, `:590-665` `draw_download_prompt`, `:2363-2404`,
-   `task/game_data_download.rs`), then reopens the replay or re-walks the
-   directory once data lands. Absent: the port calls `download_repo` only for
-   builds already in the cache (`game_data_cache.rs:323`).
+2. **Download offer for a missing build.** Done in part 2026-09-28: a scan
+   reports the builds nothing can read (`missing_builds`), and the app offers to
+   fetch them in one confirmation naming each build, its version and how many
+   replays wait on it, then downloads through the same job and progress line the
+   Settings section uses. Not ported: the per-build remote availability report
+   (published / nearest / never published / unreachable), the object-count plan
+   before the reader commits, per-build ticks, and the follow-up that reopens the
+   replay or re-walks the directory once the data lands (the reader re-opens it
+   themselves).
 3. ~~**`auto_dump_game_data` is a checkbox over nothing.**~~ Done 2026-09-28:
    loading the installed build writes it to the cache on a thread of its own,
    under the version the install's `preferences.xml` names, skipping a dump

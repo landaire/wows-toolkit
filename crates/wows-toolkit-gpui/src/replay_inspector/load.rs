@@ -343,6 +343,24 @@ impl GameDataCache {
         self
     }
 
+    /// Whether this build could be read at all: installed, already loaded, or in
+    /// the game-data cache.
+    ///
+    /// Asked before anything is loaded, so a listing can say which of its
+    /// replays nothing can open. `version` is the replay's own, for the
+    /// cross-server fallback the cache index applies.
+    pub fn can_read_build(&self, build: u32, version: Option<&str>) -> bool {
+        if self.loaded_build(build).is_some() {
+            return true;
+        }
+        if wowsunpack::game_data::list_available_builds(&self.wows_dir)
+            .is_ok_and(|available| available.contains(&build))
+        {
+            return true;
+        }
+        self.dump_base.as_deref().and_then(|base| dump_for_build(base, build, version)).is_some()
+    }
+
     /// `build`'s game data if it is already loaded, without loading it.
     ///
     /// For a caller that would like a name but will not pay a build load for

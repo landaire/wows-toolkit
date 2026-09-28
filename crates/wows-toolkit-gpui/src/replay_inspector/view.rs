@@ -41,6 +41,7 @@ use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::ReplaySettings;
 use wows_toolkit_viewmodel::personal_rating::PersonalRatingData;
 
+use super::browser_view::MissingBuild;
 use super::browser_view::ReplayBrowser;
 use super::browser_view::ReplayBrowserEvent;
 use super::columns::default_columns;
@@ -204,6 +205,12 @@ pub struct InspectorSettings {
 /// row back. Carries the whole blob because that is how it is stored.
 pub struct ReplaySettingsChanged(pub ReplaySettings);
 
+/// The listing holds replays from builds nothing on this machine can read.
+///
+/// Raised to the app, which owns the game-data cache and the jobs that fetch
+/// into it.
+pub struct GameDataMissing(pub Vec<MissingBuild>);
+
 /// A replay tab that is the one showing in its dock group.
 #[derive(Clone)]
 struct ShowingReplay {
@@ -220,6 +227,7 @@ enum OpenTarget {
 }
 
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
+impl EventEmitter<GameDataMissing> for ReplayInspectorView {}
 
 /// A viewport asked for an armor viewer on one of the battle's ships, with
 /// what that ship had taken by where playback is.
@@ -427,6 +435,9 @@ impl ReplayInspectorView {
             // something that is no longer on disk.
             ReplayBrowserEvent::ReplayChanged(path) => self.reparse_open_replay(path, window, cx),
             ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
+            // The app owns the cache and the jobs that fill it, so the offer to
+            // fetch these builds is raised to it.
+            ReplayBrowserEvent::BuildsMissing(missing) => cx.emit(GameDataMissing(missing.clone())),
         }
     }
 
