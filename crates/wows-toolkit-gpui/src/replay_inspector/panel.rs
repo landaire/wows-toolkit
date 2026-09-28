@@ -644,7 +644,7 @@ impl ExportFormat {
         }
     }
 
-    fn extension(self) -> &'static str {
+    pub(super) fn extension(self) -> &'static str {
         match self {
             Self::Json => "json",
             Self::Cbor => "cbor",
@@ -662,7 +662,7 @@ impl ExportFormat {
 }
 
 #[derive(Debug, thiserror::Error)]
-enum ExportError {
+pub(super) enum ExportError {
     #[error("could not create {path}")]
     Create {
         path: PathBuf,
@@ -674,7 +674,7 @@ enum ExportError {
 }
 
 /// Writes `match_data` to `path`.
-fn write_export(match_data: &ExportedMatch, path: &Path, format: ExportFormat) -> Result<(), ExportError> {
+pub(super) fn write_export(match_data: &ExportedMatch, path: &Path, format: ExportFormat) -> Result<(), ExportError> {
     let file = std::io::BufWriter::new(
         std::fs::File::create(path).map_err(|source| ExportError::Create { path: path.to_path_buf(), source })?,
     );

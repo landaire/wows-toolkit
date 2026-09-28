@@ -63,12 +63,11 @@ have used it.
    `ui.task.batch_render_progress`); it also has batch-to-clipboard (`:488`).
 7. **`check_for_updates` and `enable_logging` govern nothing.** No updater
    (item 11) and no log file (item 12) exist in the port.
-8. **Auto-export does not fire on a finished match.** The egui app writes from
-   the background parser for every replay the watcher reports, gated on results
-   being present (`task/replays.rs:521`, `:558-597`). The port writes only when
-   the reader opens that replay in a tab (`replay_inspector/panel.rs:396`), skips
-   the results gate, and names the file by its stem rather than
-   `better_file_name`.
+8. **Auto-export.** Done 2026-09-28: a replay the watcher reports is parsed and
+   written out whether or not it is opened (`auto_export_landed`), skipped when it
+   carries no battle results, which is the egui gate. It is still named by the
+   replay's stem rather than egui's `better_file_name` (map, mode and ship), and
+   both of the port's export paths agree on that name.
 9. ~~**"Set as Session Stats" destroys the session on one click.**~~ Done
    2026-09-27: it opens the same confirmation the port already uses for Open in
    Game, on the `confirm.set_as_session_stats` wording.
