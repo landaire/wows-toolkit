@@ -2764,6 +2764,11 @@ impl ViewportView {
     /// clears `selected_modules` (its alternatives may differ per hull,
     /// matching the egui app's own selector, `tab.rs:3169`), and reloads. A
     /// no-op if `key` is already selected.
+    /// The hull this viewport is showing, for an export seeded from it.
+    pub(crate) fn selected_hull(&self) -> Option<String> {
+        self.selected_hull.clone()
+    }
+
     pub(crate) fn select_hull_upgrade(&mut self, key: String, cx: &mut Context<Self>) {
         if self.selected_hull.as_ref() == Some(&key) {
             return;

@@ -235,7 +235,7 @@ pub(crate) fn build_hull_part_groups(hull_meshes: &[InteractiveHullMesh]) -> Vec
 
 /// Build sorted hull upgrade labels with diff-based suffixes. Ports
 /// `armor_viewer::common::build_hull_upgrade_names` verbatim.
-fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
+pub(crate) fn build_hull_upgrade_names(vehicle: &Vehicle) -> Vec<(String, String)> {
     vehicle
         .hull_upgrades()
         .map(|upgrades| {

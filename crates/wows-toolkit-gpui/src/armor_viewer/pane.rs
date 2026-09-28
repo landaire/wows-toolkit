@@ -50,6 +50,7 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::resizable::h_resizable;
@@ -63,10 +64,13 @@ use crate::replay_inspector::load::LoadedGameData;
 use crate::viewport::device::GpuContext;
 use crate::viewport::renderer::GpuPipeline;
 
+use gpui_kit::component::WindowExt as _;
+
 use super::assets::ArmorAssetsBundle;
 use super::assets::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
+use super::export_dialog;
 use super::legend;
 use gpui_kit::component::popover::Popover;
 use gpui_kit::component::searchable_list::SearchableVec;
@@ -134,6 +138,12 @@ pub struct ArmorViewerPane {
     dock: Entity<ViewportDock>,
     gpu: SharedGpu,
     bundle: BundleState,
+    /// The export choices being collected, held so the read behind them can
+    /// report into the dialog that is showing them.
+    export_dialog: Option<Entity<export_dialog::ExportDialogState>>,
+    /// Kept for as long as that dialog is open: it is what redraws the window
+    /// when a read reports into it.
+    _export_dialog_subscription: Option<Subscription>,
     ship_load: ShipLoadState,
     /// Set once a ship's armor has been shown in `viewport` at least once,
     /// gating the legend overlay exactly like the egui app's `any_ship_loaded`
@@ -208,6 +218,8 @@ impl ArmorViewerPane {
             dock,
             gpu: SharedGpu::Initializing,
             bundle: BundleState::NotStarted,
+            export_dialog: None,
+            _export_dialog_subscription: None,
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
             pending_hits: Vec::new(),
@@ -684,14 +696,10 @@ impl ArmorViewerPane {
     }
 
     /// Sidebar per-ship "Export model" context-menu handler
-    /// (`sidebar::ExportModelRequested`, Milestone 5 Task 10, item 4): asks
-    /// where to write `{display_name}.glb` (`crate::dialog`, which keeps the
-    /// app drawing while the dialog is open), then exports `event`'s ship at
-    /// STOCK hull and default LOD on the background executor -- independent
-    /// of whatever hull/LOD/module selection any pane currently displays,
-    /// unlike the toolbar's own export (which exports a pane's LIVE
-    /// selection). A cancelled dialog, or a request that arrives before the
-    /// ship-asset bundle finishes loading, is a no-op.
+    /// (`sidebar::ExportModelRequested`): asks what the model should contain
+    /// before asking where to write it, which is what the egui export dialog
+    /// collects. A request that arrives before the ship-asset bundle finishes
+    /// loading is a no-op.
     fn on_export_model_requested(
         &mut self,
         _sidebar: &Entity<Sidebar>,
@@ -703,9 +711,91 @@ impl ArmorViewerPane {
             tracing::warn!("armor viewer: export requested before ship assets finished loading");
             return;
         };
-        let bundle = Arc::clone(bundle);
+        let assets = Arc::clone(bundle);
         let param_index = event.param_index.clone();
         let display_name = event.display_name.clone();
+        // The hull the pane is showing, which is the one the reader is looking
+        // at. A sidebar menu opened with no ship loaded seeds nothing.
+        let seed_hull = self.dock.read(cx).active_viewport().read(cx).selected_hull();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let Ok(asked) = cx.update(|_window, cx| export_defaults(cx)) else { return };
+            let defaults = asked.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                let ship = ExportRequest { param_index, display_name, seed_hull, defaults };
+                this.open_export_dialog(ship, assets, window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Puts the export choices to the reader, and writes the model they confirm.
+    fn open_export_dialog(
+        &mut self,
+        ship: ExportRequest,
+        assets: Arc<ArmorAssetsBundle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let ExportRequest { param_index, display_name, seed_hull, defaults } = ship;
+        let state = cx.new(|cx| {
+            export_dialog::ExportDialogState::new(
+                param_index,
+                display_name,
+                seed_hull,
+                defaults,
+                Arc::clone(&assets),
+                cx,
+            )
+        });
+        self.export_dialog = Some(state.clone());
+        self._export_dialog_subscription =
+            Some(cx.subscribe(&state, |_this, _state, _event: &export_dialog::Changed, cx| cx.notify()));
+        let pane = cx.weak_entity();
+        window.open_dialog(cx, move |dialog, window, cx| {
+            let state = state.clone();
+            let confirming = state.clone();
+            let pane = pane.clone();
+            let assets = Arc::clone(&assets);
+            export_dialog::render(&state, dialog, window, cx).footer(
+                h_flex()
+                    .gap_2()
+                    .justify_end()
+                    .child(
+                        Button::new("armor-export-confirm")
+                            .primary()
+                            .label(t!("ui.armor.export_model").into_owned())
+                            .small()
+                            .on_click(move |_event, window, cx: &mut gpui_kit::App| {
+                                let Some(pane) = pane.upgrade() else { return };
+                                let state = confirming.clone();
+                                let assets = Arc::clone(&assets);
+                                window.close_dialog(cx);
+                                pane.update(cx, |pane, cx| pane.write_export(state, assets, window, cx));
+                            }),
+                    )
+                    .child(
+                        Button::new("armor-export-cancel")
+                            .label(t!("ui.buttons.cancel").into_owned())
+                            .small()
+                            .on_click(|_event, window, cx: &mut gpui_kit::App| window.close_dialog(cx)),
+                    ),
+            )
+        });
+    }
+
+    /// Asks where to write the model the dialog described, then writes it.
+    fn write_export(
+        &mut self,
+        state: Entity<export_dialog::ExportDialogState>,
+        assets: Arc<ArmorAssetsBundle>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let view = state.read(cx);
+        let (options, remember) = view.confirmed();
+        let param_index = view.param_index().to_owned();
+        let display_name = view.display_name().to_owned();
 
         let asked = crate::dialog::save_file(
             None,
@@ -714,11 +804,11 @@ impl ArmorViewerPane {
         );
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = asked.await else { return };
-            let options = load_ship::export_options_from_selection(load_ship::DEFAULT_LOD, None, HashMap::new());
+            let _ = cx.update(|_window, cx| remember_export_defaults(remember, cx));
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
-                    let result = load_ship::export_ship_glb(&bundle.assets, &param_index, &options, &path);
+                    let result = load_ship::export_ship_glb(&assets.assets, &param_index, &options, &path);
                     // The size is what the egui app reports beside the ship,
                     // and it is only knowable once the file is on disk.
                     result.map(|()| {
@@ -728,7 +818,11 @@ impl ArmorViewerPane {
                 })
                 .await;
 
-            let _ = this.update_in(cx, |_this, window, cx| load_ship::report_export(written, &ship, window, cx));
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.export_dialog = None;
+                this._export_dialog_subscription = None;
+                load_ship::report_export(written, &ship, window, cx);
+            });
         })
         .detach();
     }
@@ -1093,4 +1187,42 @@ mod tests {
     fn other_pane_indices_covers_every_pane_but_the_last() {
         assert_eq!(other_pane_indices(4, 3), vec![0, 1, 2]);
     }
+}
+
+/// What the last export was asked to contain, for the next one.
+///
+/// The row is the one the egui app writes, so an export set up in either is what
+/// the other offers next time.
+fn export_defaults(cx: &gpui_kit::App) -> gpui_kit::Task<wows_toolkit_viewmodel::armor::export::ExportDefaults> {
+    let pool = crate::settings_store::pool(cx);
+    let runtime = crate::runtime::runtime(cx);
+    cx.background_spawn(async move {
+        let (Some(pool), Some(runtime)) = (pool, runtime) else { return Default::default() };
+        runtime
+            .handle()
+            .block_on(async move { wows_toolkit_viewmodel::armor::export::ExportDefaults::load(&pool).await })
+    })
+}
+
+/// Remembers what an export was asked to contain.
+fn remember_export_defaults(defaults: wows_toolkit_viewmodel::armor::export::ExportDefaults, cx: &gpui_kit::App) {
+    let pool = crate::settings_store::pool(cx);
+    let runtime = crate::runtime::runtime(cx);
+    cx.background_spawn(async move {
+        let (Some(pool), Some(runtime)) = (pool, runtime) else { return };
+        let written = runtime.handle().block_on(async move { defaults.save(&pool).await });
+        if let Err(err) = written {
+            tracing::warn!("armor viewer: the export defaults were not saved: {err}");
+        }
+    })
+    .detach();
+}
+
+/// Which ship an export dialog opens on, and what it opens showing.
+struct ExportRequest {
+    param_index: String,
+    display_name: String,
+    /// The hull the pane is showing, where there is one to seed from.
+    seed_hull: Option<String>,
+    defaults: wows_toolkit_viewmodel::armor::export::ExportDefaults,
 }
