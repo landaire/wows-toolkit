@@ -186,11 +186,14 @@ have used it.
     reporting as it goes, and writes them to the cache both apps share
     (`wows_replay_insights::cap_layout`, moved out of the egui crate).
 
-    Not ported: zoom and pan on the board with its double-click reset, undo and
-    redo over what is drawn, picking a drawn shape back up to move or turn it,
-    the map pings and the grid, the per-cap radius typed in kilometres, and the
-    collab sync that puts one board in front of a whole session, which waits on
-    item 22's client-frame viewports.
+    The board zooms about the pointer, pans with a drag past every zone, and
+    goes back to the whole map on a double click, through the same window the
+    replay viewport uses (`MapViewport`).
+
+    Not ported: undo and redo over what is drawn, picking a drawn shape back up
+    to move or turn it, the map pings and the grid, the per-cap radius typed in
+    kilometres, and the collab sync that puts one board in front of a whole
+    session, which waits on item 22's client-frame viewports.
 17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its

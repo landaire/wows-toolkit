@@ -413,13 +413,14 @@ pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCa
 pub fn render_map(
     map_name: &str,
     game_data: &crate::replay_inspector::GameDataCache,
+    view: wows_minimap_renderer::viewport::MapViewport,
     commands: &[DrawCommand],
 ) -> Option<Arc<RenderImage>> {
     let loaded = game_data.newest_loaded()?;
     let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
     let canvas = {
         let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        renderer.render(commands)
+        renderer.render_at(view, commands)
     };
     Some(map_only_image(canvas))
 }
