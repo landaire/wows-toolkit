@@ -171,10 +171,11 @@ have used it.
     `task/networking.rs:669`), so the table only grows; and the poll is started
     once (`app.rs:529`) with no restart on a token or channel edit, where the
     egui app re-polls immediately (`networking.rs:746-786`).
-26. **The replay watcher handles create and rename only**
-    (`browser_view.rs:606-611`): a `Modify` leaves an open tab stale, a `Remove`
-    leaves the row in the listing, and both watcher failures are logged where the
-    egui app toasts them (`error.file_watcher_creation`, `error.replay_dir_watch`).
+26. ~~**The replay watcher handles create and rename only.**~~ Done 2026-09-27:
+    a change re-reads the row and re-parses a tab open on it
+    (`ReplayPanel::reparse`), a removal drops the row with its marking and
+    highlight, and both watcher failures are toasted in the egui app's words
+    through a typed `WatchFailure`.
 27. **Indexing.** Nothing indexes as replays are read (egui does it per replay,
     `task/replays.rs:540-552`), Build Index re-parses every replay every run (no
     skip of indexed rows), there is no re-index/repair pass for rows decoded

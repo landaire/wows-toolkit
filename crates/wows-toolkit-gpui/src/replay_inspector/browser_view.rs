@@ -257,6 +257,13 @@ pub enum ReplayBrowserEvent {
     /// The game has just written a replay into the watched directory, and the
     /// listing now holds it.
     ReplayAppeared(PathBuf),
+    /// A replay the listing already held has been written to again, and the
+    /// listing now holds the new read. A tab open on it is reading the old one.
+    ReplayChanged(PathBuf),
+    /// The replays directory cannot be watched, so a finished match will not
+    /// appear on its own. Said out loud, because the reader would otherwise wait
+    /// for a listing that never grows.
+    WatchFailed(WatchFailure),
     /// Record these battles in the Stats tab's session. `replace` forgets
     /// what is already recorded first, which is what "Set as" means.
     SessionStats {
@@ -347,6 +354,30 @@ impl ReplayBrowser {
     #[cfg(test)]
     pub(crate) fn seed_baking_preview_for_test(&mut self, path: std::path::PathBuf) {
         self.preview.seed_baking_for_test(path);
+    }
+
+    /// Seeds the listing with a replay at `path`, as a scan would. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_listing_for_test(&mut self, path: std::path::PathBuf, cx: &mut Context<Self>) {
+        self.files.push(RawReplay {
+            path,
+            listed: wows_toolkit_viewmodel::listing_row::ListedReplay {
+                ship_id: None,
+                map_name: "spaces/00_CO_ocean".to_owned(),
+                game_type: String::new(),
+                scenario: String::new(),
+                date_time: "01.01.2026 00:00:00".to_owned(),
+                build: None,
+            },
+        });
+        self.status = ScanStatus::Loaded;
+        self.rebuild_tree(cx);
+    }
+
+    /// What the listing holds, by path. Test-only.
+    #[cfg(test)]
+    pub(crate) fn listed_paths_for_test(&self) -> Vec<std::path::PathBuf> {
+        self.files.iter().map(|file| file.path.clone()).collect()
     }
 
     /// Seeds a row being dwelled on, before any bake. Test-only.
@@ -601,22 +632,26 @@ impl ReplayBrowser {
         // reporting rather than both being watched.
         self.watcher = None;
 
-        let (tx, mut rx) = futures::channel::mpsc::unbounded::<PathBuf>();
+        let (tx, mut rx) = futures::channel::mpsc::unbounded::<DirChange>();
         let watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             let Ok(event) = event else { return };
-            if !matches!(
-                event.kind,
+            let make = match event.kind {
                 notify::EventKind::Create(_)
-                    | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To))
-            ) {
-                return;
-            }
+                | notify::EventKind::Modify(notify::event::ModifyKind::Name(notify::event::RenameMode::To)) => {
+                    DirChange::Appeared
+                }
+                // A replay written to again: a re-save, or a copy that landed
+                // before the writer had finished with it.
+                notify::EventKind::Modify(notify::event::ModifyKind::Data(_)) => DirChange::Changed,
+                notify::EventKind::Remove(_) => DirChange::Removed,
+                _ => return,
+            };
             for path in event.paths {
                 if is_finished_replay(&path) {
                     // The receiver is gone once the directory changes or the
                     // app closes; this runs on notify's own thread, so a send
                     // that fails is dropped rather than unwinding it.
-                    let _ = tx.unbounded_send(path);
+                    let _ = tx.unbounded_send(make(path));
                 }
             }
         });
@@ -624,32 +659,59 @@ impl ReplayBrowser {
             Ok(watcher) => watcher,
             Err(err) => {
                 tracing::warn!(error = ?err, "replay browser: no filesystem watcher available");
+                cx.emit(ReplayBrowserEvent::WatchFailed(WatchFailure::NoWatcher(err.to_string())));
                 return;
             }
         };
         if let Err(err) = watcher.watch(&replays_dir, notify::RecursiveMode::NonRecursive) {
             tracing::warn!(dir = %replays_dir.display(), error = ?err, "replay browser: the replays directory is not watchable");
+            cx.emit(ReplayBrowserEvent::WatchFailed(WatchFailure::NotWatchable(err.to_string())));
             return;
         }
         self.watcher = Some(watcher);
 
         cx.spawn(async move |this, cx| {
-            while let Some(path) = futures::StreamExt::next(&mut rx).await {
-                let Some(raw) = read_replay_when_complete(path, cx).await else { continue };
-                let appeared = raw.path.clone();
+            while let Some(change) = futures::StreamExt::next(&mut rx).await {
+                // A removal is the one change with nothing to read: the file is
+                // gone, which is what the listing is being told.
+                if let DirChange::Removed(path) = &change {
+                    let path = path.clone();
+                    let updated = this.update(cx, |this, cx| {
+                        if this.scan_generation != generation {
+                            return;
+                        }
+                        this.forget(&path, cx);
+                    });
+                    if updated.is_err() {
+                        break;
+                    }
+                    continue;
+                }
+
+                let Some(raw) = read_replay_when_complete(change.path().to_path_buf(), cx).await else { continue };
+                let touched = raw.path.clone();
                 let updated = this.update(cx, |this, cx| {
                     // A scan started while this read was waiting means the
                     // listing is no longer the one this replay belongs to.
                     if this.scan_generation != generation {
                         return false;
                     }
-                    if this.files.iter().any(|existing| existing.path == raw.path) {
-                        return false;
+                    let held = this.files.iter().position(|existing| existing.path == raw.path);
+                    match held {
+                        // Already listed: the read replaces the row, so a
+                        // re-saved replay reads as what is on disk now.
+                        Some(at) => {
+                            this.files[at] = raw;
+                            this.rebuild_tree(cx);
+                            cx.emit(ReplayBrowserEvent::ReplayChanged(touched));
+                        }
+                        None => {
+                            this.files.push(raw);
+                            this.status = ScanStatus::Loaded;
+                            this.rebuild_tree(cx);
+                            cx.emit(ReplayBrowserEvent::ReplayAppeared(touched));
+                        }
                     }
-                    this.files.push(raw);
-                    this.status = ScanStatus::Loaded;
-                    this.rebuild_tree(cx);
-                    cx.emit(ReplayBrowserEvent::ReplayAppeared(appeared));
                     cx.notify();
                     true
                 });
@@ -659,6 +721,20 @@ impl ReplayBrowser {
             }
         })
         .detach();
+    }
+
+    /// Drops a replay the directory no longer holds, with whatever the listing
+    /// remembered about it.
+    fn forget(&mut self, path: &Path, cx: &mut Context<Self>) {
+        let held = self.files.iter().position(|existing| existing.path == *path);
+        let Some(at) = held else { return };
+        self.files.remove(at);
+        self.marked.remove(path);
+        if self.selected_path.as_deref() == Some(path) {
+            self.selected_path = None;
+        }
+        self.rebuild_tree(cx);
+        cx.notify();
     }
 
     /// Switches the grouping strategy and rebuilds the tree. Called only from
@@ -1440,6 +1516,46 @@ fn most_common_build(files: &[RawReplay]) -> Option<u32> {
 /// Whether `path` names a replay the listing shows. `temp.wowsreplay` is the
 /// match in progress: it has no container or metadata until the battle ends,
 /// and the game renames it into place then.
+/// Why the replays directory is not being watched.
+///
+/// The two are separate messages in the catalogue, and separate causes: no
+/// watcher at all is a platform or resource failure, while an unwatchable
+/// directory is usually a network share or one that has since gone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WatchFailure {
+    NoWatcher(String),
+    NotWatchable(String),
+}
+
+impl WatchFailure {
+    /// The message the reader is shown, in the words the egui app uses.
+    pub fn said(&self) -> String {
+        match self {
+            Self::NoWatcher(error) => t!("error.file_watcher_creation", error = error).into_owned(),
+            Self::NotWatchable(error) => t!("error.replay_dir_watch", error = error).into_owned(),
+        }
+    }
+}
+
+/// What the watcher saw happen to one replay.
+///
+/// Carried rather than three channels, so the reads stay in the order the
+/// directory reported them: a replay created and then written to must not be
+/// read in the other order.
+enum DirChange {
+    Appeared(PathBuf),
+    Changed(PathBuf),
+    Removed(PathBuf),
+}
+
+impl DirChange {
+    fn path(&self) -> &Path {
+        match self {
+            Self::Appeared(path) | Self::Changed(path) | Self::Removed(path) => path,
+        }
+    }
+}
+
 fn is_finished_replay(path: &Path) -> bool {
     path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
         && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
@@ -1508,6 +1624,36 @@ mod tests {
 
                 browser.handle_leaf_click(c.clone(), 1, plain, cx);
                 assert_eq!(browser.selection(), vec![c], "a plain click replaces the set");
+            });
+        });
+    }
+
+    /// A replay the directory no longer holds leaves the listing, and its
+    /// marking and highlight go with it: the egui app drops the row on the same
+    /// event (`tab_state.rs`'s `NotifyFileEvent::Removed` arm).
+    #[gpui_kit::test]
+    fn a_removed_replay_leaves_the_listing(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::Modifiers;
+        use std::path::PathBuf;
+
+        cx.update(gpui_kit::init);
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+
+        let gone = PathBuf::from("gone.wowsreplay");
+        let kept = PathBuf::from("kept.wowsreplay");
+
+        cx.update(|cx| {
+            browser.update(cx, |browser, cx| {
+                browser.seed_listing_for_test(gone.clone(), cx);
+                browser.seed_listing_for_test(kept.clone(), cx);
+                browser.handle_leaf_click(gone.clone(), 1, Modifiers::default(), cx);
+                assert_eq!(browser.selection(), vec![gone.clone()], "the row that is about to go is the selection");
+
+                browser.forget(&gone, cx);
+
+                assert_eq!(browser.listed_paths_for_test(), vec![kept], "only the replay still there is listed");
+                assert!(browser.selection().is_empty(), "and nothing is selected, since the selection is gone");
             });
         });
     }

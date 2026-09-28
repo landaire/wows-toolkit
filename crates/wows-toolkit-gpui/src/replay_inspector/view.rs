@@ -414,7 +414,18 @@ impl ReplayInspectorView {
                     self.open_replay(path.clone(), window, cx);
                 }
             }
+            // The file under an open tab has changed, so that tab is reading
+            // something that is no longer on disk.
+            ReplayBrowserEvent::ReplayChanged(path) => self.reparse_open_replay(path, window, cx),
+            ReplayBrowserEvent::WatchFailed(failure) => crate::toast::warn(failure.said(), window, cx),
         }
+    }
+
+    /// Re-reads a replay a tab is open on, leaving the tab where it is.
+    fn reparse_open_replay(&mut self, path: &PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(panel) = self.open_panels.get(path).and_then(|panel| panel.upgrade()) else { return };
+        let Some(game_data) = self.game_data.clone() else { return };
+        panel.update(cx, |panel, cx| panel.reparse(game_data, window, cx));
     }
 
     /// Opens `path` in a dock tab. A repeat double-click on a replay that is
