@@ -5330,7 +5330,6 @@ mod tests {
             }],
             ids: vec![4242],
             owners: vec![7],
-            ..Default::default()
         });
         let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 
@@ -5502,12 +5501,8 @@ mod tests {
             })
             .collect();
         let [(id, annotation)] = &drawn[..] else { panic!("one line was drawn, got {drawn:?}") };
-        state.lock().current_annotation_sync = Some(AnnotationSyncState {
-            annotations: vec![annotation.clone()],
-            ids: vec![*id],
-            owners: vec![0],
-            ..Default::default()
-        });
+        state.lock().current_annotation_sync =
+            Some(AnnotationSyncState { annotations: vec![annotation.clone()], ids: vec![*id], owners: vec![0] });
 
         window
             .update(cx, |panel, _window, cx| {
@@ -5595,7 +5590,6 @@ mod tests {
             }],
             ids: vec![11],
             owners: vec![3],
-            ..Default::default()
         });
         let (link, sent) = crate::collab::CollabLink::for_test(std::sync::Arc::clone(&state));
 

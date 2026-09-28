@@ -45,8 +45,10 @@ description = "Lints the first-party Rust graph through Buck (clippy and rustfmt
 run = "nu scripts/lint.nu"
 
 [tasks.fmt]
-description = "Rewrites formatting with rustfmt (Buck can only check, not write)"
-run = "cargo fmt -- --config unstable_features=true --config imports_granularity=Item --config imports_layout=Vertical"
+description = "Rewrites formatting with the rustfmt Buck pins, over the files Buck owns"
+# The same binary, file list and arguments the `lint` task checks with, so what
+# this writes is what the gate accepts.
+run = "nu scripts/lint.nu rustfmt --write"
 
 [tasks.test]
 description = "Runs the unit tests through Buck"
