@@ -5,6 +5,7 @@ VIEWMODEL_DEPS = [
     "//crates/wows-replays:wows_replays",
     "//crates/wows-toolkit-config:wows_toolkit_config",
     "//crates/wowsunpack:wowsunpack",
+    "//crates/wt-collab-protocol:wt_collab_protocol",
     "//crates/wt-translations:wt_translations",
     "//third-party/rust:ciborium",
     "//third-party/rust:escaper",
