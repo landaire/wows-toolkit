@@ -1399,6 +1399,9 @@ arc_stopped = "Stopped at %{plate}"
 arc_overpen = "Overpenetration"
 arc_overpen_unarmed = "Overpenetration (fuse never armed)"
 arc_plate_unknown = "an unrecorded plate"
+angle_good = "under 30 deg"
+angle_mid = "30 to 45 deg"
+angle_bad = "over 45 deg"
 trajectory_tooltip = "Click armor to simulate shell trajectories (Ctrl+T)"
 continue_ricochet = "Continue past ricochet"
 splash_mode = "Splash"
@@ -1550,11 +1553,10 @@ select_all = "Select All"
 no_data = "Shell data no longer available"
 sim_agrees = "Sim agrees"
 no_armor_hit = "No armor plates hit"
-tracked = "%{salvos} salvos, %{shells} shells"
-shells = "%{count} shells"
-unmatched_salvo = "Unmatched shell"
-
-# -- Advantage level labels --
+tracked = "%{salvos} salvos, %{shells} shells tracked"
+nothing_landed = "Nothing has landed on this ship yet"
+shells = "%{count}x"
+unknown_attacker = "Ship %{id}"
 
 [ui.armor.outcome]
 penetration = "Penetration"
@@ -1564,6 +1566,8 @@ shatter = "Shatter"
 overpenetration = "Overpenetration"
 underwater = "Underwater"
 unknown = "Unrecognized (%{raw})"
+
+# -- Advantage level labels --
 
 [advantage]
 absolute = "Absolute"

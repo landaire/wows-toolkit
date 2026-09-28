@@ -293,7 +293,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .child(Input::new(&search).id("armor-pen-search").small().w_full())
         .children(results)
         .child(div().id("armor-pen-ships").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
-        .child(render_arcs(view, pane, cx))
+        .child(render_arcs(view, cx))
         .child(render_incoming(view, pane, cx))
         .when(!ships.is_empty(), |this| {
             let pane = pane.clone();
@@ -315,12 +315,12 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
 /// opened from the catalogue, which nobody was shooting at.
 fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
     let incoming = view.incoming();
-    if incoming.hits.is_empty() && incoming.context.attackers.is_empty() {
+    if incoming.context.taken.is_empty() && incoming.context.attackers.is_empty() {
         return div().into_any_element();
     }
 
     let enemies: HashSet<EntityId> = incoming.context.attackers.keys().copied().collect();
-    let salvos = group_incoming(&incoming.hits, &incoming.filter, &enemies, &incoming.context.main_battery);
+    let salvos = group_incoming(&incoming.context.taken, &incoming.filter, &enemies, &incoming.context.main_battery);
     let shells: usize = salvos.iter().map(|salvo| salvo.shells.len()).sum();
     let chosen = incoming.filter.attacker;
 
@@ -368,7 +368,7 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
                 }),
         )
         .child(if salvos.is_empty() {
-            hint(t!("ui.armor.realtime.no_armor_hit").as_ref(), cx)
+            hint(t!("ui.armor.realtime.nothing_landed").as_ref(), cx)
         } else {
             v_flex()
                 .id("armor-incoming-log")
@@ -393,15 +393,18 @@ fn attacker_button(
 ) -> AnyElement {
     let pane = pane.clone();
     let selected = attacker == chosen;
-    let id = attacker.map(|id| id.raw() as usize).unwrap_or(usize::MAX);
+    // An element id per attacker, with the "every enemy" row on its own key
+    // rather than a reserved number.
+    let id: SharedString = match attacker {
+        Some(attacker) => format!("armor-incoming-attacker-{}", attacker.raw()).into(),
+        None => "armor-incoming-attacker-all".into(),
+    };
     crate::ui::selectable(
-        ("armor-incoming-attacker", id),
+        ElementId::from(id.clone()),
         selected,
-        Button::new(("armor-incoming-attacker-button", id)).label(label).compact().selected(selected).on_click(
-            move |_event, _window, cx: &mut App| {
-                pane.update(cx, |pane, cx| pane.set_incoming_attacker(attacker, cx));
-            },
-        ),
+        Button::new(id).label(label).compact().selected(selected).on_click(move |_event, _window, cx: &mut App| {
+            pane.update(cx, |pane, cx| pane.set_incoming_attacker(attacker, cx));
+        }),
     )
     .into_any_element()
 }
@@ -413,10 +416,15 @@ fn salvo_block(
     index: usize,
     salvo: &IncomingSalvo,
 ) -> AnyElement {
-    let who = salvo
-        .attacker
-        .and_then(|attacker| view.incoming().context.attackers.get(&attacker).cloned())
-        .unwrap_or_else(|| t!("ui.armor.realtime.unmatched_salvo").into_owned());
+    // A ship the roster did not name is one the frame had no row for, which
+    // reads as its entity rather than as a blank.
+    let who = view
+        .incoming()
+        .context
+        .attackers
+        .get(&salvo.attacker)
+        .cloned()
+        .unwrap_or_else(|| t!("ui.armor.realtime.unknown_attacker", id = salvo.attacker.raw()).into_owned());
 
     v_flex()
         .gap_0p5()
@@ -445,7 +453,7 @@ fn salvo_block(
         )
         .children(salvo.shells.iter().enumerate().map(|(shell_index, shell)| {
             div()
-                .id(("armor-incoming-shell", index * 64 + shell_index))
+                .id(SharedString::from(format!("armor-incoming-shell-{index}-{shell_index}")))
                 .pl(px(12.))
                 .text_xs()
                 .text_color(crate::theme::text_dim())
@@ -474,7 +482,7 @@ fn hit_label(hit: &HitType) -> String {
 /// The egui Analysis window's Trajectory tab, in the panel this port already
 /// puts the penetration checker in: both answer the same question about the same
 /// plates, and reading them side by side is the point.
-fn render_arcs(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut App) -> AnyElement {
+fn render_arcs(view: &ArmorViewerPane, cx: &mut App) -> AnyElement {
     let viewport = view.active_viewport(cx);
     let arcs = viewport.read(cx).arcs();
     if arcs.is_empty() {
@@ -522,20 +530,34 @@ fn render_arcs(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut 
                 .text_color(rgb(crate::theme::semantic().warn))
                 .child(t!("ui.armor.arc_simulation_caveat").to_string()),
         )
-        .children(arcs.iter().enumerate().map(|(index, arc)| arc_block(pane, &viewport, index, arc, cx)))
+        .child(render_angle_legend())
+        .children(arcs.iter().enumerate().map(|(index, arc)| arc_block(view, &viewport, index, arc)))
         .into_any_element()
+}
+
+/// What the impact markers' colours mean, which is how square each strike was.
+fn render_angle_legend() -> impl IntoElement {
+    let semantic = crate::theme::semantic();
+    h_flex().gap_2().items_center().children(
+        [
+            (semantic.armor_angle_good, "ui.armor.angle_good"),
+            (semantic.armor_angle_mid, "ui.armor.angle_mid"),
+            (semantic.armor_angle_bad, "ui.armor.angle_bad"),
+        ]
+        .into_iter()
+        .map(|(color, key)| {
+            h_flex()
+                .gap_1()
+                .items_center()
+                .child(div().size_2().rounded_full().bg(rgb(color)))
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child(t!(key).to_string()))
+        }),
+    )
 }
 
 /// One cast arc: what it crossed, what became of the shell, and the two things
 /// the reader can do to it.
-fn arc_block(
-    pane: &Entity<ArmorViewerPane>,
-    viewport: &Entity<ViewportView>,
-    index: usize,
-    arc: &ArcSummary,
-    cx: &App,
-) -> AnyElement {
-    let _ = pane;
+fn arc_block(view: &ArmorViewerPane, viewport: &Entity<ViewportView>, index: usize, arc: &ArcSummary) -> AnyElement {
     let swatch = rgba(
         (((arc.color[0] * 255.0) as u32) << 24)
             | (((arc.color[1] * 255.0) as u32) << 16)
@@ -609,7 +631,7 @@ fn arc_block(
                     )
                 }),
         )
-        .child(div().text_xs().text_color(outcome_color(&arc.outcome, cx)).child(describe_outcome(&arc.outcome)))
+        .child(div().text_xs().text_color(outcome_color(&arc.outcome)).child(describe_outcome(&arc.outcome, view)))
         .into_any_element()
 }
 
@@ -646,16 +668,18 @@ fn arc_range_step(
 }
 
 /// What an outcome reads as.
-fn describe_outcome(outcome: &ArcOutcome) -> String {
+fn describe_outcome(outcome: &ArcOutcome, view: &ArmorViewerPane) -> String {
     match outcome {
         ArcOutcome::NotSimulated => t!("ui.armor.arc_no_shell").into_owned(),
         ArcOutcome::Detonated { zone } => match zone {
             Some(zone) => t!("ui.armor.arc_detonated_in", zone = zone.clone()).into_owned(),
             None => t!("ui.armor.arc_detonated_past_armor").into_owned(),
         },
-        ArcOutcome::Ricocheted { plate } => t!("ui.armor.arc_ricochet", plate = describe_plate(plate)).into_owned(),
-        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate)).into_owned(),
-        ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate)).into_owned(),
+        ArcOutcome::Ricocheted { plate } => {
+            t!("ui.armor.arc_ricochet", plate = describe_plate(plate, view)).into_owned()
+        }
+        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate, view)).into_owned(),
+        ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate, view)).into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: true } => t!("ui.armor.arc_overpen").into_owned(),
         ArcOutcome::Overpenetrated { fuse_armed: false } => t!("ui.armor.arc_overpen_unarmed").into_owned(),
     }
@@ -663,22 +687,27 @@ fn describe_outcome(outcome: &ArcOutcome) -> String {
 
 /// The plate a shell stopped at, or that it stopped at one nothing is known
 /// about, which a cast whose plate list is shorter than its simulation reports.
-fn describe_plate(plate: &Option<StoppingPlate>) -> String {
+fn describe_plate(plate: &Option<StoppingPlate>, view: &ArmorViewerPane) -> String {
     match plate {
-        Some(plate) => format!("#{} {:.0}mm {}", plate.number, plate.thickness.value(), plate.material),
+        // Named as the reader knows it: the material key is a mesh name, and
+        // the build has a translation for it.
+        Some(plate) => {
+            let named = view.translate_part(&plate.material);
+            format!("#{} {:.0}mm {}", plate.number, plate.thickness.value(), named)
+        }
         None => t!("ui.armor.arc_plate_unknown").into_owned(),
     }
 }
 
-/// The tone an outcome is read in: through is one answer, stopped is another.
-fn outcome_color(outcome: &ArcOutcome, cx: &App) -> Hsla {
-    let _ = cx;
+/// The tone an outcome is read in: the armor palette both viewers paint their
+/// verdicts in, where a detonation is the result the reader was after.
+fn outcome_color(outcome: &ArcOutcome) -> Hsla {
+    let semantic = crate::theme::semantic();
     match outcome {
-        ArcOutcome::Detonated { .. } => rgb(crate::theme::semantic().error).into(),
-        ArcOutcome::Overpenetrated { .. } => rgb(crate::theme::semantic().notice).into(),
-        ArcOutcome::Ricocheted { .. } | ArcOutcome::Shattered { .. } | ArcOutcome::Stopped { .. } => {
-            rgb(crate::theme::semantic().ok).into()
-        }
+        ArcOutcome::Detonated { .. } => rgb(semantic.armor_pen).into(),
+        ArcOutcome::Overpenetrated { .. } => rgb(semantic.armor_overpen).into(),
+        ArcOutcome::Ricocheted { .. } => rgb(semantic.armor_ricochet).into(),
+        ArcOutcome::Shattered { .. } | ArcOutcome::Stopped { .. } => rgb(semantic.armor_shatter).into(),
         ArcOutcome::NotSimulated => crate::theme::text_dim(),
     }
 }

@@ -17,7 +17,7 @@ const PITCH_MIN: f32 = 0.03;
 const PITCH_MAX: f32 = 1.4;
 
 /// First-person preview state: where on the ring the eye sits and how it aims.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraPerspective {
     /// Ring parameter / aim yaw, radians.
     pub yaw: f32,

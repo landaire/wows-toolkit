@@ -114,6 +114,17 @@ pub struct Semantic {
     pub chat_division: u32,
     pub chat_team: u32,
     pub chat_other: u32,
+    /// What a shell did to the armor it met. The same four the egui viewer
+    /// paints its verdicts in (`ui/theme/semantic.rs`), so the two apps read a
+    /// cast the same way.
+    pub armor_pen: u32,
+    pub armor_overpen: u32,
+    pub armor_ricochet: u32,
+    pub armor_shatter: u32,
+    /// How square a strike was: head-on, angled, glancing.
+    pub armor_angle_good: u32,
+    pub armor_angle_mid: u32,
+    pub armor_angle_bad: u32,
 }
 
 pub const DARK_SEMANTIC: Semantic = Semantic {
@@ -133,6 +144,13 @@ pub const DARK_SEMANTIC: Semantic = Semantic {
     chat_division: 0xe5c158,
     chat_team: 0x6fd98a,
     chat_other: 0xe8a54a,
+    armor_pen: 0x6fd98a,
+    armor_overpen: 0xe0be64,
+    armor_ricochet: 0x7fb4e8,
+    armor_shatter: 0xa9a49a,
+    armor_angle_good: 0x64d98a,
+    armor_angle_mid: 0xe0be64,
+    armor_angle_bad: 0xe8737b,
 };
 
 pub const LIGHT_SEMANTIC: Semantic = Semantic {
@@ -152,6 +170,13 @@ pub const LIGHT_SEMANTIC: Semantic = Semantic {
     chat_division: 0x775800,
     chat_team: 0x106c34,
     chat_other: 0x8a4b00,
+    armor_pen: 0x106c34,
+    armor_overpen: 0x785808,
+    armor_ricochet: 0x1b5fa8,
+    armor_shatter: 0x5f5c52,
+    armor_angle_good: 0x116b34,
+    armor_angle_mid: 0x785808,
+    armor_angle_bad: 0xae2230,
 };
 
 /// The semantic set for whatever is on screen now.

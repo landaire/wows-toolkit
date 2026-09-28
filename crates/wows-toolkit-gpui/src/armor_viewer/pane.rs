@@ -339,6 +339,23 @@ impl ArmorViewerPane {
         cx.emit(SeekRequested(clock));
     }
 
+    /// Puts the export dialog's state away.
+    pub(crate) fn forget_export_dialog(&mut self) {
+        self.export_dialog = None;
+        self._export_dialog_subscription = None;
+    }
+
+    /// A zone or a part named the way the game names it.
+    ///
+    /// Falls back to the mesh's own key while the build is still loading, which
+    /// is what the reader would otherwise see nothing at all for.
+    pub(crate) fn translate_part(&self, name: &str) -> String {
+        match &self.bundle {
+            BundleState::Ready(bundle) => super::catalog::translate_part(bundle.assets.metadata(), name),
+            _ => name.to_owned(),
+        }
+    }
+
     /// What was fired at the ship on screen.
     pub(crate) fn incoming(&self) -> &IncomingFire {
         &self.incoming
@@ -736,6 +753,7 @@ impl ArmorViewerPane {
         if is_ship_already_loaded(loaded, &event.param_index) {
             return;
         }
+        self.forget_incoming();
         self.start_ship_load(event.param_index.clone(), event.display_name.clone(), cx);
     }
 
@@ -800,6 +818,7 @@ impl ArmorViewerPane {
             let state = state.clone();
             let confirming = state.clone();
             let pane = pane.clone();
+            let cancelling = pane.clone();
             let assets = Arc::clone(&assets);
             export_dialog::render(&state, dialog, window, cx).footer(
                 h_flex()
@@ -808,8 +827,9 @@ impl ArmorViewerPane {
                     .child(
                         Button::new("armor-export-confirm")
                             .primary()
-                            .label(t!("ui.armor.export_model").into_owned())
+                            .label(t!("ui.armor.export_button").into_owned())
                             .small()
+                            .disabled(!state.read(cx).is_ready())
                             .on_click(move |_event, window, cx: &mut gpui_kit::App| {
                                 let Some(pane) = pane.upgrade() else { return };
                                 let state = confirming.clone();
@@ -822,7 +842,14 @@ impl ArmorViewerPane {
                         Button::new("armor-export-cancel")
                             .label(t!("ui.buttons.cancel").into_owned())
                             .small()
-                            .on_click(|_event, window, cx: &mut gpui_kit::App| window.close_dialog(cx)),
+                            .on_click(move |_event, window, cx: &mut gpui_kit::App| {
+                                window.close_dialog(cx);
+                                // The dialog is gone, so neither it nor the
+                                // redraw it asked for is wanted any more.
+                                if let Some(pane) = cancelling.upgrade() {
+                                    pane.update(cx, |pane, _cx| pane.forget_export_dialog());
+                                }
+                            }),
                     ),
             )
         });
@@ -841,6 +868,12 @@ impl ArmorViewerPane {
         let param_index = view.param_index().to_owned();
         let display_name = view.display_name().to_owned();
 
+        // Remembered when the reader says yes, not when they pick a file: the
+        // choices are theirs either way, and the egui dialog saves them here.
+        remember_export_defaults(remember, cx);
+        self.export_dialog = None;
+        self._export_dialog_subscription = None;
+
         let asked = crate::dialog::save_file(
             None,
             &load_ship::default_export_filename(&display_name),
@@ -848,7 +881,6 @@ impl ArmorViewerPane {
         );
         cx.spawn_in(window, async move |this, cx| {
             let Some(path) = asked.await else { return };
-            let _ = cx.update(|_window, cx| remember_export_defaults(remember, cx));
             let ship = display_name.clone();
             let written = cx
                 .background_spawn(async move {
@@ -862,13 +894,17 @@ impl ArmorViewerPane {
                 })
                 .await;
 
-            let _ = this.update_in(cx, |this, window, cx| {
-                this.export_dialog = None;
-                this._export_dialog_subscription = None;
-                load_ship::report_export(written, &ship, window, cx);
-            });
+            let _ = this.update_in(cx, |_this, window, cx| load_ship::report_export(written, &ship, window, cx));
         })
         .detach();
+    }
+
+    /// Puts the incoming-fire log away.
+    ///
+    /// A ship opened from the catalogue is not the ship the replay was firing
+    /// at, so the log about that one is no longer about anything on screen.
+    fn forget_incoming(&mut self) {
+        self.incoming = IncomingFire::default();
     }
 
     /// Shows `param_index`'s armor with the hits it had taken, for a replay
@@ -884,8 +920,8 @@ impl ArmorViewerPane {
         incoming: crate::replay_renderer::IncomingContext,
         cx: &mut Context<Self>,
     ) {
-        self.pending_hits = hits.clone();
-        self.incoming = IncomingFire { hits, context: incoming, filter: IncomingFilter::default() };
+        self.pending_hits = hits;
+        self.incoming = IncomingFire { context: incoming, filter: IncomingFilter::default() };
         let active = self.dock.read(cx).active_viewport();
         if is_ship_already_loaded(active.read(cx).loaded_param_index(), &param_index) {
             // Already showing it, so only what it has taken has changed.
@@ -910,7 +946,6 @@ impl ArmorViewerPane {
         if !self.ship_loaded {
             return;
         }
-        self.incoming.hits = hits.clone();
         let active = self.dock.read(cx).active_viewport();
         active.update(cx, |view, cx| {
             view.set_hit_health(health, cx);
@@ -1273,8 +1308,6 @@ impl EventEmitter<SeekRequested> for ArmorViewerPane {}
 /// What was fired at the ship on screen.
 #[derive(Default)]
 pub(crate) struct IncomingFire {
-    /// The hits themselves, as far as playback has reached.
-    pub(crate) hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
     pub(crate) context: crate::replay_renderer::IncomingContext,
     pub(crate) filter: IncomingFilter,
 }

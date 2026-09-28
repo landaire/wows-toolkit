@@ -374,6 +374,9 @@ pub struct IncomingContext {
     /// Every enemy of the ship being looked at, named as the log lists them.
     /// The keys are also what counts as incoming fire.
     pub attackers: std::collections::BTreeMap<EntityId, String>,
+    /// Every hit that ship takes over the whole battle, which is what the log
+    /// lists: it is a reading of the battle rather than of where playback is.
+    pub taken: Vec<PreExtractedHit>,
     /// The main battery shells of every ship in the battle, so secondaries can
     /// be told apart from them. Empty is not knowledge that none are main
     /// battery, and the filter reads it that way.
@@ -1118,7 +1121,10 @@ impl ReplayRendererPanel {
 
         let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(timeline);
         feed.advance_to(GameClock(self.clock_of(self.at)));
-        let incoming = self.incoming_context(entity_id);
+        let mut incoming = self.incoming_context(entity_id);
+        // The log reads the whole battle, not the part played so far: scrubbing
+        // back would otherwise take salvos out of a list nobody was scrubbing.
+        incoming.taken = feed.whole_battle().to_vec();
         cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: feed.taken().to_vec(), incoming });
         self.armor_following = Some((entity_id, feed));
         self.close_ship_menu(cx);
@@ -1134,12 +1140,16 @@ impl ReplayRendererPanel {
         let mut context = IncomingContext::default();
         let Some(track) = self.track() else { return context };
         let Some(commands) = track.frames.get(self.at) else { return context };
-        let Some(rows) = commands.iter().find_map(|command| {
-            let DrawCommand::TeamRoster { rows, .. } = command else { return None };
-            Some(rows)
-        }) else {
-            return context;
-        };
+        // One roster per team, so every one of them is read: the enemies are in
+        // the roster the victim is not in.
+        let rows: Vec<&wows_minimap_renderer::draw_command::RosterRow> = commands
+            .iter()
+            .filter_map(|command| {
+                let DrawCommand::TeamRoster { rows, .. } = command else { return None };
+                Some(rows.iter())
+            })
+            .flatten()
+            .collect();
         let Some(victim_team) = rows.iter().find(|row| row.entity_id == victim).map(|row| row.team_id) else {
             return context;
         };
@@ -1150,7 +1160,7 @@ impl ReplayRendererPanel {
 
         let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else { return context };
         let provider = loaded.provider();
-        for row in rows {
+        for row in &rows {
             let Some(ship) = row.ship_param_id.and_then(|id| provider.game_param_by_id(id)) else { continue };
             let Some(config) = ship.vehicle().and_then(|vehicle| vehicle.config_data()) else { continue };
             for name in &config.main_battery_ammo {
