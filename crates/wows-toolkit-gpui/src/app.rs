@@ -1422,6 +1422,16 @@ impl App {
         Some(crate::replay_inspector::browser_view::resolve_replays_dir(std::path::Path::new(&wows_dir)))
     }
 
+    /// The version the install is on, which is what a ship's ranges are read
+    /// at. `None` until the game directory is set and its preferences read.
+    fn installed_version(&self) -> Option<wowsunpack::data::Version> {
+        let wows_dir = self.settings().map(|settings| settings.wows_dir.clone())?;
+        if wows_dir.is_empty() {
+            return None;
+        }
+        crate::replay_inspector::load::installed_version(std::path::Path::new(&wows_dir))
+    }
+
     /// Opens a tactics board in a window of its own.
     ///
     /// Its own window rather than a tab, as the egui board is: a board is drawn
@@ -1430,9 +1440,10 @@ impl App {
         let game_data = self.replay_inspector.read(cx).game_data();
         let layouts = self.cap_layouts.clone();
         let replays_dir = self.replays_dir();
+        let version = self.installed_version();
         let board = cx.new(|cx| {
             let mut board = crate::tactics::TacticsBoard::new(game_data, layouts, window, cx);
-            board.set_replays_dir(replays_dir, cx);
+            board.set_install(replays_dir, version, cx);
             board
         });
         let options =

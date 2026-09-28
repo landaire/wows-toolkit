@@ -1586,6 +1586,9 @@ scan_replays_tooltip = "Read the replays for the capture layouts of the modes th
 scan_needs_game_data = "Load a game build first"
 scan_running = "Reading replays..."
 scan_done = "Read %{total} replays and found %{added} new layouts"
+placing = "Placing %{ship}"
+side_friendly = "Friendly"
+side_enemy = "Enemy"
 
 [ui.armor.outcome]
 penetration = "Penetration"
