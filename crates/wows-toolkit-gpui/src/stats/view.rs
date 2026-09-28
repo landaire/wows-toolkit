@@ -37,6 +37,7 @@ use wows_toolkit_viewmodel::stats::PerGameStat;
 use wows_toolkit_viewmodel::stats::StatsFilters;
 use wows_toolkit_viewmodel::stats::all_match_groups;
 use wows_toolkit_viewmodel::stats::filter_games;
+use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::setting_keys;
 
@@ -221,9 +222,13 @@ impl StatsView {
     fn push_filtered(&mut self, cx: &mut Context<Self>) {
         self.save_filters(cx);
         self.drop_closed_charts(cx);
+        // The summary counts the session's own last N; the per-ship table counts
+        // N per ship, which is the split the egui tab makes between its two
+        // reads (`ui/stats_tab.rs:327` against `:406`).
         let filtered = filter_games(&self.games, &self.filters);
+        let per_ship = filter_games_per_ship(&self.games, &self.filters);
         self.overview.update(cx, |panel, cx| panel.set_games(&filtered, cx));
-        self.ships.update(cx, |panel, cx| panel.set_games(&filtered, cx));
+        self.ships.update(cx, |panel, cx| panel.set_games(&per_ship, cx));
         // A chart gets the whole session and the bar's answer: one that has
         // been taken off the bar narrows the session itself.
         for chart in &self.charts {

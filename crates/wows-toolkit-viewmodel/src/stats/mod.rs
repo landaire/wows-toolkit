@@ -367,6 +367,36 @@ pub fn filter_games<'a>(games: &'a [PerGameStat], filters: &StatsFilters) -> Vec
     }
 }
 
+/// Applies the filter bar with the recency limit counted per ship rather than
+/// over the session.
+///
+/// What "last 25" means on the per-ship table and the charts: 25 battles in each
+/// ship, not the 25 most recent overall. The egui app draws those two surfaces
+/// from `per_ship_limited_games` and its summary line from the global count
+/// (`data/session_stats.rs:325`, used at `ui/stats_tab.rs:406` and `:541`), so a
+/// session filtered in one app reads the same in the other.
+///
+/// `games` is expected in `sort_key` order, and the result keeps that order: a
+/// chart plots along it.
+pub fn filter_games_per_ship<'a>(games: &'a [PerGameStat], filters: &StatsFilters) -> Vec<&'a PerGameStat> {
+    let kept: Vec<&PerGameStat> = games.iter().filter(|game| filters.keeps(game)).collect();
+    let GameLimit::Recent(count) = filters.limit else { return kept };
+
+    // How many of each ship's battles have been passed over, counted from the
+    // end: a battle is kept while its ship still has room.
+    let mut seen: std::collections::HashMap<GameParamId, usize> = std::collections::HashMap::new();
+    let mut keeping: Vec<bool> = vec![false; kept.len()];
+    for (at, game) in kept.iter().enumerate().rev() {
+        let seen = seen.entry(game.ship_id).or_default();
+        if *seen < count {
+            keeping[at] = true;
+            *seen += 1;
+        }
+    }
+
+    kept.into_iter().zip(keeping).filter(|(_, keeping)| *keeping).map(|(game, _)| game).collect()
+}
+
 /// Every match group present in `games`, for the filter bar's mode buttons.
 pub fn all_match_groups(games: &[PerGameStat]) -> std::collections::BTreeSet<String> {
     games.iter().map(|game| game.match_group.clone()).collect()
@@ -690,6 +720,34 @@ mod tests {
             match_group: mode.to_string(),
             achievements: Vec::new(),
         }
+    }
+
+    /// The recency limit counts per ship on the surfaces that are about ships:
+    /// "last one" keeps one battle in each, not the one most recent overall.
+    #[test]
+    fn the_limit_counts_per_ship_where_the_egui_tab_counts_per_ship() {
+        let mut games = Vec::new();
+        for (at, ship) in [1_u64, 2, 1, 2, 1].into_iter().enumerate() {
+            let mut one = game("Ship", &format!("2026-01-0{at}"), 10_000, 1, true, false, "pvp");
+            one.ship_id = ship.into();
+            games.push(one);
+        }
+
+        let one_each = StatsFilters { limit: GameLimit::Recent(1), ..StatsFilters::default() };
+        let kept = filter_games_per_ship(&games, &one_each);
+        assert_eq!(kept.len(), 2, "one battle in each of the two ships");
+        assert_eq!(kept[0].ship_id, 2u64.into(), "and in the order they were played");
+        assert_eq!(kept[0].sort_key, "2026-01-03");
+        assert_eq!(kept[1].ship_id, 1u64.into());
+        assert_eq!(kept[1].sort_key, "2026-01-04");
+
+        // The session-wide count is the other reading, and keeps one game.
+        assert_eq!(filter_games(&games, &one_each).len(), 1);
+
+        // With no limit the two agree.
+        let all = StatsFilters::default();
+        assert_eq!(filter_games_per_ship(&games, &all).len(), 5);
+        assert_eq!(filter_games(&games, &all).len(), 5);
     }
 
     fn sample() -> Vec<PerGameStat> {

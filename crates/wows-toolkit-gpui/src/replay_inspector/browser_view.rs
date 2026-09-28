@@ -1220,10 +1220,26 @@ impl Render for ReplayBrowser {
                             }
                             .into_owned(),
                         )
-                        .on_click(move |_event, _window, cx| {
+                        // Replacing the session throws away everything recorded
+                        // in it, so it is confirmed first, as in the egui app
+                        // (`ConfirmableAction::SetAsSessionStats`).
+                        .on_click(move |_event, window, cx| {
                             let paths = set_paths.clone();
-                            set_entity.update(cx, |_browser, cx| {
-                                cx.emit(ReplayBrowserEvent::SessionStats { paths, replace: true });
+                            let entity = set_entity.clone();
+                            window.open_alert_dialog(cx, move |alert, _window, _cx| {
+                                let paths = paths.clone();
+                                let entity = entity.clone();
+                                alert
+                                    .title(t!("ui.replay.context.set_session_stats_one").into_owned())
+                                    .description(t!("confirm.set_as_session_stats").into_owned())
+                                    .show_cancel(true)
+                                    .on_ok(move |_event, _window, cx| {
+                                        let paths = paths.clone();
+                                        entity.update(cx, |_browser, cx| {
+                                            cx.emit(ReplayBrowserEvent::SessionStats { paths, replace: true });
+                                        });
+                                        true
+                                    })
                             });
                         }),
                     )
