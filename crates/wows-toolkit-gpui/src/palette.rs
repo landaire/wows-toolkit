@@ -32,6 +32,8 @@ pub enum PaletteAction {
     /// Read every replay again and rewrite what the index holds, once the reader
     /// has confirmed it.
     RefreshPersistedData,
+    /// Contribute every listed battle, as the data-sharing setting asks.
+    ContributeAllReplays(crate::upload::LedgerUse),
 }
 
 /// One entry: what it is called and what it does.
@@ -84,6 +86,14 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries.push(PaletteEntry {
         label: t!("ui.replay.refresh_persisted_data").into_owned(),
         action: PaletteAction::RefreshPersistedData,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.palette.send_all_replays").into_owned(),
+        action: PaletteAction::ContributeAllReplays(crate::upload::LedgerUse::Consult),
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.palette.send_all_replays_again").into_owned(),
+        action: PaletteAction::ContributeAllReplays(crate::upload::LedgerUse::Ignore),
     });
     entries.push(PaletteEntry {
         label: t!("ui.replay.copy_latest_log").into_owned(),
@@ -162,6 +172,23 @@ mod tests {
             "a battle the reader sank in is a loss and a sinking, got {parsed:?}"
         );
         assert!(parsed.contains(&seed::games_i_won()), "got {parsed:?}");
+    }
+
+    /// Both bulk contributions are offered: the ordinary pass over what has not
+    /// been sent, and the one that sends it all again for a reader told the
+    /// service lost it. The egui palette offers the same two.
+    #[test]
+    fn both_bulk_contributions_are_offered() {
+        let offered: Vec<crate::upload::LedgerUse> = entries()
+            .iter()
+            .filter_map(|entry| match entry.action {
+                PaletteAction::ContributeAllReplays(ledger) => Some(ledger),
+                _ => None,
+            })
+            .collect();
+
+        assert!(offered.contains(&crate::upload::LedgerUse::Consult));
+        assert!(offered.contains(&crate::upload::LedgerUse::Ignore));
     }
 
     /// Labels are what the reader searches, so an empty one is unreachable.

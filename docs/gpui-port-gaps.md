@@ -49,7 +49,7 @@ have used it.
 
 ## Trust: a control that says one thing and does another
 
-5. **The data-sharing radio.** Done 2026-09-28: a battle that lands is
+5. ~~**The data-sharing radio.**~~ Done 2026-09-28: a battle that lands is
    contributed as the setting says -- nothing, the per-player builds to
    `/api/ship_builds`, or the file itself to `/api/replays` -- and recorded in the
    `sent_replays` table both apps write, so it is sent once however it was read.
@@ -62,10 +62,11 @@ have used it.
    `task/replay_upload.rs` re-exports `decide_upload_action`,
    `raw_replay_snapshot_state` and their types rather than restating them, keeping
    only what is its own -- the packet-level scan and the sending. The first-run
-   consent dialogs landed with item 21. What remains is "Send all replays to
-   ShipBuilds", the palette's bulk pass over a whole directory
-   (`app.rs:4712`), so the setting is still only acted on for battles that land
-   while the app is open.
+   consent dialogs landed with item 21, and so did the bulk pass: the palette
+   offers Send All Replays to ShipBuilds and a second entry that ignores the
+   ledger, which walks what the listing holds, contributes each battle under the
+   current setting, names how far it has got in one message it rewrites, and says
+   how many were sent.
 6. ~~**Batch render.**~~ Done 2026-09-28: the menu item now runs one
    background batch (`replay_renderer::batch_export`) into a folder the reader
    picks, one file per replay, and reports how many were written and how many
@@ -162,12 +163,12 @@ have used it.
     cache job and an index build -- with their progress. A tab's own work (a
     directory scan, a replay parse) is still reported by that tab rather than
     there, where the egui panel names every background task.
-20. **Palette is a third of egui's.** Missing: the three cascading sub-modes
+20. **Palette is a third of egui's.** Still missing: the three cascading sub-modes
     (search a player, my matches in ship, view armor for ship,
-    `ui/command_palette.rs:129-131`), Import constants, and Send all replays (x2).
-    Copy latest log landed 2026-09-28, and Open replay directory, Index All Replays
-    and Refresh Persisted Replay Data followed the same day, and "Games I died in"
-    now seeds `outcome:loss self.survived:false`, which is the egui seed itself
+    `ui/command_palette.rs:129-131`) and Import constants, which waits on item 4.
+    Landed 2026-09-28: Copy latest log, Open replay directory, Index All Replays,
+    Refresh Persisted Replay Data, and both Send All Replays entries. "Games I died
+    in" now seeds `outcome:loss self.survived:false`, which is the egui seed itself
     (`query_bar::seed::games_i_died_in`) rather than a `survived:false` that also
     returned the wins the reader sank in; a test parses every seeded search and
     compares it against that module.
