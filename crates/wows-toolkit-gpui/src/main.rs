@@ -46,27 +46,6 @@ use wows_toolkit_viewmodel::settings::ThemeChoice;
 const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1200.), px(800.));
 
-/// Map the persisted main-window geometry to `WindowBounds`, falling back to
-/// the hardcoded default whenever a field (or the row itself) is absent.
-fn window_bounds_from_settings(saved: Option<wows_toolkit_config::WindowSettings>) -> WindowBounds {
-    let default_bounds = Bounds { origin: DEFAULT_WINDOW_ORIGIN, size: DEFAULT_WINDOW_SIZE };
-    let Some(saved) = saved else {
-        return WindowBounds::Windowed(default_bounds);
-    };
-
-    let size = saved.inner_size_points.map(|[w, h]| size(px(w), px(h))).unwrap_or(DEFAULT_WINDOW_SIZE);
-    let origin = saved.outer_position_pixels.map(|[x, y]| point(px(x), px(y))).unwrap_or(DEFAULT_WINDOW_ORIGIN);
-    let bounds = Bounds { origin, size };
-
-    if saved.fullscreen {
-        WindowBounds::Fullscreen(bounds)
-    } else if saved.maximized {
-        WindowBounds::Maximized(bounds)
-    } else {
-        WindowBounds::Windowed(bounds)
-    }
-}
-
 fn main() {
     // `RUST_LOG` overrides; absent that, `info` is the default so the crate's
     // `tracing::info!`/`warn!`/`error!` calls (scan errors, open-intent logs,
@@ -85,7 +64,10 @@ fn main() {
 
         // Read before the window opens: position can only be set at builder
         // time, not via a later viewport/window command.
-        let window_bounds = window_bounds_from_settings(wows_toolkit_config::load_main_window_settings());
+        let window_bounds = window_shell::bounds_for(
+            wows_toolkit_config::load_main_window_settings(),
+            Bounds { origin: DEFAULT_WINDOW_ORIGIN, size: DEFAULT_WINDOW_SIZE },
+        );
 
         let window_options = WindowOptions {
             window_bounds: Some(window_bounds),
@@ -101,6 +83,7 @@ fn main() {
                     // preference, which is what the stored default resolves to
                     // anyway.
                     theme::apply_egui_theme(ThemeChoice::default(), settings::DEFAULT_ZOOM, window, cx);
+                    window_shell::remember(wows_toolkit_config::WindowKind::Main, window, cx);
                     let view = cx.new(|cx| App::new(window, cx));
                     app_entity = Some(view.clone());
                     cx.new(|cx| Root::new(view, window, cx))
@@ -149,8 +132,23 @@ fn main() {
             // rather than discarded.
             let zoom = loaded.zoom;
             let theme_choice = loaded.theme;
+            let remembered = runtime::spawn(cx, {
+                let pool = pool.clone();
+                async move { wows_toolkit_config::load_all_window_settings(&pool).await }
+            })
+            .await;
             if let Err(err) = window.update(cx, |_root, window, cx| {
                 settings_store::init(pool.clone(), cx);
+                match remembered {
+                    Ok(remembered) => window_shell::adopt(remembered, cx),
+                    // Every window then opens at its default, which is what a
+                    // first launch does anyway.
+                    Err(err) => tracing::error!("the remembered window geometry could not be read: {err}"),
+                }
+                // Held for the life of the process: the callback is what writes
+                // a resize made in the last second before the app quits.
+                window_shell::remember_on_quit(wows_toolkit_config::WindowKind::Main, window.window_handle(), cx)
+                    .detach();
                 theme::apply_egui_theme(theme_choice, zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.apply_settings(loaded, window, cx);
