@@ -682,10 +682,12 @@ impl ReplayInspectorView {
         let options = crate::window_shell::options(
             wows_toolkit_config::WindowKind::ReplayRenderer,
             title.clone().unwrap_or_else(|| t!("ui.replay.context.render_replay").into_owned()),
+            cx,
         );
         let opened = cx.open_window(options, {
             let panel = panel.clone();
             move |window, cx| {
+                crate::window_shell::remember(wows_toolkit_config::WindowKind::ReplayRenderer, window, cx);
                 // Through a `Shell` so the panel's toasts and dialogs are drawn
                 // in this window too, not only in the one the dock lives in.
                 let view: AnyView = cx.new(|_cx| crate::window_shell::Shell::new(panel)).into();

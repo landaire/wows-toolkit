@@ -26,6 +26,8 @@ pub use settings::ReplayGrouping;
 pub use settings::ReplaySettings;
 pub use window::WindowKind;
 pub use window::WindowSettings;
+pub use window::load_all as load_all_window_settings;
+pub use window::store as store_window_settings;
 
 /// Application name used to derive the on-disk storage directory.
 pub const APP_NAME: &str = "WoWs Toolkit";
