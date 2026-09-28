@@ -269,6 +269,20 @@ fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str)> {
     ]
 }
 
+/// A ship waiting to be placed on the board.
+#[derive(Clone, Debug)]
+pub struct PlacedShip {
+    /// The param the ranges are read from.
+    param_id: u64,
+    name: String,
+    species: wowsunpack::game_params::types::Species,
+    /// Whether it is on the reader's side, which is what colours the marker.
+    friendly: bool,
+}
+
+/// How many ship matches the search offers at once.
+const SHIP_MATCHES: usize = 10;
+
 /// How far a walk of the replay directory has got.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanProgress {
@@ -314,6 +328,19 @@ pub struct TacticsBoard {
     scanning: Option<ScanProgress>,
     /// Where the replays are, so the walk knows what to read.
     replays_dir: Option<std::path::PathBuf>,
+    /// The game version the ranges are read at. `None` before the install has
+    /// been read, which draws them at the newest layout this build knows.
+    version: Option<wowsunpack::data::Version>,
+    /// What is typed into the ship search, and what it matched. Placing a ship
+    /// means naming one first: an unnamed marker has no ranges to draw.
+    ship_search: Entity<gpui_kit::component::input::InputState>,
+    matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
+    /// The ship the next placement is of, and whether it is on the reader's
+    /// side. `None` until one is picked, which is what the Ship tool waits for.
+    placing: Option<PlacedShip>,
+    /// Every ship the build knows, built the first time one is looked up.
+    ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    _ship_search_subscription: Subscription,
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
     drawn: Option<Arc<RenderImage>>,
@@ -336,11 +363,28 @@ impl TacticsBoard {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.tactics.preset_name").into_owned())
         });
+        let ship_search = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx)
+                .placeholder(t!("ui.renderer.annotations.ship_hint").into_owned())
+        });
+        let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
+            if matches!(event, gpui_kit::component::input::InputEvent::Change) {
+                let typed = state.read(cx).value().to_string();
+                this.matched_ships = this.matching_ships(&typed);
+                cx.notify();
+            }
+        });
         Self {
             preset_name,
             presets: preset::list_preset_names(),
             scanning: None,
             replays_dir: None,
+            version: None,
+            ship_search,
+            matched_ships: Vec::new(),
+            placing: None,
+            ship_catalog: None,
+            _ship_search_subscription: ship_search_subscription,
             focus_handle: cx.focus_handle(),
             game_data,
             layouts,
@@ -362,9 +406,16 @@ impl TacticsBoard {
         }
     }
 
-    /// Points the board at the replays a scan would read.
-    pub fn set_replays_dir(&mut self, dir: Option<std::path::PathBuf>, cx: &mut Context<Self>) {
+    /// Points the board at the replays a scan would read, and at the version
+    /// its ranges are read at.
+    pub fn set_install(
+        &mut self,
+        dir: Option<std::path::PathBuf>,
+        version: Option<wowsunpack::data::Version>,
+        cx: &mut Context<Self>,
+    ) {
         self.replays_dir = dir;
+        self.version = version;
         cx.notify();
     }
 
@@ -687,6 +738,101 @@ impl TacticsBoard {
         cx.notify();
     }
 
+    /// Every ship the build knows, built the first time one is looked up.
+    fn ships(&mut self) -> Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>> {
+        if let Some(catalog) = &self.ship_catalog {
+            return Some(std::rc::Rc::clone(catalog));
+        }
+        let loaded = self.game_data.as_ref()?.newest_loaded()?;
+        let catalog = std::rc::Rc::new(crate::armor_viewer::catalog::ShipCatalog::build(loaded.provider()));
+        self.ship_catalog = Some(std::rc::Rc::clone(&catalog));
+        Some(catalog)
+    }
+
+    /// The ships whose names match what has been typed.
+    ///
+    /// Empty until something is typed: every ship at once is not a choice.
+    fn matching_ships(
+        &mut self,
+        typed: &str,
+    ) -> Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)> {
+        let query = typed.trim().to_lowercase();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let Some(catalog) = self.ships() else { return Vec::new() };
+        let mut found = Vec::new();
+        for nation in &catalog.nations {
+            for class in &nation.classes {
+                for ship in &class.ships {
+                    if ship.search_name.contains(&query) {
+                        found.push((class.species, ship.clone()));
+                        if found.len() >= SHIP_MATCHES {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// Takes up the ship the reader picked, so the next click places it.
+    fn pick_ship(
+        &mut self,
+        species: wowsunpack::game_params::types::Species,
+        ship: &crate::armor_viewer::catalog::ShipEntry,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use wowsunpack::game_params::types::GameParamProvider as _;
+
+        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else { return };
+        let Some(param) = loaded.provider().game_param_by_index(&ship.param_index) else { return };
+
+        let friendly = self.placing.as_ref().map(|placed| placed.friendly).unwrap_or(true);
+        self.placing =
+            Some(PlacedShip { param_id: param.id().raw(), name: ship.display_name.clone(), species, friendly });
+        self.drawing.set_tool(wt_collab_client::drawing::Tool::Ship {
+            species: format!("{species:?}"),
+            friendly,
+            yaw: 0.0,
+        });
+        self.adding = false;
+        self.selected = None;
+        self.matched_ships.clear();
+        self.ship_search.update(cx, |state, cx| state.set_value("", window, cx));
+        cx.notify();
+    }
+
+    /// Which side the ship being placed is on.
+    pub fn set_placing_friendly(&mut self, friendly: bool, cx: &mut Context<Self>) {
+        let Some(placed) = self.placing.as_mut() else { return };
+        placed.friendly = friendly;
+        let species = format!("{:?}", placed.species);
+        self.drawing.set_tool(wt_collab_client::drawing::Tool::Ship { species, friendly, yaw: 0.0 });
+        cx.notify();
+    }
+
+    /// Names the ship a placement just put down, which is what its ranges are
+    /// read from.
+    ///
+    /// The tool draws a marker of a species; the identity behind it is what the
+    /// reader picked, and only this side knows it.
+    fn name_placed_ship(&mut self) {
+        let Some(placed) = self.placing.clone() else { return };
+        let Some(wt_collab_client::types::Annotation::Ship { config, .. }) = self.annotations.last_mut() else {
+            return;
+        };
+        *config = Some(wt_collab_client::types::AnnotationShipConfig {
+            param_id: placed.param_id,
+            ship_name: placed.name,
+            // Stock hull and no modifiers until the reader says otherwise,
+            // which is where the egui chooser leaves it.
+            ..Default::default()
+        });
+    }
+
     /// Draws in a different ink from here on. What is already drawn keeps the
     /// ink it was drawn in.
     pub fn set_ink(&mut self, ink: [u8; 4], cx: &mut Context<Self>) {
@@ -713,7 +859,13 @@ impl TacticsBoard {
     /// Hands a pointer event to the tool and keeps what it drew.
     fn stroke(&mut self, stroke: wt_collab_client::drawing::Stroke, cx: &mut Context<Self>) {
         match self.drawing.handle(stroke, &self.annotations) {
-            Some(wt_collab_client::drawing::Drawn::Added(annotation)) => self.annotations.push(annotation),
+            Some(wt_collab_client::drawing::Drawn::Added(annotation)) => {
+                let placed_a_ship = matches!(annotation, wt_collab_client::types::Annotation::Ship { .. });
+                self.annotations.push(annotation);
+                if placed_a_ship {
+                    self.name_placed_ship();
+                }
+            }
             // The index names a shape that was there when the stroke began, so
             // it is checked rather than trusted.
             Some(wt_collab_client::drawing::Drawn::Erased(index)) if index < self.annotations.len() => {
@@ -778,9 +930,16 @@ impl TacticsBoard {
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
-        if self.drawing.is_drawing() {
+        if self.has_tool() {
             let Some(at) = self.map_point(event.position) else { return };
-            self.stroke(wt_collab_client::drawing::Stroke::Ended { at: [at.0, at.1] }, cx);
+            let stroke = if self.drawing.is_drawing() {
+                wt_collab_client::drawing::Stroke::Ended { at: [at.0, at.1] }
+            } else {
+                // A ship and the eraser are placed and used by a click, which
+                // never begins a drag.
+                wt_collab_client::drawing::Stroke::Clicked { at: [at.0, at.1] }
+            };
+            self.stroke(stroke, cx);
             return;
         }
         if self.dragging.take().is_some() {
@@ -832,6 +991,10 @@ impl TacticsBoard {
             return;
         };
         let Some(game_data) = self.game_data.clone() else { return };
+        // The version the ranges are read at: a ship's detection and gun ranges
+        // are version-gated, so without one no range is drawn rather than one
+        // read at a version nobody is playing.
+        let version = self.version;
         if self.rasterising {
             self.stale = true;
             return;
@@ -846,8 +1009,9 @@ impl TacticsBoard {
             annotations.push(part_drawn);
         }
         cx.spawn(async move |this, cx| {
-            let drawn =
-                cx.background_spawn(async move { rasterise(&map.space, &game_data, &caps, &annotations) }).await;
+            let drawn = cx
+                .background_spawn(async move { rasterise(&map.space, &game_data, version, &caps, &annotations) })
+                .await;
             let _ = this.update(cx, |this, cx| {
                 this.rasterising = false;
                 if let Some(drawn) = drawn {
@@ -910,15 +1074,50 @@ fn layout_of(
 fn rasterise(
     space: &str,
     game_data: &GameDataCache,
+    version: Option<wowsunpack::data::Version>,
     caps: &[BoardCapPoint],
     annotations: &[wt_collab_client::types::Annotation],
 ) -> Option<Arc<RenderImage>> {
     let loaded = game_data.newest_loaded()?;
     let map = wows_minimap_renderer::assets::load_map_info(space, loaded.vfs())?;
     let mut commands: Vec<DrawCommand> = caps.iter().map(|cap| cap.command(&map)).collect();
+    // Under the markers, so a ship is not buried under its own circles.
+    commands.extend(ship_ranges(annotations, game_data, version, map.space_size as f32));
     // Over the zones, so a line drawn across one is not buried under it.
     commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
     crate::minimap_preview::render_map(space, game_data, &commands)
+}
+
+/// The range circles the placed ships show.
+///
+/// Read from each ship's own params, so what is drawn is what that ship sees
+/// and shoots rather than a figure typed in.
+fn ship_ranges(
+    annotations: &[wt_collab_client::types::Annotation],
+    game_data: &GameDataCache,
+    version: Option<wowsunpack::data::Version>,
+    space_size: f32,
+) -> Vec<DrawCommand> {
+    use wowsunpack::game_params::types::GameParamProvider;
+
+    // Without a version there is no saying what a ship's ranges are: they are
+    // gated on it, and a circle drawn at the wrong one reads as a fact.
+    let Some(version) = version else { return Vec::new() };
+    let Some(loaded) = game_data.newest_loaded() else { return Vec::new() };
+    let provider = loaded.provider();
+
+    let mut circles = Vec::new();
+    for annotation in annotations {
+        let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else { continue };
+        let Some(param) = GameParamProvider::game_param_by_id(provider.as_ref(), config.param_id.into()) else {
+            continue;
+        };
+        let Some(vehicle) = param.vehicle() else { continue };
+        let hull = (!config.hull_name.is_empty()).then_some(config.hull_name.as_str());
+        let ranges = vehicle.resolve_ranges(Some(provider.as_ref()), hull, version);
+        circles.extend(wt_collab_client::geometry::ship_range_commands(annotation, &ranges, space_size));
+    }
+    circles
 }
 
 impl Focusable for TacticsBoard {
@@ -972,6 +1171,7 @@ impl TacticsBoard {
             )
             .child(self.render_cap_tools(cx))
             .child(self.render_draw_tools(cx))
+            .child(self.render_ship_picker(cx))
             .child(self.render_presets(cx))
             .child(self.render_scan(cx))
             .when(!self.modes.is_empty(), |this| {
@@ -1103,6 +1303,61 @@ impl TacticsBoard {
                             board.update(cx, |board, cx| board.clear_annotations(cx));
                         })
                 })
+            })
+    }
+
+    /// Picking a ship to place, and which side it is on.
+    fn render_ship_picker(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let board = cx.entity();
+        let placing = self.placing.clone();
+
+        v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        gpui_kit::component::input::Input::new(&self.ship_search)
+                            .id("tactics-ship-search")
+                            .small()
+                            .w(px(180.)),
+                    )
+                    .when_some(placing, |this, placed| {
+                        let friendly = placed.friendly;
+                        this.child(
+                            div()
+                                .text_xs()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.tactics.placing", ship = placed.name.clone()).into_owned()),
+                        )
+                        .child({
+                            let board = board.clone();
+                            Button::new("tactics-ship-side")
+                                .label(if friendly {
+                                    t!("ui.tactics.side_friendly").into_owned()
+                                } else {
+                                    t!("ui.tactics.side_enemy").into_owned()
+                                })
+                                .compact()
+                                .on_click(move |_event, _window, cx: &mut App| {
+                                    board.update(cx, |board, cx| board.set_placing_friendly(!friendly, cx));
+                                })
+                        })
+                    }),
+            )
+            .when(!self.matched_ships.is_empty(), |this| {
+                this.child(h_flex().flex_wrap().gap_1().children(self.matched_ships.iter().cloned().enumerate().map(
+                    |(index, (species, ship))| {
+                        let board = board.clone();
+                        Button::new(("tactics-ship-match", index)).label(ship.display_name.clone()).compact().on_click(
+                            move |_event, window, cx: &mut App| {
+                                let ship = ship.clone();
+                                board.update(cx, |board, cx| board.pick_ship(species, &ship, window, cx));
+                            },
+                        )
+                    },
+                )))
             })
     }
 
