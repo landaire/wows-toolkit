@@ -66,6 +66,10 @@ const BATCH_PROGRESS: &str = "replay-batch-render";
 /// The same, for the pass that contributes every listed battle.
 const CONTRIBUTE_PROGRESS: &str = "replay-contribute-all";
 
+/// Identifies the message an auto-export failure keeps up, so a directory of
+/// battles that all fail says so once.
+const AUTO_EXPORT_FAILED: &str = "replay-auto-export-failed";
+
 const BROWSER_WIDTH: Pixels = px(280.);
 const BROWSER_MIN_WIDTH: Pixels = px(180.);
 const BROWSER_MAX_WIDTH: Pixels = px(520.);
@@ -495,7 +499,7 @@ impl ReplayInspectorView {
                 // Written whether or not it is opened: that is what "export
                 // every battle" means, and the egui app writes it from the
                 // background parser for the same reason.
-                self.auto_export_landed(path, cx);
+                self.auto_export_landed(path, window, cx);
                 self.index_landed(path, cx);
                 self.contribute_landed(path, cx);
                 if self.auto_load_latest_replay {
@@ -1005,7 +1009,7 @@ impl ReplayInspectorView {
     ///
     /// Named after the replay file, which is how this port's other export path
     /// names it too.
-    fn auto_export_landed(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+    fn auto_export_landed(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
         let AutoExport::To { directory, format } = AutoExport::from_settings(&self.replay_settings) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
         let Some(stem) = path.file_stem().map(|stem| stem.to_owned()) else { return };
@@ -1014,7 +1018,7 @@ impl ReplayInspectorView {
         let out = directory.join(stem).with_extension(format.extension());
         let parse = spawn_parse(path.to_path_buf(), game_data, self.personal_rating.clone(), cx);
         let named = path.to_path_buf();
-        cx.spawn(async move |_this, cx| {
+        cx.spawn_in(window, async move |_this, cx| {
             let parsed = match parse.await {
                 Ok(parsed) => parsed,
                 Err(err) => {
@@ -1031,7 +1035,20 @@ impl ReplayInspectorView {
             let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;
             match written {
                 Ok(()) => tracing::info!(path = %named.display(), "auto-export: the battle was written"),
-                Err(err) => tracing::warn!(path = %named.display(), error = %err, "auto-export failed"),
+                Err(err) => {
+                    tracing::warn!(path = %named.display(), error = %err, "auto-export failed");
+                    // Kept up rather than flashed past: the reader asked for a file
+                    // per battle and is not getting one, and the next battle will
+                    // fail the same way.
+                    let _ = cx.update(|window, cx| {
+                        crate::toast::stuck(
+                            AUTO_EXPORT_FAILED,
+                            t!("ui.replay.auto_export_failed", error = err.to_string()).into_owned(),
+                            window,
+                            cx,
+                        );
+                    });
+                }
             }
         })
         .detach();

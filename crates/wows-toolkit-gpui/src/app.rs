@@ -222,11 +222,13 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
 /// How long a failure may be before it is worth a window rather than a toast.
 const TOO_LONG_TO_TOAST: usize = 160;
 
-/// What a finished cache job has to say, until the next draw says it.
+/// What a finished background job has to say, until the next draw says it.
 ///
-/// Kept rather than said where it is decided: the job's completion runs without a
-/// window, and a message needs one.
-struct CacheReport {
+/// Kept rather than said where it is decided: a job finishes without a window,
+/// and a message needs one. This is the port's answer to the egui app's own
+/// catch-all (`app.rs`'s task-completion error arm): a job the reader started and
+/// then walked away from still reports where they are.
+struct JobReport {
     said: String,
     level: ReportLevel,
 }
@@ -237,7 +239,7 @@ enum ReportLevel {
     Failed,
 }
 
-impl CacheReport {
+impl JobReport {
     fn ok(said: String) -> Self {
         Self { said, level: ReportLevel::Ok }
     }
@@ -494,7 +496,7 @@ pub struct App {
     /// running against it.
     cache: game_data_cache::CacheState,
     /// What the last finished cache job has to say, until a draw says it.
-    cache_said: Option<CacheReport>,
+    job_said: Option<JobReport>,
     /// The builds already put to the reader as missing, so a walk that runs
     /// again does not ask about the same ones twice.
     offered_builds: std::collections::BTreeSet<u32>,
@@ -659,7 +661,7 @@ impl App {
             constants_checked: false,
             cache_maintained: false,
             hovering_files: None,
-            cache_said: None,
+            job_said: None,
             collab_name_input,
             index_progress: None,
             index_outcome: None,
@@ -905,7 +907,7 @@ impl App {
                         if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("game data: the download could not be planned: {reason}");
                         }
-                        this.cache_said = Some(CacheReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
+                        this.job_said = Some(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
                         None
                     }
                 };
@@ -1939,9 +1941,9 @@ impl App {
             let _ = this.update(cx, |this, cx| {
                 this.index_cancel = None;
                 this.index_progress = None;
-                this.index_outcome = Some(match built {
+                let (said, report): (String, fn(String) -> JobReport) = match built {
                     Ok(progress) => {
-                        if progress.skipped > 0 {
+                        let said = if progress.skipped > 0 {
                             t!(
                                 "ui.settings.index.built_with_skipped",
                                 indexed = progress.indexed,
@@ -1952,10 +1954,17 @@ impl App {
                         } else {
                             t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed)
                                 .into_owned()
-                        }
+                        };
+                        let report: fn(String) -> JobReport =
+                            if progress.failed > 0 { JobReport::warn } else { JobReport::ok };
+                        (said, report)
                     }
-                    Err(err) => err.to_string(),
-                });
+                    Err(err) => (err.to_string(), JobReport::failed),
+                };
+                this.index_outcome = Some(said.clone());
+                // Said as well as written to the Settings line: an index started
+                // from the palette finishes while the reader is somewhere else.
+                this.job_said = Some(report(said));
                 cx.notify();
             });
         }));
@@ -2014,10 +2023,10 @@ impl App {
                 // A clean result said nothing at all before: the spinner stopped
                 // and the reader was left to guess. The egui app reports both
                 // answers (`app.rs:2175`).
-                self.cache_said = Some(if clean {
-                    CacheReport::ok(t!("ui.messages.game_data_up_to_date").into_owned())
+                self.job_said = Some(if clean {
+                    JobReport::ok(t!("ui.messages.game_data_up_to_date").into_owned())
                 } else {
-                    CacheReport::warn(t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned())
+                    JobReport::warn(t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned())
                 });
                 self.cache.updates = updates;
                 if clean {
@@ -2026,10 +2035,10 @@ impl App {
             }
             game_data_cache::CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
-                self.cache_said = Some(if clean {
-                    CacheReport::ok(t!("ui.messages.game_data_cache_valid").into_owned())
+                self.job_said = Some(if clean {
+                    JobReport::ok(t!("ui.messages.game_data_cache_valid").into_owned())
                 } else {
-                    CacheReport::warn(t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned())
+                    JobReport::warn(t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned())
                 });
                 self.cache.repair = repair;
                 if clean {
@@ -2044,10 +2053,10 @@ impl App {
                     self.cache.repair.clear();
                     self.cache.forget_stats();
                 }
-                self.cache_said = Some(if failed.is_empty() {
-                    CacheReport::ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned())
+                self.job_said = Some(if failed.is_empty() {
+                    JobReport::ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned())
                 } else {
-                    CacheReport::failed(t!("ui.messages.game_data_download_failed").into_owned())
+                    JobReport::failed(t!("ui.messages.game_data_download_failed").into_owned())
                 });
                 if !failed.is_empty() {
                     self.cache.failure = Some(t!("ui.messages.game_data_download_failed").into_owned());
@@ -2057,7 +2066,7 @@ impl App {
             // for one.
             game_data_cache::CacheOutcome::Planned { .. } => {}
             game_data_cache::CacheOutcome::Failed(reason) => {
-                self.cache_said = Some(CacheReport::failed(reason));
+                self.job_said = Some(JobReport::failed(reason));
             }
         }
         cx.notify();
@@ -3142,7 +3151,7 @@ impl Render for App {
             }
         });
 
-        if let Some(report) = self.cache_said.take() {
+        if let Some(report) = self.job_said.take() {
             cx.defer_in(window, move |_this, window, cx| report.say(window, cx));
         }
 
