@@ -857,7 +857,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
             col = col.child(Separator::horizontal());
         }
         if build.modernization_slots.is_empty() {
-            col = col.child(body_text("No Modules"));
+            col = col.child(body_text(t!("ui.replay.sections.modules_none").into_owned()));
         } else {
             col = col.child(section_heading(t!("ui.replay.sections.modules").into_owned()));
             col = col.child(modernization_slots_view(row_ix, &build.modernization_slots, icons));
@@ -872,7 +872,7 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
 
         col = col.child(Separator::horizontal());
         if build.loadout.is_empty() {
-            col = col.child(body_text("No Loadout"));
+            col = col.child(body_text(t!("ui.replay.sections.loadout_none").into_owned()));
         } else {
             col = col.child(section_heading(t!("ui.replay.sections.loadout").into_owned()));
             for (idx, module) in build.loadout.iter().enumerate() {
@@ -887,13 +887,13 @@ fn render_build_section(row_ix: usize, row: &PlayerRow, debug: bool, icons: &Ico
             Some(skills) => {
                 col = col.child(section_heading(t!("ui.replay.sections.captain_skills").into_owned()));
                 if skills.is_empty() {
-                    col = col.child(body_text("No Captain Skills"));
+                    col = col.child(body_text(t!("ui.replay.sections.captain_skills_none").into_owned()));
                 } else {
                     col = col.child(captain_skill_grid_view(row_ix, skills, icons));
                 }
             }
             None => {
-                col = col.child(body_text("No Captain Skills"));
+                col = col.child(body_text(t!("ui.replay.sections.captain_skills_none").into_owned()));
             }
         }
     }
@@ -1060,9 +1060,30 @@ fn consumables_view(row_ix: usize, consumables: &[ConsumableResult], icons: &Ico
 
     let header = h_flex()
         .gap_2()
-        .child(div().w(px(NAME_COL)).flex_none().text_xs().font_weight(FontWeight::BOLD).child("Consumable"))
-        .child(div().w(px(COUNT_COL)).flex_none().text_xs().font_weight(FontWeight::BOLD).child("Remaining"))
-        .child(div().w(px(COUNT_COL)).flex_none().text_xs().font_weight(FontWeight::BOLD).child("Total"));
+        .child(
+            div()
+                .w(px(NAME_COL))
+                .flex_none()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .child(t!("ui.replay.consumable_header_consumable").into_owned()),
+        )
+        .child(
+            div()
+                .w(px(COUNT_COL))
+                .flex_none()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .child(t!("ui.replay.consumable_header_remaining").into_owned()),
+        )
+        .child(
+            div()
+                .w(px(COUNT_COL))
+                .flex_none()
+                .text_xs()
+                .font_weight(FontWeight::BOLD)
+                .child(t!("ui.replay.consumable_header_total").into_owned()),
+        );
 
     let mut col = v_flex().gap_1().child(header);
     for (idx, consumable) in consumables.iter().enumerate() {

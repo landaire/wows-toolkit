@@ -248,12 +248,19 @@ have used it.
     and with both running the last save wins. Window geometry, the replay grouping
     choice, Autoload Latest Replay and `current_replay_path` were in this list
     until 2026-09-27 and are now written.
-34. **Hardcoded English** where a key exists. Fixed 2026-09-27: the replay
-    grouping labels, the tracker's six period labels, the live roster's scoped
-    column headings and its Overall/Ship and Compact/Detailed labels, the live
-    roster's Twitch chip hover, and the Stats dock-tab titles all read from the
-    catalogue now. Still English: the tracker's sub-tab names, and the roster's
-    "hidden" marker (which item 23 replaces with the eye icon anyway).
+34. ~~**Hardcoded English** where a key exists.~~ Done 2026-09-28: the last of
+    them read from the catalogue -- the heals and never-spotted column hovers, the
+    consumable table's three headings, the Modules/Loadout/Captain Skills empty
+    markers, the replay panel's loading and failed titles, the results-export
+    dialog and its confirmation, the unpacker's no-build and written statuses and
+    its Extract as JSON dialog, the armor pane's ship-load failure, the Twitch
+    paste's empty clipboard, and the unset-directory status (new keys:
+    `ui.messages.wows_dir_not_set`, `ui.replay.export_results_title`,
+    `ui.replay.results_exported`, `ui.unpacker.parameters_written`,
+    `ui.unpacker.prototype_written`, `ui.armor.ship_load_failed`). What English
+    remains is English in the egui app too, at the same wording: the skill-hover
+    sentences (`util/formatting.rs`), the ship-species names and the splash module
+    names, and the armor menu's "Show all hidden plates".
 35. ~~**Window chrome.**~~ Done 2026-09-27: the window is titled
     `WoWs Toolkit v<version>`, the executable carries the icon (a build script
     under Cargo, `assets/wows_toolkit_gpui.rc` under Buck), and a release build

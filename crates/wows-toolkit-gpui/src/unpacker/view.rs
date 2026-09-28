@@ -568,12 +568,12 @@ impl UnpackerView {
     /// formats are.
     fn dump_game_params(&mut self, format: GameParamsFormat, base_only: bool, cx: &mut Context<Self>) {
         let Some(vfs) = self.package_vfs.clone() else {
-            self.dump_status = Some("No build is loaded".to_string());
+            self.dump_status = Some(t!("ui.unpacker.load_a_build").into_owned());
             cx.notify();
             return;
         };
         let Some(build) = self.selected_build else {
-            self.dump_status = Some("No build is loaded".to_string());
+            self.dump_status = Some(t!("ui.unpacker.load_a_build").into_owned());
             cx.notify();
             return;
         };
@@ -605,7 +605,7 @@ impl UnpackerView {
 
             let _ = this.update(cx, |this, cx| {
                 this.dump_status = Some(match written {
-                    Ok(()) => "Parameters written".to_string(),
+                    Ok(()) => t!("ui.unpacker.parameters_written").into_owned(),
                     Err(err) => format!("{err}"),
                 });
                 cx.notify();
@@ -619,7 +619,7 @@ impl UnpackerView {
     fn extract_as_json(&mut self, path: VfsPath, cx: &mut Context<Self>) {
         let name = path.filename();
         let stem = name.rsplit_once('.').map(|(stem, _)| stem.to_string()).unwrap_or(name);
-        let asked = crate::dialog::save_file(Some("Extract as JSON"), &format!("{stem}.json"), None);
+        let asked = crate::dialog::save_file(Some(&t!("ui.unpacker.extract_as_json")), &format!("{stem}.json"), None);
         cx.spawn(async move |this, cx| {
             let Some(target) = asked.await else { return };
             let written = cx
@@ -630,7 +630,7 @@ impl UnpackerView {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.dump_status = Some(match written {
-                    Ok(()) => "Prototype written".to_string(),
+                    Ok(()) => t!("ui.unpacker.prototype_written").into_owned(),
                     Err(err) => err,
                 });
                 cx.notify();

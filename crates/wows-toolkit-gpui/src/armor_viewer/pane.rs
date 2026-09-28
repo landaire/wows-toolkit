@@ -858,7 +858,7 @@ impl ArmorViewerPane {
             BundleState::Ready(_) => match &self.ship_load {
                 ShipLoadState::Idle | ShipLoadState::Loading { .. } => None,
                 ShipLoadState::Failed { display_name, reason } => {
-                    Some(format!("Failed to load {display_name}: {reason}"))
+                    Some(t!("ui.armor.ship_load_failed", ship = display_name, reason = reason).into_owned())
                 }
             },
         }
