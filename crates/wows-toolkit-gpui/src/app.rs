@@ -513,6 +513,9 @@ pub struct App {
     /// The board already open, so the menu brings it forward rather than
     /// opening another.
     tactics_board: Option<WeakEntity<crate::tactics::TacticsBoard>>,
+    /// Held while a board is open: it is what carries what its walk found back
+    /// to the copy a later board starts from.
+    _board_subscription: Option<Subscription>,
     /// The capture-point layouts a tactics board picks its modes from, read
     /// from the cache both apps write. Empty until the read lands, and empty on
     /// a machine that has never indexed a replay, which is a board with maps
@@ -697,6 +700,7 @@ impl App {
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
             tactics_board: None,
+            _board_subscription: None,
             cap_layouts: wows_replay_insights::cap_layout::CapLayoutDb::default(),
             cap_layouts_requested: false,
             cache_maintained: false,
@@ -1468,6 +1472,11 @@ impl App {
             board
         });
         self.tactics_board = Some(board.downgrade());
+        self._board_subscription =
+            Some(cx.subscribe(&board, |this, _board, event: &crate::tactics::LayoutsFound, _cx| {
+                let crate::tactics::LayoutsFound(found) = event;
+                this.cap_layouts = found.clone();
+            }));
         let options = crate::window_shell::options(
             wows_toolkit_config::WindowKind::TacticsBoard,
             crate::tactics::TacticsBoard::title(),

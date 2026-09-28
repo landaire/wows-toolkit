@@ -1591,6 +1591,7 @@ scan_done = "Read %{total} replays and found %{added} new layouts"
 placing = "Placing %{ship}"
 side_friendly = "Friendly"
 side_enemy = "Enemy"
+no_map_art = "This build ships no art for that map"
 
 [ui.armor.outcome]
 penetration = "Penetration"
