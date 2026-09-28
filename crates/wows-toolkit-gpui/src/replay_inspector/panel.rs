@@ -227,6 +227,21 @@ impl ReplayPanel {
         }
     }
 
+    /// Reads the replay again, for a file that has changed under an open tab.
+    ///
+    /// The tab stays where it is and returns to its loading state, which is what
+    /// the egui app does with a modified replay it has open
+    /// (`tab_state.rs`'s `NotifyFileEvent::Modified` arm).
+    pub fn reparse(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+        let parse_task = spawn_parse(self.path.clone(), game_data, self.personal_rating.clone(), cx);
+        self._parse_task = cx.spawn_in(window, async move |this, cx| {
+            let result = parse_task.await;
+            let _ = this.update_in(cx, |this, window, cx| this.apply_result(result, window, cx));
+        });
+        self.state = LoadState::Loading;
+        cx.notify();
+    }
+
     /// Applies a runtime debug-mode toggle from `ReplayInspectorView`:
     /// updates `debug`, threads it into the already-loaded table (if any),
     /// and closes a debug-only side panel that just lost its gate rather than
