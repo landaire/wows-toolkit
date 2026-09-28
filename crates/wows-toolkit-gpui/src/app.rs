@@ -1328,6 +1328,61 @@ impl App {
 
     /// Opens the command palette over the window.
     pub(crate) fn open_palette(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let entries = Rc::clone(&self.palette_entries);
+        self.open_palette_with(entries, window, cx);
+    }
+
+    /// Fills the palette with one of the cascading modes and reopens it.
+    ///
+    /// Read once on entering the mode rather than per keystroke: the palette
+    /// filters what it was given as the reader types, and a query per keystroke
+    /// against a year of battles is slower than the typing.
+    fn enter_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        if mode == crate::palette::PaletteMode::ArmorShips {
+            let entries = self.armor_ship_entries(cx);
+            self.open_palette_mode_with(entries, window, cx);
+            return;
+        }
+
+        let Some(pool) = settings_store::pool(cx) else { return };
+        let Some(runtime) = runtime::runtime(cx) else { return };
+        cx.spawn_in(window, async move |this, cx| {
+            let read = cx
+                .background_spawn(async move {
+                    runtime.handle().block_on(async move { crate::palette::mode_entries(mode, &pool).await })
+                })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| this.open_palette_mode_with(read, window, cx));
+        })
+        .detach();
+    }
+
+    /// Every ship the loaded build has armor for, as palette rows.
+    ///
+    /// Empty when no build is loaded, which the palette says rather than opening
+    /// an empty list.
+    fn armor_ship_entries(&self, cx: &Context<Self>) -> Vec<PaletteEntry> {
+        let Some(catalog) = self.armor_pane.read(cx).catalog() else { return Vec::new() };
+        catalog
+            .ships()
+            .map(|ship| PaletteEntry {
+                label: format!("{} -- {}", ship.display_name, crate::armor_viewer::catalog::tier_roman(ship.tier)),
+                action: PaletteAction::ViewArmor { param_index: ship.param_index.clone() },
+            })
+            .collect()
+    }
+
+    /// Opens the palette over a mode's rows, or says the mode has none.
+    fn open_palette_mode_with(&mut self, entries: Vec<PaletteEntry>, window: &mut Window, cx: &mut Context<Self>) {
+        if entries.is_empty() {
+            crate::toast::warn(t!("ui.palette.nothing_indexed").into_owned(), window, cx);
+            return;
+        }
+        self.open_palette_with(Rc::new(entries), window, cx);
+    }
+
+    /// Opens the palette over `entries`.
+    fn open_palette_with(&mut self, entries: Rc<Vec<PaletteEntry>>, window: &mut Window, cx: &mut Context<Self>) {
         // Reaching for the palette while one is already up must not stack a
         // second over it. Closed rather than counted: a dialog can go by the
         // Escape key or a click outside it without this hearing, so a flag
@@ -1336,7 +1391,6 @@ impl App {
         window.close_all_dialogs(cx);
 
         let palette = self.palette.clone();
-        let entries = Rc::clone(&self.palette_entries);
         let owner = cx.weak_entity();
         // Focused once, when it is first drawn: the palette is a search field
         // and a reader who opened it is about to type.
@@ -1388,7 +1442,20 @@ impl App {
             PaletteAction::OpenReplayFile => {
                 self.replay_inspector.update(cx, |view, cx| view.open_manually(window, cx));
             }
-            PaletteAction::SearchFor(query) => self.run_search(query.to_string(), window, cx),
+            PaletteAction::SearchFor(query) => self.run_search(query, window, cx),
+            PaletteAction::EnterMode(mode) => self.enter_palette_mode(mode, window, cx),
+            PaletteAction::ViewArmor { param_index } => {
+                let named = self
+                    .armor_pane
+                    .read(cx)
+                    .catalog()
+                    .and_then(|catalog| catalog.ships().find(|ship| ship.param_index == param_index))
+                    .map(|ship| ship.display_name.clone())
+                    .unwrap_or_else(|| param_index.clone());
+                self.active_tab = AppTab::ArmorViewer;
+                self.poll_armor_game_data(window, cx);
+                self.armor_pane.update(cx, |pane, cx| pane.show_with_hits(param_index, named, Vec::new(), cx));
+            }
             PaletteAction::CopyLatestLog => self.copy_latest_log(window, cx),
             PaletteAction::RefreshPersistedData => {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)

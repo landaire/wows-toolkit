@@ -316,6 +316,17 @@ impl ArmorViewerPane {
     /// Resolves the ship the penetration checker's combo just picked into the
     /// shells it brings, which is a GameParams walk rather than something to
     /// redo per render.
+    /// The catalogue of ships this pane can open, once it has loaded.
+    ///
+    /// `None` while the assets are still being read, which is what the palette's
+    /// armor mode says rather than opening an empty list.
+    pub(crate) fn catalog(&self) -> Option<&crate::armor_viewer::catalog::ShipCatalog> {
+        match &self.bundle {
+            BundleState::Ready(bundle) => Some(&bundle.catalog),
+            _ => None,
+        }
+    }
+
     /// Adds `param_index` to the ships being compared.
     ///
     /// The search field is cleared, as the egui panel clears it: the ship
