@@ -164,11 +164,11 @@ have used it.
     (search a player, my matches in ship, view armor for ship,
     `ui/command_palette.rs:129-131`), Import constants, and Send all replays (x2).
     Copy latest log landed 2026-09-28, and Open replay directory, Index All Replays
-    and Refresh Persisted Replay Data followed the same day. Also a seed bug: the
-    port's "Games I died in" sends `survived:false` where the egui seed is loss AND
-    not survived (`palette.rs:53` against
-    `wows-toolkit-viewmodel/src/query_bar/seed.rs:108`), so it also returns wins the
-    reader sank in.
+    and Refresh Persisted Replay Data followed the same day, and "Games I died in"
+    now seeds `outcome:loss self.survived:false`, which is the egui seed itself
+    (`query_bar::seed::games_i_died_in`) rather than a `survived:false` that also
+    returned the wins the reader sank in; a test parses every seeded search and
+    compares it against that module.
 21. ~~**Dialogs.**~~ Done 2026-09-28: all seven are there. `first_run` asks the
     three questions a fresh run has -- what battle data may be shared, whether to
     share whole replays, and which language to read in, with its
