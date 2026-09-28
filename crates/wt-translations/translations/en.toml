@@ -1208,6 +1208,8 @@ include_pre_battle_tooltip = "Include the spawn and countdown before battle star
 codec = "Codec"
 codec_auto = "Auto"
 save_defaults = "Save Defaults"
+save_defaults_done = "Saved as what a renderer opens with"
+save_defaults_failed = "The defaults could not be saved"
 event_timeline = "Event Timeline"
 
 # -- File Unpacker --

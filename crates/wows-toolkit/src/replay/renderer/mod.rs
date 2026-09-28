@@ -510,38 +510,14 @@ pub(crate) fn load_game_fonts_unlocked(
     fonts
 }
 pub fn render_options_from_saved(saved: &SavedRenderOptions) -> RenderOptions {
-    RenderOptions {
-        show_hp_bars: saved.show_hp_bars,
-        show_tracers: saved.show_tracers,
-        show_torpedoes: saved.show_torpedoes,
-        show_planes: saved.show_planes,
-        show_smoke: saved.show_smoke,
-        show_score: saved.show_score,
-        show_timer: saved.show_timer,
-        show_kill_feed: saved.show_kill_feed,
-        show_player_names: saved.show_player_names,
-        show_ship_names: saved.show_ship_names,
-        show_capture_points: saved.show_capture_points,
-        show_buildings: saved.show_buildings,
-        show_weather: saved.show_buildings, // TODO: add show_weather to SavedRenderOptions
-        show_camera_direction: saved.show_camera_direction,
-        show_consumables: saved.show_consumables,
-        show_armament: saved.show_armament,
-        show_trails: saved.show_trails,
-        show_dead_trails: saved.show_dead_trails,
-        show_speed_trails: saved.show_speed_trails,
-        show_ship_config: saved.show_ship_config,
-        show_dead_ship_names: saved.show_dead_ship_names,
-        show_battle_result: saved.show_battle_result,
-        show_buffs: saved.show_buffs,
-        show_chat: saved.show_chat,
-        show_advantage: saved.show_advantage,
-        show_score_timer: saved.show_score_timer,
-        show_stats_panel: saved.show_stats_panel,
-        show_team_rosters: saved.show_team_rosters,
-        // UI does its own per-ship filtering in the draw loop, so emit all circles
+    let mut options = RenderOptions {
+        // The UI does its own per-ship filtering in the draw loop, so every
+        // circle is emitted and the loop decides which ones are drawn.
         ship_config_visibility: ShipConfigVisibility::Filtered(Arc::new(|_| Some(ShipConfigFilter::all_enabled()))),
-    }
+        ..RenderOptions::default()
+    };
+    saved.apply_to(&mut options);
+    options
 }
 
 /// Send the current per-ship trail hidden set through the collab channel (if connected).
@@ -565,48 +541,18 @@ fn broadcast_range_overrides(
     }
 }
 
-fn saved_from_render_options(opts: &RenderOptions) -> SavedRenderOptions {
-    SavedRenderOptions {
-        show_hp_bars: opts.show_hp_bars,
-        show_tracers: opts.show_tracers,
-        show_torpedoes: opts.show_torpedoes,
-        show_planes: opts.show_planes,
-        show_smoke: opts.show_smoke,
-        show_score: opts.show_score,
-        show_timer: opts.show_timer,
-        show_kill_feed: opts.show_kill_feed,
-        show_player_names: opts.show_player_names,
-        show_ship_names: opts.show_ship_names,
-        show_capture_points: opts.show_capture_points,
-        show_buildings: opts.show_buildings,
-        show_camera_direction: opts.show_camera_direction,
-        show_consumables: opts.show_consumables,
-        show_dead_ships: false,
-        show_dead_ship_names: opts.show_dead_ship_names,
-        show_armament: opts.show_armament,
-        show_trails: opts.show_trails,
-        show_dead_trails: opts.show_dead_trails,
-        show_speed_trails: opts.show_speed_trails,
-        show_battle_result: opts.show_battle_result,
-        show_buffs: opts.show_buffs,
-        show_ship_config: opts.show_ship_config,
-        // Range filter flags are persisted from annotation state at the call site
-        show_self_detection_range: false,
-        show_self_main_battery_range: false,
-        show_self_secondary_range: false,
-        show_self_torpedo_range: false,
-        show_self_radar_range: false,
-        show_self_hydro_range: false,
-        show_chat: opts.show_chat,
-        show_advantage: opts.show_advantage,
-        show_score_timer: opts.show_score_timer,
-        show_stats_panel: opts.show_stats_panel,
-        show_team_rosters: opts.show_team_rosters,
-        prefer_cpu_encoder: false, // Not part of RenderOptions; set by caller
-        video_codec: None,         // Same: caller persists the user's codec choice.
-        include_pre_battle: false, // Same: caller persists the user's choice.
-    }
+/// The saved options a viewer's current state would be stored as.
+///
+/// The self ranges and the export settings have no counterpart in
+/// `RenderOptions`, so they come from `saved` unchanged and the call site
+/// overwrites the ones the reader has since changed.
+fn saved_from_render_options(saved: &SavedRenderOptions, opts: &RenderOptions, show_dead: bool) -> SavedRenderOptions {
+    let mut updated = saved.clone();
+    updated.read_from(opts);
+    updated.show_dead_ships = show_dead;
+    updated
 }
+
 /// Commands sent from the UI thread to the background playback thread.
 pub enum PlaybackCommand {
     Play,
@@ -1066,6 +1012,9 @@ pub struct ReplayRendererViewer {
     window_settings: crate::tab_state::SharedWindowSettings,
     /// Notify handle to trigger an immediate settings save.
     save_notify: Arc<tokio::sync::Notify>,
+    /// The saved options this viewer opened under, so a Save Defaults keeps the
+    /// fields `RenderOptions` has no counterpart for.
+    saved_defaults: SavedRenderOptions,
 }
 
 /// Decrypted bytes for one additional perspective replay merged into the
@@ -1210,6 +1159,7 @@ pub fn launch_replay_renderer(
         include_pre_battle: Arc::new(AtomicBool::new(saved_options.include_pre_battle)),
         window_settings,
         save_notify,
+        saved_defaults: saved_options.clone(),
     };
 
     let open = Arc::clone(&viewer.open);
@@ -1401,6 +1351,7 @@ pub fn launch_client_renderer(
         include_pre_battle: Arc::new(AtomicBool::new(false)),
         window_settings,
         save_notify,
+        saved_defaults: saved_options.clone(),
     }
 }
 
@@ -1452,6 +1403,7 @@ impl ReplayRendererViewer {
         let window_open = self.open.clone();
         let textures_arc = self.textures.clone();
         let pending_save = self.pending_defaults_save.clone();
+        let saved_defaults = self.saved_defaults.clone();
         let toasts = self.toasts.clone();
         let video_exporting = self.video_exporting.clone();
         let video_export_progress = self.video_export_progress.clone();
@@ -3234,8 +3186,7 @@ impl ReplayRendererViewer {
                                             let (opts, show_dead) = scroll_out.inner;
                                             ui.separator();
                                             if ui.button(t!("ui.renderer.settings.save_defaults")).clicked() {
-                                                let mut saved = saved_from_render_options(&opts);
-                                                saved.show_dead_ships = show_dead;
+                                                let mut saved = saved_from_render_options(&saved_defaults, &opts, show_dead);
                                                 saved.prefer_cpu_encoder = prefer_cpu_encoder.load(Ordering::Relaxed);
                                                 saved.video_codec = *video_codec.lock();
                                                 saved.include_pre_battle = include_pre_battle.load(Ordering::Relaxed);

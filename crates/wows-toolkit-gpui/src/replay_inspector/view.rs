@@ -515,9 +515,12 @@ impl ReplayInspectorView {
                 );
             });
 
-            let settings = crate::replay_renderer::ExportSettings::default();
-            let batch =
-                cx.update(|_window, cx| crate::replay_renderer::batch_export(paths, game_data, out_dir, settings, cx));
+            let batch = cx.update(|_window, cx| {
+                // What a viewport would have shown, so a batch does not write a
+                // different video than the reader has been watching.
+                let defaults = crate::render_defaults::defaults(cx);
+                crate::replay_renderer::batch_export(paths, game_data, out_dir, defaults, cx)
+            });
             let Ok(batch) = batch else { return };
             let (written, failed) = batch.await;
 

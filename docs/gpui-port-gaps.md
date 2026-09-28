@@ -65,10 +65,10 @@ have used it.
 6. **Batch render.** Done in part 2026-09-28: the menu item now runs one
    background batch (`replay_renderer::batch_export`) into a folder the reader
    picks, one file per replay, and reports how many were written and how many
-   failed. Not ported: per-replay progress (the egui app has a task bar entry for
-   it, which this port has no bar for -- item 19), batch-to-clipboard
-   (`video_export.rs:488`), and the renderer's saved display defaults, so a batch
-   renders with the default options rather than the reader's.
+   failed. A batch encodes with the reader's saved display defaults and export
+   settings (item 33). Not ported: per-replay progress (the egui app has a task
+   bar entry for it, which this port has no bar for -- item 19) and
+   batch-to-clipboard (`video_export.rs:488`).
 7. **`check_for_updates` and `enable_logging` govern nothing.** No updater
    (item 11) and no log file (item 12) exist in the port.
 8. **Auto-export.** Done 2026-09-28: a replay the watcher reports is parsed and
@@ -234,11 +234,20 @@ have used it.
     invalid directory and the refused Twitch credential both now use. Still
     missing: a counterpart to egui's catch-all task-error funnel
     (`app.rs:2465`), so a failed background task can be entirely silent.
-33. **Small persistence holes.** Every renderer display default
-    (`ui.renderer.settings.save_defaults` and its five families) is not written
-    back. Window geometry, the replay grouping choice, Autoload Latest Replay and
-    `current_replay_path` were in this list until 2026-09-27 and are now
-    written.
+33. ~~**Small persistence holes.**~~ Done 2026-09-28: `SavedRenderOptions` moved
+    into the renderer crate beside the options it mirrors, with `apply_to` and
+    `read_from` for the two directions, so both apps store the same row through
+    the same mapping. The gear's Save Defaults writes what a viewport is showing,
+    a viewport opens showing it once its bake lands, and a batch render encodes
+    with it rather than with the built-in set. Two fields the port has no control
+    over are carried through a save rather than written from it: the self-range
+    flags, keyed per entity in the egui renderer and per player name here, and the
+    stats panel, whose silhouettes a bake skips. Both apps read the row once and
+    the egui app rewrites the whole of it from that copy on its periodic save, so
+    a default saved in either is what the other opens with next time it starts,
+    and with both running the last save wins. Window geometry, the replay grouping
+    choice, Autoload Latest Replay and `current_replay_path` were in this list
+    until 2026-09-27 and are now written.
 34. **Hardcoded English** where a key exists. Fixed 2026-09-27: the replay
     grouping labels, the tracker's six period labels, the live roster's scoped
     column headings and its Overall/Ship and Compact/Detailed labels, the live
