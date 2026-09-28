@@ -59,7 +59,10 @@ pub fn entries() -> Vec<PaletteEntry> {
     // something the reader can then edit.
     entries.push(PaletteEntry {
         label: t!("ui.palette.games_i_died_in").into_owned(),
-        action: PaletteAction::SearchFor("survived:false"),
+        // A battle lost in which the reader's own ship sank, which is the egui
+        // seed (`query_bar::seed::games_i_died_in`). `survived:false` alone also
+        // returns the wins they sank in.
+        action: PaletteAction::SearchFor("outcome:loss self.survived:false"),
     });
     entries.push(PaletteEntry {
         label: t!("ui.palette.games_i_won").into_owned(),
@@ -127,6 +130,38 @@ mod tests {
         for tab in AppTab::ALL {
             assert!(offered.contains(&tab), "{tab:?} is not in the palette");
         }
+    }
+
+    /// Every seeded search parses, and reads as what its label promises: the
+    /// egui palette seeds the same searches as an expression, so the text here
+    /// has to come out the same way.
+    #[test]
+    fn the_seeded_searches_mean_what_they_say() {
+        use wows_toolkit_config::index::query_ast::MatchExpr;
+        use wows_toolkit_config::index::query_text;
+        use wows_toolkit_viewmodel::query_bar::seed;
+
+        let seeded: Vec<&str> = entries()
+            .iter()
+            .filter_map(|entry| match entry.action {
+                PaletteAction::SearchFor(query) => Some(query),
+                _ => None,
+            })
+            .collect();
+        assert!(!seeded.is_empty(), "the palette offers at least one search");
+
+        let parsed: Vec<MatchExpr> = seeded
+            .iter()
+            .map(|query| {
+                query_text::parse_query(query).unwrap_or_else(|err| panic!("{query:?} does not parse: {err:?}"))
+            })
+            .collect();
+
+        assert!(
+            parsed.contains(&seed::games_i_died_in()),
+            "a battle the reader sank in is a loss and a sinking, got {parsed:?}"
+        );
+        assert!(parsed.contains(&seed::games_i_won()), "got {parsed:?}");
     }
 
     /// Labels are what the reader searches, so an empty one is unreachable.
