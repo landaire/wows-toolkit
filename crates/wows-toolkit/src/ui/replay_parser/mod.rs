@@ -2906,17 +2906,10 @@ impl Replay {
         self.battle_report.as_ref()
     }
 
+    /// Shared with the GPUI port, which names the same battle the same file
+    /// (`wows_toolkit_viewmodel::replay_export::exported_file_stem`).
     pub fn better_file_name(&self, metadata_provider: &GameMetadataProvider) -> String {
-        [
-            self.vehicle_name(metadata_provider).as_str(),
-            self.map_name(metadata_provider).as_str(),
-            self.scenario(metadata_provider).as_str(),
-            self.game_mode(metadata_provider).as_str(),
-            self.game_time(),
-        ]
-        .iter()
-        .join("_")
-        .replace(['.', ':', ' '], "-")
+        wows_toolkit_viewmodel::replay_export::exported_file_stem(&self.replay_file.meta, metadata_provider)
     }
 
     pub fn parse(&self, expected_build: &str) -> Result<ParsedReplay, Report> {

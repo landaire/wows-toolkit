@@ -33,9 +33,10 @@ use crate::replay_inspector::GameDataCache;
 /// One map the board can be set on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapChoice {
-    /// The id the cap layouts are keyed by. Zero for a map found in the game's
-    /// own art with no layout recorded for it yet, which can still be drawn on.
-    pub map_id: u32,
+    /// The id the cap layouts are keyed by. `None` for a map found in the game's
+    /// own art with no layout recorded for it yet, which can still be drawn on
+    /// and which a later scan can give an id to.
+    pub map_id: Option<u32>,
     /// The space name, such as `spaces/16_OC_bees_to_honey`.
     pub space: String,
     /// What the reader is shown.
@@ -64,6 +65,11 @@ pub struct BoardCapPoint {
     pub radius: f32,
     /// Which team holds it at the start. `None` for a neutral one.
     pub team: Option<wows_replays::types::TeamId>,
+    /// Whether it came from a recorded layout rather than from the reader.
+    ///
+    /// A frozen cap is where the game put it, so it is not dragged or deleted:
+    /// the egui board holds its own the same way.
+    pub frozen: bool,
 }
 
 impl BoardCapPoint {
@@ -76,6 +82,7 @@ impl BoardCapPoint {
             // The layout states a neutral cap as a negative team, which is an
             // absence rather than a team.
             team: (point.team_id >= 0).then(|| wows_replays::types::TeamId::new(point.team_id)),
+            frozen: true,
         }
     }
 
@@ -86,6 +93,7 @@ impl BoardCapPoint {
             world_z: saved.world_z,
             radius: saved.radius,
             team: (saved.team_id >= 0).then(|| wows_replays::types::TeamId::new(saved.team_id)),
+            frozen: saved.frozen,
         }
     }
 
@@ -98,7 +106,7 @@ impl BoardCapPoint {
             // A cap nobody holds is stated as a negative team, which is the
             // form the egui board writes and reads.
             team_id: self.team.map(|team| team.raw()).unwrap_or(-1),
-            frozen: false,
+            frozen: self.frozen,
         }
     }
 
@@ -128,11 +136,15 @@ impl BoardCapPoint {
 /// How solid a capture zone's fill is drawn, as the battle draws its own.
 const CAP_FILL_ALPHA: f32 = 0.25;
 
-/// What a team's capture zone is coloured: the reader's own team, the enemy,
-/// and one nobody holds.
-const FRIENDLY_COLOR: [u8; 3] = [0x6f, 0xd9, 0x8a];
-const ENEMY_COLOR: [u8; 3] = [0xe8, 0x73, 0x7b];
-const NEUTRAL_COLOR: [u8; 3] = [0xe9, 0xe5, 0xdd];
+/// What a team's capture zone is coloured: the reader's own team, the enemy, and
+/// one nobody holds.
+///
+/// The same two the renderer paints a friendly and an enemy marker
+/// (`wt_collab_client::geometry`), so one side reads as one colour whether it is
+/// a zone or a ship.
+const FRIENDLY_COLOR: [u8; 3] = [76, 232, 170];
+const ENEMY_COLOR: [u8; 3] = [254, 77, 42];
+const NEUTRAL_COLOR: [u8; 3] = [255, 255, 255];
 
 /// The board reads team zero as the reader's own, which is the team a replay
 /// records the recording player on.
@@ -142,6 +154,15 @@ fn team_color(team: Option<wows_replays::types::TeamId>) -> [u8; 3] {
         Some(0) => FRIENDLY_COLOR,
         Some(_) => ENEMY_COLOR,
     }
+}
+
+/// [`RESIZE_BAND_PX`] in world units, at this map's scale.
+///
+/// A zone's edge is a line on screen; the press that grabs it is measured in the
+/// world, so the tolerance has to cross over.
+fn band_in_world(map: &wows_minimap_renderer::MapInfo) -> f32 {
+    let per_unit = map.world_distance_to_minimap(1.0, MINIMAP_SIZE);
+    if per_unit > f32::EPSILON { RESIZE_BAND_PX / per_unit } else { RESIZE_BAND_PX }
 }
 
 /// Every map the board can be set on.
@@ -158,7 +179,7 @@ pub fn maps(layouts: &CapLayoutDb, game_data: Option<&GameDataCache>) -> Vec<Map
         .into_iter()
         .map(|(map_id, space)| {
             let label = naming::map_label(&space, metadata);
-            MapChoice { map_id, space, label }
+            MapChoice { map_id: Some(map_id), space, label }
         })
         .collect();
 
@@ -168,7 +189,7 @@ pub fn maps(layouts: &CapLayoutDb, game_data: Option<&GameDataCache>) -> Vec<Map
                 continue;
             }
             let label = naming::map_label(&space, metadata);
-            maps.push(MapChoice { map_id: 0, space, label });
+            maps.push(MapChoice { map_id: None, space, label });
         }
     }
 
@@ -199,7 +220,11 @@ fn drawable_spaces(vfs: &wowsunpack::vfs::VfsPath) -> Vec<String> {
 }
 
 /// The modes a map has recorded layouts for, named apart where two read alike.
-pub fn modes(layouts: &CapLayoutDb, map_id: u32, game_data: Option<&GameDataCache>) -> Vec<ModeChoice> {
+///
+/// A map with no id has no recorded layout and so no modes, which is what a scan
+/// can change.
+pub fn modes(layouts: &CapLayoutDb, map_id: Option<u32>, game_data: Option<&GameDataCache>) -> Vec<ModeChoice> {
+    let Some(map_id) = map_id else { return Vec::new() };
     let metadata = game_data.and_then(|data| data.newest_loaded()).map(|loaded| loaded.provider().clone());
     let found: Vec<CapLayout> = layouts.modes_for_map(map_id).into_iter().cloned().collect();
     let labels = naming::mode_labels(&found, metadata.as_deref());
@@ -214,22 +239,27 @@ pub fn caps_of(layouts: &CapLayoutDb, key: &CapLayoutKey) -> Vec<BoardCapPoint> 
 /// What a drag on a capture point is doing to it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CapDrag {
+    /// Picked out, and nothing more: a frozen cap is where the game put it.
+    None,
     /// Moving it across the map.
     Move,
     /// Widening or narrowing its zone.
     Resize,
 }
 
-/// How close to a zone's edge a press has to land to widen it rather than move
-/// it, as a fraction of the zone's own radius.
-const RESIZE_BAND: f32 = 0.2;
+/// How near a zone's drawn edge a press has to land to widen it rather than move
+/// it, in map pixels. A tolerance rather than a fraction of the radius: the
+/// reader is aiming at a line on screen, and that line is the same thickness
+/// whatever the zone is.
+const RESIZE_BAND_PX: f32 = 8.0;
 
 /// The smallest a zone can be made, in world units, so one cannot be shrunk to
-/// nothing and lost.
-const MIN_CAP_RADIUS: f32 = 50.0;
+/// nothing and lost. The egui board holds its own to the same floor.
+const MIN_CAP_RADIUS: f32 = 0.5;
 
-/// What a capture point added by hand starts as.
-const NEW_CAP_RADIUS: f32 = 600.0;
+/// What a capture point added by hand starts as. A cap circle is about 5 km,
+/// which is about 167 world units; the egui board starts one at 150.
+const NEW_CAP_RADIUS: f32 = 150.0;
 
 /// What a board draws in until the reader picks otherwise, matching the ink and
 /// nib the replay viewport starts with.
@@ -267,6 +297,56 @@ fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str)> {
         (Tool::Measurement, "ui.renderer.annotations.measure"),
         (Tool::Eraser, "ui.renderer.annotations.eraser"),
     ]
+}
+
+/// Which range circles a placed ship shows.
+///
+/// Chosen once and carried by every ship placed afterwards: a reader comparing
+/// two ships' detection ranges wants the same circles on both.
+const RANGE_CIRCLES: [(RangeCircle, &str); 6] = [
+    (RangeCircle::Detection, "ui.renderer.context.detection"),
+    (RangeCircle::MainBattery, "ui.renderer.context.main_battery"),
+    (RangeCircle::SecondaryBattery, "ui.renderer.context.secondary"),
+    (RangeCircle::Torpedo, "ui.renderer.context.torpedo"),
+    (RangeCircle::Radar, "ui.renderer.context.radar"),
+    (RangeCircle::Hydro, "ui.renderer.context.hydro"),
+];
+
+/// One of the circles a placed ship can show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RangeCircle {
+    Detection,
+    MainBattery,
+    SecondaryBattery,
+    Torpedo,
+    Radar,
+    Hydro,
+}
+
+impl RangeCircle {
+    /// Whether this circle is on, in a filter.
+    fn is_on(self, filter: &wt_collab_client::types::AnnotationRangeFilter) -> bool {
+        match self {
+            Self::Detection => filter.detection,
+            Self::MainBattery => filter.main_battery,
+            Self::SecondaryBattery => filter.secondary_battery,
+            Self::Torpedo => filter.torpedo,
+            Self::Radar => filter.radar,
+            Self::Hydro => filter.hydro,
+        }
+    }
+
+    /// Turns this circle on or off in a filter.
+    fn set(self, filter: &mut wt_collab_client::types::AnnotationRangeFilter, on: bool) {
+        match self {
+            Self::Detection => filter.detection = on,
+            Self::MainBattery => filter.main_battery = on,
+            Self::SecondaryBattery => filter.secondary_battery = on,
+            Self::Torpedo => filter.torpedo = on,
+            Self::Radar => filter.radar = on,
+            Self::Hydro => filter.hydro = on,
+        }
+    }
 }
 
 /// A ship waiting to be placed on the board.
@@ -314,6 +394,9 @@ pub struct TacticsBoard {
     drawing: wt_collab_client::drawing::Drawing,
     /// What has been drawn on the board.
     annotations: Vec<wt_collab_client::types::Annotation>,
+    /// The window this board is drawn in, remembered so the menu can bring it
+    /// forward. `None` until it has been drawn once.
+    window: Option<AnyWindowHandle>,
     /// Where the map was last painted, which is what a pointer position is
     /// read against. `None` until it has been painted once. Shared with the
     /// painter, which is the only thing that knows where the map landed.
@@ -335,11 +418,19 @@ pub struct TacticsBoard {
     /// means naming one first: an unnamed marker has no ranges to draw.
     ship_search: Entity<gpui_kit::component::input::InputState>,
     matched_ships: Vec<(wowsunpack::game_params::types::Species, crate::armor_viewer::catalog::ShipEntry)>,
+    /// What is typed into the map search, so every map a build ships is
+    /// reachable rather than only the first few.
+    map_search: Entity<gpui_kit::component::input::InputState>,
+    map_search_text: String,
+    _map_search_subscription: Subscription,
     /// The ship the next placement is of, and whether it is on the reader's
     /// side. `None` until one is picked, which is what the Ship tool waits for.
     placing: Option<PlacedShip>,
     /// Every ship the build knows, built the first time one is looked up.
     ship_catalog: Option<std::rc::Rc<crate::armor_viewer::catalog::ShipCatalog>>,
+    /// Which circles a placed ship shows. Every ship already on the board is
+    /// given the same set, so two ships are compared on the same terms.
+    range_filter: wt_collab_client::types::AnnotationRangeFilter,
     _ship_search_subscription: Subscription,
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
@@ -367,6 +458,15 @@ impl TacticsBoard {
             gpui_kit::component::input::InputState::new(window, cx)
                 .placeholder(t!("ui.renderer.annotations.ship_hint").into_owned())
         });
+        let map_search = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx).placeholder(t!("ui.tactics.map_hint").into_owned())
+        });
+        let map_search_subscription = cx.subscribe(&map_search, |this, state, event, cx| {
+            if matches!(event, gpui_kit::component::input::InputEvent::Change) {
+                this.map_search_text = state.read(cx).value().to_string();
+                cx.notify();
+            }
+        });
         let ship_search_subscription = cx.subscribe(&ship_search, |this, state, event, cx| {
             if matches!(event, gpui_kit::component::input::InputEvent::Change) {
                 let typed = state.read(cx).value().to_string();
@@ -382,8 +482,12 @@ impl TacticsBoard {
             version: None,
             ship_search,
             matched_ships: Vec::new(),
+            map_search,
+            map_search_text: String::new(),
+            _map_search_subscription: map_search_subscription,
             placing: None,
             ship_catalog: None,
+            range_filter: wt_collab_client::types::AnnotationRangeFilter::default(),
             _ship_search_subscription: ship_search_subscription,
             focus_handle: cx.focus_handle(),
             game_data,
@@ -399,6 +503,7 @@ impl TacticsBoard {
             adding: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             annotations: Vec::new(),
+            window: None,
             painted: std::rc::Rc::new(std::cell::Cell::new(None)),
             drawn: None,
             rasterising: false,
@@ -457,21 +562,25 @@ impl TacticsBoard {
                 let files = replay_files(&dir);
                 let total = files.len();
                 let _ = reports.unbounded_send(ScanProgress { read: 0, total });
-                let mut added = 0usize;
+                let mut fresh = Vec::new();
                 for (read, path) in files.iter().enumerate() {
-                    if let Some(layout) = layout_of(path, provider.as_ref(), &constants, &found)
-                        && found.insert(layout)
-                    {
-                        added += 1;
+                    if let Some(layout) = layout_of(path, provider.as_ref(), &constants, &found) {
+                        let kept = layout.clone();
+                        if found.insert(layout) {
+                            fresh.push(kept);
+                        }
                     }
                     let _ = reports.unbounded_send(ScanProgress { read: read + 1, total });
                 }
-                if added > 0
-                    && let Err(err) = runtime.handle().block_on(found.save_to_db(&pool))
-                {
-                    tracing::warn!("tactics: the capture layouts were not saved: {err}");
+                // Each new layout on its own rather than the whole cache: this
+                // walk holds a copy taken when the board opened, and writing all
+                // of it would put those rows back over anything written since.
+                for layout in &fresh {
+                    if let Err(err) = runtime.handle().block_on(CapLayoutDb::save_layout_to_db(&pool, layout)) {
+                        tracing::warn!("tactics: a capture layout was not saved: {err}");
+                    }
                 }
-                (found, added, total)
+                (found, fresh.len(), total)
             });
 
             let listen = {
@@ -505,8 +614,16 @@ impl TacticsBoard {
                 // The map list grows with what the walk turned up, and the
                 // modes of whichever map the board is on.
                 this.maps = maps(&this.layouts, this.game_data.as_ref());
-                if let Some(map) = this.map.clone() {
-                    this.modes = modes(&this.layouts, map.map_id, this.game_data.as_ref());
+                if let Some(map) = this.map.as_mut() {
+                    // A map the walk has just recorded a layout for now has an
+                    // id, which is what its modes are looked up by: without
+                    // this the scan that found them would show none.
+                    if map.map_id.is_none() {
+                        map.map_id =
+                            this.maps.iter().find(|found| found.space == map.space).and_then(|found| found.map_id);
+                    }
+                    let map_id = map.map_id;
+                    this.modes = modes(&this.layouts, map_id, this.game_data.as_ref());
                 }
                 crate::toast::info(t!("ui.tactics.scan_done", added = added, total = total).into_owned(), window, cx);
                 cx.notify();
@@ -532,7 +649,9 @@ impl TacticsBoard {
         let saved = preset::TacticsPreset {
             name: name.clone(),
             map_name: map.space,
-            map_id: map.map_id,
+            // The file states a map with no recorded layout as the id zero,
+            // which is the form the egui board writes and reads.
+            map_id: map.map_id.unwrap_or(0),
             cap_points: self.caps.iter().map(BoardCapPoint::to_preset).collect(),
             annotations: self.annotations.iter().map(preset::PresetAnnotation::from_annotation).collect(),
         };
@@ -568,10 +687,12 @@ impl TacticsBoard {
 
         // Matched by space name rather than by map id: a board saved from a map
         // nothing has a layout for carries the id zero, which names no map.
+        let metadata =
+            self.game_data.as_ref().and_then(|data| data.newest_loaded()).map(|loaded| loaded.provider().clone());
         let map = self.maps.iter().find(|map| map.space == read.map_name).cloned().unwrap_or_else(|| MapChoice {
-            map_id: read.map_id,
+            map_id: (read.map_id != 0).then_some(read.map_id),
+            label: naming::map_label(&read.map_name, metadata.as_deref()),
             space: read.map_name.clone(),
-            label: read.map_name,
         });
         self.modes = modes(&self.layouts, map.map_id, self.game_data.as_ref());
         // The saved capture points stand, whatever mode the map has: they are
@@ -597,6 +718,23 @@ impl TacticsBoard {
         }
         self.presets = preset::list_preset_names();
         cx.notify();
+    }
+
+    /// The maps the picker offers: the ones whose names match what has been
+    /// typed, or the first few when nothing has been.
+    ///
+    /// Every map is reachable this way, which a capped list on its own is not.
+    fn offered_maps(&self) -> Vec<MapChoice> {
+        let typed = self.map_search_text.trim().to_lowercase();
+        if typed.is_empty() {
+            return self.maps.iter().take(MAPS_SHOWN).cloned().collect();
+        }
+        self.maps
+            .iter()
+            .filter(|map| map.label.to_lowercase().contains(&typed) || map.space.to_lowercase().contains(&typed))
+            .take(MAPS_SHOWN)
+            .cloned()
+            .collect()
     }
 
     /// Where a window position falls on the map, in the map's own pixels.
@@ -628,26 +766,38 @@ impl TacticsBoard {
     }
 
     /// Where a window position falls in the world.
+    ///
+    /// Through the map's own inverse of what [`BoardCapPoint::command`] draws
+    /// with, so a press lands on the zone it looks like it lands on.
     fn world_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
         let (x, y) = self.map_point(position)?;
         let map = self.map_info()?;
-        let world = map.minimap_to_world(wows_minimap_renderer::MinimapPos { x, y }, MINIMAP_SIZE);
+        let world = map.minimap_to_world_f32(x, y, MINIMAP_SIZE);
         Some((world.x, world.z))
     }
 
     /// Which capture point a press lands on, and what it would do to it.
     ///
-    /// A press near the edge of a zone widens it; anywhere else inside moves
-    /// it. The topmost one wins, which is the last drawn.
+    /// A press within a few pixels of a zone's drawn edge, inside or out, widens
+    /// it; anywhere else inside moves it. The topmost one wins, which is the
+    /// last drawn.
     fn cap_under(&self, position: Point<Pixels>) -> Option<(usize, CapDrag)> {
         let (x, z) = self.world_point(position)?;
+        let map = self.map_info()?;
+        // The band is a screen tolerance, so it is measured where the reader is
+        // aiming: converted from pixels into the world at this map's scale.
+        let band = band_in_world(&map);
         self.caps.iter().enumerate().rev().find_map(|(index, cap)| {
             let away = ((x - cap.world_x).powi(2) + (z - cap.world_z).powi(2)).sqrt();
-            if away > cap.radius {
-                return None;
+            // A frozen cap is still pickable, so its figures can be read; it is
+            // simply not dragged.
+            if cap.frozen {
+                return (away < cap.radius).then_some((index, CapDrag::None));
             }
-            let what = if away > cap.radius * (1.0 - RESIZE_BAND) { CapDrag::Resize } else { CapDrag::Move };
-            Some((index, what))
+            if (away - cap.radius).abs() <= band {
+                return Some((index, CapDrag::Resize));
+            }
+            (away < cap.radius).then_some((index, CapDrag::Move))
         })
     }
 
@@ -672,27 +822,35 @@ impl TacticsBoard {
 
     /// Places a capture point where the reader clicked.
     fn add_cap_at(&mut self, world: (f32, f32), cx: &mut Context<Self>) {
-        // Lettered after the ones already there, so a board reads A, B, C in
-        // the order the reader placed them.
-        let index = self.caps.len();
-        self.caps.push(BoardCapPoint { index, world_x: world.0, world_z: world.1, radius: NEW_CAP_RADIUS, team: None });
+        // Lettered past the highest already there, so a cap taken off does not
+        // hand its letter to the next one placed.
+        let index = self.caps.iter().map(|cap| cap.index + 1).max().unwrap_or(0);
+        self.caps.push(BoardCapPoint {
+            index,
+            world_x: world.0,
+            world_z: world.1,
+            radius: NEW_CAP_RADIUS,
+            team: None,
+            frozen: false,
+        });
         self.selected = Some(index);
         self.adding = false;
         self.redraw(cx);
     }
 
     /// Drops the capture point the reader is working on.
+    ///
+    /// A frozen one stays: it is where the game put it, and the egui board holds
+    /// its own the same way.
     pub fn remove_selected(&mut self, cx: &mut Context<Self>) {
-        let Some(at) = self.selected.take() else { return };
-        if at >= self.caps.len() {
+        let Some(at) = self.selected else { return };
+        if self.caps.get(at).is_none_or(|cap| cap.frozen) {
             return;
         }
+        self.selected = None;
+        // The letters the others carry stand: a cap is lettered by what it was
+        // called, and renumbering would rename the ones that stayed.
         self.caps.remove(at);
-        // The letters follow their places, so a board with B removed reads A, B
-        // rather than A, C.
-        for (index, cap) in self.caps.iter_mut().enumerate() {
-            cap.index = index;
-        }
         self.redraw(cx);
     }
 
@@ -700,7 +858,7 @@ impl TacticsBoard {
     /// reader's side, then the other.
     pub fn cycle_selected_team(&mut self, cx: &mut Context<Self>) {
         let Some(at) = self.selected else { return };
-        let Some(cap) = self.caps.get_mut(at) else { return };
+        let Some(cap) = self.caps.get_mut(at).filter(|cap| !cap.frozen) else { return };
         cap.team = match cap.team.map(|team| team.raw()) {
             None => Some(wows_replays::types::TeamId::new(0)),
             Some(0) => Some(wows_replays::types::TeamId::new(1)),
@@ -827,10 +985,22 @@ impl TacticsBoard {
         *config = Some(wt_collab_client::types::AnnotationShipConfig {
             param_id: placed.param_id,
             ship_name: placed.name,
+            range_filter: self.range_filter.clone(),
             // Stock hull and no modifiers until the reader says otherwise,
             // which is where the egui chooser leaves it.
             ..Default::default()
         });
+    }
+
+    /// Turns one circle on or off, for the ships already placed and the ones to
+    /// come.
+    pub fn set_range_circle(&mut self, circle: RangeCircle, on: bool, cx: &mut Context<Self>) {
+        circle.set(&mut self.range_filter, on);
+        for annotation in &mut self.annotations {
+            let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else { continue };
+            circle.set(&mut config.range_filter, on);
+        }
+        self.redraw(cx);
     }
 
     /// Draws in a different ink from here on. What is already drawn keeps the
@@ -876,6 +1046,20 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
+    /// The same, for a stroke that only moved the shape being built: the frame
+    /// is redrawn by the pointer that moved it, not again here.
+    fn stroke_without_redraw(&mut self, stroke: wt_collab_client::drawing::Stroke) {
+        if let Some(wt_collab_client::drawing::Drawn::Added(annotation)) =
+            self.drawing.handle(stroke, &self.annotations)
+        {
+            let placed_a_ship = matches!(annotation, wt_collab_client::types::Annotation::Ship { .. });
+            self.annotations.push(annotation);
+            if placed_a_ship {
+                self.name_placed_ship();
+            }
+        }
+    }
+
     fn on_mouse_down(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if event.button != MouseButton::Left {
             return;
@@ -905,18 +1089,36 @@ impl TacticsBoard {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        // A drag released off the map never reports its release here, so a
+        // pointer moving with nothing held has let go of whatever it had.
+        if event.pressed_button.is_none() {
+            self.release(cx);
+        }
+        let at = self.map_point(event.position);
+        let moved_over = at.map(|(x, y)| [x, y]);
+        if self.pointer_at != moved_over {
+            self.pointer_at = moved_over;
+            // The part-drawn shape follows the pointer, so the frame is only
+            // worth redrawing while one is being drawn.
+            if self.drawing.is_drawing() {
+                self.redraw(cx);
+            }
+        }
+
         if self.drawing.is_drawing() {
-            let Some(at) = self.map_point(event.position) else { return };
-            // Straight lines are not asked for here: the board has no
-            // modifier on its pointer yet, and a freehand stroke is what the
-            // tool draws without one.
-            self.stroke(wt_collab_client::drawing::Stroke::Moved { at: [at.0, at.1], straight: false }, cx);
+            let Some(at) = at else { return };
+            // Straight lines are not asked for here: the board has no modifier
+            // on its pointer yet, and a freehand stroke is what the tool draws
+            // without one.
+            self.stroke_without_redraw(wt_collab_client::drawing::Stroke::Moved { at: [at.0, at.1], straight: false });
             return;
         }
+
         let Some((index, what)) = self.dragging else { return };
         let Some((x, z)) = self.world_point(event.position) else { return };
         let Some(cap) = self.caps.get_mut(index) else { return };
         match what {
+            CapDrag::None => return,
             CapDrag::Move => {
                 cap.world_x = x;
                 cap.world_z = z;
@@ -927,6 +1129,20 @@ impl TacticsBoard {
             }
         }
         self.redraw(cx);
+    }
+
+    /// Lets go of whatever the pointer had hold of.
+    fn release(&mut self, cx: &mut Context<Self>) {
+        let held = self.dragging.take().is_some();
+        // A shape part way through is abandoned rather than finished somewhere
+        // the reader did not put it.
+        let drawing = self.drawing.is_drawing();
+        if drawing {
+            self.drawing.cancel();
+        }
+        if held || drawing {
+            self.redraw(cx);
+        }
     }
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
@@ -947,12 +1163,13 @@ impl TacticsBoard {
         }
     }
 
-    /// What the window is titled: the board, and the map it is set on.
-    pub fn title(&self) -> String {
-        match &self.map {
-            Some(map) => format!("{} - {}", t!("ui.windows.tactics_board"), map.label),
-            None => t!("ui.windows.tactics_board").into_owned(),
-        }
+    /// What the window is titled.
+    ///
+    /// The board rather than the board and its map: a window's title is set when
+    /// it opens, which is before any map is chosen, and gpui has no way to
+    /// change it afterwards. The map is named in the board's own strip.
+    pub fn title() -> String {
+        t!("ui.windows.tactics_board").into_owned()
     }
 
     /// Sets the board on a map, which replaces whatever was on it.
@@ -969,12 +1186,21 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
-    /// Sets the board on one of the chosen map's modes.
+    /// Sets the board on one of the chosen map's modes, or takes the mode off.
+    ///
+    /// Picking the mode already set puts it down, which is the egui board's own
+    /// blank entry: an empty map to place capture points on from nothing. The
+    /// layout's own caps come back by picking it again.
     pub fn set_mode(&mut self, key: CapLayoutKey, cx: &mut Context<Self>) {
         if self.mode.as_ref() == Some(&key) {
+            self.mode = None;
+            self.caps.clear();
+            self.selected = None;
+            self.redraw(cx);
             return;
         }
         self.caps = caps_of(&self.layouts, &key);
+        self.selected = None;
         self.mode = Some(key);
         self.redraw(cx);
     }
@@ -990,7 +1216,12 @@ impl TacticsBoard {
             cx.notify();
             return;
         };
-        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(game_data) = self.game_data.clone() else {
+            // Nothing to draw with, but the toolbar still says what the board
+            // holds, so it is redrawn even though the map is not.
+            cx.notify();
+            return;
+        };
         // The version the ranges are read at: a ship's detection and gun ranges
         // are version-gated, so without one no range is drawn rather than one
         // read at a version nobody is playing.
@@ -1027,13 +1258,23 @@ impl TacticsBoard {
     }
 }
 
-/// Every replay in `dir`, deepest first, as the index walks them.
+/// Every replay under `dir`, in a stable order.
+///
+/// Symbolic links are not followed: a directory the reader picked may link back
+/// into its own ancestry, which would walk for ever. A subdirectory that cannot
+/// be read is skipped rather than losing the rest.
 fn replay_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut found = Vec::new();
     let Ok(entries) = std::fs::read_dir(dir) else { return found };
-    for entry in entries.flatten() {
+    let mut entries: Vec<std::fs::DirEntry> = entries.flatten().collect();
+    entries.sort_by_key(|entry| entry.file_name());
+    for entry in entries {
+        let Ok(kind) = entry.file_type() else { continue };
+        if kind.is_symlink() {
+            continue;
+        }
         let path = entry.path();
-        if path.is_dir() {
+        if kind.is_dir() {
             found.extend(replay_files(&path));
             continue;
         }
@@ -1126,8 +1367,18 @@ impl Focusable for TacticsBoard {
     }
 }
 
+impl TacticsBoard {
+    /// The window this board is drawn in.
+    pub fn window(&self) -> Option<AnyWindowHandle> {
+        self.window
+    }
+}
+
 impl Render for TacticsBoard {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Taken at draw time because nothing else knows it, and the menu needs
+        // it to bring this board forward.
+        self.window = Some(window.window_handle());
         let border = cx.theme().border;
         v_flex().size_full().child(self.render_toolbar(cx)).child(div().h(px(1.)).bg(border)).child(self.render_map(cx))
     }
@@ -1148,8 +1399,14 @@ impl TacticsBoard {
                     .gap_2()
                     .items_center()
                     .child(div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.tactics.map").to_string()))
-                    .child(h_flex().flex_wrap().gap_1().children(
-                        self.maps.iter().take(MAPS_SHOWN).cloned().enumerate().map(|(index, map)| {
+                    .child(
+                        gpui_kit::component::input::Input::new(&self.map_search)
+                            .id("tactics-map-search")
+                            .small()
+                            .w(px(140.)),
+                    )
+                    .child(h_flex().flex_wrap().gap_1().children(self.offered_maps().into_iter().enumerate().map(
+                        |(index, map)| {
                             let chosen = chosen_map.as_ref() == Some(&map);
                             crate::ui::selectable(
                                 ("tactics-map", index),
@@ -1166,12 +1423,13 @@ impl TacticsBoard {
                                         }
                                     }),
                             )
-                        }),
-                    )),
+                        },
+                    ))),
             )
             .child(self.render_cap_tools(cx))
             .child(self.render_draw_tools(cx))
             .child(self.render_ship_picker(cx))
+            .child(self.render_range_circles(cx))
             .child(self.render_presets(cx))
             .child(self.render_scan(cx))
             .when(!self.modes.is_empty(), |this| {
@@ -1304,6 +1562,34 @@ impl TacticsBoard {
                         })
                 })
             })
+    }
+
+    /// Which range circles the placed ships show.
+    fn render_range_circles(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let board = cx.entity();
+        let filter = self.range_filter.clone();
+
+        h_flex()
+            .gap_1()
+            .flex_wrap()
+            .items_center()
+            .child(
+                div()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.renderer.context.ranges").to_string()),
+            )
+            .children(RANGE_CIRCLES.into_iter().enumerate().map(|(index, (circle, key))| {
+                let board = board.clone();
+                let on = circle.is_on(&filter);
+                gpui_kit::component::checkbox::Checkbox::new(("tactics-range", index))
+                    .label(t!(key).into_owned())
+                    .checked(on)
+                    .on_click(move |checked, _window, cx: &mut App| {
+                        let checked = *checked;
+                        board.update(cx, |board, cx| board.set_range_circle(circle, checked, cx));
+                    })
+            }))
     }
 
     /// Picking a ship to place, and which side it is on.
@@ -1542,9 +1828,10 @@ impl TacticsBoard {
 
 /// How many maps the picker offers at once.
 ///
-/// A build ships dozens; the strip is for reaching one, not for reading the
-/// whole list, and the rest arrive with the search the board grows next.
-const MAPS_SHOWN: usize = 40;
+/// A build ships dozens, and the strip is for reaching one rather than reading
+/// them all: the search narrows to what the reader typed, and this caps what is
+/// offered before they have typed anything.
+const MAPS_SHOWN: usize = 24;
 
 #[cfg(test)]
 mod tests {
@@ -1555,11 +1842,10 @@ mod tests {
     use super::ENEMY_COLOR;
     use super::FRIENDLY_COLOR;
     use super::NEUTRAL_COLOR;
-    use super::RESIZE_BAND;
     use super::team_color;
 
     fn cap(index: usize, x: f32, z: f32, radius: f32) -> BoardCapPoint {
-        BoardCapPoint { index, world_x: x, world_z: z, radius, team: None }
+        BoardCapPoint { index, world_x: x, world_z: z, radius, team: None, frozen: false }
     }
 
     /// A press inside a zone moves it; one near its edge widens it. The band is
@@ -1567,18 +1853,19 @@ mod tests {
     #[test]
     fn a_press_near_the_edge_widens_rather_than_moves() {
         let zone = cap(0, 0.0, 0.0, 1000.0);
+        let band = 8.0;
         let what = |away: f32| {
-            let outside = away > zone.radius;
-            if outside {
-                return None;
+            if (away - zone.radius).abs() <= band {
+                return Some(CapDrag::Resize);
             }
-            Some(if away > zone.radius * (1.0 - RESIZE_BAND) { CapDrag::Resize } else { CapDrag::Move })
+            (away < zone.radius).then_some(CapDrag::Move)
         };
 
         assert_eq!(what(0.0), Some(CapDrag::Move));
         assert_eq!(what(500.0), Some(CapDrag::Move));
-        assert_eq!(what(900.0), Some(CapDrag::Resize));
-        assert_eq!(what(1100.0), None, "a press past the zone is not on it");
+        assert_eq!(what(995.0), Some(CapDrag::Resize), "just inside the edge widens it");
+        assert_eq!(what(1005.0), Some(CapDrag::Resize), "and so does just outside");
+        assert_eq!(what(1100.0), None, "a press well past the zone is not on it");
     }
 
     /// A cap taken off the board leaves the letters running in order, so what
@@ -1618,5 +1905,72 @@ mod tests {
 
         let held = wows_replay_insights::cap_layout::CapPointLayout { team_id: 1, ..point };
         assert_eq!(BoardCapPoint::from_layout(&held).team, Some(wows_replays::types::TeamId::new(1)));
+    }
+}
+
+#[cfg(test)]
+mod coordinate_tests {
+    // Named rather than glob-imported, for the reason the other test module
+    // names its imports.
+    use super::BoardCapPoint;
+    use super::MINIMAP_SIZE;
+    use super::RESIZE_BAND_PX;
+    use super::band_in_world;
+    use wows_minimap_renderer::MapInfo;
+
+    fn map(space_size: i32) -> MapInfo {
+        MapInfo { space_size }
+    }
+
+    /// A press has to land on the zone it looks like it lands on: the position a
+    /// pointer is read at goes through the inverse of what the zone is drawn
+    /// with, at the same output size.
+    #[test]
+    fn a_map_pixel_round_trips_to_the_world_and_back() {
+        let map = map(1200);
+        for at in [(0.0, 0.0), (100.0, 40.0), (383.5, 383.5), (767.0, 767.0)] {
+            let world = map.minimap_to_world_f32(at.0, at.1, MINIMAP_SIZE);
+            let back = map.world_to_minimap(world, MINIMAP_SIZE);
+            assert!(
+                (back.x - at.0).abs() < 0.01 && (back.y - at.1).abs() < 0.01,
+                "{at:?} came back as ({}, {})",
+                back.x,
+                back.y
+            );
+        }
+    }
+
+    /// A zone drawn at the centre of the map is hit by a press at the centre of
+    /// the map, which is the failure a wrong coordinate space produces.
+    #[test]
+    fn a_press_at_the_centre_lands_on_a_zone_drawn_there() {
+        let map = map(1200);
+        let centre = map.minimap_to_world_f32(MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE);
+        let cap =
+            BoardCapPoint { index: 0, world_x: centre.x, world_z: centre.z, radius: 150.0, team: None, frozen: false };
+
+        let drawn =
+            map.world_to_minimap(wowsunpack::game_types::WorldPos::new(cap.world_x, 0.0, cap.world_z), MINIMAP_SIZE);
+        assert!((drawn.x - MINIMAP_SIZE as f32 / 2.0).abs() < 0.01);
+        assert!((drawn.y - MINIMAP_SIZE as f32 / 2.0).abs() < 0.01);
+
+        let pressed = map.minimap_to_world_f32(drawn.x, drawn.y, MINIMAP_SIZE);
+        let away = ((pressed.x - cap.world_x).powi(2) + (pressed.z - cap.world_z).powi(2)).sqrt();
+        assert!(away < 1.0, "the press is {away} units from the zone it was aimed at");
+    }
+
+    /// The resize tolerance is a screen distance, so it is the same handful of
+    /// pixels on a small map and a large one.
+    #[test]
+    fn the_resize_band_is_the_same_on_screen_whatever_the_map() {
+        for space in [800i32, 1200, 1600] {
+            let map = map(space);
+            let band = band_in_world(&map);
+            let on_screen = map.world_distance_to_minimap(band, MINIMAP_SIZE);
+            assert!(
+                (on_screen - RESIZE_BAND_PX).abs() < 0.01,
+                "a {space}-unit map gives a {on_screen}px band, not {RESIZE_BAND_PX}"
+            );
+        }
     }
 }

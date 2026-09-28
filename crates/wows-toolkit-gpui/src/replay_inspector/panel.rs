@@ -202,6 +202,9 @@ pub struct ReplayPanel {
     /// it triggered fails, so a recording that passes the up-front check and
     /// then will not merge cannot poison every later read of this tab.
     alt_on_trial: Option<PathBuf>,
+    /// What an export of this battle is called, without its extension. `None`
+    /// until the parse lands, which is where the name is read.
+    export_stem: Option<String>,
     /// What the last export did, shown beside the menu.
     export_status: Option<String>,
     _parse_task: Task<()>,
@@ -253,6 +256,7 @@ impl ReplayPanel {
             columns,
             personal_rating,
             export: None,
+            export_stem: None,
             export_status: None,
             auto_export,
             path,
@@ -384,7 +388,9 @@ impl ReplayPanel {
         let Some(export) = self.export.clone() else { return };
         let export = if self.debug { export } else { export.stripped() };
 
-        let Some(stem) = self.path.file_stem() else {
+        // Named the way the egui app names it, so a directory both apps write
+        // into reads as one set rather than two.
+        let Some(stem) = self.export_stem.clone() else {
             tracing::warn!(path = %self.path.display(), "auto-export: the replay has no name to write under");
             return;
         };
@@ -410,9 +416,14 @@ impl ReplayPanel {
         };
         let export = if self.debug { export } else { export.stripped() };
 
-        let name = match &self.state {
-            LoadState::Loaded(loaded) => loaded.title.replace([' ', '/'], "_"),
-            _ => "replay".to_string(),
+        // The same name the auto-export writes and the egui dialog offers, so a
+        // battle exported by hand sits beside one written for it.
+        let name = match &self.export_stem {
+            Some(stem) => stem.clone(),
+            None => match &self.state {
+                LoadState::Loaded(loaded) => loaded.title.replace([' ', '/'], "_"),
+                _ => "replay".to_string(),
+            },
         };
         let asked = crate::dialog::save_file(
             Some(&t!("ui.replay.export_results_title")),
@@ -499,6 +510,7 @@ impl ReplayPanel {
             Ok(ParsedReplay {
                 model,
                 export,
+                export_stem,
                 game_data,
                 raw_metadata_json,
                 raw_results_json,
@@ -520,6 +532,7 @@ impl ReplayPanel {
                 }
                 self.alt_on_trial = None;
                 self.export = Some(export);
+                self.export_stem = Some(export_stem);
                 self.write_auto_export(cx);
                 let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
                 self.loaded_state(model, game_data.vfs().clone(), fire_chance, payloads, window, cx)
@@ -610,6 +623,7 @@ impl ReplayPanel {
     ) -> Self {
         let mut panel = Self {
             alt_on_trial: None,
+            export_stem: None,
             focus_handle: cx.focus_handle(),
             state: LoadState::Loading,
             side_panel: SidePanel::None,

@@ -2333,20 +2333,12 @@ fn screen_delta_to_world(screen_delta: Vec2, transform: &MapTransform, map_info:
 }
 
 /// Translate a map name to a human-readable string, falling back to a pretty format.
+/// Shared with the GPUI port, whose board names the same maps the same way
+/// (`wows_toolkit_viewmodel::tactics::naming`).
 fn translate_or_pretty(map_name: &str, wows_data: &SharedBuildData) -> String {
     let wdata = wows_data.read();
-    if let Some(ref gm) = wdata.game_metadata {
-        wowsunpack::game_params::translations::translate_map_name(map_name, gm.as_ref())
-    } else {
-        pretty_map_name(map_name)
-    }
-}
-
-/// Extract a human-readable map name from a path like "spaces/16_OC_bees_to_honey".
-fn pretty_map_name(map_name: &str) -> String {
-    let bare = map_name.strip_prefix("spaces/").unwrap_or(map_name);
-    let stripped = bare.find('_').map(|i| &bare[i + 1..]).unwrap_or(bare);
-    stripped.replace('_', " ")
+    let metadata = wdata.game_metadata.as_deref();
+    wows_toolkit_viewmodel::tactics::naming::map_label(map_name, metadata)
 }
 
 /// Render range circles for a ship annotation with config.
@@ -2461,11 +2453,5 @@ fn render_annotation_range_circles(
 /// Build a human-readable mode label from a cap layout.
 fn pretty_mode_name(layout: &CapLayout, wows_data: &SharedBuildData) -> String {
     let wdata = wows_data.read();
-    let scenario_label = if let Some(ref gm) = wdata.game_metadata {
-        wowsunpack::game_params::translations::translate_scenario(&layout.scenario, gm.as_ref())
-    } else {
-        layout.scenario.clone()
-    };
-    let caps = layout.points.len();
-    format!("{scenario_label} - {caps} caps")
+    wows_toolkit_viewmodel::tactics::naming::mode_label(layout, wdata.game_metadata.as_deref())
 }

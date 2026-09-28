@@ -1562,6 +1562,7 @@ unknown_attacker = "Ship %{id}"
 
 [ui.tactics]
 map = "Map"
+map_hint = "Find a map"
 mode = "Mode"
 pick_a_map = "Pick a map to draw on"
 drawing = "Drawing the map..."
