@@ -18,11 +18,19 @@ Cargo workspace, edition 2024, rust 1.97. Crates under `crates/`:
 - `wows-replay-insights` derived replay insights
 - `wgcheck` WGCheck .gch report parsing
 
+## Development
+
+- See DEVELOPING.md. We primarily use buck2 for building, testing, etc., but all code should compile with Cargo.
+- Vendor 3rd party code.
+
 ## Version control
 
 - The repo is jj-colocated. Use `jj`, not `git`, as the authoritative interface.
 - Never append `Co-Authored-By` or any AI attribution to commit messages.
 - Make focused commits, one per logical change or milestone.
+- Changes should be rolled into one commit where it makes sense, as if sending patches to Phabricator (stacked diffs) or Gerrit.
+- When working on a sequence of uncommit changes, prefer to edit prior commits to contain new requirements rather than creating a new commit.
+- One isolated change per commit. Each commit should stand on its own and be reviewable.
 
 ## Types and data modeling
 
@@ -48,6 +56,11 @@ Cargo workspace, edition 2024, rust 1.97. Crates under `crates/`:
 - No historical framing ("now X", "was Y, now Z"). Describe current behavior.
 - No numbered step-recaps of the implementation. Short WHY lines only.
 
+## Tests
+
+- Prefer snapshot tests in scenarios where data is being deserialized or parsed to assert correctness
+- Tautological tests considered harmful.
+
 ## Text and formatting
 
 - ASCII only in code, comments, UI strings, and commit messages. No emdash, endash, ellipsis, arrows, or other unicode symbols.
@@ -55,12 +68,6 @@ Cargo workspace, edition 2024, rust 1.97. Crates under `crates/`:
 - Use only technical language you'd find in an IBM manual from the 1970s. No slang, casual shorthand, cute or clever names, no borrowed words from chat culture. Be succinct and clear. For example, do not use phrases like "golden snapshot". Another example: a script which updates build data should be named `update_build_data.sh` and not `push_build_data.sh`.
 - Do not include unnecessary details. No, "The X describes the Y" type phrases or "caveats" unless asked for it.
 - Commit messages should be short. Do not include unnecessary details in the longform commit message. Generally the commit details should just not even be included unless there is necessary context behind a change. Otherwise the commit title should speak for itself.
-
-## Commit Style
-
-- Changes should be rolled into one commit where it makes sense, as if sending patches to Phabricator (stacked diffs) or Gerrit.
-- When working on a sequence of uncommit changes, prefer to edit prior commits to contain new requirements rather than creating a new commit.
-- One isolated change per commit. Each commit should stand on its own and be reviewable.
 
 ## Compatibility
 
