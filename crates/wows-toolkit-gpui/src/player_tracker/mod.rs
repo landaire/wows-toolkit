@@ -206,7 +206,7 @@ impl SearchableListItem for PeriodItem {
     type Value = TimePeriod;
 
     fn title(&self) -> SharedString {
-        SharedString::from(self.0.label())
+        SharedString::from(t!(self.0.label_key()).into_owned())
     }
 
     fn value(&self) -> &Self::Value {
@@ -1599,7 +1599,7 @@ impl PlayerTrackerView {
                 ("tracker-view-mode", mode as usize),
                 chosen,
                 Button::new(("tracker-view-mode-button", mode as usize))
-                    .label(mode.label())
+                    .label(t!(mode.label_key()).into_owned())
                     .compact()
                     .selected(chosen)
                     .on_click(move |_event, _window, cx: &mut App| {
@@ -1617,7 +1617,7 @@ impl PlayerTrackerView {
                     ("tracker-win-rate-mode", mode as usize),
                     chosen,
                     Button::new(("tracker-win-rate-mode-button", mode as usize))
-                        .label(mode.label())
+                        .label(t!(mode.label_key()).into_owned())
                         .compact()
                         .selected(chosen)
                         .on_click(move |_event, _window, cx: &mut App| {
@@ -2167,6 +2167,15 @@ fn team_heading(title: String, rows: &[LiveRosterRow], layout: RosterLayout) -> 
         })
 }
 
+/// A scoped column heading: the scope, then the column, both from the catalogue.
+///
+/// Composed rather than a key per pair, because the pairs are the product of two
+/// lists and the egui app composes the same two halves for its cell hovers
+/// (`ui/player_tracker/current_match.rs:782`).
+fn scoped_heading(scope: &str, column_key: &str) -> String {
+    format!("{scope} {}", t!(column_key))
+}
+
 /// One team's roster column, with its own header row.
 fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout: RosterLayout) -> AnyElement {
     let heading = team_heading(title, rows, layout);
@@ -2188,12 +2197,12 @@ fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout
     // One group of columns per scope, so a detailed row reads
     // "overall, then this ship" rather than interleaving the two.
     for mode in layout.modes {
-        let scope = mode.label();
+        let scope = t!(mode.label_key()).into_owned();
         header = header
-            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} WR")))
-            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} PR")))
-            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} dmg")))
-            .child(div().w(STAT_COLUMN_WIDTH).child(format!("{scope} battles")));
+            .child(div().w(STAT_COLUMN_WIDTH).child(scoped_heading(&scope, "ui.player_tracker.column.win_rate")))
+            .child(div().w(STAT_COLUMN_WIDTH).child(scoped_heading(&scope, "ui.player_tracker.column.personal_rating")))
+            .child(div().w(STAT_COLUMN_WIDTH).child(scoped_heading(&scope, "ui.player_tracker.column.avg_damage")))
+            .child(div().w(STAT_COLUMN_WIDTH).child(scoped_heading(&scope, "ui.player_tracker.column.battles")));
     }
 
     v_flex()
@@ -2380,13 +2389,12 @@ fn sniper_hover_text(candidates: &[SniperCandidate]) -> String {
             out.push_str("\n\n");
         }
         let minutes: Vec<String> = candidate.minutes.iter().map(|minute| minute.to_string()).collect();
-        out.push_str(&format!(
-            "{} may be this player.\nSeen in chat at minute {} of this battle.",
-            candidate.login,
-            minutes.join(", ")
-        ));
+        out.push_str(&t!("ui.twitch.possible_name", name = candidate.login));
+        out.push('\n');
+        out.push_str(&t!("ui.twitch.seen_minutes", minutes = minutes.join(", ")));
     }
-    out.push_str("\n\nClick to copy.");
+    out.push_str("\n\n");
+    out.push_str(&t!("ui.twitch.click_to_copy"));
     out
 }
 
@@ -2797,10 +2805,12 @@ mod tests {
             SniperCandidate { login: "harvey_635".to_string(), minutes: vec![3] },
         ]);
 
-        assert!(hover.contains("harvey635 may be this player."));
-        assert!(hover.contains("Seen in chat at minute -1, 5 of this battle."));
-        assert!(hover.contains("harvey_635 may be this player."));
-        assert!(hover.ends_with("Click to copy."));
+        // The catalogue's wording, which is what the replay table's own chip
+        // says for the same candidate (`replay_inspector/table.rs`).
+        assert!(hover.contains("Possible stream name: harvey635"), "got {hover:?}");
+        assert!(hover.contains("Seen: -1, 5 minutes after match start"), "got {hover:?}");
+        assert!(hover.contains("Possible stream name: harvey_635"), "got {hover:?}");
+        assert!(hover.ends_with(&rust_i18n::t!("ui.twitch.click_to_copy").into_owned()), "got {hover:?}");
     }
 
     /// An opened row shows what the tracker knows beyond the columns.

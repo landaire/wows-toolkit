@@ -74,14 +74,15 @@ impl TimePeriod {
     pub const ALL: [TimePeriod; 6] =
         [Self::LastHour, Self::LastSixHours, Self::LastDay, Self::LastWeek, Self::LastMonth, Self::AllTime];
 
-    pub fn label(self) -> &'static str {
+    /// The translation key the period selector reads from.
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::LastHour => "Last hour",
-            Self::LastSixHours => "Last 6 hours",
-            Self::LastDay => "Last day",
-            Self::LastWeek => "Last week",
-            Self::LastMonth => "Last month",
-            Self::AllTime => "All time",
+            Self::LastHour => "ui.player_tracker.period.past_hour",
+            Self::LastSixHours => "ui.player_tracker.period.past_six_hours",
+            Self::LastDay => "ui.player_tracker.period.past_day",
+            Self::LastWeek => "ui.player_tracker.period.past_week",
+            Self::LastMonth => "ui.player_tracker.period.past_month",
+            Self::AllTime => "ui.player_tracker.period.all_time",
         }
     }
 

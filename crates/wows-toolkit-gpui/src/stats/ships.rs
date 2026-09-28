@@ -222,7 +222,7 @@ impl BasePanel for StatsShipsPanel {
 
 impl Panel for StatsShipsPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
-        SharedString::from("Ships")
+        SharedString::from(t!("ui.stats.ships").into_owned())
     }
 }
 

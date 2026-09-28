@@ -247,10 +247,11 @@ pub enum WinRateMode {
 impl WinRateMode {
     pub const ALL: [WinRateMode; 2] = [Self::Overall, Self::Ship];
 
-    pub fn label(self) -> &'static str {
+    /// The translation key the scope selector reads from.
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::Overall => "Overall",
-            Self::Ship => "Ship",
+            Self::Overall => "ui.player_tracker.win_rate_overall",
+            Self::Ship => "ui.player_tracker.win_rate_ship",
         }
     }
 }
@@ -268,10 +269,11 @@ pub enum CurrentMatchViewMode {
 impl CurrentMatchViewMode {
     pub const ALL: [CurrentMatchViewMode; 2] = [Self::Compact, Self::Detailed];
 
-    pub fn label(self) -> &'static str {
+    /// The translation key the density selector reads from.
+    pub fn label_key(self) -> &'static str {
         match self {
-            Self::Compact => "Compact",
-            Self::Detailed => "Detailed",
+            Self::Compact => "ui.player_tracker.view_compact",
+            Self::Detailed => "ui.player_tracker.view_detailed",
         }
     }
 }
