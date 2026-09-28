@@ -264,6 +264,9 @@ pub struct GameDataMissing(pub Vec<MissingBuild>);
 /// than report the repository unchanged.
 pub struct ConstantsUnfit;
 
+/// The armor viewer's incoming-fire log was asked to move playback to a salvo.
+pub struct SeekToClock(pub wows_replays::types::GameClock);
+
 /// A replay tab that is the one showing in its dock group.
 #[derive(Clone)]
 struct ShowingReplay {
@@ -289,6 +292,8 @@ pub struct ShowArmorRequested {
     pub param_index: String,
     pub display_name: String,
     pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// Who was firing at that ship, for the incoming-fire log.
+    pub incoming: crate::replay_renderer::IncomingContext,
 }
 
 impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}
@@ -639,6 +644,26 @@ impl ReplayInspectorView {
         // got is the mapping that does not fit.
         self.constants_asked.remove(&build);
         self.fetch_missing_constants(vec![(build, version)], crate::constants::Cached::Replace, window, cx);
+    }
+
+    /// Moves the playback that is feeding an armor viewer to `clock`.
+    ///
+    /// Only the viewport that is feeding one: another playback open beside it is
+    /// showing a different battle, or the same one somewhere else on purpose.
+    pub(crate) fn seek_following_playback(
+        &mut self,
+        clock: wows_replays::types::GameClock,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        for panel in self.open_renderers.values() {
+            let Some(panel) = panel.upgrade() else { continue };
+            if !panel.read(cx).is_following_armor() {
+                continue;
+            }
+            panel.update(cx, |panel, cx| panel.go_to_clock(clock, window, cx));
+            return;
+        }
     }
 
     /// Reads every open replay again, for a mapping or a dump that has since
@@ -1360,10 +1385,11 @@ impl ReplayInspectorView {
             RendererEvent::PopOut => self.pop_out_renderer(panel.clone(), window, cx),
             // Passed further up: the armor viewer is another tab, which this
             // view does not own either.
-            RendererEvent::ShowArmor { param_index, display_name, hits } => cx.emit(ShowArmorRequested {
+            RendererEvent::ShowArmor { param_index, display_name, hits, incoming } => cx.emit(ShowArmorRequested {
                 param_index: param_index.clone(),
                 display_name: display_name.clone(),
                 hits: hits.clone(),
+                incoming: incoming.clone(),
             }),
             RendererEvent::ArmorFollowed { hits, health } => {
                 cx.emit(ArmorFollowed { hits: hits.clone(), health: *health })

@@ -39,8 +39,16 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
 
+use std::collections::HashSet;
+
+use wows_replays::analyzer::decoder::HitType;
+use wows_replays::types::EntityId;
+use wows_replays::types::GameClock;
 use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
 use wows_toolkit_viewmodel::armor::arc::StoppingPlate;
+use wows_toolkit_viewmodel::armor::incoming::IncomingSalvo;
+use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
+use wows_toolkit_viewmodel::armor::incoming::group_incoming;
 
 use super::catalog::ShipCatalog;
 use super::catalog::tier_roman;
@@ -286,6 +294,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .children(results)
         .child(div().id("armor-pen-ships").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
         .child(render_arcs(view, pane, cx))
+        .child(render_incoming(view, pane, cx))
         .when(!ships.is_empty(), |this| {
             let pane = pane.clone();
             this.child(
@@ -297,6 +306,167 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
             )
         })
         .into_any_element()
+}
+
+/// What was fired at this ship, salvo by salvo.
+///
+/// The egui app's Incoming Fire panel (`replay/realtime_armor_viewer.rs`), in
+/// the panel this port already reads its armor questions in. Empty for a ship
+/// opened from the catalogue, which nobody was shooting at.
+fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &App) -> AnyElement {
+    let incoming = view.incoming();
+    if incoming.hits.is_empty() && incoming.context.attackers.is_empty() {
+        return div().into_any_element();
+    }
+
+    let enemies: HashSet<EntityId> = incoming.context.attackers.keys().copied().collect();
+    let salvos = group_incoming(&incoming.hits, &incoming.filter, &enemies, &incoming.context.main_battery);
+    let shells: usize = salvos.iter().map(|salvo| salvo.shells.len()).sum();
+    let chosen = incoming.filter.attacker;
+
+    v_flex()
+        .gap_1()
+        .pt_2()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.realtime.incoming_fire").to_string()))
+        .child(
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.armor.realtime.tracked", salvos = salvos.len(), shells = shells).to_string()),
+        )
+        .child(
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.armor.realtime.attacker_filter").to_string()),
+        )
+        .child(
+            h_flex()
+                .flex_wrap()
+                .gap_1()
+                .child(attacker_button(pane, None, t!("ui.armor.realtime.all_enemies").into_owned(), chosen))
+                .children(
+                    incoming
+                        .context
+                        .attackers
+                        .iter()
+                        .map(|(entity_id, named)| attacker_button(pane, Some(*entity_id), named.clone(), chosen)),
+                ),
+        )
+        .child(
+            Checkbox::new("armor-incoming-secondaries")
+                .label(t!("ui.armor.realtime.show_secondaries").to_string())
+                .checked(incoming.filter.secondaries)
+                .on_click({
+                    let pane = pane.clone();
+                    move |checked: &bool, _window, cx: &mut App| {
+                        let checked = *checked;
+                        pane.update(cx, |pane, cx| pane.set_incoming_secondaries(checked, cx));
+                    }
+                }),
+        )
+        .child(if salvos.is_empty() {
+            hint(t!("ui.armor.realtime.no_armor_hit").as_ref(), cx)
+        } else {
+            v_flex()
+                .id("armor-incoming-log")
+                .gap_1()
+                .max_h(LOG_MAX_HEIGHT)
+                .overflow_y_scroll()
+                .children(salvos.iter().enumerate().map(|(index, salvo)| salvo_block(view, pane, index, salvo)))
+                .into_any_element()
+        })
+        .into_any_element()
+}
+
+/// How far the salvo log runs before it scrolls.
+const LOG_MAX_HEIGHT: Pixels = px(220.);
+
+/// One attacker the log can be narrowed to.
+fn attacker_button(
+    pane: &Entity<ArmorViewerPane>,
+    attacker: Option<EntityId>,
+    label: String,
+    chosen: Option<EntityId>,
+) -> AnyElement {
+    let pane = pane.clone();
+    let selected = attacker == chosen;
+    let id = attacker.map(|id| id.raw() as usize).unwrap_or(usize::MAX);
+    crate::ui::selectable(
+        ("armor-incoming-attacker", id),
+        selected,
+        Button::new(("armor-incoming-attacker-button", id)).label(label).compact().selected(selected).on_click(
+            move |_event, _window, cx: &mut App| {
+                pane.update(cx, |pane, cx| pane.set_incoming_attacker(attacker, cx));
+            },
+        ),
+    )
+    .into_any_element()
+}
+
+/// One salvo: who fired it, when its first shell landed, and what each did.
+fn salvo_block(
+    view: &ArmorViewerPane,
+    pane: &Entity<ArmorViewerPane>,
+    index: usize,
+    salvo: &IncomingSalvo,
+) -> AnyElement {
+    let who = salvo
+        .attacker
+        .and_then(|attacker| view.incoming().context.attackers.get(&attacker).cloned())
+        .unwrap_or_else(|| t!("ui.armor.realtime.unmatched_salvo").into_owned());
+
+    v_flex()
+        .gap_0p5()
+        .child(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(div().flex_1().text_xs().child(who))
+                .child({
+                    let pane = pane.clone();
+                    let clock = salvo.first_clock;
+                    Button::new(("armor-incoming-seek", index))
+                        .label(clock_label(clock))
+                        .compact()
+                        .tooltip(t!("ui.armor.realtime.seek_to_salvo").to_string())
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            pane.update(cx, |pane, cx| pane.seek_to(clock, cx));
+                        })
+                })
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.armor.realtime.shells", count = salvo.shells.len()).to_string()),
+                ),
+        )
+        .children(salvo.shells.iter().enumerate().map(|(shell_index, shell)| {
+            div()
+                .id(("armor-incoming-shell", index * 64 + shell_index))
+                .pl(px(12.))
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(format!("{}  {}", clock_label(shell.clock), hit_label(&shell.hit_type)))
+        }))
+        .into_any_element()
+}
+
+/// A game clock as the log prints it: minutes and seconds into the battle.
+fn clock_label(clock: GameClock) -> String {
+    let seconds = clock.seconds().max(0.0);
+    format!("{}:{:02}", (seconds / 60.0).floor() as i32, (seconds % 60.0) as i32)
+}
+
+/// What the server said a shell did.
+fn hit_label(hit: &HitType) -> String {
+    let outcome = ServerOutcome::from_shell_hit_type(&hit.shell_hit);
+    match &outcome {
+        ServerOutcome::Unknown(raw) => t!(outcome.label_key(), raw = raw.clone()).into_owned(),
+        _ => t!(outcome.label_key()).into_owned(),
+    }
 }
 
 /// What the shells cast at the hull did.

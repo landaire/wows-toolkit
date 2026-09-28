@@ -70,6 +70,9 @@ use super::assets::ArmorAssetsBundle;
 use super::assets::ArmorAssetsError;
 use super::assets::spawn_load_armor_assets;
 use super::dock::ViewportDock;
+use wows_replays::types::EntityId;
+use wows_toolkit_viewmodel::armor::incoming::IncomingFilter;
+
 use super::export_dialog;
 use super::legend;
 use gpui_kit::component::popover::Popover;
@@ -152,6 +155,9 @@ pub struct ArmorViewerPane {
     /// Hits a replay viewport asked for, waiting for the ship they belong on
     /// to finish loading.
     pending_hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// What was fired at the ship on screen, for the log beside it. Empty for a
+    /// ship opened from the catalogue rather than from a battle.
+    incoming: IncomingFire,
     /// The floating Armor Thickness legend's visibility/collapsed/position
     /// state; see the module doc and `legend.rs`.
     legend: LegendState,
@@ -223,6 +229,7 @@ impl ArmorViewerPane {
             ship_load: ShipLoadState::Idle,
             ship_loaded: false,
             pending_hits: Vec::new(),
+            incoming: IncomingFire::default(),
             legend: LegendState::default(),
             unported_defaults: UnportedDefaults::default(),
             ship_load_generation: 0,
@@ -322,6 +329,38 @@ impl ArmorViewerPane {
             stack_panes: dock.split_axis() == Axis::Vertical,
         };
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
+    }
+
+    /// Asks the playback feeding this viewer to move to `clock`.
+    ///
+    /// The pane owns neither the playback nor the tab it sits in, so it says
+    /// where rather than moving anything itself.
+    pub(crate) fn seek_to(&mut self, clock: wows_replays::types::GameClock, cx: &mut Context<Self>) {
+        cx.emit(SeekRequested(clock));
+    }
+
+    /// What was fired at the ship on screen.
+    pub(crate) fn incoming(&self) -> &IncomingFire {
+        &self.incoming
+    }
+
+    /// Narrows the incoming-fire log to one attacker, or widens it to every
+    /// enemy.
+    pub(crate) fn set_incoming_attacker(&mut self, attacker: Option<EntityId>, cx: &mut Context<Self>) {
+        if self.incoming.filter.attacker == attacker {
+            return;
+        }
+        self.incoming.filter.attacker = attacker;
+        cx.notify();
+    }
+
+    /// Whether the log counts secondary armament.
+    pub(crate) fn set_incoming_secondaries(&mut self, secondaries: bool, cx: &mut Context<Self>) {
+        if self.incoming.filter.secondaries == secondaries {
+            return;
+        }
+        self.incoming.filter.secondaries = secondaries;
+        cx.notify();
     }
 
     /// The viewport the reader is working in, which is where a cast arc lives.
@@ -842,9 +881,11 @@ impl ArmorViewerPane {
         param_index: String,
         display_name: String,
         hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+        incoming: crate::replay_renderer::IncomingContext,
         cx: &mut Context<Self>,
     ) {
-        self.pending_hits = hits;
+        self.pending_hits = hits.clone();
+        self.incoming = IncomingFire { hits, context: incoming, filter: IncomingFilter::default() };
         let active = self.dock.read(cx).active_viewport();
         if is_ship_already_loaded(active.read(cx).loaded_param_index(), &param_index) {
             // Already showing it, so only what it has taken has changed.
@@ -869,6 +910,7 @@ impl ArmorViewerPane {
         if !self.ship_loaded {
             return;
         }
+        self.incoming.hits = hits.clone();
         let active = self.dock.read(cx).active_viewport();
         active.update(cx, |view, cx| {
             view.set_hit_health(health, cx);
@@ -1221,6 +1263,20 @@ fn remember_export_defaults(defaults: wows_toolkit_viewmodel::armor::export::Exp
         }
     })
     .detach();
+}
+
+/// The armor viewer asked for the playback behind it to move.
+pub struct SeekRequested(pub wows_replays::types::GameClock);
+
+impl EventEmitter<SeekRequested> for ArmorViewerPane {}
+
+/// What was fired at the ship on screen.
+#[derive(Default)]
+pub(crate) struct IncomingFire {
+    /// The hits themselves, as far as playback has reached.
+    pub(crate) hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    pub(crate) context: crate::replay_renderer::IncomingContext,
+    pub(crate) filter: IncomingFilter,
 }
 
 /// Which ship an export dialog opens on, and what it opens showing.

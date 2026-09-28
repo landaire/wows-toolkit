@@ -7,7 +7,6 @@
 
 use crate::viewport_3d::Vec3;
 
-
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
@@ -149,48 +148,9 @@ pub fn model_distance(a: &Vec3, b: &Vec3) -> ShipModelDistance {
 
 // Server vs Simulation Comparison
 
-use wowsunpack::game_types::ShellHitType;
-use wowsunpack::recognized::Recognized;
-
-/// Server-authoritative shell outcome (mapped from ShellHitType).
-#[derive(Clone, Debug, PartialEq)]
-pub enum ServerOutcome {
-    Penetration,
-    Citadel,
-    Ricochet,
-    Shatter,
-    Overpenetration,
-    Underwater,
-    Unknown(String),
-}
-
-impl ServerOutcome {
-    pub fn from_shell_hit_type(hit: &Recognized<ShellHitType>) -> Self {
-        match hit {
-            Recognized::Known(ShellHitType::Normal) => Self::Penetration,
-            Recognized::Known(ShellHitType::MajorHit) => Self::Citadel,
-            Recognized::Known(ShellHitType::Ricochet) => Self::Ricochet,
-            Recognized::Known(ShellHitType::NoPenetration) => Self::Shatter,
-            Recognized::Known(ShellHitType::Overpenetration) => Self::Overpenetration,
-            Recognized::Known(ShellHitType::ExitOverpenetration) => Self::Overpenetration,
-            Recognized::Known(ShellHitType::Underwater) => Self::Underwater,
-            Recognized::Known(ShellHitType::None) => Self::Unknown("None".into()),
-            Recognized::Unknown(s) => Self::Unknown(s.clone()),
-        }
-    }
-
-    pub fn display_name(&self) -> &str {
-        match self {
-            Self::Penetration => "Penetration",
-            Self::Citadel => "Citadel",
-            Self::Ricochet => "Ricochet",
-            Self::Shatter => "Shatter",
-            Self::Overpenetration => "Overpenetration",
-            Self::Underwater => "Underwater",
-            Self::Unknown(s) => s.as_str(),
-        }
-    }
-}
+/// Shared with the GPUI port, whose incoming-fire log names the same
+/// outcomes.
+pub use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 
 /// What the simulation says became of the shell.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

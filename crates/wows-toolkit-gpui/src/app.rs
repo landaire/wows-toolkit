@@ -579,11 +579,20 @@ impl App {
         // A viewport asked for an armor viewer on one of the battle's
         // ships: the tab it lives in is this view's to switch to.
         let show_armor_requested = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
-            let crate::replay_inspector::view::ShowArmorRequested { param_index, display_name, hits } = event;
-            let (param_index, display_name, hits) = (param_index.clone(), display_name.clone(), hits.clone());
+            let crate::replay_inspector::view::ShowArmorRequested { param_index, display_name, hits, incoming } = event;
+            let (param_index, display_name) = (param_index.clone(), display_name.clone());
+            let (hits, incoming) = (hits.clone(), incoming.clone());
             this.active_tab = AppTab::ArmorViewer;
-            this.armor_pane.update(cx, |pane, cx| pane.show_with_hits(param_index, display_name, hits, cx));
+            this.armor_pane.update(cx, |pane, cx| pane.show_with_hits(param_index, display_name, hits, incoming, cx));
             cx.notify();
+        });
+
+        // A salvo picked out of the incoming-fire log is a moment in the
+        // battle, which the playback behind the viewer moves to.
+        let armor_seek = cx.subscribe_in(&armor_pane, window, |this, _pane, event, window, cx| {
+            let crate::armor_viewer::pane::SeekRequested(clock) = event;
+            let clock = *clock;
+            this.replay_inspector.update(cx, |view, cx| view.seek_following_playback(clock, window, cx));
         });
 
         // The followed ship took more hits, which the open viewer shows
@@ -687,6 +696,7 @@ impl App {
                 subscription,
                 show_armor_requested,
                 armor_followed,
+                armor_seek,
                 replay_settings_changed,
                 game_data_missing,
                 constants_unfit,
@@ -1499,7 +1509,8 @@ impl App {
                     .unwrap_or_else(|| param_index.clone());
                 self.active_tab = AppTab::ArmorViewer;
                 self.poll_armor_game_data(window, cx);
-                self.armor_pane.update(cx, |pane, cx| pane.show_with_hits(param_index, named, Vec::new(), cx));
+                self.armor_pane
+                    .update(cx, |pane, cx| pane.show_with_hits(param_index, named, Vec::new(), Default::default(), cx));
             }
             PaletteAction::CopyLatestLog => self.copy_latest_log(window, cx),
             PaletteAction::RefreshPersistedData => {
