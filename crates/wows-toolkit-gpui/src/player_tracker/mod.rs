@@ -2348,18 +2348,41 @@ fn stat_cell(text: Option<String>, color: Option<Hsla>, pending: bool) -> AnyEle
         .into_any_element()
 }
 
+/// Why a row has no figures, as the reader is told it.
+///
+/// A private profile is the egui roster's eye icon with its own hover
+/// (`ui/player_tracker/current_match.rs:702`); the other two are a service that
+/// had nothing and one that could not be reached. All three read from the
+/// catalogue rather than as a bare English word in the cell.
+fn status_cell(id: SharedString, status: PlayerStatsStatus) -> AnyElement {
+    let (glyph, hover) = match status {
+        PlayerStatsStatus::Hidden => (crate::icons::EYE_SLASH, t!("ui.player_tracker.stats_hidden")),
+        PlayerStatsStatus::Unavailable => (crate::icons::WARNING, t!("ui.player_tracker.stats_no_data")),
+        // Nothing has been asked yet, or the answer never came.
+        PlayerStatsStatus::Unknown | PlayerStatsStatus::Ok => {
+            (crate::icons::INFO, t!("ui.player_tracker.stats_no_data"))
+        }
+    };
+    let hover: SharedString = hover.into_owned().into();
+
+    h_flex()
+        .w(STAT_COLUMN_WIDTH)
+        .id(id)
+        .test_support()
+        .aria_label(hover.clone())
+        .text_xs()
+        .text_color(crate::theme::text_dim())
+        .child(crate::icons::icon(glyph))
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+        .into_any_element()
+}
+
 /// The cells one scope contributes to a row.
-fn scope_cells(stats: RowStats, status: PlayerStatsStatus, pending: bool) -> Vec<AnyElement> {
+fn scope_cells(id: SharedString, stats: RowStats, status: PlayerStatsStatus, pending: bool) -> Vec<AnyElement> {
     // A player who hid their statistics is a different answer from one the
     // service had nothing for, and both differ from one it could not reach.
-    let note = match status {
-        PlayerStatsStatus::Ok => None,
-        PlayerStatsStatus::Hidden => Some("hidden"),
-        PlayerStatsStatus::Unavailable => Some("n/a"),
-        PlayerStatsStatus::Unknown => Some("?"),
-    };
-    if let Some(note) = note {
-        let mut cells = vec![stat_cell(Some(note.to_string()), None, false)];
+    if !matches!(status, PlayerStatsStatus::Ok) {
+        let mut cells = vec![status_cell(id, status)];
         cells.extend((0..3).map(|_| stat_cell(None, None, false)));
         return cells;
     }
@@ -2477,17 +2500,35 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
     let pending = layout.stats.is_none();
     let status = player.map_or(PlayerStatsStatus::Ok, |player| player.status);
 
-    let cells: Vec<AnyElement> =
-        layout.modes.iter().flat_map(|mode| scope_cells(row_stats(player, *mode), status, pending)).collect();
+    let cells: Vec<AnyElement> = layout
+        .modes
+        .iter()
+        .flat_map(|mode| {
+            let id = SharedString::from(format!("tracker-roster-{side}-{index}-status-{}", *mode as usize));
+            scope_cells(id, row_stats(player, *mode), status, pending)
+        })
+        .collect();
 
     // How many battles this player has been met in, counted the way the
     // tables beside it count: the division toggle hides the ones the user
     // arranged.
-    let met = row
-        .tracked
-        .and_then(|account| layout.met.get(&account))
-        .map(|tracked| tracked.visible_arena_ids(layout.count_division_mates).count())
-        .unwrap_or_default();
+    let tracked = row.tracked.and_then(|account| layout.met.get(&account));
+    let met = tracked.map(|tracked| tracked.visible_arena_ids(layout.count_division_mates).count()).unwrap_or_default();
+
+    // The count on its own does not say when, or how many of those battles fall
+    // in the period the tables are showing. The egui roster puts both in the
+    // cell's hover (`ui/player_tracker/current_match.rs:839`).
+    let met_hover: SharedString = match tracked {
+        Some(tracked) if met > 0 => {
+            let total = tracked.arena_ids.len();
+            let last = tracked
+                .last_visible_timestamp(layout.count_division_mates)
+                .map(|at| history::last_seen_text(Some(at), Timestamp::now()))
+                .unwrap_or_else(|| t!("ui.player_tracker.never_encountered").into_owned());
+            t!("ui.player_tracker.encounters_hover", total = total, range = met, last = last).into_owned().into()
+        }
+        _ => t!("ui.player_tracker.never_encountered").into_owned().into(),
+    };
 
     h_flex()
         // Keyed by position as well as name: bots repeat names within a team.
@@ -2516,11 +2557,15 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
         // static "met before" string.
         .child(
             div()
+                .id(SharedString::from(format!("tracker-roster-{side}-{index}-met")))
+                .test_support()
+                .aria_label(met_hover.clone())
                 .w(MET_COLUMN_WIDTH)
                 .text_xs()
                 .when_some(severity_color(met), |el, color| el.text_color(color))
                 .when(met == 0, |el| el.text_color(crate::theme::text_dim()))
-                .child(if met == 0 { String::new() } else { separate_number(met as i64, None) }),
+                .child(if met == 0 { String::new() } else { separate_number(met as i64, None) })
+                .tooltip(move |window, cx| Tooltip::new(met_hover.clone()).build(window, cx)),
         )
         .child(roster_row_menu(side, index, row, layout.tracker))
         .into_any_element()
@@ -2882,6 +2927,23 @@ mod tests {
         assert!(hover.contains("Seen: -1, 5 minutes after match start"), "got {hover:?}");
         assert!(hover.contains("Possible stream name: harvey_635"), "got {hover:?}");
         assert!(hover.ends_with(&rust_i18n::t!("ui.twitch.click_to_copy").into_owned()), "got {hover:?}");
+    }
+
+    /// A player who hid their profile is marked as that, with the reason in the
+    /// hover: the egui roster draws an eye there, and a bare English "hidden" in
+    /// the cell told a non-English reader nothing.
+    #[test]
+    fn a_hidden_profile_is_marked_rather_than_spelled_out() {
+        use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
+        use wows_toolkit_viewmodel::player_tracker::live::RowStats;
+
+        let cells = super::scope_cells(
+            gpui_kit::SharedString::from("tracker-roster-ally-0-status-0"),
+            RowStats::default(),
+            PlayerStatsStatus::Hidden,
+            false,
+        );
+        assert_eq!(cells.len(), 4, "the marker takes the first cell and the rest stay empty");
     }
 
     /// An opened row shows what the tracker knows beyond the columns.
