@@ -67,6 +67,10 @@ use crate::armor_viewer::visibility::SidebarHighlightKey;
 use crate::armor_viewer::visibility::VisibilityFilter;
 use crate::armor_viewer::visibility::VisibilitySnapshot;
 use crate::armor_viewer::visibility::VisibilityUndoStack;
+use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
+use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
+use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
+
 use crate::viewport::camera;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::Axis;
@@ -113,6 +117,36 @@ pub(crate) struct CameraRingSettings {
     pub(crate) zoom_path_at_fov: bool,
     pub(crate) zoom_path_at_max_fov: bool,
 }
+
+/// The camera locked onto one of the ship's own orbits, looking the way the
+/// game's camera looks from there.
+///
+/// What the reader steers changes with the lock: a drag turns the eye on its
+/// orbit and tilts it rather than orbiting the model, and the wheel moves
+/// between the inner and outer orbit rather than pulling the camera back.
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct PerspectiveSettings {
+    pub(crate) enabled: bool,
+    pub(crate) camera: CameraPerspective,
+}
+
+/// How far the locked camera's aim marker reaches, as a fraction of the model's
+/// diagonal, and the span it is held to so it is legible on any ship.
+const AIM_MARKER_FRACTION: f32 = 0.03;
+const AIM_MARKER_MIN: f32 = 1.0;
+const AIM_MARKER_MAX: f32 = 8.0;
+
+/// What the locked camera's aim marker is coloured (`armor_viewer/ui/tab.rs`).
+const AIM_MARKER_COLOR: [f32; 4] = [1.0, 0.6, 0.1, 0.85];
+
+/// How far along the look direction the water is searched for, so a camera
+/// aimed near the horizon marks a far point rather than none.
+const AIM_MARKER_REACH: f32 = 5000.0;
+
+/// What a drag and the wheel do to the locked camera, per pixel and per notch.
+const PERSPECTIVE_YAW_PER_PX: f32 = 0.005;
+const PERSPECTIVE_PITCH_PER_PX: f32 = 0.005;
+const PERSPECTIVE_ZOOM_PER_NOTCH: f32 = 0.001;
 
 /// Whether the armor's openings are marked, and how many were found.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -294,6 +328,8 @@ pub(crate) struct DisplaySettingsSliders {
     pub(crate) armor_opacity: Entity<SliderState>,
     /// How solid the impact markers are drawn.
     pub(crate) marker_opacity: Entity<SliderState>,
+    /// How wide the locked camera sees, in degrees.
+    pub(crate) perspective_fov: Entity<SliderState>,
     /// How far the hull is heeled over, in degrees. A property of the model
     /// on screen rather than of the armor, so it is not written back with the
     /// display defaults.
@@ -576,6 +612,15 @@ pub struct ViewportView {
     /// corrected to a mode the ship has whenever the armor changes, since a
     /// mode is a per-ship name rather than a global one.
     camera_rings: CameraRingSettings,
+    /// Whether the camera is locked to one of the ship's own orbits, and where
+    /// on it the eye sits.
+    perspective: PerspectiveSettings,
+    /// The free camera as it was when the lock went on, put back when it comes
+    /// off: a reader who was looking at a plate is looking at it again.
+    camera_before_lock: Option<crate::viewport::camera::ArcballCamera>,
+    /// The meshes marking where the locked camera is aimed, dropped and rebuilt
+    /// as it moves.
+    aim_mesh_ids: Vec<crate::viewport::types::MeshId>,
     /// Whether the openings in the armor are marked, and how many were
     /// found last time they were looked for. The count is what the toolbar
     /// reports, so it is kept rather than recomputed per frame.
@@ -695,6 +740,9 @@ impl ViewportView {
             ship_loading: None,
             current_armor: None,
             camera_rings: CameraRingSettings::default(),
+            perspective: PerspectiveSettings::default(),
+            camera_before_lock: None,
+            aim_mesh_ids: Vec::new(),
             show_gaps: false,
             trajectory_mode: false,
             trajectories: Vec::new(),
@@ -784,6 +832,7 @@ impl ViewportView {
         let waterline_opacity = Self::new_slider(cx, 0.05, 1.0, 0.01, display.waterline_opacity);
         let armor_opacity = Self::new_slider(cx, 0.1, 1.0, 0.01, display.armor_opacity);
         let marker_opacity = Self::new_slider(cx, 0.0, 1.0, 0.01, display.marker_opacity);
+        let perspective_fov = Self::new_slider(cx, 30.0, 120.0, 1.0, CameraPerspective::default().fov_deg);
         // The range the egui slider uses: a hull heels this far in a hard
         // turn, and further than that reads as a capsize rather than a
         // camera angle worth checking armor against.
@@ -803,6 +852,7 @@ impl ViewportView {
             Self::subscribe_slider(cx, &marker_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.marker_opacity = v)
             }),
+            Self::subscribe_slider(cx, &perspective_fov, |this, v, cx| this.set_perspective_fov(v, cx)),
             Self::subscribe_slider(cx, &model_roll_deg, |this, v, cx| this.set_model_roll_deg(v, cx)),
             Self::subscribe_slider(cx, &camera_fov, |this, v, cx| {
                 let next = CameraRingSettings { fov: v, ..this.camera_rings.clone() };
@@ -819,6 +869,7 @@ impl ViewportView {
                 waterline_opacity,
                 armor_opacity,
                 marker_opacity,
+                perspective_fov,
                 model_roll_deg,
                 camera_fov,
                 camera_height,
@@ -1112,6 +1163,18 @@ impl ViewportView {
             &self.active_camo_uvs,
         );
         self.model_bounds = Some(armor.bounds);
+        // The camera the lock puts back is the one framed on the ship now
+        // showing, not the one framed on the ship before it. A ship that names
+        // no orbit has nothing to lock onto, and its control is not drawn, so
+        // the lock comes off rather than being left on with no way out.
+        if self.perspective.enabled {
+            if armor.camera_trajectories.is_empty() {
+                self.perspective.enabled = false;
+                self.camera_before_lock = None;
+            } else {
+                self.camera_before_lock = Some(self.viewport.camera.clone());
+            }
+        }
         self.current_armor = Some(armor);
     }
 
@@ -1194,6 +1257,139 @@ impl ViewportView {
         self.camera_rings = settings;
         self.reupload_current_armor(cx);
         cx.notify();
+    }
+
+    /// Where the camera lock stands, for the popover that steers it.
+    pub(crate) fn perspective(&self) -> PerspectiveSettings {
+        self.perspective
+    }
+
+    /// Whether this ship has an orbit the camera can be locked to.
+    ///
+    /// The lock follows one of the ship's own camera trajectories, so a ship
+    /// whose GameParams name none has nothing to lock onto.
+    pub(crate) fn has_camera_trajectory(&self) -> bool {
+        self.current_trajectory().is_some()
+    }
+
+    /// Locks the camera to the ship's own orbit, or lets it go again.
+    ///
+    /// The free camera is kept while the lock is on and put back when it comes
+    /// off, and the lock starts where the free camera was looking from.
+    pub(crate) fn set_perspective_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
+        if on == self.perspective.enabled {
+            return;
+        }
+        if on {
+            self.camera_before_lock = Some(self.viewport.camera.clone());
+            self.perspective.camera.yaw = self.viewport.camera.azimuth;
+            self.perspective.camera.pitch = self.viewport.camera.elevation;
+            self.perspective.camera.clamp();
+        } else if let Some(camera) = self.camera_before_lock.take() {
+            self.viewport.camera = camera;
+        }
+        self.perspective.enabled = on;
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// How wide the locked camera sees, in degrees.
+    pub(crate) fn set_perspective_fov(&mut self, degrees: f32, cx: &mut Context<Self>) {
+        if (self.perspective.camera.fov_deg - degrees).abs() < f32::EPSILON {
+            return;
+        }
+        self.perspective.camera.fov_deg = degrees;
+        self.perspective.camera.clamp();
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// Whether the locked camera looks along its bearing as the game's does, or
+    /// through the ship's centre.
+    pub(crate) fn set_perspective_look_mode(&mut self, mode: LookMode, cx: &mut Context<Self>) {
+        if self.perspective.camera.look_mode == mode {
+            return;
+        }
+        self.perspective.camera.look_mode = mode;
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
+    /// The trajectory the locked camera and the drawn orbits both follow: the
+    /// mode the reader picked, among the ones this ship names.
+    fn current_trajectory(&self) -> Option<&wowsunpack::game_params::types::CameraTrajectory> {
+        let armor = self.current_armor.as_ref()?;
+        let wanted = self.camera_rings.mode.as_ref();
+        armor
+            .camera_trajectories
+            .iter()
+            .find(|(name, _)| Some(name) == wanted)
+            .or_else(|| armor.camera_trajectories.first())
+            .map(|(_, trajectory)| trajectory)
+    }
+
+    /// Points the viewport's camera where the lock says, and marks what it is
+    /// aimed at.
+    ///
+    /// A no-op while the lock is off, and while the ship names no orbit to lock
+    /// onto: there is nothing to put the eye on.
+    fn apply_perspective(&mut self, device: &wgpu::Device, armor: &super::load_ship::LoadedShipArmor) {
+        for id in self.aim_mesh_ids.drain(..) {
+            self.viewport.remove_mesh(id);
+        }
+        if !self.perspective.enabled {
+            return;
+        }
+        let Some(trajectory) = self.current_trajectory().cloned() else { return };
+
+        // The orbits sit at the height the trajectory states, as the drawn rings
+        // do: the port's armor carries no waterline offset.
+        let waterline_dy = 0.0;
+        let (fov, height) = (self.camera_rings.fov, self.camera_rings.height);
+        self.perspective.camera.clamp_pitch_to_far_side(&trajectory, fov, height, waterline_dy);
+        let (eye_model, look_model) = self.perspective.camera.eye_and_look_dir(&trajectory, fov, height, waterline_dy);
+        let eye = self.viewport.pos_to_world_space(eye_model);
+        let look = self.viewport.pos_to_world_space(look_model);
+        let target = water_aim_point(eye, look, AIM_MARKER_REACH);
+
+        let (min, max) = armor.bounds;
+        let diagonal = (max - min).norm();
+        let camera = &mut self.viewport.camera;
+        camera.set_eye_and_target(eye, target);
+        camera.fov = self.perspective.camera.fov_deg.to_radians();
+        // Near enough to stand on the ship without the hull clipping away, far
+        // enough to keep the water the eye is aimed at in the frustum.
+        camera.near = 0.05;
+        camera.far = (diagonal * 8.0).max(10.0);
+
+        let radius = (diagonal * AIM_MARKER_FRACTION).clamp(AIM_MARKER_MIN, AIM_MARKER_MAX);
+        let (vertices, indices) = camera_rings::build_water_marker(target, radius, AIM_MARKER_COLOR);
+        if !indices.is_empty() {
+            let id = self.viewport.add_world_space_mesh(device, &vertices, &indices, LAYER_OVERLAY);
+            self.aim_mesh_ids.push(id);
+        }
+    }
+
+    /// Turns the locked camera by a drag, in pixels. Says whether it moved.
+    fn steer_perspective(&mut self, dx: f32, dy: f32) -> bool {
+        if !self.perspective.enabled || (dx == 0.0 && dy == 0.0) {
+            return false;
+        }
+        self.perspective.camera.yaw -= dx * PERSPECTIVE_YAW_PER_PX;
+        self.perspective.camera.pitch += dy * PERSPECTIVE_PITCH_PER_PX;
+        self.perspective.camera.clamp();
+        true
+    }
+
+    /// Moves the locked camera between the inner and outer orbit. Says whether
+    /// it moved.
+    fn zoom_perspective(&mut self, notches: f32) -> bool {
+        if !self.perspective.enabled || notches == 0.0 {
+            return false;
+        }
+        self.perspective.camera.zoom -= notches * PERSPECTIVE_ZOOM_PER_NOTCH;
+        self.perspective.camera.clamp();
+        true
     }
 
     /// Draws what the ship had taken, replacing whatever was drawn before.
@@ -1580,9 +1776,16 @@ impl ViewportView {
             let dy = event.position.y.as_f32() - drag.last_position.y.as_f32();
             if dx != 0.0 || dy != 0.0 {
                 let size = self.viewport_size();
-                match drag.kind {
-                    DragKind::Orbit => self.viewport.camera.orbit((dx, dy), size),
-                    DragKind::Pan => self.viewport.camera.pan((dx, dy), size),
+                // A locked camera is steered on its orbit instead: orbiting the
+                // model would fight the lock, which puts the camera back every
+                // upload.
+                if self.perspective.enabled {
+                    self.steer_perspective(dx, dy);
+                } else {
+                    match drag.kind {
+                        DragKind::Orbit => self.viewport.camera.orbit((dx, dy), size),
+                        DragKind::Pan => self.viewport.camera.pan((dx, dy), size),
+                    }
                 }
                 let total_dx = event.position.x.as_f32() - drag.start_position.x.as_f32();
                 let total_dy = event.position.y.as_f32() - drag.start_position.y.as_f32();
@@ -1763,7 +1966,14 @@ impl ViewportView {
         let delta = event.delta.pixel_delta(window.line_height());
         let dy = delta.y.as_f32();
         if dy != 0.0 {
-            self.viewport.camera.zoom(dy);
+            // The wheel moves the locked camera between the inner and outer
+            // orbit rather than pulling it back off them.
+            if self.perspective.enabled {
+                self.zoom_perspective(dy);
+                self.reupload_current_armor(cx);
+            } else {
+                self.viewport.camera.zoom(dy);
+            }
             self.viewport.mark_dirty();
             cx.emit(ViewportEvent::CameraChanged);
             cx.notify();
@@ -2392,6 +2602,10 @@ impl ViewportView {
                 self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
             }
         }
+        // After the passes that read the visibility filter, which borrows this
+        // viewport while the lock wants it back.
+        self.apply_perspective(&device, &armor);
+
         // `viewport.clear()` (inside the re-upload) already dropped the old
         // highlight meshes; forget the stale ids before rebuilding against
         // the fresh geometry.

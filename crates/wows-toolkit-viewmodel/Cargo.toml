@@ -15,6 +15,8 @@ path = "src/lib.rs"
 test-support = []
 
 [dependencies]
+# Camera math the armor viewports share, in the vector type both use.
+nalgebra = "0.34"
 # The game's own commands.scheme.xml, for the replay keyboard reference.
 roxmltree = { workspace = true }
 ciborium.workspace = true
