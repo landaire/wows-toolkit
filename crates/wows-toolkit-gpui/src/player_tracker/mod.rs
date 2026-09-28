@@ -84,6 +84,7 @@ use wows_toolkit_viewmodel::player_tracker::live::WinRateMode;
 use wows_toolkit_viewmodel::player_tracker::live::resolve_roster;
 use wows_toolkit_viewmodel::player_tracker::live::row_stats;
 use wows_toolkit_viewmodel::player_tracker::live::visible_stat_modes;
+use wows_toolkit_viewmodel::player_tracker::live::win_rate_hover;
 use wows_toolkit_viewmodel::player_tracker::shipbuilds_player_url;
 use wows_toolkit_viewmodel::player_tracker::store;
 use wows_toolkit_viewmodel::player_tracker::tracked;
@@ -146,6 +147,15 @@ impl SubTab {
         }
     }
 }
+/// What the note mark takes, which the header leaves empty so the columns line
+/// up whether or not any row carries one.
+const NOTE_COLUMN_WIDTH: Pixels = px(16.);
+
+/// How much of a band's hue a chip and a whole row carry. A row is far fainter:
+/// it sits behind text that has to stay readable.
+const CHIP_TINT_ALPHA: f32 = 0.22;
+const ROW_TINT_ALPHA: f32 = 0.08;
+
 const CLAN_COLUMN_WIDTH: Pixels = px(120.);
 const COUNT_COLUMN_WIDTH: Pixels = px(110.);
 /// Wide enough for "Encounters in Time Range" and the figure under it.
@@ -312,6 +322,8 @@ pub struct PlayerTrackerView {
     /// How much of each player the roster shows, and which scope its figures
     /// come from when it shows one.
     view_mode: CurrentMatchViewMode,
+    /// Where the roster is scrolled to. A detailed roster is taller than the tab.
+    roster_scroll: ScrollHandle,
     win_rate_mode: WinRateMode,
     /// The proxy the stats lookup goes through, as the settings hold it.
     /// Normalized and interpreted by `http::client`, which is where an unset
@@ -424,6 +436,7 @@ impl PlayerTrackerView {
             note_input,
             icons: IconCache::new(),
             view_mode: CurrentMatchViewMode::default(),
+            roster_scroll: ScrollHandle::new(),
             win_rate_mode: WinRateMode::default(),
             proxy_url: String::new(),
             _live_scan: None,
@@ -1736,13 +1749,32 @@ impl PlayerTrackerView {
                 this.child(div().flex_none().px_2().py_1().text_xs().text_color(crate::theme::text_dim()).child(note))
             })
             .child(
-                h_flex()
+                div()
+                    .relative()
                     .flex_1()
                     .min_h(px(0.))
-                    .items_start()
-                    .child(team_column(t!("ui.player_tracker.allies").into_owned(), "ally", &roster.friendly, layout))
-                    .child(div().w(px(1.)).h_full().bg(border))
-                    .child(team_column(t!("ui.player_tracker.enemies").into_owned(), "enemy", &roster.enemy, layout)),
+                    .child(
+                        h_flex()
+                            .id("tracker-roster-scroll")
+                            .track_scroll(&self.roster_scroll)
+                            .size_full()
+                            .overflow_y_scroll()
+                            .items_start()
+                            .child(team_column(
+                                t!("ui.player_tracker.allies").into_owned(),
+                                "ally",
+                                &roster.friendly,
+                                layout,
+                            ))
+                            .child(div().w(px(1.)).h_full().bg(border))
+                            .child(team_column(
+                                t!("ui.player_tracker.enemies").into_owned(),
+                                "enemy",
+                                &roster.enemy,
+                                layout,
+                            )),
+                    )
+                    .child(Scrollbar::vertical(&self.roster_scroll)),
             )
             .into_any_element()
     }
@@ -2236,6 +2268,7 @@ fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout
         .text_xs()
         .font_weight(FontWeight::BOLD)
         .child(div().flex_none().w(CLASS_COLUMN_WIDTH))
+        .child(div().flex_none().w(NOTE_COLUMN_WIDTH))
         .child(div().flex_none().w(CHIP_COLUMN_WIDTH))
         .child(div().flex_1().min_w(px(0.)).child(t!("ui.player_tracker.column.player_name").to_string()))
         .child(div().w(SHIP_COLUMN_WIDTH).child(t!("ui.player_tracker.win_rate_ship").to_string()));
@@ -2262,13 +2295,6 @@ fn team_column(title: String, side: &'static str, rows: &[LiveRosterRow], layout
         )
         .children(rows.iter().enumerate().map(|(index, row)| roster_row(side, index, row, layout)))
         .into_any_element()
-}
-
-/// A rating's colour band, the same one the replay inspector's PR column
-/// uses. Absent when the service returned no rating for this player.
-fn rating_color(pr: Option<f64>) -> Option<Hsla> {
-    let category = PersonalRatingCategory::from_pr(pr?);
-    Some(rgb(personal_rating::chip_text(category, crate::theme::is_dark_mode())).into())
 }
 
 /// A win rate's colour, from the band the rate itself falls in, so the
@@ -2348,6 +2374,70 @@ fn stat_cell(text: Option<String>, color: Option<Hsla>, pending: bool) -> AnyEle
         .into_any_element()
 }
 
+/// The same, with what the pointer resting on it says.
+fn stat_cell_hovered(
+    id: SharedString,
+    text: Option<String>,
+    color: Option<Hsla>,
+    pending: bool,
+    hover: Option<String>,
+) -> AnyElement {
+    let Some(hover) = hover.filter(|hover| !hover.is_empty()) else {
+        return stat_cell(text, color, pending);
+    };
+    let hover = SharedString::from(hover);
+
+    div()
+        .id(id)
+        .test_support()
+        .aria_label(hover.clone())
+        .w(STAT_COLUMN_WIDTH)
+        .text_xs()
+        .when_some(color, |this, color| this.text_color(color))
+        .when(color.is_none(), |this| this.text_color(crate::theme::text_dim()))
+        .child(text.unwrap_or_else(|| if pending { String::new() } else { "-".to_string() }))
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+        .into_any_element()
+}
+
+/// A rating as the chip it is on every other surface: the band's hue behind the
+/// band's own text colour, rather than a bare coloured number.
+///
+/// The hover names the scope, because one row shows two of them side by side and
+/// a chip on its own does not say which it is.
+fn rating_cell(id: SharedString, pr: Option<f64>, mode: WinRateMode, pending: bool) -> AnyElement {
+    let Some(pr) = pr else {
+        return stat_cell(None, None, pending);
+    };
+    let category = PersonalRatingCategory::from_pr(pr);
+    let text: Hsla = rgb(personal_rating::chip_text(category, crate::theme::is_dark_mode())).into();
+    let hue: Hsla = rgb(personal_rating::chip_hue(category)).into();
+    let hover = SharedString::from(
+        t!(match mode {
+            WinRateMode::Overall => "ui.player_tracker.pr_overall_hover",
+            WinRateMode::Ship => "ui.player_tracker.pr_ship_hover",
+        })
+        .into_owned(),
+    );
+
+    div()
+        .id(id)
+        .test_support()
+        .aria_label(hover.clone())
+        .w(STAT_COLUMN_WIDTH)
+        .child(
+            div()
+                .px_1()
+                .rounded(px(3.))
+                .bg(hue.opacity(CHIP_TINT_ALPHA))
+                .text_xs()
+                .text_color(text)
+                .child(format!("{pr:.0}")),
+        )
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+        .into_any_element()
+}
+
 /// Why a row has no figures, as the reader is told it.
 ///
 /// A private profile is the egui roster's eye icon with its own hover
@@ -2378,7 +2468,14 @@ fn status_cell(id: SharedString, status: PlayerStatsStatus) -> AnyElement {
 }
 
 /// The cells one scope contributes to a row.
-fn scope_cells(id: SharedString, stats: RowStats, status: PlayerStatsStatus, pending: bool) -> Vec<AnyElement> {
+fn scope_cells(
+    id: SharedString,
+    stats: RowStats,
+    status: PlayerStatsStatus,
+    pending: bool,
+    mode: WinRateMode,
+    win_rate_hover: Option<String>,
+) -> Vec<AnyElement> {
     // A player who hid their statistics is a different answer from one the
     // service had nothing for, and both differ from one it could not reach.
     if !matches!(status, PlayerStatsStatus::Ok) {
@@ -2388,12 +2485,44 @@ fn scope_cells(id: SharedString, stats: RowStats, status: PlayerStatsStatus, pen
     }
 
     vec![
-        stat_cell(stats.win_rate.map(|rate| format!("{rate:.1}%")), band_color(stats.band), pending),
-        stat_cell(stats.pr.map(|pr| format!("{pr:.0}")), rating_color(stats.pr), pending),
+        // The hover names both scopes, so a reader comparing this player overall
+        // against this player in this ship does not have to switch the roster.
+        stat_cell_hovered(
+            SharedString::from(format!("{id}-win-rate")),
+            stats.win_rate.map(|rate| format!("{rate:.1}%")),
+            band_color(stats.band),
+            pending,
+            win_rate_hover,
+        ),
+        rating_cell(SharedString::from(format!("{id}-pr")), stats.pr, mode, pending),
         // Grouped, as every other figure this size in the app is.
         stat_cell(stats.avg_damage.map(|damage| separate_number(damage, None)), None, pending),
         stat_cell(stats.battles.map(|battles| separate_number(battles, None)), None, pending),
     ]
+}
+
+/// The pencil a player the reader has written a note about carries, with the
+/// note itself as its hover.
+///
+/// The egui roster puts the same mark on the row
+/// (`ui/player_tracker/current_match.rs:706`); without it a note written in the
+/// tracker's own table is invisible where it matters, which is the battle the
+/// player turns up in again.
+fn notes_mark(side: &'static str, index: usize, tracked: Option<&TrackedPlayer>) -> AnyElement {
+    let slot = div().flex_none().w(NOTE_COLUMN_WIDTH);
+    let Some(notes) = tracked.map(|tracked| tracked.notes.clone()).filter(|notes| !notes.trim().is_empty()) else {
+        return slot.into_any_element();
+    };
+    let hover = SharedString::from(notes);
+
+    slot.id(SharedString::from(format!("tracker-roster-{side}-{index}-note")))
+        .test_support()
+        .aria_label(hover.clone())
+        .text_xs()
+        .text_color(crate::theme::text_dim())
+        .child(crate::icons::icon(crate::icons::NOTE_PENCIL))
+        .tooltip(move |window, cx| Tooltip::new(hover.clone()).build(window, cx))
+        .into_any_element()
 }
 
 /// The possible-stream-sniper chip: shown when a Twitch login that
@@ -2500,12 +2629,13 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
     let pending = layout.stats.is_none();
     let status = player.map_or(PlayerStatsStatus::Ok, |player| player.status);
 
+    let hover_both_scopes = win_rate_hover(player, None);
     let cells: Vec<AnyElement> = layout
         .modes
         .iter()
         .flat_map(|mode| {
             let id = SharedString::from(format!("tracker-roster-{side}-{index}-status-{}", *mode as usize));
-            scope_cells(id, row_stats(player, *mode), status, pending)
+            scope_cells(id, row_stats(player, *mode), status, pending, *mode, hover_both_scopes.clone())
         })
         .collect();
 
@@ -2530,6 +2660,15 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
         _ => t!("ui.player_tracker.never_encountered").into_owned().into(),
     };
 
+    // The band of the scope the row leads with, at an alpha well under the
+    // chip's: the egui roster tints its rows the same way, so a screen of them
+    // reads as bands before any number is read.
+    let lead = layout.modes.first().copied().unwrap_or(WinRateMode::Overall);
+    let tint = row_stats(player, lead).band.map(|band| {
+        let hue: Hsla = rgb(personal_rating::chip_hue(band)).into();
+        hue.opacity(ROW_TINT_ALPHA)
+    });
+
     h_flex()
         // Keyed by position as well as name: bots repeat names within a team.
         .id(SharedString::from(format!("tracker-roster-{side}-{index}")))
@@ -2540,7 +2679,9 @@ fn roster_row(side: &'static str, index: usize, row: &LiveRosterRow, layout: Ros
         .gap_2()
         .items_center()
         .px_2()
+        .when_some(tint, |this, tint| this.bg(tint))
         .child(class_icon(row, layout.icons))
+        .child(notes_mark(side, index, tracked))
         .child(twitch_chip(side, index, row, layout))
         .child(div().flex_1().min_w(px(0.)).text_sm().text_color(tint_color(row.tint)).truncate().child(name))
         .child(
@@ -2929,6 +3070,44 @@ mod tests {
         assert!(hover.ends_with(&rust_i18n::t!("ui.twitch.click_to_copy").into_owned()), "got {hover:?}");
     }
 
+    /// A win-rate cell says both scopes, whichever one it is showing: a reader
+    /// comparing a player overall against that player in this ship should not have
+    /// to switch the whole roster to see the other number.
+    #[test]
+    fn a_win_rate_cell_hovers_both_scopes() {
+        use wows_toolkit_viewmodel::match_stats::PlayerStatsStatus;
+        use wows_toolkit_viewmodel::player_tracker::live::win_rate_hover;
+
+        rust_i18n::set_locale("en");
+        let stats = wows_toolkit_viewmodel::match_stats::PlayerStatsOut {
+            account_id: wows_replays::types::AccountId(1),
+            region: "eu".to_owned(),
+            ship_id: wows_replays::types::GameParamId::default(),
+            status: PlayerStatsStatus::Ok,
+            battles: Some(12_345),
+            overall_win_rate: Some(52.4),
+            overall_avg_damage: None,
+            ship_win_rate: Some(61.0),
+            ship_battles: Some(87),
+            ship_avg_damage: None,
+            ship_pr: None,
+            pr: None,
+        };
+
+        let hover = win_rate_hover(Some(&stats), Some("en")).expect("both scopes are there");
+        assert!(hover.contains("52.4%"), "got {hover:?}");
+        assert!(hover.contains("61.0%"), "got {hover:?}");
+        assert_eq!(hover.lines().count(), 2, "one line per scope, got {hover:?}");
+
+        let one_scope = wows_toolkit_viewmodel::match_stats::PlayerStatsOut {
+            ship_win_rate: None,
+            ship_battles: None,
+            ..stats.clone()
+        };
+        let hover = win_rate_hover(Some(&one_scope), Some("en")).expect("one scope is enough for a hover");
+        assert_eq!(hover.lines().count(), 1, "a scope with no rate is left out rather than shown as zero");
+    }
+
     /// A player who hid their profile is marked as that, with the reason in the
     /// hover: the egui roster draws an eye there, and a bare English "hidden" in
     /// the cell told a non-English reader nothing.
@@ -2942,6 +3121,8 @@ mod tests {
             RowStats::default(),
             PlayerStatsStatus::Hidden,
             false,
+            wows_toolkit_viewmodel::player_tracker::live::WinRateMode::Overall,
+            None,
         );
         assert_eq!(cells.len(), 4, "the marker takes the first cell and the rest stay empty");
     }

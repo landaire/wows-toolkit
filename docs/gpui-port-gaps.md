@@ -198,14 +198,17 @@ have used it.
     opening or closing a replay. Still missing: the Tactics Board button, the
     shared-windows list and "Open for everyone", copy-localhost-link, and the
     spam-protection notice (which belongs to the shared viewports).
-23. **The live roster's detail.** Done 2026-09-28: the hidden-profile marker is
+23. ~~**The live roster's detail.**~~ Done 2026-09-28: the hidden-profile marker is
     the eye with its own hover (and the two other absences are marked too, from the
     catalogue rather than as bare English), and the encounters cell carries the
     hover that says the total, how many fall in the period, and when they were last
-    seen. Still missing: the win-rate hover comparing both scopes, the PR chip and
-    its hovers, the notes pencil on a roster row, the win-rate row tint, and a
-    scrollbar on the Detailed roster
-    (`ui/player_tracker/current_match.rs:471`, `:706`, `:741`, `:760`).
+    seen. The rest followed the same day: the win-rate cell's hover names both
+    scopes with the battles and damage behind each (the wording moved to
+    `wows_toolkit_viewmodel::player_tracker::live::win_rate_hover`, which the egui
+    roster now calls too), the rating reads as the chip it is everywhere else with
+    the scope in its hover, a player the reader has written a note about carries the
+    pencil with the note as its hover, each row is tinted by the band of the scope
+    it leads with, and the roster scrolls.
 24. ~~**Tracker: no Clear Stats and no Populate Data From Replays.**~~ Done
     2026-09-28: the toolbar carries both. Clear asks first and then drops every
     player with their aliases, encounters and notes (`tracker::clear_tracker`, one
