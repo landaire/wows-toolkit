@@ -38,7 +38,7 @@ use wows_toolkit_viewmodel::stats::chart::ChartableStat;
 use wows_toolkit_viewmodel::stats::chart::bar_chart_series;
 use wows_toolkit_viewmodel::stats::chart::line_chart_series;
 use wows_toolkit_viewmodel::stats::chart::ships_played;
-use wows_toolkit_viewmodel::stats::filter_games;
+use wows_toolkit_viewmodel::stats::filter_games_per_ship;
 use wows_toolkit_viewmodel::stats::match_group_display_name;
 use wows_toolkit_viewmodel::stats::per_ship_performance;
 
@@ -276,7 +276,9 @@ impl StatsChartPanel {
 
     /// Re-narrows the session and rebuilds everything drawn from it.
     fn rebuild(&mut self, cx: &mut Context<Self>) {
-        let games = filter_games(&self.all_games, self.active_filters());
+        // Per ship, as the egui charts count it (`ui/stats_tab.rs:541`): a chart
+        // of ten ships under "last 25" plots 25 battles in each.
+        let games = filter_games_per_ship(&self.all_games, self.active_filters());
         self.ships = per_ship_performance(&games);
         self.games = games.iter().map(|game| (*game).clone()).collect();
         self.played = ships_played(&games);

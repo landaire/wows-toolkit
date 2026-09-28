@@ -68,16 +68,13 @@ have used it.
    the reader opens that replay in a tab (`replay_inspector/panel.rs:396`), skips
    the results gate, and names the file by its stem rather than
    `better_file_name`.
-9. **"Set as Session Stats" destroys the session on one click.** The egui app
-   routes it through `ConfirmableAction::SetAsSessionStats` and the Confirm
-   window (`ui/replay_parser/mod.rs:292-299`, executed `app.rs:3995`); the port
-   emits `SessionStats { replace: true }` straight from the menu item
-   (`browser_view.rs:1141-1146`).
-10. **The session game-count limit means something different.** The egui app
-    applies it per ship for the per-ship tables and every chart
-    (`data/session_stats.rs:324-359`); the port applies one global last-N
-    everywhere (`wows-toolkit-viewmodel/src/stats/mod.rs:357-368`). Same
-    control, different numbers, nothing said.
+9. ~~**"Set as Session Stats" destroys the session on one click.**~~ Done
+   2026-09-27: it opens the same confirmation the port already uses for Open in
+   Game, on the `confirm.set_as_session_stats` wording.
+10. ~~**The session game-count limit means something different.**~~ Done
+    2026-09-27: `filter_games_per_ship` counts the limit per ship, and the
+    per-ship table and the charts read it while the summary keeps the
+    session-wide count, which is the split the egui tab makes.
 
 ## Recovery: what a stuck user has no way out of
 
