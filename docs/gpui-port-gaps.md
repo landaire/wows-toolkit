@@ -79,8 +79,11 @@ have used it.
    as it goes, and can put the rendered files on the clipboard instead of into a
    folder (`ui.replay.context.render_to_clipboard_many`). A frame count within the
    replay being rendered waits on a task bar to put it in (item 19).
-7. **`check_for_updates` and `enable_logging` govern nothing.** No updater
-   (item 11) and no log file (item 12) exist in the port.
+7. ~~**`check_for_updates` and `enable_logging` govern nothing.**~~ Done
+   2026-09-28 with items 11 and 12: the startup update check runs only when
+   `check_for_updates` says so, and `enable_logging` is read straight from the
+   database before anything else starts, because the log file is what a crash
+   during startup would otherwise go unrecorded in.
 8. **Auto-export.** Done 2026-09-28: a replay the watcher reports is parsed and
    written out whether or not it is opened (`auto_export_landed`), skipped when it
    carries no battle results, which is the egui gate. It is still named by the
@@ -153,10 +156,15 @@ have used it.
     from Replays", editable capture points, ship placement, range circles
     (`replay/minimap_view/tactics.rs:704`). Absent, and its `WindowKind` geometry
     row is read and never used.
-17. **Alt perspective.** Pick another recording of the same battle, validate
-    version and arena id, merge, re-parse, and feed the renderer and video export
-    (`ui/replay_parser/mod.rs:4114-4172`, `replay/renderer/playback.rs:205`).
-    Absent.
+17. **Alt perspective.** Done in part 2026-09-28: the open replay's Actions menu
+    takes another recording of the same battle, refuses one that is not (a different
+    version, a different battle, or one whose battle cannot be read, each with its
+    own reason), and reads the battle again through both by way of
+    `wows_battle_world::merged::MergedReplays`, the same merge the egui app uses.
+    The count rides on the menu item as it does there. Not ported: the renderer and
+    the video export still walk the primary recording alone, so what a merged report
+    reveals is in the table and not yet on the map
+    (`replay/renderer/playback.rs:205`).
 18. **Realtime armor viewer as a window**, with its attacker filter, auto-scroll,
     seek-to-salvo, show-secondaries and sim-agrees controls
     (`replay/realtime_armor_viewer.rs:1198`, `ui.armor.realtime.*`). The hit

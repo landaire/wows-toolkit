@@ -693,6 +693,73 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
+/// Reads every recording of one battle into a single report.
+///
+/// The merge walks all of the streams together so the world sees what any of
+/// them saw. A stream that will not parse fails the whole read rather than being
+/// dropped: a report that silently left one perspective out would look exactly
+/// like one that merged it.
+fn merged_report(
+    primary: &ReplayFile,
+    alts: &[PathBuf],
+    loaded: &LoadedGameData,
+    constants: &GameConstants,
+    version: Version,
+) -> Result<wows_battle_world::report::BattleReport, ReplayLoadError> {
+    let mut read = Vec::with_capacity(alts.len());
+    for path in alts {
+        let alt = ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(format!("{report:?}")))?;
+        read.push(alt);
+    }
+
+    let mut session = wows_battle_world::merged::MergedReplays::new(
+        loaded.provider.entity_specs(),
+        loaded.provider.as_ref(),
+        constants,
+        version,
+        primary,
+        &read,
+    )
+    .map_err(|err| ReplayLoadError::Parse(err.to_string()))?;
+
+    while session.step().map_err(|err| ReplayLoadError::Parse(err.to_string()))?.is_some() {}
+    session.finish();
+    Ok(session.into_world().into_report())
+}
+
+/// Whether a recording belongs to the battle a report was read from.
+///
+/// Two answers that both mean no: a different game version, whose packets the
+/// same parser would read as something else, and a different battle. `None` for
+/// an arena id that could not be read at all, which is not evidence either way
+/// and is refused for that reason.
+pub(crate) fn alt_belongs(
+    primary_version: &str,
+    alt_version: &str,
+    primary_arena: Option<wows_replays::types::ArenaId>,
+    alt_arena: Option<wows_replays::types::ArenaId>,
+) -> Result<(), AltRefusal> {
+    if primary_version != alt_version {
+        return Err(AltRefusal::Version { primary: primary_version.to_owned(), alt: alt_version.to_owned() });
+    }
+    match (primary_arena, alt_arena) {
+        (_, None) => Err(AltRefusal::NoArenaId),
+        (Some(primary), Some(alt)) if primary != alt => Err(AltRefusal::OtherBattle { primary, alt }),
+        _ => Ok(()),
+    }
+}
+
+/// Why another recording was refused.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum AltRefusal {
+    #[error("it was recorded on {alt} and this battle on {primary}")]
+    Version { primary: String, alt: String },
+    #[error("the battle it belongs to could not be read from it")]
+    NoArenaId,
+    #[error("it is a recording of battle {alt}, not {primary}")]
+    OtherBattle { primary: wows_replays::types::ArenaId, alt: wows_replays::types::ArenaId },
+}
+
 /// Reads the disk-cached versioned constants for `build`
 /// (`constants_{build}.json` under the shared storage directory). Falls back
 /// to `Value::Null` (no overrides) whenever the storage directory is
@@ -819,6 +886,26 @@ pub(crate) fn parse_replay(
     game_data: &GameDataCache,
     personal_rating: Option<&PersonalRatingData>,
 ) -> Result<ParsedReplay, ReplayLoadError> {
+    parse_replay_with_alts(path, &[], game_data, personal_rating)
+}
+
+/// The same, reading other recordings of the same battle alongside it.
+///
+/// One replay records one player's view: what their team saw, when they saw it.
+/// Another player's recording of the same battle saw different things, and a
+/// battle read through both has no fog between them -- enemy positions, builds,
+/// torpedoes and consumables the primary never saw. The egui app calls this the
+/// other-team perspective (`ui/replay_parser/mod.rs`'s `load_alt_perspective`);
+/// what merges them is `wows_battle_world::merged::MergedReplays`, shared.
+///
+/// `alts` that do not belong to this battle are refused before anything is read
+/// (see [`alt_belongs`]).
+pub(crate) fn parse_replay_with_alts(
+    path: &Path,
+    alts: &[PathBuf],
+    game_data: &GameDataCache,
+    personal_rating: Option<&PersonalRatingData>,
+) -> Result<ParsedReplay, ReplayLoadError> {
     let replay_file = ReplayFile::from_file(path).map_err(|report| {
         let is_io = matches!(report.current_context(), ParseError::Io(_));
         let message = format!("{report:?}");
@@ -836,20 +923,28 @@ pub(crate) fn parse_replay(
     constants.merge_replay_constants(&constants_json, version);
     wowsunpack::game_constants::apply_version_consumables(constants.common_mut(), version);
 
-    let mut world = BattleWorld::new(meta, loaded.provider.as_ref(), Some(&constants));
-    world.set_shot_tracking(ShotTracking::Untracked);
+    // Whether the stream was read to its end, which is what tells a battle with
+    // no results from one whose tail was never reached. A merge either consumes
+    // every stream or fails, so it is always whole.
+    let mut read_whole = true;
+    let report = if alts.is_empty() {
+        let mut world = BattleWorld::new(meta, loaded.provider.as_ref(), Some(&constants));
+        world.set_shot_tracking(ShotTracking::Untracked);
 
-    let mut parser = Parser::with_version(loaded.provider.entity_specs(), version);
-    let mut remaining = replay_file.packet_data();
-    while !remaining.is_empty() {
-        match parser.parse_packet(&mut remaining) {
-            Ok(packet) => world.process(&packet),
-            Err(_) => break,
+        let mut parser = Parser::with_version(loaded.provider.entity_specs(), version);
+        let mut remaining = replay_file.packet_data();
+        while !remaining.is_empty() {
+            match parser.parse_packet(&mut remaining) {
+                Ok(packet) => world.process(&packet),
+                Err(_) => break,
+            }
         }
-    }
-    world.finish();
-
-    let report = world.into_report();
+        read_whole = remaining.is_empty();
+        world.finish();
+        world.into_report()
+    } else {
+        merged_report(&replay_file, alts, &loaded, &constants, version)?
+    };
     let raw_results_json = report.battle_results().map(pretty_json_or_raw);
     // What the egui debug menu calls "Battle Results: Mapped JSON": the same
     // resolution the normalized report reads its per-player figures through.
@@ -897,7 +992,7 @@ pub(crate) fn parse_replay(
         // absence, and the loop above stops on the first packet it cannot read.
         results: if report.battle_results().is_some() {
             wows_toolkit_viewmodel::upload::ResultsScan::Present
-        } else if remaining.is_empty() {
+        } else if read_whole {
             wows_toolkit_viewmodel::upload::ResultsScan::Absent
         } else {
             wows_toolkit_viewmodel::upload::ResultsScan::Truncated
@@ -963,7 +1058,94 @@ pub fn spawn_parse(
     personal_rating: Option<Arc<PersonalRatingData>>,
     cx: &App,
 ) -> Task<Result<ParsedReplay, ReplayLoadError>> {
-    cx.background_spawn(async move { parse_replay(&path, &game_data, personal_rating.as_deref()) })
+    spawn_parse_with_alts(path, Vec::new(), game_data, personal_rating, cx)
+}
+
+/// The same, reading other recordings of the same battle alongside it.
+pub fn spawn_parse_with_alts(
+    path: PathBuf,
+    alts: Vec<PathBuf>,
+    game_data: GameDataCache,
+    personal_rating: Option<Arc<PersonalRatingData>>,
+    cx: &App,
+) -> Task<Result<ParsedReplay, ReplayLoadError>> {
+    cx.background_spawn(async move { parse_replay_with_alts(&path, &alts, &game_data, personal_rating.as_deref()) })
+}
+
+/// Reads a recording and says whether it belongs to the battle `primary` was read
+/// from, without parsing either in full.
+///
+/// The header carries the version, and one scan of the stream carries the battle
+/// it belongs to; a recording that fails either is refused before it can reach a
+/// merge, where it would cost a whole re-read to find out.
+pub fn check_alt(
+    primary: PathBuf,
+    alt: PathBuf,
+    game_data: GameDataCache,
+    cx: &App,
+) -> Task<Result<(), ReplayLoadError>> {
+    cx.background_spawn(async move {
+        let read =
+            |path: &Path| ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(format!("{report:?}")));
+        let primary_file = read(&primary)?;
+        let alt_file = read(&alt)?;
+
+        let version = Version::try_from_client_exe(&primary_file.meta.clientVersionFromExe)
+            .ok_or(ReplayLoadError::VersionParse)?;
+        let build = version.build_number().ok_or(ReplayLoadError::VersionParse)?;
+        let loaded = game_data.get_or_load_build_for(build, Some(&version))?;
+        let specs = loaded.provider.entity_specs();
+
+        let arena_of = |file: &ReplayFile| wows_replays::analyzer::arena_scan::scan_arena_id(specs, version, file);
+        alt_belongs(
+            &primary_file.meta.clientVersionFromExe,
+            &alt_file.meta.clientVersionFromExe,
+            arena_of(&primary_file),
+            arena_of(&alt_file),
+        )
+        .map_err(|refused| ReplayLoadError::Parse(refused.to_string()))
+    })
+}
+
+#[cfg(test)]
+mod alt_perspective_tests {
+    use wows_replays::types::ArenaId;
+
+    use super::AltRefusal;
+    use super::alt_belongs;
+
+    /// Another recording of the same battle on the same version is taken; the
+    /// three ways it can fail to be that are each refused with their own reason.
+    #[test]
+    fn only_another_recording_of_the_same_battle_is_taken() {
+        let battle = ArenaId::new(4_242);
+        assert_eq!(alt_belongs("12,3,0,0", "12,3,0,0", Some(battle), Some(battle)), Ok(()));
+
+        assert_eq!(
+            alt_belongs("12,3,0,0", "12,4,0,0", Some(battle), Some(battle)),
+            Err(AltRefusal::Version { primary: "12,3,0,0".to_owned(), alt: "12,4,0,0".to_owned() }),
+            "a recording from another version reads as different packets entirely"
+        );
+
+        let other = ArenaId::new(7);
+        assert_eq!(
+            alt_belongs("12,3,0,0", "12,3,0,0", Some(battle), Some(other)),
+            Err(AltRefusal::OtherBattle { primary: battle, alt: other })
+        );
+
+        assert_eq!(
+            alt_belongs("12,3,0,0", "12,3,0,0", Some(battle), None),
+            Err(AltRefusal::NoArenaId),
+            "a recording whose battle cannot be read is not evidence either way"
+        );
+    }
+
+    /// A primary whose own battle could not be read still takes a recording that
+    /// names one: the merge itself is what would fail, and it says so.
+    #[test]
+    fn a_primary_with_no_battle_of_its_own_is_not_the_refusal() {
+        assert_eq!(alt_belongs("12,3,0,0", "12,3,0,0", None, Some(ArenaId::new(1))), Ok(()));
+    }
 }
 
 #[cfg(test)]

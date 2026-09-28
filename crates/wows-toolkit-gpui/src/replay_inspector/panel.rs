@@ -82,6 +82,7 @@ use super::load::GameDataCache;
 use super::load::ParsedReplay;
 use super::load::ReplayLoadError;
 use super::load::spawn_parse;
+use super::load::spawn_parse_with_alts;
 use super::model::MatchContext;
 use super::model::ReplayReportModel;
 use super::model::separate_number;
@@ -189,6 +190,12 @@ pub struct ReplayPanel {
     /// The replay this tab is reading, kept because an auto-export is named
     /// after it.
     path: PathBuf,
+    /// Other recordings of the same battle, read alongside it so the report sees
+    /// what the primary's team could not.
+    alts: Vec<PathBuf>,
+    /// The build data this tab reads against, kept so another recording can be
+    /// checked and merged without the view handing it over again.
+    game_data: GameDataCache,
     /// What the last export did, shown beside the menu.
     export_status: Option<String>,
     _parse_task: Task<()>,
@@ -202,6 +209,7 @@ pub struct ReplayPanel {
 impl ReplayPanel {
     pub fn new(setup: PanelSetup, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let PanelSetup { path, game_data, debug, columns, personal_rating, auto_export } = setup;
+        let kept_game_data = game_data.clone();
         let focus_handle = cx.focus_handle();
         let parse_task = spawn_parse(path.clone(), game_data, personal_rating.clone(), cx);
         let parse_task = cx.spawn_in(window, async move |this, cx| {
@@ -220,6 +228,8 @@ impl ReplayPanel {
             export_status: None,
             auto_export,
             path,
+            alts: Vec::new(),
+            game_data: kept_game_data,
             _parse_task: parse_task,
             _table_subscription: None,
         }
@@ -231,13 +241,59 @@ impl ReplayPanel {
     /// the egui app does with a modified replay it has open
     /// (`tab_state.rs`'s `NotifyFileEvent::Modified` arm).
     pub fn reparse(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
-        let parse_task = spawn_parse(self.path.clone(), game_data, self.personal_rating.clone(), cx);
+        let parse_task =
+            spawn_parse_with_alts(self.path.clone(), self.alts.clone(), game_data, self.personal_rating.clone(), cx);
         self._parse_task = cx.spawn_in(window, async move |this, cx| {
             let result = parse_task.await;
             let _ = this.update_in(cx, |this, window, cx| this.apply_result(result, window, cx));
         });
         self.state = LoadState::Loading;
         cx.notify();
+    }
+
+    /// Takes another recording of this battle, and reads the battle again
+    /// through both.
+    ///
+    /// Refused before anything is merged when it is not this battle: a mismatched
+    /// recording kept in the list would fail every later read of this tab
+    /// (`ui/replay_parser/mod.rs`'s own up-front validation, for the same reason).
+    pub fn load_alt_perspective(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_file(
+            Some(&t!("ui.replay.load_alt_perspective")),
+            Some(crate::dialog::Filter { label: "WoWs Replays", extensions: &["wowsreplay"] }),
+        );
+        let primary = self.path.clone();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(alt) = asked.await else { return };
+            let Ok(check) =
+                cx.update(|_window, cx| super::load::check_alt(primary, alt.clone(), game_data.clone(), cx))
+            else {
+                return;
+            };
+
+            match check.await {
+                Ok(()) => {
+                    let _ = this.update_in(cx, |this, window, cx| {
+                        if this.alts.contains(&alt) {
+                            return;
+                        }
+                        this.alts.push(alt);
+                        this.reparse(game_data.clone(), window, cx);
+                    });
+                }
+                Err(refused) => {
+                    let _ = this.update_in(cx, |_this, window, cx| {
+                        crate::toast::failed(
+                            t!("ui.replay.load_alt_perspective_failed", error = refused.to_string()).into_owned(),
+                            window,
+                            cx,
+                        );
+                    });
+                }
+            }
+        })
+        .detach();
     }
 
     /// Applies a runtime debug-mode toggle from `ReplayInspectorView`:
@@ -500,6 +556,8 @@ impl ReplayPanel {
             export_status: None,
             auto_export: AutoExport::Off,
             path: PathBuf::from("test.wowsreplay"),
+            alts: Vec::new(),
+            game_data: GameDataCache::new(PathBuf::from("test")),
             _parse_task: Task::ready(()),
             _table_subscription: None,
         };
@@ -796,6 +854,10 @@ struct HeaderState {
     export_status: Option<String>,
     debug: bool,
     side_panel: SidePanel,
+    /// What another recording of the same battle is read against.
+    game_data: GameDataCache,
+    /// How many other recordings this tab is already reading.
+    alts: usize,
 }
 
 /// The subdued line under the header: who was recording, which match, and
@@ -860,6 +922,10 @@ struct ActionsState {
     has_results: bool,
     has_mapped_results: bool,
     side_panel: SidePanel,
+    /// What another recording is read against.
+    game_data: GameDataCache,
+    /// How many other recordings this tab is already reading.
+    alts: usize,
 }
 
 /// The header's Actions menu.
@@ -867,12 +933,19 @@ struct ActionsState {
 /// Everything that is not a thing the reader flips back and forth lives in
 /// here, sectioned as the egui menu sections it: a header row of eight
 /// buttons is a row nobody reads.
-///
-/// The egui menu also carries the other-team perspective, which this port
-/// has no loading path for.
 fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoElement + use<> {
-    let ActionsState { path, hidden, is_test_ship, can_export, debug, has_results, has_mapped_results, side_panel } =
-        state;
+    let ActionsState {
+        path,
+        hidden,
+        is_test_ship,
+        can_export,
+        debug,
+        has_results,
+        has_mapped_results,
+        side_panel,
+        game_data,
+        alts,
+    } = state;
 
     Button::new("replay-actions").label(t!("ui.replay.actions").into_owned()).compact().dropdown_menu(
         move |menu, _window, _cx| {
@@ -886,6 +959,22 @@ fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoEle
                     }
                 }),
             );
+
+            // Another recording of the same battle, read alongside this one:
+            // what one team saw, the other did not. The count is on the label,
+            // as the egui menu puts it, so a tab already reading two says so.
+            let menu = {
+                let panel = panel.clone();
+                let game_data = game_data.clone();
+                let label = match alts {
+                    0 => t!("ui.replay.load_alt_perspective").into_owned(),
+                    merged => format!("{} ({merged})", t!("ui.replay.load_alt_perspective")),
+                };
+                menu.item(PopupMenuItem::new(label).on_click(move |_event, window, cx| {
+                    let game_data = game_data.clone();
+                    panel.update(cx, |panel, cx| panel.load_alt_perspective(game_data, window, cx));
+                }))
+            };
 
             // Hiding your own figures only means anything for a test ship,
             // where they are the thing being kept quiet.
@@ -949,6 +1038,8 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         export_status,
         debug,
         side_panel,
+        game_data,
+        alts,
     } = state;
 
     let chat_button = side_panel_button(
@@ -982,6 +1073,8 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                 has_results,
                 has_mapped_results,
                 side_panel,
+                game_data,
+                alts,
             },
         ))
         // Kept out of the menu: the chat is read alongside the table and
@@ -1122,6 +1215,8 @@ impl Render for ReplayPanel {
                             export_status: self.export_status.clone(),
                             debug: self.debug,
                             side_panel: self.side_panel,
+                            game_data: self.game_data.clone(),
+                            alts: self.alts.len(),
                         },
                         cx,
                     ))
