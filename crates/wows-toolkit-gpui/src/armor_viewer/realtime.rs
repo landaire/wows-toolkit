@@ -43,6 +43,15 @@ impl RealtimeArmorFeed {
         }
     }
 
+    /// Every hit this ship takes over the whole battle.
+    ///
+    /// What the incoming-fire log lists, as against what the hull draws: the log
+    /// is a reading of the battle and does not shrink as playback is scrubbed
+    /// back, which is how the egui panel reads it.
+    pub fn whole_battle(&self) -> &[PreExtractedHit] {
+        &self.timeline.hits
+    }
+
     /// What this ship's health was at that moment.
     pub fn health(&self) -> Option<f32> {
         self.timeline.health_at(self.at?).map(|snapshot| snapshot.health)

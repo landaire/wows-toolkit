@@ -132,7 +132,7 @@ pub(crate) struct CameraRingSettings {
 /// What the reader steers changes with the lock: a drag turns the eye on its
 /// orbit and tilts it rather than orbiting the model, and the wheel moves
 /// between the inner and outer orbit rather than pulling the camera back.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct PerspectiveSettings {
     pub(crate) enabled: bool,
     pub(crate) camera: CameraPerspective,
@@ -410,17 +410,15 @@ struct ReloadSource {
     display_name: String,
 }
 
-/// The port's cross-pane-relevant settings (Milestone 5 Task 9c's "sync
-/// options"): everything [`ViewportView::synced_settings`]/[`ViewportView::
-/// apply_synced`] capture and apply between panes. Deliberately narrower than
-/// the egui app's own `SyncedPaneSettings` (`armor_viewer/state.rs`), which
-/// also carries ship-center/waterline-overlay/camera-ellipse/perspective
-/// fields this port hasn't built yet -- those are simply absent here, not
-/// stubbed. The selected camo is likewise NOT included: `CamoSchemeId` is
-/// only a stable index within a single ship's own `camo_scheme_infos` list
-/// (see that type's doc), so it can't be safely reapplied to a different
-/// pane's (possibly different-ship) armor without the same remap machinery
-/// `apply_reload_result` uses for a same-pane reload.
+/// What one pane hands another while "sync options" is on: everything
+/// [`ViewportView::synced_settings`] and [`ViewportView::apply_synced`] carry
+/// between them, matching the egui app's own `SyncedPaneSettings`
+/// (`armor_viewer/state.rs`).
+///
+/// The selected camo is not among them: a `CamoSchemeId` is a stable index
+/// within one ship's own scheme list (see that type's doc), so it cannot be
+/// reapplied to a pane showing another ship without the remap
+/// `apply_reload_result` does for a same-pane reload.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SyncedSettings {
     part_visibility: HashMap<(String, String), bool>,
@@ -428,6 +426,9 @@ pub(crate) struct SyncedSettings {
     hull_visibility: HashMap<String, bool>,
     display_settings: upload::DisplaySettings,
     lighting: LightingSettings,
+    camera_rings: CameraRingSettings,
+    /// Whether the camera is locked to the ship's orbit, and how it aims.
+    perspective: PerspectiveSettings,
 }
 
 pub struct ViewportView {
@@ -1070,6 +1071,8 @@ impl ViewportView {
             hull_visibility: self.hull_visibility.clone(),
             display_settings: self.display_settings,
             lighting: self.viewport.lighting.clone(),
+            camera_rings: self.camera_rings.clone(),
+            perspective: self.perspective,
         }
     }
 
@@ -1087,6 +1090,12 @@ impl ViewportView {
         self.hull_visibility = settings.hull_visibility.clone();
         self.display_settings = settings.display_settings;
         self.viewport.lighting = settings.lighting.clone();
+        self.camera_rings = settings.camera_rings.clone();
+        // Through the toggle rather than by assignment: turning the lock on
+        // keeps the free camera to put back, and turning it off puts it back.
+        let locked = settings.perspective.enabled;
+        self.perspective.camera = settings.perspective.camera;
+        self.set_perspective_enabled(locked, cx);
         self.reupload_current_armor(cx);
         self.viewport.mark_dirty();
         cx.notify();
@@ -1294,14 +1303,6 @@ impl ViewportView {
         self.perspective
     }
 
-    /// Whether this ship has an orbit the camera can be locked to.
-    ///
-    /// The lock follows one of the ship's own camera trajectories, so a ship
-    /// whose GameParams name none has nothing to lock onto.
-    pub(crate) fn has_camera_trajectory(&self) -> bool {
-        self.current_trajectory().is_some()
-    }
-
     /// Locks the camera to the ship's own orbit, or lets it go again.
     ///
     /// The free camera is kept while the lock is on and put back when it comes
@@ -1364,6 +1365,31 @@ impl ViewportView {
     /// A no-op while the lock is off, and while the ship names no orbit to lock
     /// onto: there is nothing to put the eye on.
     fn apply_perspective(&mut self, device: &wgpu::Device, armor: &super::load_ship::LoadedShipArmor) {
+        self.aim_perspective(Some(device), armor.bounds);
+    }
+
+    /// Points the camera where the lock says, for a change that moved the lock
+    /// rather than the model.
+    ///
+    /// Cheap enough for a drag: the armor is not touched, only the camera and
+    /// the one marker saying where it is aimed.
+    fn refresh_perspective(&mut self, cx: &mut Context<Self>) {
+        let device = match &self.gpu {
+            GpuState::Ready { ctx, .. } => Some(ctx.device.clone()),
+            _ => None,
+        };
+        let Some(bounds) = self.model_bounds else { return };
+        self.aim_perspective(device.as_deref(), bounds);
+        self.viewport.mark_dirty();
+        cx.notify();
+    }
+
+    /// Points the viewport's camera where the lock says, and marks what it is
+    /// aimed at when there is a device to build the marker with.
+    ///
+    /// A no-op while the lock is off, and while the ship names no orbit to lock
+    /// onto: there is nothing to put the eye on.
+    fn aim_perspective(&mut self, device: Option<&wgpu::Device>, bounds: (Vec3, Vec3)) {
         for id in self.aim_mesh_ids.drain(..) {
             self.viewport.remove_mesh(id);
         }
@@ -1382,7 +1408,7 @@ impl ViewportView {
         let look = self.viewport.pos_to_world_space(look_model);
         let target = water_aim_point(eye, look, AIM_MARKER_REACH);
 
-        let (min, max) = armor.bounds;
+        let (min, max) = bounds;
         let diagonal = (max - min).norm();
         let camera = &mut self.viewport.camera;
         camera.set_eye_and_target(eye, target);
@@ -1392,12 +1418,21 @@ impl ViewportView {
         camera.near = 0.05;
         camera.far = (diagonal * 8.0).max(10.0);
 
+        let Some(device) = device else { return };
         let radius = (diagonal * AIM_MARKER_FRACTION).clamp(AIM_MARKER_MIN, AIM_MARKER_MAX);
         let (vertices, indices) = camera_rings::build_water_marker(target, radius, AIM_MARKER_COLOR);
         if !indices.is_empty() {
             let id = self.viewport.add_world_space_mesh(device, &vertices, &indices, LAYER_OVERLAY);
             self.aim_mesh_ids.push(id);
         }
+    }
+
+    /// Whether the free camera is the reader's to move.
+    ///
+    /// While the lock is on the camera belongs to the ship's orbit, and anything
+    /// that moved it another way would be undone by the next aim.
+    fn camera_is_free(&self) -> bool {
+        !self.perspective.enabled
     }
 
     /// Turns the locked camera by a drag, in pixels. Says whether it moved.
@@ -1625,7 +1660,14 @@ impl ViewportView {
         if self.trajectories.is_empty() {
             return;
         }
+        let was_isolating = self.trajectories.iter().any(|cast| cast.isolating_plates || cast.isolating_zones);
         self.trajectories.clear();
+        // What the arcs were hiding is given back with them, rather than
+        // leaving most of the ship gone with nothing on screen saying why.
+        if was_isolating {
+            self.apply_arc_isolation(cx);
+            return;
+        }
         self.reupload_current_armor(cx);
         cx.notify();
     }
@@ -1741,6 +1783,9 @@ impl ViewportView {
     /// either.
     fn gizmo_rect(&self) -> Option<ViewRect> {
         self.current_armor.as_ref()?;
+        // Nothing to snap while the lock owns the camera, so the box is not
+        // there to be hit either.
+        self.camera_is_free().then_some(())?;
         self.last_bounds.map(|b| gizmo::gizmo_rect(view_rect_from_bounds(b)))
     }
 
@@ -1761,7 +1806,7 @@ impl ViewportView {
                 let pointer = point_to_vec2(event.position);
                 let in_gizmo = self.gizmo_rect().is_some_and(|r| r.contains(pointer));
                 self.gizmo_press_in_box = in_gizmo;
-                if !in_gizmo && event.click_count >= 2 {
+                if !in_gizmo && event.click_count >= 2 && !self.perspective.enabled {
                     if let Some((min, max)) = self.model_bounds {
                         self.viewport.camera.reset(min, max);
                         self.viewport.mark_dirty();
@@ -1810,7 +1855,9 @@ impl ViewportView {
                 // model would fight the lock, which puts the camera back every
                 // upload.
                 if self.perspective.enabled {
-                    self.steer_perspective(dx, dy);
+                    if self.steer_perspective(dx, dy) {
+                        self.refresh_perspective(cx);
+                    }
                 } else {
                     match drag.kind {
                         DragKind::Orbit => self.viewport.camera.orbit((dx, dy), size),
@@ -1832,8 +1879,10 @@ impl ViewportView {
         // Plate picking only runs while not dragging the camera/gizmo, so it
         // doesn't fight with (or waste CPU during) an orbit/pan; any hover
         // from before the drag started is cleared so the tooltip/highlight
-        // don't sit stale over a moving model.
-        let plate_hover_changed = if self.drag.is_none() {
+        // don't sit stale over a moving model. It is off entirely while the
+        // camera is locked, which is a view rather than a place to edit from,
+        // as the egui viewer suppresses it (`ui/tab.rs`).
+        let plate_hover_changed = if self.drag.is_none() && self.camera_is_free() {
             let ring_changed = self.update_ring_hover(event.position);
             self.update_plate_hover(event.position) || ring_changed
         } else {
@@ -1867,7 +1916,9 @@ impl ViewportView {
                 self.cast_at(point_to_vec2(event.position), event.modifiers.shift, cx);
             } else if self.splash_mode {
                 self.burst_at(point_to_vec2(event.position), cx);
-            } else if let Some(key) = self.hovered.as_ref().map(|h| h.key.clone()) {
+            } else if self.camera_is_free()
+                && let Some(key) = self.hovered.as_ref().map(|h| h.key.clone())
+            {
                 // A plain click on the model, outside the gizmo box, toggles
                 // the hovered plate's visibility, matching the egui app's
                 // `response.clicked()` click-to-hide (`tab.rs:5350-5362`).
@@ -1952,8 +2003,15 @@ impl ViewportView {
         if index >= self.trajectories.len() {
             return;
         }
-        self.trajectories.remove(index);
-        self.apply_arc_isolation(cx);
+        let dropped = self.trajectories.remove(index);
+        // Only what it was hiding has to be given back; an arc that hid nothing
+        // leaves the reader's own hiding where it is.
+        if dropped.isolating_plates || dropped.isolating_zones {
+            self.apply_arc_isolation(cx);
+        } else {
+            self.reupload_current_armor(cx);
+            cx.notify();
+        }
     }
 
     /// Fires one arc from a different range, leaving the others where they are.
@@ -1967,8 +2025,17 @@ impl ViewportView {
         let mut cast = self.build_cast_at(hits, shell_dir, range);
         cast.isolating_plates = isolating_plates;
         cast.isolating_zones = isolating_zones;
+        let isolating = cast.isolating_plates || cast.isolating_zones;
         self.trajectories[index] = cast;
-        self.apply_arc_isolation(cx);
+        // A different range is a different set of plates crossed, so an arc
+        // that is isolating has to hide a different set. One that is not leaves
+        // the visibility alone, and with it the reader's own hiding.
+        if isolating {
+            self.apply_arc_isolation(cx);
+        } else {
+            self.reupload_current_armor(cx);
+            cx.notify();
+        }
     }
 
     /// Hides what one arc did not cross, or stops hiding it.
@@ -2039,11 +2106,14 @@ impl ViewportView {
                 .collect();
             let isolation = isolate(&zones, &hit_zones, &hit_plates);
             self.part_visibility = isolation.parts;
+            // The shared map says whether a plate is shown; this port's says
+            // whether it is hidden (`visibility.rs`), so the sense is turned
+            // over on the way in.
             self.plate_visibility = isolation
                 .plates
                 .into_iter()
                 .map(|((zone, material_name, thickness_tenths), shown)| {
-                    (PlateKey { zone, material_name, thickness_tenths }, shown)
+                    (PlateKey { zone, material_name, thickness_tenths }, !shown)
                 })
                 .collect();
         }
@@ -2152,8 +2222,9 @@ impl ViewportView {
             // The wheel moves the locked camera between the inner and outer
             // orbit rather than pulling it back off them.
             if self.perspective.enabled {
-                self.zoom_perspective(dy);
-                self.reupload_current_armor(cx);
+                if self.zoom_perspective(dy) {
+                    self.refresh_perspective(cx);
+                }
             } else {
                 self.viewport.camera.zoom(dy);
             }
@@ -2213,7 +2284,7 @@ impl ViewportView {
     /// movement key, mirroring the egui original's per-frame `key_down` poll
     /// (`viewport_3d/camera.rs` `handle_input`).
     fn apply_held_keys(&mut self) -> bool {
-        if self.held_keys.is_empty() {
+        if self.held_keys.is_empty() || !self.camera_is_free() {
             return false;
         }
         let mut fwd = 0.0f32;
@@ -3983,6 +4054,11 @@ mod tests {
             hull_visibility,
             display_settings: DisplaySettings { show_zero_mm: true, hull_opaque: true, ..Default::default() },
             lighting: LightingSettings::flat(),
+            camera_rings: crate::armor_viewer::viewport_view::CameraRingSettings { shown: true, ..Default::default() },
+            perspective: crate::armor_viewer::viewport_view::PerspectiveSettings {
+                enabled: true,
+                ..Default::default()
+            },
         }
     }
 

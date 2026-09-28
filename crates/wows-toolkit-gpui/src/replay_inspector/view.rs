@@ -264,9 +264,6 @@ pub struct GameDataMissing(pub Vec<MissingBuild>);
 /// than report the repository unchanged.
 pub struct ConstantsUnfit;
 
-/// The armor viewer's incoming-fire log was asked to move playback to a salvo.
-pub struct SeekToClock(pub wows_replays::types::GameClock);
-
 /// A replay tab that is the one showing in its dock group.
 #[derive(Clone)]
 struct ShowingReplay {

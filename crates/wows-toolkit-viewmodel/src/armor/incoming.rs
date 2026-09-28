@@ -28,20 +28,10 @@ pub struct IncomingFilter {
 }
 
 /// What one salvo is known by.
-///
-/// A hit the parser could not match back to a salvo is its own group rather than
-/// being folded into a neighbouring one: two unmatched hits are not evidence of
-/// one salvo.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub enum SalvoKey {
-    Matched {
-        owner: EntityId,
-        salvo_id: u32,
-    },
-    /// Keyed by the shot it came from, which is unique within a battle. The raw
-    /// id rather than the newtype, which carries no ordering and is only wanted
-    /// here to keep the groups in a stable order.
-    Unmatched(u32),
+pub struct SalvoKey {
+    pub owner: EntityId,
+    pub salvo_id: u32,
 }
 
 /// One shell of a salvo, as the log lists it.
@@ -58,10 +48,10 @@ pub struct IncomingShell {
 #[derive(Clone, Debug, PartialEq)]
 pub struct IncomingSalvo {
     pub key: SalvoKey,
-    /// Who fired it, where the hit was matched to a salvo.
-    pub attacker: Option<EntityId>,
+    /// Who fired it.
+    pub attacker: EntityId,
     /// The shell that was fired, for naming it.
-    pub shell: Option<GameParamId>,
+    pub shell: GameParamId,
     /// When its first shell landed, which is the order the log is read in.
     pub first_clock: GameClock,
     /// When its last one did.
@@ -141,39 +131,33 @@ pub fn group_incoming(
         if !counted(hit.hit.owner_id, filter, enemies) {
             continue;
         }
-        let shell = hit.salvo.as_ref().map(|salvo| salvo.params_id);
-        if !filter.secondaries
-            && !main_battery.is_empty()
-            && let Some(shell) = shell
-            && !main_battery.contains(&shell)
-        {
+        // Only gunfire: a hit the parser could not match back to a salvo is a
+        // torpedo, a bomb or a rocket, which this log has nothing to say about
+        // and which the egui panel drops for the same reason.
+        let Some(salvo) = hit.salvo.as_ref() else { continue };
+        if !filter.secondaries && !main_battery.is_empty() && !main_battery.contains(&salvo.params_id) {
             continue;
         }
 
-        let key = match &hit.salvo {
-            Some(salvo) => SalvoKey::Matched { owner: salvo.owner_id, salvo_id: salvo.salvo_id },
-            None => SalvoKey::Unmatched(hit.hit.shot_id.raw()),
-        };
+        let key = SalvoKey { owner: salvo.owner_id, salvo_id: salvo.salvo_id };
         let shell_entry =
             IncomingShell { shot_id: hit.hit.shot_id, clock: taken.clock, hit_type: hit.hit.hit_type.clone() };
 
         let group = groups.entry(key).or_insert_with(|| IncomingSalvo {
             key,
-            attacker: hit.salvo.as_ref().map(|salvo| salvo.owner_id),
-            shell,
+            attacker: salvo.owner_id,
+            shell: salvo.params_id,
             first_clock: taken.clock,
             latest_clock: taken.clock,
             shells: Vec::new(),
         });
-        group.first_clock = min_clock(group.first_clock, taken.clock);
-        group.latest_clock = max_clock(group.latest_clock, taken.clock);
+        group.first_clock = group.first_clock.min(taken.clock);
+        group.latest_clock = group.latest_clock.max(taken.clock);
         group.shells.push(shell_entry);
     }
 
     let mut ordered: Vec<IncomingSalvo> = groups.into_values().collect();
-    ordered.sort_by(|a, b| {
-        a.first_clock.0.partial_cmp(&b.first_clock.0).unwrap_or(std::cmp::Ordering::Equal).then(a.key.cmp(&b.key))
-    });
+    ordered.sort_by_key(|salvo| (salvo.first_clock, salvo.key));
     ordered
 }
 
@@ -185,14 +169,6 @@ fn counted(owner: EntityId, filter: &IncomingFilter, enemies: &HashSet<EntityId>
     }
 }
 
-fn min_clock(a: GameClock, b: GameClock) -> GameClock {
-    if b.0 < a.0 { b } else { a }
-}
-
-fn max_clock(a: GameClock, b: GameClock) -> GameClock {
-    if b.0 > a.0 { b } else { a }
-}
-
 /// Every attacker the log holds shells from, in the order they first appear.
 ///
 /// What the attacker filter offers: a ship that never hit this one is not worth
@@ -201,11 +177,102 @@ pub fn attackers(salvos: &[IncomingSalvo]) -> Vec<EntityId> {
     let mut seen = HashSet::new();
     let mut ordered = Vec::new();
     for salvo in salvos {
-        if let Some(attacker) = salvo.attacker
-            && seen.insert(attacker)
-        {
-            ordered.push(attacker);
+        if seen.insert(salvo.attacker) {
+            ordered.push(salvo.attacker);
         }
     }
     ordered
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+    use wows_replays::analyzer::decoder::ArtillerySalvo;
+    use wows_replays::analyzer::decoder::HitType;
+    use wows_replays::analyzer::decoder::ShotHit;
+    use wows_replays::types::ShotId;
+    use wowsunpack::game_types::CollisionType;
+    use wowsunpack::game_types::WorldPos;
+
+    use super::*;
+
+    fn hit(owner: u32, salvo_id: Option<u32>, shell: u32, at: f32) -> PreExtractedHit {
+        let owner = EntityId::from(owner as i64);
+        let salvo = salvo_id.map(|salvo_id| ArtillerySalvo {
+            owner_id: owner,
+            params_id: GameParamId::from(shell),
+            salvo_id,
+            shots: Vec::new(),
+        });
+        PreExtractedHit {
+            clock: GameClock(at),
+            hit: ResolvedShotHit {
+                clock: GameClock(at),
+                hit: ShotHit {
+                    owner_id: owner,
+                    hit_type: HitType {
+                        collision: Recognized::Known(CollisionType::HitEntity),
+                        shell_hit: Recognized::Known(ShellHitType::Normal),
+                        raw: 0,
+                    },
+                    shot_id: ShotId::from(1),
+                    position: WorldPos::default(),
+                    terminal_ballistics: None,
+                },
+                victim_entity_id: EntityId::from(99),
+                salvo,
+                fired_at: None,
+                victim_pose: None,
+            },
+        }
+    }
+
+    fn enemies(ids: &[u32]) -> HashSet<EntityId> {
+        ids.iter().map(|id| EntityId::from(*id as i64)).collect()
+    }
+
+    /// With no attacker chosen, a shell from the ship's own side is not
+    /// incoming fire.
+    #[test]
+    fn only_an_enemys_shells_count_as_incoming() {
+        let hits = [hit(1, Some(7), 500, 10.0), hit(2, Some(8), 500, 11.0)];
+        let salvos = group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &HashSet::new());
+        assert_eq!(salvos.len(), 1);
+        assert_eq!(salvos[0].attacker, EntityId::from(1));
+    }
+
+    /// An empty main-battery set is not knowledge that nothing is main battery,
+    /// so nothing is hidden by it.
+    #[test]
+    fn nothing_is_hidden_when_no_shell_is_known_to_be_main_battery() {
+        let hits = [hit(1, Some(7), 500, 10.0)];
+        let salvos = group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &HashSet::new());
+        assert_eq!(salvos.len(), 1);
+
+        let known = HashSet::from([GameParamId::from(999u32)]);
+        let filtered = group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &known);
+        assert!(filtered.is_empty(), "a shell that is not main battery is a secondary");
+
+        let counted = IncomingFilter { attacker: None, secondaries: true };
+        assert_eq!(group_incoming(&hits, &counted, &enemies(&[1]), &known).len(), 1);
+    }
+
+    /// A hit with no salvo behind it is a torpedo or a bomb, which this log has
+    /// nothing to say about.
+    #[test]
+    fn a_hit_with_no_salvo_is_not_listed() {
+        let hits = [hit(1, None, 0, 10.0)];
+        assert!(group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &HashSet::new()).is_empty());
+    }
+
+    /// One salvo's shells are one group, in the order its first shell landed.
+    #[test]
+    fn a_salvos_shells_are_one_group() {
+        let hits = [hit(1, Some(7), 500, 30.0), hit(1, Some(4), 500, 10.0), hit(1, Some(7), 500, 31.0)];
+        let salvos = group_incoming(&hits, &IncomingFilter::default(), &enemies(&[1]), &HashSet::new());
+        assert_eq!(salvos.len(), 2);
+        assert_eq!(salvos[0].first_clock, GameClock(10.0));
+        assert_eq!(salvos[1].shells.len(), 2);
+        assert_eq!(salvos[1].latest_clock, GameClock(31.0));
+    }
 }
