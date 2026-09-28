@@ -320,6 +320,12 @@ fn normalize(cmd: &DrawCommand) -> String {
             let row_ids: Vec<_> = rows.iter().map(|r| r.entity_id).collect();
             format!("TeamRoster side={side:?} x={x} y={y} w={width} h={height} eids={row_ids:?}")
         }
+        // Drawn by a reader, not by the battle, so a replay played back through
+        // this driver never produces one. Described anyway, because the match is
+        // exhaustive and a new command must not go unnoticed.
+        DrawCommand::Annotation { shape, color, width } => {
+            format!("Annotation shape={shape:?} color={color:?} w={width}")
+        }
     }
 }
 

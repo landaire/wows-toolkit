@@ -11,13 +11,19 @@
 # compile is different: the clippy sub-target cannot be produced at all, so the
 # BXL aborts and the buck2 error surfaces instead of a rendered diagnostic.
 #
+# rustfmt also writes, with --write: same pinned binary, same file list, same
+# arguments as the check, so formatting cannot drift from what the gate wants.
+# Clippy has no write mode here -- the rust rules produce diagnostics, not
+# rewrites -- so `cargo clippy --fix` remains the only autofix (see mise.toml).
+#
 # Usage:
 #   nu scripts/lint.nu              # clippy and rustfmt over root//...
 #   nu scripts/lint.nu clippy
 #   nu scripts/lint.nu rustfmt --target root//crates/wowsunpack/...
+#   nu scripts/lint.nu rustfmt --write
 
-# Matches mise.toml's fmt task. .rustfmt.toml keeps these commented out, so the
-# two paths would otherwise drift apart silently. The rustfmt binary itself
+# .rustfmt.toml keeps these commented out, so they are named here and nowhere
+# else: the check and the write below are the only two callers. The rustfmt binary
 # comes from toolchains//:rustfmt via the BXL, not from PATH.
 const RUSTFMT_ARGS = [
     "--config"
@@ -88,7 +94,7 @@ def check_clippy [target: string] {
     false
 }
 
-def check_rustfmt [target: string] {
+def check_rustfmt [target: string, write: bool] {
     let report = (run_bxl "rustfmt" $target)
     let groups = ($report.sources_by_edition | transpose edition sources)
     if ($groups | is-empty) {
@@ -106,7 +112,12 @@ def check_rustfmt [target: string] {
         for chunk in ($paths | chunks 100) {
             # rustfmt parses to the edition it is told; a 2021 crate checked as
             # 2024 reports differences that are not real.
-            let result = (do { ^$report.rustfmt --check --edition $group.edition ...$RUSTFMT_ARGS ...$chunk } | complete)
+            # --check reports differences and writes nothing; without it rustfmt
+            # rewrites the file in place. Nothing else differs between the two.
+            let mode = (if $write { [] } else { ["--check"] })
+            let result = (
+                do { ^$report.rustfmt ...$mode --edition $group.edition ...$RUSTFMT_ARGS ...$chunk } | complete
+            )
             if $result.exit_code != 0 {
                 print -e $result.stdout
                 print -e $result.stderr
@@ -117,17 +128,29 @@ def check_rustfmt [target: string] {
     }
 
     if not $ok {
-        print -e $"rustfmt: formatting differences found \(($checked) file\(s\) checked\)."
+        if $write {
+            print -e $"rustfmt: ($checked) file\(s\) could not all be formatted."
+        } else {
+            print -e $"rustfmt: formatting differences found \(($checked) file\(s\) checked\)."
+        }
         return false
     }
-    print $"rustfmt: ($checked) file\(s\) already formatted."
+    if $write {
+        print $"rustfmt: ($checked) file\(s\) formatted."
+    } else {
+        print $"rustfmt: ($checked) file\(s\) already formatted."
+    }
     true
 }
 
 def main [
     what: string = "all"  # clippy, rustfmt, or all
     --target: string = "root//..."
+    --write  # rustfmt only: rewrite the files instead of reporting differences
 ] {
+    if $write and $what == "clippy" {
+        error make {msg: "clippy has no write mode here; use `cargo clippy --fix`."}
+    }
     let checks = match $what {
         "all" => ["clippy" "rustfmt"]
         "clippy" => ["clippy"]
@@ -137,7 +160,7 @@ def main [
 
     mut ok = true
     for check in $checks {
-        let passed = if $check == "clippy" { check_clippy $target } else { check_rustfmt $target }
+        let passed = if $check == "clippy" { check_clippy $target } else { check_rustfmt $target $write }
         if not $passed { $ok = false }
     }
     if not $ok { exit 1 }
