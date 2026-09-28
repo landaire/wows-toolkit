@@ -289,11 +289,26 @@ have used it.
     not (the port's pills are a reading of the query, not handles on it). Every
     chord in the port is a hand-rolled `on_key_down` match rather than a gpui
     action, so none are rebindable.
-31. **Armor viewer**: no export options at all (contents, LOD, resolution, camo,
-    size estimate -- `armor_viewer/export_dialog.rs:426` against the hardcoded
-    `DEFAULT_LOD` at `armor_viewer/pane.rs:710`), no Analysis window with its
-    ships and trajectory tabs, no camera-perspective mode with FOV, no lighting
-    colour pickers, no ship-center toggle, no marker opacity, no Save Defaults.
+31. ~~**Armor viewer** gaps.~~ Done 2026-09-28. The export asks what it should
+    contain before it asks where to write: contents, hull, level of detail,
+    texture cap, camo set and the size it is expected to weigh, with the choices
+    themselves shared (`wows_toolkit_viewmodel::armor::export`) so an export set
+    up in either app is what the other offers next time. What a cast shell did is
+    read out in words beside the penetration checker -- one block per arc with
+    its hits, the plating crossed, the range it was fired from, a stepper to fire
+    it from another, and the two isolations -- through a shared reader of the
+    simulation (`wows_toolkit_viewmodel::armor::arc`), which is the egui Analysis
+    window's Trajectory tab in the panel this port already puts its Ships tab in.
+    The camera locks onto the ship's own orbit and looks out from it, with its
+    own field of view and the two projections, on the shared camera math
+    (`wows_toolkit_viewmodel::armor::camera_perspective`); a drag turns the eye
+    on its orbit and the wheel moves between the inner and outer one. The two
+    lighting colours have pickers, the ship's own origin has a cross, and the
+    impact markers have an opacity. Defaults are written as they are changed
+    rather than behind a button, into the same `armor_viewer_defaults` row the
+    egui app reads. Still thinner: a cast fires the first comparison ship's
+    shell rather than one arc per compared ship, and the Splash tab's readout is
+    not built (the boxes themselves are drawn).
 32. ~~**Toast mechanics.**~~ Done 2026-09-28: sticky and arm-once landed
     2026-09-27 (`toast::stuck(key, ...)` keeps one message per state,
     `toast::resolved(key, ...)` takes it down), and what stood in for the egui

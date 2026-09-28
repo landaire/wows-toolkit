@@ -324,6 +324,11 @@ impl ArmorViewerPane {
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
     }
 
+    /// The viewport the reader is working in, which is where a cast arc lives.
+    pub(crate) fn active_viewport(&self, cx: &App) -> Entity<ViewportView> {
+        self.dock.read(cx).active_viewport()
+    }
+
     /// The catalogue of ships this pane can open, once it has loaded.
     ///
     /// `None` while the assets are still being read, which is what the palette's

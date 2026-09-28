@@ -10,6 +10,8 @@
 //! `wows_toolkit_viewmodel::armor::penetration`, which both front ends read.
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Disableable;
+use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
@@ -33,12 +35,19 @@ use wows_toolkit_viewmodel::armor::penetration::check_penetration;
 use wows_toolkit_viewmodel::armor::penetration::he_penetration;
 use wows_toolkit_viewmodel::armor::penetration::sap_penetration;
 use wowsunpack::game_params::types::AmmoType;
+use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShellInfo;
+
+use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
+use wows_toolkit_viewmodel::armor::arc::StoppingPlate;
 
 use super::catalog::ShipCatalog;
 use super::catalog::tier_roman;
 use super::pane::ArmorViewerPane;
+use super::viewport_view::ArcSummary;
+use super::viewport_view::Isolate;
+use super::viewport_view::ViewportView;
 
 /// The panel's own width, and the range it can be dragged over. Wide enough
 /// for a shell name beside its verdict.
@@ -276,6 +285,7 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
         .child(Input::new(&search).id("armor-pen-search").small().w_full())
         .children(results)
         .child(div().id("armor-pen-ships").flex_1().min_h(px(0.)).overflow_y_scroll().child(body))
+        .child(render_arcs(view, pane, cx))
         .when(!ships.is_empty(), |this| {
             let pane = pane.clone();
             this.child(
@@ -287,6 +297,220 @@ pub fn render_panel(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: 
             )
         })
         .into_any_element()
+}
+
+/// What the shells cast at the hull did.
+///
+/// The egui Analysis window's Trajectory tab, in the panel this port already
+/// puts the penetration checker in: both answer the same question about the same
+/// plates, and reading them side by side is the point.
+fn render_arcs(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &mut App) -> AnyElement {
+    let viewport = view.active_viewport(cx);
+    let arcs = viewport.read(cx).arcs();
+    if arcs.is_empty() {
+        return div().into_any_element();
+    }
+
+    v_flex()
+        .gap_1()
+        .pt_2()
+        .border_t_1()
+        .border_color(cx.theme().border)
+        .child(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(
+                    div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.trajectory").to_string()),
+                )
+                .child({
+                    let viewport = viewport.clone();
+                    Button::new("armor-arcs-isolate-plates")
+                        .label(t!("ui.armor.arc_isolate_plates").to_string())
+                        .compact()
+                        .tooltip(t!("ui.armor.arc_isolate_plates_tooltip").to_string())
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            viewport.update(cx, |view, cx| view.isolate_all_arcs(Isolate::Plates, cx));
+                        })
+                })
+                .child({
+                    let viewport = viewport.clone();
+                    Button::new("armor-arcs-isolate-zones")
+                        .label(t!("ui.armor.arc_isolate_zones").to_string())
+                        .compact()
+                        .tooltip(t!("ui.armor.arc_isolate_zones_tooltip").to_string())
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            viewport.update(cx, |view, cx| view.isolate_all_arcs(Isolate::Zones, cx));
+                        })
+                }),
+        )
+        // The simulation is read off the game's own data but is not the game's
+        // own code, which is worth saying where its verdicts are read.
+        .child(
+            div()
+                .text_xs()
+                .text_color(rgb(crate::theme::semantic().warn))
+                .child(t!("ui.armor.arc_simulation_caveat").to_string()),
+        )
+        .children(arcs.iter().enumerate().map(|(index, arc)| arc_block(pane, &viewport, index, arc, cx)))
+        .into_any_element()
+}
+
+/// One cast arc: what it crossed, what became of the shell, and the two things
+/// the reader can do to it.
+fn arc_block(
+    pane: &Entity<ArmorViewerPane>,
+    viewport: &Entity<ViewportView>,
+    index: usize,
+    arc: &ArcSummary,
+    cx: &App,
+) -> AnyElement {
+    let _ = pane;
+    let swatch = rgba(
+        (((arc.color[0] * 255.0) as u32) << 24)
+            | (((arc.color[1] * 255.0) as u32) << 16)
+            | (((arc.color[2] * 255.0) as u32) << 8)
+            | 0xff,
+    );
+
+    v_flex()
+        .gap_0p5()
+        .child(
+            h_flex()
+                .gap_2()
+                .items_center()
+                .child(div().size_2().rounded_full().bg(swatch))
+                .child(div().flex_1().text_xs().child(t!("ui.armor.arc_heading", number = index + 1).to_string()))
+                .child(
+                    div().text_xs().text_color(crate::theme::text_dim()).child(
+                        t!(
+                            "ui.armor.arc_summary",
+                            hits = arc.hits,
+                            armor = format!("{:.0}", arc.total_armor.value()),
+                            range = format!("{:.1}", arc.range.value()),
+                        )
+                        .to_string(),
+                    ),
+                )
+                .child({
+                    let viewport = viewport.clone();
+                    Button::new(("armor-arc-delete", index))
+                        .child(crate::icons::icon(crate::icons::TRASH))
+                        .compact()
+                        .tooltip(t!("ui.armor.arc_delete").to_string())
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            viewport.update(cx, |view, cx| view.remove_trajectory(index, cx));
+                        })
+                }),
+        )
+        .child(
+            h_flex()
+                .gap_1()
+                .child({
+                    let viewport = viewport.clone();
+                    let on = arc.isolating_plates;
+                    crate::ui::selectable(
+                        ("armor-arc-plates", index),
+                        on,
+                        Button::new(("armor-arc-plates-button", index))
+                            .label(t!("ui.armor.arc_isolate_plates").to_string())
+                            .compact()
+                            .selected(on)
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                viewport.update(cx, |view, cx| view.isolate_arc(index, Isolate::Plates, !on, cx));
+                            }),
+                    )
+                })
+                .child(arc_range_step(viewport, index, arc.range, -RANGE_STEP, "armor-arc-range-down", "-"))
+                .child(arc_range_step(viewport, index, arc.range, RANGE_STEP, "armor-arc-range-up", "+"))
+                .child({
+                    let viewport = viewport.clone();
+                    let on = arc.isolating_zones;
+                    crate::ui::selectable(
+                        ("armor-arc-zones", index),
+                        on,
+                        Button::new(("armor-arc-zones-button", index))
+                            .label(t!("ui.armor.arc_isolate_zones").to_string())
+                            .compact()
+                            .selected(on)
+                            .on_click(move |_event, _window, cx: &mut App| {
+                                viewport.update(cx, |view, cx| view.isolate_arc(index, Isolate::Zones, !on, cx));
+                            }),
+                    )
+                }),
+        )
+        .child(div().text_xs().text_color(outcome_color(&arc.outcome, cx)).child(describe_outcome(&arc.outcome)))
+        .into_any_element()
+}
+
+/// How far one press moves an arc's firing range, and the span it is held to.
+///
+/// The same span the cast-range slider offers, so an arc cannot be stepped to a
+/// range the viewport would not fire from.
+const RANGE_STEP: f32 = 0.5;
+const RANGE_MIN: f32 = 0.0;
+const RANGE_MAX: f32 = 30.0;
+
+/// One press of an arc's range, up or down.
+///
+/// A stepper rather than a slider: a slider would need state of its own per arc,
+/// and the arcs come and go as the reader casts.
+fn arc_range_step(
+    viewport: &Entity<ViewportView>,
+    index: usize,
+    range: Km,
+    by: f32,
+    id: &'static str,
+    label: &'static str,
+) -> impl IntoElement + use<> {
+    let viewport = viewport.clone();
+    let stepped = (range.value() + by).clamp(RANGE_MIN, RANGE_MAX);
+    Button::new((id, index))
+        .label(label)
+        .compact()
+        .tooltip(t!("ui.armor.arc_range_tooltip").to_string())
+        .disabled((stepped - range.value()).abs() < f32::EPSILON)
+        .on_click(move |_event, _window, cx: &mut App| {
+            viewport.update(cx, |view, cx| view.set_trajectory_range(index, Km::new(stepped), cx));
+        })
+}
+
+/// What an outcome reads as.
+fn describe_outcome(outcome: &ArcOutcome) -> String {
+    match outcome {
+        ArcOutcome::NotSimulated => t!("ui.armor.arc_no_shell").into_owned(),
+        ArcOutcome::Detonated { zone } => match zone {
+            Some(zone) => t!("ui.armor.arc_detonated_in", zone = zone.clone()).into_owned(),
+            None => t!("ui.armor.arc_detonated_past_armor").into_owned(),
+        },
+        ArcOutcome::Ricocheted { plate } => t!("ui.armor.arc_ricochet", plate = describe_plate(plate)).into_owned(),
+        ArcOutcome::Shattered { plate } => t!("ui.armor.arc_shatter", plate = describe_plate(plate)).into_owned(),
+        ArcOutcome::Stopped { plate } => t!("ui.armor.arc_stopped", plate = describe_plate(plate)).into_owned(),
+        ArcOutcome::Overpenetrated { fuse_armed: true } => t!("ui.armor.arc_overpen").into_owned(),
+        ArcOutcome::Overpenetrated { fuse_armed: false } => t!("ui.armor.arc_overpen_unarmed").into_owned(),
+    }
+}
+
+/// The plate a shell stopped at, or that it stopped at one nothing is known
+/// about, which a cast whose plate list is shorter than its simulation reports.
+fn describe_plate(plate: &Option<StoppingPlate>) -> String {
+    match plate {
+        Some(plate) => format!("#{} {:.0}mm {}", plate.number, plate.thickness.value(), plate.material),
+        None => t!("ui.armor.arc_plate_unknown").into_owned(),
+    }
+}
+
+/// The tone an outcome is read in: through is one answer, stopped is another.
+fn outcome_color(outcome: &ArcOutcome, cx: &App) -> Hsla {
+    let _ = cx;
+    match outcome {
+        ArcOutcome::Detonated { .. } => rgb(crate::theme::semantic().error).into(),
+        ArcOutcome::Overpenetrated { .. } => rgb(crate::theme::semantic().notice).into(),
+        ArcOutcome::Ricocheted { .. } | ArcOutcome::Shattered { .. } | ArcOutcome::Stopped { .. } => {
+            rgb(crate::theme::semantic().ok).into()
+        }
+        ArcOutcome::NotSimulated => crate::theme::text_dim(),
+    }
 }
 
 /// One ship being compared: its name, a way to drop it, and its shells

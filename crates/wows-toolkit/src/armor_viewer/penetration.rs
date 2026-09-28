@@ -7,7 +7,6 @@
 
 use crate::viewport_3d::Vec3;
 
-use std::collections::HashMap;
 
 use wowsunpack::game_params::types::Degrees;
 use wowsunpack::game_params::types::Km;
@@ -57,19 +56,11 @@ pub struct TrajectoryResult {
 /// Which zone volume the shell is inside after crossing plates up to and
 /// including `last_plate`.
 ///
-/// Each crossing of a zone boundary toggles whether the shell is inside that
-/// zone, so a zone crossed an odd number of times has been entered and not left
-/// again. The innermost such zone is the one the shell sits in. `None` once the
-/// shell is clear of every zone.
+/// Shared with the GPUI port, which reads the same answer out of the same cast
+/// (`wows_toolkit_viewmodel::armor::arc`).
 pub fn enclosing_zone(hits: &[TrajectoryHit], last_plate: PlateIndex) -> Option<&str> {
-    let crossed = &hits[..hits.len().min(last_plate.number())];
-
-    let mut crossings: HashMap<&str, usize> = HashMap::new();
-    for hit in crossed {
-        *crossings.entry(hit.zone.as_str()).or_default() += 1;
-    }
-
-    crossed.iter().rev().map(|hit| hit.zone.as_str()).find(|zone| crossings[zone] % 2 == 1)
+    let zones: Vec<&str> = hits.iter().map(|hit| hit.zone.as_str()).collect();
+    wows_toolkit_viewmodel::armor::arc::enclosing_zone(&zones, last_plate.number())
 }
 
 /// Strike angle between a ray direction and a triangle normal.
