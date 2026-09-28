@@ -6,6 +6,7 @@
 
 #[cfg(feature = "battle-report")]
 pub mod battle_report;
+pub mod cap_layout;
 
 pub mod hull_impact;
 

@@ -13,7 +13,7 @@ license.workspace = true
 
 [dependencies]
 wows-core = { workspace = true }
-wowsunpack = { workspace = true, default-features = false, features = ["parsing"] }
+wowsunpack = { workspace = true, default-features = false, features = ["parsing", "rkyv"] }
 wows_replays = { workspace = true, default-features = false, features = ["parsing"] }
 wows-battle-world = { workspace = true, default-features = false }
 tracing = { workspace = true }
@@ -26,6 +26,13 @@ serde_json = { workspace = true, optional = true }
 jiff = { workspace = true, features = ["serde"], optional = true }
 flate2 = { workspace = true, optional = true }
 data-encoding = { workspace = true, optional = true }
+# The cap layout cache, which is rkyv on disk and read by both front ends.
+rkyv = { workspace = true }
+wows-toolkit-config = { workspace = true }
+# The cap layout cache is written through a temporary file beside it.
+tempfile = "3.27.0"
+# The cap layout cache also lives in the settings database.
+sqlx = { workspace = true }
 
 [dev-dependencies]
 wows-data-mgr = { workspace = true }
