@@ -1397,6 +1397,10 @@ impl App {
         self.cache.updates.clear();
         self.cache.repair.clear();
         self.cache.failure = None;
+        // A fire-chance section that found no geometry found none in the old
+        // directory. Kept, it would stay failed until a restart even once the
+        // data it needed has been downloaded into the new one.
+        wows_replay_insights::fire_chance::sections::clear_fire_section_failures();
         cx.notify();
     }
 

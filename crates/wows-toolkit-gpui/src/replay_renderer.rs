@@ -3038,6 +3038,76 @@ fn bake(
     Ok((track, baked.renderer))
 }
 
+/// Renders each replay in `paths` to its own file under `out_dir`, without
+/// opening a viewport for any of them.
+///
+/// This is what the listing's "Render N Replays to Video" is for: the egui app
+/// runs one background batch into a chosen folder
+/// (`replay/renderer/video_export.rs:458`), where opening N viewports would bake
+/// N tracks that nobody watches and leave the reader to save each one.
+///
+/// Sequential, because each encode holds a GPU device and the machine has one:
+/// two at once would contend for it and finish no sooner. A replay that fails is
+/// reported and the rest still run, since one unreadable file in a marked set
+/// should not lose the other forty.
+///
+/// Returns the files written and the replays that failed.
+pub fn batch_export(
+    paths: Vec<PathBuf>,
+    game_data: GameDataCache,
+    out_dir: PathBuf,
+    settings: ExportSettings,
+    cx: &App,
+) -> Task<(Vec<PathBuf>, Vec<PathBuf>)> {
+    cx.background_spawn(async move {
+        let mut written = Vec::new();
+        let mut failed = Vec::new();
+        let cancel = AtomicBool::new(false);
+
+        for path in paths {
+            let Some(stem) = path.file_stem() else {
+                failed.push(path);
+                continue;
+            };
+            let output = out_dir.join(stem).with_extension("mp4");
+
+            let baked = match bake(&path, &game_data, &cancel) {
+                Ok(baked) => baked,
+                Err(err) => {
+                    tracing::warn!(path = %path.display(), error = %err, "batch render: the replay did not bake");
+                    failed.push(path);
+                    continue;
+                }
+            };
+            let (track, renderer) = baked;
+            let frames: Vec<Vec<DrawCommand>> = if settings.include_pre_battle {
+                track.frames.clone()
+            } else {
+                let from = track.frame_at(track.battle_start.seconds());
+                track.frames.get(from..).unwrap_or(&track.frames).to_vec()
+            };
+            if frames.is_empty() {
+                failed.push(path);
+                continue;
+            }
+            let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
+
+            // The progress channel is per encode; nothing reads it here, since
+            // the batch reports per replay rather than per frame.
+            let (progress, _ignored) = futures::channel::mpsc::unbounded();
+            match encode_track(&renderer, &frames, duration, &output, settings, progress) {
+                Ok(()) => written.push(output),
+                Err(reason) => {
+                    tracing::warn!(path = %path.display(), %reason, "batch render: the encode failed");
+                    failed.push(path);
+                }
+            }
+        }
+
+        (written, failed)
+    })
+}
+
 /// One rasterised frame, as an image gpui can draw.
 fn to_image(frame: image::RgbImage) -> Arc<RenderImage> {
     let (width, height) = frame.dimensions();
