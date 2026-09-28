@@ -44,7 +44,10 @@ windows_resource(
 windows_resource(
     name = "gpui_app_resource",
     src = "root//assets:wows_toolkit_gpui_rc",
-    resources = ["root//assets:wows_toolkit_gpui_manifest"],
+    resources = [
+        "root//assets:wows_toolkit_gpui_manifest",
+        "root//assets:wows_toolkit_ico",
+    ],
     tools = ":msvc_tools",
     out = "wows_toolkit_gpui.res",
     visibility = ["PUBLIC"],

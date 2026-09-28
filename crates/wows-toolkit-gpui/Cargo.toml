@@ -1,6 +1,6 @@
 [package]
 name = "wows-toolkit-gpui"
-version = "0.1.0"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
@@ -114,6 +114,21 @@ tempfile = "3"
 tiny-skia = "0.12"
 ab_glyph = "0.2"
 fontdb = "0.23"
+
+# A release build has no console, so `--help`, `--version` and a refused
+# argument are written to the parent's console or shown in a message box.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_System_Console", "Win32_UI_WindowsAndMessaging"] }
+
+# The executable's icon, which is what Windows shows on the window, in the
+# taskbar and in Explorer.
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1.31"
+
+# `wows_buck_build` is set by the Buck build, which compiles the Windows
+# resources with its own pinned rc.exe instead of the build script's.
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(wows_buck_build)'] }
 
 [dev-dependencies]
 # Kit's UI test harness: `#[gpui_kit::test]`, headless windows, and the

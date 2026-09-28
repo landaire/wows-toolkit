@@ -7,7 +7,7 @@ workspace_binary(
     name = "gpui_bin",
     crate = "wows_toolkit_gpui",
     package = "wows-toolkit-gpui",
-    version = "0.1.0",
+    version = "1.0.2-beta2",
     crate_root = "src/main.rs",
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
@@ -26,6 +26,7 @@ workspace_binary(
         "//third-party/rust:bytemuck",
         "//third-party/rust:ciborium",
         "//third-party/rust:clap",
+        "//third-party/rust:windows-sys",
         "//third-party/rust:csv",
         "//third-party/rust:escaper",
         "//third-party/rust:fontdb",

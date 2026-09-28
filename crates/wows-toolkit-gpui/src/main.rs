@@ -1,3 +1,4 @@
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 // The path deliberately holds no locale files: pointed at the real catalogs,
 // `i18n!()` needs a stack frame larger than a thread gets by default (see the
 // same note in `wows_toolkit`'s lib.rs). `TranslationsBackend` supplies them,
@@ -78,6 +79,16 @@ fn main() {
         let window_options = WindowOptions {
             window_bounds: Some(window_bounds),
             window_min_size: Some(size(px(640.), px(480.))),
+            // Named and versioned as the egui window is, so two of them side by
+            // side are told apart, and a bug report names a build.
+            titlebar: Some(TitlebarOptions {
+                title: Some(SharedString::from(format!(
+                    "{} v{}",
+                    wows_toolkit_config::APP_NAME,
+                    env!("CARGO_PKG_VERSION")
+                ))),
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
