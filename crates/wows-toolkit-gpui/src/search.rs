@@ -1778,7 +1778,24 @@ impl Render for SearchView {
                     .bg(crate::preview_hover::MAP_PLACEHOLDER)
                     .into_any_element(),
             ),
-            None => None,
+            // Why there is none, where the map would have been: a replay from a
+            // build that is not installed is the ordinary case.
+            None => self.preview.failure().map(|reason| {
+                h_flex()
+                    .id("search-preview-failed")
+                    .test_support()
+                    .aria_label(reason.clone())
+                    .w(px(PREVIEW_WIDTH))
+                    .h(px(PREVIEW_WIDTH))
+                    .bg(crate::preview_hover::MAP_PLACEHOLDER)
+                    .items_center()
+                    .justify_center()
+                    .p_2()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(reason.clone())
+                    .into_any_element()
+            }),
         };
         let preview = preview_art.map(|art| {
             div().id("search-preview").test_support().flex_none().p_1().border_t_1().border_color(border).child(art)
