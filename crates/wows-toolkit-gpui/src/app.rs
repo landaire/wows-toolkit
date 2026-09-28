@@ -610,9 +610,9 @@ impl App {
         // The followed ship took more hits, which the open viewer shows
         // without pulling the reader away from what they are watching.
         let armor_followed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
-            let crate::replay_inspector::view::ArmorFollowed { hits, health } = event;
-            let (hits, health) = (hits.clone(), *health);
-            this.armor_pane.update(cx, |pane, cx| pane.follow_hits(hits, health, cx));
+            let crate::replay_inspector::view::ArmorFollowed { at, hits, health } = event;
+            let (at, hits, health) = (*at, hits.clone(), *health);
+            this.armor_pane.update(cx, |pane, cx| pane.follow_hits(at, hits, health, cx));
         });
 
         let replay_settings_changed = cx.subscribe(&replay_inspector, |this, _view, event, cx| {

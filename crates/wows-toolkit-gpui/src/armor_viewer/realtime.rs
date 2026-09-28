@@ -52,6 +52,11 @@ impl RealtimeArmorFeed {
         &self.timeline.hits
     }
 
+    /// This ship's health over the whole battle, as a strip to draw.
+    pub fn health_strip(&self) -> Option<wows_toolkit_viewmodel::armor::health_strip::HealthStrip> {
+        wows_toolkit_viewmodel::armor::health_strip::health_strip(&self.timeline)
+    }
+
     /// What this ship's health was at that moment.
     pub fn health(&self) -> Option<f32> {
         self.timeline.health_at(self.at?).map(|snapshot| snapshot.health)
