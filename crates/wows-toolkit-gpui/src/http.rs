@@ -7,7 +7,7 @@
 
 use std::time::Duration;
 
-use wows_toolkit_viewmodel::settings;
+use wows_toolkit_viewmodel::proxy;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -16,11 +16,15 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// the same services and a log that cannot tell them apart is less useful.
 const USER_AGENT: &str = concat!("wows-toolkit-gpui/", env!("CARGO_PKG_VERSION"));
 
-/// Builds a client, honouring `proxy_url` when it is set.
+/// Builds a client, honouring the proxy this machine is on.
 ///
-/// A proxy URL the client rejects is reported rather than swallowed: sending
-/// direct because a proxy setting was malformed is exactly what a user who
-/// set one does not want.
+/// `proxy_url` is the reader's own setting and wins; failing that the standard
+/// environment variables and then the Windows configuration are read, which is
+/// what makes the app work on a managed network nobody configured it for
+/// (`wows_toolkit_viewmodel::proxy`, shared with the egui app). A proxy URL the
+/// client rejects is reported rather than swallowed: sending direct because a
+/// proxy setting was malformed is exactly what a reader who set one does not
+/// want.
 pub fn client(proxy_url: &str, redirects: reqwest::redirect::Policy) -> Result<reqwest::Client, HttpError> {
     let mut builder = reqwest::Client::builder()
         .user_agent(USER_AGENT)
@@ -28,8 +32,16 @@ pub fn client(proxy_url: &str, redirects: reqwest::redirect::Policy) -> Result<r
         .read_timeout(READ_TIMEOUT)
         .redirect(redirects);
 
-    if let Some(url) = settings::normalize_proxy_url(proxy_url) {
-        let proxy = reqwest::Proxy::all(&url).map_err(|source| HttpError::Proxy { url, source })?;
+    let manual = (!proxy_url.trim().is_empty()).then_some(proxy_url);
+    if let Some(config) = proxy::resolve_proxy(manual) {
+        tracing::debug!(proxy = %config.redacted_url(), source = ?config.source, "routing through a proxy");
+        let mut proxy = reqwest::Proxy::all(&config.url)
+            .map_err(|source| HttpError::Proxy { url: config.redacted_url(), source })?;
+        if !config.bypass.is_empty()
+            && let Some(no_proxy) = reqwest::NoProxy::from_string(&config.bypass.join(","))
+        {
+            proxy = proxy.no_proxy(Some(no_proxy));
+        }
         builder = builder.proxy(proxy);
     }
 

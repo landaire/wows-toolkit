@@ -85,9 +85,23 @@ impl Session {
         }
 
         query::record_twitch_observations(pool, &observations).await?;
+
+        // The table only grows otherwise: a channel of a few hundred chatters
+        // polled every two minutes is tens of thousands of rows a day, and a
+        // sighting from last year says nothing about who is in this battle. The
+        // window is the egui app's (`task/networking.rs:657`), so both apps keep
+        // the same history.
+        let pruned = query::prune_twitch_observations(pool, seen_at - OBSERVATION_RETENTION_SECS).await?;
+        if pruned > 0 {
+            tracing::debug!(pruned, "twitch: dropped observations older than the retention window");
+        }
+
         Ok(observations.len())
     }
 }
+
+/// How long a sighting is kept. Thirty days, as the egui app keeps them.
+const OBSERVATION_RETENTION_SECS: i64 = 30 * 24 * 60 * 60;
 
 /// How long to wait before polling again.
 pub const fn poll_interval() -> Duration {

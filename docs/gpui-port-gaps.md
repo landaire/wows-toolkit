@@ -166,10 +166,11 @@ have used it.
 24. **Tracker: no Clear Stats and no Populate Data From Replays**
     (`ui/player_tracker/historical.rs:471-481`, `:518-534`). No way to wipe or
     force-backfill.
-25. **Twitch: observations are never pruned** (egui prunes at
-    `task/networking.rs:669`), so the table only grows; and the poll is started
-    once (`app.rs:529`) with no restart on a token or channel edit, where the
-    egui app re-polls immediately (`networking.rs:746-786`).
+25. ~~**Twitch: observations are never pruned, and no re-poll on an edit.**~~
+    Done 2026-09-28: a poll prunes sightings older than the same thirty days the
+    egui app keeps, and pasting a credential or editing the channel restarts the
+    poll. The monitored channel is also written back now; the field was seeded and
+    never saved.
 26. ~~**The replay watcher handles create and rename only.**~~ Done 2026-09-27:
     a change re-reads the row and re-parses a tab open on it
     (`ReplayPanel::reparse`), a removal drops the row with its marking and
@@ -225,9 +226,11 @@ have used it.
     under Cargo, `assets/wows_toolkit_gpui.rc` under Buck), and a release build
     is a windows-subsystem binary, with the CLI's messages routed so they are
     still visible.
-36. **Proxy auto-detection** from the environment and the Windows registry
-    (`util/proxy.rs`, `app.rs:1256-1282`); the port honours only the manual
-    setting (`http.rs:31`).
+36. ~~**Proxy auto-detection.**~~ Done 2026-09-28: the resolution moved to
+    `wows_toolkit_viewmodel::proxy`, so both apps read the reader's setting, then
+    the standard environment variables, then the Windows configuration, and the
+    port applies the bypass list too. The egui app's `util::proxy` is a re-export
+    of it.
 37. **A live OS theme switch is not followed.** `apply_egui_theme` is called at
     startup, on a theme change and on a zoom drag only; there is no appearance
     observer, where egui's `ThemePreference::System` follows the desktop. Read

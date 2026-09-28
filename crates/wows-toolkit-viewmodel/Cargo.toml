@@ -44,6 +44,11 @@ wows-replay-insights = { workspace = true, features = ["arc", "battle-report", "
 sqlx = { workspace = true }
 wows-toolkit-config = { workspace = true }
 
+# The Windows proxy configuration, which `proxy::resolve_proxy` reads when
+# neither a manual setting nor the environment names one.
+[target.'cfg(windows)'.dependencies]
+windows-registry = "0.6"
+
 [dev-dependencies]
 # The store's tests drive a real in-memory database, which needs an executor.
 tokio = { version = "1.53", features = ["rt", "macros"] }
