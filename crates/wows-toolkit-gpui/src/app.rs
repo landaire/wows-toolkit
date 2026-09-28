@@ -510,6 +510,12 @@ pub struct App {
     /// egui app throttles its own check to one per half hour for the same reason:
     /// the mapping changes when the game does, not while the app is open.
     constants_checked: bool,
+    /// The capture-point layouts a tactics board picks its modes from, read
+    /// from the cache both apps write. Empty until the read lands, and empty on
+    /// a machine that has never indexed a replay, which is a board with maps
+    /// and no modes rather than no board.
+    cap_layouts: wows_replay_insights::cap_layout::CapLayoutDb,
+    cap_layouts_requested: bool,
     /// Whether the game-data cache has been tidied this session.
     cache_maintained: bool,
     /// The files being dragged over the window, while any are. What the scrim
@@ -681,6 +687,8 @@ impl App {
             cache: game_data_cache::CacheState::default(),
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
+            cap_layouts: wows_replay_insights::cap_layout::CapLayoutDb::default(),
+            cap_layouts_requested: false,
             cache_maintained: false,
             hovering_files: None,
             job_said: Vec::new(),
@@ -1197,6 +1205,35 @@ impl App {
     /// Tidies the game-data cache once a session.
     ///
     /// After the settings have landed, because where the cache is is one of them.
+    /// Reads the capture-point layouts a tactics board picks its modes from.
+    ///
+    /// Once a session, off the database both apps write them to: a board asked
+    /// for before this lands offers its maps with no modes, which is what a
+    /// machine that has never indexed a replay offers anyway.
+    fn poll_cap_layouts(&mut self, cx: &mut Context<Self>) {
+        if self.cap_layouts_requested {
+            return;
+        }
+        let Some(pool) = settings_store::pool(cx) else { return };
+        let Some(runtime) = runtime::runtime(cx) else { return };
+        self.cap_layouts_requested = true;
+
+        cx.spawn(async move |this, cx| {
+            let read = cx
+                .background_spawn(async move {
+                    runtime.handle().block_on(async move {
+                        wows_replay_insights::cap_layout::CapLayoutDb::load_from_db(&pool).await
+                    })
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.cap_layouts = read;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     fn poll_cache_maintenance(&mut self, cx: &mut Context<Self>) {
         if self.cache_maintained {
             return;
@@ -1235,6 +1272,7 @@ impl App {
         self.poll_stats_game_data(cx);
         self.poll_constants_check(window, cx);
         self.poll_cache_maintenance(cx);
+        self.poll_cap_layouts(cx);
         if self.armor_game_data_requested {
             return;
         }
@@ -1370,6 +1408,29 @@ impl App {
         });
         self.theme = choice;
         theme::apply_egui_theme(choice, self.zoom, window, cx);
+    }
+
+    /// Opens a tactics board in a window of its own.
+    ///
+    /// Its own window rather than a tab, as the egui board is: a board is drawn
+    /// beside the battle it is about, not instead of it.
+    pub(crate) fn open_tactics_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let game_data = self.replay_inspector.read(cx).game_data();
+        let layouts = self.cap_layouts.clone();
+        let board = cx.new(|cx| crate::tactics::TacticsBoard::new(game_data, layouts, cx));
+        let options =
+            crate::window_shell::options(wows_toolkit_config::WindowKind::TacticsBoard, board.read(cx).title(), cx);
+        let opened = cx.open_window(options, move |window, cx| {
+            crate::window_shell::remember(wows_toolkit_config::WindowKind::TacticsBoard, window, cx);
+            // Through a `Shell` so the board's own toasts and dialogs are drawn
+            // in its window rather than only in the one the tabs live in.
+            let view: AnyView = cx.new(|_cx| crate::window_shell::Shell::new(board)).into();
+            cx.new(|cx| gpui_kit::component::Root::new(view, window, cx))
+        });
+        if let Err(err) = opened {
+            tracing::warn!("tactics board: the window could not be opened: {err}");
+            crate::toast::failed(t!("ui.tactics.window_failed").into_owned(), window, cx);
+        }
     }
 
     /// Opens the command palette over the window.
@@ -3276,24 +3337,35 @@ impl Render for App {
             .small()
             .icon(IconName::Ellipsis)
             .tooltip(t!("ui.menu.file").to_string())
-            .dropdown_menu(|menu, _window, _cx| {
-                menu.item(PopupMenuItem::new(t!("ui.menu.check_updates").into_owned()).on_click(
-                    move |_event, window, cx| {
-                        check_for_update_from_menu(window, cx);
-                    },
-                ))
-                .item(PopupMenuItem::new(t!("ui.menu.about").into_owned()).on_click(move |_event, window, cx| {
-                    show_about(window, cx);
-                }))
-                .separator()
-                .item(PopupMenuItem::link(t!("ui.buttons.create_issue").into_owned(), ISSUES_URL))
-                .item(PopupMenuItem::link(t!("ui.buttons.discord").into_owned(), DISCORD_URL))
-                .separator()
-                .item(PopupMenuItem::new(t!("ui.menu.quit").into_owned()).on_click(
-                    move |_event, _window, cx| {
-                        cx.quit();
-                    },
-                ))
+            .dropdown_menu({
+                let opening = cx.entity().downgrade();
+                move |menu, _window, _cx| {
+                    let opening = opening.clone();
+                    menu.item(PopupMenuItem::new(t!("ui.windows.tactics_board").into_owned()).on_click(
+                        move |_event, window, cx| {
+                            let Some(app) = opening.upgrade() else { return };
+                            app.update(cx, |app, cx| app.open_tactics_board(window, cx));
+                        },
+                    ))
+                    .separator()
+                    .item(PopupMenuItem::new(t!("ui.menu.check_updates").into_owned()).on_click(
+                        move |_event, window, cx| {
+                            check_for_update_from_menu(window, cx);
+                        },
+                    ))
+                    .item(PopupMenuItem::new(t!("ui.menu.about").into_owned()).on_click(move |_event, window, cx| {
+                        show_about(window, cx);
+                    }))
+                    .separator()
+                    .item(PopupMenuItem::link(t!("ui.buttons.create_issue").into_owned(), ISSUES_URL))
+                    .item(PopupMenuItem::link(t!("ui.buttons.discord").into_owned(), DISCORD_URL))
+                    .separator()
+                    .item(PopupMenuItem::new(t!("ui.menu.quit").into_owned()).on_click(
+                        move |_event, _window, cx| {
+                            cx.quit();
+                        },
+                    ))
+                }
             });
         let strip = h_flex()
             .flex_none()
