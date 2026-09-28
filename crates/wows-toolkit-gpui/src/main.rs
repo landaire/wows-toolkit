@@ -7,6 +7,7 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 
 mod app;
 mod armor_viewer;
+mod child_process;
 mod cli;
 mod collab;
 mod collab_popover;
@@ -69,6 +70,10 @@ fn main() {
     // anything that could fail. The setting is read straight from the database:
     // the app that owns the pool does not exist yet, and a crash here would
     // otherwise go unrecorded. `RUST_LOG` still governs stderr.
+    // A database that cannot be read reads the same as one that has never been
+    // written here, and both mean logging: a log file the reader did not ask for
+    // is a file to delete, where a session that logged nothing is a crash nobody
+    // can explain.
     let to_file =
         wows_toolkit_config::load_startup_setting::<bool>(wows_toolkit_viewmodel::settings::keys::ENABLE_LOGGING)
             .unwrap_or(None)
@@ -86,10 +91,9 @@ fn main() {
     // sake of one: the policies are asked for on every launch.
     let report = wows_toolkit_hardening::apply_startup_mitigations(wows_toolkit_hardening::HardeningRequest {
         hardening: wows_toolkit_hardening::Hardening::Apply,
-        code_integrity: wows_toolkit_config::load_startup_setting::<wows_toolkit_hardening::CodeIntegrityPreference>(
-            wows_toolkit_viewmodel::settings::keys::CODE_INTEGRITY,
-        )
-        .unwrap_or(None),
+        code_integrity: wows_toolkit_hardening::CodeIntegrityPreference::from_startup_read(
+            wows_toolkit_config::load_startup_setting(wows_toolkit_viewmodel::settings::keys::CODE_INTEGRITY),
+        ),
     });
     for (mitigation, outcome) in report.entries() {
         tracing::info!("hardening: {mitigation} {outcome}");

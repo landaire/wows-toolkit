@@ -100,6 +100,9 @@ pub enum ReplayLoadError {
     /// The replay's header/metadata block itself was corrupt or malformed.
     #[error("failed to parse replay: {0}")]
     Parse(String),
+    /// Another recording was offered as this battle and is not it.
+    #[error("{0}")]
+    AltRefused(#[from] AltRefusal),
 }
 
 /// Path to the versioned GameParams cache for `build`, matching the egui
@@ -367,6 +370,11 @@ impl GameDataCache {
             return true;
         }
         self.dump_base.as_deref().and_then(|base| dump_for_build(base, build, version)).is_some()
+    }
+
+    /// Where `build`'s dump sits, for a caller reading a file written beside it.
+    pub fn dump_dir_for(&self, build: u32, version: Option<&str>) -> Option<PathBuf> {
+        self.dump_base.as_deref().and_then(|base| dump_for_build(base, build, version))
     }
 
     /// `build`'s game data if it is already loaded, without loading it.
@@ -696,16 +704,16 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 /// Reads every recording of one battle into a single report.
 ///
 /// The merge walks all of the streams together so the world sees what any of
-/// them saw. A stream that will not parse fails the whole read rather than being
-/// dropped: a report that silently left one perspective out would look exactly
-/// like one that merged it.
+/// them saw. Returns the report and whether every stream was read to its end,
+/// which is what the single-replay path calls `read_whole`: a recording of a
+/// battle still in progress has an unreadable tail in either path.
 fn merged_report(
     primary: &ReplayFile,
     alts: &[PathBuf],
     loaded: &LoadedGameData,
     constants: &GameConstants,
     version: Version,
-) -> Result<wows_battle_world::report::BattleReport, ReplayLoadError> {
+) -> Result<(wows_battle_world::report::BattleReport, bool), ReplayLoadError> {
     let mut read = Vec::with_capacity(alts.len());
     for path in alts {
         let alt = ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(format!("{report:?}")))?;
@@ -724,7 +732,8 @@ fn merged_report(
 
     while session.step().map_err(|err| ReplayLoadError::Parse(err.to_string()))?.is_some() {}
     session.finish();
-    Ok(session.into_world().into_report())
+    let read_whole = !session.truncated();
+    Ok((session.into_world().into_report(), read_whole))
 }
 
 /// Whether a recording belongs to the battle a report was read from.
@@ -750,7 +759,7 @@ pub(crate) fn alt_belongs(
 }
 
 /// Why another recording was refused.
-#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[derive(Debug, Clone, thiserror::Error, PartialEq, Eq)]
 pub enum AltRefusal {
     #[error("it was recorded on {alt} and this battle on {primary}")]
     Version { primary: String, alt: String },
@@ -787,6 +796,46 @@ fn load_versioned_constants(build: u32) -> Value {
             Value::Null
         }
     }
+}
+
+/// The constants this build decodes its battle results through, and how far they
+/// can be trusted.
+///
+/// The same three sources the egui app reads, in the same order (`data/
+/// build_data.rs`): the build's own dump, the versioned storage cache, and the
+/// copy embedded in this executable. Judging only the cache would call a replay
+/// mismatched on a machine that has simply never fetched one, and the two apps
+/// write the same index rows.
+fn resolve_constants(
+    build: u32,
+    version: &Version,
+    game_data: &GameDataCache,
+) -> (Value, wows_toolkit_viewmodel::index_rows::ConstantsFit) {
+    let dump_constants = game_data
+        .dump_dir_for(build, Some(&format!("{}.{}.{}", version.major, version.minor, version.patch)))
+        .and_then(|dir| std::fs::read(dir.join("constants.json")).ok())
+        .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+    let cached_constants = match load_versioned_constants(build) {
+        Value::Null => None,
+        cached => Some(cached),
+    };
+    wows_toolkit_viewmodel::index_rows::resolve_replay_constants(
+        dump_constants,
+        cached_constants,
+        embedded_constants(),
+        build,
+        Some(*version),
+    )
+}
+
+/// The mapping this executable was built with, for a build nothing newer has
+/// been published or fetched for.
+fn embedded_constants() -> &'static Value {
+    static EMBEDDED: std::sync::OnceLock<Value> = std::sync::OnceLock::new();
+    EMBEDDED.get_or_init(|| {
+        serde_json::from_str(include_str!(concat!(env!("OUT_DIR"), "/constants.json")))
+            .expect("the embedded constants did not parse")
+    })
 }
 
 /// One parsed replay: the presentation model, plus the [`LoadedGameData`] it
@@ -922,17 +971,15 @@ pub(crate) fn parse_replay_with_alts(
     let build = version.build_number().ok_or(ReplayLoadError::VersionParse)?;
     let loaded = game_data.get_or_load_build_for(build, Some(&version))?;
 
-    let constants_json = load_versioned_constants(build);
+    let (constants_json, constants_fit) = resolve_constants(build, &version, game_data);
 
     let mut constants = loaded.base_constants.clone();
     constants.merge_replay_constants(&constants_json, version);
     wowsunpack::game_constants::apply_version_consumables(constants.common_mut(), version);
 
     // Whether the stream was read to its end, which is what tells a battle with
-    // no results from one whose tail was never reached. A merge either consumes
-    // every stream or fails, so it is always whole.
-    let mut read_whole = true;
-    let report = if alts.is_empty() {
+    // no results from one whose tail was never reached.
+    let (report, read_whole) = if alts.is_empty() {
         let mut world = BattleWorld::new(meta, loaded.provider.as_ref(), Some(&constants));
         world.set_shot_tracking(ShotTracking::Untracked);
 
@@ -944,9 +991,9 @@ pub(crate) fn parse_replay_with_alts(
                 Err(_) => break,
             }
         }
-        read_whole = remaining.is_empty();
+        let read_whole = remaining.is_empty();
         world.finish();
-        world.into_report()
+        (world.into_report(), read_whole)
     } else {
         merged_report(&replay_file, alts, &loaded, &constants, version)?
     };
@@ -1032,7 +1079,7 @@ pub(crate) fn parse_replay_with_alts(
         arena_id: report.arena_id(),
         game_mode_id: report.game_mode_id().known().map(|mode| mode.id()),
         version_build: version.build_number(),
-        constants_fit: wows_toolkit_viewmodel::index_rows::constants_fit(&constants_json, build, Some(version)),
+        constants_fit,
         self_ship_id: normalized.players.iter().find(|player| player.is_self).map(|player| player.ship_id),
         // The results are pending when the packet stream carries none, which
         // is what a replay of a battle that just ended looks like.
@@ -1091,8 +1138,11 @@ pub fn check_alt(
     cx: &App,
 ) -> Task<Result<(), ReplayLoadError>> {
     cx.background_spawn(async move {
-        let read =
-            |path: &Path| ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(format!("{report:?}")));
+        // The message reaches a toast, so it is the error's own sentence rather
+        // than the rootcause dump the panel's failed state prints.
+        let read = |path: &Path| {
+            ReplayFile::from_file(path).map_err(|report| ReplayLoadError::Parse(report.current_context().to_string()))
+        };
         let primary_file = read(&primary)?;
         let alt_file = read(&alt)?;
 
@@ -1109,7 +1159,7 @@ pub fn check_alt(
             arena_of(&primary_file),
             arena_of(&alt_file),
         )
-        .map_err(|refused| ReplayLoadError::Parse(refused.to_string()))
+        .map_err(ReplayLoadError::AltRefused)
     })
 }
 

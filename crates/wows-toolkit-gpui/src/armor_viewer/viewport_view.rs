@@ -292,6 +292,8 @@ struct HoverInfo {
 pub(crate) struct DisplaySettingsSliders {
     pub(crate) waterline_opacity: Entity<SliderState>,
     pub(crate) armor_opacity: Entity<SliderState>,
+    /// How solid the impact markers are drawn.
+    pub(crate) marker_opacity: Entity<SliderState>,
     /// How far the hull is heeled over, in degrees. A property of the model
     /// on screen rather than of the armor, so it is not written back with the
     /// display defaults.
@@ -309,6 +311,16 @@ pub(crate) struct DisplaySettingsSliders {
 /// rationale as [`DisplaySettingsSliders`]. Rebuilt wholesale by a preset
 /// button (`ViewportView::set_lighting_preset`), which moves every slider at
 /// once.
+/// The two colours the lighting is made of, as the pickers that set them.
+///
+/// Built with the view rather than with the popover: a picker keeps its own
+/// sliders and its open state, and one rebuilt per frame would close itself as
+/// the reader dragged it.
+pub(crate) struct LightingColors {
+    pub(crate) flat: Entity<gpui_kit::component::color_picker::ColorPickerState>,
+    pub(crate) key: Entity<gpui_kit::component::color_picker::ColorPickerState>,
+}
+
 pub(crate) struct LightingSliders {
     pub(crate) flat_intensity: Entity<SliderState>,
     pub(crate) key_intensity: Entity<SliderState>,
@@ -607,10 +619,14 @@ pub struct ViewportView {
     _display_slider_subscriptions: Vec<Subscription>,
     /// The display-settings popover's lighting slider state.
     pub(crate) lighting_sliders: LightingSliders,
+    /// The ambient and key light colours, which the shader multiplies each term
+    /// by; the sliders beside them set how much of each there is.
+    pub(crate) lighting_colors: LightingColors,
     /// Kept alive so `lighting_sliders`' `SliderEvent::Change` subscriptions
     /// keep firing; replaced wholesale whenever `set_lighting_preset` rebuilds
     /// the sliders.
     _lighting_slider_subscriptions: Vec<Subscription>,
+    _lighting_color_subscriptions: Vec<Subscription>,
     /// The toolbar's export-confirm panel (Milestone 5 Task 10) target, if
     /// open: a snapshot of everything the export needs, taken at the moment
     /// the panel opens (`open_export_confirm`), mirroring the egui app's own
@@ -638,15 +654,30 @@ struct ExportConfirm {
     selected_modules: HashMap<ComponentType, String>,
 }
 
+/// A light's colour as the picker takes it.
+///
+/// The shader works in linear channels and the picker in the colours a reader
+/// sees, which is the same distinction `gpui_kit::rgb` makes.
+fn rgb_color(channels: [f32; 3]) -> gpui_kit::Hsla {
+    gpui_kit::Rgba { r: channels[0], g: channels[1], b: channels[2], a: 1.0 }.into()
+}
+
+/// The same the other way, for what a picker reports back.
+fn color_rgb(color: gpui_kit::Hsla) -> [f32; 3] {
+    let rgba: gpui_kit::Rgba = color.into();
+    [rgba.r, rgba.g, rgba.b]
+}
+
 impl EventEmitter<ViewportEvent> for ViewportView {}
 
 impl ViewportView {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let focus_handle = cx.focus_handle();
         let display_settings = upload::DisplaySettings::default();
         let (display_sliders, display_slider_subscriptions) = Self::build_display_sliders(cx, display_settings);
         let lighting = LightingSettings::default();
         let (lighting_sliders, lighting_slider_subscriptions) = Self::build_lighting_sliders(cx, &lighting);
+        let (lighting_colors, lighting_color_subscriptions) = Self::build_lighting_colors(window, cx, &lighting);
         Self {
             focus_handle,
             viewport: Viewport3D::new(),
@@ -712,6 +743,8 @@ impl ViewportView {
             display_sliders,
             _display_slider_subscriptions: display_slider_subscriptions,
             lighting_sliders,
+            lighting_colors,
+            _lighting_color_subscriptions: lighting_color_subscriptions,
             _lighting_slider_subscriptions: lighting_slider_subscriptions,
             export_confirm: None,
         }
@@ -750,6 +783,7 @@ impl ViewportView {
     ) -> (DisplaySettingsSliders, Vec<Subscription>) {
         let waterline_opacity = Self::new_slider(cx, 0.05, 1.0, 0.01, display.waterline_opacity);
         let armor_opacity = Self::new_slider(cx, 0.1, 1.0, 0.01, display.armor_opacity);
+        let marker_opacity = Self::new_slider(cx, 0.0, 1.0, 0.01, display.marker_opacity);
         // The range the egui slider uses: a hull heels this far in a hard
         // turn, and further than that reads as a capsize rather than a
         // camera angle worth checking armor against.
@@ -766,6 +800,9 @@ impl ViewportView {
             Self::subscribe_slider(cx, &armor_opacity, |this, v, cx| {
                 this.mutate_display_settings(cx, |d| d.armor_opacity = v)
             }),
+            Self::subscribe_slider(cx, &marker_opacity, |this, v, cx| {
+                this.mutate_display_settings(cx, |d| d.marker_opacity = v)
+            }),
             Self::subscribe_slider(cx, &model_roll_deg, |this, v, cx| this.set_model_roll_deg(v, cx)),
             Self::subscribe_slider(cx, &camera_fov, |this, v, cx| {
                 let next = CameraRingSettings { fov: v, ..this.camera_rings.clone() };
@@ -781,6 +818,7 @@ impl ViewportView {
             DisplaySettingsSliders {
                 waterline_opacity,
                 armor_opacity,
+                marker_opacity,
                 model_roll_deg,
                 camera_fov,
                 camera_height,
@@ -793,6 +831,40 @@ impl ViewportView {
     /// Builds [`LightingSliders`] seeded from `lighting`, wired so a drag
     /// calls [`mutate_lighting`](Self::mutate_lighting). Called from `new()`
     /// and, to move every thumb at once, again from `set_lighting_preset`.
+    /// The two colour pickers, seeded from `lighting` and reporting every change
+    /// back into it.
+    fn build_lighting_colors(
+        window: &mut Window,
+        cx: &mut Context<Self>,
+        lighting: &LightingSettings,
+    ) -> (LightingColors, Vec<Subscription>) {
+        use gpui_kit::component::color_picker::ColorPickerState;
+
+        let flat = cx.new(|cx| ColorPickerState::new(window, cx).default_value(rgb_color(lighting.flat_color)));
+        let key = cx.new(|cx| ColorPickerState::new(window, cx).default_value(rgb_color(lighting.key_color)));
+        let subs = vec![
+            Self::subscribe_color(cx, &flat, |lighting, color| lighting.flat_color = color),
+            Self::subscribe_color(cx, &key, |lighting, color| lighting.key_color = color),
+        ];
+        (LightingColors { flat, key }, subs)
+    }
+
+    /// Folds a picker's changes into the lighting it belongs to.
+    ///
+    /// A cleared picker is left alone: the shader has no meaning for "no colour",
+    /// and the reader clearing the field is not asking for black.
+    fn subscribe_color(
+        cx: &mut Context<Self>,
+        picker: &Entity<gpui_kit::component::color_picker::ColorPickerState>,
+        apply: fn(&mut LightingSettings, [f32; 3]),
+    ) -> Subscription {
+        cx.subscribe(picker, move |this, _picker, event, cx| {
+            let gpui_kit::component::color_picker::ColorPickerEvent::Change(Some(color)) = event else { return };
+            let channels = color_rgb(*color);
+            this.mutate_lighting(cx, |lighting| apply(lighting, channels));
+        })
+    }
+
     fn build_lighting_sliders(
         cx: &mut Context<Self>,
         lighting: &LightingSettings,
@@ -2263,8 +2335,18 @@ impl ViewportView {
             self.ring_hovers = hovers;
         }
 
+        if self.display_settings.show_ship_center {
+            let (vertices, indices) = super::hits::build_center_marker(armor.bounds);
+            self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
+        }
+
         if !self.hits.is_empty() {
-            let (vertices, indices) = super::hits::build_markers(&self.hits, armor.center(), Some(armor.bounds));
+            let (vertices, indices) = super::hits::build_markers(
+                &self.hits,
+                armor.center(),
+                Some(armor.bounds),
+                self.display_settings.marker_opacity,
+            );
             if !indices.is_empty() {
                 self.viewport.add_non_pickable_mesh(&device, &vertices, &indices, LAYER_OVERLAY);
             }
@@ -2774,12 +2856,22 @@ impl ViewportView {
     /// `pane.lighting` and restores it after). A preset moves every lighting
     /// slider's thumb at once, so the sliders are rebuilt (not `set_value`d
     /// -- see `LightingSliders`'s doc) rather than just the domain value.
-    pub(crate) fn set_lighting_preset(&mut self, mut preset: LightingSettings, cx: &mut Context<Self>) {
+    pub(crate) fn set_lighting_preset(
+        &mut self,
+        mut preset: LightingSettings,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         preset.enabled = self.viewport.lighting.enabled;
         self.viewport.lighting = preset.clone();
         let (lighting_sliders, subs) = Self::build_lighting_sliders(cx, &preset);
         self.lighting_sliders = lighting_sliders;
         self._lighting_slider_subscriptions = subs;
+        // The pickers follow the preset rather than being rebuilt: a picker the
+        // reader has open stays open, showing the colour the preset just set.
+        let (flat, key) = (rgb_color(preset.flat_color), rgb_color(preset.key_color));
+        self.lighting_colors.flat.update(cx, |picker, cx| picker.set_value(flat, window, cx));
+        self.lighting_colors.key.update(cx, |picker, cx| picker.set_value(key, window, cx));
         self.viewport.mark_dirty();
         cx.emit(ViewportEvent::SettingsChanged);
         cx.notify();

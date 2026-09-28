@@ -1,4 +1,13 @@
-load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_binary", "workspace_buildscript")
+
+buildscript = workspace_buildscript(
+    name = "gpui_build",
+    crate = "wows_toolkit_gpui",
+    package = "wows-toolkit-gpui",
+    version = "1.0.2-beta2",
+    rustc_flags = ["--cfg=wows_buck_build"],
+    env = {"EMBEDDED_CONSTANTS": "$(location //embedded_resources:constants_json)"},
+)
 
 # Not wows_toolkit_gpui_bin: the target name is a path component of every
 # object file a release build writes, and the longest of those already sits
@@ -9,6 +18,7 @@ workspace_binary(
     package = "wows-toolkit-gpui",
     version = "1.0.2-beta2",
     crate_root = "src/main.rs",
+    buildscript = buildscript,
     deps = [
         "//crates/minimap-renderer:wows_minimap_renderer",
         "//crates/wows-battle-world:wows_battle_world",

@@ -156,7 +156,9 @@ fn copy_replay_files(paths: &[PathBuf], window: &mut Window, cx: &mut App) {
 /// so rather than leaving the reader waiting for a window.
 fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &mut App) {
     let exe = Path::new(wows_dir).join("WorldOfWarships.exe");
-    match std::process::Command::new(&exe).arg(replay).spawn() {
+    let mut command = std::process::Command::new(&exe);
+    command.arg(replay);
+    match crate::child_process::prepare(&mut command).spawn() {
         Ok(_) => {}
         Err(err) => {
             tracing::warn!("replay browser: {} could not be launched: {err}", exe.display());
@@ -171,13 +173,25 @@ fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &
 /// line rather than an error the listing would have to carry.
 fn reveal_in_file_manager(path: &std::path::Path) {
     #[cfg(target_os = "windows")]
-    let command = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    let mut command = {
+        let mut command = std::process::Command::new("explorer");
+        command.arg(format!("/select,{}", path.display()));
+        command
+    };
     #[cfg(target_os = "macos")]
-    let command = std::process::Command::new("open").arg("-R").arg(path).spawn();
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg("-R").arg(path);
+        command
+    };
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let command = std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn();
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path.parent().unwrap_or(path));
+        command
+    };
 
-    if let Err(err) = command {
+    if let Err(err) = crate::child_process::prepare(&mut command).spawn() {
         tracing::warn!("replay listing: {} could not be shown in the file manager: {err}", path.display());
     }
 }

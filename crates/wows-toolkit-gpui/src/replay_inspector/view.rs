@@ -58,7 +58,6 @@ use crate::replay_renderer::ReplayRendererPanel;
 use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 
-/// Sidebar width for the file browser, matching the egui app's left panel.
 /// Identifies the message a batch render keeps on screen while it runs, so each
 /// step replaces the last rather than stacking.
 const BATCH_PROGRESS: &str = "replay-batch-render";
@@ -70,6 +69,11 @@ const CONTRIBUTE_PROGRESS: &str = "replay-contribute-all";
 /// battles that all fail says so once.
 const AUTO_EXPORT_FAILED: &str = "replay-auto-export-failed";
 
+/// The same, for the notice that a battle was read through a mapping that does
+/// not fit, which stands until one that does is on disk.
+const CONSTANTS_UNFIT: &str = "replay-constants-unfit";
+
+/// Sidebar width for the file browser, matching the egui app's left panel.
 const BROWSER_WIDTH: Pixels = px(280.);
 const BROWSER_MIN_WIDTH: Pixels = px(180.);
 const BROWSER_MAX_WIDTH: Pixels = px(520.);
@@ -253,6 +257,13 @@ pub struct ReplaySettingsChanged(pub ReplaySettings);
 /// into it.
 pub struct GameDataMissing(pub Vec<MissingBuild>);
 
+/// A battle was read through a mapping that does not fit its build.
+///
+/// Raised to the app, which holds the commit the published mappings were last
+/// checked at: forgetting it is what makes the next check fetch again rather
+/// than report the repository unchanged.
+pub struct ConstantsUnfit;
+
 /// A replay tab that is the one showing in its dock group.
 #[derive(Clone)]
 struct ShowingReplay {
@@ -270,6 +281,7 @@ enum OpenTarget {
 
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 impl EventEmitter<GameDataMissing> for ReplayInspectorView {}
+impl EventEmitter<ConstantsUnfit> for ReplayInspectorView {}
 
 /// A viewport asked for an armor viewer on one of the battle's ships, with
 /// what that ship had taken by where playback is.
@@ -420,6 +432,11 @@ impl ReplayInspectorView {
             .detach();
         }
         self.game_data = Some(game_data.clone());
+        // An open tab reads its own copy, which carries the directory and the
+        // dump preference by value and would otherwise stay on the old install.
+        for panel in self.open_panels.values() {
+            let _ = panel.update(cx, |panel, _cx| panel.set_game_data(game_data.clone()));
+        }
         // Named from the install's own `preferences.xml`, which is a file read
         // rather than a build load, so the listing can say which version it is
         // waiting for while the load runs.
@@ -487,7 +504,9 @@ impl ReplayInspectorView {
                 self.record_session_stats(paths.clone(), *replace, cx)
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
-            ReplayBrowserEvent::BuildsListed(builds) => self.fetch_missing_constants(builds.clone(), window, cx),
+            ReplayBrowserEvent::BuildsListed(builds) => {
+                self.fetch_missing_constants(builds.clone(), crate::constants::Cached::Keep, window, cx)
+            }
             ReplayBrowserEvent::RenderManyToVideo(paths) => self.render_many_to_video(paths.clone(), window, cx),
             ReplayBrowserEvent::RenderManyToClipboard(paths) => {
                 self.render_many_to_clipboard(paths.clone(), window, cx)
@@ -532,6 +551,7 @@ impl ReplayInspectorView {
     fn fetch_missing_constants(
         &mut self,
         builds: Vec<(u32, Option<String>)>,
+        cached: crate::constants::Cached,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -541,14 +561,14 @@ impl ReplayInspectorView {
         let wanted: Vec<(u32, Option<String>)> = builds
             .into_iter()
             .filter(|(build, _)| !self.constants_asked.contains(build))
-            .filter(|(build, _)| !crate::constants::is_cached(*build))
+            .filter(|(build, _)| cached == crate::constants::Cached::Replace || !crate::constants::is_cached(*build))
             .collect();
         if wanted.is_empty() {
             return;
         }
 
         cx.spawn_in(window, async move |this, cx| {
-            let Ok(sweep) = cx.update(|_window, cx| crate::constants::fetch_for_builds(wanted, cx)) else {
+            let Ok(sweep) = cx.update(|_window, cx| crate::constants::fetch_for_builds(wanted, cached, cx)) else {
                 return;
             };
             let outcomes = sweep.await;
@@ -576,6 +596,12 @@ impl ReplayInspectorView {
             if written == 0 {
                 return;
             }
+            // Withdrawn now a mapping that fits is on disk: the battles read
+            // through the old one are read again below.
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.constants_mismatched.clear();
+                crate::toast::resolved(CONSTANTS_UNFIT, window, cx);
+            });
             // What is open was read through the mapping that was there before, so
             // it is read again now there is a better one.
             let _ = this.update_in(cx, |this, window, cx| {
@@ -598,20 +624,21 @@ impl ReplayInspectorView {
     /// Says that a battle was read through the wrong mapping, and fetches the
     /// right one.
     ///
-    /// The stale file is dropped first: it is on disk, which is what would
-    /// otherwise stop a fresh one being fetched, and it decodes results through
-    /// keys that moved. The egui app recovers the same way
+    /// What is on disk is fetched over rather than dropped first: a mapping the
+    /// reader imported by hand is the only one some builds will ever have, and a
+    /// fetch that fails would leave nothing in its place. The message stays up
+    /// until one arrives, as the egui app keeps its own up
     /// (`app.rs`'s `check_constants_version_mismatch`).
     fn recover_constants(&mut self, build: u32, version: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
         if !self.constants_mismatched.insert(build) {
             return;
         }
-        crate::toast::warn(t!("ui.messages.constants_version_mismatch").into_owned(), window, cx);
-        crate::constants::forget(build);
-        // Asked about again, whatever this session already asked: what is on disk
-        // for it has just been dropped.
+        crate::toast::stuck(CONSTANTS_UNFIT, t!("ui.messages.constants_version_mismatch").into_owned(), window, cx);
+        cx.emit(ConstantsUnfit);
+        // Asked about again, whatever this session already asked: the answer it
+        // got is the mapping that does not fit.
         self.constants_asked.remove(&build);
-        self.fetch_missing_constants(vec![(build, version)], window, cx);
+        self.fetch_missing_constants(vec![(build, version)], crate::constants::Cached::Replace, window, cx);
     }
 
     /// Reads every open replay again, for a mapping or a dump that has since
@@ -1034,12 +1061,17 @@ impl ReplayInspectorView {
             let export = if debug { parsed.export } else { parsed.export.stripped() };
             let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;
             match written {
-                Ok(()) => tracing::info!(path = %named.display(), "auto-export: the battle was written"),
+                Ok(()) => {
+                    tracing::info!(path = %named.display(), "auto-export: the battle was written");
+                    // Whatever stopped the last one has passed, so the notice
+                    // about it comes down.
+                    let _ = cx.update(|window, cx| crate::toast::resolved(AUTO_EXPORT_FAILED, window, cx));
+                }
                 Err(err) => {
                     tracing::warn!(path = %named.display(), error = %err, "auto-export failed");
                     // Kept up rather than flashed past: the reader asked for a file
-                    // per battle and is not getting one, and the next battle will
-                    // fail the same way.
+                    // per battle and is not getting one. Taken down again by the
+                    // next battle that writes.
                     let _ = cx.update(|window, cx| {
                         crate::toast::stuck(
                             AUTO_EXPORT_FAILED,
@@ -1264,6 +1296,13 @@ impl ReplayInspectorView {
         };
 
         if let Some(existing) = self.open_renderers.get(&path).and_then(|panel| panel.upgrade()) {
+            // A recording added since this viewport was baked is not on the map
+            // it is showing, so it is baked again rather than brought forward
+            // as it is.
+            let stale = existing.read(cx).baked_alts() != alts.as_slice();
+            if stale {
+                existing.update(cx, |panel, cx| panel.rebake_with_alts(alts, cx));
+            }
             let id = PanelId::from(existing.entity_id());
             self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
             cx.notify();

@@ -504,6 +504,20 @@ impl ReplayRendererPanel {
         panel
     }
 
+    /// Which other recordings this viewport was baked with.
+    pub(crate) fn baked_alts(&self) -> &[PathBuf] {
+        &self.alts
+    }
+
+    /// Bakes this battle again through another set of recordings, for a tab
+    /// opened before one of them was added.
+    pub(crate) fn rebake_with_alts(&mut self, alts: Vec<PathBuf>, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else { return };
+        self.alts = alts;
+        let path = self.path.clone();
+        self.start_bake(path, game_data, cx);
+    }
+
     /// A viewport already holding `clocks`' worth of empty frames, with no
     /// bake behind it and no renderer to rasterise through.
     ///

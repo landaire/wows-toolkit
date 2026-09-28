@@ -125,10 +125,8 @@ pub fn blocked_services() -> Result<Vec<TextService>, TextServiceError> {
 mod windows_ime {
     use std::path::PathBuf;
 
-    use windows_sys::Win32::System::Registry::HKEY_CURRENT_USER;
-
-    use crate::registry::HKEY_LOCAL_MACHINE;
     use crate::registry::RegKey;
+    use crate::registry::Root;
 
     use super::TIP_KEY;
     use super::TextService;
@@ -142,10 +140,9 @@ mod windows_ime {
     /// Per-user class registrations shadow machine-wide ones, so `HKCU` is
     /// consulted first, the same order the merged `HKEY_CLASSES_ROOT` view uses.
     fn inproc_server(clsid: &str) -> Option<PathBuf> {
-        for parent in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        for root in [Root::CurrentUser, Root::LocalMachine] {
             let key = format!(r"SOFTWARE\Classes\CLSID\{clsid}\InprocServer32");
-            // SAFETY: both roots are well-known handles, live for the process.
-            let Ok(server) = (unsafe { RegKey::open(parent, &key) }) else {
+            let Ok(server) = RegKey::open_under(root, &key) else {
                 continue;
             };
             // The default value holds the module path; an entry with the key but
@@ -166,9 +163,8 @@ mod windows_ime {
     }
 
     /// Class ids registered as text services under one root.
-    fn registered_clsids(parent: windows_sys::Win32::System::Registry::HKEY) -> Result<Vec<String>, TextServiceError> {
-        // SAFETY: the caller passes one of the well-known roots.
-        let key = unsafe { RegKey::open(parent, TIP_KEY) }
+    fn registered_clsids(root: Root) -> Result<Vec<String>, TextServiceError> {
+        let key = RegKey::open_under(root, TIP_KEY)
             .map_err(|status| TextServiceError::OpenKey { key: TIP_KEY.to_string(), status })?;
         key.subkey_names().map_err(|status| TextServiceError::EnumerateKeys { key: TIP_KEY.to_string(), status })
     }
@@ -183,8 +179,8 @@ mod windows_ime {
         // an absence rather than a failure. The machine-wide key exists on every
         // Windows install, so failing to read that one is a real probe failure
         // and the caller must not conclude anything from an empty result.
-        let per_user = registered_clsids(HKEY_CURRENT_USER).unwrap_or_default();
-        let machine_wide = registered_clsids(HKEY_LOCAL_MACHINE)?;
+        let per_user = registered_clsids(Root::CurrentUser).unwrap_or_default();
+        let machine_wide = registered_clsids(Root::LocalMachine)?;
 
         let mut services = Vec::new();
         let mut seen = std::collections::HashSet::new();

@@ -194,8 +194,14 @@ pub struct ReplayPanel {
     /// what the primary's team could not.
     alts: Vec<PathBuf>,
     /// The build data this tab reads against, kept so another recording can be
-    /// checked and merged without the view handing it over again.
+    /// checked and merged without the view handing it over again. Replaced
+    /// through `set_game_data` when the install changes, since the cache carries
+    /// the directory and the dump preference by value.
     game_data: GameDataCache,
+    /// The recording added but not yet read through. Taken back out if the read
+    /// it triggered fails, so a recording that passes the up-front check and
+    /// then will not merge cannot poison every later read of this tab.
+    alt_on_trial: Option<PathBuf>,
     /// What the last export did, shown beside the menu.
     export_status: Option<String>,
     _parse_task: Task<()>,
@@ -204,6 +210,28 @@ pub struct ReplayPanel {
     /// together). `None` while still loading, since there is no `table` yet
     /// to subscribe to.
     _table_subscription: Option<Subscription>,
+}
+
+/// How many other recordings one tab reads alongside its own.
+///
+/// Each one is a decompressed packet stream and a parser held for as long as the
+/// tab is open, and the merge walks every one of them twice. A full enemy team
+/// is eleven; the cap is what keeps a menu that invites another click from
+/// growing that without end.
+const MAX_ALTS: usize = 11;
+
+/// Whether two paths name the same recording.
+///
+/// Compared through the filesystem's own answer where it has one, so the same
+/// file picked twice under different spellings -- a drive letter in another
+/// case, a junction, an extended-length prefix -- is recognised as already
+/// merged. A path that cannot be resolved is compared as written, which is the
+/// only answer available for a file that has since been moved.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
 }
 
 impl ReplayPanel {
@@ -229,10 +257,17 @@ impl ReplayPanel {
             auto_export,
             path,
             alts: Vec::new(),
+            alt_on_trial: None,
             game_data: kept_game_data,
             _parse_task: parse_task,
             _table_subscription: None,
         }
+    }
+
+    /// Points this tab at the install the view now reads, for a reader who has
+    /// changed the game directory or the dump preference with the tab open.
+    pub fn set_game_data(&mut self, game_data: GameDataCache) {
+        self.game_data = game_data;
     }
 
     /// Reads the replay again, for a file that has changed under an open tab.
@@ -257,7 +292,15 @@ impl ReplayPanel {
     /// Refused before anything is merged when it is not this battle: a mismatched
     /// recording kept in the list would fail every later read of this tab
     /// (`ui/replay_parser/mod.rs`'s own up-front validation, for the same reason).
-    pub fn load_alt_perspective(&mut self, game_data: GameDataCache, window: &mut Window, cx: &mut Context<Self>) {
+    /// The check cannot be conclusive for a primary whose own battle could not be
+    /// read, so a recording that passes it and then will not merge is taken back
+    /// out again (see `alt_on_trial`).
+    pub fn load_alt_perspective(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.alts.len() >= MAX_ALTS {
+            crate::toast::warn(t!("ui.replay.load_alt_perspective_limit", limit = MAX_ALTS).into_owned(), window, cx);
+            return;
+        }
+        let game_data = self.game_data.clone();
         let asked = crate::dialog::pick_file(
             Some(&t!("ui.replay.load_alt_perspective")),
             Some(crate::dialog::Filter { label: "WoWs Replays", extensions: &["wowsreplay"] }),
@@ -275,9 +318,10 @@ impl ReplayPanel {
             match check.await {
                 Ok(()) => {
                     let _ = this.update_in(cx, |this, window, cx| {
-                        if this.alts.contains(&alt) {
+                        if this.alts.iter().any(|kept| same_file(kept, &alt)) {
                             return;
                         }
+                        this.alt_on_trial = Some(alt.clone());
                         this.alts.push(alt);
                         this.reparse(game_data.clone(), window, cx);
                     });
@@ -474,12 +518,27 @@ impl ReplayPanel {
                 {
                     cx.emit(ConstantsMismatched { build, version: Some(model.context.version.clone()) });
                 }
+                self.alt_on_trial = None;
                 self.export = Some(export);
                 self.write_auto_export(cx);
                 let payloads = DebugPayloads { raw_metadata_json, raw_results_json, mapped_results_json };
                 self.loaded_state(model, game_data.vfs().clone(), fire_chance, payloads, window, cx)
             }
             Err(err) => {
+                // A read that only failed because of the recording just added
+                // is not this tab's new state: drop that recording and read the
+                // battle again without it.
+                if let Some(refused) = self.alt_on_trial.take() {
+                    self.alts.retain(|kept| !same_file(kept, &refused));
+                    crate::toast::failed(
+                        t!("ui.replay.load_alt_perspective_failed", error = err.to_string()).into_owned(),
+                        window,
+                        cx,
+                    );
+                    let game_data = self.game_data.clone();
+                    self.reparse(game_data, window, cx);
+                    return;
+                }
                 // The panel says what went wrong; the toast is so a reader
                 // who has moved on still learns it did, which is what the
                 // egui app reports here (`ui/replay_parser/mod.rs`).
@@ -550,6 +609,7 @@ impl ReplayPanel {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut panel = Self {
+            alt_on_trial: None,
             focus_handle: cx.focus_handle(),
             state: LoadState::Loading,
             side_panel: SidePanel::None,
@@ -590,12 +650,11 @@ pub struct ConstantsMismatched {
 
 impl EventEmitter<ConstantsMismatched> for ReplayPanel {}
 
-/// A panel asked for its own replay to be rendered.
+/// A panel asked for its battle to be played back, with the other recordings it
+/// is reading it through.
 ///
 /// The panel owns neither the dock nor the renderer, so it says which replay
 /// rather than opening anything itself.
-/// A panel asked for its battle to be played back, with the other recordings it
-/// is reading it through.
 pub struct RenderRequested {
     pub path: PathBuf,
     pub alts: Vec<PathBuf>,
@@ -878,8 +937,6 @@ struct HeaderState {
     export_status: Option<String>,
     debug: bool,
     side_panel: SidePanel,
-    /// What another recording of the same battle is read against.
-    game_data: GameDataCache,
     /// How many other recordings this tab is already reading.
     alts: usize,
 }
@@ -946,8 +1003,6 @@ struct ActionsState {
     has_results: bool,
     has_mapped_results: bool,
     side_panel: SidePanel,
-    /// What another recording is read against.
-    game_data: GameDataCache,
     /// How many other recordings this tab is already reading.
     alts: usize,
 }
@@ -967,7 +1022,6 @@ fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoEle
         has_results,
         has_mapped_results,
         side_panel,
-        game_data,
         alts,
     } = state;
 
@@ -992,14 +1046,12 @@ fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoEle
             // as the egui menu puts it, so a tab already reading two says so.
             let menu = {
                 let panel = panel.clone();
-                let game_data = game_data.clone();
                 let label = match alts {
                     0 => t!("ui.replay.load_alt_perspective").into_owned(),
                     merged => format!("{} ({merged})", t!("ui.replay.load_alt_perspective")),
                 };
                 menu.item(PopupMenuItem::new(label).on_click(move |_event, window, cx| {
-                    let game_data = game_data.clone();
-                    panel.update(cx, |panel, cx| panel.load_alt_perspective(game_data, window, cx));
+                    panel.update(cx, |panel, cx| panel.load_alt_perspective(window, cx));
                 }))
             };
 
@@ -1065,7 +1117,6 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
         export_status,
         debug,
         side_panel,
-        game_data,
         alts,
     } = state;
 
@@ -1100,7 +1151,6 @@ fn header_row(state: HeaderState, cx: &mut Context<ReplayPanel>) -> AnyElement {
                 has_results,
                 has_mapped_results,
                 side_panel,
-                game_data,
                 alts,
             },
         ))
@@ -1242,7 +1292,6 @@ impl Render for ReplayPanel {
                             export_status: self.export_status.clone(),
                             debug: self.debug,
                             side_panel: self.side_panel,
-                            game_data: self.game_data.clone(),
                             alts: self.alts.len(),
                         },
                         cx,

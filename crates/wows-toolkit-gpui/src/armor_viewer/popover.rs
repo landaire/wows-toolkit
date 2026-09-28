@@ -1136,6 +1136,10 @@ struct DisplayPopoverSnapshot {
     display: super::upload::DisplaySettings,
     lighting: LightingSettings,
     waterline_slider: Entity<SliderState>,
+    marker_slider: Entity<SliderState>,
+    /// Whether any impact marker is drawn, since a marker control with nothing
+    /// to act on is what the egui popover hides.
+    has_markers: bool,
     armor_slider: Entity<SliderState>,
     roll_slider: Entity<SliderState>,
     /// How far the hull is currently heeled over, for the readout beside its
@@ -1152,6 +1156,10 @@ struct DisplayPopoverSnapshot {
     camera_fov_slider: Entity<SliderState>,
     camera_height_slider: Entity<SliderState>,
     flat_slider: Entity<SliderState>,
+    /// The colour each of the two lighting terms is tinted by. A picker keeps its
+    /// own state, so these are the view's own rather than rebuilt per frame.
+    flat_color: Entity<gpui_kit::component::color_picker::ColorPickerState>,
+    key_color: Entity<gpui_kit::component::color_picker::ColorPickerState>,
     key_slider: Entity<SliderState>,
     azimuth_slider: Entity<SliderState>,
     elevation_slider: Entity<SliderState>,
@@ -1182,7 +1190,11 @@ fn render_display_popover_content(
             cast_range_slider: view.display_sliders.cast_range.clone(),
             camera_fov_slider: view.display_sliders.camera_fov.clone(),
             camera_height_slider: view.display_sliders.camera_height.clone(),
+            marker_slider: view.display_sliders.marker_opacity.clone(),
+            has_markers: view.hits_drawn() > 0,
             flat_slider: view.lighting_sliders.flat_intensity.clone(),
+            flat_color: view.lighting_colors.flat.clone(),
+            key_color: view.lighting_colors.key.clone(),
             key_slider: view.lighting_sliders.key_intensity.clone(),
             azimuth_slider: view.lighting_sliders.azimuth_deg.clone(),
             elevation_slider: view.lighting_sliders.elevation_deg.clone(),
@@ -1202,10 +1214,14 @@ fn render_display_popover_content(
         camera_fov_slider,
         camera_height_slider,
         waterline_slider,
+        marker_slider,
+        has_markers,
         armor_slider,
         roll_slider,
         roll_deg,
         flat_slider,
+        flat_color,
+        key_color,
         key_slider,
         azimuth_slider,
         elevation_slider,
@@ -1219,6 +1235,7 @@ fn render_display_popover_content(
     let edges_entity = entity.clone();
     let waterline_entity = entity.clone();
     let zero_mm_entity = entity.clone();
+    let ship_center_entity = entity.clone();
     let lighting_enabled_entity = entity.clone();
     let preset_ingame_entity = entity.clone();
     let preset_flat_entity = entity.clone();
@@ -1283,12 +1300,30 @@ fn render_display_popover_content(
                         .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_zero_mm = checked));
                 }),
         )
+        .child(
+            Checkbox::new("armor-display-ship-center")
+                .label(t!("ui.armor.ship_center").to_string())
+                .checked(display.show_ship_center)
+                .on_click(move |checked, _window, cx| {
+                    let checked = *checked;
+                    ship_center_entity
+                        .update(cx, |view, cx| view.mutate_display_settings(cx, |d| d.show_ship_center = checked));
+                }),
+        )
         .child(labeled_slider_row(
             t!("ui.armor.armor_opacity").into_owned(),
             &armor_slider,
             display.armor_opacity,
             false,
         ))
+        .when(has_markers, |this| {
+            this.child(labeled_slider_row(
+                t!("ui.armor.marker_opacity").into_owned(),
+                &marker_slider,
+                display.marker_opacity,
+                false,
+            ))
+        })
         // Heeling the hull over is what says whether a belt is still a belt
         // at the angle the ship is fighting at.
         .child(labeled_slider_row(t!("ui.armor.roll").into_owned(), &roll_slider, roll_deg, false))
@@ -1321,9 +1356,10 @@ fn render_display_popover_content(
                         .label(t!("ui.armor.lighting_preset_ingame").to_string())
                         .compact()
                         .disabled(!lighting.enabled)
-                        .on_click(move |_, _window, cx| {
-                            preset_ingame_entity
-                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::in_game(), cx));
+                        .on_click(move |_, window, cx| {
+                            preset_ingame_entity.update(cx, |view, cx| {
+                                view.set_lighting_preset(LightingSettings::in_game(), window, cx)
+                            });
                         }),
                 )
                 .child(
@@ -1331,9 +1367,9 @@ fn render_display_popover_content(
                         .label(t!("ui.armor.lighting_preset_flat").to_string())
                         .compact()
                         .disabled(!lighting.enabled)
-                        .on_click(move |_, _window, cx| {
+                        .on_click(move |_, window, cx| {
                             preset_flat_entity
-                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::flat(), cx));
+                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::flat(), window, cx));
                         }),
                 )
                 .child(
@@ -1341,9 +1377,10 @@ fn render_display_popover_content(
                         .label(t!("ui.armor.lighting_preset_studio").to_string())
                         .compact()
                         .disabled(!lighting.enabled)
-                        .on_click(move |_, _window, cx| {
-                            preset_studio_entity
-                                .update(cx, |view, cx| view.set_lighting_preset(LightingSettings::studio(), cx));
+                        .on_click(move |_, window, cx| {
+                            preset_studio_entity.update(cx, |view, cx| {
+                                view.set_lighting_preset(LightingSettings::studio(), window, cx)
+                            });
                         }),
                 ),
         )
@@ -1353,12 +1390,14 @@ fn render_display_popover_content(
             lighting.flat_intensity,
             !lighting.enabled,
         ))
+        .child(labeled_color_row(t!("ui.armor.lighting_ambient_color").into_owned(), &flat_color, !lighting.enabled))
         .child(labeled_slider_row(
             t!("ui.armor.lighting_intensity").into_owned(),
             &key_slider,
             lighting.key_intensity,
             !lighting.enabled,
         ))
+        .child(labeled_color_row(t!("ui.armor.lighting_key_color").into_owned(), &key_color, !lighting.enabled))
         .child(labeled_slider_row(
             t!("ui.armor.lighting_azimuth").into_owned(),
             &azimuth_slider,
@@ -1391,6 +1430,27 @@ fn render_display_popover_content(
         ));
 
     col.into_any_element()
+}
+
+/// One labelled colour row: what it tints, and the picker that sets it.
+fn labeled_color_row(
+    label: String,
+    picker: &Entity<gpui_kit::component::color_picker::ColorPickerState>,
+    lighting_off: bool,
+) -> impl IntoElement + use<> {
+    // Dimmed rather than taken away when the lighting is off: the colour it would
+    // be lit in is still what this sets, and a row that vanished would read as a
+    // setting that had gone.
+    h_flex()
+        .gap_2()
+        .items_center()
+        .when(lighting_off, |row| row.opacity(0.5))
+        .child(div().w(px(96.)).text_xs().child(label.clone()))
+        .child(
+            gpui_kit::component::color_picker::ColorPicker::new(picker)
+                .small()
+                .accessibility_label(SharedString::from(label)),
+        )
 }
 
 /// One labeled slider row: `label`, the slider itself, and a live numeric

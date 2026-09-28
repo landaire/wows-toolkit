@@ -123,10 +123,9 @@ fn swap_in(current: &Path, downloaded: &Path) -> Result<(), String> {
         return Err(format!("the new executable could not be moved into place: {err}"));
     }
 
-    let started = std::process::Command::new(current)
-        .arg("finalize-update")
-        .arg("--replaced")
-        .arg(&replaced)
+    let mut command = std::process::Command::new(current);
+    command.arg("finalize-update").arg("--replaced").arg(&replaced);
+    let started = crate::child_process::prepare(&mut command)
         .spawn()
         .map_err(|err| format!("the updated executable would not start: {err}"));
     match started {

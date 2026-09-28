@@ -12,6 +12,7 @@
 pub mod ime;
 pub mod modules;
 pub mod policy;
+#[cfg(windows)]
 pub mod registry;
 pub mod version_info;
 pub mod win32;
@@ -80,6 +81,18 @@ pub enum CodeIntegrityPreference {
 
 impl CodeIntegrityPreference {
     pub const ALL: [Self; 3] = [Self::Automatic, Self::Always, Self::Never];
+
+    /// What a startup read of the stored preference means.
+    ///
+    /// Absence and failure are kept apart deliberately. A key that was never
+    /// written means the reader has not chosen, and `Automatic` is the right
+    /// answer. A database that could not be read means the choice is unknown,
+    /// and the unknown value may have been the one turning the policy off;
+    /// defaulting there would apply an irreversible policy against a preference
+    /// that said otherwise.
+    pub fn from_startup_read<E>(read: Result<Option<Self>, E>) -> Option<Self> {
+        read.ok().map(Option::unwrap_or_default)
+    }
 
     /// Translation key for this choice's label.
     pub const fn key(self) -> &'static str {

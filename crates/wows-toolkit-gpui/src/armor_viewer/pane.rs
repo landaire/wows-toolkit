@@ -180,7 +180,7 @@ impl ArmorViewerPane {
         // in the viewport's toolbar rather than on a strip above it.
         let this = cx.weak_entity();
         let viewport = cx.new(|cx| {
-            let mut viewport = ViewportView::new(cx);
+            let mut viewport = ViewportView::new(window, cx);
             viewport.set_pane(this);
             viewport
         });
@@ -312,10 +312,6 @@ impl ArmorViewerPane {
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
     }
 
-    /// A change made in the sidebar's pane-sharing menu.
-    /// Resolves the ship the penetration checker's combo just picked into the
-    /// shells it brings, which is a GameParams walk rather than something to
-    /// redo per render.
     /// The catalogue of ships this pane can open, once it has loaded.
     ///
     /// `None` while the assets are still being read, which is what the palette's
@@ -443,12 +439,12 @@ impl ArmorViewerPane {
         &mut self,
         _dock: &Entity<ViewportDock>,
         event: &DockEvent,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event {
             DockEvent::ResetLastPane => {
-                let viewport = self.fresh_viewport(cx);
+                let viewport = self.fresh_viewport(window, cx);
                 self.dock.update(cx, |dock, cx| dock.reset_to(viewport, cx));
                 self.ship_loaded = false;
                 self.push_common_settings(cx);
@@ -459,10 +455,10 @@ impl ArmorViewerPane {
 
     /// A new empty viewport, wired to this pane and handed whatever the
     /// shared GPU device has settled into so far.
-    fn fresh_viewport(&mut self, cx: &mut Context<Self>) -> Entity<ViewportView> {
+    fn fresh_viewport(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Entity<ViewportView> {
         let this = cx.weak_entity();
         let viewport = cx.new(|cx| {
-            let mut viewport = ViewportView::new(cx);
+            let mut viewport = ViewportView::new(window, cx);
             viewport.set_pane(this);
             viewport
         });
@@ -489,7 +485,7 @@ impl ArmorViewerPane {
         &mut self,
         _sidebar: &Entity<Sidebar>,
         event: &CompareSplit,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let active = self.dock.read(cx).active_viewport();
@@ -500,7 +496,7 @@ impl ArmorViewerPane {
                 .map(|armor| (armor, source.camera(), source.synced_settings(), source.reload_source()))
         };
 
-        let viewport = self.fresh_viewport(cx);
+        let viewport = self.fresh_viewport(window, cx);
 
         if let Some((armor, camera, synced, reload_source)) = clone_source {
             viewport.update(cx, |view, cx| {

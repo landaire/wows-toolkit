@@ -121,24 +121,8 @@ pub fn install_constants(
     Ok(InstalledConstants { build: parsed.build, version: parsed.version.clone(), storage_path, dump_path })
 }
 
-/// Pick the constants a build loads, and judge them.
-///
-/// Preference order matches what the app reads from disk: the build's dump-local
-/// copy, then the versioned storage cache, then the embedded fallback. The
-/// chosen value is returned whatever its fit, because it is what the rest of the
-/// build decodes with; the fit says how far the results decoded from it can be
-/// trusted.
-pub fn resolve_replay_constants(
-    dump_constants: Option<Value>,
-    cached_constants: Option<Value>,
-    fallback: &Value,
-    build: u32,
-    version: Option<Version>,
-) -> (Value, ConstantsFit) {
-    let chosen = dump_constants.or(cached_constants).unwrap_or_else(|| fallback.clone());
-    let fit = constants_fit(&chosen, build, version);
-    (chosen, fit)
-}
+/// Shared with the GPUI port, which picks a build's constants the same way.
+pub use wows_toolkit_viewmodel::index_rows::resolve_replay_constants;
 
 #[cfg(test)]
 mod tests {
