@@ -161,6 +161,9 @@ fn team_color(team: Option<wows_replays::types::TeamId>) -> [u8; 3] {
     }
 }
 
+/// How much one notch of the wheel changes the zoom.
+const ZOOM_PER_NOTCH: f32 = 0.004;
+
 /// [`RESIZE_BAND_PX`] in world units, at this map's scale.
 ///
 /// A zone's edge is a line on screen; the press that grabs it is measured in the
@@ -449,6 +452,11 @@ pub struct TacticsBoard {
     /// Whether the last attempt to draw the map found no art for it, which is
     /// what the board says rather than claiming to still be drawing.
     no_art: bool,
+    /// Which part of the map is on screen: the whole of it until the reader
+    /// zooms in, and then whatever they moved to.
+    view: wows_minimap_renderer::viewport::MapViewport,
+    /// The pan in progress, and where the pointer was when it last moved.
+    panning: Option<Point<Pixels>>,
     /// Whether a rasterisation is in flight, so a burst of edits asks for one
     /// redraw rather than one each.
     rasterising: bool,
@@ -522,6 +530,8 @@ impl TacticsBoard {
             painted: std::rc::Rc::new(std::cell::Cell::new(None)),
             drawn: None,
             no_art: false,
+            view: wows_minimap_renderer::viewport::MapViewport::default(),
+            panning: None,
             rasterising: false,
             stale: false,
         }
@@ -780,7 +790,51 @@ impl TacticsBoard {
         let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - width * scale) / 2.0;
         let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - height * scale) / 2.0;
         let (x, y) = ((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale);
+        if x < 0.0 || x >= width || y < 0.0 || y >= height {
+            return None;
+        }
+        // The frame shows the part of the map the window names, so a drawn
+        // point is turned back into a map one before anything reads it.
+        Some(self.view.to_map(x, y))
+    }
+
+    /// Where a window position falls in the drawn frame, before the window is
+    /// undone. What a zoom about the pointer needs, since it re-anchors on a
+    /// drawn point rather than a map one.
+    fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let bounds = self.painted.get()?;
+        let drawn = self.drawn.as_ref()?;
+        let size = drawn.size(0);
+        let (width, height) = (size.width.0 as f32, size.height.0 as f32);
+        if width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        let scale = (bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height);
+        let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - width * scale) / 2.0;
+        let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - height * scale) / 2.0;
+        let (x, y) = ((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale);
         (x >= 0.0 && x < width && y >= 0.0 && y < height).then_some((x, y))
+    }
+
+    /// Zooms the map about the pointer, so what is under it stays there.
+    fn zoom_about(&mut self, notches: f32, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let Some(at) = self.drawn_point(position) else { return };
+        let zoom = self.view.zoom() * (1.0 + notches * ZOOM_PER_NOTCH);
+        let view = self.view.zoomed_about(zoom, at);
+        if view == self.view {
+            return;
+        }
+        self.view = view;
+        self.redraw(cx);
+    }
+
+    /// Puts the whole map back on screen.
+    fn reset_view(&mut self, cx: &mut Context<Self>) {
+        if self.view == wows_minimap_renderer::viewport::MapViewport::default() {
+            return;
+        }
+        self.view = wows_minimap_renderer::viewport::MapViewport::default();
+        self.redraw(cx);
     }
 
     /// The map's own coordinate metadata, which is what turns a map pixel into
@@ -1102,14 +1156,24 @@ impl TacticsBoard {
             self.add_cap_at(world, cx);
             return;
         }
+        // A double click puts the whole map back, which is how the replay
+        // viewport is reset too.
+        if event.click_count >= 2 {
+            self.reset_view(cx);
+            return;
+        }
         match self.cap_under(event.position) {
             Some((index, what)) => {
                 self.selected = Some(index);
                 self.dragging = Some((index, what));
             }
-            // A click past every zone puts the selection down, which is what
-            // takes the handles off the map.
-            None => self.selected = None,
+            // A drag past every zone moves the map, which is what a reader
+            // zoomed in is reaching for; the click alone puts the selection
+            // down, which takes the handles off the map.
+            None => {
+                self.selected = None;
+                self.panning = Some(event.position);
+            }
         }
         cx.notify();
     }
@@ -1140,6 +1204,16 @@ impl TacticsBoard {
             return;
         }
 
+        if let Some(from) = self.panning {
+            let delta = (event.position.x.as_f32() - from.x.as_f32(), event.position.y.as_f32() - from.y.as_f32());
+            self.panning = Some(event.position);
+            if delta.0 != 0.0 || delta.1 != 0.0 {
+                self.view = self.view.dragged(delta);
+                self.redraw(cx);
+            }
+            return;
+        }
+
         let Some((index, what)) = self.dragging else { return };
         let Some((x, z)) = self.world_point(event.position) else { return };
         let Some(cap) = self.caps.get_mut(index) else { return };
@@ -1159,6 +1233,7 @@ impl TacticsBoard {
 
     /// Lets go of whatever the pointer had hold of.
     fn release(&mut self, cx: &mut Context<Self>) {
+        self.panning = None;
         let held = self.dragging.take().is_some();
         // A shape part way through is abandoned rather than finished somewhere
         // the reader did not put it.
@@ -1171,7 +1246,15 @@ impl TacticsBoard {
         }
     }
 
+    fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
+        let notches = event.delta.pixel_delta(window.line_height()).y.as_f32();
+        if notches != 0.0 {
+            self.zoom_about(notches, event.position, cx);
+        }
+    }
+
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        self.panning = None;
         if self.has_tool() {
             let Some(at) = self.map_point(event.position) else { return };
             let stroke = if self.drawing.is_drawing() {
@@ -1258,6 +1341,7 @@ impl TacticsBoard {
         }
         self.rasterising = true;
 
+        let view = self.view;
         let caps = self.caps.clone();
         let mut annotations = self.annotations.clone();
         // The shape under the pointer is drawn the way the finished one will
@@ -1267,7 +1351,7 @@ impl TacticsBoard {
         }
         cx.spawn(async move |this, cx| {
             let drawn = cx
-                .background_spawn(async move { rasterise(&map.space, &game_data, version, &caps, &annotations) })
+                .background_spawn(async move { rasterise(&map.space, &game_data, version, view, &caps, &annotations) })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.rasterising = false;
@@ -1343,6 +1427,7 @@ fn rasterise(
     space: &str,
     game_data: &GameDataCache,
     version: Option<wowsunpack::data::Version>,
+    view: wows_minimap_renderer::viewport::MapViewport,
     caps: &[BoardCapPoint],
     annotations: &[wt_collab_client::types::Annotation],
 ) -> Option<Arc<RenderImage>> {
@@ -1353,7 +1438,7 @@ fn rasterise(
     commands.extend(ship_ranges(annotations, game_data, version, map.space_size as f32));
     // Over the zones, so a line drawn across one is not buried under it.
     commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
-    crate::minimap_preview::render_map(space, game_data, &commands)
+    crate::minimap_preview::render_map(space, game_data, view, &commands)
 }
 
 /// The range circles the placed ships show.
@@ -1795,6 +1880,7 @@ impl TacticsBoard {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .on_scroll_wheel(cx.listener(Self::on_scroll))
             .into_any_element()
     }
 
@@ -1995,6 +2081,28 @@ mod coordinate_tests {
         let pressed = map.minimap_to_world_f32(drawn.x, drawn.y, MINIMAP_SIZE);
         let away = ((pressed.x - cap.world_x).powi(2) + (pressed.z - cap.world_z).powi(2)).sqrt();
         assert!(away < 1.0, "the press is {away} units from the zone it was aimed at");
+    }
+
+    /// A press is read against the part of the map on screen, so a zoomed board
+    /// still lands where it looks like it lands.
+    #[test]
+    fn a_press_is_read_through_the_window_the_map_is_drawn_in() {
+        use wows_minimap_renderer::viewport::MapViewport;
+
+        let whole = MapViewport::default();
+        assert_eq!(whole.to_map(100.0, 200.0), (100.0, 200.0), "the whole map draws itself one to one");
+
+        // Zoomed about the centre, a point drawn at the centre is still the
+        // centre of the map.
+        let middle = MINIMAP_SIZE as f32 / 2.0;
+        let zoomed = whole.zoomed_about(whole.zoom() * 2.0, (middle, middle));
+        let (x, y) = zoomed.to_map(middle, middle);
+        assert!((x - middle).abs() < 0.01 && (y - middle).abs() < 0.01, "the centre moved to ({x}, {y})");
+
+        // And a point off to one side is nearer the centre in map space than it
+        // is on screen, which is what being zoomed in means.
+        let (x, _y) = zoomed.to_map(middle + 100.0, middle);
+        assert!(x > middle && x < middle + 100.0, "a point 100px right of centre reads as {x}");
     }
 
     /// The resize tolerance is a screen distance, so it is the same handful of
