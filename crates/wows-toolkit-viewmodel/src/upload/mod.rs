@@ -24,7 +24,7 @@ pub mod build_tracker;
 pub const RAW_UPLOAD_GRACE: SignedDuration = SignedDuration::from_secs(30 * 60);
 
 /// When a raw upload that is still waiting for results gives up waiting.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RawUploadDeadline(pub Timestamp);
 
 /// Whether a replay's packet stream carries an end-of-battle marker.

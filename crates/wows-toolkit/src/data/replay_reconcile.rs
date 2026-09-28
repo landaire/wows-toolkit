@@ -14,9 +14,9 @@ use tracing::warn;
 use crate::data::settings::DataSharingMode;
 
 /// Wall-clock instant after which an incomplete replay's raw upload proceeds
-/// without end-of-battle results.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RawUploadDeadline(pub jiff::Timestamp);
+/// without end-of-battle results. Shared with the port, which waits out the same
+/// window.
+pub use wows_toolkit_viewmodel::upload::RawUploadDeadline;
 
 /// Result of a single background parse attempt, distinguishing genuinely
 /// un-processable files from retryable conditions so the caller can blacklist

@@ -57,13 +57,15 @@ have used it.
    raw upload waits for results through) moved to
    `wows_toolkit_viewmodel::upload` with their tests.
 
-   Two things remain. The egui path still carries its own copy of those rules,
-   because this crate's `DataSharingMode` is its own type rather than the
-   viewmodel's; unifying the two lets `task/replay_upload.rs` call the shared
-   module instead. And "Send all replays to ShipBuilds" (the palette's bulk pass
-   over a whole directory, `app.rs:4712`) and the first-run consent dialogs are
-   still absent, so the setting is only acted on for battles that land while the
-   app is open.
+   The two apps now share one type and one copy of the rules: the egui crate's
+   `DataSharingMode` is the viewmodel's (re-exported from `data/settings.rs`), and
+   `task/replay_upload.rs` re-exports `decide_upload_action`,
+   `raw_replay_snapshot_state` and their types rather than restating them, keeping
+   only what is its own -- the packet-level scan and the sending. The first-run
+   consent dialogs landed with item 21. What remains is "Send all replays to
+   ShipBuilds", the palette's bulk pass over a whole directory
+   (`app.rs:4712`), so the setting is still only acted on for battles that land
+   while the app is open.
 6. ~~**Batch render.**~~ Done 2026-09-28: the menu item now runs one
    background batch (`replay_renderer::batch_export`) into a folder the reader
    picks, one file per replay, and reports how many were written and how many
