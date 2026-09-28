@@ -85,7 +85,9 @@ regex = "1"
 # Time periods for the Player Tracker window.
 jiff = "0.2"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "local-time", "time"] }
+# The rotated log file a bug report is copied from.
+tracing-appender = "0.2"
 thiserror = "2.0"
 escaper = "0.1.1"
 gettext = "0.4"

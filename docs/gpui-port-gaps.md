@@ -84,11 +84,12 @@ have used it.
     form (`app.rs:3421-3474`, `:2266-2291`, `task/networking.rs:601`,
     `cli.rs:40-155`). No released version can update into the port, and the port
     cannot tell a user a new version exists.
-12. **No crash reporting, no log file, no Copy Latest Log.** The egui app keeps
-    an hourly-rotated log and a panic log, shows a Crash Detected window with
-    the last run's backtrace, and can copy the newest log
-    (`app.rs:1569-1583`, `:3362`, `:3477`, `:3650`). The port logs to stderr
-    only (`main.rs:74-76`).
+12. ~~**No crash reporting, no log file, no Copy Latest Log.**~~ Done
+    2026-09-28: `logging.rs` writes the same hourly-rotated file beside the
+    executable and the same panic log in the shared storage directory the egui app
+    uses, the next launch reports what a crash left and offers to copy it, and the
+    palette copies the newest log. `enable_logging` governs the file and now
+    defaults on, as it does in the egui app.
 13. **No renderer or adapter control, and no process hardening.** The egui app
     resolves a six-rung ladder and remembers per machine which rung worked
     (`gpu/select.rs:19-35`, `boot.rs`), pins the Vulkan ICD
@@ -134,8 +135,8 @@ have used it.
 20. **Palette is a third of egui's.** Missing: the three cascading sub-modes
     (search a player, my matches in ship, view armor for ship,
     `ui/command_palette.rs:129-131`), Open replay directory, Import constants,
-    Refresh persisted data, Copy latest log, Index all replays, Send all replays
-    (x2). Also a seed bug: the port's "Games I died in" sends `survived:false`
+    Refresh persisted data, Index all replays, Send all replays (x2). Copy latest
+    log landed 2026-09-28. Also a seed bug: the port's "Games I died in" sends `survived:false`
     where the egui seed is loss AND not survived
     (`palette.rs:53` against `wows-toolkit-viewmodel/src/query_bar/seed.rs:108`),
     so it also returns wins the reader sank in.

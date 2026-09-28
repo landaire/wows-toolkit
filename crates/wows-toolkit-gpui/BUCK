@@ -52,6 +52,7 @@ workspace_binary(
         "//third-party/rust:tiny-skia",
         "//third-party/rust:tokio",
         "//third-party/rust:tracing",
+        "//third-party/rust:tracing-appender",
         "//third-party/rust:tracing-subscriber",
         "//third-party/rust:twitch_api",
         "//third-party/rust:unidecode",
