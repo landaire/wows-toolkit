@@ -33,6 +33,7 @@ pub mod match_stats;
 pub mod personal_rating;
 pub mod player_tracker;
 pub mod preview_dwell;
+pub mod proxy;
 pub mod query_bar;
 pub mod replay_export;
 pub mod search;

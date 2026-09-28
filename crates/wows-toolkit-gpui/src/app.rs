@@ -369,6 +369,7 @@ impl App {
             this.run_search(query.clone(), window, cx);
         });
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
+        let twitch_channel_edited = cx.subscribe(&twitch_channel_input, Self::on_twitch_channel_edited);
         let cache_dir_edited = cx.subscribe(&cache_dir_input, Self::on_cache_dir_edited);
         let collab_name_edited = cx.subscribe(&collab_name_input, Self::on_collab_name_edited);
         // `Confirm(None)` is the cleared-selection case, which this combo
@@ -420,6 +421,7 @@ impl App {
                 game_data_missing,
                 wows_dir_edited,
                 proxy_edited,
+                twitch_channel_edited,
                 cache_dir_edited,
                 collab_name_edited,
                 search_event,
@@ -665,6 +667,19 @@ impl App {
     pub fn start_player_tracker(&mut self, pool: sqlx::sqlite::SqlitePool, cx: &mut Context<Self>) {
         self.start_twitch_poll(pool.clone(), cx);
         self.player_tracker.update(cx, |tracker, cx| tracker.load_notes(pool, cx));
+    }
+
+    /// Starts the chat poll again, for a credential or channel that has just
+    /// changed.
+    ///
+    /// The running task holds the old one, so dropping it is what stops polling a
+    /// channel the reader has moved off. The egui app re-polls on the same two
+    /// edits (`task/networking.rs:746`); without this the change waits for a
+    /// restart.
+    fn restart_twitch_poll(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = settings_store::pool(cx) else { return };
+        self._twitch_poll = None;
+        self.start_twitch_poll(pool, cx);
     }
 
     /// Polls the watched channel's chat while a credential is stored.
@@ -1193,6 +1208,25 @@ impl App {
         settings_store::save(keys::PROXY_URL, &url, cx);
     }
 
+    /// Adopts the channel to watch once the edit has settled, and polls it.
+    ///
+    /// The field was seeded from the row and never written back, so a channel
+    /// typed here was watched for the session and forgotten. The poll is restarted
+    /// with it, since the running one is reading the old channel.
+    fn on_twitch_channel_edited(&mut self, state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
+        if !matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+            return;
+        }
+        let channel = state.read(cx).value().trim().to_string();
+        let Some(settings) = self.settings_mut() else { return };
+        if settings.twitch_channel == channel {
+            return;
+        }
+        settings.twitch_channel = channel.clone();
+        settings_store::save(twitch_keys::MONITORED_CHANNEL, &channel, cx);
+        self.restart_twitch_poll(cx);
+    }
+
     /// What the last credential paste did. Test-only.
     #[cfg(test)]
     pub(crate) fn twitch_paste_outcome(&self) -> Option<Result<String, String>> {
@@ -1249,6 +1283,7 @@ impl App {
                     token
                 });
                 self.twitch_paste = Some(Ok(who));
+                self.restart_twitch_poll(cx);
             }
             Err(err) => self.twitch_paste = Some(Err(err.to_string())),
         }

@@ -1,4 +1,4 @@
-load("//build-support/buck:workspace_rules.bzl", "workspace_library", "workspace_test")
+load("//build-support/buck:workspace_rules.bzl", "os_select", "workspace_library", "workspace_test")
 
 VIEWMODEL_DEPS = [
     "//crates/wows-replay-insights:wows_replay_insights",
@@ -24,12 +24,21 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:tracing",
 ]
 
+# The cfg(windows) dependency section of Cargo.toml: the Windows proxy
+# configuration `proxy::resolve_proxy` reads. Kept apart from VIEWMODEL_DEPS
+# because the test target filters that list, and a select cannot be iterated.
+VIEWMODEL_PLATFORM_DEPS = os_select(
+    macos = [],
+    linux = [],
+    windows = ["//third-party/rust:windows-registry"],
+)
+
 workspace_library(
     name = "wows_toolkit_viewmodel",
     crate = "wows_toolkit_viewmodel",
     package = "wows-toolkit-viewmodel",
     version = "0.1.0",
-    deps = VIEWMODEL_DEPS,
+    deps = VIEWMODEL_DEPS + VIEWMODEL_PLATFORM_DEPS,
 )
 
 workspace_test(
@@ -44,5 +53,5 @@ workspace_test(
            [
                "//crates/wows-toolkit-config:wows_toolkit_config_test_support",
                "//third-party/rust:tokio",
-           ],
+           ] + VIEWMODEL_PLATFORM_DEPS,
 )
