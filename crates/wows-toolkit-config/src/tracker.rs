@@ -448,6 +448,20 @@ async fn count_rows(tx: &mut sqlx::SqliteConnection) -> Result<TrackerCounts, sq
     })
 }
 
+/// Forgets every tracked player, with their names, encounters and notes.
+///
+/// What the tracker's own Clear Stats asks for. One transaction, children first,
+/// so a reader looking while it runs sees the tracker before or after and never
+/// a player whose encounters have gone.
+pub async fn clear_tracker(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *tx).await.ok();
+    for table in TABLES {
+        sqlx::query(&format!("DELETE FROM {table}")).execute(&mut *tx).await?;
+    }
+    tx.commit().await
+}
+
 /// Reclaims the space a dropped blob left behind.
 ///
 /// Best effort: `VACUUM` rewrites the whole file and cannot run while another
@@ -489,6 +503,33 @@ mod tests {
             key: Timestamp::from_second(second).expect("a second in range"),
             in_division,
         }
+    }
+
+    /// Clearing forgets every player with everything hanging off them, and
+    /// leaves a tracker that reads back empty rather than one with orphans in it.
+    #[tokio::test]
+    async fn clearing_forgets_every_player_and_their_encounters() {
+        let pool = crate::test_pool().await;
+        let write = TrackerWrite {
+            players: vec![player(1, "a note"), player(2, "another")],
+            arenas: vec![arena(1, 10, false), arena(2, 11, true)],
+            timestamps: vec![seen(1, 1_700_000_000, false), seen(2, 1_700_000_001, true)],
+            ..TrackerWrite::default()
+        };
+        apply_tracker_write(&pool, &write).await.expect("the write lands");
+
+        clear_tracker(&pool).await.expect("the clear lands");
+
+        let rows = load_tracker(&pool).await.expect("the tables read back");
+        assert!(rows.players.is_empty(), "no player is left");
+        assert!(rows.names.is_empty(), "nor an alias");
+        assert!(rows.arenas.is_empty(), "nor a battle");
+        assert!(rows.timestamps.is_empty(), "nor a sighting");
+
+        // And the tracker still takes writes afterwards, which a dropped table
+        // would not.
+        apply_tracker_write(&pool, &write).await.expect("the tracker fills again");
+        assert_eq!(load_tracker(&pool).await.expect("it reads back").players.len(), 2);
     }
 
     /// What was written is what loads back, aliases and marks included.

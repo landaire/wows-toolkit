@@ -163,9 +163,11 @@ have used it.
     (`ui/player_tracker/current_match.rs:471-473`, `:654`, `:702-710`,
     `:741-743`, `:760-771`, `:839-844`). The Detailed roster also has no
     scrollbar (`player_tracker/mod.rs:2199-2209`).
-24. **Tracker: no Clear Stats and no Populate Data From Replays**
-    (`ui/player_tracker/historical.rs:471-481`, `:518-534`). No way to wipe or
-    force-backfill.
+24. ~~**Tracker: no Clear Stats and no Populate Data From Replays.**~~ Done
+    2026-09-28: the toolbar carries both. Clear asks first and then drops every
+    player with their aliases, encounters and notes (`tracker::clear_tracker`, one
+    transaction, children first); the other re-reads the index, which is where the
+    port's rows come from in the first place.
 25. ~~**Twitch: observations are never pruned, and no re-poll on an edit.**~~
     Done 2026-09-28: a poll prunes sightings older than the same thirty days the
     egui app keeps, and pasting a credential or editing the channel restarts the
