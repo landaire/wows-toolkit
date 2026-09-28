@@ -185,6 +185,26 @@ pub fn caps_of(layouts: &CapLayoutDb, key: &CapLayoutKey) -> Vec<BoardCapPoint> 
     layouts.get(key).map(|layout| layout.points.iter().map(BoardCapPoint::from_layout).collect()).unwrap_or_default()
 }
 
+/// What a drag on a capture point is doing to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CapDrag {
+    /// Moving it across the map.
+    Move,
+    /// Widening or narrowing its zone.
+    Resize,
+}
+
+/// How close to a zone's edge a press has to land to widen it rather than move
+/// it, as a fraction of the zone's own radius.
+const RESIZE_BAND: f32 = 0.2;
+
+/// The smallest a zone can be made, in world units, so one cannot be shrunk to
+/// nothing and lost.
+const MIN_CAP_RADIUS: f32 = 50.0;
+
+/// What a capture point added by hand starts as.
+const NEW_CAP_RADIUS: f32 = 600.0;
+
 /// The board itself.
 pub struct TacticsBoard {
     focus_handle: FocusHandle,
@@ -195,6 +215,16 @@ pub struct TacticsBoard {
     modes: Vec<ModeChoice>,
     mode: Option<CapLayoutKey>,
     caps: Vec<BoardCapPoint>,
+    /// Which capture point the reader is working on, by its place in `caps`.
+    selected: Option<usize>,
+    /// The drag in progress, and what it is doing.
+    dragging: Option<(usize, CapDrag)>,
+    /// Whether the next click on the map places a capture point.
+    adding: bool,
+    /// Where the map was last painted, which is what a pointer position is
+    /// read against. `None` until it has been painted once. Shared with the
+    /// painter, which is the only thing that knows where the map landed.
+    painted: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
     drawn: Option<Arc<RenderImage>>,
@@ -217,9 +247,177 @@ impl TacticsBoard {
             modes: Vec::new(),
             mode: None,
             caps: Vec::new(),
+            selected: None,
+            dragging: None,
+            adding: false,
+            painted: std::rc::Rc::new(std::cell::Cell::new(None)),
             drawn: None,
             drawing: false,
             stale: false,
+        }
+    }
+
+    /// Where a window position falls on the map, in the map's own pixels.
+    ///
+    /// `None` before the map has been painted once, and for a position in the
+    /// margin beside a map that does not fill its element.
+    fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let bounds = self.painted.get()?;
+        let drawn = self.drawn.as_ref()?;
+        let size = drawn.size(0);
+        let (width, height) = (size.width.0 as f32, size.height.0 as f32);
+        if width <= 0.0 || height <= 0.0 {
+            return None;
+        }
+        // Drawn to fit without stretching, so one scale covers both directions.
+        let scale = (bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height);
+        let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - width * scale) / 2.0;
+        let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - height * scale) / 2.0;
+        let (x, y) = ((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale);
+        (x >= 0.0 && x < width && y >= 0.0 && y < height).then_some((x, y))
+    }
+
+    /// The map's own coordinate metadata, which is what turns a map pixel into
+    /// a world position and back.
+    fn map_info(&self) -> Option<wows_minimap_renderer::MapInfo> {
+        let map = self.map.as_ref()?;
+        let loaded = self.game_data.as_ref()?.newest_loaded()?;
+        wows_minimap_renderer::assets::load_map_info(&map.space, loaded.vfs())
+    }
+
+    /// Where a window position falls in the world.
+    fn world_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
+        let (x, y) = self.map_point(position)?;
+        let map = self.map_info()?;
+        let world = map.minimap_to_world(wows_minimap_renderer::MinimapPos { x, y }, MINIMAP_SIZE);
+        Some((world.x, world.z))
+    }
+
+    /// Which capture point a press lands on, and what it would do to it.
+    ///
+    /// A press near the edge of a zone widens it; anywhere else inside moves
+    /// it. The topmost one wins, which is the last drawn.
+    fn cap_under(&self, position: Point<Pixels>) -> Option<(usize, CapDrag)> {
+        let (x, z) = self.world_point(position)?;
+        self.caps.iter().enumerate().rev().find_map(|(index, cap)| {
+            let away = ((x - cap.world_x).powi(2) + (z - cap.world_z).powi(2)).sqrt();
+            if away > cap.radius {
+                return None;
+            }
+            let what = if away > cap.radius * (1.0 - RESIZE_BAND) { CapDrag::Resize } else { CapDrag::Move };
+            Some((index, what))
+        })
+    }
+
+    /// Whether a capture point is the reader's to move.
+    ///
+    /// Every one is: a board is a place to ask what a different layout would
+    /// look like, and the recorded one is only where that starts.
+    pub fn selected_cap(&self) -> Option<&BoardCapPoint> {
+        self.selected.and_then(|at| self.caps.get(at))
+    }
+
+    /// Whether the next click places a capture point.
+    pub fn adding(&self) -> bool {
+        self.adding
+    }
+
+    /// Turns placing capture points on or off.
+    pub fn set_adding(&mut self, adding: bool, cx: &mut Context<Self>) {
+        self.adding = adding;
+        cx.notify();
+    }
+
+    /// Places a capture point where the reader clicked.
+    fn add_cap_at(&mut self, world: (f32, f32), cx: &mut Context<Self>) {
+        // Lettered after the ones already there, so a board reads A, B, C in
+        // the order the reader placed them.
+        let index = self.caps.len();
+        self.caps.push(BoardCapPoint { index, world_x: world.0, world_z: world.1, radius: NEW_CAP_RADIUS, team: None });
+        self.selected = Some(index);
+        self.adding = false;
+        self.redraw(cx);
+    }
+
+    /// Drops the capture point the reader is working on.
+    pub fn remove_selected(&mut self, cx: &mut Context<Self>) {
+        let Some(at) = self.selected.take() else { return };
+        if at >= self.caps.len() {
+            return;
+        }
+        self.caps.remove(at);
+        // The letters follow their places, so a board with B removed reads A, B
+        // rather than A, C.
+        for (index, cap) in self.caps.iter_mut().enumerate() {
+            cap.index = index;
+        }
+        self.redraw(cx);
+    }
+
+    /// Hands the selected capture point to the next team round: nobody, the
+    /// reader's side, then the other.
+    pub fn cycle_selected_team(&mut self, cx: &mut Context<Self>) {
+        let Some(at) = self.selected else { return };
+        let Some(cap) = self.caps.get_mut(at) else { return };
+        cap.team = match cap.team.map(|team| team.raw()) {
+            None => Some(wows_replays::types::TeamId::new(0)),
+            Some(0) => Some(wows_replays::types::TeamId::new(1)),
+            Some(_) => None,
+        };
+        self.redraw(cx);
+    }
+
+    /// Takes every capture point off the board.
+    pub fn clear_caps(&mut self, cx: &mut Context<Self>) {
+        if self.caps.is_empty() {
+            return;
+        }
+        self.caps.clear();
+        self.selected = None;
+        self.redraw(cx);
+    }
+
+    fn on_mouse_down(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if event.button != MouseButton::Left {
+            return;
+        }
+        if self.adding {
+            let Some(world) = self.world_point(event.position) else { return };
+            self.add_cap_at(world, cx);
+            return;
+        }
+        match self.cap_under(event.position) {
+            Some((index, what)) => {
+                self.selected = Some(index);
+                self.dragging = Some((index, what));
+            }
+            // A click past every zone puts the selection down, which is what
+            // takes the handles off the map.
+            None => self.selected = None,
+        }
+        cx.notify();
+    }
+
+    fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let Some((index, what)) = self.dragging else { return };
+        let Some((x, z)) = self.world_point(event.position) else { return };
+        let Some(cap) = self.caps.get_mut(index) else { return };
+        match what {
+            CapDrag::Move => {
+                cap.world_x = x;
+                cap.world_z = z;
+            }
+            CapDrag::Resize => {
+                let away = ((x - cap.world_x).powi(2) + (z - cap.world_z).powi(2)).sqrt();
+                cap.radius = away.max(MIN_CAP_RADIUS);
+            }
+        }
+        self.redraw(cx);
+    }
+
+    fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.dragging.take().is_some() {
+            cx.notify();
         }
     }
 
@@ -351,6 +549,7 @@ impl TacticsBoard {
                         }),
                     )),
             )
+            .child(self.render_cap_tools(cx))
             .when(!self.modes.is_empty(), |this| {
                 this.child(
                     h_flex()
@@ -388,14 +587,8 @@ impl TacticsBoard {
 
     /// The map itself, or what is standing in its way.
     fn render_map(&self, cx: &mut Context<Self>) -> AnyElement {
-        let _ = cx;
-        match &self.drawn {
-            Some(drawn) => div()
-                .flex_1()
-                .min_h(px(0.))
-                .child(img(drawn.clone()).size_full().object_fit(ObjectFit::Contain))
-                .into_any_element(),
-            None => div()
+        let Some(drawn) = self.drawn.clone() else {
+            return div()
                 .flex_1()
                 .min_h(px(0.))
                 .flex()
@@ -408,8 +601,97 @@ impl TacticsBoard {
                 } else {
                     t!("ui.tactics.drawing").to_string()
                 })
-                .into_any_element(),
-        }
+                .into_any_element();
+        };
+
+        div()
+            .id("tactics-map")
+            .flex_1()
+            .min_h(px(0.))
+            .relative()
+            .child(img(drawn).size_full().object_fit(ObjectFit::Contain))
+            // Where the map was painted, which is what a pointer position is
+            // read against. Taken at paint time because nothing else knows it.
+            .child(
+                canvas(
+                    {
+                        let painted = std::rc::Rc::clone(&self.painted);
+                        move |bounds, _window, _cx| painted.set(Some(bounds))
+                    },
+                    |_bounds, _state, _window, _cx| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+            .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
+            .on_mouse_move(cx.listener(Self::on_mouse_move))
+            .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
+            .into_any_element()
+    }
+
+    /// What can be done to the capture points on the board.
+    fn render_cap_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let board = cx.entity();
+        let adding = self.adding;
+        let selected = self.selected_cap().cloned();
+        let has_caps = !self.caps.is_empty();
+
+        h_flex()
+            .gap_1()
+            .items_center()
+            .child(crate::ui::selectable(
+                "tactics-add-cap",
+                adding,
+                Button::new("tactics-add-cap-button")
+                    .label(t!("ui.tactics.add_cap").into_owned())
+                    .compact()
+                    .selected(adding)
+                    .on_click({
+                        let board = board.clone();
+                        move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| {
+                                let adding = !board.adding();
+                                board.set_adding(adding, cx);
+                            });
+                        }
+                    }),
+            ))
+            .when_some(selected, |this, cap| {
+                this.child(
+                    div()
+                        .text_xs()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.tactics.selected_cap", letter = cap.letter()).into_owned()),
+                )
+                .child({
+                    let board = board.clone();
+                    Button::new("tactics-cap-team").label(t!("ui.tactics.cap_team").into_owned()).compact().on_click(
+                        move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.cycle_selected_team(cx));
+                        },
+                    )
+                })
+                .child({
+                    let board = board.clone();
+                    Button::new("tactics-cap-delete")
+                        .label(t!("ui.tactics.delete_cap").into_owned())
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.remove_selected(cx));
+                        })
+                })
+            })
+            .when(has_caps, |this| {
+                this.child({
+                    let board = board.clone();
+                    Button::new("tactics-clear-caps")
+                        .label(t!("ui.tactics.clear_caps").into_owned())
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.clear_caps(cx));
+                        })
+                })
+            })
     }
 }
 
@@ -418,3 +700,78 @@ impl TacticsBoard {
 /// A build ships dozens; the strip is for reaching one, not for reading the
 /// whole list, and the rest arrive with the search the board grows next.
 const MAPS_SHOWN: usize = 40;
+
+#[cfg(test)]
+mod tests {
+    // Named rather than glob-imported: this module glob-imports gpui, whose own
+    // `test` attribute would otherwise stand in for the one these want.
+    use super::BoardCapPoint;
+    use super::CapDrag;
+    use super::ENEMY_COLOR;
+    use super::FRIENDLY_COLOR;
+    use super::NEUTRAL_COLOR;
+    use super::RESIZE_BAND;
+    use super::team_color;
+
+    fn cap(index: usize, x: f32, z: f32, radius: f32) -> BoardCapPoint {
+        BoardCapPoint { index, world_x: x, world_z: z, radius, team: None }
+    }
+
+    /// A press inside a zone moves it; one near its edge widens it. The band is
+    /// measured against that zone's own radius, so a wide zone has a wide band.
+    #[test]
+    fn a_press_near_the_edge_widens_rather_than_moves() {
+        let zone = cap(0, 0.0, 0.0, 1000.0);
+        let what = |away: f32| {
+            let outside = away > zone.radius;
+            if outside {
+                return None;
+            }
+            Some(if away > zone.radius * (1.0 - RESIZE_BAND) { CapDrag::Resize } else { CapDrag::Move })
+        };
+
+        assert_eq!(what(0.0), Some(CapDrag::Move));
+        assert_eq!(what(500.0), Some(CapDrag::Move));
+        assert_eq!(what(900.0), Some(CapDrag::Resize));
+        assert_eq!(what(1100.0), None, "a press past the zone is not on it");
+    }
+
+    /// A cap taken off the board leaves the letters running in order, so what
+    /// is left reads A, B rather than A, C.
+    #[test]
+    fn the_letters_close_up_when_one_is_removed() {
+        let mut caps = vec![cap(0, 0.0, 0.0, 100.0), cap(1, 1.0, 1.0, 100.0), cap(2, 2.0, 2.0, 100.0)];
+        caps.remove(1);
+        for (index, cap) in caps.iter_mut().enumerate() {
+            cap.index = index;
+        }
+        assert_eq!(caps.iter().map(BoardCapPoint::letter).collect::<Vec<_>>(), ["A", "B"]);
+    }
+
+    /// A zone reads by the team that holds it, and by nobody's colour when it
+    /// is neutral.
+    #[test]
+    fn a_zone_is_coloured_by_who_holds_it() {
+        assert_eq!(team_color(None), NEUTRAL_COLOR);
+        assert_eq!(team_color(Some(wows_replays::types::TeamId::new(0))), FRIENDLY_COLOR);
+        assert_eq!(team_color(Some(wows_replays::types::TeamId::new(1))), ENEMY_COLOR);
+    }
+
+    /// A layout's neutral cap is stated as a negative team, which is an absence
+    /// rather than a team to colour by.
+    #[test]
+    fn a_layouts_negative_team_reads_as_nobody() {
+        let point = wows_replay_insights::cap_layout::CapPointLayout {
+            index: 0,
+            position: wowsunpack::game_types::WorldPos2D { x: 1.0, z: 2.0 },
+            radius: wowsunpack::game_params::types::BigWorldDistance::from(600.0),
+            cp_type: wowsunpack::game_types::ControlPointType::Control,
+            team_id: -1,
+            initially_enabled: true,
+        };
+        assert_eq!(BoardCapPoint::from_layout(&point).team, None);
+
+        let held = wows_replay_insights::cap_layout::CapPointLayout { team_id: 1, ..point };
+        assert_eq!(BoardCapPoint::from_layout(&held).team, Some(wows_replays::types::TeamId::new(1)));
+    }
+}

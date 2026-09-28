@@ -1565,6 +1565,11 @@ mode = "Mode"
 pick_a_map = "Pick a map to draw on"
 drawing = "Drawing the map..."
 window_failed = "The tactics board window could not be opened"
+add_cap = "Add cap"
+selected_cap = "Cap %{letter}"
+cap_team = "Team"
+delete_cap = "Delete"
+clear_caps = "Clear caps"
 
 [ui.armor.outcome]
 penetration = "Penetration"
