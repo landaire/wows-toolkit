@@ -245,6 +245,44 @@ impl ProgressSink {
     }
 }
 
+/// Brings an older cache layout up to date and drops what nothing references.
+///
+/// Three passes the egui app runs at startup for the same reasons
+/// (`app.rs`'s game-data-cache-maintenance thread): a cache written before the
+/// content store was renamed still has its old directory, a cache written before
+/// the store existed holds whole build directories that can be deduplicated into
+/// it, and a build directory deleted by hand leaves objects nothing points at.
+///
+/// Off the UI thread and reported only to the log: nothing the reader asked for is
+/// waiting on it, and a cache that cannot be tidied still reads.
+pub fn maintain(base: PathBuf, cx: &App) {
+    cx.background_spawn(async move {
+        if !base.exists() {
+            return;
+        }
+        match wows_data_mgr::dump::migrate_cas_dir_name(&base) {
+            Ok(true) => tracing::info!("game data cache: the content store was moved to its current name"),
+            Ok(false) => {}
+            Err(err) => tracing::warn!("game data cache: the content store was not moved: {err}"),
+        }
+        match wows_data_mgr::dump::migrate_to_cas(&base) {
+            Ok(migrated) if migrated > 0 => {
+                tracing::info!(migrated, "game data cache: builds were moved into the content store")
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!("game data cache: builds were not moved into the content store: {err}"),
+        }
+        match wows_data_mgr::dump::gc_unreferenced(&base) {
+            Ok(dropped) if dropped > 0 => {
+                tracing::info!(dropped, "game data cache: objects nothing referenced were dropped")
+            }
+            Ok(_) => {}
+            Err(err) => tracing::warn!("game data cache: unreferenced objects were not dropped: {err}"),
+        }
+    })
+    .detach();
+}
+
 /// Asks the repository which cached builds have newer data.
 pub fn check_for_updates<V: 'static>(
     state: impl Fn(&mut V) -> &mut CacheState + Copy + 'static,

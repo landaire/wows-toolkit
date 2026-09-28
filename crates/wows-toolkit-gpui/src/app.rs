@@ -502,6 +502,8 @@ pub struct App {
     /// egui app throttles its own check to one per half hour for the same reason:
     /// the mapping changes when the game does, not while the app is open.
     constants_checked: bool,
+    /// Whether the game-data cache has been tidied this session.
+    cache_maintained: bool,
     /// The files being dragged over the window, while any are. What the scrim
     /// says is which of them would open, or that only one may.
     hovering_files: Option<Vec<PathBuf>>,
@@ -655,6 +657,7 @@ impl App {
             cache: game_data_cache::CacheState::default(),
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
+            cache_maintained: false,
             hovering_files: None,
             cache_said: None,
             collab_name_input,
@@ -1066,6 +1069,18 @@ impl App {
         .detach();
     }
 
+    /// Tidies the game-data cache once a session.
+    ///
+    /// After the settings have landed, because where the cache is is one of them.
+    fn poll_cache_maintenance(&mut self, cx: &mut Context<Self>) {
+        if self.cache_maintained {
+            return;
+        }
+        let Some(base) = self.cache_base() else { return };
+        self.cache_maintained = true;
+        game_data_cache::maintain(base, cx);
+    }
+
     fn poll_stats_game_data(&mut self, cx: &mut Context<Self>) {
         if self.stats_game_data_requested {
             return;
@@ -1094,6 +1109,7 @@ impl App {
     fn poll_armor_game_data(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_stats_game_data(cx);
         self.poll_constants_check(window, cx);
+        self.poll_cache_maintenance(cx);
         if self.armor_game_data_requested {
             return;
         }

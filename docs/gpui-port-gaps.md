@@ -226,13 +226,15 @@ have used it.
     Re-index Everything reads the lot again for rows an older parse got wrong, the
     unreadable-file ledger moved to `wows_toolkit_config::index::unindexable` so
     both apps share it, and the walk leaves `temp.wowsreplay` alone.
-28. **Cache housekeeping.** Done 2026-09-28 except the migrations: every
-    finished cache job says what it found, and the per-build caches
-    (`game_params_<build>.bin`, `constants_<build>.json`) are pruned for builds
-    neither the install nor the dump cache can open -- the egui app prunes on
-    installed builds alone, which would drop a dumped build's cache this port can
-    still use. Still missing: the startup migration of an old cache layout,
-    `migrate_to_cas` and `gc_unreferenced` (`app.rs:1502-1525`).
+28. ~~**Cache housekeeping.**~~ Done 2026-09-28: every finished cache job says
+    what it found, and the per-build caches (`game_params_<build>.bin`,
+    `constants_<build>.json`) are pruned for builds neither the install nor the dump
+    cache can open -- the egui app prunes on installed builds alone, which would
+    drop a dumped build's cache this port can still use. The three startup passes
+    are there too (`game_data_cache::maintain`): the content store's old directory
+    name is moved, whole build directories written before that store existed are
+    deduplicated into it, and objects nothing references are dropped, all off the UI
+    thread and reported to the log, as the egui app runs them.
 29. ~~**Preview failures say nothing.**~~ Done 2026-09-27: `PreviewError::said`
     carries the egui popup's four messages (plus one for a render failure the
     egui path cannot have), `PreviewHover` keeps the reason for the watched row,
