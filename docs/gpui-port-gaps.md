@@ -162,10 +162,23 @@ have used it.
     time when there are several. What the scrim follows is gpui's own drag: an
     entering file drag arrives as a drag of `ExternalPaths`, and a drag that leaves
     is reported as a file-drop event, which a paint-time listener takes.
-16. **Tactics Board.** ~2700 lines: map, mode and preset pickers, "Populate Caps
-    from Replays", editable capture points, ship placement, range circles
-    (`replay/minimap_view/tactics.rs:704`). Absent, and its `WindowKind` geometry
-    row is read and never used.
+16. **Tactics Board.** Done in the main 2026-09-28: the app menu opens one in a
+    window of its own, which now uses the `WindowKind::TacticsBoard` geometry row
+    that was read and never used. It is set on a map and one of that map's game
+    modes, drawn through the same renderer the battle is, and its capture points
+    are the reader's: placed, moved, widened, handed to a side and taken off
+    again. What is on it can be drawn over with the same tools and inks the
+    replay viewport draws with, ships can be placed with the range circles their
+    own params state, and the whole board saves and reopens through the preset
+    format the egui board reads and writes
+    (`wows_toolkit_viewmodel::tactics::preset`). "Populate caps from replays"
+    reads the replay directory for the layouts of the modes they were played in,
+    reporting as it goes, and writes them to the cache both apps share
+    (`wows_replay_insights::cap_layout`, moved out of the egui crate).
+
+    Not ported: zoom and pan on the board, and the collab sync that puts one
+    board in front of a whole session, which waits on item 22's client-frame
+    viewports.
 17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its
