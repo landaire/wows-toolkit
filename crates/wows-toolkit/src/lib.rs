@@ -75,10 +75,7 @@ pub use db::load_main_window_settings;
 /// unknown value may have been the one turning the policy off; defaulting there
 /// would apply an irreversible policy against a preference that said otherwise.
 pub fn load_code_integrity_preference() -> Option<hardening::CodeIntegrityPreference> {
-    match db::load_startup_setting(CODE_INTEGRITY_SETTING) {
-        Ok(stored) => Some(stored.unwrap_or_default()),
-        Err(_) => None,
-    }
+    hardening::CodeIntegrityPreference::from_startup_read(db::load_startup_setting(CODE_INTEGRITY_SETTING))
 }
 
 /// Settings key for the Code Integrity Guard preference, shared by the startup

@@ -25,6 +25,16 @@ const THICKNESS: f32 = 0.22;
 /// them here would say something this does not know.
 const COLOR: [f32; 4] = [1.0, 0.25, 0.15, 1.0];
 
+/// What the ship-centre cross is coloured (`armor_viewer/ui/tab.rs`).
+const CENTER_COLOR: [f32; 4] = [1.0, 0.85, 0.1, 1.0];
+
+/// The shortest ship-centre arm, for a model whose bounds are tiny or absent.
+const CENTER_ARM_FLOOR: f32 = 0.2;
+
+/// What fraction of the model's longest side an arm reaches, so the cross stays
+/// legible on a destroyer and does not swallow a battleship.
+const CENTER_ARM_FRACTION: f32 = 0.05;
+
 /// Markers for every hit that can be placed on the hull.
 ///
 /// A hit whose victim was not being watched at that moment carries no pose,
@@ -34,6 +44,7 @@ pub(crate) fn build_markers(
     hits: &[PreExtractedHit],
     model_center: Vec3,
     bounds: Option<(Vec3, Vec3)>,
+    opacity: f32,
 ) -> (Vec<Vertex>, Vec<u32>) {
     let center = [model_center.x, model_center.y, model_center.z];
     let bounds = bounds.map(|(low, high)| ([low.x, low.y, low.z], [high.x, high.y, high.z]));
@@ -42,23 +53,43 @@ pub(crate) fn build_markers(
     let mut indices: Vec<u32> = Vec::new();
     for hit in hits {
         let Some(at) = hull_impact::hull_impact(&hit.hit, center, bounds) else { continue };
-        push_marker(&mut vertices, &mut indices, Vec3::new(at[0], at[1], at[2]));
+        push_marker(&mut vertices, &mut indices, Vec3::new(at[0], at[1], at[2]), tinted(COLOR, opacity), ARM);
     }
     (vertices, indices)
 }
 
+/// A cross at the model's own origin.
+///
+/// Where the game measures a ship from, which is not where the hull's middle
+/// looks to be: the egui viewer draws the same three axes for the same reason
+/// (`armor_viewer/ui/tab.rs`'s `show_ship_center`).
+pub(crate) fn build_center_marker(bounds: (Vec3, Vec3)) -> (Vec<Vertex>, Vec<u32>) {
+    let (min, max) = bounds;
+    let extent = max - min;
+    let arm = (extent.x.max(extent.y).max(extent.z) * CENTER_ARM_FRACTION).max(CENTER_ARM_FLOOR);
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    push_marker(&mut vertices, &mut indices, Vec3::zeros(), CENTER_COLOR, arm);
+    (vertices, indices)
+}
+
+/// `color` at `opacity`, which is what the marker-opacity control sets.
+fn tinted(color: [f32; 4], opacity: f32) -> [f32; 4] {
+    [color[0], color[1], color[2], color[3] * opacity.clamp(0.0, 1.0)]
+}
+
 /// One cross, as three boxes about `at`.
-fn push_marker(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3) {
+fn push_marker(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, color: [f32; 4], arm: f32) {
     for axis in [Vec3::x(), Vec3::y(), Vec3::z()] {
-        push_bar(vertices, indices, at, axis);
+        push_bar(vertices, indices, at, axis, color, arm);
     }
 }
 
 /// A bar along `axis`, drawn as two crossed quads so it is visible from any
 /// angle rather than vanishing edge-on.
-fn push_bar(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, axis: Vec3) {
-    let from = at - axis * ARM;
-    let to = at + axis * ARM;
+fn push_bar(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, axis: Vec3, color: [f32; 4], arm: f32) {
+    let from = at - axis * arm;
+    let to = at + axis * arm;
     // Any axis not parallel to the bar will do to get a perpendicular from.
     let reference = if axis[1].abs() < 0.9 { Vec3::y() } else { Vec3::x() };
     let across = axis.cross(&reference).normalize();
@@ -69,7 +100,7 @@ fn push_bar(vertices: &mut Vec<Vertex>, indices: &mut Vec<u32>, at: Vec3, axis: 
         let offset = perpendicular * (THICKNESS * 0.5);
         let base = vertices.len() as u32;
         for corner in [from - offset, from + offset, to + offset, to - offset] {
-            vertices.push(Vertex { position: corner.into(), normal, color: COLOR, uv: [0.0, 0.0] });
+            vertices.push(Vertex { position: corner.into(), normal, color, uv: [0.0, 0.0] });
         }
         indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
     }
@@ -88,7 +119,7 @@ mod tests {
     fn a_marker_is_a_cross_about_the_hit() {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
-        push_marker(&mut vertices, &mut indices, Vec3::new(1.0, 2.0, 3.0));
+        push_marker(&mut vertices, &mut indices, Vec3::new(1.0, 2.0, 3.0), COLOR, ARM);
 
         assert_eq!(indices.len(), PER_HIT);
         for axis in 0..3 {
@@ -106,7 +137,7 @@ mod tests {
     fn a_bar_is_two_quads_at_right_angles() {
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
-        push_bar(&mut vertices, &mut indices, Vec3::zeros(), Vec3::x());
+        push_bar(&mut vertices, &mut indices, Vec3::zeros(), Vec3::x(), COLOR, ARM);
 
         assert_eq!(vertices.len(), 8, "two quads");
         assert_eq!(indices.len(), 12);
@@ -120,7 +151,7 @@ mod tests {
     /// would still upload.
     #[test]
     fn no_hits_draw_nothing() {
-        let (vertices, indices) = build_markers(&[], Vec3::zeros(), None);
+        let (vertices, indices) = build_markers(&[], Vec3::zeros(), None, 1.0);
         assert!(vertices.is_empty() && indices.is_empty());
     }
 }

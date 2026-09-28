@@ -61,6 +61,27 @@ fn expand(value: &str) -> String {
     String::from_utf16_lossy(&buffer[..written.saturating_sub(1) as usize])
 }
 
+/// One of the registry roots this crate reads under.
+///
+/// Named rather than passed as a handle so a caller that walks both roots does
+/// not have to hold, or be trusted with, a raw `HKEY`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Root {
+    /// The machine's own settings.
+    LocalMachine,
+    /// This reader's own settings, which shadow the machine's.
+    CurrentUser,
+}
+
+impl Root {
+    fn handle(self) -> HKEY {
+        match self {
+            Self::LocalMachine => HKEY_LOCAL_MACHINE,
+            Self::CurrentUser => HKEY_CURRENT_USER,
+        }
+    }
+}
+
 /// Owns an open registry key so every early return closes it.
 pub struct RegKey(HKEY);
 
@@ -82,26 +103,26 @@ impl RegKey {
         if status == ERROR_SUCCESS { Ok(Self(key)) } else { Err(Win32Status::new(status)) }
     }
 
+    /// Opens `path` under `root`.
+    pub fn open_under(root: Root, path: &str) -> Result<Self, Win32Status> {
+        // SAFETY: a well-known root, live for the life of the process.
+        unsafe { Self::open(root.handle(), path) }
+    }
+
     /// Opens `path` under `HKEY_LOCAL_MACHINE`, the machine's own settings.
     pub fn open_local_machine(path: &str) -> Result<Self, Win32Status> {
-        // SAFETY: a well-known root, live for the life of the process.
-        unsafe { Self::open(HKEY_LOCAL_MACHINE, path) }
+        Self::open_under(Root::LocalMachine, path)
     }
 
     /// Opens `path` under `HKEY_CURRENT_USER`, this reader's own settings.
     pub fn open_current_user(path: &str) -> Result<Self, Win32Status> {
-        // SAFETY: as above.
-        unsafe { Self::open(HKEY_CURRENT_USER, path) }
+        Self::open_under(Root::CurrentUser, path)
     }
 
     /// Opens `path` under this key.
     pub fn open_subkey(&self, path: &str) -> Result<Self, Win32Status> {
         // SAFETY: `self` is open for the length of the call.
         unsafe { Self::open(self.0, path) }
-    }
-
-    pub fn raw(&self) -> HKEY {
-        self.0
     }
 
     /// Raw value bytes and their registry type, or `None` when the value is

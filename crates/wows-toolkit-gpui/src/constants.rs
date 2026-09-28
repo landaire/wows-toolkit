@@ -57,18 +57,16 @@ pub fn is_cached(build: u32) -> bool {
     cached_path(build).is_some_and(|path| path.exists())
 }
 
-/// Drops the cached mapping for `build`, for one that turned out not to be its.
-///
-/// A mapping that does not belong to the build it was read with is worse than
-/// none: it decodes results through keys that moved, and being on disk is what
-/// stops a fresh one being fetched.
-pub fn forget(build: u32) {
-    let Some(path) = cached_path(build) else { return };
-    match std::fs::remove_file(&path) {
-        Ok(()) => tracing::info!(build, "constants: the mapping that did not fit was dropped"),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
-        Err(err) => tracing::warn!(build, %err, "constants: the mapping that did not fit could not be dropped"),
-    }
+/// Whether a mapping already on disk is fetched again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cached {
+    /// The cached mapping stands, and the repository is not asked about it.
+    Keep,
+    /// The cached mapping is replaced by whatever the repository publishes.
+    /// What is there decoded results through keys that moved, but it is only
+    /// dropped once there is something to put in its place: a reader's imported
+    /// file is the only mapping some builds will ever have.
+    Replace,
 }
 
 /// Asks whether the published mapping has moved since `known_commit`, and writes
@@ -115,13 +113,13 @@ pub const BUILDS_PER_SWEEP: usize = 8;
 /// what is left of it.
 ///
 /// Returns what became of each build it reached, in the order it reached them.
-pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cx: &App) -> Task<Vec<(u32, Fetched)>> {
+pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cached: Cached, cx: &App) -> Task<Vec<(u32, Fetched)>> {
     cx.background_spawn(async move {
         let mut outcomes = Vec::new();
         let mut fetcher = None;
 
         for (build, version) in wanted.into_iter().take(BUILDS_PER_SWEEP) {
-            if is_cached(build) {
+            if cached == Cached::Keep && is_cached(build) {
                 outcomes.push((build, Fetched::AlreadyOnDisk));
                 continue;
             }

@@ -50,9 +50,6 @@ pub enum MergeError {
 
     #[error("arena ID mismatch: replays are not from the same match (primary={primary}, merge #{index}={merge})")]
     ArenaIdMismatch { primary: ArenaId, merge: ArenaId, index: usize },
-
-    #[error("packet parse error in replay #{index}: {message}")]
-    PacketParse { index: usize, message: String },
 }
 
 /// Driver for a primary replay plus zero or more "alt" perspectives of the
@@ -66,6 +63,10 @@ pub struct MergedReplays<'res, 'data, G: ResourceLoader> {
     self_teams: Vec<Option<TeamId>>,
     last_clocks: Vec<GameClock>,
     finished: Vec<bool>,
+    /// Which streams stopped at a packet that would not parse rather than at
+    /// their end, which is what tells a battle with no results from one whose
+    /// tail was never reached.
+    truncated: Vec<bool>,
     arena_ids: Vec<Option<ArenaId>>,
     arena_validated: bool,
     total_duration: GameClock,
@@ -154,6 +155,7 @@ impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
             self_teams,
             last_clocks: vec![GameClock(0.0); replay_count],
             finished: vec![false; replay_count],
+            truncated: vec![false; replay_count],
             arena_ids: vec![None; replay_count],
             arena_validated: replay_count <= 1,
             total_duration,
@@ -205,6 +207,11 @@ impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
         self.finished.iter().all(|f| *f)
     }
 
+    /// Whether any stream ended at a packet that would not parse.
+    pub fn truncated(&self) -> bool {
+        self.truncated.iter().any(|t| *t)
+    }
+
     /// Read-only access to the merged world state. Renderers call this
     /// between [`step`](Self::step) calls to inspect the current merged view.
     pub fn world(&self) -> &BattleWorld<'res, 'data, G> {
@@ -236,7 +243,14 @@ impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
     /// Returns:
     /// - `Ok(Some(safe_clock))` after a packet was processed.
     /// - `Ok(None)` once every replay is exhausted ([`is_done`] returns true).
-    /// - `Err` on parse failure or arena-id mismatch.
+    /// - `Err` on an arena-id mismatch.
+    ///
+    /// A packet that will not parse ends that stream rather than the merge: a
+    /// recording of a battle still in progress has no readable tail, and the
+    /// single-replay path reads it the same way. [`truncated`] says afterwards
+    /// whether any stream ended that way.
+    ///
+    /// [`truncated`]: Self::truncated
     ///
     /// [`is_done`]: Self::is_done
     pub fn step(&mut self) -> Result<Option<GameClock>, MergeError> {
@@ -250,9 +264,15 @@ impl<'res, 'data, G: ResourceLoader> MergedReplays<'res, 'data, G> {
             return self.step();
         }
 
-        let packet = self.parsers[idx]
-            .parse_packet(&mut self.remainings[idx])
-            .map_err(|e| MergeError::PacketParse { index: idx, message: format!("{e:?}") })?;
+        let packet = match self.parsers[idx].parse_packet(&mut self.remainings[idx]) {
+            Ok(packet) => packet,
+            Err(err) => {
+                tracing::warn!("merge: replay #{idx} ends at an unreadable packet: {err:?}");
+                self.finished[idx] = true;
+                self.truncated[idx] = true;
+                return self.step();
+            }
+        };
         let packet_clock = packet.clock;
 
         let is_primary = idx == 0;

@@ -71,6 +71,25 @@ pub fn constants_fit(
     }
 }
 
+/// Picks the constants a build decodes with, and judges them.
+///
+/// Preference order is what both apps read from disk: the build's dump-local
+/// copy, then the versioned storage cache, then the copy embedded in this
+/// executable. The chosen value is returned whatever its fit, because it is what
+/// the rest of the build decodes with; the fit says how far the results decoded
+/// from it can be trusted.
+pub fn resolve_replay_constants(
+    dump_constants: Option<serde_json::Value>,
+    cached_constants: Option<serde_json::Value>,
+    fallback: &serde_json::Value,
+    build: u32,
+    version: Option<wowsunpack::data::Version>,
+) -> (serde_json::Value, ConstantsFit) {
+    let chosen = dump_constants.or(cached_constants).unwrap_or_else(|| fallback.clone());
+    let fit = constants_fit(&chosen, build, version);
+    (chosen, fit)
+}
+
 /// What a replay carries that its normalized report does not.
 pub struct IndexContext {
     pub arena_id: ArenaId,

@@ -122,7 +122,6 @@ impl CollabState {
         if self.token_revealed { Some(token) } else { Some("*".repeat(token.chars().count().min(32))) }
     }
 
-    /// A link a browser can join from.
     /// The link to the session on this machine, for a web client being worked on
     /// beside the app. Debug builds only, as the egui popover offers it.
     #[cfg(debug_assertions)]
@@ -144,6 +143,8 @@ impl CollabState {
             .map(|replay| SharedWindow {
                 replay_id: replay.replay_id,
                 replay_name: replay.replay_name.clone(),
+                // The protocol carries no display name as an empty string,
+                // which is the map's own name here rather than a blank label.
                 map: match replay.display_name.as_str() {
                     "" => replay.map_name.clone(),
                     named => named.to_owned(),
@@ -152,6 +153,7 @@ impl CollabState {
             .collect()
     }
 
+    /// A link a browser can join from.
     pub fn web_link(&self) -> Option<String> {
         self.token().map(|token| format!("{WEB_CLIENT_URL}#{token}"))
     }
@@ -407,7 +409,6 @@ impl SessionNotice {
     }
 }
 
-/// One participant, as the roster shows them.
 /// One battle the session is on.
 pub struct SharedWindow {
     pub replay_id: u64,
@@ -416,6 +417,7 @@ pub struct SharedWindow {
     pub map: String,
 }
 
+/// One participant, as the roster shows them.
 pub struct ConnectedPeer {
     pub user_id: u64,
     pub name: String,

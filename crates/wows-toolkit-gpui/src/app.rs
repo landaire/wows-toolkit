@@ -46,6 +46,7 @@ use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
+use crate::replay_inspector::view::ConstantsUnfit;
 use crate::replay_inspector::view::GameDataMissing;
 use crate::replay_inspector::view::ReplaySettingsChanged;
 
@@ -221,6 +222,9 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
 
 /// How long a failure may be before it is worth a window rather than a toast.
 const TOO_LONG_TO_TOAST: usize = 160;
+
+/// What a palette mode backed by the replay index says when it has no rows.
+const NOTHING_INDEXED: &str = "ui.palette.nothing_indexed";
 
 /// What a finished background job has to say, until the next draw says it.
 ///
@@ -495,8 +499,10 @@ pub struct App {
     /// The game-data cache: what is there, what is stale, and what job is
     /// running against it.
     cache: game_data_cache::CacheState,
-    /// What the last finished cache job has to say, until a draw says it.
-    job_said: Option<JobReport>,
+    /// What finished jobs have to say, until a draw says it. A list rather than
+    /// one message: two jobs can finish between draws, and the first of them is
+    /// not worth less than the second.
+    job_said: Vec<JobReport>,
     /// The builds already put to the reader as missing, so a walk that runs
     /// again does not ask about the same ones twice.
     offered_builds: std::collections::BTreeSet<u32>,
@@ -598,6 +604,13 @@ impl App {
             let GameDataMissing(missing) = event;
             this.offer_missing_game_data(missing.clone(), window, cx);
         });
+        // A mapping that does not fit means the commit this app last checked at
+        // is no answer: forget it so the newest published one is fetched rather
+        // than the repository reported unchanged.
+        let constants_unfit =
+            cx.subscribe_in(&replay_inspector, window, |this, _view, _event: &ConstantsUnfit, window, cx| {
+                this.forget_constants_commit(window, cx);
+            });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         // A "find matches" button on a tracker row asks a question the Search
@@ -661,7 +674,7 @@ impl App {
             constants_checked: false,
             cache_maintained: false,
             hovering_files: None,
-            job_said: None,
+            job_said: Vec::new(),
             collab_name_input,
             index_progress: None,
             index_outcome: None,
@@ -676,6 +689,7 @@ impl App {
                 armor_followed,
                 replay_settings_changed,
                 game_data_missing,
+                constants_unfit,
                 wows_dir_edited,
                 proxy_edited,
                 twitch_channel_edited,
@@ -907,7 +921,7 @@ impl App {
                         if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
                             tracing::warn!("game data: the download could not be planned: {reason}");
                         }
-                        this.job_said = Some(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
+                        this.job_said.push(JobReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
                         None
                     }
                 };
@@ -983,10 +997,23 @@ impl App {
                                                         .collect()
                                                 };
                                                 window.close_dialog(cx);
+                                                let Some(entity) = entity.upgrade() else { return };
+                                                // Every build in the dialog is
+                                                // answered for, ticked or not:
+                                                // the walk that follows a
+                                                // download reports the unticked
+                                                // ones as missing again, and
+                                                // offering them back is a loop
+                                                // rather than a question.
+                                                let offered = missing.clone();
+                                                entity.update(cx, |this, _cx| {
+                                                    for build in &offered {
+                                                        this.offered_builds.insert(build.build);
+                                                    }
+                                                });
                                                 if wanted.is_empty() {
                                                     return;
                                                 }
-                                                let Some(entity) = entity.upgrade() else { return };
                                                 let base = base.clone();
                                                 let proxy = proxy.clone();
                                                 entity.update(cx, |this, cx| {
@@ -1016,10 +1043,8 @@ impl App {
         proxy: String,
         cx: &mut Context<Self>,
     ) {
-        // Spent now the reader has said yes: the walk that follows a download
-        // reports whatever is still missing, and offering that again would be a
-        // loop rather than a question. A refused offer leaves the build worth
-        // asking about again.
+        // Spent now the reader has said yes. A refused offer leaves the build
+        // worth asking about again.
         for build in &missing {
             self.offered_builds.insert(build.build);
         }
@@ -1104,6 +1129,17 @@ impl App {
     /// the file decoded last year's keys against this year's results. The commit
     /// row is shared with the egui app, so whichever app checks first spares the
     /// other the request.
+    /// Drops the commit the published mappings were last checked at, and checks
+    /// again.
+    fn forget_constants_commit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(settings) = self.settings_mut() {
+            settings.constants_commit = None;
+        }
+        settings_store::save(keys::CONSTANTS_FILE_COMMIT, &None::<String>, cx);
+        self.constants_checked = false;
+        self.poll_constants_check(window, cx);
+    }
+
     fn poll_constants_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.constants_checked {
             return;
@@ -1340,7 +1376,9 @@ impl App {
     fn enter_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
         if mode == crate::palette::PaletteMode::ArmorShips {
             let entries = self.armor_ship_entries(cx);
-            self.open_palette_mode_with(entries, window, cx);
+            // Its own empty message: a ship list is empty because no build is
+            // loaded, which has nothing to do with what is indexed.
+            self.open_palette_mode_with(entries, "ui.palette.no_ship_catalogue", window, cx);
             return;
         }
 
@@ -1352,7 +1390,8 @@ impl App {
                     runtime.handle().block_on(async move { crate::palette::mode_entries(mode, &pool).await })
                 })
                 .await;
-            let _ = this.update_in(cx, |this, window, cx| this.open_palette_mode_with(read, window, cx));
+            let _ =
+                this.update_in(cx, |this, window, cx| this.open_palette_mode_with(read, NOTHING_INDEXED, window, cx));
         })
         .detach();
     }
@@ -1373,9 +1412,15 @@ impl App {
     }
 
     /// Opens the palette over a mode's rows, or says the mode has none.
-    fn open_palette_mode_with(&mut self, entries: Vec<PaletteEntry>, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_palette_mode_with(
+        &mut self,
+        entries: Vec<PaletteEntry>,
+        when_empty: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if entries.is_empty() {
-            crate::toast::warn(t!("ui.palette.nothing_indexed").into_owned(), window, cx);
+            crate::toast::warn(t!(when_empty).into_owned(), window, cx);
             return;
         }
         self.open_palette_with(Rc::new(entries), window, cx);
@@ -2031,7 +2076,7 @@ impl App {
                 this.index_outcome = Some(said.clone());
                 // Said as well as written to the Settings line: an index started
                 // from the palette finishes while the reader is somewhere else.
-                this.job_said = Some(report(said));
+                this.job_said.push(report(said));
                 cx.notify();
             });
         }));
@@ -2090,7 +2135,7 @@ impl App {
                 // A clean result said nothing at all before: the spinner stopped
                 // and the reader was left to guess. The egui app reports both
                 // answers (`app.rs:2175`).
-                self.job_said = Some(if clean {
+                self.job_said.push(if clean {
                     JobReport::ok(t!("ui.messages.game_data_up_to_date").into_owned())
                 } else {
                     JobReport::warn(t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned())
@@ -2102,7 +2147,7 @@ impl App {
             }
             game_data_cache::CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
-                self.job_said = Some(if clean {
+                self.job_said.push(if clean {
                     JobReport::ok(t!("ui.messages.game_data_cache_valid").into_owned())
                 } else {
                     JobReport::warn(t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned())
@@ -2120,7 +2165,7 @@ impl App {
                     self.cache.repair.clear();
                     self.cache.forget_stats();
                 }
-                self.job_said = Some(if failed.is_empty() {
+                self.job_said.push(if failed.is_empty() {
                     JobReport::ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned())
                 } else {
                     JobReport::failed(t!("ui.messages.game_data_download_failed").into_owned())
@@ -2133,7 +2178,7 @@ impl App {
             // for one.
             game_data_cache::CacheOutcome::Planned { .. } => {}
             game_data_cache::CacheOutcome::Failed(reason) => {
-                self.job_said = Some(JobReport::failed(reason));
+                self.job_said.push(JobReport::failed(reason));
             }
         }
         cx.notify();
@@ -3163,7 +3208,9 @@ fn open_directory(dir: &std::path::Path) {
     #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     let opener = "xdg-open";
 
-    if let Err(err) = std::process::Command::new(opener).arg(dir).spawn() {
+    let mut command = std::process::Command::new(opener);
+    command.arg(dir);
+    if let Err(err) = crate::child_process::prepare(&mut command).spawn() {
         tracing::warn!("settings: {} could not be opened: {err}", dir.display());
     }
 }
@@ -3260,7 +3307,7 @@ impl Render for App {
             }
         });
 
-        if let Some(report) = self.job_said.take() {
+        for report in std::mem::take(&mut self.job_said) {
             cx.defer_in(window, move |_this, window, cx| report.say(window, cx));
         }
 
