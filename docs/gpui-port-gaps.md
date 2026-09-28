@@ -86,12 +86,18 @@ have used it.
 
 ## Recovery: what a stuck user has no way out of
 
-11. **No updater and no About.** Startup and manual check, the release window
-    with notes, install with progress, the rename to `.old`, the relaunch, and
-    `finalize-update --replaced` with its path validation and legacy bare-path
-    form (`app.rs:3421-3474`, `:2266-2291`, `task/networking.rs:601`,
-    `cli.rs:40-155`). No released version can update into the port, and the port
-    cannot tell a user a new version exists.
+11. **The updater.** Done 2026-09-28: a startup check (when the setting says
+    so) and a manual one from the menu, the release offered with its notes, the
+    install that renames the running executable to `.old`, moves the new one in
+    and restarts it, and `finalize-update --replaced` -- accepted both as this
+    build spawns it and as the bare path every released version spawns it -- which
+    deletes only this app's own `.old` beside this executable. The version
+    comparison, the release shape and that delete rule are
+    `wows_toolkit_viewmodel::update`, shared with the egui app.
+
+    Not ported: per-byte download progress (the download is one request and the
+    reader is told it started), and About is there but has no window of its own --
+    it is a dialog.
 12. ~~**No crash reporting, no log file, no Copy Latest Log.**~~ Done
     2026-09-28: `logging.rs` writes the same hourly-rotated file beside the
     executable and the same panic log in the shared storage directory the egui app

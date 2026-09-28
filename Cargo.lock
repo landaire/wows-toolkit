@@ -14639,6 +14639,7 @@ dependencies = [
  "regex",
  "roxmltree 0.21.1",
  "rust-i18n 3.1.5",
+ "semver",
  "serde",
  "serde_json",
  "sqlx",

@@ -56,6 +56,77 @@ const DISCORD_URL: &str = "https://discord.gg/RJXjXHUj7rh";
 const PR_INFO_URL: &str = "https://wows-numbers.com/personal/rating";
 const PROJECT_URL: &str = "https://github.com/landaire/wows-toolkit";
 
+/// Asks the window's own app view to check, for a menu item that has no handle
+/// on it.
+fn check_for_update_from_menu(window: &mut Window, cx: &mut gpui_kit::App) {
+    let Some(app) =
+        window.root::<Root>().flatten().and_then(|root| root.read(cx).view().clone().downcast::<App>().ok())
+    else {
+        return;
+    };
+    app.update(cx, |app, cx| app.check_for_update(Asked::ByHand, window, cx));
+}
+
+/// Who asked for the update check.
+///
+/// A startup check that finds nothing says nothing; one the reader asked for says
+/// so, because silence would read as a check that never ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Asked {
+    AtStartup,
+    ByHand,
+}
+
+/// Offers the release, and installs it if the reader says so.
+///
+/// Installing replaces this executable and restarts it, so the dialog is the last
+/// thing this process does.
+fn offer_update(
+    release: wows_toolkit_viewmodel::update::Release,
+    asset_url: String,
+    proxy: String,
+    window: &mut Window,
+    cx: &mut gpui_kit::App,
+) {
+    let tag = release.tag_name.clone();
+    let notes = release.body.clone().unwrap_or_default();
+    // Built once, outside the builder: that closure runs on every draw of the
+    // dialog, and the release it describes does not change under one.
+    let announced = t!("ui.dialogs.update_message", tag = tag).into_owned();
+    let described =
+        if notes.trim().is_empty() { announced.clone() } else { format!("{announced}\n\n{}", notes.trim()) };
+
+    window.open_alert_dialog(cx, move |alert, _window, _cx| {
+        let asset_url = asset_url.clone();
+        let proxy = proxy.clone();
+        let described = described.clone();
+        let installing_said = announced.clone();
+        alert
+            .title(t!("ui.windows.update_available").into_owned())
+            .description(described)
+            .ok_text(t!("ui.buttons.install_update").into_owned())
+            .show_cancel(true)
+            .on_ok(move |_event, window, cx| {
+                let asset_url = asset_url.clone();
+                let proxy = proxy.clone();
+                crate::toast::info(installing_said.clone(), window, cx);
+                let installing = crate::update::install(asset_url, proxy, cx);
+                window
+                    .spawn(cx, async move |cx| {
+                        // Only a failure returns: a successful install restarts
+                        // the app from the new executable.
+                        if let Err(reason) = installing.await {
+                            let _ = cx.update(|window, cx| {
+                                crate::toast::failed(reason, window, cx);
+                            });
+                        }
+                    })
+                    .detach();
+                true
+            })
+    });
+}
+
 /// Who made this, what it is built on, and where to look next.
 ///
 /// The same lines as the egui About window (`app.rs`'s `build_about_window`),
@@ -526,6 +597,37 @@ impl App {
                 language_chosen,
             ],
         }
+    }
+
+    /// Looks for a newer release, and offers to install one.
+    ///
+    /// Asked at startup when the setting says to, and from the menu at any time.
+    /// A check nobody asked for says nothing when this build is the newest one:
+    /// the egui app reports "up to date" only for a manual check too.
+    pub(crate) fn check_for_update(&mut self, asked: Asked, window: &mut Window, cx: &mut Context<Self>) {
+        let proxy = self.proxy_url();
+        let found = crate::update::check(proxy.clone(), cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let found = found.await;
+            let _ = this.update_in(cx, |_this, window, cx| match found {
+                crate::update::Found::Newer { release, asset_url } => {
+                    offer_update(release, asset_url, proxy, window, cx)
+                }
+                crate::update::Found::UpToDate => {
+                    if asked == Asked::ByHand {
+                        crate::toast::ok(t!("ui.messages.app_up_to_date").into_owned(), window, cx);
+                    }
+                }
+                crate::update::Found::Failed(reason) => {
+                    if asked == Asked::ByHand {
+                        crate::toast::failed(t!("ui.messages.update_check_failed").into_owned(), window, cx);
+                    } else {
+                        tracing::warn!("the update check failed: {reason}");
+                    }
+                }
+            });
+        })
+        .detach();
     }
 
     /// Reports what the last run's crash left behind, once.
@@ -2609,7 +2711,12 @@ impl Render for App {
             .icon(IconName::Ellipsis)
             .tooltip(t!("ui.menu.file").to_string())
             .dropdown_menu(|menu, _window, _cx| {
-                menu.item(PopupMenuItem::new(t!("ui.menu.about").into_owned()).on_click(move |_event, window, cx| {
+                menu.item(PopupMenuItem::new(t!("ui.menu.check_updates").into_owned()).on_click(
+                    move |_event, window, cx| {
+                        check_for_update_from_menu(window, cx);
+                    },
+                ))
+                .item(PopupMenuItem::new(t!("ui.menu.about").into_owned()).on_click(move |_event, window, cx| {
                     show_about(window, cx);
                 }))
                 .separator()
