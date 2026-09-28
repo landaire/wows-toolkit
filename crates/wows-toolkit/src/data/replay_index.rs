@@ -107,7 +107,7 @@ pub fn map_rows(replay: &Replay, source_id: SourceId, indexed_at: Timestamp, fit
         results_pending: replay.battle_results_are_pending(),
         indexed_at,
         fit: match fit {
-            ConstantsFit::Exact => SharedFit::Matched,
+            ConstantsFit::Matched => SharedFit::Matched,
             ConstantsFit::Mismatched => SharedFit::Mismatched,
         },
     };
@@ -293,7 +293,7 @@ pub fn index_replay_reporting(
     let window_end = match_ts + SNIPER_WINDOW_AFTER_SECS;
 
     let results = match fit {
-        ConstantsFit::Exact => ResultsWrite::Store,
+        ConstantsFit::Matched => ResultsWrite::Store,
         ConstantsFit::Mismatched => ResultsWrite::Keep,
     };
 

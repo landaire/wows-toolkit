@@ -209,6 +209,9 @@ pub struct ReplayInspectorView {
     /// The builds whose result mapping has already been asked about this
     /// session, so a second scan does not ask again.
     constants_asked: std::collections::BTreeSet<u32>,
+    /// The builds already reported as read through the wrong mapping, so a second
+    /// replay on the same build does not say it again.
+    constants_mismatched: std::collections::BTreeSet<u32>,
     /// The bulk contribution now running, if one is: a second pass over the same
     /// directory would send everything twice.
     contributing: Option<Task<()>>,
@@ -327,6 +330,7 @@ impl ReplayInspectorView {
             auto_load_latest_replay: true,
             grouping_select,
             constants_asked: std::collections::BTreeSet::new(),
+            constants_mismatched: std::collections::BTreeSet::new(),
             contributing: None,
             _subscriptions: vec![subscription, grouping_subscription],
         }
@@ -585,6 +589,25 @@ impl ReplayInspectorView {
     fn loaded_build(&self) -> Option<u32> {
         let GameDataStatus::Ready(loaded) = &self.game_data_status else { return None };
         Some(loaded.build())
+    }
+
+    /// Says that a battle was read through the wrong mapping, and fetches the
+    /// right one.
+    ///
+    /// The stale file is dropped first: it is on disk, which is what would
+    /// otherwise stop a fresh one being fetched, and it decodes results through
+    /// keys that moved. The egui app recovers the same way
+    /// (`app.rs`'s `check_constants_version_mismatch`).
+    fn recover_constants(&mut self, build: u32, version: Option<String>, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.constants_mismatched.insert(build) {
+            return;
+        }
+        crate::toast::warn(t!("ui.messages.constants_version_mismatch").into_owned(), window, cx);
+        crate::constants::forget(build);
+        // Asked about again, whatever this session already asked: what is on disk
+        // for it has just been dropped.
+        self.constants_asked.remove(&build);
+        self.fetch_missing_constants(vec![(build, version)], window, cx);
     }
 
     /// Reads every open replay again, for a mapping or a dump that has since
@@ -1083,6 +1106,15 @@ impl ReplayInspectorView {
             let RenderRequested { path, alts } = event;
             this.render_replay_with_alts(path.clone(), alts.clone(), window, cx);
         }));
+        // A battle read through a mapping that is not its build's: said once, and
+        // the right one fetched so the next read is decoded properly.
+        self.panel_events.push(cx.subscribe_in(
+            &panel,
+            window,
+            |this, _panel, event: &super::panel::ConstantsMismatched, window, cx| {
+                this.recover_constants(event.build, event.version.clone(), window, cx);
+            },
+        ));
         self.open_panels.insert(path.clone(), panel.downgrade());
         self.current_replay = Some(path);
         self.dock_area.update(cx, |dock_area, cx| {

@@ -2977,7 +2977,7 @@ mod tests {
     /// `Exact` because these tests exercise the walk's control flow, not the
     /// fit it carries; use `read_replay_with_fit` for tests about the fit itself.
     fn read_replay(game_build: usize) -> ReadReplay {
-        read_replay_with_fit(game_build, crate::data::constants::ConstantsFit::Exact)
+        read_replay_with_fit(game_build, crate::data::constants::ConstantsFit::Matched)
     }
 
     fn read_replay_with_fit(game_build: usize, fit: crate::data::constants::ConstantsFit) -> ReadReplay {
@@ -3086,7 +3086,7 @@ mod tests {
             |_| true,
             |path| {
                 let fit =
-                    if path == Path::new("a.wowsreplay") { ConstantsFit::Exact } else { ConstantsFit::Mismatched };
+                    if path == Path::new("a.wowsreplay") { ConstantsFit::Matched } else { ConstantsFit::Mismatched };
                 Ok(read_replay_with_fit(11, fit))
             },
             |replay, _| {
@@ -3097,7 +3097,7 @@ mod tests {
 
         assert_eq!(
             seen.into_inner(),
-            vec![ConstantsFit::Exact, ConstantsFit::Mismatched],
+            vec![ConstantsFit::Matched, ConstantsFit::Mismatched],
             "each replay's fit must be the one its own read produced"
         );
     }

@@ -57,6 +57,20 @@ pub fn is_cached(build: u32) -> bool {
     cached_path(build).is_some_and(|path| path.exists())
 }
 
+/// Drops the cached mapping for `build`, for one that turned out not to be its.
+///
+/// A mapping that does not belong to the build it was read with is worse than
+/// none: it decodes results through keys that moved, and being on disk is what
+/// stops a fresh one being fetched.
+pub fn forget(build: u32) {
+    let Some(path) = cached_path(build) else { return };
+    match std::fs::remove_file(&path) {
+        Ok(()) => tracing::info!(build, "constants: the mapping that did not fit was dropped"),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => tracing::warn!(build, %err, "constants: the mapping that did not fit could not be dropped"),
+    }
+}
+
 /// Asks whether the published mapping has moved since `known_commit`, and writes
 /// it for `build` when it has.
 ///

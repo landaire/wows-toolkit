@@ -1073,7 +1073,7 @@ fn should_rebuild_for_constants(
     match source {
         crate::task::networking::VersionedConstantsSource::Downloaded => true,
         crate::task::networking::VersionedConstantsSource::AlreadyOnDisk => {
-            loaded_fit == ConstantsFit::Mismatched && on_disk_fit == ConstantsFit::Exact
+            loaded_fit == ConstantsFit::Mismatched && on_disk_fit == ConstantsFit::Matched
         }
     }
 }
@@ -6476,7 +6476,7 @@ mod versioned_constants_rebuild_tests {
         assert!(should_rebuild_for_constants(
             VersionedConstantsSource::AlreadyOnDisk,
             ConstantsFit::Mismatched,
-            ConstantsFit::Exact
+            ConstantsFit::Matched
         ));
     }
 
@@ -6496,10 +6496,10 @@ mod versioned_constants_rebuild_tests {
     /// rebuild, whatever the on-disk file's own fit says.
     #[test]
     fn an_already_exact_load_never_rebuilds_for_a_cached_reply() {
-        for on_disk_fit in [ConstantsFit::Exact, ConstantsFit::Mismatched] {
+        for on_disk_fit in [ConstantsFit::Matched, ConstantsFit::Mismatched] {
             assert!(!should_rebuild_for_constants(
                 VersionedConstantsSource::AlreadyOnDisk,
-                ConstantsFit::Exact,
+                ConstantsFit::Matched,
                 on_disk_fit
             ));
         }
@@ -6510,8 +6510,8 @@ mod versioned_constants_rebuild_tests {
     /// have changed on this run.
     #[test]
     fn a_freshly_downloaded_file_always_rebuilds() {
-        for loaded_fit in [ConstantsFit::Exact, ConstantsFit::Mismatched] {
-            for on_disk_fit in [ConstantsFit::Exact, ConstantsFit::Mismatched] {
+        for loaded_fit in [ConstantsFit::Matched, ConstantsFit::Mismatched] {
+            for on_disk_fit in [ConstantsFit::Matched, ConstantsFit::Mismatched] {
                 assert!(should_rebuild_for_constants(VersionedConstantsSource::Downloaded, loaded_fit, on_disk_fit));
             }
         }

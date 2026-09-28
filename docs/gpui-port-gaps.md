@@ -39,17 +39,21 @@ have used it.
    loading the installed build writes it to the cache on a thread of its own,
    under the version the install's `preferences.xml` names, skipping a dump
    already there, and copies this app's versioned constants in beside it.
-4. **The constants pipeline.** Done in part 2026-09-28: the port fetches as well
-   as reads. `crates/wows-toolkit-gpui/src/constants.rs` checks whether a newer
+4. ~~**The constants pipeline.**~~ Done 2026-09-28: the port fetches as well as
+   reads. `crates/wows-toolkit-gpui/src/constants.rs` checks whether a newer
    mapping has been published for the loaded build (through the shared
    `wows_data_mgr::constants::fetch_latest_constants`, which the egui networking
    thread now calls too, against the `constants_file_commit` row both apps keep),
    fetches the mapping for any listed build that has none, and imports a
    `constants.json` the reader points at from the palette. Every write is followed
    by re-reading the open replays, so the figures on screen are the ones the new
-   mapping gives. Not ported: the version-mismatch report and its recovery
-   (`app.rs:3496-3585`), so a build whose mapping does not fit is read with what
-   there is rather than saying so.
+   mapping gives. A battle read through a mapping that is not its build's is
+   reported and recovered from, once per build: the judgement moved to
+   `wows_toolkit_viewmodel::index_rows::constants_fit`, which the egui app calls
+   too, the stale file is dropped so it cannot stand in for a fetched one, and the
+   right mapping is fetched. That fit is also what the index row carries, where the
+   port used to store every row as though its mapping fitted, so results decoded
+   through keys that had moved were kept rather than suppressed.
 
 ## Trust: a control that says one thing and does another
 

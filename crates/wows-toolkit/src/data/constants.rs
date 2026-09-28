@@ -10,23 +10,9 @@ use wowsunpack::data::Version;
 /// Whether a set of replay constants was produced for the build it is being
 /// used with. Results decoded through mismatched constants read the wrong
 /// indices, so they are never persisted (see `replay_index::map_rows`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ConstantsFit {
-    Exact,
-    Mismatched,
-}
-
-/// The release a constants file declares itself to be for.
 ///
-/// `PATCH` absent reads as 0, matching the upstream manifest's
-/// `#[serde(default)]` on the same component.
-fn declared_version(constants: &Value) -> Option<Version> {
-    let block = constants.get("VERSION")?;
-    let version = block.get("VERSION")?.as_str()?;
-    let patch = block.get("PATCH").and_then(Value::as_f64).unwrap_or(0.0) as u32;
-    let build = block.get("BUILD").and_then(Value::as_u64).and_then(|b| u32::try_from(b).ok());
-    Version::from_constants_block(version, patch, build)
-}
+/// Shared with the GPUI port, which judges the same files by the same rule.
+pub use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 
 /// Judge `constants` against the build it is about to decode.
 ///
@@ -36,16 +22,7 @@ fn declared_version(constants: &Value) -> Option<Version> {
 /// the nearest-older file used when nothing better is published: still worth
 /// decoding with, never worth persisting results from.
 pub fn constants_fit(constants: &Value, build: u32, version: Option<Version>) -> ConstantsFit {
-    let Some(declared) = declared_version(constants) else {
-        return ConstantsFit::Mismatched;
-    };
-    if declared.build_number() == Some(build) {
-        return ConstantsFit::Exact;
-    }
-    match version {
-        Some(version) if declared.same_release(&version) => ConstantsFit::Exact,
-        _ => ConstantsFit::Mismatched,
-    }
+    wows_toolkit_viewmodel::index_rows::constants_fit(constants, build, version)
 }
 
 /// A `constants.json` that has been read and identified.
@@ -188,7 +165,7 @@ mod tests {
             resolve_replay_constants(Some(dump.clone()), Some(cached), &fallback, 12116141, Some(version(15, 2)));
 
         assert_eq!(chosen, dump);
-        assert_eq!(fit, ConstantsFit::Exact);
+        assert_eq!(fit, ConstantsFit::Matched);
     }
 
     #[test]
@@ -214,7 +191,7 @@ mod tests {
             resolve_replay_constants(None, Some(cached.clone()), &fallback, 12116141, Some(version(15, 2)));
 
         assert_eq!(chosen, cached);
-        assert_eq!(fit, ConstantsFit::Exact);
+        assert_eq!(fit, ConstantsFit::Matched);
     }
 
     #[test]
@@ -230,7 +207,7 @@ mod tests {
     #[test]
     fn a_matching_build_number_fits() {
         let constants = json!({ "VERSION": { "VERSION": "15.2", "BUILD": 12116141 } });
-        assert_eq!(constants_fit(&constants, 12116141, Some(version(15, 2))), ConstantsFit::Exact);
+        assert_eq!(constants_fit(&constants, 12116141, Some(version(15, 2))), ConstantsFit::Matched);
     }
 
     #[test]
@@ -246,7 +223,7 @@ mod tests {
         // under the target build, so the file keeps its origin build number.
         let constants = json!({ "VERSION": { "VERSION": "14.7", "PATCH": 1.0, "BUILD": 24477 } });
         let cn_build = Version { major: 14, minor: 7, patch: 1, build: std::num::NonZeroU32::new(25588) };
-        assert_eq!(constants_fit(&constants, 25588, Some(cn_build)), ConstantsFit::Exact);
+        assert_eq!(constants_fit(&constants, 25588, Some(cn_build)), ConstantsFit::Matched);
     }
 
     #[test]
@@ -264,7 +241,7 @@ mod tests {
         // file that omits PATCH is read the same way.
         let constants = json!({ "VERSION": { "VERSION": "15.2", "BUILD": 12116141 } });
         let build = Version { major: 15, minor: 2, patch: 0, build: std::num::NonZeroU32::new(99) };
-        assert_eq!(constants_fit(&constants, 99, Some(build)), ConstantsFit::Exact);
+        assert_eq!(constants_fit(&constants, 99, Some(build)), ConstantsFit::Matched);
     }
 
     #[test]
@@ -273,7 +250,7 @@ mod tests {
         assert_eq!(constants_fit(&constants, 3747819, Some(version(0, 10))), ConstantsFit::Mismatched);
 
         let constants = json!({ "VERSION": { "VERSION": "15.2" } });
-        assert_eq!(constants_fit(&constants, 12116141, Some(version(15, 2))), ConstantsFit::Exact);
+        assert_eq!(constants_fit(&constants, 12116141, Some(version(15, 2))), ConstantsFit::Matched);
         assert_eq!(constants_fit(&constants, 12116141, Some(version(15, 1))), ConstantsFit::Mismatched);
     }
 

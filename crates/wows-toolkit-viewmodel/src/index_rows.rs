@@ -35,6 +35,42 @@ pub enum ConstantsFit {
     Mismatched,
 }
 
+/// The release a constants file declares itself to be for.
+///
+/// `PATCH` absent reads as zero, which is what the published manifest's own
+/// default does with it.
+fn declared_version(constants: &serde_json::Value) -> Option<wowsunpack::data::Version> {
+    let block = constants.get("VERSION")?;
+    let version = block.get("VERSION")?.as_str()?;
+    let patch = block.get("PATCH").and_then(serde_json::Value::as_f64).unwrap_or(0.0) as u32;
+    let build = block.get("BUILD").and_then(serde_json::Value::as_u64).and_then(|build| u32::try_from(build).ok());
+    wowsunpack::data::Version::from_constants_block(version, patch, build)
+}
+
+/// Judges `constants` against the build they are about to decode.
+///
+/// An exact build number settles it. Otherwise they fit when they name the same
+/// release, which is how a regional client is paired with another region's file
+/// for the same release. Anything else is a mismatch, including the nearest older
+/// file used when nothing better is published: still worth decoding with, never
+/// worth storing results from.
+pub fn constants_fit(
+    constants: &serde_json::Value,
+    build: u32,
+    version: Option<wowsunpack::data::Version>,
+) -> ConstantsFit {
+    let Some(declared) = declared_version(constants) else {
+        return ConstantsFit::Mismatched;
+    };
+    if declared.build_number() == Some(build) {
+        return ConstantsFit::Matched;
+    }
+    match version {
+        Some(version) if declared.same_release(&version) => ConstantsFit::Matched,
+        _ => ConstantsFit::Mismatched,
+    }
+}
+
 /// What a replay carries that its normalized report does not.
 pub struct IndexContext {
     pub arena_id: ArenaId,
@@ -190,4 +226,50 @@ pub fn suppress_untrusted_results(rows: &mut MappedRows) {
     rows.record.self_kills = None;
     rows.record.self_pr = None;
     rows.record.results_available = false;
+}
+
+#[cfg(test)]
+mod constants_fit_tests {
+    use serde_json::json;
+    use wowsunpack::data::Version;
+
+    use super::ConstantsFit;
+    use super::constants_fit;
+
+    fn declared(version: &str, patch: u32, build: u32) -> serde_json::Value {
+        json!({ "VERSION": { "VERSION": version, "PATCH": patch, "BUILD": build } })
+    }
+
+    /// The build settles it: a mapping dumped for this build fits it whatever
+    /// else it says.
+    #[test]
+    fn the_build_number_settles_it() {
+        let mapping = declared("15.2", 0, 9_876_543);
+        assert_eq!(constants_fit(&mapping, 9_876_543, None), ConstantsFit::Matched);
+        assert_eq!(constants_fit(&mapping, 1, None), ConstantsFit::Mismatched);
+    }
+
+    /// Failing that, the release does: this is how one region's client is paired
+    /// with another region's mapping for the same release.
+    #[test]
+    fn a_mapping_from_the_same_release_fits_another_regions_build() {
+        let mapping = declared("15.2", 0, 9_876_543);
+        let other_region = Version::from_client_exe("15,2,0,9999999");
+
+        assert_eq!(constants_fit(&mapping, 9_999_999, Some(other_region)), ConstantsFit::Matched);
+
+        let next_release = Version::from_client_exe("15,3,0,9999999");
+        assert_eq!(
+            constants_fit(&mapping, 9_999_999, Some(next_release)),
+            ConstantsFit::Mismatched,
+            "the nearest older mapping is still worth decoding with, never worth storing results from"
+        );
+    }
+
+    /// A file that declares nothing cannot be shown to fit, so it does not.
+    #[test]
+    fn a_mapping_that_names_no_version_does_not_fit() {
+        assert_eq!(constants_fit(&json!({}), 1, None), ConstantsFit::Mismatched);
+        assert_eq!(constants_fit(&json!({ "VERSION": {} }), 1, None), ConstantsFit::Mismatched);
+    }
 }
