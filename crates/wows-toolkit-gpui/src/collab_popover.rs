@@ -37,6 +37,29 @@ pub trait SessionHost: 'static {
     fn token_input(&self) -> &Entity<InputState>;
 }
 
+/// The link to a locally served web client, in a debug build.
+///
+/// A release build has nothing to point at, so it offers nothing; the egui
+/// popover draws the same button under the same gate.
+#[cfg(debug_assertions)]
+fn localhost_copy<V: SessionHost + Render>(view: &V) -> Option<AnyElement> {
+    let link = view.collab().localhost_link()?;
+    Some(
+        copy_button(
+            "collab-copy-localhost",
+            t!("ui.collab.copy_localhost_link").into_owned(),
+            Copies { value: link, said: t!("ui.collab.localhost_copied").into_owned() },
+        )
+        .into_any_element(),
+    )
+}
+
+/// Nothing, in a release build: there is no locally served client to point at.
+#[cfg(not(debug_assertions))]
+fn localhost_copy<V: SessionHost + Render>(_view: &V) -> Option<AnyElement> {
+    None
+}
+
 /// The header button and the popover under it.
 ///
 /// The button carries the session's own state: an active session is what the
@@ -184,6 +207,7 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
     let token = collab.token();
     let shown_token = collab.token_display();
     let web_link = collab.web_link();
+    let shared = collab.shared_windows();
     let roster = collab.connected();
     let permissions = collab.permissions();
     let heading = if hosting { t!("ui.collab.session_active") } else { t!("ui.collab.connected_to_session") };
@@ -256,8 +280,33 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                                 t!("ui.collab.copy_web_link").into_owned(),
                                 Copies { value: link, said: t!("ui.collab.web_link_copied").into_owned() },
                             )
-                        })),
+                        }))
+                        .children(localhost_copy(view)),
                 ),
+        );
+    }
+
+    // What the session is on, so a reader knows which battle the cursors and the
+    // drawing belong to. The egui popover lists the same windows, with a button to
+    // open each; this app plays a battle back from its own copy, so a reader with
+    // the same replay opens it themselves.
+    if !shared.is_empty() {
+        body = body.child(crate::ui::rule_h(cx)).child(
+            v_flex()
+                .gap_1()
+                .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.collab.shared_windows").to_string()))
+                .children(shared.into_iter().map(|window| {
+                    h_flex()
+                        .id(SharedString::from(format!("collab-shared-{}", window.replay_id)))
+                        .test_support()
+                        .aria_label(window.replay_name.clone())
+                        .gap_1()
+                        .items_center()
+                        .text_xs()
+                        .child(crate::icons::icon(crate::icons::MONITOR))
+                        .child(div().flex_1().min_w(px(0.)).truncate().child(window.replay_name))
+                        .child(div().text_color(crate::theme::text_dim()).child(window.map))
+                })),
         );
     }
 

@@ -215,9 +215,18 @@ have used it.
 22. **Collab.** The session notifications are done (2026-09-27): `poll` returns
     typed `SessionNotice`s the header says after its draw -- started or connected
     by role, joined, left, timed out, ended, error, rejected, and the host
-    opening or closing a replay. Still missing: the Tactics Board button, the
-    shared-windows list and "Open for everyone", copy-localhost-link, and the
-    spam-protection notice (which belongs to the shared viewports).
+    opening or closing a replay. Done 2026-09-28: the popover lists what the
+    session is on (`shared_windows`), and a debug build offers the localhost link
+    beside the web one.
+
+    What the egui popover has and this does not is an Open button per shared
+    window, and with it "Open for everyone". Those exist because a peer there
+    watches the host's rendered frames; a peer here plays the battle back from its
+    own copy of the replay, which is better where they have it and impossible where
+    they do not. Closing that difference means a frame-receiving viewport
+    (`launch_client_renderer`), which is an architecture decision rather than a
+    missing control. The Tactics Board button waits on item 16, and the
+    spam-protection notice on the shared viewports.
 23. ~~**The live roster's detail.**~~ Done 2026-09-28: the hidden-profile marker is
     the eye with its own hover (and the two other absences are marked too, from the
     catalogue rather than as bare English), and the encounters cell carries the

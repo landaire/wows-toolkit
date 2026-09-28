@@ -123,6 +123,35 @@ impl CollabState {
     }
 
     /// A link a browser can join from.
+    /// The link to the session on this machine, for a web client being worked on
+    /// beside the app. Debug builds only, as the egui popover offers it.
+    #[cfg(debug_assertions)]
+    pub fn localhost_link(&self) -> Option<String> {
+        self.token().map(|token| format!("http://localhost:8080/#{token}"))
+    }
+
+    /// What the session is showing, as the host has told everyone.
+    ///
+    /// A peer in this app plays a battle back from its own copy of the replay, so
+    /// this is a list of what the session is on rather than a set of windows to
+    /// open: a reader who has the same replay can open it themselves, and one who
+    /// does not cannot be shown it (see `docs/gpui-port-gaps.md`, item 22).
+    pub fn shared_windows(&self) -> Vec<SharedWindow> {
+        let state = self.state.lock();
+        state
+            .open_replays
+            .iter()
+            .map(|replay| SharedWindow {
+                replay_id: replay.replay_id,
+                replay_name: replay.replay_name.clone(),
+                map: match replay.display_name.as_str() {
+                    "" => replay.map_name.clone(),
+                    named => named.to_owned(),
+                },
+            })
+            .collect()
+    }
+
     pub fn web_link(&self) -> Option<String> {
         self.token().map(|token| format!("{WEB_CLIENT_URL}#{token}"))
     }
@@ -379,6 +408,14 @@ impl SessionNotice {
 }
 
 /// One participant, as the roster shows them.
+/// One battle the session is on.
+pub struct SharedWindow {
+    pub replay_id: u64,
+    pub replay_name: String,
+    /// The map it is played on, translated where the host said so.
+    pub map: String,
+}
+
 pub struct ConnectedPeer {
     pub user_id: u64,
     pub name: String,
