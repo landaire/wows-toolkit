@@ -1858,6 +1858,48 @@ fn a_toast_reaches_the_screen(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// A state the reader has to fix stays on screen, and one per state: the egui
+/// app makes these permanent and closable, and arms each once, so an app that
+/// retries does not stack a column of the same complaint.
+#[gpui_kit::test]
+async fn a_stuck_state_stays_up_and_does_not_stack(cx: &mut TestAppContext) {
+    let (window, _app) = open_app_in_root(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        crate::toast::stuck("wows-dir", "the directory is not an install", window, cx);
+        crate::toast::stuck("wows-dir", "the directory is not an install", window, cx);
+        // A different state is its own message, not a replacement.
+        crate::toast::stuck("twitch-token", "the credential was refused", window, cx);
+    })
+    .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        // The toast itself, not the list it is in nor the parts it is made of.
+        let showing = gpui_kit::base::test_support::snapshots(window)
+            .into_iter()
+            .filter(|element| element.path().last().is_some_and(|id| format!("{id:?}") == "Name(\"notification\")"))
+            .count();
+        assert_eq!(showing, 2, "a repeat of one state replaces it; a different state is its own message");
+
+        // Fixed: that one comes down, the other stays.
+        crate::toast::resolved("wows-dir", window, cx);
+    })
+    .expect("the test window stays open");
+
+    // Taking one down animates it out, so the wait is for it to be gone rather
+    // than for the next frame.
+    cx.wait_for(window.into(), Duration::from_millis(500), |window, _| {
+        gpui_kit::base::test_support::snapshots(window)
+            .into_iter()
+            .filter(|element| element.path().last().is_some_and(|id| format!("{id:?}") == "Name(\"notification\")"))
+            .count()
+            == 1
+    })
+    .await;
+}
+
 /// A toast reaches the screen of a secondary window too.
 ///
 /// A popped-out panel's window is rooted in a `Shell` for exactly this: rooted

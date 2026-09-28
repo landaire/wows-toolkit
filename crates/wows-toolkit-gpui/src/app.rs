@@ -43,6 +43,10 @@ use crate::replay_inspector::GameDataStatus;
 use crate::replay_inspector::InspectorSettings;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::ReplaySettingsChanged;
+
+/// The states the app reports with a message that stays until they are fixed.
+const STUCK_WOWS_DIR: &str = "wows-dir";
+const STUCK_TWITCH_TOKEN: &str = "twitch-token";
 use crate::runtime;
 use crate::search::SearchEvent;
 use crate::search::SearchView;
@@ -575,8 +579,9 @@ impl App {
                     return;
                 }
             };
-            let _ = this.update(cx, |this, cx| {
+            let _ = this.update_in(cx, |this, window, cx| {
                 this.twitch_status = TwitchStatus::Accepted { who };
+                crate::toast::resolved(STUCK_TWITCH_TOKEN, window, cx);
                 cx.notify();
             });
             let session = std::sync::Arc::new(session);
@@ -778,7 +783,7 @@ impl App {
     /// own schedule, and nothing else on screen would show it.
     fn twitch_refused(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.twitch_status = TwitchStatus::Refused;
-        crate::toast::warn(t!("ui.messages.twitch_token_invalid").to_string(), window, cx);
+        crate::toast::stuck(STUCK_TWITCH_TOKEN, t!("ui.messages.twitch_token_invalid").to_string(), window, cx);
         cx.notify();
     }
 
@@ -1689,10 +1694,12 @@ impl App {
         // (`ui/settings_tab.rs`'s `wows_dir_invalid`).
         self.wows_dir_invalid = !path.is_empty() && !std::path::Path::new(&path).join("bin").is_dir();
         if self.wows_dir_invalid {
-            crate::toast::failed(t!("ui.messages.wows_dir_invalid").to_string(), window, cx);
+            crate::toast::stuck(STUCK_WOWS_DIR, t!("ui.messages.wows_dir_invalid").to_string(), window, cx);
             cx.notify();
             return;
         }
+
+        crate::toast::resolved(STUCK_WOWS_DIR, window, cx);
 
         let Some(settings) = self.settings_mut() else { return };
         if settings.wows_dir == path {

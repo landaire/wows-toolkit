@@ -981,7 +981,7 @@ fn column_filters_popover(entity: Entity<ReplayInspectorView>, settings: ReplayS
 }
 
 impl Render for ReplayInspectorView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dock_content: AnyElement = if self.has_opened_replay {
             self.dock_area.clone().into_any_element()
         } else {
@@ -1025,8 +1025,17 @@ impl Render for ReplayInspectorView {
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
-        // draw rather than left to grow for as long as the session runs.
-        self.collab.poll();
+        // draw rather than left to grow for as long as the session runs. What it
+        // raised is said after the draw: a message queued during one is not on
+        // the frame being drawn.
+        let notices = self.collab.poll();
+        if !notices.is_empty() {
+            cx.defer_in(window, move |_this, window, cx| {
+                for notice in notices {
+                    notice.say(window, cx);
+                }
+            });
+        }
         self.share_session_with_renderers(cx);
         let session = crate::collab_popover::render(self, &entity, cx);
         let replay_header = h_flex()

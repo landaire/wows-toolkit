@@ -151,11 +151,12 @@ have used it.
 
 ## Detail: things that are ported but thinner
 
-22. **Collab is silent.** Thirteen session notifications -- started, joined,
-    left, timed out, ended, error, rejected, connected, host opened/closed a
-    replay, spam protection -- are `tracing::info!` only (`collab.rs:283-307`
-    against `app.rs:4166-4402`). Also missing: the Tactics Board button, the
-    shared-windows list and "Open for everyone", copy-localhost-link.
+22. **Collab.** The session notifications are done (2026-09-27): `poll` returns
+    typed `SessionNotice`s the header says after its draw -- started or connected
+    by role, joined, left, timed out, ended, error, rejected, and the host
+    opening or closing a replay. Still missing: the Tactics Board button, the
+    shared-windows list and "Open for everyone", copy-localhost-link, and the
+    spam-protection notice (which belongs to the shared viewports).
 23. **The live roster lost what made it useful**: the win-rate hover comparing
     both scopes with battles and average damage, the hidden-profile eye and its
     hover (the port draws the literal English "hidden"), the PR chip and its
@@ -204,10 +205,11 @@ have used it.
     `DEFAULT_LOD` at `armor_viewer/pane.rs:710`), no Analysis window with its
     ships and trajectory tabs, no camera-perspective mode with FOV, no lighting
     colour pickers, no ship-center toggle, no marker opacity, no Save Defaults.
-32. **Toast mechanics.** No duration control, no sticky toast, no dismiss-all,
-    and no arm-once gate, so the egui app's two deliberately permanent settings
-    warnings (invalid WoWs directory, refused Twitch credential) auto-dismiss
-    here. There is also no counterpart to egui's catch-all task-error funnel
+32. **Toast mechanics.** Sticky and arm-once are done (2026-09-27):
+    `toast::stuck(key, ...)` stays up and keeps one message per state, and
+    `toast::resolved(key, ...)` takes it down when the state is fixed, which the
+    invalid directory and the refused Twitch credential both now use. Still
+    missing: a counterpart to egui's catch-all task-error funnel
     (`app.rs:2465`), so a failed background task can be entirely silent.
 33. **Small persistence holes.** Every renderer display default
     (`ui.renderer.settings.save_defaults` and its five families) is not written
