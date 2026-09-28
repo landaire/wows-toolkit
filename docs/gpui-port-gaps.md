@@ -173,12 +173,15 @@ have used it.
     seek-to-salvo, show-secondaries and sim-agrees controls
     (`replay/realtime_armor_viewer.rs:1198`, `ui.armor.realtime.*`). The hit
     pipeline is ported; the surface is not.
-19. **The menu bar and the status bar.** Done 2026-09-28: the strip's trailing
+19. ~~**The menu bar and the status bar.**~~ Done 2026-09-28: the strip's trailing
     end carries Check for Updates, About, Create Issue, Discord and Quit, and a
-    status strip along the bottom names the two jobs the app owns -- a game-data
-    cache job and an index build -- with their progress. A tab's own work (a
-    directory scan, a replay parse) is still reported by that tab rather than
-    there, where the egui panel names every background task.
+    status strip along the bottom names the jobs the app owns -- a game-data cache
+    job, a download plan and an index build -- with their progress. Where the egui
+    panel lists every background task in one place, this port reports each where
+    the work is: a directory walk and a game-data load on the listing, a replay's
+    own read in its tab, a batch render or a bulk contribution in a message it
+    rewrites as it goes, and an outcome nobody was watching for through
+    `JobReport` (item 32). Nothing runs unreported.
 20. **Palette is a third of egui's.** Still missing: the three cascading sub-modes
     (search a player, my matches in ship, view armor for ship,
     `ui/command_palette.rs:129-131`).
@@ -272,12 +275,14 @@ have used it.
     `DEFAULT_LOD` at `armor_viewer/pane.rs:710`), no Analysis window with its
     ships and trajectory tabs, no camera-perspective mode with FOV, no lighting
     colour pickers, no ship-center toggle, no marker opacity, no Save Defaults.
-32. **Toast mechanics.** Sticky and arm-once are done (2026-09-27):
-    `toast::stuck(key, ...)` stays up and keeps one message per state, and
-    `toast::resolved(key, ...)` takes it down when the state is fixed, which the
-    invalid directory and the refused Twitch credential both now use. Still
-    missing: a counterpart to egui's catch-all task-error funnel
-    (`app.rs:2465`), so a failed background task can be entirely silent.
+32. ~~**Toast mechanics.**~~ Done 2026-09-28: sticky and arm-once landed
+    2026-09-27 (`toast::stuck(key, ...)` keeps one message per state,
+    `toast::resolved(key, ...)` takes it down), and what stood in for the egui
+    app's catch-all task-error funnel is now `JobReport`: whatever a background job
+    has to say is kept until a draw can say it, so an index build started from the
+    palette reports where the reader is rather than only on the Settings tab, and
+    an auto-export that fails keeps a message up rather than logging alone. A
+    failure too long for a toast opens the error window instead (item 21).
 33. ~~**Small persistence holes.**~~ Done 2026-09-28: `SavedRenderOptions` moved
     into the renderer crate beside the options it mirrors, with `apply_to` and
     `read_from` for the two directions, so both apps store the same row through
