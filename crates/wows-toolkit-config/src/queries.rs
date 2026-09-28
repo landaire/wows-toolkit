@@ -162,6 +162,17 @@ pub async fn get_all_sent_replays(pool: &SqlitePool) -> Result<Vec<String>, sqlx
     Ok(rows.into_iter().map(|(p,)| p).collect())
 }
 
+/// Whether this replay has already been contributed.
+///
+/// Asked per replay rather than by reading the whole ledger: a directory of
+/// thousands sends one at a time, and the set would be stale by the time the
+/// second was decided.
+pub async fn sent_replay_exists(pool: &SqlitePool, path: &str) -> Result<bool, sqlx::Error> {
+    let row: Option<(i64,)> =
+        sqlx::query_as("SELECT 1 FROM sent_replays WHERE replay_path = ?1").bind(path).fetch_optional(pool).await?;
+    Ok(row.is_some())
+}
+
 /// Delete sent replays not in the given set.
 pub async fn delete_stale_sent_replays(pool: &SqlitePool, current: &[String]) -> Result<(), sqlx::Error> {
     // Build a comma-separated list of placeholders.

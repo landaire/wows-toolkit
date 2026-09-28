@@ -14,6 +14,10 @@ use crate::data::wows_data::ReplayBytes;
 use crate::ui::replay_parser::Replay;
 use crate::util::build_tracker;
 
+// The GPUI port states these rules in `wows_toolkit_viewmodel::upload`, which is
+// a copy of what is below. They converge once this crate's `DataSharingMode` is
+// the viewmodel's rather than its own type; see `docs/gpui-port-gaps.md`.
+
 /// Grace window measured from the instant this replay was first observed, not
 /// from its mtime: an archived file carries an mtime from months ago and would
 /// otherwise be past due the moment it is first indexed. When the window

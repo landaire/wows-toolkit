@@ -41,3 +41,4 @@ pub mod settings;
 pub mod stats;
 pub mod twitch;
 pub mod unpacker;
+pub mod upload;

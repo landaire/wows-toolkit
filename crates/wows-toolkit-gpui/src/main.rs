@@ -36,6 +36,7 @@ mod toast;
 mod twitch;
 mod ui;
 mod unpacker;
+mod upload;
 mod viewport;
 mod window_shell;
 

@@ -1100,6 +1100,7 @@ impl App {
         let cache_dir = settings.game_data_cache_dir.clone();
         let game_data_cache_dir = cache_dir.clone();
         let auto_dump_game_data = settings.auto_dump_game_data;
+        let data_sharing = settings.data_sharing;
         self.cache_dir_input.update(cx, |state, cx| state.set_value(cache_dir, window, cx));
         // Whatever is known about the cache belongs to the directory the old
         // settings named, which these may not.
@@ -1115,6 +1116,7 @@ impl App {
                 wows_dir,
                 game_data_cache_dir,
                 auto_dump_game_data,
+                data_sharing,
                 debug_mode,
                 replay_settings,
                 auto_load_latest_replay,
@@ -2044,6 +2046,7 @@ impl App {
         let proxy_url = settings.proxy_url.clone();
         let game_data_cache_dir = settings.game_data_cache_dir.clone();
         let auto_dump_game_data = settings.auto_dump_game_data;
+        let data_sharing = settings.data_sharing;
         let for_unpacker = path.clone();
         let for_tracker = path.clone();
         self.replay_inspector.update(cx, |view, cx| {
@@ -2051,6 +2054,7 @@ impl App {
                 wows_dir: path,
                 game_data_cache_dir,
                 auto_dump_game_data,
+                data_sharing,
                 debug_mode,
                 replay_settings,
                 auto_load_latest_replay: auto_load,

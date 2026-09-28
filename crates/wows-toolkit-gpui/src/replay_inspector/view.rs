@@ -170,6 +170,9 @@ pub struct ReplayInspectorView {
     /// `browser`; `set_grouping` keeps this copy and the stored row in step
     /// with it.
     replay_settings: ReplaySettings,
+    /// What the reader agreed to share, which decides what a finished battle
+    /// contributes. Seeded from the row the Settings tab writes.
+    data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode,
     /// `AppPreferences.auto_load_latest_replay` in the egui app: seeded from
     /// the shared config DB in `apply_settings`, then flippable at runtime via
     /// the header checkbox, and read by the directory watcher when a replay
@@ -189,6 +192,8 @@ pub struct InspectorSettings {
     /// Where the dumped builds are kept, so a replay from a build that is no
     /// longer installed can still be read. Empty is the default location.
     pub game_data_cache_dir: String,
+    /// What the reader agreed to share: nothing, their builds, or the replays.
+    pub data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode,
     /// Whether a build loaded out of the install is written to that cache.
     pub auto_dump_game_data: bool,
     pub debug_mode: bool,
@@ -271,6 +276,7 @@ impl ReplayInspectorView {
         });
 
         Self {
+            data_sharing: wows_toolkit_viewmodel::settings::DataSharingMode::default(),
             browser,
             collab: crate::collab::CollabState::default(),
             collab_name: cx
@@ -320,6 +326,7 @@ impl ReplayInspectorView {
             wows_dir,
             game_data_cache_dir,
             auto_dump_game_data,
+            data_sharing,
             debug_mode,
             replay_settings,
             auto_load_latest_replay,
@@ -339,6 +346,7 @@ impl ReplayInspectorView {
             browser.load_summaries(cx);
         });
         self.debug_mode = debug_mode;
+        self.data_sharing = data_sharing;
         self.auto_load_latest_replay = auto_load_latest_replay;
         let grouping = replay_settings.grouping;
         self.replay_settings = replay_settings;
@@ -434,6 +442,7 @@ impl ReplayInspectorView {
                 // background parser for the same reason.
                 self.auto_export_landed(path, cx);
                 self.index_landed(path, cx);
+                self.contribute_landed(path, cx);
                 if self.auto_load_latest_replay {
                     self.open_replay(path.clone(), window, cx);
                 }
@@ -492,6 +501,56 @@ impl ReplayInspectorView {
                     crate::toast::warn(said, window, cx);
                 }
             });
+        })
+        .detach();
+    }
+
+    /// Contributes a battle that has just landed, if the reader asked for that.
+    ///
+    /// This is what the data-sharing setting governs: off sends nothing, build
+    /// data sends each player's setup, and replays sends the file itself. The
+    /// rules are shared with the egui app (`wows_toolkit_viewmodel::upload`), and
+    /// so is the ledger, so a battle is contributed once however it was read.
+    fn contribute_landed(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        use wows_toolkit_viewmodel::settings::DataSharingMode;
+
+        if self.data_sharing == DataSharingMode::Off {
+            return;
+        }
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let mode = self.data_sharing;
+        // The service is reached through whatever proxy this machine is on,
+        // which `http::client` resolves; the manual setting is the app's.
+        let proxy = String::new();
+        let parse = spawn_parse(path.to_path_buf(), game_data, None, cx);
+        let named = path.to_path_buf();
+
+        cx.spawn(async move |_this, cx| {
+            let parsed = match parse.await {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    tracing::warn!(path = %named.display(), error = %err, "sharing: the replay did not parse");
+                    return;
+                }
+            };
+            let candidate = crate::upload::Candidate {
+                path: named.clone(),
+                shareable: parsed.shareable,
+                // First seen now, which is what a replay the watcher just
+                // reported is: the grace window for its results starts here.
+                first_seen: jiff::Timestamp::now(),
+            };
+            let sent = cx.update(|cx| crate::upload::contribute(candidate, mode, pool, proxy, cx));
+            match sent.await {
+                crate::upload::Outcome::Sent => {
+                    tracing::info!(path = %named.display(), "sharing: the battle was contributed")
+                }
+                crate::upload::Outcome::Failed(reason) => {
+                    tracing::warn!(path = %named.display(), %reason, "sharing: the battle was not contributed")
+                }
+                other => tracing::debug!(path = %named.display(), ?other, "sharing: nothing sent"),
+            }
         })
         .detach();
     }
@@ -1323,6 +1382,7 @@ mod tests {
             wows_dir: "G:/does-not-exist".to_string(),
             game_data_cache_dir: String::new(),
             auto_dump_game_data: false,
+            data_sharing: Default::default(),
             debug_mode: false,
             replay_settings: Default::default(),
             auto_load_latest_replay: false,
