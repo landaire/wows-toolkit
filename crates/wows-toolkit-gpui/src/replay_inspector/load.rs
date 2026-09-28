@@ -159,6 +159,9 @@ pub struct LoadedGameData {
     provider: Arc<GameMetadataProvider>,
     base_constants: GameConstants,
     vfs: VfsPath,
+    /// The build this data is for. A dump of a different build of the same
+    /// version reports its own, which is what a per-build cache is keyed by.
+    build: u32,
 }
 
 impl LoadedGameData {
@@ -167,6 +170,11 @@ impl LoadedGameData {
     /// milestones use to translate listing labels and resolve icons.
     pub fn provider(&self) -> &Arc<GameMetadataProvider> {
         &self.provider
+    }
+
+    /// The build this data is for.
+    pub fn build(&self) -> u32 {
+        self.build
     }
 
     /// This build's base `GameConstants`, before a specific replay's own
@@ -196,7 +204,7 @@ impl LoadedGameData {
         let provider = Arc::new(provider);
         let base_constants = GameConstants::from_vfs(&vfs);
 
-        Ok(Self { provider, base_constants, vfs })
+        Ok(Self { provider, base_constants, vfs, build })
     }
 
     /// Loads a build out of the game-data cache, for a replay recorded on one
@@ -242,7 +250,7 @@ impl LoadedGameData {
 
         let base_constants = GameConstants::from_vfs(&vfs);
 
-        Ok(Self { provider: Arc::new(provider), base_constants, vfs })
+        Ok(Self { provider: Arc::new(provider), base_constants, vfs, build: dump_build })
     }
 
     /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk

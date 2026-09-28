@@ -10,6 +10,7 @@ mod armor_viewer;
 mod cli;
 mod collab;
 mod collab_popover;
+mod constants;
 mod dialog;
 mod first_run;
 mod game_data_cache;

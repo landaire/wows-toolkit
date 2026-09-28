@@ -39,13 +39,17 @@ have used it.
    loading the installed build writes it to the cache on a thread of its own,
    under the version the install's `preferences.xml` names, skipping a dump
    already there, and copies this app's versioned constants in beside it.
-4. **The constants pipeline is read-only.** The egui app fetches latest and
-   per-build constants (`task/networking.rs:184-200`), detects a version
-   mismatch and recovers (`app.rs:3496-3585`), and can import a `constants.json`
-   by hand (`app.rs:3591-3644`). The port only reads
-   `constants_{build}.json` (`load.rs:387-412`). A port-only user decodes post
-   battle results through whatever mapping was last written by the egui app, with
-   no warning that it is stale.
+4. **The constants pipeline.** Done in part 2026-09-28: the port fetches as well
+   as reads. `crates/wows-toolkit-gpui/src/constants.rs` checks whether a newer
+   mapping has been published for the loaded build (through the shared
+   `wows_data_mgr::constants::fetch_latest_constants`, which the egui networking
+   thread now calls too, against the `constants_file_commit` row both apps keep),
+   fetches the mapping for any listed build that has none, and imports a
+   `constants.json` the reader points at from the palette. Every write is followed
+   by re-reading the open replays, so the figures on screen are the ones the new
+   mapping gives. Not ported: the version-mismatch report and its recovery
+   (`app.rs:3496-3585`), so a build whose mapping does not fit is read with what
+   there is rather than saying so.
 
 ## Trust: a control that says one thing and does another
 
@@ -165,9 +169,10 @@ have used it.
     there, where the egui panel names every background task.
 20. **Palette is a third of egui's.** Still missing: the three cascading sub-modes
     (search a player, my matches in ship, view armor for ship,
-    `ui/command_palette.rs:129-131`) and Import constants, which waits on item 4.
+    `ui/command_palette.rs:129-131`).
     Landed 2026-09-28: Copy latest log, Open replay directory, Index All Replays,
-    Refresh Persisted Replay Data, and both Send All Replays entries. "Games I died
+    Refresh Persisted Replay Data, Import constants, and both Send All Replays
+    entries. "Games I died
     in" now seeds `outcome:loss self.survived:false`, which is the egui seed itself
     (`query_bar::seed::games_i_died_in`) rather than a `survived:false` that also
     returned the wins the reader sank in; a test parses every seeded search and

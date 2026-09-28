@@ -34,6 +34,8 @@ pub enum PaletteAction {
     RefreshPersistedData,
     /// Contribute every listed battle, as the data-sharing setting asks.
     ContributeAllReplays(crate::upload::LedgerUse),
+    /// Take a result mapping the reader points at as the loaded build's.
+    ImportConstants,
 }
 
 /// One entry: what it is called and what it does.
@@ -86,6 +88,10 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries.push(PaletteEntry {
         label: t!("ui.replay.refresh_persisted_data").into_owned(),
         action: PaletteAction::RefreshPersistedData,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.replay.import_constants").into_owned(),
+        action: PaletteAction::ImportConstants,
     });
     entries.push(PaletteEntry {
         label: t!("ui.palette.send_all_replays").into_owned(),

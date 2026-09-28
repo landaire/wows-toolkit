@@ -370,6 +370,7 @@ fn test_settings() -> GpuiSettings {
         replay_consent_shown: true,
         language_selection_shown: true,
         suppress_gpu_encoder_warning: false,
+        constants_commit: None,
     }
 }
 

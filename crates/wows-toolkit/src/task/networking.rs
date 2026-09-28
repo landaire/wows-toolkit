@@ -6,12 +6,9 @@ use std::sync::mpsc;
 use std::time::Duration;
 use std::time::Instant;
 
-use http_body::Body;
-use http_body_util::BodyExt;
 use image::EncodableLayout;
 use octocrab::models::repos::Asset;
 use octocrab::models::repos::Release;
-use octocrab::params::repos::Reference;
 use reqwest::Url;
 use rootcause::Report;
 use rootcause::hooks::builtin_hooks::report_formatter::DefaultReportFormatter;
@@ -383,53 +380,14 @@ impl NetworkingThread {
             return;
         }
         self.last_constants_check = Some(now);
-        let result = self.runtime.block_on(async {
-            let octocrab = octocrab::instance();
-
-            let latest_commit = octocrab
-                .repos("padtrack", "wows-constants")
-                .list_commits()
-                .per_page(1)
-                .send()
-                .await
-                .ok()
-                .and_then(|mut list| list.take_items().pop())
-                .map(|commit| commit.sha);
-
-            if current_commit == latest_commit || latest_commit.is_none() {
-                return Ok(None);
-            }
-
-            match octocrab
-                .repos("padtrack", "wows-constants")
-                .raw_file(Reference::Branch("main".to_string()), "data/latest.json")
-                .await
-            {
-                Ok(response) => {
-                    let mut body = response.into_body();
-                    let mut data = Vec::with_capacity(body.size_hint().exact().unwrap_or_default() as usize);
-
-                    while let Some(frame) = body.frame().await {
-                        match frame {
-                            Ok(frame) => {
-                                if let Some(chunk) = frame.data_ref() {
-                                    data.extend_from_slice(chunk);
-                                }
-                            }
-                            Err(e) => {
-                                return Err(format!(
-                                    "failed to read constants response body: {}",
-                                    crate::util::http::error_chain(&e)
-                                ));
-                            }
-                        }
-                    }
-
-                    Ok(Some((data, latest_commit)))
-                }
-                Err(e) => Err(format!("failed to fetch constants from GitHub: {}", crate::util::http::error_chain(&e))),
-            }
-        });
+        // The fetch itself is shared with the GPUI port
+        // (`wows_data_mgr::constants::fetch_latest_constants`); what stays here is
+        // the throttle and the reply channel.
+        let result = self
+            .runtime
+            .block_on(wows_data_mgr::constants::fetch_latest_constants(current_commit.as_deref()))
+            .map(|latest| latest.map(|latest| (latest.data, latest.commit)))
+            .map_err(|err| format!("failed to fetch constants from GitHub: {err}"));
 
         match result {
             Ok(Some((data, commit))) => {

@@ -94,6 +94,9 @@ pub struct GpuiSettings {
     pub language_selection_shown: bool,
     /// Whether the notice that an export encoded in software is suppressed.
     pub suppress_gpu_encoder_warning: bool,
+    /// The commit the cached result mappings were last read at. `None` until one
+    /// has been read, which makes the first check a full one.
+    pub constants_commit: Option<String>,
 }
 
 impl GpuiSettings {
@@ -152,6 +155,8 @@ impl GpuiSettings {
             queries::get_setting::<bool>(pool, keys::LANGUAGE_SELECTION_SHOWN).await.unwrap_or(false);
         let suppress_gpu_encoder_warning =
             queries::get_setting::<bool>(pool, keys::SUPPRESS_GPU_ENCODER_WARNING).await.unwrap_or(false);
+        let constants_commit =
+            queries::get_setting::<Option<String>>(pool, keys::CONSTANTS_FILE_COMMIT).await.flatten();
 
         Self {
             zoom,
@@ -180,6 +185,7 @@ impl GpuiSettings {
             replay_consent_shown,
             language_selection_shown,
             suppress_gpu_encoder_warning,
+            constants_commit,
         }
     }
 }
