@@ -184,6 +184,11 @@ pub struct ReplayInspectorView {
 /// What the replay inspector takes from the app's settings.
 pub struct InspectorSettings {
     pub wows_dir: String,
+    /// Where the dumped builds are kept, so a replay from a build that is no
+    /// longer installed can still be read. Empty is the default location.
+    pub game_data_cache_dir: String,
+    /// Whether a build loaded out of the install is written to that cache.
+    pub auto_dump_game_data: bool,
     pub debug_mode: bool,
     pub replay_settings: ReplaySettings,
     pub auto_load_latest_replay: bool,
@@ -304,6 +309,8 @@ impl ReplayInspectorView {
     pub fn apply_settings(&mut self, settings: InspectorSettings, window: &mut Window, cx: &mut Context<Self>) {
         let InspectorSettings {
             wows_dir,
+            game_data_cache_dir,
+            auto_dump_game_data,
             debug_mode,
             replay_settings,
             auto_load_latest_replay,
@@ -343,7 +350,9 @@ impl ReplayInspectorView {
         // The kept preview renderers hold art read out of the previous
         // install's VFS, which this directory is replacing.
         crate::minimap_preview::forget_renderers();
-        let game_data = GameDataCache::new(PathBuf::from(&wows_dir));
+        let game_data = GameDataCache::new(PathBuf::from(&wows_dir))
+            .with_cache_dir(&game_data_cache_dir)
+            .with_auto_dump(auto_dump_game_data);
         self.game_data = Some(game_data.clone());
         self.game_data_status = GameDataStatus::Loading;
         let status = self.game_data_status.clone();
@@ -1166,6 +1175,8 @@ mod tests {
     fn settings() -> InspectorSettings {
         InspectorSettings {
             wows_dir: "G:/does-not-exist".to_string(),
+            game_data_cache_dir: String::new(),
+            auto_dump_game_data: false,
             debug_mode: false,
             replay_settings: Default::default(),
             auto_load_latest_replay: false,

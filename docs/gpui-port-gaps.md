@@ -16,26 +16,24 @@ have used it.
 
 ## Blocking: the port cannot do the thing it is for
 
-1. **No replay from an uninstalled build can be opened.** The egui app falls
-   back to the `wows-data-mgr` dump cache when a replay's build is not under
-   `bin/<build>` (`data/wows_data.rs:567-600`, `data/build_data.rs:378`
-   `from_dump`, cross-region version fallback, LRU eviction of non-main builds).
-   The port hard-gates on `list_available_builds` and returns
-   `UnsupportedVersion` (`replay_inspector/load.rs:91-94`, `:316`). No
-   `BuildCas`, `cas_vfs` or `BuildsIndex` reference exists in the port at all.
-   Everything below about old replays is downstream of this, and it makes the
-   port's own game-data cache section decorative.
+1. ~~**No replay from an uninstalled build can be opened.**~~ Done 2026-09-28:
+   `GameDataCache` falls back to the dump cache through `BuildCas`, keyed by
+   build and then by the replay's own version (`dump_for_build`,
+   `LoadedGameData::load_dump`), preferring the dump's rkyv params and this app's
+   own params cache over a re-parse, and reading the dump's translations. Not yet
+   ported from the egui path: the forward-only constants bridge between loaded
+   builds, and the LRU eviction of non-main builds (the port keeps every build it
+   has loaded for the session).
 2. **No download offer for a missing build.** The egui app plans and offers the
    fetch, per build, with replay counts and remote availability
    (`app.rs:583`, `:590-665` `draw_download_prompt`, `:2363-2404`,
    `task/game_data_download.rs`), then reopens the replay or re-walks the
    directory once data lands. Absent: the port calls `download_repo` only for
    builds already in the cache (`game_data_cache.rs:323`).
-3. **`auto_dump_game_data` is a checkbox over nothing.** It saves and persists
-   (`app.rs:1363`) but nothing calls `wows_data_mgr::dump::dump_renderer_data`,
-   which is what the egui app runs per build load (`task/replays.rs:308-338`).
-   A user who only ever runs the port never accumulates the cache that item 1
-   would read.
+3. ~~**`auto_dump_game_data` is a checkbox over nothing.**~~ Done 2026-09-28:
+   loading the installed build writes it to the cache on a thread of its own,
+   under the version the install's `preferences.xml` names, skipping a dump
+   already there, and copies this app's versioned constants in beside it.
 4. **The constants pipeline is read-only.** The egui app fetches latest and
    per-build constants (`task/networking.rs:184-200`), detects a version
    mismatch and recovers (`app.rs:3496-3585`), and can import a `constants.json`
