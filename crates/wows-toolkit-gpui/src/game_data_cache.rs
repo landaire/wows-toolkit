@@ -38,6 +38,9 @@ pub enum CacheJob {
     Validating,
     /// Fetching builds, either to update them or to repair them.
     Downloading,
+    /// Asking the repository what it publishes for a selection of builds, and
+    /// how much fetching them would come to.
+    Planning,
 }
 
 /// How far a job has got. Absent while a job reports no steps of its own,
@@ -164,6 +167,9 @@ pub enum CacheOutcome {
     Validated { tip: String, repair: Vec<BuildUpdateStatus> },
     /// How many builds were fetched, and which ones could not be.
     Downloaded { fetched: usize, failed: Vec<u32> },
+    /// What the repository publishes for each requested build, and how many CAS
+    /// objects the whole selection would fetch.
+    Planned { plan: download_repo::DownloadPlan },
     /// The job did not finish. Carries what to show under the controls.
     Failed(String),
 }
@@ -293,6 +299,38 @@ pub fn validate<V: 'static>(
                 CacheOutcome::Validated { tip: validated.tip, repair }
             })
             .map_err(|err| err.to_string())
+        },
+        apply,
+    );
+}
+
+/// Asks the repository what it has for each of `builds`, and what fetching them
+/// all would come to.
+///
+/// `builds` pairs each build with the version hint the replays that need it
+/// reported, which is what lets the repository answer with a nearest published
+/// build rather than nothing at all.
+pub fn plan<V: 'static>(
+    state: impl Fn(&mut V) -> &mut CacheState + Copy + 'static,
+    base: PathBuf,
+    builds: Vec<(u32, Option<String>)>,
+    proxy_url: String,
+    view: &Entity<V>,
+    cx: &mut App,
+    apply: impl FnOnce(&mut V, CacheOutcome, &mut Context<V>) + 'static,
+) {
+    run(
+        state,
+        CacheJob::Planning,
+        proxy_url,
+        view,
+        cx,
+        move |client, _progress| async move {
+            let cas_root = wows_data_mgr::cas::cas_root(&base);
+            download_repo::plan_download(&client, download_repo::DEFAULT_REPO_BASE_URL, &cas_root, &builds)
+                .await
+                .map(|plan| CacheOutcome::Planned { plan })
+                .map_err(|err| err.to_string())
         },
         apply,
     );
