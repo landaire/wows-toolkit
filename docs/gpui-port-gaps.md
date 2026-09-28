@@ -286,7 +286,7 @@ have used it.
     carries the egui popup's four messages (plus one for a render failure the
     egui path cannot have), `PreviewHover` keeps the reason for the watched row,
     and both surfaces draw it where the map would have been.
-30. **Annotation keys.** Done in part 2026-09-28: ctrl and a digit take up each
+30. ~~**Annotation keys.**~~ Done 2026-09-28: ctrl and a digit take up each
     tool in the egui board's own order, ctrl+m the measurement, escape puts the tool
     down, delete or backspace erases what is picked out, and `[`/`]` narrow and
     widen the nib between 1 and 8 as the egui board holds it. The chords are
@@ -294,10 +294,14 @@ have used it.
     egui board does, each tool button says what it is and which chord takes it up,
     and the nib has a stepper beside the inks so the bracket keys have something
     visible to move. Ctrl-click row selection in the listing was already there
-    (`handle_leaf_click`). Still missing: query-bar pill stepping with the arrows,
-    which needs the caret and selection model the egui bar has and this one does
-    not (the port's pills are a reading of the query, not handles on it). Every
-    chord in the port is a hand-rolled `on_key_down` match rather than a gpui
+    (`handle_leaf_click`). The query bar's pills step too, from 2026-09-28: Left
+    from the start of the text takes the pill before the caret and walks back
+    along them, Right walks forward and puts the caret back in the text past the
+    last one, Shift extends from wherever the run was anchored, and Delete erases
+    what is selected. It steps over the shared selection model
+    (`query_bar::select`'s `step`, `range` and `selectable_paths`), which is what
+    the egui bar walks, and a clicked pill anchors the next step. Every chord in
+    the port is still a hand-rolled `on_key_down` match rather than a gpui
     action, so none are rebindable.
 31. ~~**Armor viewer** gaps.~~ Done 2026-09-28. The export asks what it should
     contain before it asks where to write: contents, hull, level of detail,

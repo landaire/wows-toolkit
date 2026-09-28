@@ -326,6 +326,10 @@ pub struct SearchView {
     /// acts on. Cleared whenever the query is rewritten, since a path names
     /// a place in a tree that no longer exists.
     selection: Selection,
+    /// The fixed end of a multi-pill selection, and the end an arrow moves.
+    /// `None` when the caret is in the text rather than on a pill.
+    selection_anchor: Option<Vec<usize>>,
+    selection_focus: Option<Vec<usize>>,
     /// Queries a structural edit replaced, newest last.
     ///
     /// Only structural edits are recorded: typing in the bar has the text
@@ -420,6 +424,8 @@ impl SearchView {
             history: Vec::new(),
             history_walk: None,
             selection: Selection::default(),
+            selection_anchor: None,
+            selection_focus: None,
             undo: Vec::new(),
             redo: Vec::new(),
             name_cache: Default::default(),
@@ -473,6 +479,15 @@ impl SearchView {
         cx: &mut Context<Self>,
     ) {
         if edit == StructuralEdit::ToggleSelected {
+            // An arrow step afterwards carries on from the pill just clicked,
+            // which is the one the reader is looking at.
+            if self.selection.contains(&path) {
+                self.selection_anchor = None;
+                self.selection_focus = None;
+            } else {
+                self.selection_anchor = Some(path.clone());
+                self.selection_focus = Some(path.clone());
+            }
             self.selection.toggle(path);
             cx.notify();
             return;
@@ -509,7 +524,7 @@ impl SearchView {
         self.remember_for_undo(cx);
         // Every path the selection held named a place in the tree that has
         // just been rewritten.
-        self.selection.clear();
+        self.clear_pill_selection();
         self.set_query_text(query_text::print_query(&expr), window, cx);
     }
 
@@ -584,7 +599,7 @@ impl SearchView {
         let Some(previous) = self.undo.pop() else { return };
         self.redo.push(self.full_query(cx));
         // The paths a selection holds name places in the tree being replaced.
-        self.selection.clear();
+        self.clear_pill_selection();
         self.set_query_text(previous, window, cx);
     }
 
@@ -592,7 +607,7 @@ impl SearchView {
     pub(crate) fn redo_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(next) = self.redo.pop() else { return };
         self.undo.push(self.full_query(cx));
-        self.selection.clear();
+        self.clear_pill_selection();
         self.set_query_text(next, window, cx);
     }
 
@@ -661,6 +676,16 @@ impl SearchView {
             }
             // Nothing left to erase in the box, so the key means the filter
             // before the caret. The egui bar reads it the same way.
+            // Only from the start of the text: anywhere else the key belongs to
+            // the box, which is what the reader is typing in. The egui bar
+            // gates it on the same caret position.
+            "left" if self.caret_at_start(cx) => self.step_pill_selection(true, modifiers.shift, cx),
+            // And only once a pill is selected, so the key still walks the text
+            // when nothing is.
+            "right" if self.caret_at_end(cx) && !self.selection.is_empty() => {
+                self.step_pill_selection(false, modifiers.shift, cx)
+            }
+            "delete" if !self.selection.is_empty() => self.delete_at_caret(window, cx),
             "backspace" if self.query_input.read(cx).value().is_empty() => self.delete_at_caret(window, cx),
             "enter" => {
                 let Some(at) = self.completion_cursor else { return };
@@ -672,6 +697,41 @@ impl SearchView {
             }
             _ => {}
         }
+    }
+
+    /// Moves the caret onto the pill beside the one it is on, or onto the last
+    /// pill when it is still in the text.
+    ///
+    /// `extend` grows the selection from wherever it was anchored instead of
+    /// replacing it, which is how a run of filters is taken in one gesture. The
+    /// egui bar steps the same way (`ui/query_bar/mod.rs`'s `step_selection`).
+    fn step_pill_selection(&mut self, back: bool, extend: bool, cx: &mut Context<Self>) {
+        let Some(expr) = self.reading.clone() else { return };
+        let tokens = wows_toolkit_viewmodel::query_bar::tokens::tokenize(&expr, &self.name_cache);
+        let paths = select::selectable_paths(&expr, &tokens);
+        let from = self.selection_focus.clone();
+        let Some(target) = select::step(&paths, from.as_deref(), back) else {
+            // Stepping forward off the last pill puts the caret back in the
+            // text, which is where the reader was heading.
+            if !back {
+                self.selection.clear();
+                self.selection_anchor = None;
+                self.selection_focus = None;
+                cx.notify();
+            }
+            return;
+        };
+
+        if extend {
+            let anchor = self.selection_anchor.clone().unwrap_or_else(|| target.clone());
+            self.selection.set_many(select::range(&paths, &anchor, &target));
+            self.selection_anchor = Some(anchor);
+        } else {
+            self.selection.set_one(target.clone());
+            self.selection_anchor = Some(target.clone());
+        }
+        self.selection_focus = Some(target);
+        cx.notify();
     }
 
     /// Takes the pill before the caret, or the selection where there is one.
@@ -691,8 +751,27 @@ impl SearchView {
         }
         select::canonicalise(&mut expr);
         self.remember_for_undo(cx);
-        self.selection.clear();
+        self.clear_pill_selection();
         self.set_query_text(query_text::print_query(&expr), window, cx);
+    }
+
+    /// Puts the caret back in the text, with no pill under it.
+    fn clear_pill_selection(&mut self) {
+        self.selection.clear();
+        self.selection_anchor = None;
+        self.selection_focus = None;
+    }
+
+    /// Whether the text caret sits before the first character.
+    fn caret_at_start(&self, cx: &App) -> bool {
+        let input = self.query_input.read(cx);
+        input.cursor() == 0 && input.selected_range().is_empty()
+    }
+
+    /// Whether it sits after the last one.
+    fn caret_at_end(&self, cx: &App) -> bool {
+        let input = self.query_input.read(cx);
+        input.cursor() == input.value().len() && input.selected_range().is_empty()
     }
 
     /// Puts an older (positive delta) or newer query in the bar.
