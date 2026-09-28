@@ -36,6 +36,7 @@ pub(crate) mod test_support;
 pub use browser::BrowserNode;
 pub use browser::ReplayLite;
 pub use browser::build_browser_tree;
+pub use browser_view::MissingBuild;
 pub use browser_view::ReplayBrowser;
 pub use browser_view::ReplayBrowserEvent;
 pub use chat::ChatPanel;
