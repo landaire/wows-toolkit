@@ -377,6 +377,12 @@ pub struct IncomingContext {
     /// Every hit that ship takes over the whole battle, which is what the log
     /// lists: it is a reading of the battle rather than of where playback is.
     pub taken: Vec<PreExtractedHit>,
+    /// That ship's health over the battle, as the strip beside the log draws
+    /// it. `None` for a ship nothing recorded the health of.
+    pub health: Option<wows_toolkit_viewmodel::armor::health_strip::HealthStrip>,
+    /// Where playback stood when the viewer was asked for, so the strip marks it
+    /// straight away rather than waiting for playback to move.
+    pub at: Option<wows_replays::types::GameClock>,
     /// The main battery shells of every ship in the battle, so secondaries can
     /// be told apart from them. Empty is not knowledge that none are main
     /// battery, and the filter reads it that way.
@@ -408,7 +414,12 @@ pub enum RendererEvent {
     /// Separate from [`Self::ShowArmor`] because it must not pull the reader
     /// back to the armor tab: they asked for the viewer once, not on every
     /// frame.
-    ArmorFollowed { hits: Vec<PreExtractedHit>, health: Option<f32> },
+    ArmorFollowed {
+        hits: Vec<PreExtractedHit>,
+        health: Option<f32>,
+        /// Where playback has reached, which the health strip marks.
+        at: GameClock,
+    },
 }
 
 impl EventEmitter<RendererEvent> for ReplayRendererPanel {}
@@ -1125,6 +1136,8 @@ impl ReplayRendererPanel {
         // The log reads the whole battle, not the part played so far: scrubbing
         // back would otherwise take salvos out of a list nobody was scrubbing.
         incoming.taken = feed.whole_battle().to_vec();
+        incoming.health = feed.health_strip();
+        incoming.at = Some(GameClock(self.clock_of(self.at)));
         cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: feed.taken().to_vec(), incoming });
         self.armor_following = Some((entity_id, feed));
         self.close_ship_menu(cx);
@@ -1189,7 +1202,7 @@ impl ReplayRendererPanel {
             return;
         }
         let (hits, health) = (feed.taken().to_vec(), feed.health());
-        cx.emit(RendererEvent::ArmorFollowed { hits, health });
+        cx.emit(RendererEvent::ArmorFollowed { hits, health, at: clock });
     }
 
     /// The game clock frame `at` was drawn at.

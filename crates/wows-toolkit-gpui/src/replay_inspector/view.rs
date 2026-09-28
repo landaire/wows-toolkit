@@ -310,6 +310,8 @@ impl EventEmitter<ShowArmorRequested> for ReplayInspectorView {}
 
 /// Playback moved and the followed ship has taken different hits by now.
 pub struct ArmorFollowed {
+    /// Where playback has reached, which the health strip marks.
+    pub at: wows_replays::types::GameClock,
     pub hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
     pub health: Option<f32>,
 }
@@ -1451,8 +1453,8 @@ impl ReplayInspectorView {
                 hits: hits.clone(),
                 incoming: incoming.clone(),
             }),
-            RendererEvent::ArmorFollowed { hits, health } => {
-                cx.emit(ArmorFollowed { hits: hits.clone(), health: *health })
+            RendererEvent::ArmorFollowed { hits, health, at } => {
+                cx.emit(ArmorFollowed { at: *at, hits: hits.clone(), health: *health })
             }
         }
     }

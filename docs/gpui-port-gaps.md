@@ -202,7 +202,7 @@ have used it.
     The count rides on the menu item as it does there. A playback opened from that
     tab bakes through the same merge, so the map shows what the primary's team never
     saw, and an export of that playback writes what the map shows.
-18. **Realtime armor viewer.** Done in part 2026-09-28: the Incoming Fire log is
+18. **Realtime armor viewer.** Done in the main 2026-09-28: the Incoming Fire log is
     there, in the panel this port already reads its armor questions in rather
     than a window of its own. It lists what was fired at the ship salvo by salvo
     -- who fired, when its first shell landed, and what the server said each one
@@ -211,9 +211,14 @@ have used it.
     the outcome names are shared (`wows_toolkit_viewmodel::armor::incoming`),
     including `ServerOutcome`, which moved out of the egui crate.
 
-    Not ported: the health timeline strip, and the sim-agrees marker that says
-    where this port's own simulation and the server disagree (the simulation is
-    run per cast arc here, not per landed shell). Auto-scroll has nothing to
+    The health strip is there too, above the log: the ship's health across the
+    battle with a tick where each shell landed and a mark where playback has
+    reached, and a press along it moves playback to that moment. Its shape is
+    read by `wows_toolkit_viewmodel::armor::health_strip`, which both apps use.
+
+    Not ported: the sim-agrees marker that says where this port's own simulation
+    and the server disagree, which would mean running a simulation per landed
+    shell where this port runs one per cast arc. Auto-scroll has nothing to
     scroll: the log is the panel's own list rather than a pane that follows
     playback.
 19. ~~**The menu bar and the status bar.**~~ Done 2026-09-28: the strip's trailing

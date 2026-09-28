@@ -158,6 +158,9 @@ pub struct ArmorViewerPane {
     /// What was fired at the ship on screen, for the log beside it. Empty for a
     /// ship opened from the catalogue rather than from a battle.
     incoming: IncomingFire,
+    /// Where the playback feeding this viewer has reached, which the health
+    /// strip marks.
+    playback_at: Option<wows_replays::types::GameClock>,
     /// The floating Armor Thickness legend's visibility/collapsed/position
     /// state; see the module doc and `legend.rs`.
     legend: LegendState,
@@ -230,6 +233,7 @@ impl ArmorViewerPane {
             ship_loaded: false,
             pending_hits: Vec::new(),
             incoming: IncomingFire::default(),
+            playback_at: None,
             legend: LegendState::default(),
             unported_defaults: UnportedDefaults::default(),
             ship_load_generation: 0,
@@ -329,6 +333,12 @@ impl ArmorViewerPane {
             stack_panes: dock.split_axis() == Axis::Vertical,
         };
         self.sidebar.update(cx, |sidebar, cx| sidebar.set_common(common, cx));
+    }
+
+    /// Where playback is, so the health strip can mark it. `None` until the
+    /// viewer is following one.
+    pub(crate) fn playback_at(&self) -> Option<wows_replays::types::GameClock> {
+        self.playback_at
     }
 
     /// Asks the playback feeding this viewer to move to `clock`.
@@ -921,6 +931,7 @@ impl ArmorViewerPane {
         cx: &mut Context<Self>,
     ) {
         self.pending_hits = hits;
+        self.playback_at = incoming.at;
         self.incoming = IncomingFire { context: incoming, filter: IncomingFilter::default() };
         let active = self.dock.read(cx).active_viewport();
         if is_ship_already_loaded(active.read(cx).loaded_param_index(), &param_index) {
@@ -939,6 +950,7 @@ impl ArmorViewerPane {
     /// a tab they did not ask for.
     pub fn follow_hits(
         &mut self,
+        at: wows_replays::types::GameClock,
         hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
         health: Option<f32>,
         cx: &mut Context<Self>,
@@ -946,6 +958,7 @@ impl ArmorViewerPane {
         if !self.ship_loaded {
             return;
         }
+        self.playback_at = Some(at);
         let active = self.dock.read(cx).active_viewport();
         active.update(cx, |view, cx| {
             view.set_hit_health(health, cx);

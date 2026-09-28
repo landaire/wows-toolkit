@@ -330,6 +330,7 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
         .border_t_1()
         .border_color(cx.theme().border)
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.realtime.incoming_fire").to_string()))
+        .children(incoming.context.health.clone().map(|strip| render_health_strip(pane, strip, view.playback_at())))
         .child(
             div()
                 .text_xs()
@@ -379,6 +380,114 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
                 .into_any_element()
         })
         .into_any_element()
+}
+
+/// This ship's health over the battle, with what landed on it and where
+/// playback has reached. A press along it moves playback there.
+///
+/// The egui panel draws the same strip above its own log
+/// (`replay/realtime_armor_viewer.rs`'s `draw_health_timeline`); the shape comes
+/// from the reading both apps share.
+fn render_health_strip(
+    pane: &Entity<ArmorViewerPane>,
+    strip: wows_toolkit_viewmodel::armor::health_strip::HealthStrip,
+    at: Option<GameClock>,
+) -> AnyElement {
+    let pressing = pane.clone();
+    let seeking = strip.clone();
+
+    div()
+        .id("armor-incoming-health")
+        .h(STRIP_HEIGHT)
+        .w_full()
+        .relative()
+        .child(
+            canvas(|_bounds, _window, _cx| {}, {
+                let strip = strip.clone();
+                move |bounds, _state, window, _cx| paint_health_strip(&strip, at, bounds, window)
+            })
+            .absolute()
+            .inset_0(),
+        )
+        .on_mouse_down(MouseButton::Left, move |event: &MouseDownEvent, _window, cx: &mut App| {
+            // Where along the strip the press landed, which is the moment it
+            // names. The strip fills its element, so its own width is the one
+            // the press is measured against.
+            let Some(bounds) = STRIP_BOUNDS.with(|held| held.get()) else { return };
+            let width = bounds.size.width.as_f32();
+            if width <= 0.0 {
+                return;
+            }
+            let along = (event.position.x.as_f32() - bounds.origin.x.as_f32()) / width;
+            let clock = seeking.clock_at(along);
+            pressing.update(cx, |pane, cx| pane.seek_to(clock, cx));
+        })
+        .into_any_element()
+}
+
+/// How tall the health strip is drawn.
+const STRIP_HEIGHT: Pixels = px(60.);
+
+thread_local! {
+    /// Where the strip was last painted, so a press on it can be measured.
+    /// One board's strip at a time, which is what one window draws.
+    static STRIP_BOUNDS: std::cell::Cell<Option<Bounds<Pixels>>> = const { std::cell::Cell::new(None) };
+}
+
+/// Draws the strip: what landed, the health line, and where playback is.
+fn paint_health_strip(
+    strip: &wows_toolkit_viewmodel::armor::health_strip::HealthStrip,
+    at: Option<GameClock>,
+    bounds: Bounds<Pixels>,
+    window: &mut Window,
+) {
+    STRIP_BOUNDS.with(|held| held.set(Some(bounds)));
+
+    let semantic = crate::theme::semantic();
+    let (left, top) = (bounds.origin.x.as_f32(), bounds.origin.y.as_f32());
+    let (width, height) = (bounds.size.width.as_f32(), bounds.size.height.as_f32());
+    // The ticks sit in a band along the bottom, and the line is drawn above it.
+    let tick_height = height * 0.2;
+    let line_height = height - tick_height;
+
+    window.paint_quad(fill(bounds, rgb(semantic.text_faint).opacity(0.15)));
+
+    for along in &strip.hits {
+        let x = left + along * width;
+        window.paint_quad(fill(
+            Bounds { origin: point(px(x), px(top + height - tick_height)), size: size(px(1.), px(tick_height)) },
+            rgb(semantic.armor_pen).opacity(0.55),
+        ));
+    }
+
+    // Drawn as a run of short bars rather than a stroked path: what the strip
+    // says is where the health stepped, and a bar per step says it without a
+    // path type this viewport has no other use for.
+    for pair in strip.line.windows(2) {
+        let (from, to) = (pair[0], pair[1]);
+        let (x0, x1) = (left + from.0 * width, left + to.0 * width);
+        let y = top + line_height - from.1 * line_height;
+        window.paint_quad(fill(
+            Bounds { origin: point(px(x0), px(y)), size: size(px((x1 - x0).max(1.0)), px(1.5)) },
+            rgb(semantic.ok),
+        ));
+        // The step down to the next reading, so a shell that took a third of
+        // the ship reads as a drop rather than a slope.
+        let next_y = top + line_height - to.1 * line_height;
+        let (high, low) = if next_y < y { (next_y, y) } else { (y, next_y) };
+        window.paint_quad(fill(
+            Bounds { origin: point(px(x1), px(high)), size: size(px(1.5), px((low - high).max(1.0))) },
+            rgb(semantic.ok),
+        ));
+    }
+
+    if let Some(at) = at {
+        let x = left + strip.along(at) * width;
+        window.paint_quad(fill(
+            Bounds { origin: point(px(x), px(top)), size: size(px(1.5), px(height)) },
+            rgb(semantic.text_strong),
+        ));
+    }
 }
 
 /// How far the salvo log runs before it scrolls.
