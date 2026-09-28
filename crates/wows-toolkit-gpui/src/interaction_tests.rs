@@ -986,6 +986,47 @@ fn a_query_that_does_not_parse_is_reported_rather_than_searched_for(cx: &mut Tes
     .expect("the test window stays open");
 }
 
+/// A file dragged over the window says what letting go would do, and the scrim
+/// goes once the drag does.
+#[gpui_kit::test]
+fn a_hovering_file_is_named_on_the_scrim(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    window
+        .update(cx, |app, _window, cx| {
+            assert!(app.drop_scrim().is_none(), "nothing hovers, so nothing is drawn over the window");
+            app.note_hovering_files(vec![PathBuf::from("G:/replays/20260928_105501_PJSB018-Yamato.wowsreplay")], cx);
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let said = window.find("app-drop-scrim").label().unwrap_or_default().to_string();
+        assert!(said.contains("Yamato"), "the file it would open is named, got {said:?}");
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, _window, cx| {
+            app.note_hovering_files(vec![PathBuf::from("one.wowsreplay"), PathBuf::from("two.wowsreplay")], cx);
+        })
+        .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        let said = window.find("app-drop-scrim").label().unwrap_or_default().to_string();
+        assert!(!said.contains("one.wowsreplay"), "two files are not an open, got {said:?}");
+    })
+    .expect("the test window stays open");
+
+    window
+        .update(cx, |app, _window, cx| {
+            app.forget_hovering_files(cx);
+            assert!(app.drop_scrim().is_none(), "and the scrim goes with the drag");
+        })
+        .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn clicking_a_search_column_moves_the_sort_to_it(cx: &mut TestAppContext) {
     let window = open_app(cx);
