@@ -1081,6 +1081,10 @@ impl App {
             }
             PaletteAction::SearchFor(query) => self.run_search(query.to_string(), window, cx),
             PaletteAction::CopyLatestLog => self.copy_latest_log(window, cx),
+            PaletteAction::OpenReplayDirectory => {
+                self.active_tab = AppTab::ReplayInspector;
+                self.replay_inspector.update(cx, |view, cx| view.open_directory(window, cx));
+            }
         }
         cx.notify();
     }

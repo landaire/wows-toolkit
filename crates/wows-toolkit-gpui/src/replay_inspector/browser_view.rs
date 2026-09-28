@@ -298,6 +298,8 @@ pub struct MissingBuild {
 
 pub struct ReplayBrowser {
     files: Vec<RawReplay>,
+    /// A directory the reader opened instead of the install's, if any.
+    chosen_directory: Option<PathBuf>,
     /// How far the running scan has got. `None` when none is running.
     scan_progress: Option<ScanProgress>,
     /// The replays the reader has ctrl-clicked, which every batch action
@@ -430,6 +432,7 @@ impl ReplayBrowser {
             leaf_info: Rc::new(HashMap::new()),
             group_children: Rc::new(HashMap::new()),
             selected_path: None,
+            chosen_directory: None,
             open_requested: None,
             game_data: GameData::Loading,
             summaries: HashMap::new(),
@@ -550,7 +553,73 @@ impl ReplayBrowser {
     /// Kicks off the background directory scan for `wows_dir`. Safe to call
     /// again later (e.g. if the user changes the WoWs directory); replaces
     /// whatever the previous scan found.
+    /// Lists a directory the reader chose, rather than the install's own.
+    ///
+    /// An archive of old replays, a folder from someone else, a second install:
+    /// the egui app opens each as a workspace of its own
+    /// (`app.rs`'s `open_replay_directory`). Here it replaces what the listing is
+    /// showing, and `start_scan` puts the install's directory back.
+    ///
+    /// The install itself is remembered, because "Open in Game" launches the
+    /// executable beside it whatever the listing is reading.
+    pub fn scan_directory(&mut self, directory: PathBuf, cx: &mut Context<Self>) {
+        self.scan_generation = self.scan_generation.wrapping_add(1);
+        let generation = self.scan_generation;
+        self.chosen_directory = Some(directory.clone());
+        self.status = ScanStatus::Loading;
+        self.scan_progress = Some(ScanProgress::default());
+        cx.notify();
+
+        let (reports, mut progress_rx) = futures::channel::mpsc::unbounded();
+        cx.spawn(async move |this, cx| {
+            let scanned = directory.clone();
+            let scan = cx.background_spawn(async move { scan_replay_files(&scanned, &reports) });
+            let listen = {
+                let this = this.clone();
+                let mut cx = cx.clone();
+                async move {
+                    while let Some(progress) = futures::StreamExt::next(&mut progress_rx).await {
+                        let kept = this.update(&mut cx, |this, cx| {
+                            if this.scan_generation != generation {
+                                return false;
+                            }
+                            this.scan_progress = Some(progress);
+                            cx.notify();
+                            true
+                        });
+                        if !matches!(kept, Ok(true)) {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let (files, ()) = futures::future::join(scan, listen).await;
+            let _ = this.update(cx, |this, cx| {
+                if this.scan_generation != generation {
+                    return;
+                }
+                this.scan_progress = None;
+                this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
+                this.files = files;
+                this.rebuild_tree(cx);
+                this.watch_replays_dir(directory, generation, cx);
+                this.warm_listed_build(cx);
+                this.report_missing_builds(cx);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// The directory the listing is reading, when it is not the install's.
+    pub fn chosen_directory(&self) -> Option<&Path> {
+        self.chosen_directory.as_deref()
+    }
+
     pub fn start_scan(&mut self, wows_dir: String, cx: &mut Context<Self>) {
+        // Back to the install's own directory, whatever was being read.
+        self.chosen_directory = None;
         // Kept because "Open in Game" launches the executable beside it.
         self.wows_dir = wows_dir.clone();
         // Every scan takes a number, and only the newest one's result is
@@ -1768,6 +1837,43 @@ mod tests {
             );
         })
         .expect("the test window stays open");
+    }
+
+    /// A directory the reader opened is listed as it is, and the listing says so;
+    /// going back to the install's own forgets it.
+    ///
+    /// Synchronous on purpose: letting the scan finish starts a filesystem watcher
+    /// on its own thread, which the test scheduler refuses as non-deterministic.
+    /// What is under test is which directory the listing took, not what the walk
+    /// found in it.
+    #[gpui_kit::test]
+    fn an_opened_directory_is_listed_and_named(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+
+        cx.update(gpui_kit::init);
+        let browser = cx.update(|cx| cx.new(super::ReplayBrowser::new));
+
+        let dir = tempfile::tempdir().expect("a temp directory");
+        // Not a real replay, so the read fails and the listing ends up empty:
+        // what is under test is which directory was walked, not what was in it.
+        std::fs::write(dir.path().join("a.wowsreplay"), b"not a replay").expect("the file is written");
+
+        cx.update(|cx| {
+            browser.update(cx, |browser, cx| browser.scan_directory(dir.path().to_path_buf(), cx));
+        });
+        assert_eq!(
+            cx.update(|cx| browser.read(cx).chosen_directory().map(std::path::Path::to_path_buf)),
+            Some(dir.path().to_path_buf()),
+            "the listing says which directory it is reading"
+        );
+
+        cx.update(|cx| {
+            browser.update(cx, |browser, cx| browser.start_scan("G:/does-not-exist".to_owned(), cx));
+        });
+        assert!(
+            cx.update(|cx| browser.read(cx).chosen_directory().is_none()),
+            "and forgets it once the install's own directory is listed again"
+        );
     }
 
     /// A build nothing on this machine can read is reported once, with how many

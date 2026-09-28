@@ -122,12 +122,17 @@ have used it.
 
 ## Reach: surfaces and entry points
 
-14. **Only one replay directory, ever.** No picker for an arbitrary directory
-    (egui `app.rs:4455`), no workspaces -- the egui app opens one dock tab per
-    directory, titled by its root, closeable, with "Search these replays" on its
-    context menu (`tab_state.rs:797`, `app.rs:300-311`). The port's `AppTab` is a
-    fixed 7-entry strip (`app.rs:89-141`, `:2235-2257`): nothing closeable,
-    nothing reorderable, no second listing and no second Search tab.
+14. **Opening another replay directory.** Done in part 2026-09-28: the header
+    and the palette both open a directory the reader picks, the listing reads it as
+    it is, and the header says which directory that is until the install's own is
+    listed again. Everything that works on the install's listing -- previews,
+    opening, indexing, the missing-build offer -- works on it.
+
+    Not ported: workspaces, which is the egui app's shape for this. It opens one
+    dock tab per directory, titled by its root, closeable, with "Search these
+    replays" on its context menu (`tab_state.rs:797`, `app.rs:300-311`), and keeps
+    them across launches; here one listing is replaced by another. The port's
+    `AppTab` is a fixed 7-entry strip, so there is also no second Search tab.
 15. **Drag and drop.** Done in part 2026-09-28: a replay dropped on the window
     opens in the inspector, and a drop that is not one replay says so. The egui
     app's full-window scrim while the file hovers is not drawn yet.

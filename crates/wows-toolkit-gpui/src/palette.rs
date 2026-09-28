@@ -25,6 +25,8 @@ pub enum PaletteAction {
     SearchFor(&'static str),
     /// Put the newest log file on the clipboard, for a bug report.
     CopyLatestLog,
+    /// List a directory of replays other than the install's.
+    OpenReplayDirectory,
 }
 
 /// One entry: what it is called and what it does.
@@ -62,6 +64,10 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries.push(PaletteEntry {
         label: t!("ui.replay.open_manually").into_owned(),
         action: PaletteAction::OpenReplayFile,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.replay.open_directory").into_owned(),
+        action: PaletteAction::OpenReplayDirectory,
     });
     entries.push(PaletteEntry {
         label: t!("ui.replay.copy_latest_log").into_owned(),
