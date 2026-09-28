@@ -467,6 +467,28 @@ impl ReplayInspectorView {
         }
     }
 
+    /// Lists a directory the reader picks, instead of the install's own.
+    ///
+    /// The egui app opens each such directory as a workspace of its own; here it
+    /// replaces what the listing shows, and the header says which directory that
+    /// is. Everything else -- previews, opening, indexing -- works on it as it
+    /// does on the install's.
+    pub(crate) fn open_directory(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let asked = crate::dialog::pick_folder(&t!("ui.replay.open_directory"));
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(directory) = asked.await else { return };
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.browser.update(cx, |browser, cx| browser.scan_directory(directory.clone(), cx));
+                crate::toast::info(
+                    t!("ui.replay.reading_directory", dir = directory.display().to_string()).into_owned(),
+                    window,
+                    cx,
+                );
+            });
+        })
+        .detach();
+    }
+
     /// Writes a video of each marked battle into a directory the reader picks.
     ///
     /// One background batch rather than one viewport per replay: the menu item
@@ -1278,6 +1300,33 @@ impl Render for ReplayInspectorView {
                     .compact()
                     .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.open_manually(window, cx))),
             )
+            // A folder of replays that is not the install's: an archive, or
+            // someone else's. The egui app opens each as a workspace of its own.
+            .child(
+                Button::new("replay-header-open-directory")
+                    .icon(IconName::Folder)
+                    // The glyph alone: the header is already the width of the
+                    // window at its narrowest, and the name is in the tooltip.
+                    .tooltip(t!("ui.replay.open_directory").to_string())
+                    .compact()
+                    .on_click(cx.listener(|this, _event: &ClickEvent, window, cx| this.open_directory(window, cx))),
+            )
+            // Which directory is being listed, when it is not the install's: the
+            // rows otherwise look like the game's own and are not.
+            .children(self.browser.read(cx).chosen_directory().map(|directory| {
+                let shown = directory.display().to_string();
+                h_flex()
+                    .id("replay-header-directory")
+                    .test_support()
+                    .aria_label(shown.clone())
+                    .gap_1()
+                    .items_center()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(crate::icons::icon(crate::icons::FOLDER))
+                    .child(shown)
+                    .into_any_element()
+            }))
             .child(
                 Checkbox::new("replay-header-auto-load-latest")
                     .label(t!("ui.replay.autoload_latest").to_string())
