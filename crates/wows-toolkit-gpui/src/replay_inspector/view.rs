@@ -47,6 +47,7 @@ use super::browser_view::ReplayBrowserEvent;
 use super::columns::default_columns;
 use super::load::GameDataCache;
 use super::load::GameDataStatus;
+use super::load::spawn_parse;
 use super::load::spawn_startup_preload;
 use super::panel::AutoExport;
 use super::panel::PanelSetup;
@@ -427,6 +428,10 @@ impl ReplayInspectorView {
             // straight away when this is on, which is what the checkbox
             // promises.
             ReplayBrowserEvent::ReplayAppeared(path) => {
+                // Written whether or not it is opened: that is what "export
+                // every battle" means, and the egui app writes it from the
+                // background parser for the same reason.
+                self.auto_export_landed(path, cx);
                 if self.auto_load_latest_replay {
                     self.open_replay(path.clone(), window, cx);
                 }
@@ -439,6 +444,49 @@ impl ReplayInspectorView {
             // fetch these builds is raised to it.
             ReplayBrowserEvent::BuildsMissing(missing) => cx.emit(GameDataMissing(missing.clone())),
         }
+    }
+
+    /// Writes a battle that has just landed out to the auto-export directory.
+    ///
+    /// The egui app exports from its background parser as each replay appears
+    /// (`task/replays.rs:558`), so a match nobody opens is still written; the
+    /// port used to write only what was opened, which made the setting say more
+    /// than it did. Skipped for a replay carrying no battle results, as the egui
+    /// gate skips it: the document would be a hollow one for a battle the client
+    /// left before the server reported it.
+    ///
+    /// Named after the replay file, which is how this port's other export path
+    /// names it too.
+    fn auto_export_landed(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let AutoExport::To { directory, format } = AutoExport::from_settings(&self.replay_settings) else { return };
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(stem) = path.file_stem().map(|stem| stem.to_owned()) else { return };
+
+        let debug = self.debug_mode;
+        let out = directory.join(stem).with_extension(format.extension());
+        let parse = spawn_parse(path.to_path_buf(), game_data, self.personal_rating.clone(), cx);
+        let named = path.to_path_buf();
+        cx.spawn(async move |_this, cx| {
+            let parsed = match parse.await {
+                Ok(parsed) => parsed,
+                Err(err) => {
+                    tracing::warn!(path = %named.display(), error = %err, "auto-export: the replay did not parse");
+                    return;
+                }
+            };
+            if parsed.raw_results_json.is_none() {
+                tracing::debug!(path = %named.display(), "auto-export: no battle results, so nothing is written");
+                return;
+            }
+
+            let export = if debug { parsed.export } else { parsed.export.stripped() };
+            let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;
+            match written {
+                Ok(()) => tracing::info!(path = %named.display(), "auto-export: the battle was written"),
+                Err(err) => tracing::warn!(path = %named.display(), error = %err, "auto-export failed"),
+            }
+        })
+        .detach();
     }
 
     /// Re-reads a replay a tab is open on, leaving the tab where it is.
