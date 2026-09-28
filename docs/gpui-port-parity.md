@@ -423,8 +423,10 @@ kept so the next audit does not re-report them.
   player's name, between it and the ship, while the pointer is on that row (the
   chat pane reveals its copy button the same way). The table gets that column's
   width back, and the actions stay where the row is. Both ways in are headed by
-  `[CLAN] Name -- Ship`, since a right-click menu lands wherever the pointer was
-  and the rows it could have come from are one line apart.
+  the player they belong to, since a right-click menu lands wherever the pointer
+  was and the rows it could have come from are one line apart: the ship's class
+  icon, the clan tag and name in the colours the row gives them, and the ship on
+  a second line under them.
 - [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match
