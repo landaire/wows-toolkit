@@ -325,6 +325,11 @@ description = "Saved defaults for the armor viewport"
 no_defaults = "(no saved defaults)"
 
 [ui.app]
+status_cache_checking = "Checking the game data cache"
+status_cache_validating = "Verifying the game data cache"
+status_cache_downloading = "Downloading game data"
+status_indexing = "Indexing replays"
+status_of = "%{done} of %{total}"
 debug_build = "Debug build"
 
 # -- Command palette --

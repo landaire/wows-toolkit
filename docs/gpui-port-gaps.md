@@ -143,10 +143,12 @@ have used it.
     seek-to-salvo, show-secondaries and sim-agrees controls
     (`replay/realtime_armor_viewer.rs:1198`, `ui.armor.realtime.*`). The hit
     pipeline is ported; the surface is not.
-19. **No menu bar and no status bar.** File > Check for updates / About / Quit,
-    Create issue, Discord (`app.rs:4751-4782`), and the bottom panel that shows
-    every background task's spinner and progress (`app.rs:1604`). A background
-    task can fail in the port with nothing on screen.
+19. **The menu bar and the status bar.** Done 2026-09-28: the strip's trailing
+    end carries Check for Updates, About, Create Issue, Discord and Quit, and a
+    status strip along the bottom names the two jobs the app owns -- a game-data
+    cache job and an index build -- with their progress. A tab's own work (a
+    directory scan, a replay parse) is still reported by that tab rather than
+    there, where the egui panel names every background task.
 20. **Palette is a third of egui's.** Missing: the three cascading sub-modes
     (search a player, my matches in ship, view armor for ship,
     `ui/command_palette.rs:129-131`), Open replay directory, Import constants,
@@ -198,13 +200,13 @@ have used it.
     Re-index Everything reads the lot again for rows an older parse got wrong, the
     unreadable-file ledger moved to `wows_toolkit_config::index::unindexable` so
     both apps share it, and the walk leaves `temp.wowsreplay` alone.
-28. **Cache housekeeping.** Reporting is done 2026-09-28: every finished cache
-    job says what it found, clean or not, in the egui app's words. Still missing:
-    the startup migration of an old cache layout, `migrate_to_cas`,
-    `gc_unreferenced` (`app.rs:1502-1525`), and the pruning of
-    `game_params_{build}.bin` for builds no longer installed
-    (`util/game_params.rs:59`) although the port writes those files
-    (`load.rs:104`).
+28. **Cache housekeeping.** Done 2026-09-28 except the migrations: every
+    finished cache job says what it found, and the per-build caches
+    (`game_params_<build>.bin`, `constants_<build>.json`) are pruned for builds
+    neither the install nor the dump cache can open -- the egui app prunes on
+    installed builds alone, which would drop a dumped build's cache this port can
+    still use. Still missing: the startup migration of an old cache layout,
+    `migrate_to_cas` and `gc_unreferenced` (`app.rs:1502-1525`).
 29. ~~**Preview failures say nothing.**~~ Done 2026-09-27: `PreviewError::said`
     carries the egui popup's four messages (plus one for a render failure the
     egui path cannot have), `PreviewHover` keeps the reason for the watched row,

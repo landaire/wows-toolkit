@@ -370,6 +370,16 @@ impl ReplayInspectorView {
         let game_data = GameDataCache::new(PathBuf::from(&wows_dir))
             .with_cache_dir(&game_data_cache_dir)
             .with_auto_dump(auto_dump_game_data);
+        // The per-build caches for builds nothing can open any more, which is
+        // gigabytes after a year of game updates.
+        {
+            let wows_dir = PathBuf::from(&wows_dir);
+            let dump_base = wows_toolkit_config::game_data_dump_base_with_override(&game_data_cache_dir);
+            cx.background_spawn(async move {
+                super::load::prune_stale_caches(&wows_dir, dump_base.as_deref());
+            })
+            .detach();
+        }
         self.game_data = Some(game_data.clone());
         self.game_data_status = GameDataStatus::Loading;
         let status = self.game_data_status.clone();
