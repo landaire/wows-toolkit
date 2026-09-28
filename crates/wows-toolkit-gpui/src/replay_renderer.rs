@@ -1284,7 +1284,9 @@ impl ReplayRendererPanel {
                         this.renderer = Some(renderer);
                         this.state = State::Ready(track);
                         this.rebuild_seek(cx);
-                        this.draw_current(cx);
+                        // Draws the first frame as it applies them, so nothing
+                        // else has to ask for one.
+                        this.adopt_saved_defaults(cx);
                     }
                     Err(err) => this.state = State::Failed(err.to_string()),
                 }
@@ -1320,6 +1322,50 @@ impl ReplayRendererPanel {
         }
         let from = track.frame_at(track.battle_start.seconds());
         track.frames.get(from..).unwrap_or(&track.frames)
+    }
+
+    /// Opens this viewport showing what the reader last saved as the defaults.
+    ///
+    /// Runs once the bake has landed, because the rosters are a wider canvas
+    /// rather than a layer and there is nothing to widen before then.
+    fn adopt_saved_defaults(&mut self, cx: &mut Context<Self>) {
+        let saved = crate::render_defaults::defaults(cx);
+        let export = export_settings_of(&saved);
+        self.set_export_settings(|settings| *settings = export, cx);
+        self.set_options(
+            |options, show_dead| {
+                saved.apply_to(options);
+                *show_dead = saved.show_dead_ships;
+                // The stats panel's ship silhouettes are one of the loads a
+                // bake skips, so its gutter has nothing to draw in it and the
+                // viewport does not offer the layer at all.
+                options.show_stats_panel = false;
+            },
+            cx,
+        );
+    }
+
+    /// Writes what this viewport is showing back as what a viewport opens with.
+    ///
+    /// What this viewport has no control over is left as it was: the self
+    /// ranges, which are per-ship here rather than one saved filter, and the
+    /// stats panel, which a bake cannot fill and which this viewport therefore
+    /// holds off whatever the reader chose in the egui renderer.
+    fn remember_defaults(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let stored = crate::render_defaults::defaults(cx);
+        let mut saved = stored.clone();
+        saved.read_from(&self.options);
+        saved.show_stats_panel = stored.show_stats_panel;
+        saved.show_dead_ships = self.show_dead_ships;
+        saved.prefer_cpu_encoder = self.export_settings.prefer_cpu;
+        saved.video_codec = self.export_settings.codec;
+        saved.include_pre_battle = self.export_settings.include_pre_battle;
+
+        if crate::render_defaults::remember(saved, cx) {
+            crate::toast::ok(t!("ui.renderer.settings.save_defaults_done").into_owned(), window, cx);
+        } else {
+            crate::toast::failed(t!("ui.renderer.settings.save_defaults_failed").into_owned(), window, cx);
+        }
     }
 
     /// What the viewport is drawing.
@@ -1586,7 +1632,22 @@ impl ReplayRendererPanel {
         let Some(renderer) = self.renderer.take() else { return };
 
         let settings = self.export_settings;
-        let frames = self.frames_to_export(track).to_vec();
+        // What is on screen, not what was baked: a layer the reader turned off
+        // should not come back in the file. The overlays drawn over a battle --
+        // trails, annotations, the ranges placed on the map -- are derived at
+        // draw time and are not written.
+        let frames: Vec<Vec<DrawCommand>> = self
+            .frames_to_export(track)
+            .iter()
+            .map(|frame| {
+                frame
+                    .iter()
+                    .filter(|command| should_draw_command(command, &self.options, self.show_dead_ships))
+                    .filter(|command| per_ship_allows(command, &self.trail_hidden, &self.ship_ranges))
+                    .cloned()
+                    .collect()
+            })
+            .collect();
         // What the video covers, which is not the whole track when the
         // pre-battle phase is left out.
         let duration = (frames.len().saturating_sub(1)) as f32 * BAKE_INTERVAL;
@@ -2647,7 +2708,7 @@ impl Render for ReplayRendererPanel {
                     .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
             )
             .child(tools_popover(&cx.entity(), self, cx))
-            .child(render_options_popover(&cx.entity(), self, cx))
+            .child(render_options_popover(&cx.entity(), self, ready, cx))
             .child(timeline_popover(&cx.entity(), self, cx))
             .when(!self.popped_out, |this| {
                 this.child(
@@ -3084,14 +3145,20 @@ fn bake(
 /// reported and the rest still run, since one unreadable file in a marked set
 /// should not lose the other forty.
 ///
+/// `defaults` is what the reader saved as what a renderer opens with, so a
+/// batch writes what a viewport would have shown rather than the built-in set.
+///
 /// Returns the files written and the replays that failed.
 pub fn batch_export(
     paths: Vec<PathBuf>,
     game_data: GameDataCache,
     out_dir: PathBuf,
-    settings: ExportSettings,
+    defaults: wows_minimap_renderer::SavedRenderOptions,
     cx: &App,
 ) -> Task<(Vec<PathBuf>, Vec<PathBuf>)> {
+    let settings = export_settings_of(&defaults);
+    let (options, show_dead_ships) = batch_options(&defaults);
+
     cx.background_spawn(async move {
         let mut written = Vec::new();
         let mut failed = Vec::new();
@@ -3113,12 +3180,24 @@ pub fn batch_export(
                 }
             };
             let (track, renderer) = baked;
-            let frames: Vec<Vec<DrawCommand>> = if settings.include_pre_battle {
-                track.frames.clone()
+            let covered: &[Vec<DrawCommand>] = if settings.include_pre_battle {
+                &track.frames
             } else {
                 let from = track.frame_at(track.battle_start.seconds());
-                track.frames.get(from..).unwrap_or(&track.frames).to_vec()
+                track.frames.get(from..).unwrap_or(&track.frames)
             };
+            // The bake holds every layer it could; which of them are drawn is
+            // what the saved defaults decide, as they do in a viewport.
+            let frames: Vec<Vec<DrawCommand>> = covered
+                .iter()
+                .map(|frame| {
+                    frame
+                        .iter()
+                        .filter(|command| should_draw_command(command, &options, show_dead_ships))
+                        .cloned()
+                        .collect()
+                })
+                .collect();
             if frames.is_empty() {
                 failed.push(path);
                 continue;
@@ -3219,6 +3298,30 @@ pub struct ExportSettings {
 fn encoder_status() -> &'static wows_minimap_renderer::encoder::EncoderStatus {
     static STATUS: std::sync::OnceLock<wows_minimap_renderer::encoder::EncoderStatus> = std::sync::OnceLock::new();
     STATUS.get_or_init(wows_minimap_renderer::check_encoder)
+}
+
+/// What a batch draws of what it baked, and whether dead ships are among it.
+///
+/// The reader's saved layers, less the two a viewport holds off for the same
+/// reasons: the stats panel's ship silhouettes are a load the bake skips, so its
+/// gutter would be empty and the kill feed and the chat that share it would go
+/// unfilmed; and which ships have their range circles drawn is a per-ship choice
+/// a batch is never given, so drawing every ship's would bury the map.
+fn batch_options(defaults: &wows_minimap_renderer::SavedRenderOptions) -> (RenderOptions, bool) {
+    let mut options = playback_options();
+    defaults.apply_to(&mut options);
+    options.show_stats_panel = false;
+    options.show_ship_config = false;
+    (options, defaults.show_dead_ships)
+}
+
+/// What an export is encoded with, as the reader last saved it.
+fn export_settings_of(saved: &wows_minimap_renderer::SavedRenderOptions) -> ExportSettings {
+    ExportSettings {
+        prefer_cpu: saved.prefer_cpu_encoder,
+        codec: saved.video_codec,
+        include_pre_battle: saved.include_pre_battle,
+    }
 }
 
 /// Whether an export has to be encoded in software.
@@ -3679,6 +3782,7 @@ fn same_tool(chosen: &Tool, other: &Tool) -> bool {
 fn render_options_popover(
     panel: &Entity<ReplayRendererPanel>,
     view: &ReplayRendererPanel,
+    ready: bool,
     cx: &Context<ReplayRendererPanel>,
 ) -> AnyElement {
     let _ = cx;
@@ -3692,6 +3796,10 @@ fn render_options_popover(
             Button::new("replay-renderer-settings-toggle")
                 .child(crate::icons::icon(crate::icons::GEAR_FINE))
                 .compact()
+                // Until the bake lands the options are the ones it is baking
+                // under, not the reader's, and a Save Defaults would store
+                // those over what they chose.
+                .disabled(!ready)
                 .tooltip(t!("ui.renderer.settings.title").into_owned()),
         )
         .content(move |_state, _window, _cx| {
@@ -3720,6 +3828,7 @@ fn render_options_popover(
                         .into_any_element()
                 })))
                 .child(export_settings_section(&owner, export))
+                .child(save_defaults_button(&owner))
                 .into_any_element()
         })
         .into_any_element()
@@ -3814,6 +3923,22 @@ fn export_settings_section(panel: &Entity<ReplayRendererPanel>, settings: Export
             )
             .into_any_element()
         }))
+        .into_any_element()
+}
+
+/// Keeps what this viewport is showing as what the next one opens with.
+fn save_defaults_button(panel: &Entity<ReplayRendererPanel>) -> AnyElement {
+    let owner = panel.clone();
+    div()
+        .pt_2()
+        .child(
+            Button::new("replay-renderer-save-defaults")
+                .label(t!("ui.renderer.settings.save_defaults").to_string())
+                .compact()
+                .on_click(move |_event, window, cx: &mut App| {
+                    owner.update(cx, |panel, cx| panel.remember_defaults(window, cx));
+                }),
+        )
         .into_any_element()
 }
 
@@ -4296,6 +4421,89 @@ mod tests {
                 assert_eq!(panel.at, 39);
             })
             .expect("the window is open");
+    }
+
+    /// A viewport opens showing what was last saved as the defaults, and the
+    /// gear's Save Defaults writes what it is showing back.
+    #[gpui_kit::test]
+    fn a_viewport_opens_showing_what_was_saved_as_the_defaults(cx: &mut TestAppContext) {
+        use wows_minimap_renderer::SavedRenderOptions;
+
+        cx.update(gpui_kit::init);
+        cx.update(|cx| {
+            crate::render_defaults::adopt(
+                SavedRenderOptions {
+                    show_torpedoes: false,
+                    show_player_names: true,
+                    include_pre_battle: true,
+                    prefer_cpu_encoder: true,
+                    // Saved by the egui renderer, which has the silhouettes for
+                    // it; a bake here does not.
+                    show_stats_panel: true,
+                    // Kept for the egui renderer rather than read here, so a
+                    // save from this app must not clear it.
+                    show_self_radar_range: true,
+                    ..SavedRenderOptions::default()
+                },
+                cx,
+            );
+        });
+
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, window, cx| {
+                panel.adopt_saved_defaults(cx);
+
+                assert!(!panel.options().show_torpedoes, "a layer turned off stays off");
+                assert!(panel.options().show_player_names, "and one turned on comes back on");
+                assert!(!panel.options().show_stats_panel, "the panel a bake cannot fill is not drawn");
+                assert!(panel.export_settings().include_pre_battle);
+                assert!(panel.export_settings().prefer_cpu);
+
+                panel.set_options(|options, _dead| options.show_smoke = false, cx);
+                panel.remember_defaults(window, cx);
+
+                let saved = crate::render_defaults::defaults(cx);
+                assert!(!saved.show_smoke, "what the viewport shows is what is saved");
+                assert!(!saved.show_torpedoes);
+                assert!(saved.show_self_radar_range, "the ranges this app does not read are left as they were");
+                assert!(saved.include_pre_battle, "as are the export settings it did not change");
+                assert!(
+                    saved.show_stats_panel,
+                    "and the panel this viewport holds off is not turned off for the egui renderer"
+                );
+            })
+            .expect("the window is open");
+    }
+
+    /// A batch draws the reader's saved layers, less the two that would leave
+    /// it worse off than the built-in set did.
+    #[test]
+    fn a_batch_draws_the_saved_layers_without_the_two_it_cannot_fill() {
+        use wows_minimap_renderer::SavedRenderOptions;
+        use wows_minimap_renderer::config::should_draw_command;
+
+        let saved = SavedRenderOptions {
+            show_torpedoes: false,
+            // On in the egui renderer, which has what it takes to fill them.
+            show_stats_panel: true,
+            show_ship_config: true,
+            show_dead_ships: false,
+            ..SavedRenderOptions::default()
+        };
+        let (options, show_dead_ships) = super::batch_options(&saved);
+
+        assert!(!options.show_torpedoes, "a layer the reader turned off is not filmed");
+        assert!(!show_dead_ships);
+        assert!(!options.show_stats_panel, "the panel a bake cannot fill is left out");
+        assert!(!options.show_ship_config, "as are range circles nobody asked for per ship");
+        assert!(
+            should_draw_command(&super::DrawCommand::KillFeed { entries: Vec::new() }, &options, show_dead_ships),
+            "so the kill feed, which shares the panel's gutter, is still filmed"
+        );
     }
 
     /// A toggle changes what the viewport draws without re-baking: the

@@ -22,6 +22,7 @@ mod palette;
 mod personal_rating;
 mod player_tracker;
 mod preview_hover;
+mod render_defaults;
 mod replay_index;
 mod replay_inspector;
 mod replay_renderer;
@@ -165,8 +166,19 @@ fn main() {
                 async move { wows_toolkit_config::load_all_window_settings(&pool).await }
             })
             .await;
+            let render_defaults = runtime::spawn(cx, {
+                let pool = pool.clone();
+                async move { render_defaults::load(&pool).await }
+            })
+            .await;
             if let Err(err) = window.update(cx, |_root, window, cx| {
                 settings_store::init(pool.clone(), cx);
+                match render_defaults {
+                    Ok(defaults) => render_defaults::adopt(defaults, cx),
+                    // Every viewport then opens with what the renderer itself
+                    // defaults to, which is what a fresh install does anyway.
+                    Err(err) => tracing::error!("the saved renderer defaults could not be read: {err}"),
+                }
                 match remembered {
                     Ok(remembered) => window_shell::adopt(remembered, cx),
                     // Every window then opens at its default, which is what a

@@ -21,6 +21,7 @@ pub mod panel_math;
 pub mod preview;
 #[cfg(feature = "rendering")]
 pub mod renderer;
+pub mod saved_options;
 #[cfg(feature = "rendering")]
 pub mod video;
 pub mod viewport;
@@ -68,6 +69,7 @@ pub use map_data::MapInfo;
 pub use map_data::MinimapPos;
 #[cfg(feature = "rendering")]
 pub use renderer::MinimapRenderer;
+pub use saved_options::SavedRenderOptions;
 #[cfg(feature = "rendering")]
 pub use video::DumpMode;
 #[cfg(feature = "rendering")]

@@ -95,6 +95,9 @@ objc2-core-video = { version = "0.3", optional = true }
 objc2-video-toolbox = { version = "0.3", optional = true }
 
 [dev-dependencies]
+# The saved-options tests read a stored row. The library needs serde_json only
+# under `bin`, so it stays optional there and unconditional here.
+serde_json = { workspace = true }
 wows-data-mgr = { workspace = true }
 wows-battle-world = { workspace = true, features = ["vfs"] }
 wows-replay-insights = { workspace = true, features = ["build"] }
