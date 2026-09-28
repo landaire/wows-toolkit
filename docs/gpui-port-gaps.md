@@ -179,7 +179,7 @@ have used it.
     time when there are several. What the scrim follows is gpui's own drag: an
     entering file drag arrives as a drag of `ExternalPaths`, and a drag that leaves
     is reported as a file-drop event, which a paint-time listener takes.
-16. **Tactics Board.** Done in the main 2026-09-28: the app menu opens one in a
+16. ~~**Tactics Board.**~~ Done 2026-09-28: the app menu opens one in a
     window of its own, which now uses the `WindowKind::TacticsBoard` geometry row
     that was read and never used. It is set on a map and one of that map's game
     modes, drawn through the same renderer the battle is, and its capture points
@@ -202,10 +202,12 @@ have used it.
     kilometres beside the cap it belongs to. Escape puts the tool down and
     Delete erases the cap picked out, which are the egui board's own chords.
 
-    Not ported: picking a drawn shape back up to move or turn it, and the map
-    pings and grid, which are a session's rather than a board's. The collab sync
-    that puts one board in front of a whole session waits on item 22's
-    client-frame viewports.
+    A drawn shape can be picked back up: a press on one picks it out and draws a
+    halo under it, ctrl adds another, a drag moves what is picked, and Delete
+    erases it. Turning a shape by its handle is not there, and nor are the map
+    pings or the grid, which belong to a session rather than to a board. The
+    collab sync that puts one board in front of a whole session waits on item
+    22's client-frame viewports.
 17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its

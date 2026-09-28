@@ -173,6 +173,45 @@ fn radius_km(radius: f32) -> f32 {
     radius / WORLD_UNITS_PER_KM
 }
 
+/// The same shape, drawn wider and dimmer: what sits under a picked one to say
+/// it is picked.
+fn halo(annotation: &wt_collab_client::types::Annotation) -> wt_collab_client::types::Annotation {
+    use wt_collab_client::types::Annotation;
+
+    let mut halo = annotation.clone();
+    let widened = |width: &mut f32| *width = (*width + HALO_WIDTH).max(HALO_WIDTH);
+    let tinted = |color: &mut [u8; 4]| *color = HALO_INK;
+    match &mut halo {
+        // A ship marker is drawn from its species rather than stroked, so it
+        // has no width to widen; it reads as picked by the handles on it.
+        Annotation::Ship { .. } => {}
+        Annotation::FreehandStroke { color, width, .. }
+        | Annotation::Line { color, width, .. }
+        | Annotation::Arrow { color, width, .. }
+        | Annotation::Measurement { color, width, .. } => {
+            tinted(color);
+            widened(width);
+        }
+        Annotation::Circle { color, width, filled, .. }
+        | Annotation::Rectangle { color, width, filled, .. }
+        | Annotation::Triangle { color, width, filled, .. } => {
+            tinted(color);
+            widened(width);
+            // Hollow, so the shape it is under is still read through it.
+            *filled = false;
+        }
+    }
+    halo
+}
+
+/// How much wider a picked shape's halo is drawn, and in what.
+const HALO_WIDTH: f32 = 4.0;
+const HALO_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0x80];
+
+/// How near a drawn shape a press has to land to pick it out, in map pixels.
+/// A line is one pixel wide and nobody presses one exactly.
+const SHAPE_REACH_PX: f32 = 10.0;
+
 /// How much one notch of the wheel changes the zoom.
 const ZOOM_PER_NOTCH: f32 = 0.004;
 
@@ -488,6 +527,10 @@ pub struct TacticsBoard {
     history: Vec<BoardState>,
     /// What was taken back, so it can be put back again.
     undone: Vec<BoardState>,
+    /// The drawn shapes the reader has picked out, which a drag then moves.
+    picked: wt_collab_client::drawing::Selection,
+    /// A move in progress: where it began, and what was on the board then.
+    moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
     /// Whether a rasterisation is in flight, so a burst of edits asks for one
     /// redraw rather than one each.
     rasterising: bool,
@@ -565,6 +608,8 @@ impl TacticsBoard {
             panning: None,
             history: Vec::new(),
             undone: Vec::new(),
+            picked: wt_collab_client::drawing::Selection::default(),
+            moving: None,
             rasterising: false,
             stale: false,
         }
@@ -933,6 +978,33 @@ impl TacticsBoard {
         cx.notify();
     }
 
+    /// The drawn shape under the pointer, if it is near enough one.
+    ///
+    /// A reach rather than a hit test: a line is one pixel wide and nobody can
+    /// press one exactly, which is why the shared reader takes a distance.
+    fn shape_under(&self, position: Point<Pixels>) -> Option<usize> {
+        let at = self.map_point(position)?;
+        wt_collab_client::drawing::nearest_within(&self.annotations, [at.0, at.1], SHAPE_REACH_PX)
+    }
+
+    /// Erases the shapes the reader has picked out.
+    pub fn erase_picked(&mut self, cx: &mut Context<Self>) {
+        if self.picked.picked().is_empty() {
+            return;
+        }
+        self.remember();
+        let mut going: Vec<usize> = self.picked.picked().to_vec();
+        // Highest first, so an index is not shifted out from under the next.
+        going.sort_unstable_by(|a, b| b.cmp(a));
+        for at in going {
+            if at < self.annotations.len() {
+                self.annotations.remove(at);
+            }
+        }
+        self.picked.clear();
+        self.redraw(cx);
+    }
+
     /// Remembers what is on the board, before changing it.
     ///
     /// A change made after something was taken back is the new end of the line,
@@ -1265,6 +1337,27 @@ impl TacticsBoard {
             self.reset_view(cx);
             return;
         }
+        if let Some(at) = self.map_point(event.position) {
+            // A shape already picked out is dragged as a whole, which is what
+            // moving a line or a circle means.
+            if !self.picked.is_empty()
+                && self.shape_under(event.position).is_some_and(|found| self.picked.picked().contains(&found))
+            {
+                self.remember();
+                self.moving = Some(([at.0, at.1], self.annotations.clone()));
+                return;
+            }
+            // Otherwise a press on one picks it out, and ctrl adds it to
+            // whatever is already picked. The reach is the shared one, which is
+            // what the replay viewport picks with too.
+            let was: Vec<usize> = self.picked.picked().to_vec();
+            self.picked.click(&self.annotations, [at.0, at.1], event.modifiers.secondary());
+            if self.picked.picked() != was.as_slice() {
+                cx.notify();
+                return;
+            }
+        }
+
         match self.cap_under(event.position) {
             Some((index, what)) => {
                 self.selected = Some(index);
@@ -1312,6 +1405,19 @@ impl TacticsBoard {
             return;
         }
 
+        if let Some((from, was)) = self.moving.clone() {
+            let Some(at) = self.map_point(event.position) else { return };
+            let delta = [at.0 - from[0], at.1 - from[1]];
+            self.annotations = was;
+            for index in self.picked.picked() {
+                if let Some(annotation) = self.annotations.get_mut(*index) {
+                    wt_collab_client::drawing::move_annotation(annotation, delta);
+                }
+            }
+            self.redraw(cx);
+            return;
+        }
+
         if let Some(from) = self.panning {
             let delta = (event.position.x.as_f32() - from.x.as_f32(), event.position.y.as_f32() - from.y.as_f32());
             self.panning = Some(event.position);
@@ -1342,6 +1448,7 @@ impl TacticsBoard {
     /// Lets go of whatever the pointer had hold of.
     fn release(&mut self, cx: &mut Context<Self>) {
         self.panning = None;
+        self.moving = None;
         let held = self.dragging.take().is_some();
         // A shape part way through is abandoned rather than finished somewhere
         // the reader did not put it.
@@ -1363,6 +1470,7 @@ impl TacticsBoard {
 
     fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
         self.panning = None;
+        self.moving = None;
         if self.has_tool() {
             let Some(at) = self.map_point(event.position) else { return };
             let stroke = if self.drawing.is_drawing() {
@@ -1452,6 +1560,12 @@ impl TacticsBoard {
         let view = self.view;
         let caps = self.caps.clone();
         let mut annotations = self.annotations.clone();
+        // A shape the reader has picked out is drawn again underneath in a
+        // wider stroke, which is what says it is the one a drag will move.
+        let mut under: Vec<wt_collab_client::types::Annotation> =
+            self.picked.picked().iter().filter_map(|at| self.annotations.get(*at)).map(halo).collect();
+        under.append(&mut annotations);
+        let mut annotations = under;
         // The shape under the pointer is drawn the way the finished one will
         // be, so what the reader sees while dragging is what they get.
         if let Some(part_drawn) = self.pointer_at.and_then(|at| self.drawing.in_progress(at)) {
@@ -1622,6 +1736,9 @@ impl TacticsBoard {
         }
         match event.keystroke.key.as_str() {
             "escape" => self.set_tool(wt_collab_client::drawing::Tool::None, cx),
+            // What is picked out is what a delete is about: a drawn shape if
+            // one is picked, and the capture point otherwise.
+            "delete" | "backspace" if !self.picked.picked().is_empty() => self.erase_picked(cx),
             "delete" | "backspace" => self.remove_selected(cx),
             _ => {}
         }
