@@ -43,6 +43,7 @@ pub mod camera_rings;
 pub(crate) mod camo;
 pub mod catalog;
 pub mod dock;
+mod export_dialog;
 mod gaps;
 mod hits;
 pub mod legend;
