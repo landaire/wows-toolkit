@@ -626,6 +626,12 @@ impl App {
             cx.subscribe_in(&replay_inspector, window, |this, _view, _event: &ConstantsUnfit, window, cx| {
                 this.forget_constants_commit(window, cx);
             });
+        // A workspace tab asking for its own replays searched: the Search tab is
+        // this app's, so the query is run here.
+        let search_directory = cx.subscribe_in(&replay_inspector, window, |this, _view, event, window, cx| {
+            let crate::replay_inspector::view::SearchDirectory(root) = event;
+            this.search_directory(root.clone(), window, cx);
+        });
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         // A "find matches" button on a tracker row asks a question the Search
@@ -708,6 +714,7 @@ impl App {
                 replay_settings_changed,
                 game_data_missing,
                 constants_unfit,
+                search_directory,
                 wows_dir_edited,
                 proxy_edited,
                 twitch_channel_edited,
@@ -1627,6 +1634,41 @@ impl App {
         self.active_tab = AppTab::Search;
         self.search.update(cx, |search, cx| search.run_query(&query, window, cx));
         cx.notify();
+    }
+
+    /// Runs a search over the replays indexed under one directory.
+    ///
+    /// The index keys a replay by the source it was read under, and a source is
+    /// a directory, so the query the reader wants is the one that names it. A
+    /// directory nothing has indexed yet has no source to name, which the reader
+    /// is told rather than shown an empty result for.
+    fn search_directory(&mut self, root: std::path::PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(pool) = settings_store::pool(cx) else { return };
+        let Some(runtime) = runtime::runtime(cx) else { return };
+
+        cx.spawn_in(window, async move |this, cx| {
+            let found = cx
+                .background_spawn(async move {
+                    runtime.handle().block_on(async move {
+                        let sources = wows_toolkit_config::index::query::list_sources(&pool).await.ok()?;
+                        sources
+                            .into_iter()
+                            .find(|source| source.root_path.as_deref() == Some(root.as_path()))
+                            .map(|source| source.id)
+                    })
+                })
+                .await;
+
+            let _ = this.update_in(cx, |this, window, cx| match found {
+                Some(source) => {
+                    let query = wows_toolkit_viewmodel::query_bar::seed::source_scoped(source);
+                    let text = wows_toolkit_config::index::query_text::print_query(&query);
+                    this.run_search(text, window, cx);
+                }
+                None => crate::toast::warn(t!("ui.tabs.search_these_replays_unavailable").into_owned(), window, cx),
+            });
+        })
+        .detach();
     }
 
     /// The auto-export controls: whether to write a file per battle, in which

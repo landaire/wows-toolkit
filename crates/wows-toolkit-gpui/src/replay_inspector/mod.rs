@@ -29,6 +29,7 @@ pub mod sample;
 pub mod sort;
 pub mod table;
 pub mod view;
+pub mod workspace;
 
 #[cfg(test)]
 pub(crate) mod test_support;

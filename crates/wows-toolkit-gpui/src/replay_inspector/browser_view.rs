@@ -575,6 +575,15 @@ impl ReplayBrowser {
     /// Kicks off the background directory scan for `wows_dir`. Safe to call
     /// again later (e.g. if the user changes the WoWs directory); replaces
     /// whatever the previous scan found.
+    /// Names the install the listing reads beside, whatever directory it is
+    /// listing.
+    ///
+    /// Only "Open in Game" needs it: the scan takes its own copy of whichever
+    /// directory it walks.
+    pub fn set_wows_dir(&mut self, wows_dir: String) {
+        self.wows_dir = wows_dir;
+    }
+
     /// Lists a directory the reader chose, rather than the install's own.
     ///
     /// An archive of old replays, a folder from someone else, a second install:
