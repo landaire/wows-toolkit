@@ -89,11 +89,14 @@ have used it.
    `check_for_updates` says so, and `enable_logging` is read straight from the
    database before anything else starts, because the log file is what a crash
    during startup would otherwise go unrecorded in.
-8. **Auto-export.** Done 2026-09-28: a replay the watcher reports is parsed and
-   written out whether or not it is opened (`auto_export_landed`), skipped when it
-   carries no battle results, which is the egui gate. It is still named by the
-   replay's stem rather than egui's `better_file_name` (map, mode and ship), and
-   both of the port's export paths agree on that name.
+8. ~~**Auto-export.**~~ Done 2026-09-28: a replay the watcher reports is parsed
+   and written out whether or not it is opened (`auto_export_landed`), skipped
+   when it carries no battle results, which is the egui gate. It is named by
+   ship, map, scenario, mode and time, the same name the egui app writes, through
+   the shared `wows_toolkit_viewmodel::replay_export::exported_file_stem`; all
+   three of the port's export paths -- the watcher's, the tab's own auto-export
+   and the Export menu's save dialog -- agree on it, so a directory both apps
+   write into reads as one set.
 9. ~~**"Set as Session Stats" destroys the session on one click.**~~ Done
    2026-09-27: it opens the same confirmation the port already uses for Open in
    Game, on the `confirm.set_as_session_stats` wording.
@@ -104,7 +107,7 @@ have used it.
 
 ## Recovery: what a stuck user has no way out of
 
-11. **The updater.** Done 2026-09-28: a startup check (when the setting says
+11. ~~**The updater.**~~ Done 2026-09-28: a startup check (when the setting says
     so) and a manual one from the menu, the release offered with its notes, the
     install that renames the running executable to `.old`, moves the new one in
     and restarts it, and `finalize-update --replaced` -- accepted both as this
@@ -113,9 +116,13 @@ have used it.
     comparison, the release shape and that delete rule are
     `wows_toolkit_viewmodel::update`, shared with the egui app.
 
-    Not ported: per-byte download progress (the download is one request and the
-    reader is told it started), and About is there but has no window of its own --
-    it is a dialog.
+    The download reports itself as it arrives, written to disk chunk by chunk
+    with a message saying how much of the release has landed, or how much so far
+    where the server did not say how much there is.
+
+    One difference stands, deliberately: About is a dialog here rather than a
+    window of its own. It carries the same lines and the same link; a window
+    would be a second thing to close for a paragraph nobody keeps open.
 12. ~~**No crash reporting, no log file, no Copy Latest Log.**~~ Done
     2026-09-28: `logging.rs` writes the same hourly-rotated file beside the
     executable and the same panic log in the shared storage directory the egui app

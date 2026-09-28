@@ -123,6 +123,8 @@ loading_replays = "Loading %{count} replays..."
 # -- Toast messages --
 
 [ui.messages]
+update_downloading = "Downloading the update: %{read} of %{total}"
+update_downloading_unknown = "Downloading the update: %{read} so far"
 app_up_to_date = "Application up-to-date"
 update_check_failed = "Failed to check for app updates"
 constants_fetch_failed = "Failed to fetch updated replay data mapping. Will retry later."
