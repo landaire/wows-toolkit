@@ -14570,7 +14570,7 @@ dependencies = [
 
 [[package]]
 name = "wows-toolkit-gpui"
-version = "0.1.0"
+version = "1.0.2-beta2"
 dependencies = [
  "ab_glyph",
  "anyhow",
@@ -14609,6 +14609,8 @@ dependencies = [
  "unidecode",
  "web-time",
  "wgpu",
+ "windows-sys 0.61.2",
+ "winresource",
  "wows-battle-world",
  "wows-data-mgr",
  "wows-replay-insights",

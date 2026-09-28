@@ -104,7 +104,9 @@ have used it.
     a different adapter than the UI. `code_integrity` is the only egui settings
     field the port has no control for, and it is moot until the mitigations
     exist. The port now takes `--help` and `--version` and refuses the rest by
-    name (`crates/wows-toolkit-gpui/src/cli.rs`) rather than ignoring it.
+    name (`crates/wows-toolkit-gpui/src/cli.rs`) rather than ignoring it, and
+    reports that message the way a release build can show it (own handle, then
+    the parent's console, then a message box).
 
 ## Reach: surfaces and entry points
 
@@ -206,22 +208,22 @@ have used it.
     warnings (invalid WoWs directory, refused Twitch credential) auto-dismiss
     here. There is also no counterpart to egui's catch-all task-error funnel
     (`app.rs:2465`), so a failed background task can be entirely silent.
-33. **Small persistence holes.** The replay grouping choice
-    (`replay_inspector/view.rs:813`), Autoload Latest Replay (`view.rs:788`),
-    `current_replay_path` (read and displayed, never written), and every renderer
-    display default (`ui.renderer.settings.save_defaults` and its five families)
-    are not written back. Window geometry was in this list until
-    2026-09-27 and is now saved for the main window and the popped-out renderer.
-34. **Hardcoded English** where a key exists: the replay grouping labels
-    (`view.rs:74`), the tracker's six period labels and its sub-tab name
-    (`wows-toolkit-viewmodel/src/player_tracker/mod.rs:77-86`), the live roster's
-    column headers and its Overall/Ship and Compact/Detailed labels, the live
-    roster's Twitch chip hover (translated in the port's own replay table), and
-    the Stats dock-tab titles (`stats/overview.rs:147`, `stats/ships.rs:225`).
-35. **Window chrome.** No window title (the egui app titles it
-    `wows_toolkit vX.Y.Z`), no window or executable icon (the egui app embeds one
-    through `winresource`, `crates/wows-toolkit/build.rs:136`), and no
-    `windows_subsystem = "windows"`, so a release build carries a console.
+33. **Small persistence holes.** Every renderer display default
+    (`ui.renderer.settings.save_defaults` and its five families) is not written
+    back. Window geometry, the replay grouping choice, Autoload Latest Replay and
+    `current_replay_path` were in this list until 2026-09-27 and are now
+    written.
+34. **Hardcoded English** where a key exists. Fixed 2026-09-27: the replay
+    grouping labels, the tracker's six period labels, the live roster's scoped
+    column headings and its Overall/Ship and Compact/Detailed labels, the live
+    roster's Twitch chip hover, and the Stats dock-tab titles all read from the
+    catalogue now. Still English: the tracker's sub-tab names, and the roster's
+    "hidden" marker (which item 23 replaces with the eye icon anyway).
+35. ~~**Window chrome.**~~ Done 2026-09-27: the window is titled
+    `WoWs Toolkit v<version>`, the executable carries the icon (a build script
+    under Cargo, `assets/wows_toolkit_gpui.rc` under Buck), and a release build
+    is a windows-subsystem binary, with the CLI's messages routed so they are
+    still visible.
 36. **Proxy auto-detection** from the environment and the Windows registry
     (`util/proxy.rs`, `app.rs:1256-1282`); the port honours only the manual
     setting (`http.rs:31`).
