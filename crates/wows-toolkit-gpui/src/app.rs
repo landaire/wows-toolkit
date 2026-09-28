@@ -76,6 +76,57 @@ fn status_job(named: String, progress: Option<(u64, u64)>) -> AnyElement {
     h_flex().gap_1().items_center().child(Spinner::new().xsmall()).child(named).children(counted).into_any_element()
 }
 
+/// What the download offer says: a line per build, and what the whole selection
+/// would come to.
+///
+/// Each line names the version and build, how many replays are waiting on it,
+/// and what the repository has for it. `plan` is `None` when the repository could
+/// not be asked, which leaves the availability out rather than claiming one.
+fn describe_missing_builds(
+    missing: &[MissingBuild],
+    plan: Option<&wows_data_mgr::download_repo::DownloadPlan>,
+) -> String {
+    let rows: Vec<String> = missing
+        .iter()
+        .map(|build| {
+            let named = t!(
+                "ui.dialogs.download_build_row",
+                version = build.version.clone().unwrap_or_else(|| "?".to_owned()),
+                build = build.build
+            );
+            let needed = t!("ui.dialogs.download_replays_needing", count = build.replays);
+            let said = plan
+                .and_then(|plan| plan.resolved.iter().find(|resolved| resolved.requested_build == build.build))
+                .map(|resolved| availability_said(&resolved.availability));
+            match said {
+                Some(said) => format!("{named} -- {needed} -- {said}"),
+                None => format!("{named} -- {needed}"),
+            }
+        })
+        .collect();
+
+    let mut described = format!("{}\n\n{}", t!("ui.dialogs.download_game_data_intro"), rows.join("\n"));
+    if let Some(plan) = plan {
+        described.push_str("\n\n");
+        described.push_str(&t!("ui.dialogs.download_objects_to_fetch", count = plan.unique_missing_objects));
+    }
+    described
+}
+
+/// How one build's availability reads in the offer.
+fn availability_said(availability: &wows_data_mgr::download_repo::RemoteAvailability) -> String {
+    use wows_data_mgr::download_repo::RemoteAvailability;
+
+    match availability {
+        RemoteAvailability::Exact => t!("ui.dialogs.download_availability_exact").into_owned(),
+        RemoteAvailability::Nearest { version, build } => {
+            t!("ui.dialogs.download_availability_nearest", version = version, build = build).into_owned()
+        }
+        RemoteAvailability::Unpublished => t!("ui.dialogs.download_availability_unpublished").into_owned(),
+        RemoteAvailability::Unreachable => t!("ui.dialogs.download_availability_unreachable").into_owned(),
+    }
+}
+
 /// Who asked for the update check.
 ///
 /// A startup check that finds nothing says nothing; one the reader asked for says
@@ -432,6 +483,9 @@ pub struct App {
     cache: game_data_cache::CacheState,
     /// What the last finished cache job has to say, until a draw says it.
     cache_said: Option<CacheReport>,
+    /// The builds already put to the reader as missing, so a walk that runs
+    /// again does not ask about the same ones twice.
+    offered_builds: std::collections::BTreeSet<u32>,
     /// The name this app appears under to the peers in a session. Written
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
@@ -580,6 +634,7 @@ impl App {
             proxy_input,
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
+            offered_builds: std::collections::BTreeSet::new(),
             cache_said: None,
             collab_name_input,
             index_progress: None,
@@ -654,6 +709,7 @@ impl App {
                 game_data_cache::CacheJob::Checking => t!("ui.app.status_cache_checking"),
                 game_data_cache::CacheJob::Validating => t!("ui.app.status_cache_validating"),
                 game_data_cache::CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
+                game_data_cache::CacheJob::Planning => t!("ui.app.status_cache_planning"),
             };
             jobs.push(status_job(named.into_owned(), self.cache.progress.map(|at| (at.done, at.total))));
         }
@@ -734,6 +790,11 @@ impl App {
     /// availability and an object count before the reader commits; those are a
     /// second read of the repository, and are not offered here yet.
     fn offer_missing_game_data(&mut self, missing: Vec<MissingBuild>, window: &mut Window, cx: &mut Context<Self>) {
+        // Each build is put to the reader once a session: a walk that runs again
+        // after a download reports whatever it still cannot read, and offering
+        // that again would be a loop rather than a question.
+        let missing: Vec<MissingBuild> =
+            missing.into_iter().filter(|build| !self.offered_builds.contains(&build.build)).collect();
         if missing.is_empty() || self.cache.busy() {
             return;
         }
@@ -741,43 +802,65 @@ impl App {
             crate::toast::warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned(), window, cx);
             return;
         };
+        for build in &missing {
+            self.offered_builds.insert(build.build);
+        }
 
-        // One line per build, as the prompt's own rows read: the version and
-        // build it would fetch, and how many replays are waiting on it.
-        let rows: Vec<String> = missing
-            .iter()
-            .map(|build| {
-                let named = t!(
-                    "ui.dialogs.download_build_row",
-                    version = build.version.clone().unwrap_or_else(|| "?".to_owned()),
-                    build = build.build
-                );
-                let needed = t!("ui.dialogs.download_replays_needing", count = build.replays);
-                format!("{named} -- {needed}")
-            })
-            .collect();
-        let described = format!("{}\n\n{}", t!("ui.dialogs.download_game_data_intro"), rows.join("\n"));
-
-        let entity = cx.entity().downgrade();
-        let proxy = self.proxy_url();
-        window.open_alert_dialog(cx, move |alert, _window, _cx| {
-            let entity = entity.clone();
-            let missing = missing.clone();
-            let base = base.clone();
-            let proxy = proxy.clone();
-            alert
-                .title(t!("ui.windows.download_game_data").into_owned())
-                .description(described.clone())
-                .show_cancel(true)
-                .on_ok(move |_event, _window, cx| {
-                    let Some(entity) = entity.upgrade() else { return true };
-                    let missing = missing.clone();
-                    let base = base.clone();
-                    let proxy = proxy.clone();
-                    entity.update(cx, |this, cx| this.fetch_missing_game_data(missing, base, proxy, cx));
-                    true
-                })
-        });
+        // What the repository actually publishes for each build, and how much the
+        // whole selection would fetch, before the reader is asked to commit to
+        // it: an offer to download data that was never published is worse than
+        // saying so.
+        crate::toast::info(t!("ui.dialogs.download_plan_pending").into_owned(), window, cx);
+        let builds: Vec<(u32, Option<String>)> =
+            missing.iter().map(|build| (build.build, build.version.clone())).collect();
+        let held = window.window_handle();
+        let asked = base.clone();
+        game_data_cache::plan(
+            |this: &mut Self| &mut this.cache,
+            base,
+            builds,
+            self.proxy_url(),
+            &cx.entity(),
+            cx,
+            move |this, outcome, cx| {
+                let plan = match outcome {
+                    game_data_cache::CacheOutcome::Planned { plan } => Some(plan),
+                    // The repository could not be asked. The builds are still
+                    // missing and the data may still be there, so the offer is
+                    // made without the per-build detail rather than withheld.
+                    outcome => {
+                        if let game_data_cache::CacheOutcome::Failed(reason) = &outcome {
+                            tracing::warn!("game data: the download could not be planned: {reason}");
+                        }
+                        this.cache_said = Some(CacheReport::warn(t!("ui.dialogs.download_plan_failed").into_owned()));
+                        None
+                    }
+                };
+                let proxy = this.proxy_url();
+                let described = describe_missing_builds(&missing, plan.as_ref());
+                let entity = cx.entity().downgrade();
+                let _ = held.update(cx, move |_root: gpui_kit::AnyView, window, cx| {
+                    window.open_alert_dialog(cx, move |alert, _window, _cx| {
+                        let entity = entity.clone();
+                        let missing = missing.clone();
+                        let base = asked.clone();
+                        let proxy = proxy.clone();
+                        alert
+                            .title(t!("ui.windows.download_game_data").into_owned())
+                            .description(described.clone())
+                            .show_cancel(true)
+                            .on_ok(move |_event, _window, cx| {
+                                let Some(entity) = entity.upgrade() else { return true };
+                                let missing = missing.clone();
+                                let base = base.clone();
+                                let proxy = proxy.clone();
+                                entity.update(cx, |this, cx| this.fetch_missing_game_data(missing, base, proxy, cx));
+                                true
+                            })
+                    });
+                });
+            },
+        );
     }
 
     /// Fetches the named builds into the game-data cache, reporting through the
@@ -804,7 +887,17 @@ impl App {
             proxy,
             &cx.entity(),
             cx,
-            |this, outcome, cx| this.cache_job_finished(outcome, cx),
+            |this, outcome, cx| {
+                let fetched =
+                    matches!(&outcome, game_data_cache::CacheOutcome::Downloaded { fetched, .. } if *fetched > 0);
+                this.cache_job_finished(outcome, cx);
+                // What the listing could not read, it can now: which replays
+                // have a preview and which builds are missing are both decided as
+                // the directory is walked, so it is walked again.
+                if fetched {
+                    this.replay_inspector.update(cx, |view, cx| view.relist(cx));
+                }
+            },
         );
     }
 
@@ -1734,6 +1827,9 @@ impl App {
                     self.cache.failure = Some(t!("ui.messages.game_data_download_failed").into_owned());
                 }
             }
+            // The offer that asked for a plan reads it itself; nothing else asks
+            // for one.
+            game_data_cache::CacheOutcome::Planned { .. } => {}
             game_data_cache::CacheOutcome::Failed(reason) => {
                 self.cache_said = Some(CacheReport::failed(reason));
             }
@@ -2884,5 +2980,77 @@ impl Render for App {
             .children(sheet_layer)
             .children(dialog_layer)
             .children(notification_layer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wows_data_mgr::download_repo::DownloadPlan;
+    use wows_data_mgr::download_repo::RemoteAvailability;
+    use wows_data_mgr::download_repo::ResolvedBuild;
+
+    use super::MissingBuild;
+    use super::describe_missing_builds;
+
+    fn waiting(build: u32, version: &str, replays: usize) -> MissingBuild {
+        MissingBuild { build, version: Some(version.to_owned()), replays }
+    }
+
+    fn resolved(build: u32, availability: RemoteAvailability) -> ResolvedBuild {
+        ResolvedBuild { requested_build: build, requested_version: None, availability }
+    }
+
+    /// The offer says what the repository has for each build and what the whole
+    /// selection would fetch, so the reader is not agreeing to an unknown.
+    #[test]
+    fn the_offer_names_each_builds_availability_and_the_total() {
+        let missing = vec![waiting(7062104, "0.10.5.0", 3), waiting(3747819, "0.6.9.0", 1)];
+        let plan = DownloadPlan {
+            unique_missing_objects: 412,
+            resolved: vec![
+                resolved(7062104, RemoteAvailability::Exact),
+                resolved(3747819, RemoteAvailability::Unpublished),
+            ],
+        };
+
+        let said = describe_missing_builds(&missing, Some(&plan));
+
+        assert!(said.contains("0.10.5.0"), "got {said:?}");
+        assert!(said.contains("3 replay(s)"), "got {said:?}");
+        assert!(said.contains("published"), "got {said:?}");
+        assert!(said.contains("never published"), "the build nothing was published for says so: {said:?}");
+        assert!(said.contains("412"), "and the whole selection's object count is there: {said:?}");
+    }
+
+    /// A nearest published build is named, since downloading it may still not
+    /// satisfy the replays that asked.
+    #[test]
+    fn a_nearest_match_names_what_would_be_fetched_instead() {
+        let missing = vec![waiting(7062104, "0.10.5.0", 2)];
+        let plan = DownloadPlan {
+            unique_missing_objects: 9,
+            resolved: vec![resolved(
+                7062104,
+                RemoteAvailability::Nearest { version: "0.10.5.1".to_owned(), build: 7070000 },
+            )],
+        };
+
+        let said = describe_missing_builds(&missing, Some(&plan));
+
+        assert!(said.contains("0.10.5.1"), "got {said:?}");
+        assert!(said.contains("7070000"), "got {said:?}");
+    }
+
+    /// A repository that could not be asked leaves the availability out rather
+    /// than claiming one, and the offer still stands.
+    #[test]
+    fn an_unasked_repository_leaves_the_availability_out() {
+        let missing = vec![waiting(7062104, "0.10.5.0", 2)];
+
+        let said = describe_missing_builds(&missing, None);
+
+        assert!(said.contains("0.10.5.0"), "got {said:?}");
+        assert!(said.contains("2 replay(s)"), "got {said:?}");
+        assert!(!said.contains("published"), "nothing is claimed about what is there: {said:?}");
     }
 }

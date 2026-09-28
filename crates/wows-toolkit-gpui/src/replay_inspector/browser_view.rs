@@ -707,6 +707,21 @@ impl ReplayBrowser {
         self.files.is_empty()
     }
 
+    /// Walks whatever this listing is reading again.
+    ///
+    /// For a change outside the directory that alters what can be read of it:
+    /// game data arriving for a build the listing called unreadable is what this
+    /// exists for, since both the preview and the build warning are decided as
+    /// the directory is walked.
+    pub fn relist(&mut self, cx: &mut Context<Self>) {
+        match self.chosen_directory.clone() {
+            Some(directory) => self.scan_directory(directory, cx),
+            None if !self.wows_dir.is_empty() => self.start_scan(self.wows_dir.clone(), cx),
+            // Nothing has been listed yet, so there is nothing to walk again.
+            None => {}
+        }
+    }
+
     /// Says which of the listed builds nothing on this machine can read.
     ///
     /// Checked once per scan rather than per row: the answer is the same for

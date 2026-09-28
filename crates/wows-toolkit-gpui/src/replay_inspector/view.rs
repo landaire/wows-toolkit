@@ -490,6 +490,11 @@ impl ReplayInspectorView {
         }
     }
 
+    /// Reads the listed directory again, for game data that has since arrived.
+    pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
+        self.browser.update(cx, |browser, cx| browser.relist(cx));
+    }
+
     /// Lists a directory the reader picks, instead of the install's own.
     ///
     /// The egui app opens each such directory as a workspace of its own; here it
