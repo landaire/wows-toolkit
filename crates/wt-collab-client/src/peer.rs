@@ -85,6 +85,15 @@ pub enum LocalAnnotationEvent {
     Clear { board_id: Option<u64> },
 }
 
+/// A name nothing else in the session holds.
+///
+/// Drawn at random rather than counted up: every peer mints its own, and two of
+/// them naming something at the same moment must not land on the same number.
+/// What a board, a capture point and an annotation are all known by.
+pub fn fresh_id() -> u64 {
+    rand::random()
+}
+
 impl LocalAnnotationEvent {
     /// A new annotation, under an id nothing else in the session holds.
     ///

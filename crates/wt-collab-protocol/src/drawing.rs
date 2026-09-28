@@ -527,7 +527,13 @@ impl Selection {
     /// The session's list is shared, so another peer rubbing something out
     /// can leave a selection pointing past the end of it.
     pub fn retain_within(&mut self, annotations: &[Annotation]) {
-        self.picked.retain(|picked| *picked < annotations.len());
+        self.retain_to(annotations.len());
+    }
+
+    /// The same against a count, for a caller that would have to copy the list
+    /// to hand it over.
+    pub fn retain_to(&mut self, len: usize) {
+        self.picked.retain(|picked| *picked < len);
     }
 }
 

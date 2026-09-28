@@ -748,7 +748,12 @@ impl ReplayRendererPanel {
 
     /// Hands this viewport a session to talk to, or takes one away.
     pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+        // What was drawn before stays on the map: a session starting under an
+        // open viewport hears about it as though it had just been drawn, and one
+        // ending leaves it where the reader can still see it.
+        let carried = self.collab.annotations_held();
         self.collab = link;
+        self.collab.adopt(carried);
         self.follow_collab(cx);
         cx.notify();
     }
@@ -6234,6 +6239,28 @@ mod tests {
 
     /// Drawing puts the session back within reach, and undoing takes the
     /// shape off again under the id it was added with.
+    #[gpui_kit::test]
+    fn drawing_without_a_session_still_puts_a_shape_on_the_map(cx: &mut TestAppContext) {
+        use wt_collab_client::drawing::Stroke as DrawStroke;
+        use wt_collab_client::drawing::Tool;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(900.)), |window, cx| {
+            let mut panel = ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx);
+            panel.seed_frame_for_test();
+            panel
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                panel.take_up(Tool::Line, cx);
+                panel.stroke(DrawStroke::Began { at: [100.0, 100.0] }, cx);
+                panel.stroke(DrawStroke::Ended { at: [200.0, 100.0] }, cx);
+                assert_eq!(panel.collab.annotations().len(), 1, "the line a reader drew with nobody connected");
+            })
+            .expect("the window is open");
+    }
+
     #[gpui_kit::test]
     fn undoing_takes_back_what_was_just_drawn(cx: &mut TestAppContext) {
         use wt_collab_client::AnnotationSyncState;

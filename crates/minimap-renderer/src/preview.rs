@@ -69,7 +69,21 @@ impl PreviewRenderer {
     ) -> Result<Self, PreviewRenderError> {
         let map_image = assets::load_map_image(map_name, vfs)
             .ok_or_else(|| PreviewRenderError::NoMapArt { map: map_name.to_string() })?;
+        Ok(Self::with_art(map_image, vfs, version, layout))
+    }
 
+    /// The same, drawing art the caller already holds.
+    ///
+    /// For a map this build has no art for: a collab peer is sent the art of the
+    /// board it is joining, which may come from a build it does not have. Only
+    /// the art is supplied; the fonts and icons drawn over it are this build's,
+    /// because they are what the reader's own other windows draw with.
+    pub fn with_art(
+        map_image: RgbImage,
+        vfs: &VfsPath,
+        version: Option<&Version>,
+        layout: crate::drawing::SidePanelLayout,
+    ) -> Self {
         let target = ImageTarget::with_side_panel(
             Some(map_image),
             assets::load_game_fonts(vfs),
@@ -88,7 +102,7 @@ impl PreviewRenderer {
             layout,
         );
 
-        Ok(Self { target })
+        Self { target }
     }
 
     /// The pixel size of every frame this renderer produces.
