@@ -206,6 +206,9 @@ pub struct ReplayInspectorView {
     /// lives on `browser`; this mirrors it so the closed combo shows the
     /// current value.
     grouping_select: Entity<SelectState<SearchableVec<GroupingItem>>>,
+    /// The builds whose result mapping has already been asked about this
+    /// session, so a second scan does not ask again.
+    constants_asked: std::collections::BTreeSet<u32>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -320,6 +323,7 @@ impl ReplayInspectorView {
             replay_settings: ReplaySettings::default(),
             auto_load_latest_replay: true,
             grouping_select,
+            constants_asked: std::collections::BTreeSet::new(),
             _subscriptions: vec![subscription, grouping_subscription],
         }
     }
@@ -471,6 +475,7 @@ impl ReplayInspectorView {
                 self.record_session_stats(paths.clone(), *replace, cx)
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::BuildsListed(builds) => self.fetch_missing_constants(builds.clone(), window, cx),
             ReplayBrowserEvent::RenderManyToVideo(paths) => self.render_many_to_video(paths.clone(), window, cx),
             ReplayBrowserEvent::RenderManyToClipboard(paths) => {
                 self.render_many_to_clipboard(paths.clone(), window, cx)
@@ -503,6 +508,105 @@ impl ReplayInspectorView {
     /// change is contributed under the new setting rather than the old one.
     pub(crate) fn set_data_sharing(&mut self, mode: wows_toolkit_viewmodel::settings::DataSharingMode) {
         self.data_sharing = mode;
+    }
+
+    /// Fetches the result mapping for any listed build that has none.
+    ///
+    /// Battle results are read through a per-build mapping; without it the figures
+    /// a replay reports are read through whatever mapping was last written, which
+    /// is what the egui app fetches per build to avoid
+    /// (`task/networking.rs`'s `FetchVersionedConstants`). Small files, so they are
+    /// fetched without asking, and each build is asked about once a session.
+    fn fetch_missing_constants(
+        &mut self,
+        builds: Vec<(u32, Option<String>)>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let wanted: Vec<(u32, Option<String>)> = builds
+            .into_iter()
+            .filter(|(build, _)| self.constants_asked.insert(*build))
+            .filter(|(build, _)| !crate::constants::is_cached(*build))
+            .collect();
+        if wanted.is_empty() {
+            return;
+        }
+
+        cx.spawn_in(window, async move |this, cx| {
+            let mut written = 0usize;
+            for (build, version) in wanted {
+                let Ok(fetch) = cx.update(|_window, cx| crate::constants::fetch_for_build(build, version, cx)) else {
+                    return;
+                };
+                match fetch.await {
+                    crate::constants::Fetched::Written { build, actual } => {
+                        tracing::info!(build, actual, "constants: the result mapping was fetched");
+                        written += 1;
+                    }
+                    crate::constants::Fetched::AlreadyOnDisk => {}
+                    crate::constants::Fetched::Failed(reason) => {
+                        tracing::warn!(build, %reason, "constants: the result mapping was not fetched");
+                    }
+                }
+            }
+            if written == 0 {
+                return;
+            }
+            // What is open was read through the mapping that was there before, so
+            // it is read again now there is a better one.
+            let _ = this.update_in(cx, |this, window, cx| {
+                crate::toast::info(t!("ui.replay.constants_written", count = written).into_owned(), window, cx);
+                this.reparse_open_replays(window, cx);
+            });
+        })
+        .detach();
+    }
+
+    /// The build the game data now loaded is for.
+    ///
+    /// `None` until a build is loaded, which is what refuses an import: a mapping
+    /// is cached under a build, and there is no build to cache it under.
+    fn loaded_build(&self) -> Option<u32> {
+        let GameDataStatus::Ready(loaded) = &self.game_data_status else { return None };
+        Some(loaded.build())
+    }
+
+    /// Reads every open replay again, for a mapping or a dump that has since
+    /// arrived.
+    pub(crate) fn reparse_open_replays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let open: Vec<PathBuf> = self.open_panels.keys().cloned().collect();
+        for path in open {
+            self.reparse_open_replay(&path, window, cx);
+        }
+    }
+
+    /// Takes a mapping the reader points at as the loaded build's own.
+    pub(crate) fn import_constants(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(build) = self.loaded_build() else {
+            crate::toast::warn(t!("ui.replay.constants_no_build").into_owned(), window, cx);
+            return;
+        };
+        let asked = crate::dialog::pick_file(
+            Some(&t!("ui.replay.constants_import_title")),
+            Some(crate::dialog::Filter { label: "JSON", extensions: &["json"] }),
+        );
+
+        cx.spawn_in(window, async move |this, cx| {
+            let Some(path) = asked.await else { return };
+            let imported = crate::constants::import(&path, build);
+            let _ = this.update_in(cx, |this, window, cx| match imported {
+                Ok(()) => {
+                    crate::toast::ok(t!("ui.replay.constants_imported", build = build).into_owned(), window, cx);
+                    this.reparse_open_replays(window, cx);
+                }
+                Err(reason) => crate::toast::failed(
+                    t!("ui.replay.constants_import_failed", reason = reason).into_owned(),
+                    window,
+                    cx,
+                ),
+            });
+        })
+        .detach();
     }
 
     /// Reads the listed directory again, for game data that has since arrived.

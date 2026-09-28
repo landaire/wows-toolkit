@@ -261,6 +261,8 @@ pub enum ReplayBrowserEvent {
     /// Write a video of each of these battles, which is what the marked set's
     /// own menu item asks for.
     RenderManyToVideo(Vec<PathBuf>),
+    /// The builds the listing holds, with the version each one's replays name.
+    BuildsListed(Vec<(u32, Option<String>)>),
     /// Render each of these to a video and put the files on the clipboard.
     RenderManyToClipboard(Vec<PathBuf>),
     /// The game has just written a replay into the watched directory, and the
@@ -612,10 +614,28 @@ impl ReplayBrowser {
                 this.watch_replays_dir(directory, generation, cx);
                 this.warm_listed_build(cx);
                 this.report_missing_builds(cx);
+                this.report_listed_builds(cx);
                 cx.notify();
             });
         })
         .detach();
+    }
+
+    /// Every build the listing holds, with the version its replays name.
+    ///
+    /// For what is fetched per build rather than per replay: the game data itself
+    /// (`missing_builds`) and the result mapping the battle results are read
+    /// through.
+    pub fn listed_builds(&self) -> Vec<(u32, Option<String>)> {
+        let mut builds: std::collections::BTreeMap<u32, Option<String>> = std::collections::BTreeMap::new();
+        for file in &self.files {
+            let Some(build) = file.listed.build else { continue };
+            let entry = builds.entry(build).or_default();
+            if entry.is_none() {
+                *entry = file.version.clone();
+            }
+        }
+        builds.into_iter().collect()
     }
 
     /// Every replay the listing holds, in the order it walked them.
@@ -696,6 +716,7 @@ impl ReplayBrowser {
                 this.watch_replays_dir(replays_dir, generation, cx);
                 this.warm_listed_build(cx);
                 this.report_missing_builds(cx);
+                this.report_listed_builds(cx);
                 cx.notify();
             });
         })
@@ -742,6 +763,18 @@ impl ReplayBrowser {
             return;
         }
         cx.emit(ReplayBrowserEvent::BuildsMissing(missing));
+    }
+
+    /// Says which builds the listing holds, whatever can be read of them.
+    ///
+    /// Reported per scan rather than per replay, as the missing-build report is:
+    /// what is fetched for a build is fetched once.
+    fn report_listed_builds(&mut self, cx: &mut Context<Self>) {
+        let builds = self.listed_builds();
+        if builds.is_empty() {
+            return;
+        }
+        cx.emit(ReplayBrowserEvent::BuildsListed(builds));
     }
 
     fn warm_listed_build(&mut self, cx: &mut Context<Self>) {

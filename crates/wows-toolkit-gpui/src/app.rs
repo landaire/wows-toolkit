@@ -498,6 +498,10 @@ pub struct App {
     /// The builds already put to the reader as missing, so a walk that runs
     /// again does not ask about the same ones twice.
     offered_builds: std::collections::BTreeSet<u32>,
+    /// Whether the published result mappings have been checked this session. The
+    /// egui app throttles its own check to one per half hour for the same reason:
+    /// the mapping changes when the game does, not while the app is open.
+    constants_checked: bool,
     /// The files being dragged over the window, while any are. What the scrim
     /// says is which of them would open, or that only one may.
     hovering_files: Option<Vec<PathBuf>>,
@@ -650,6 +654,7 @@ impl App {
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
             offered_builds: std::collections::BTreeSet::new(),
+            constants_checked: false,
             hovering_files: None,
             cache_said: None,
             collab_name_input,
@@ -1012,6 +1017,55 @@ impl App {
     ///
     /// The same `LoadedGameData` the replay inspector already opened; this
     /// never starts a load of its own.
+    /// Asks once whether a newer result mapping has been published for the build
+    /// now loaded, and writes it if so.
+    ///
+    /// Battle results are read through that mapping; a port that only ever read
+    /// the file decoded last year's keys against this year's results. The commit
+    /// row is shared with the egui app, so whichever app checks first spares the
+    /// other the request.
+    fn poll_constants_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.constants_checked {
+            return;
+        }
+        let GameDataStatus::Ready(loaded) = self.replay_inspector.read(cx).game_data_status() else {
+            return;
+        };
+        let Some(known) = self.settings().map(|settings| settings.constants_commit.clone()) else { return };
+        self.constants_checked = true;
+
+        let build = loaded.build();
+        let checked = crate::constants::check_latest(build, known, cx);
+
+        cx.spawn_in(window, async move |this, cx| {
+            let outcome = checked.await;
+            let _ = this.update_in(cx, |this, window, cx| match outcome {
+                crate::constants::Checked::Written { build, commit } => {
+                    tracing::info!(build, "constants: the newest result mapping was written");
+                    if let Some(settings) = this.settings_mut() {
+                        settings.constants_commit = commit.clone();
+                    }
+                    settings_store::save(keys::CONSTANTS_FILE_COMMIT, &commit, cx);
+                    crate::toast::info(t!("ui.replay.constants_latest_written").into_owned(), window, cx);
+                    this.replay_inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
+                }
+                crate::constants::Checked::UpToDate => {}
+                crate::constants::Checked::Failed(reason) => {
+                    // Said once, as the egui app says it once: the mappings that
+                    // are cached still read, so this is a notice rather than a
+                    // failure to work.
+                    tracing::warn!(%reason, "constants: the published mappings could not be checked");
+                    crate::toast::warn(
+                        t!("ui.replay.constants_check_failed", reason = reason).into_owned(),
+                        window,
+                        cx,
+                    );
+                }
+            });
+        })
+        .detach();
+    }
+
     fn poll_stats_game_data(&mut self, cx: &mut Context<Self>) {
         if self.stats_game_data_requested {
             return;
@@ -1039,6 +1093,7 @@ impl App {
     /// observer's first notification races the settings load.
     fn poll_armor_game_data(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.poll_stats_game_data(cx);
+        self.poll_constants_check(window, cx);
         if self.armor_game_data_requested {
             return;
         }
@@ -1244,6 +1299,10 @@ impl App {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
             }
             PaletteAction::IndexAllReplays => self.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx),
+            PaletteAction::ImportConstants => {
+                self.active_tab = AppTab::ReplayInspector;
+                self.replay_inspector.update(cx, |view, cx| view.import_constants(window, cx));
+            }
             PaletteAction::ContributeAllReplays(ledger) => {
                 self.active_tab = AppTab::ReplayInspector;
                 self.replay_inspector.update(cx, |view, cx| view.contribute_all(ledger, window, cx));

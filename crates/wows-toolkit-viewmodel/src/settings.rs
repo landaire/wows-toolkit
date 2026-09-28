@@ -48,6 +48,9 @@ pub mod keys {
     /// Whether the notice that an export fell back to software encoding is
     /// suppressed.
     pub const SUPPRESS_GPU_ENCODER_WARNING: &str = "suppress_gpu_encoder_warning";
+    /// The commit the cached result mappings were last read at, which is what
+    /// makes the next check one small request.
+    pub const CONSTANTS_FILE_COMMIT: &str = "constants_file_commit";
 }
 
 /// A proxy setting as a URL a client can take.

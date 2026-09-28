@@ -283,6 +283,85 @@ pub async fn list_available_builds() -> Result<Vec<u32>, rootcause::Report> {
     Ok(builds)
 }
 
+/// The newest published constants, and the commit they were published in.
+pub struct LatestConstants {
+    /// The file as published, to be written out as it is.
+    pub data: Vec<u8>,
+    /// The commit it was read at. `None` when the repository would not say,
+    /// which costs the next check its shortcut and nothing else.
+    pub commit: Option<String>,
+}
+
+/// Fetches `data/latest.json` when the repository has moved since
+/// `known_commit`.
+///
+/// `Ok(None)` means what the caller already has is the newest there is. The
+/// commit is asked for first because that is one small request, where the file
+/// itself is the whole mapping.
+pub async fn fetch_latest_constants(
+    known_commit: Option<&str>,
+) -> Result<Option<LatestConstants>, ConstantsFetchError> {
+    use http_body_util::BodyExt;
+    use octocrab::params::repos::Reference;
+
+    const PATH: &str = "data/latest.json";
+
+    let latest_commit = octocrab::instance()
+        .repos("padtrack", "wows-constants")
+        .list_commits()
+        .per_page(1)
+        .send()
+        .await
+        .ok()
+        .and_then(|mut list| list.take_items().pop())
+        .map(|commit| commit.sha);
+
+    // Nothing to do when the repository is where the caller last saw it, and
+    // nothing to compare against when it would not say where it is.
+    match (&latest_commit, known_commit) {
+        (None, _) => return Ok(None),
+        (Some(latest), Some(known)) if latest == known => return Ok(None),
+        _ => {}
+    }
+
+    let response = octocrab::instance()
+        .repos("padtrack", "wows-constants")
+        .raw_file(Reference::Branch("main".to_string()), PATH)
+        .await
+        .map_err(|e| {
+            let err = ConstantsFetchError::Transport { message: error_chain(&e) };
+            tracing::warn!(host = GITHUB_HOST, path = PATH, %err, "fetching the latest constants");
+            err
+        })?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let rate_limit_remaining = response.headers().get("x-ratelimit-remaining").and_then(|v| v.to_str().ok());
+        let err = ConstantsFetchError::from_status(status.as_u16(), rate_limit_remaining);
+        tracing::warn!(host = GITHUB_HOST, path = PATH, %err, "fetching the latest constants");
+        return Err(err);
+    }
+
+    let mut body = response.into_body();
+    let mut data = Vec::new();
+    while let Some(frame) = body.frame().await {
+        match frame {
+            Ok(frame) => {
+                if let Some(chunk) = frame.data_ref() {
+                    data.extend_from_slice(chunk);
+                }
+            }
+            Err(e) => {
+                let err = ConstantsFetchError::Transport { message: error_chain(&e) };
+                tracing::warn!(host = GITHUB_HOST, path = PATH, %err, "reading the latest constants body");
+                return Err(err);
+            }
+        }
+    }
+
+    Ok(Some(LatestConstants { data, commit: latest_commit }))
+}
+
 /// Fetch constants JSON for a specific build number.
 pub async fn fetch_build(build: u32) -> Result<serde_json::Value, ConstantsFetchError> {
     use http_body_util::BodyExt;
