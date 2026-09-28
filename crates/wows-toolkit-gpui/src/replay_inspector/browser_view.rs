@@ -258,6 +258,9 @@ pub enum ReplayBrowserEvent {
     OpenReplayInNewTab(PathBuf),
     /// Play this replay's battle back on its minimap.
     RenderReplay(PathBuf),
+    /// Write a video of each of these battles, which is what the marked set's
+    /// own menu item asks for.
+    RenderManyToVideo(Vec<PathBuf>),
     /// The game has just written a replay into the watched directory, and the
     /// listing now holds it.
     ReplayAppeared(PathBuf),
@@ -1221,9 +1224,7 @@ impl Render for ReplayBrowser {
                             .on_click(move |_event, _window, cx| {
                                 let paths = batch_render.clone();
                                 batch_entity.update(cx, |_browser, cx| {
-                                    for path in paths {
-                                        cx.emit(ReplayBrowserEvent::RenderReplay(path));
-                                    }
+                                    cx.emit(ReplayBrowserEvent::RenderManyToVideo(paths));
                                 });
                             }),
                         )

@@ -54,13 +54,13 @@ have used it.
    `app.rs:4712`). A user who selects "send replays" is told they are
    contributing and nothing is sent; a user who selects "off" gets the same
    behaviour. This is the most serious divergence on the list after item 1.
-6. **"Render N Replays to Video" does not render.** The listing offers
-   `ui.replay.context.render_to_video_many` and then emits one `RenderReplay`
-   per path (`replay_inspector/browser_view.rs:1099-1111`), so marking 50
-   replays opens 50 viewport tabs and bakes 50 previews rather than writing 50
-   files. The egui app runs one background batch into a chosen folder
-   (`replay/renderer/video_export.rs:458`, progress
-   `ui.task.batch_render_progress`); it also has batch-to-clipboard (`:488`).
+6. **Batch render.** Done in part 2026-09-28: the menu item now runs one
+   background batch (`replay_renderer::batch_export`) into a folder the reader
+   picks, one file per replay, and reports how many were written and how many
+   failed. Not ported: per-replay progress (the egui app has a task bar entry for
+   it, which this port has no bar for -- item 19), batch-to-clipboard
+   (`video_export.rs:488`), and the renderer's saved display defaults, so a batch
+   renders with the default options rather than the reader's.
 7. **`check_for_updates` and `enable_logging` govern nothing.** No updater
    (item 11) and no log file (item 12) exist in the port.
 8. **Auto-export.** Done 2026-09-28: a replay the watcher reports is parsed and
@@ -239,9 +239,8 @@ have used it.
     data, Loading game data for a version, and Reading (`task/replays.rs:1579`);
     the port reports scan and read counts only, so a build being fetched or
     decoded looks like a stalled scan.
-39. **`clear_fire_section_failures` has no caller** in the port, so a
-    fire-chance section that failed against the old cache directory stays failed
-    until restart (egui clears it on a cache-dir change, `tab_state.rs:1345`).
+39. ~~**`clear_fire_section_failures` has no caller.**~~ Done 2026-09-28: it is
+    cleared with the rest of what the old cache directory told us.
 
 ## Corrections to `docs/gpui-port-parity.md`
 

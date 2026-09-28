@@ -424,6 +424,7 @@ impl ReplayInspectorView {
                 self.record_session_stats(paths.clone(), *replace, cx)
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::RenderManyToVideo(paths) => self.render_many_to_video(paths.clone(), window, cx),
             // The game has just finished a match. The egui app opens it
             // straight away when this is on, which is what the checkbox
             // promises.
@@ -444,6 +445,54 @@ impl ReplayInspectorView {
             // fetch these builds is raised to it.
             ReplayBrowserEvent::BuildsMissing(missing) => cx.emit(GameDataMissing(missing.clone())),
         }
+    }
+
+    /// Writes a video of each marked battle into a directory the reader picks.
+    ///
+    /// One background batch rather than one viewport per replay: the menu item
+    /// says "Render N Replays to Video", and N open tabs baking tracks nobody
+    /// watches is not that. Mirrors the egui app's own batch
+    /// (`replay/renderer/video_export.rs:458`), which also writes into a chosen
+    /// folder; per-replay progress is not reported here yet, only the outcome.
+    fn render_many_to_video(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        if paths.is_empty() {
+            return;
+        }
+        let Some(game_data) = self.game_data.clone() else { return };
+        let asked = crate::dialog::pick_folder(&t!("ui.replay.renderer.export_video"));
+
+        cx.spawn_in(window, async move |_this, cx| {
+            let Some(out_dir) = asked.await else { return };
+            let count = paths.len();
+            let shown = out_dir.display().to_string();
+            let _ = cx.update(|window, cx| {
+                crate::toast::info(
+                    t!("ui.replay.renderer.batch_started", count = count, dir = shown).into_owned(),
+                    window,
+                    cx,
+                );
+            });
+
+            let settings = crate::replay_renderer::ExportSettings::default();
+            let batch =
+                cx.update(|_window, cx| crate::replay_renderer::batch_export(paths, game_data, out_dir, settings, cx));
+            let Ok(batch) = batch else { return };
+            let (written, failed) = batch.await;
+
+            let _ = cx.update(|window, cx| {
+                let said = if failed.is_empty() {
+                    t!("ui.replay.renderer.batch_all_written", written = written.len()).into_owned()
+                } else {
+                    t!("ui.replay.renderer.batch_finished", written = written.len(), failed = failed.len()).into_owned()
+                };
+                if failed.is_empty() {
+                    crate::toast::ok(said, window, cx);
+                } else {
+                    crate::toast::warn(said, window, cx);
+                }
+            });
+        })
+        .detach();
     }
 
     /// Writes a battle that has just landed out to the auto-export directory.
