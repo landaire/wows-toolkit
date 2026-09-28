@@ -400,10 +400,15 @@ pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCa
     Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
 }
 
-/// Draws one map with `commands` on it.
+/// Draws one map with `commands` on it, and nothing else.
 ///
 /// What the tactics board shows: the same renderer the battle is drawn through,
 /// with capture points and annotations on it rather than a replay's own frame.
+/// The battle's HUD strip is cropped off and the art is handed over at its own
+/// size, so one pixel of the image is one pixel of the minimap: a board turns a
+/// pointer position back into a world one, and a resample would put every press
+/// somewhere else.
+///
 /// `None` when no build is open, or the open one ships no art for that map.
 pub fn render_map(
     map_name: &str,
@@ -412,8 +417,32 @@ pub fn render_map(
 ) -> Option<Arc<RenderImage>> {
     let loaded = game_data.newest_loaded()?;
     let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
-    let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    Some(to_image(renderer.render(commands)))
+    let canvas = {
+        let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        renderer.render(commands)
+    };
+    Some(map_only_image(canvas))
+}
+
+/// The map layer of a rendered canvas, at its own size.
+///
+/// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas that is taller
+/// than the map by that strip, so the crop is the strip taken off the top.
+fn map_only_image(canvas: RgbImage) -> Arc<RenderImage> {
+    use wows_minimap_renderer::HUD_HEIGHT;
+    use wows_minimap_renderer::MINIMAP_SIZE;
+
+    let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
+    let mut bgra = Vec::with_capacity((side * side * 4) as usize);
+    for y in 0..side {
+        for x in 0..side {
+            let pixel = canvas.get_pixel(x, y + HUD_HEIGHT);
+            bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+        }
+    }
+    let buffer = image::RgbaImage::from_raw(side, side, bgra)
+        .expect("the buffer is four bytes per pixel of the size it was built at");
+    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
 }
 
 /// Bakes `replay` into the frames a preview plays, rasterising them one at a

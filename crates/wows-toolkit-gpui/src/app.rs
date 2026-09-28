@@ -510,6 +510,9 @@ pub struct App {
     /// egui app throttles its own check to one per half hour for the same reason:
     /// the mapping changes when the game does, not while the app is open.
     constants_checked: bool,
+    /// The board already open, so the menu brings it forward rather than
+    /// opening another.
+    tactics_board: Option<WeakEntity<crate::tactics::TacticsBoard>>,
     /// The capture-point layouts a tactics board picks its modes from, read
     /// from the cache both apps write. Empty until the read lands, and empty on
     /// a machine that has never indexed a replay, which is a board with maps
@@ -693,6 +696,7 @@ impl App {
             cache: game_data_cache::CacheState::default(),
             offered_builds: std::collections::BTreeSet::new(),
             constants_checked: false,
+            tactics_board: None,
             cap_layouts: wows_replay_insights::cap_layout::CapLayoutDb::default(),
             cap_layouts_requested: false,
             cache_maintained: false,
@@ -1448,13 +1452,27 @@ impl App {
         let layouts = self.cap_layouts.clone();
         let replays_dir = self.replays_dir();
         let version = self.installed_version();
+        // Brought forward rather than opened again: the egui app toggles one
+        // board, and two windows on one would each walk the replays and each
+        // write what they found.
+        if let Some(open) = self.tactics_board.as_ref().and_then(|handle| handle.upgrade())
+            && let Some(window) = open.read(cx).window()
+        {
+            let _ = window.update(cx, |_root, window, _cx| window.activate_window());
+            return;
+        }
+
         let board = cx.new(|cx| {
             let mut board = crate::tactics::TacticsBoard::new(game_data, layouts, window, cx);
             board.set_install(replays_dir, version, cx);
             board
         });
-        let options =
-            crate::window_shell::options(wows_toolkit_config::WindowKind::TacticsBoard, board.read(cx).title(), cx);
+        self.tactics_board = Some(board.downgrade());
+        let options = crate::window_shell::options(
+            wows_toolkit_config::WindowKind::TacticsBoard,
+            crate::tactics::TacticsBoard::title(),
+            cx,
+        );
         let opened = cx.open_window(options, move |window, cx| {
             crate::window_shell::remember(wows_toolkit_config::WindowKind::TacticsBoard, window, cx);
             // Through a `Shell` so the board's own toasts and dialogs are drawn

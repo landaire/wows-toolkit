@@ -1119,15 +1119,14 @@ impl ReplayInspectorView {
     /// gate skips it: the document would be a hollow one for a battle the client
     /// left before the server reported it.
     ///
-    /// Named after the replay file, which is how this port's other export path
-    /// names it too.
+    /// Named by ship, map, scenario, mode and time, which is the name the egui
+    /// app writes (`wows_toolkit_viewmodel::replay_export::exported_file_stem`),
+    /// so a directory both apps write into reads as one set.
     fn auto_export_landed(&mut self, path: &std::path::Path, window: &mut Window, cx: &mut Context<Self>) {
         let AutoExport::To { directory, format } = AutoExport::from_settings(&self.replay_settings) else { return };
         let Some(game_data) = self.game_data.clone() else { return };
-        let Some(stem) = path.file_stem().map(|stem| stem.to_owned()) else { return };
 
         let debug = self.debug_mode;
-        let out = directory.join(stem).with_extension(format.extension());
         let parse = spawn_parse(path.to_path_buf(), game_data, self.personal_rating.clone(), cx);
         let named = path.to_path_buf();
         cx.spawn_in(window, async move |_this, cx| {
@@ -1142,6 +1141,7 @@ impl ReplayInspectorView {
                 tracing::debug!(path = %named.display(), "auto-export: no battle results, so nothing is written");
                 return;
             }
+            let out = directory.join(&parsed.export_stem).with_extension(format.extension());
 
             let export = if debug { parsed.export } else { parsed.export.stripped() };
             let written = cx.background_spawn(async move { super::panel::write_export(&export, &out, format) }).await;

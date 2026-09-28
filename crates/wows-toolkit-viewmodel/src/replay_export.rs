@@ -659,6 +659,41 @@ impl Message {
     }
 }
 
+/// What an exported battle's file is called, without its extension.
+///
+/// Ship, map, scenario, mode and the time it was played, joined so a directory
+/// of exports sorts and reads without opening any of them. Dots, colons and
+/// spaces become dashes, because a file name carrying them is awkward on one
+/// platform or another.
+///
+/// Shared so the two apps name the same battle the same file
+/// (`ui/replay_parser/mod.rs`'s `better_file_name`).
+pub fn exported_file_stem(
+    meta: &wows_replays::ReplayMeta,
+    metadata: &wowsunpack::game_params::provider::GameMetadataProvider,
+) -> String {
+    use wowsunpack::data::ResourceLoader;
+
+    // Relation zero is the recording player, which is whose ship the export is
+    // named after. A recording with none is a spectator's.
+    let ship = meta
+        .vehicles
+        .iter()
+        .find(|vehicle| vehicle.relation == 0)
+        .and_then(|vehicle| metadata.param_localization_id(vehicle.shipId.raw().into()))
+        .and_then(|id| metadata.localized_name_from_id(&wowsunpack::data::TranslationKey::new(id)))
+        .unwrap_or_else(|| rust_i18n::t!("ui.replay.spectator").into_owned());
+
+    let parts = [
+        ship,
+        wowsunpack::game_params::translations::translate_map_name(&meta.mapName, metadata),
+        wowsunpack::game_params::translations::translate_scenario(&meta.scenario, metadata),
+        wowsunpack::game_params::translations::translate_game_mode(meta.gameType.as_deref().unwrap_or(""), metadata),
+        meta.dateTime.clone(),
+    ];
+    parts.join("_").replace(['.', ':', ' '], "-")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

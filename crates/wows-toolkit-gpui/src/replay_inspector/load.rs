@@ -879,6 +879,10 @@ pub struct ParsedReplay {
     /// This battle as the Stats tab records it. `None` when the replay names
     /// no recording player.
     pub session_stat: Option<PerGameStat>,
+    /// What an export of this battle is called, without its extension: ship,
+    /// map, scenario, mode and time, which is the name the egui app writes.
+    /// Kept from the parse because it needs the build's own translations.
+    pub export_stem: String,
 }
 
 /// What the replay index needs from one parsed battle.
@@ -1070,6 +1074,7 @@ pub(crate) fn parse_replay_with_alts(
     let raw_metadata_json = pretty_json_or_raw(&replay_file.raw_meta);
     // Built here because this is where the build that named the achievements
     // is open; the row itself is only written when the reader asks for it.
+    let export_stem = wows_toolkit_viewmodel::replay_export::exported_file_stem(meta, loaded.provider.as_ref());
     let session_stat = PerGameStat::from_report(&normalized, &meta.dateTime, &|name| {
         <GameMetadataProvider as GameParamProvider>::game_param_by_name(loaded.provider.as_ref(), name)
             .map(|param| param.id())
@@ -1091,6 +1096,7 @@ pub(crate) fn parse_replay_with_alts(
         model,
         indexable,
         session_stat,
+        export_stem,
         shareable,
         export,
         game_data: loaded,
