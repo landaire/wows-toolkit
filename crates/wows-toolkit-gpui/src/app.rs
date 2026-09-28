@@ -1410,7 +1410,7 @@ impl App {
     /// The whole directory rather than what changed: this is the control for
     /// building an index that is not there, or rebuilding one whose rows an
     /// older parse got wrong.
-    fn build_replay_index(&mut self, cx: &mut Context<Self>) {
+    fn build_replay_index(&mut self, mode: crate::replay_index::IndexMode, cx: &mut Context<Self>) {
         if self.index_cancel.is_some() {
             return;
         }
@@ -1450,7 +1450,7 @@ impl App {
         self._index_build = Some(cx.spawn(async move |this, cx| {
             let built = cx
                 .background_spawn(async move {
-                    crate::replay_index::build_index(&runtime, &pool, &root, &game_data, &cancel, |step| {
+                    crate::replay_index::build_index(&runtime, &pool, &root, &game_data, &cancel, mode, |step| {
                         let _ = progress_tx.unbounded_send(step);
                     })
                 })
@@ -1461,7 +1461,18 @@ impl App {
                 this.index_progress = None;
                 this.index_outcome = Some(match built {
                     Ok(progress) => {
-                        t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed).into_owned()
+                        if progress.skipped > 0 {
+                            t!(
+                                "ui.settings.index.built_with_skipped",
+                                indexed = progress.indexed,
+                                skipped = progress.skipped,
+                                failed = progress.failed
+                            )
+                            .into_owned()
+                        } else {
+                            t!("ui.settings.index.built", indexed = progress.indexed, failed = progress.failed)
+                                .into_owned()
+                        }
                     }
                     Err(err) => err.to_string(),
                 });
@@ -1604,7 +1615,22 @@ impl App {
                                         .label(t!("ui.settings.index.build").to_string())
                                         .compact()
                                         .disabled(!has_dir || running)
-                                        .on_click(cx.listener(|this, _event, _window, cx| this.build_replay_index(cx))),
+                                        .on_click(cx.listener(|this, _event, _window, cx| {
+                                            this.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx)
+                                        })),
+                                )
+                                // For rows an older parse decoded through
+                                // constants that did not fit: nothing else can
+                                // correct them (the egui app's Re-index All).
+                                .child(
+                                    Button::new("index-rebuild")
+                                        .label(t!("ui.settings.index.rebuild").to_string())
+                                        .compact()
+                                        .disabled(!has_dir || running)
+                                        .tooltip(t!("ui.settings.index.rebuild_hint").to_string())
+                                        .on_click(cx.listener(|this, _event, _window, cx| {
+                                            this.build_replay_index(crate::replay_index::IndexMode::RefreshAll, cx)
+                                        })),
                                 )
                                 .when(running, |this| {
                                     this.child(Spinner::new()).child(
@@ -1624,15 +1650,24 @@ impl App {
                             div()
                                 .text_xs()
                                 .text_color(crate::theme::text_dim())
-                                .child(
+                                .child(if step.skipped > 0 {
+                                    t!(
+                                        "ui.settings.index.progress_skipped",
+                                        done = step.done,
+                                        total = step.total,
+                                        skipped = step.skipped,
+                                        failed = step.failed
+                                    )
+                                    .to_string()
+                                } else {
                                     t!(
                                         "ui.settings.index.progress",
                                         done = step.done,
                                         total = step.total,
                                         failed = step.failed
                                     )
-                                    .to_string(),
-                                )
+                                    .to_string()
+                                })
                                 .into_any_element()
                         }))
                         .children(outcome.map(|text| {

@@ -433,6 +433,7 @@ impl ReplayInspectorView {
                 // every battle" means, and the egui app writes it from the
                 // background parser for the same reason.
                 self.auto_export_landed(path, cx);
+                self.index_landed(path, cx);
                 if self.auto_load_latest_replay {
                     self.open_replay(path.clone(), window, cx);
                 }
@@ -491,6 +492,43 @@ impl ReplayInspectorView {
                     crate::toast::warn(said, window, cx);
                 }
             });
+        })
+        .detach();
+    }
+
+    /// Puts a battle that has just landed into the replay index.
+    ///
+    /// The egui app indexes each replay as its background parser reads it
+    /// (`task/replays.rs:540`), so an index fills as you play. Without this the
+    /// port's index only grows when the reader presses Build Index, and every row
+    /// of the newest battles reads as "not indexed" until they do.
+    ///
+    /// Its own parse, deliberately: this runs whether or not the replay is opened,
+    /// and a tab that opens it will not be waiting on this.
+    fn index_landed(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let Some(runtime) = crate::runtime::runtime(cx) else { return };
+        let Some(root) = path.parent().map(std::path::Path::to_path_buf) else { return };
+        let path = path.to_path_buf();
+
+        cx.spawn(async move |_this, cx| {
+            let indexed = cx
+                .background_spawn(async move {
+                    let now = jiff::Timestamp::now();
+                    let source =
+                        runtime.block_on(wows_toolkit_config::index::query::ensure_default_source(&pool, &root, now));
+                    let source = match source {
+                        Ok(source) => source,
+                        Err(err) => return Err(err.to_string()),
+                    };
+                    crate::replay_index::index_one(&runtime, &pool, &path, &game_data, source, now)
+                        .map_err(|err| err.to_string())
+                })
+                .await;
+            if let Err(err) = indexed {
+                tracing::warn!("replay index: the battle that just landed was not indexed: {err}");
+            }
         })
         .detach();
     }

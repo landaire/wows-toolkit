@@ -6,3 +6,4 @@ pub mod query_ast;
 pub mod query_sql;
 pub mod query_text;
 pub mod rows;
+pub mod unindexable;
