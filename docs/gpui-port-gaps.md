@@ -285,10 +285,14 @@ have used it.
     of it.
 37. ~~**A live OS theme switch is not followed.**~~ Done 2026-09-28: the window's
     appearance observer re-applies the palette while the theme is "System".
-38. **Staged ingest progress.** The egui app reports Scanning, Downloading game
-    data, Loading game data for a version, and Reading (`task/replays.rs:1579`);
-    the port reports scan and read counts only, so a build being fetched or
-    decoded looks like a stalled scan.
+38. ~~**Staged ingest progress.**~~ Done 2026-09-28: the listing names every
+    stage it goes through. The walk and the header reads were already apart
+    ("Scanning replays" with no denominator, then "Reading replay N of M"), and the
+    wait for the game data now names the version it is waiting for, read from the
+    install's own `preferences.xml` rather than from the load it is waiting on
+    (`GameDataStatus::Loading { version }`). A download is reported on the status
+    strip rather than in the listing, because in this port it is a job the app owns
+    and not a stage of the walk.
 39. ~~**`clear_fire_section_failures` has no caller.**~~ Done 2026-09-28: it is
     cleared with the rest of what the old cache directory told us.
 

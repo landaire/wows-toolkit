@@ -519,7 +519,7 @@ impl GameDataCache {
 /// This is what names a dump of it. `None` when the file is absent or names
 /// something that will not parse, in which case nothing can be dumped under a
 /// name that would be found again.
-fn installed_version(wows_dir: &Path) -> Option<Version> {
+pub(crate) fn installed_version(wows_dir: &Path) -> Option<Version> {
     let preferences = std::fs::read_to_string(wows_dir.join("preferences.xml")).ok()?;
     let version = super::browser_view::last_server_version(&preferences)?;
     Version::try_from_client_exe(&version)
@@ -634,7 +634,12 @@ fn stale_cache_build(name: &str) -> Option<u32> {
 /// already warms the same per-build slot it reads from.
 #[derive(Clone)]
 pub enum GameDataStatus {
-    Loading,
+    /// `version` is what the install says it is, so the listing can name what it
+    /// is waiting for. `None` when `preferences.xml` could not be read, which is
+    /// the one case nothing can be named.
+    Loading {
+        version: Option<String>,
+    },
     Ready(Arc<LoadedGameData>),
     Failed(String),
 }
