@@ -14,6 +14,7 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
+use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
@@ -832,6 +833,51 @@ impl PlayerTrackerView {
                     Err(err) => this.state = LoadState::Failed(err.to_string()),
                 }
                 this.sync_rows(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Asks before forgetting every tracked player.
+    ///
+    /// The egui button clears on one press; here it is a confirmation, because
+    /// what goes is every encounter, alias and note the tracker has collected and
+    /// nothing brings the notes back.
+    fn confirm_clear(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let entity = cx.entity().downgrade();
+        window.open_alert_dialog(cx, move |alert, _window, _cx| {
+            let entity = entity.clone();
+            alert
+                .title(t!("ui.player_tracker.clear_stats").into_owned())
+                .description(t!("confirm.clear_all_session_stats").into_owned())
+                .show_cancel(true)
+                .on_ok(move |_event, _window, cx| {
+                    if let Some(entity) = entity.upgrade() {
+                        entity.update(cx, |this, cx| this.clear_tracked(cx));
+                    }
+                    true
+                })
+        });
+    }
+
+    /// Forgets every tracked player, in the database and on screen.
+    ///
+    /// The rows go once the delete has landed, not before: a failed write would
+    /// otherwise leave an empty tracker that fills again on the next load with
+    /// nothing saying why.
+    fn clear_tracked(&mut self, cx: &mut Context<Self>) {
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        cx.spawn(async move |this, cx| {
+            let cleared =
+                runtime::spawn(cx, async move { wows_toolkit_config::tracker::clear_tracker(&pool).await }).await;
+            let _ = this.update(cx, |this, cx| match cleared {
+                Ok(Ok(())) => {
+                    this.tracked.clear();
+                    this.sync_rows(cx);
+                    cx.notify();
+                }
+                Ok(Err(err)) => tracing::error!("player tracker: the tracker was not cleared: {err}"),
+                Err(err) => tracing::error!("player tracker: the clear did not complete: {err}"),
             });
         })
         .detach();
@@ -2525,6 +2571,31 @@ impl Render for PlayerTrackerView {
                 // Offered whatever is docked: the tables count it and the
                 // roster's own Seen column follows it too.
                 .child(crate::ui::rule_v(cx))
+                // Re-reads the index, which is where the rows come from: the
+                // egui tracker's own "Populate Data From Replays" button
+                // (`ui/player_tracker/historical.rs:518`), whose aggregate this
+                // port reads straight from the index instead.
+                .child(
+                    Button::new("tracker-repopulate")
+                        .ghost()
+                        .small()
+                        .child(crate::icons::icon(crate::icons::ARROW_COUNTER_CLOCKWISE))
+                        .tooltip(t!("ui.player_tracker.populate_from_replays").to_string())
+                        .on_click(cx.listener(|this, _event, _window, cx| {
+                            let Some(pool) = crate::settings_store::pool(cx) else { return };
+                            this.refresh(pool, cx);
+                        })),
+                )
+                // Destructive, so it is confirmed: everything the tracker knows
+                // about every player goes, which is years of encounters.
+                .child(
+                    Button::new("tracker-clear")
+                        .ghost()
+                        .small()
+                        .child(crate::icons::icon(crate::icons::TRASH))
+                        .tooltip(t!("ui.player_tracker.clear_stats").to_string())
+                        .on_click(cx.listener(|this, _event, window, cx| this.confirm_clear(window, cx))),
+                )
                 .child({
                     let show = self.show_division_mates;
                     Checkbox::new("tracker-show-division-mates")
