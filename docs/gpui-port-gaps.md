@@ -221,11 +221,17 @@ have used it.
     and both surfaces draw it where the map would have been.
 30. **Annotation keys.** Done in part 2026-09-28: ctrl and a digit take up each
     tool in the egui board's own order, ctrl+m the measurement, escape puts the tool
-    down, and delete or backspace erases what is picked out. Still missing: the
-    Ctrl-held cheat sheet overlay, `[`/`]` for stroke width, query-bar pill stepping
-    with the arrows, and `Ctrl`-click row selection in the listing. Every chord in
-    the port is a hand-rolled `on_key_down` match rather than a gpui action, so none
-    are rebindable or discoverable.
+    down, delete or backspace erases what is picked out, and `[`/`]` narrow and
+    widen the nib between 1 and 8 as the egui board holds it. The chords are
+    discoverable now: holding ctrl over a viewport puts up the same cheat sheet the
+    egui board does, each tool button says what it is and which chord takes it up,
+    and the nib has a stepper beside the inks so the bracket keys have something
+    visible to move. Ctrl-click row selection in the listing was already there
+    (`handle_leaf_click`). Still missing: query-bar pill stepping with the arrows,
+    which needs the caret and selection model the egui bar has and this one does
+    not (the port's pills are a reading of the query, not handles on it). Every
+    chord in the port is a hand-rolled `on_key_down` match rather than a gpui
+    action, so none are rebindable.
 31. **Armor viewer**: no export options at all (contents, LOD, resolution, camo,
     size estimate -- `armor_viewer/export_dialog.rs:426` against the hardcoded
     `DEFAULT_LOD` at `armor_viewer/pane.rs:710`), no Analysis window with its
