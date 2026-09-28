@@ -38,6 +38,33 @@ pub fn warn(message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui
     push(Notification::warning(message.clone()), &message, window, cx);
 }
 
+/// A state the reader has to act on, which stays until they dismiss it.
+///
+/// For the settings the app cannot work without: the egui app makes these two
+/// permanent and closable rather than letting them slide away while the reader is
+/// looking elsewhere (`app.rs`'s `duration(None)`/`closable(true)`). `key` is the
+/// state being reported, so the same complaint replaces itself rather than
+/// stacking one copy per attempt.
+pub fn stuck(key: &'static str, message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui_kit::App) {
+    let message = message.into();
+    push(Notification::warning(message.clone()).autohide(false).id1::<Stuck>(key), &message, window, cx);
+}
+
+/// The identity of a [`stuck`] message, so one per state is on screen at a time.
+struct Stuck;
+
+/// Takes a [`stuck`] message down, for a state the reader has since fixed.
+///
+/// Called on the way out of the state rather than left to the reader: a
+/// permanent complaint about a directory that is now an install is worse than no
+/// complaint at all.
+pub fn resolved(key: &'static str, window: &mut Window, cx: &mut gpui_kit::App) {
+    if window.root::<Root>().flatten().is_none() {
+        return;
+    }
+    window.remove_notification1::<Stuck>(key, cx);
+}
+
 /// Queues `notification` on the window's `Root`, which is what holds the queue.
 ///
 /// A window rooted in anything else has none, and the kit panics on the missing

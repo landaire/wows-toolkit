@@ -273,39 +273,108 @@ impl CollabState {
     /// every frame. It has to be called: the inbox is unbounded, so an
     /// undrained session's events would accumulate for as long as it runs.
     ///
-    /// Returns whether anything arrived, so a caller can redraw on it.
-    pub fn poll(&mut self) -> bool {
-        let Some(handle) = &self.handle else { return false };
+    /// Returns what the reader should be told, which the caller says once it has
+    /// a window: in a running session nothing else reports who joined, who left,
+    /// or that the host has opened something.
+    pub fn poll(&mut self) -> Vec<SessionNotice> {
+        let Some(handle) = &self.handle else { return Vec::new() };
         let events = handle.event_inbox.drain();
-        if events.is_empty() {
-            return false;
-        }
+        let mut notices = Vec::new();
         for event in events {
             match event {
+                // Hosting announces a session; joining announces a connection,
+                // which is the split the egui app makes between its two pollers.
+                SessionEvent::Started => notices.push(if self.hosting {
+                    SessionNotice::info(t!("ui.messages.session_started").into_owned())
+                } else {
+                    SessionNotice::info(t!("ui.messages.connected_to_session").into_owned())
+                }),
+                SessionEvent::UserJoined(user) => {
+                    notices.push(SessionNotice::info(t!("ui.messages.user_joined", name = user.name).into_owned()));
+                }
+                SessionEvent::UserLeft { name, timed_out, .. } => notices.push(if timed_out {
+                    SessionNotice::warn(t!("ui.messages.user_timeout", name = name).into_owned())
+                } else {
+                    SessionNotice::info(t!("ui.messages.user_left", name = name).into_owned())
+                }),
                 // The roster and the token are read from the shared state, so
-                // these need nothing beyond the redraw below.
-                SessionEvent::Started
-                | SessionEvent::UserJoined(_)
-                | SessionEvent::UserLeft { .. }
-                | SessionEvent::PeerPromoted { .. }
+                // these need nothing beyond the redraw.
+                SessionEvent::PeerPromoted { .. }
                 | SessionEvent::FrameSourceChanged { .. }
                 | SessionEvent::SessionInfoReceived { .. } => {}
                 // A replay opened on the host needs a viewport this port does
-                // not build yet; noted rather than silently dropped.
+                // not build yet, so the reader is told rather than left to
+                // wonder why nothing appeared.
                 SessionEvent::ReplayOpened { replay_name, .. } => {
-                    tracing::info!("collab: the host opened {replay_name}, which this app cannot show yet");
+                    notices.push(SessionNotice::info(
+                        t!("ui.messages.host_opened_replay", name = replay_name).into_owned(),
+                    ));
                 }
-                SessionEvent::ReplayClosed { .. } => {}
+                SessionEvent::ReplayClosed { .. } => {
+                    notices.push(SessionNotice::info(t!("ui.messages.host_closed_replay").into_owned()));
+                }
                 SessionEvent::Ended => {
+                    notices.push(SessionNotice::info(t!("ui.messages.session_ended").into_owned()));
                     self.leave();
                 }
-                SessionEvent::Error(reason) | SessionEvent::Rejected(reason) => {
+                SessionEvent::Error(reason) => {
+                    notices.push(SessionNotice::failed(t!("ui.messages.session_error", msg = reason).into_owned()));
+                    self.failure = Some(reason);
+                    self.leave();
+                }
+                SessionEvent::Rejected(reason) => {
+                    notices
+                        .push(SessionNotice::failed(t!("ui.messages.session_rejected", reason = reason).into_owned()));
                     self.failure = Some(reason);
                     self.leave();
                 }
             }
         }
-        true
+        notices
+    }
+}
+
+/// Something that happened in the session, for the reader.
+///
+/// Carried out of `poll` rather than shown there: the poll runs inside the
+/// header's draw, and a message queued during a draw is one the frame being
+/// drawn cannot show.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionNotice {
+    said: String,
+    level: NoticeLevel,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NoticeLevel {
+    /// Something happened that nobody asked for.
+    Info,
+    /// Something is wrong but the session goes on.
+    Warn,
+    /// The session is over.
+    Failed,
+}
+
+impl SessionNotice {
+    fn info(said: String) -> Self {
+        Self { said, level: NoticeLevel::Info }
+    }
+
+    fn warn(said: String) -> Self {
+        Self { said, level: NoticeLevel::Warn }
+    }
+
+    fn failed(said: String) -> Self {
+        Self { said, level: NoticeLevel::Failed }
+    }
+
+    /// Puts it on screen at its own level.
+    pub fn say(self, window: &mut gpui_kit::Window, cx: &mut gpui_kit::App) {
+        match self.level {
+            NoticeLevel::Info => crate::toast::info(self.said, window, cx),
+            NoticeLevel::Warn => crate::toast::warn(self.said, window, cx),
+            NoticeLevel::Failed => crate::toast::failed(self.said, window, cx),
+        }
     }
 }
 
