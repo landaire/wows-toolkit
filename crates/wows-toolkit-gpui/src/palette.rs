@@ -27,6 +27,11 @@ pub enum PaletteAction {
     CopyLatestLog,
     /// List a directory of replays other than the install's.
     OpenReplayDirectory,
+    /// Read every replay that is not indexed yet.
+    IndexAllReplays,
+    /// Read every replay again and rewrite what the index holds, once the reader
+    /// has confirmed it.
+    RefreshPersistedData,
 }
 
 /// One entry: what it is called and what it does.
@@ -68,6 +73,14 @@ pub fn entries() -> Vec<PaletteEntry> {
     entries.push(PaletteEntry {
         label: t!("ui.replay.open_directory").into_owned(),
         action: PaletteAction::OpenReplayDirectory,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.settings.replay.index_all_replays").into_owned(),
+        action: PaletteAction::IndexAllReplays,
+    });
+    entries.push(PaletteEntry {
+        label: t!("ui.replay.refresh_persisted_data").into_owned(),
+        action: PaletteAction::RefreshPersistedData,
     });
     entries.push(PaletteEntry {
         label: t!("ui.replay.copy_latest_log").into_owned(),

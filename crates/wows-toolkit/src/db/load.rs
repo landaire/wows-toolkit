@@ -11,6 +11,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::warn;
+use wows_toolkit_viewmodel::settings::keys;
 
 use crate::data::session_stats::PerGameStat;
 use crate::data::session_stats::SerializableAchievement;
@@ -96,13 +97,13 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<bool>(pool, "debug_mode").await {
         s.app.debug_mode = v;
     }
-    if let Some(v) = queries::get_setting::<bool>(pool, "build_consent_window_shown").await {
+    if let Some(v) = queries::get_setting::<bool>(pool, keys::BUILD_CONSENT_SHOWN).await {
         s.app.build_consent_window_shown = v;
     }
-    if let Some(v) = queries::get_setting::<bool>(pool, "replay_consent_prompt_shown").await {
+    if let Some(v) = queries::get_setting::<bool>(pool, keys::REPLAY_CONSENT_SHOWN).await {
         s.app.replay_consent_prompt_shown = v;
     }
-    if let Some(v) = queries::get_setting::<bool>(pool, "language_selection_shown").await {
+    if let Some(v) = queries::get_setting::<bool>(pool, keys::LANGUAGE_SELECTION_SHOWN).await {
         s.app.language_selection_shown = v;
     }
     if let Some(v) = queries::get_setting::<bool>(pool, "session_stats_limit_enabled").await {

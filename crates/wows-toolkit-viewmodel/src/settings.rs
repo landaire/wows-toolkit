@@ -38,6 +38,16 @@ pub mod keys {
     pub const SUPPRESS_P2P_IP_WARNING: &str = "suppress_p2p_ip_warning";
     /// Whether windows a session opens are left for the reader to open.
     pub const DISABLE_AUTO_OPEN_SESSION_WINDOWS: &str = "disable_auto_open_session_windows";
+    /// Whether the reader has been asked what battle data to share.
+    pub const BUILD_CONSENT_SHOWN: &str = "build_consent_window_shown";
+    /// Whether the reader has been offered sharing whole replays, which was
+    /// added after build data.
+    pub const REPLAY_CONSENT_SHOWN: &str = "replay_consent_prompt_shown";
+    /// Whether the reader has been asked which language to read in.
+    pub const LANGUAGE_SELECTION_SHOWN: &str = "language_selection_shown";
+    /// Whether the notice that an export fell back to software encoding is
+    /// suppressed.
+    pub const SUPPRESS_GPU_ENCODER_WARNING: &str = "suppress_gpu_encoder_warning";
 }
 
 /// A proxy setting as a URL a client can take.

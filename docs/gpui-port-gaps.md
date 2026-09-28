@@ -162,18 +162,25 @@ have used it.
     there, where the egui panel names every background task.
 20. **Palette is a third of egui's.** Missing: the three cascading sub-modes
     (search a player, my matches in ship, view armor for ship,
-    `ui/command_palette.rs:129-131`), Open replay directory, Import constants,
-    Refresh persisted data, Index all replays, Send all replays (x2). Copy latest
-    log landed 2026-09-28. Also a seed bug: the port's "Games I died in" sends `survived:false`
-    where the egui seed is loss AND not survived
-    (`palette.rs:53` against `wows-toolkit-viewmodel/src/query_bar/seed.rs:108`),
-    so it also returns wins the reader sank in.
-21. **Dialogs.** Build-data consent, replay migration, language selection with
-    its machine-translation warning, refresh-persisted-data, the P2P IP warning,
-    the readable/copyable Error window, and the GPU-encoder-unavailable notice
-    (`app.rs:3161`, `:3178`, `:3233`, `:3202`, `:4010`, `:3278`,
-    `replay/renderer/mod.rs:3342`). All absent; the encoder one means an export
-    silently drops to CPU encoding.
+    `ui/command_palette.rs:129-131`), Import constants, and Send all replays (x2).
+    Copy latest log landed 2026-09-28, and Open replay directory, Index All Replays
+    and Refresh Persisted Replay Data followed the same day. Also a seed bug: the
+    port's "Games I died in" sends `survived:false` where the egui seed is loss AND
+    not survived (`palette.rs:53` against
+    `wows-toolkit-viewmodel/src/query_bar/seed.rs:108`), so it also returns wins the
+    reader sank in.
+21. ~~**Dialogs.**~~ Done 2026-09-28: all seven are there. `first_run` asks the
+    three questions a fresh run has -- what battle data may be shared, whether to
+    share whole replays, and which language to read in, with its
+    machine-translation warning -- in the egui app's order and records the answers
+    in the same rows, so a reader who answered in either app is not asked again. It
+    also holds the refresh-persisted-data confirmation, which the palette now
+    offers along with Index All Replays. `notices` holds the two suppressible
+    warnings: hosting or joining a session says it reveals this machine's address
+    before it does, and an export with no GPU encoder behind it says it will encode
+    in software, both writing the suppression rows the egui app reads. A failure
+    too long for a toast -- a chain of causes rather than a sentence -- opens the
+    error window instead, where it can be read and copied.
 
 ## Detail: things that are ported but thinner
 

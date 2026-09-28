@@ -1608,24 +1608,28 @@ impl ReplayRendererPanel {
         .detach();
     }
 
+    /// Starts an export, asking first when it would encode in software.
+    ///
+    /// A GPU encode of a long battle takes a while; a software one takes several
+    /// times that, which is worth knowing before the wait rather than after.
+    fn export_asking_first(&mut self, target: ExportTarget, window: &mut Window, cx: &mut Context<Self>) {
+        if !must_use_cpu(&self.export_settings, encoder_status()) || self.export_settings.prefer_cpu {
+            self.export(target, cx);
+            return;
+        }
+        let owner = cx.entity();
+        crate::notices::before_software_encode(window, cx, move |_window, cx| {
+            owner.update(cx, |panel, cx| panel.export(target, cx));
+        });
+    }
+
     /// Asks where to write, then encodes the baked track there.
     ///
     /// The frames are the ones already baked, so nothing is parsed twice: the
     /// track is rasterised through the same renderer the viewport draws with,
-    /// and the pixels go straight to the encoder.
-    fn export_video(&mut self, cx: &mut Context<Self>) {
-        self.export(ExportTarget::File, cx)
-    }
-
-    /// Renders to a temporary file and puts that file on the clipboard, so it
-    /// pastes into a chat window or an upload dialog.
-    ///
-    /// The file is left behind deliberately: the clipboard holds a path, and
-    /// deleting what it points at would paste nothing.
-    fn export_to_clipboard(&mut self, cx: &mut Context<Self>) {
-        self.export(ExportTarget::Clipboard, cx)
-    }
-
+    /// and the pixels go straight to the encoder. A clipboard export writes a
+    /// temporary file and leaves it behind deliberately: the clipboard holds a
+    /// path, and deleting what it points at would paste nothing.
     fn export(&mut self, target: ExportTarget, cx: &mut Context<Self>) {
         if self.export.is_some() {
             return;
@@ -2633,131 +2637,136 @@ impl Render for ReplayRendererPanel {
         // end of it there is nothing further to step to.
         let has_previous = self.previous_event().is_some();
         let has_next = self.next_event().is_some();
-        let controls = h_flex()
-            .flex_none()
-            .gap_2()
-            .items_center()
-            .px_2()
-            .pb_1()
-            .child(
-                Button::new("replay-renderer-jump-to-start")
-                    .child(crate::icons::icon(crate::icons::SKIP_BACK))
-                    .compact()
-                    .disabled(!ready)
-                    .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
-                    .on_click(cx.listener(|this, _event, window, cx| this.go_to(0, window, cx))),
-            )
-            .child(
-                Button::new("replay-renderer-previous-event")
-                    .child(crate::icons::icon(crate::icons::REWIND))
-                    .compact()
-                    .disabled(!ready || !has_previous)
-                    .tooltip(t!("ui.renderer.controls.previous_event").into_owned())
-                    .on_click(cx.listener(|this, _event, window, cx| this.jump_to_previous_event(window, cx))),
-            )
-            .child(
-                Button::new("replay-renderer-back-10s")
-                    .child(crate::icons::icon(crate::icons::CLOCK_COUNTER_CLOCKWISE))
-                    .compact()
-                    .disabled(!ready)
-                    .tooltip(t!("ui.renderer.controls.back_10s").into_owned())
-                    .on_click(cx.listener(|this, _event, window, cx| this.seek_by(-SEEK_STEP, window, cx))),
-            )
-            .child(
-                Button::new("replay-renderer-play")
-                    .icon(if self.playing { IconName::Pause } else { IconName::Play })
-                    .compact()
-                    .disabled(!ready)
-                    .tooltip(
-                        t!(if self.playing { "ui.replay.renderer.pause" } else { "ui.replay.renderer.play" })
-                            .into_owned(),
-                    )
-                    .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
-            )
-            .child(
-                Button::new("replay-renderer-forward-10s")
-                    .child(crate::icons::icon(crate::icons::CLOCK_CLOCKWISE))
-                    .compact()
-                    .disabled(!ready)
-                    .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
-                    .on_click(cx.listener(|this, _event, window, cx| this.seek_by(SEEK_STEP, window, cx))),
-            )
-            .child(
-                Button::new("replay-renderer-next-event")
-                    .child(crate::icons::icon(crate::icons::FAST_FORWARD))
-                    .compact()
-                    .disabled(!ready || !has_next)
-                    .tooltip(t!("ui.renderer.controls.next_event").into_owned())
-                    .on_click(cx.listener(|this, _event, window, cx| this.jump_to_next_event(window, cx))),
-            )
-            .child(
-                Button::new("replay-renderer-jump-to-end")
-                    .child(crate::icons::icon(crate::icons::SKIP_FORWARD))
-                    .compact()
-                    .disabled(!ready)
-                    .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
-                    .on_click(cx.listener(move |this, _event, window, cx| this.go_to(last_frame, window, cx))),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .w(CLOCK_WIDTH)
-                    .text_xs()
-                    .text_color(crate::theme::text_dim())
-                    .child(self.clock_and_length()),
-            )
-            // Everything past here is not playback, so it sits at the far
-            // end rather than between the reader and the transport.
-            .child(div().flex_1().min_w(px(0.)))
-            .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS)))
-            .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
-            .child(
-                Button::new("replay-renderer-zoom-reset")
-                    .label(t!("ui.buttons.reset").into_owned())
-                    .compact()
-                    .disabled(!ready || self.view.is_whole_map())
-                    .on_click(
-                        cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
-                    ),
-            )
-            .child(crate::ui::rule_v(cx))
-            .child(
-                crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
-                    Select::new(&self.speed_select)
-                        .id("replay-renderer-speed")
-                        .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
-                        .small(),
-                ),
-            )
-            .child(crate::ui::rule_v(cx))
-            .child(
-                Button::new("replay-renderer-export")
-                    .child(crate::icons::icon(crate::icons::DOWNLOAD_SIMPLE))
-                    .compact()
-                    .disabled(!ready || self.export.is_some())
-                    .tooltip(t!("ui.replay.renderer.export_video").into_owned())
-                    .on_click(cx.listener(|this, _event, _window, cx| this.export_video(cx))),
-            )
-            .child(tools_popover(&cx.entity(), self, cx))
-            .child(render_options_popover(&cx.entity(), self, ready, cx))
-            .child(timeline_popover(&cx.entity(), self, cx))
-            .when(!self.popped_out, |this| {
-                this.child(
-                    Button::new("replay-renderer-pop-out")
-                        .child(crate::icons::icon(crate::icons::ARROW_SQUARE_OUT))
+        let controls =
+            h_flex()
+                .flex_none()
+                .gap_2()
+                .items_center()
+                .px_2()
+                .pb_1()
+                .child(
+                    Button::new("replay-renderer-jump-to-start")
+                        .child(crate::icons::icon(crate::icons::SKIP_BACK))
                         .compact()
-                        .tooltip(t!("ui.replay.renderer.pop_out").into_owned())
-                        .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(RendererEvent::PopOut))),
+                        .disabled(!ready)
+                        .tooltip(t!("ui.renderer.controls.jump_to_start").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| this.go_to(0, window, cx))),
                 )
-            })
-            .child(
-                Button::new("replay-renderer-clipboard")
-                    .child(crate::icons::icon(crate::icons::CLIPBOARD))
-                    .compact()
-                    .disabled(!ready || self.export.is_some())
-                    .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
-                    .on_click(cx.listener(|this, _event, _window, cx| this.export_to_clipboard(cx))),
-            );
+                .child(
+                    Button::new("replay-renderer-previous-event")
+                        .child(crate::icons::icon(crate::icons::REWIND))
+                        .compact()
+                        .disabled(!ready || !has_previous)
+                        .tooltip(t!("ui.renderer.controls.previous_event").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| this.jump_to_previous_event(window, cx))),
+                )
+                .child(
+                    Button::new("replay-renderer-back-10s")
+                        .child(crate::icons::icon(crate::icons::CLOCK_COUNTER_CLOCKWISE))
+                        .compact()
+                        .disabled(!ready)
+                        .tooltip(t!("ui.renderer.controls.back_10s").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| this.seek_by(-SEEK_STEP, window, cx))),
+                )
+                .child(
+                    Button::new("replay-renderer-play")
+                        .icon(if self.playing { IconName::Pause } else { IconName::Play })
+                        .compact()
+                        .disabled(!ready)
+                        .tooltip(
+                            t!(if self.playing { "ui.replay.renderer.pause" } else { "ui.replay.renderer.play" })
+                                .into_owned(),
+                        )
+                        .on_click(cx.listener(|this, _event, window, cx| this.toggle_playing(window, cx))),
+                )
+                .child(
+                    Button::new("replay-renderer-forward-10s")
+                        .child(crate::icons::icon(crate::icons::CLOCK_CLOCKWISE))
+                        .compact()
+                        .disabled(!ready)
+                        .tooltip(t!("ui.renderer.controls.forward_10s").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| this.seek_by(SEEK_STEP, window, cx))),
+                )
+                .child(
+                    Button::new("replay-renderer-next-event")
+                        .child(crate::icons::icon(crate::icons::FAST_FORWARD))
+                        .compact()
+                        .disabled(!ready || !has_next)
+                        .tooltip(t!("ui.renderer.controls.next_event").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| this.jump_to_next_event(window, cx))),
+                )
+                .child(
+                    Button::new("replay-renderer-jump-to-end")
+                        .child(crate::icons::icon(crate::icons::SKIP_FORWARD))
+                        .compact()
+                        .disabled(!ready)
+                        .tooltip(t!("ui.renderer.controls.jump_to_end").into_owned())
+                        .on_click(cx.listener(move |this, _event, window, cx| this.go_to(last_frame, window, cx))),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .w(CLOCK_WIDTH)
+                        .text_xs()
+                        .text_color(crate::theme::text_dim())
+                        .child(self.clock_and_length()),
+                )
+                // Everything past here is not playback, so it sits at the far
+                // end rather than between the reader and the transport.
+                .child(div().flex_1().min_w(px(0.)))
+                .child(div().flex_none().text_xs().child(crate::icons::icon(crate::icons::MAGNIFYING_GLASS)))
+                .child(div().flex_none().w(ZOOM_WIDTH).child(Slider::new(&self.zoom).disabled(!ready)))
+                .child(
+                    Button::new("replay-renderer-zoom-reset")
+                        .label(t!("ui.buttons.reset").into_owned())
+                        .compact()
+                        .disabled(!ready || self.view.is_whole_map())
+                        .on_click(
+                            cx.listener(|this, _event, window, cx| this.set_view(MapViewport::default(), window, cx)),
+                        ),
+                )
+                .child(crate::ui::rule_v(cx))
+                .child(
+                    crate::ui::boxed(SPEED_WIDTH, crate::ui::SELECT_SMALL_HEIGHT).child(
+                        Select::new(&self.speed_select)
+                            .id("replay-renderer-speed")
+                            .accessibility_label(t!("ui.renderer.controls.speed").into_owned())
+                            .small(),
+                    ),
+                )
+                .child(crate::ui::rule_v(cx))
+                .child(
+                    Button::new("replay-renderer-export")
+                        .child(crate::icons::icon(crate::icons::DOWNLOAD_SIMPLE))
+                        .compact()
+                        .disabled(!ready || self.export.is_some())
+                        .tooltip(t!("ui.replay.renderer.export_video").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| {
+                            this.export_asking_first(ExportTarget::File, window, cx)
+                        })),
+                )
+                .child(tools_popover(&cx.entity(), self, cx))
+                .child(render_options_popover(&cx.entity(), self, ready, cx))
+                .child(timeline_popover(&cx.entity(), self, cx))
+                .when(!self.popped_out, |this| {
+                    this.child(
+                        Button::new("replay-renderer-pop-out")
+                            .child(crate::icons::icon(crate::icons::ARROW_SQUARE_OUT))
+                            .compact()
+                            .tooltip(t!("ui.replay.renderer.pop_out").into_owned())
+                            .on_click(cx.listener(|_this, _event, _window, cx| cx.emit(RendererEvent::PopOut))),
+                    )
+                })
+                .child(
+                    Button::new("replay-renderer-clipboard")
+                        .child(crate::icons::icon(crate::icons::CLIPBOARD))
+                        .compact()
+                        .disabled(!ready || self.export.is_some())
+                        .tooltip(t!("ui.replay.renderer.export_clipboard").into_owned())
+                        .on_click(cx.listener(|this, _event, window, cx| {
+                            this.export_asking_first(ExportTarget::Clipboard, window, cx)
+                        })),
+                );
 
         // The scrubber has a row to itself, as a video player gives it: a
         // bar sharing a row with a dozen controls is both hard to aim at and

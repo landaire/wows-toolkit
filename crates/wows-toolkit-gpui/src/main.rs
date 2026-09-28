@@ -11,6 +11,7 @@ mod cli;
 mod collab;
 mod collab_popover;
 mod dialog;
+mod first_run;
 mod game_data_cache;
 mod http;
 mod icons;
@@ -18,6 +19,7 @@ mod icons;
 mod interaction_tests;
 mod logging;
 mod minimap_preview;
+mod notices;
 mod palette;
 mod personal_rating;
 mod player_tracker;
@@ -173,6 +175,7 @@ fn main() {
             .await;
             if let Err(err) = window.update(cx, |_root, window, cx| {
                 settings_store::init(pool.clone(), cx);
+                notices::adopt(loaded.suppress_p2p_ip_warning, loaded.suppress_gpu_encoder_warning, cx);
                 match render_defaults {
                     Ok(defaults) => render_defaults::adopt(defaults, cx),
                     // Every viewport then opens with what the renderer itself
@@ -190,6 +193,10 @@ fn main() {
                 window_shell::remember_on_quit(wows_toolkit_config::WindowKind::Main, window.window_handle(), cx)
                     .detach();
                 theme::apply_egui_theme(theme_choice, zoom, window, cx);
+                // Before anything else the app does with the settings: what may
+                // be shared is the reader's to answer, and a battle landing
+                // before they have is a battle sent under a default.
+                first_run::ask(&app_entity, &loaded, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.report_last_crash(window, cx);
                     if loaded.check_for_updates {

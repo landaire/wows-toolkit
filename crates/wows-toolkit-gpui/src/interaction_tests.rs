@@ -365,6 +365,11 @@ fn test_settings() -> GpuiSettings {
         collab_display_name: String::new(),
         suppress_p2p_ip_warning: false,
         disable_auto_open_session_windows: false,
+        // Asked and answered, so a test window does not open on a dialog.
+        build_consent_shown: true,
+        replay_consent_shown: true,
+        language_selection_shown: true,
+        suppress_gpu_encoder_warning: false,
     }
 }
 
@@ -984,6 +989,44 @@ fn a_query_that_does_not_parse_is_reported_rather_than_searched_for(cx: &mut Tes
         assert!(reported.contains("did not parse"), "the error names itself, got {reported:?}");
     })
     .expect("the test window stays open");
+}
+
+/// A warning the reader switched off does not stand between them and the work;
+/// one they have not answered does, and answering it lets the work through.
+#[gpui_kit::test]
+fn a_suppressed_warning_does_not_stand_in_the_way(cx: &mut TestAppContext) {
+    use gpui_kit::component::WindowExt as _;
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    // Mounted in a `Root`, which is what hosts a dialog.
+    let (window, _app) = open_app_in_root(cx);
+
+    // Switched off: hosting a session goes ahead without asking.
+    let went = Rc::new(Cell::new(false));
+    let ran = Rc::clone(&went);
+    let put_up = cx
+        .update_window(window.into(), move |_, window, cx| {
+            crate::notices::adopt(true, false, cx);
+            crate::notices::before_revealing_address(window, cx, move |_window, _cx| ran.set(true));
+            window.has_active_dialog(cx)
+        })
+        .expect("the test window stays open");
+    assert!(went.get(), "a suppressed warning runs the work itself");
+    assert!(!put_up, "and puts nothing up");
+
+    // Not switched off: the warning is put, and the work waits for it.
+    let waited = Rc::new(Cell::new(false));
+    let held = Rc::clone(&waited);
+    let put_up = cx
+        .update_window(window.into(), move |_, window, cx| {
+            crate::notices::adopt(false, false, cx);
+            crate::notices::before_revealing_address(window, cx, move |_window, _cx| held.set(true));
+            window.has_active_dialog(cx)
+        })
+        .expect("the test window stays open");
+    assert!(!waited.get(), "nothing is hosted until the reader has read the warning");
+    assert!(put_up, "which is what the dialog is for");
 }
 
 /// A file dragged over the window says what letting go would do, and the scrim
