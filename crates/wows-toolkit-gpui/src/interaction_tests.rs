@@ -1030,6 +1030,41 @@ fn a_suppressed_warning_does_not_stand_in_the_way(cx: &mut TestAppContext) {
     assert!(put_up, "which is what the dialog is for");
 }
 
+/// A warning the reader switched off runs the work it guards after the view that
+/// asked for it has been released, not inside it.
+///
+/// Every caller asks from a listener, which holds that view leased for the length
+/// of the call; work that re-enters the same view there is a double lease, which
+/// gpui answers with a panic rather than a wrong result.
+#[gpui_kit::test]
+fn a_suppressed_warning_runs_the_work_outside_the_callers_lease(cx: &mut TestAppContext) {
+    use std::cell::Cell;
+    use std::rc::Rc;
+
+    let (window, app) = open_app_in_root(cx);
+
+    let ran = Rc::new(Cell::new(false));
+    let inside = Rc::clone(&ran);
+    let asked = app.clone();
+    let leased = app.clone();
+    window
+        .update(cx, move |_root, window, cx| {
+            // Asked from inside an update of the same view, which is the shape
+            // every caller has: a listener holds its view leased for the length of
+            // the call.
+            leased.update(cx, |_app, cx| {
+                crate::notices::adopt(true, false, cx);
+                crate::notices::before_revealing_address(window, cx, move |_window, cx| {
+                    asked.update(cx, |_app, _cx| inside.set(true));
+                });
+            });
+        })
+        .expect("the test window stays open");
+
+    cx.run_until_parked();
+    assert!(ran.get(), "the work runs, rather than panicking on the lease it was asked from");
+}
+
 /// A file dragged over the window says what letting go would do, and the scrim
 /// goes once the drag does.
 #[gpui_kit::test]

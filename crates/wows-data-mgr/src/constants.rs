@@ -287,9 +287,8 @@ pub async fn list_available_builds() -> Result<Vec<u32>, rootcause::Report> {
 pub struct LatestConstants {
     /// The file as published, to be written out as it is.
     pub data: Vec<u8>,
-    /// The commit it was read at. `None` when the repository would not say,
-    /// which costs the next check its shortcut and nothing else.
-    pub commit: Option<String>,
+    /// The commit it was read at, which is what the next check compares against.
+    pub commit: String,
 }
 
 /// Fetches `data/latest.json` when the repository has moved since
@@ -306,22 +305,33 @@ pub async fn fetch_latest_constants(
 
     const PATH: &str = "data/latest.json";
 
+    // Asked for first because it is one small request, where the file itself is
+    // the whole mapping. A repository that cannot be asked is an error rather than
+    // an answer: reporting it as "up to date" would tell a caller its year-old
+    // mapping is the newest there is.
     let latest_commit = octocrab::instance()
         .repos("padtrack", "wows-constants")
         .list_commits()
         .per_page(1)
         .send()
         .await
-        .ok()
-        .and_then(|mut list| list.take_items().pop())
-        .map(|commit| commit.sha);
+        .map_err(|e| {
+            let err = ConstantsFetchError::Transport { message: error_chain(&e) };
+            tracing::warn!(host = GITHUB_HOST, %err, "asking which commit the constants are at");
+            err
+        })?
+        .take_items()
+        .pop()
+        .map(|commit| commit.sha)
+        .ok_or_else(|| {
+            let err = ConstantsFetchError::Transport { message: "the repository listed no commits".to_owned() };
+            tracing::warn!(host = GITHUB_HOST, %err, "asking which commit the constants are at");
+            err
+        })?;
 
-    // Nothing to do when the repository is where the caller last saw it, and
-    // nothing to compare against when it would not say where it is.
-    match (&latest_commit, known_commit) {
-        (None, _) => return Ok(None),
-        (Some(latest), Some(known)) if latest == known => return Ok(None),
-        _ => {}
+    // Nothing to do when the repository is where the caller last saw it.
+    if known_commit == Some(latest_commit.as_str()) {
+        return Ok(None);
     }
 
     let response = octocrab::instance()

@@ -67,7 +67,6 @@ pub fn ask_replay_migration(app: &Entity<Toolkit>, window: &mut Window, cx: &mut
     let asked = app.downgrade();
     window.open_dialog(cx, move |dialog, _window, _cx| {
         let switch = asked.clone();
-        let keep = asked.clone();
         dialog
             .title(t!("ui.windows.replay_migration").into_owned())
             .close_button(false)
@@ -99,13 +98,11 @@ pub fn ask_replay_migration(app: &Entity<Toolkit>, window: &mut Window, cx: &mut
                             })
                     })
                     .child({
-                        let keep = keep.clone();
                         Button::new("first-run-migration-keep")
                             .label(t!("ui.buttons.keep_current").into_owned())
                             .small()
                             .on_click(move |_event, window, cx: &mut App| {
                                 // The setting stands; only the asking is recorded.
-                                let _ = keep.upgrade();
                                 settings_store::save(keys::REPLAY_CONSENT_SHOWN, &true, cx);
                                 window.close_dialog(cx);
                             })
@@ -125,6 +122,7 @@ pub fn ask_language(app: &Entity<Toolkit>, detected: String, window: &mut Window
 
     window.open_dialog(cx, move |dialog, _window, _cx| {
         let english = asked.clone();
+        let keep = asked.clone();
         let detected = detected.clone();
         // The catalogue's own label, which reads in the detected language once
         // that catalogue is loaded; in English it names the language instead.
@@ -161,11 +159,17 @@ pub fn ask_language(app: &Entity<Toolkit>, detected: String, window: &mut Window
                             })
                     })
                     .child({
-                        let _detected = detected.clone();
+                        let keep = keep.clone();
+                        let kept = detected.clone();
                         Button::new("first-run-language-keep").primary().label(keep_label.clone()).small().on_click(
                             move |_event, window, cx: &mut App| {
-                                // The detected language is already in use; only
-                                // the asking is recorded.
+                                // Written rather than assumed: the row may never
+                                // have held a language, and this question is what
+                                // settles it.
+                                if let Some(app) = keep.upgrade() {
+                                    let kept = kept.clone();
+                                    app.update(cx, |this, cx| this.set_locale(kept, window, cx));
+                                }
                                 settings_store::save(keys::LANGUAGE_SELECTION_SHOWN, &true, cx);
                                 window.close_dialog(cx);
                             },

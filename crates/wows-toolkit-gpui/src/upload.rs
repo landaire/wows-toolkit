@@ -78,6 +78,43 @@ pub struct Candidate {
     pub first_seen: jiff::Timestamp,
 }
 
+/// When this replay was first seen, which is what the grace window is measured
+/// from.
+///
+/// Recorded on the first sight, in the row the egui app's own uploader keeps, so
+/// the two apps agree about how long a battle has been waiting for its results.
+pub fn first_seen(path: PathBuf, pool: sqlx::sqlite::SqlitePool, cx: &App) -> Task<jiff::Timestamp> {
+    let runtime = crate::runtime::runtime(cx);
+    cx.background_spawn(async move {
+        let now = jiff::Timestamp::now();
+        let Some(runtime) = runtime else { return now };
+        let recorded = path.to_string_lossy().into_owned();
+        runtime
+            .block_on(async move { wows_toolkit_config::queries::raw_upload_first_seen(&pool, &recorded, now).await })
+            .unwrap_or_else(|err| {
+                // A window that starts now holds the upload rather than sending a
+                // battle that may still be in progress.
+                tracing::warn!(%err, "sharing: the first-seen anchor could not be read");
+                now
+            })
+    })
+}
+
+/// Whether this replay is already in the ledger.
+///
+/// Asked before a bulk pass reads a replay at all: the read is seconds of work,
+/// and a replay already contributed needs none of it.
+pub fn already_contributed(path: PathBuf, pool: sqlx::sqlite::SqlitePool, cx: &App) -> Task<bool> {
+    let runtime = crate::runtime::runtime(cx);
+    cx.background_spawn(async move {
+        let Some(runtime) = runtime else { return false };
+        let recorded = path.to_string_lossy().into_owned();
+        runtime
+            .block_on(async move { wows_toolkit_config::queries::sent_replay_exists(&pool, &recorded).await })
+            .unwrap_or(false)
+    })
+}
+
 /// Sends what `mode` asks for, if anything, and records what was sent.
 ///
 /// Runs on the caller's task rather than blocking a draw: the read of the file

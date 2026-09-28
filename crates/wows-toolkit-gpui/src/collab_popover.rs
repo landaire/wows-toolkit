@@ -105,8 +105,11 @@ fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> A
                 // Hosting tells every peer where this machine is, which the
                 // reader is asked about before it happens.
                 .on_click(cx.listener(|_view: &mut V, _event, window, cx| {
-                    let owner = cx.entity();
+                    // Weak: the warning outlives this render, and a tab closed
+                    // while it is up must not be kept alive by it.
+                    let owner = cx.entity().downgrade();
                     crate::notices::before_revealing_address(window, cx, move |_window, cx| {
+                        let Some(owner) = owner.upgrade() else { return };
                         let version = toolkit_version();
                         owner.update(cx, |view: &mut V, cx| {
                             view.collab_mut().host(version, cx);
@@ -125,8 +128,9 @@ fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> A
                 .disabled(!named)
                 .on_click(cx.listener(|view: &mut V, _event, window, cx| {
                     let token = view.token_input().read(cx).value().to_string();
-                    let owner = cx.entity();
+                    let owner = cx.entity().downgrade();
                     crate::notices::before_revealing_address(window, cx, move |_window, cx| {
+                        let Some(owner) = owner.upgrade() else { return };
                         let token = token.clone();
                         let version = toolkit_version();
                         owner.update(cx, |view: &mut V, cx| {

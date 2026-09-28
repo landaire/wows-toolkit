@@ -10,6 +10,7 @@ use sqlx::SqlitePool;
 use tracing::error;
 use tracing::info;
 use tracing::trace;
+use wows_toolkit_viewmodel::settings::keys;
 
 use crate::tab_state::TabState;
 use crate::ui::player_tracker::ClanSortedBy;
@@ -166,7 +167,7 @@ async fn save_settings(pool: &SqlitePool, ctx: &SaveContext) -> Result<(), sqlx:
     queries::set_setting(pool, "data_sharing_mode", &data_sharing_mode).await?;
     queries::set_setting(pool, "replay_consent_prompt_shown", &replay_consent_prompt_shown).await?;
     // Downgrade-compat: an older app build still reads this bool.
-    queries::set_setting(pool, "send_replay_data", &data_sharing_mode.shares_anything()).await?;
+    queries::set_setting(pool, keys::SEND_REPLAY_DATA, &data_sharing_mode.shares_anything()).await?;
     queries::set_setting_raw(pool, "twitch_token", &twitch_tok).await?;
     queries::set_setting(pool, "twitch_monitored_channel", &twitch_ch).await?;
     queries::set_setting(pool, "session_stats_limit_enabled", &stats_limit).await?;

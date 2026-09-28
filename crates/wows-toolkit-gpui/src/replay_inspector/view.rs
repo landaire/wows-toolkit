@@ -209,6 +209,9 @@ pub struct ReplayInspectorView {
     /// The builds whose result mapping has already been asked about this
     /// session, so a second scan does not ask again.
     constants_asked: std::collections::BTreeSet<u32>,
+    /// The bulk contribution now running, if one is: a second pass over the same
+    /// directory would send everything twice.
+    contributing: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -324,6 +327,7 @@ impl ReplayInspectorView {
             auto_load_latest_replay: true,
             grouping_select,
             constants_asked: std::collections::BTreeSet::new(),
+            contributing: None,
             _subscriptions: vec![subscription, grouping_subscription],
         }
     }
@@ -523,9 +527,12 @@ impl ReplayInspectorView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // What is already cached, and what this session has already had an answer
+        // about, is not asked again. A build a sweep never reached stays unasked, so
+        // the next scan picks it up.
         let wanted: Vec<(u32, Option<String>)> = builds
             .into_iter()
-            .filter(|(build, _)| self.constants_asked.insert(*build))
+            .filter(|(build, _)| !self.constants_asked.contains(build))
             .filter(|(build, _)| !crate::constants::is_cached(*build))
             .collect();
         if wanted.is_empty() {
@@ -533,22 +540,31 @@ impl ReplayInspectorView {
         }
 
         cx.spawn_in(window, async move |this, cx| {
+            let Ok(sweep) = cx.update(|_window, cx| crate::constants::fetch_for_builds(wanted, cx)) else {
+                return;
+            };
+            let outcomes = sweep.await;
+
             let mut written = 0usize;
-            for (build, version) in wanted {
-                let Ok(fetch) = cx.update(|_window, cx| crate::constants::fetch_for_build(build, version, cx)) else {
-                    return;
-                };
-                match fetch.await {
+            let mut answered = Vec::new();
+            for (build, outcome) in outcomes {
+                match outcome {
                     crate::constants::Fetched::Written { build, actual } => {
                         tracing::info!(build, actual, "constants: the result mapping was fetched");
                         written += 1;
+                        answered.push(build);
                     }
-                    crate::constants::Fetched::AlreadyOnDisk => {}
+                    crate::constants::Fetched::AlreadyOnDisk => answered.push(build),
+                    // Left unanswered deliberately: a repository that refused once
+                    // is worth asking again on a later scan, where marking it here
+                    // would need a restart to retry.
                     crate::constants::Fetched::Failed(reason) => {
                         tracing::warn!(build, %reason, "constants: the result mapping was not fetched");
                     }
                 }
             }
+
+            let _ = this.update(cx, |this, _cx| this.constants_asked.extend(answered));
             if written == 0 {
                 return;
             }
@@ -739,7 +755,12 @@ impl ReplayInspectorView {
                 crate::toast::resolved(BATCH_PROGRESS, window, cx);
                 let copied = if to_clipboard && !written.is_empty() { copy_rendered_files(&written) } else { Ok(()) };
                 let said = match (&copied, failed.is_empty(), to_clipboard) {
-                    (Err(reason), _, _) => reason.clone(),
+                    // The files were written either way, so the message says where
+                    // they are rather than only that the clipboard refused them.
+                    (Err(reason), _, _) => {
+                        t!("ui.replay.renderer.batch_not_copied", dir = shown.clone(), reason = reason.clone())
+                            .into_owned()
+                    }
                     (Ok(()), true, true) => t!("ui.replay.renderer.batch_copied", written = written.len()).into_owned(),
                     (Ok(()), true, false) => {
                         t!("ui.replay.renderer.batch_all_written", written = written.len()).into_owned()
@@ -762,9 +783,10 @@ impl ReplayInspectorView {
     /// Contributes every listed battle, as the data-sharing setting asks.
     ///
     /// The egui app's "Send all replays to ShipBuilds" (`app.rs:4712`): a pass
-    /// over what is listed rather than only what lands while the app is open. The
-    /// ledger decides what is actually sent, so a second pass costs a read of the
-    /// ledger per replay and nothing else.
+    /// over what is listed rather than only what lands while the app is open.
+    /// Under `LedgerUse::Consult` a replay already in the ledger is skipped before
+    /// it is read, so a second pass costs one ledger read per replay; the pass
+    /// that ignores the ledger reads and sends every one of them.
     pub(crate) fn contribute_all(
         &mut self,
         ledger: crate::upload::LedgerUse,
@@ -784,10 +806,16 @@ impl ReplayInspectorView {
             crate::toast::warn(t!("ui.replay.contribute_none_listed").into_owned(), window, cx);
             return;
         }
+        if self.contributing.is_some() {
+            // One pass at a time: two would read the same directory twice and, with
+            // the ledger ignored, send every battle twice.
+            crate::toast::warn(t!("ui.replay.contribute_already_running").into_owned(), window, cx);
+            return;
+        }
         let mode = self.data_sharing;
         let total = paths.len();
 
-        cx.spawn_in(window, async move |_this, cx| {
+        self.contributing = Some(cx.spawn_in(window, async move |this, cx| {
             let mut sent = 0usize;
             for (index, path) in paths.into_iter().enumerate() {
                 let told = cx.update(|window, cx| {
@@ -802,6 +830,19 @@ impl ReplayInspectorView {
                     return;
                 }
 
+                // The ledger before the read: a replay already contributed is
+                // seconds of parsing for a request that would be refused.
+                if ledger == crate::upload::LedgerUse::Consult {
+                    let Ok(already) =
+                        cx.update(|_window, cx| crate::upload::already_contributed(path.clone(), pool.clone(), cx))
+                    else {
+                        return;
+                    };
+                    if already.await {
+                        continue;
+                    }
+                }
+
                 let parse = match cx.update(|_window, cx| spawn_parse(path.clone(), game_data.clone(), None, cx)) {
                     Ok(parse) => parse,
                     Err(_) => return,
@@ -811,12 +852,17 @@ impl ReplayInspectorView {
                     continue;
                 };
 
+                // The anchor both apps keep, recorded on the first sight of this
+                // replay: a battle still being played is held for its results
+                // rather than sent half-finished.
+                let Ok(first_seen) = cx.update(|_window, cx| crate::upload::first_seen(path.clone(), pool.clone(), cx))
+                else {
+                    return;
+                };
                 let candidate = crate::upload::Candidate {
                     path: path.clone(),
                     shareable: parsed.shareable,
-                    // A replay already on disk is not one that just landed, so the
-                    // grace window it would wait through has long lapsed.
-                    first_seen: jiff::Timestamp::now() - wows_toolkit_viewmodel::upload::RAW_UPLOAD_GRACE,
+                    first_seen: first_seen.await,
                 };
                 let Ok(contributed) = cx.update(|_window, cx| {
                     crate::upload::contribute(candidate, mode, ledger, pool.clone(), String::new(), cx)
@@ -832,8 +878,8 @@ impl ReplayInspectorView {
                 crate::toast::resolved(CONTRIBUTE_PROGRESS, window, cx);
                 crate::toast::ok(t!("ui.replay.contributed", sent = sent, total = total).into_owned(), window, cx);
             });
-        })
-        .detach();
+            let _ = this.update(cx, |this, _cx| this.contributing = None);
+        }));
     }
 
     /// Contributes a battle that has just landed, if the reader asked for that.

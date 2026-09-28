@@ -222,23 +222,7 @@ pub async fn raw_upload_first_seen(
     path: &Path,
     now: jiff::Timestamp,
 ) -> Result<jiff::Timestamp, sqlx::Error> {
-    let path_text = path.to_string_lossy();
-    // Insert-then-read in one statement: RETURNING on a conflicting insert
-    // yields no row, so the DO UPDATE keeps the stored anchor and returns it
-    // rather than the caller having to branch on whether it won the race.
-    let seconds: i64 = sqlx::query_scalar(
-        "INSERT INTO raw_upload_first_seen (replay_path, first_seen) VALUES (?1, ?2) \
-         ON CONFLICT(replay_path) DO UPDATE SET first_seen = first_seen \
-         RETURNING first_seen",
-    )
-    .bind(path_text.as_ref())
-    .bind(now.as_second())
-    .fetch_one(pool)
-    .await?;
-
-    // A stored value outside jiff's range can only come from a corrupted row;
-    // falling back to `now` restarts the window rather than failing the upload.
-    Ok(jiff::Timestamp::from_second(seconds).unwrap_or(now))
+    wows_toolkit_config::queries::raw_upload_first_seen(pool, &path.to_string_lossy(), now).await
 }
 
 /// The files a parse could not read, remembered so they are not retried every

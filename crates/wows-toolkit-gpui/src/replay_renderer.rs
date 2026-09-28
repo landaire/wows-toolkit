@@ -1617,8 +1617,11 @@ impl ReplayRendererPanel {
             self.export(target, cx);
             return;
         }
-        let owner = cx.entity();
+        // Weak: the viewport can be closed while the notice is up, and the
+        // dialog holds this until it is answered.
+        let owner = cx.entity().downgrade();
         crate::notices::before_software_encode(window, cx, move |_window, cx| {
+            let Some(owner) = owner.upgrade() else { return };
             owner.update(cx, |panel, cx| panel.export(target, cx));
         });
     }

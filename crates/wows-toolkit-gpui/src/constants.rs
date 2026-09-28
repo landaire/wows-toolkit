@@ -23,7 +23,7 @@ use gpui_kit::Task;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Checked {
     /// A newer mapping was written for `build`, at this commit.
-    Written { build: u32, commit: Option<String> },
+    Written { build: u32, commit: String },
     /// The repository is where it was when the mapping was last written.
     UpToDate,
     /// The repository could not be asked, or what it gave could not be written.
@@ -64,6 +64,10 @@ pub fn is_cached(build: u32) -> bool {
 /// for; an older replay's own build is fetched by [`fetch_for_build`] instead.
 pub fn check_latest(build: u32, known_commit: Option<String>, cx: &App) -> Task<Checked> {
     let runtime = crate::runtime::runtime(cx);
+    // A build with no mapping at all is not up to date whatever the commit says,
+    // so the shortcut is skipped for it.
+    let known_commit = known_commit.filter(|_| is_cached(build));
+
     cx.background_spawn(async move {
         let Some(runtime) = runtime else { return Checked::Failed("no runtime to fetch on".to_owned()) };
         runtime.block_on(async move {
@@ -79,31 +83,66 @@ pub fn check_latest(build: u32, known_commit: Option<String>, cx: &App) -> Task<
     })
 }
 
-/// Fetches the mapping for one replay's own build, when nothing has it yet.
+/// How many builds one sweep asks the repository about.
 ///
-/// `version` is the replay's `major.minor.patch`, which is what resolves a
-/// mapping across servers when the build numbers differ.
-pub fn fetch_for_build(build: u32, version: Option<String>, cx: &App) -> Task<Fetched> {
-    if is_cached(build) {
-        return Task::ready(Fetched::AlreadyOnDisk);
-    }
-    let runtime = crate::runtime::runtime(cx);
+/// The repository is GitHub, which allows sixty requests an hour to a caller it
+/// does not know, and a directory of archived replays can name forty builds. What
+/// a sweep leaves is picked up by the next one, so a cold cache fills over a few
+/// scans rather than spending the whole allowance at once.
+pub const BUILDS_PER_SWEEP: usize = 8;
+
+/// Fetches the mappings for builds that have none, up to [`BUILDS_PER_SWEEP`].
+///
+/// Each build is paired with the version its replays name, which is what resolves
+/// a mapping across servers when the build numbers differ. One fetcher for the
+/// whole sweep, so the repository's manifest is read once rather than once per
+/// build, and the sweep stops at the first build the repository refuses: a refusal
+/// is nearly always the allowance running out, and asking again would only use
+/// what is left of it.
+///
+/// Returns what became of each build it reached, in the order it reached them.
+pub fn fetch_for_builds(wanted: Vec<(u32, Option<String>)>, cx: &App) -> Task<Vec<(u32, Fetched)>> {
     cx.background_spawn(async move {
-        let Some(runtime) = runtime else { return Fetched::Failed("no runtime to fetch on".to_owned()) };
-        runtime.block_on(async move {
-            match wows_data_mgr::constants::fetch_versioned_constants(build, version.as_deref()).await {
-                // Written under the build that asked, so the next read of this
-                // replay finds it whichever build it was published under.
-                Ok((data, actual)) => match serde_json::to_vec(&data) {
-                    Ok(bytes) => match write_cached(build, &bytes) {
-                        Ok(()) => Fetched::Written { build, actual },
-                        Err(err) => Fetched::Failed(err),
-                    },
-                    Err(err) => Fetched::Failed(err.to_string()),
-                },
-                Err(err) => Fetched::Failed(err.to_string()),
+        let mut outcomes = Vec::new();
+        let mut fetcher = None;
+
+        for (build, version) in wanted.into_iter().take(BUILDS_PER_SWEEP) {
+            if is_cached(build) {
+                outcomes.push((build, Fetched::AlreadyOnDisk));
+                continue;
             }
-        })
+
+            // Built on the first build that actually needs one: a sweep where
+            // everything is already cached asks the repository nothing.
+            if fetcher.is_none() {
+                match wows_data_mgr::constants::ConstantsFetcher::new() {
+                    Ok(built) => fetcher = Some(built),
+                    Err(err) => {
+                        outcomes.push((build, Fetched::Failed(err.to_string())));
+                        break;
+                    }
+                }
+            }
+            let Some(asking) = fetcher.as_ref() else { break };
+
+            let Some((data, actual)) = asking.fetch(build, version.as_deref()) else {
+                outcomes.push((build, Fetched::Failed("the repository published nothing for it".to_owned())));
+                break;
+            };
+            // Written under the build that asked, so the next read of that
+            // replay finds it whichever build it was published under.
+            let written =
+                serde_json::to_vec(&data).map_err(|err| err.to_string()).and_then(|bytes| write_cached(build, &bytes));
+            outcomes.push((
+                build,
+                match written {
+                    Ok(()) => Fetched::Written { build, actual },
+                    Err(err) => Fetched::Failed(err),
+                },
+            ));
+        }
+
+        outcomes
     })
 }
 
@@ -126,7 +165,12 @@ fn write_cached(build: u32, bytes: &[u8]) -> Result<(), String> {
     let Some(path) = cached_path(build) else {
         return Err("there is no storage directory to cache constants in".to_owned());
     };
-    std::fs::write(&path, bytes).map_err(|err| format!("{}: {err}", path.display()))
+    let beside = path.with_extension("json.part");
+    std::fs::write(&beside, bytes).map_err(|err| format!("{}: {err}", beside.display()))?;
+    // Renamed over rather than written in place: a crash or a second app writing
+    // the same path would otherwise leave a half-written file, which reads as a
+    // mapping with nothing in it and silently changes what results decode to.
+    std::fs::rename(&beside, &path).map_err(|err| format!("{}: {err}", path.display()))
 }
 
 #[cfg(test)]
