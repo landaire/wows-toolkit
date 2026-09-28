@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use gpui_kit::Context;
 use gpui_kit::Render;
+use gpui_kit::SharedString;
 use gpui_kit::Task;
 use wows_toolkit_viewmodel::preview_dwell::DWELL;
 use wows_toolkit_viewmodel::preview_dwell::Dwell;
@@ -75,6 +76,12 @@ pub struct PreviewHover {
     /// Cleared once a bake has finished, so a replay whose build is not
     /// installed stops holding space it will never fill.
     expecting: bool,
+    /// Why the watched row has no preview, once a bake has failed.
+    ///
+    /// Kept so the popup can say it: a replay recorded on a build that is not
+    /// installed is the ordinary case here, and a blank square reads as a broken
+    /// preview rather than as a missing build.
+    failed: Option<SharedString>,
     /// The last track baked in full, so moving the pointer away and back is
     /// instant rather than another bake.
     ///
@@ -106,6 +113,7 @@ impl Default for PreviewHover {
             released: Vec::new(),
             baking: false,
             expecting: false,
+            failed: None,
             cached: None,
             cancel: Arc::new(AtomicBool::new(false)),
             _bake: None,
@@ -138,6 +146,11 @@ impl PreviewHover {
     /// The row under the pointer, whether or not its preview has baked yet.
     pub fn watched_path(&self) -> Option<&std::path::Path> {
         self.watched.as_ref().map(|(path, _)| path.as_path())
+    }
+
+    /// Why the watched row has no preview, if a bake has said so.
+    pub fn failure(&self) -> Option<&SharedString> {
+        self.failed.as_ref()
     }
 
     /// Whether a preview is on its way for the watched row, dwell included.
@@ -186,6 +199,16 @@ impl PreviewHover {
         self.baking = true;
         self.expecting = true;
         self.shown = None;
+        self.watched = Some((path, Instant::now()));
+    }
+
+    /// Seeds a bake that finished with nothing to show, and why. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_failure_for_test(&mut self, path: PathBuf, reason: &str) {
+        self.expecting = false;
+        self.baking = false;
+        self.shown = None;
+        self.failed = Some(SharedString::from(reason.to_owned()));
         self.watched = Some((path, Instant::now()));
     }
 
@@ -250,6 +273,7 @@ impl PreviewHover {
         // held: the popup is the row's words on their own.
         let Some(game_data) = game_data else { return };
         self.expecting = true;
+        self.failed = None;
         self._dwell_timer = Some(cx.spawn(async move |view, cx| {
             cx.background_executor().timer(DWELL).await;
             let _ = view.update(cx, |view, cx| {
@@ -301,6 +325,7 @@ impl PreviewHover {
     fn cancel_bake(&mut self) {
         self.baking = false;
         self.expecting = false;
+        self.failed = None;
         self.cancel.store(true, Ordering::Relaxed);
         self.cancel = Arc::new(AtomicBool::new(false));
         self._bake = None;
@@ -417,9 +442,15 @@ impl PreviewHover {
             }
 
             let baked = baked.await;
-            if let Err(err) = &baked {
-                tracing::debug!("no preview for {}: {err}", path.display());
-            }
+            // Why there is none, for the surface to say. A superseded bake says
+            // nothing: the row it was for is not the row being watched.
+            let failed = match &baked {
+                Err(err) => {
+                    tracing::debug!("no preview for {}: {err}", path.display());
+                    err.said().map(SharedString::from)
+                }
+                Ok(()) => None,
+            };
 
             let _ = view.update(cx, |view, cx| {
                 let this = field(view);
@@ -427,6 +458,7 @@ impl PreviewHover {
                 // Nothing more is coming, so a replay that produced no preview
                 // stops holding the map's space.
                 this.expecting = false;
+                this.failed = failed;
                 // Looping only starts once the whole track is here.
                 if let Some(shown) = this.shown.as_mut() {
                     shown.frames.finish();

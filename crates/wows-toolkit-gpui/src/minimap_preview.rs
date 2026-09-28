@@ -7,6 +7,7 @@
 //! paints and the video export encodes, rasterised to an image here because
 //! this front end has no painter of its own.
 
+use rust_i18n::t;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -132,8 +133,9 @@ pub fn renderer_for_replay(
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
-    let loaded =
-        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+    let loaded = game_data
+        .get_or_load_build(build.get())
+        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
 
     let renderer = renderer_for(Some(build), &replay.meta.mapName, loaded.vfs(), Some(&version), layout)?;
     let origin = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).map_origin();
@@ -173,14 +175,34 @@ pub enum PreviewError {
     UnreadableReplay,
     #[error("the replay reports an unreadable client version {raw:?}")]
     UnknownBuild { raw: String },
-    #[error("this replay's build is not loaded: {reason}")]
-    NoGameData { reason: String },
+    #[error("this replay's build {version} is not loaded: {reason}")]
+    NoGameData { version: String, reason: String },
     #[error("the build ships no map info for {map:?}")]
     NoMapInfo { map: String },
     #[error("the preview was superseded")]
     Cancelled,
     #[error(transparent)]
     Render(#[from] wows_minimap_renderer::preview::PreviewRenderError),
+}
+
+impl PreviewError {
+    /// What a surface says instead of a map, in the egui popup's own words
+    /// (`replay/renderer/preview.rs`'s `PreviewError::key`).
+    ///
+    /// `None` for a superseded bake, which is not something to tell the reader:
+    /// another bake is already running for the row they moved to.
+    pub fn said(&self) -> Option<String> {
+        match self {
+            Self::UnreadableReplay => Some(t!("ui.replay.preview_unreadable").into_owned()),
+            Self::UnknownBuild { raw } => Some(t!("ui.replay.preview_unknown_version", value = raw).into_owned()),
+            Self::NoGameData { version, .. } => {
+                Some(t!("ui.replay.preview_no_game_data", value = version).into_owned())
+            }
+            Self::NoMapInfo { map } => Some(t!("ui.replay.preview_no_map", value = map).into_owned()),
+            Self::Render(err) => Some(t!("ui.replay.preview_render_failed", value = err.to_string()).into_owned()),
+            Self::Cancelled => None,
+        }
+    }
 }
 
 /// Reads the replay at `path` and bakes its preview against its own build.
@@ -210,8 +232,9 @@ pub fn bake_from_file(
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build_at = std::time::Instant::now();
-    let loaded =
-        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+    let loaded = game_data
+        .get_or_load_build(build.get())
+        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
     tracing::debug!("preview: build {} ready in {:?}", build.get(), build_at.elapsed());
 
     bake(&replay, loaded.provider(), loaded.base_constants(), loaded.vfs(), Some(&version), cancel, on_map, on_frame)
@@ -263,8 +286,9 @@ pub fn extract_events(
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
-    let loaded =
-        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+    let loaded = game_data
+        .get_or_load_build(build.get())
+        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
 
     // One walk for both: the shots come off the same scan as the events, so
     // reading them costs nothing beyond keeping them.
@@ -296,8 +320,9 @@ pub fn bake_track(
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build =
         version.build.ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
-    let loaded =
-        game_data.get_or_load_build(build.get()).map_err(|err| PreviewError::NoGameData { reason: err.to_string() })?;
+    let loaded = game_data
+        .get_or_load_build(build.get())
+        .map_err(|err| PreviewError::NoGameData { version: version.to_path(), reason: err.to_string() })?;
 
     let provider = loaded.provider().as_ref();
     let vfs = loaded.vfs();

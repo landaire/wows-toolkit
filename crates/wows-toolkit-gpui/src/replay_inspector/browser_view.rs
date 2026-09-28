@@ -386,6 +386,12 @@ impl ReplayBrowser {
         self.preview.seed_dwelling_for_test(path);
     }
 
+    /// Seeds a bake that produced nothing, and why. Test-only.
+    #[cfg(test)]
+    pub(crate) fn seed_failed_preview_for_test(&mut self, path: std::path::PathBuf, reason: &str) {
+        self.preview.seed_failure_for_test(path, reason);
+    }
+
     pub fn new(cx: &mut Context<Self>) -> Self {
         let tree_state = cx.new(|cx| TreeState::new(cx));
         Self {
@@ -1361,7 +1367,24 @@ impl Render for ReplayBrowser {
                     .child(Spinner::new().large())
                     .into_any_element(),
             ),
-            (None, false) => None,
+            // Why there is none, in the space the map would have taken: a
+            // replay from a build that is not installed is the ordinary case.
+            (None, false) => self.preview.failure().map(|reason| {
+                h_flex()
+                    .id("replay-preview-failed")
+                    .test_support()
+                    .aria_label(reason.clone())
+                    .w(px(PREVIEW_SIZE))
+                    .h(px(PREVIEW_SIZE))
+                    .bg(crate::preview_hover::MAP_PLACEHOLDER)
+                    .items_center()
+                    .justify_center()
+                    .p_2()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(reason.clone())
+                    .into_any_element()
+            }),
         };
         // Under the map: the detail the two drawn lines drop, one labelled
         // fact per line.
@@ -1626,6 +1649,42 @@ mod tests {
                 assert_eq!(browser.selection(), vec![c], "a plain click replaces the set");
             });
         });
+    }
+
+    /// A preview that cannot be built says why, in the space the map would have
+    /// taken: the ordinary cause is a replay from a build that is not installed,
+    /// and a blank square reads as a broken preview instead.
+    #[gpui_kit::test]
+    fn a_preview_that_cannot_be_built_says_why(cx: &mut gpui_kit::TestAppContext) {
+        use gpui_kit::AppContext as _;
+        use gpui_kit::px;
+        use gpui_kit::size;
+        use std::path::PathBuf;
+
+        use gpui_kit::test::TestWindowExt as _;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(1200.), px(800.)), |_window, cx| super::ReplayBrowser::new(cx));
+
+        let said = "No game data for client version 0.10.5.0";
+        window
+            .update(cx, |browser, _window, cx| {
+                browser.seed_failed_preview_for_test(PathBuf::from("old.wowsreplay"), said);
+                cx.notify();
+            })
+            .expect("the test window stays open");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let panel = window.find("replay-preview-failed");
+            assert_eq!(panel.label(), Some(said), "the reason is what the popup carries");
+            assert_eq!(
+                panel.bounds().size.width,
+                px(super::PREVIEW_SIZE),
+                "and it fills the space the map would have taken"
+            );
+        })
+        .expect("the test window stays open");
     }
 
     /// A replay the directory no longer holds leaves the listing, and its

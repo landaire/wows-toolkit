@@ -189,10 +189,10 @@ have used it.
     (`util/game_params.rs:59`) although the port writes those files
     (`load.rs:104`). A clean Check or Validate also reports nothing at all
     (`app.rs:1240-1270`): only failure gets a line.
-29. **Preview failures say nothing.** The egui hover preview reports why there is
-    none -- no game data for that version, unreadable version, no map data
-    (`replay/renderer/preview.rs:62-68`); the port logs at `debug!`
-    (`preview_hover.rs:419-421`), so an old replay looks like a broken preview.
+29. ~~**Preview failures say nothing.**~~ Done 2026-09-27: `PreviewError::said`
+    carries the egui popup's four messages (plus one for a render failure the
+    egui path cannot have), `PreviewHover` keeps the reason for the watched row,
+    and both surfaces draw it where the map would have been.
 30. **Annotations are mouse-only.** `Ctrl+1`..`Ctrl+7`, `Ctrl+M`, the Ctrl-held
     cheat sheet, `Escape`, `Delete`, `[`/`]`, and annotation undo
     (`replay/minimap_view/shapes.rs:84-131`, `replay/renderer/mod.rs:2162-2252`).
