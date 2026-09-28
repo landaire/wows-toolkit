@@ -312,6 +312,51 @@ pub fn row_stats(stats: Option<&PlayerStatsOut>, mode: WinRateMode) -> RowStats 
     RowStats { win_rate, battles, avg_damage, pr, band: win_rate.map(PersonalRatingCategory::from_win_rate) }
 }
 
+/// What a win-rate cell says when the pointer rests on it: both scopes, with
+/// the battles each rate is over and the damage that goes with it.
+///
+/// One cell shows one scope, so without this a reader comparing a player's
+/// overall rate against their rate in the ship they are in has to switch the
+/// whole roster between scopes to see the other number.
+///
+/// `None` when the service gave neither scope, which is the case a cell already
+/// says nothing in.
+pub fn win_rate_hover(stats: Option<&PlayerStatsOut>, locale: Option<&str>) -> Option<String> {
+    let stats = stats?;
+    let scopes = [
+        (WinRateMode::Overall, stats.overall_win_rate, stats.battles, stats.overall_avg_damage),
+        (WinRateMode::Ship, stats.ship_win_rate, stats.ship_battles, stats.ship_avg_damage),
+    ];
+
+    let lines: Vec<String> = scopes
+        .into_iter()
+        .filter_map(|(mode, rate, battles, damage)| {
+            let (rate, battles) = (rate?, battles?);
+            let label = rust_i18n::t!(mode.label_key()).into_owned();
+            let rate = format!("{rate:.1}%");
+            let battles = crate::formatting::separate_number(battles, locale);
+            let line = match damage {
+                Some(damage) => rust_i18n::t!(
+                    "ui.player_tracker.win_rate_hover_line_damage",
+                    label = label,
+                    rate = rate,
+                    battles = battles,
+                    damage = crate::formatting::separate_number(damage, locale)
+                ),
+                None => rust_i18n::t!(
+                    "ui.player_tracker.win_rate_hover_line",
+                    label = label,
+                    rate = rate,
+                    battles = battles
+                ),
+            };
+            Some(line.into_owned())
+        })
+        .collect();
+
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}
+
 /// One team's average win rate, over the rows that have one.
 ///
 /// A row with no rate is skipped rather than counted as zero, and the answer

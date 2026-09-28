@@ -904,33 +904,7 @@ fn render_action_menu(ui: &mut egui::Ui, row_data: &LiveRosterRow, actions: &mut
 /// when neither scope has one. Average damage joins the line only when that
 /// scope reports one, under the same rule.
 fn win_rate_hover(stats: Option<&PlayerStatsOut>, locale: &str) -> Option<String> {
-    let stats = stats?;
-    let scopes = [
-        (scope_label(WinRateMode::Overall), stats.overall_win_rate, stats.battles, stats.overall_avg_damage),
-        (scope_label(WinRateMode::Ship), stats.ship_win_rate, stats.ship_battles, stats.ship_avg_damage),
-    ];
-
-    let lines: Vec<String> = scopes
-        .into_iter()
-        .filter_map(|(label, rate, battles, damage)| {
-            let (rate, battles) = (rate?, battles?);
-            let rate = format!("{rate:.1}%");
-            let battles = separate_number(battles, Some(locale));
-            let line = match damage {
-                Some(damage) => t!(
-                    "ui.player_tracker.win_rate_hover_line_damage",
-                    label = label,
-                    rate = rate,
-                    battles = battles,
-                    damage = separate_number(damage, Some(locale))
-                ),
-                None => t!("ui.player_tracker.win_rate_hover_line", label = label, rate = rate, battles = battles),
-            };
-            Some(line.to_string())
-        })
-        .collect();
-
-    if lines.is_empty() { None } else { Some(lines.join("\n")) }
+    wows_toolkit_viewmodel::player_tracker::live::win_rate_hover(stats, Some(locale))
 }
 
 #[cfg(test)]
