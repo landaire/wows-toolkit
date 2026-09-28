@@ -80,6 +80,7 @@ error = "Error"
 software_encode = "No GPU Video Encoder"
 about = "About"
 refresh_persisted_data = "Refresh Persisted Replay Data"
+tactics_board = "Tactics Board"
 
 # -- Dialog / message text --
 
@@ -1557,6 +1558,13 @@ tracked = "%{salvos} salvos, %{shells} shells tracked"
 nothing_landed = "Nothing has landed on this ship yet"
 shells = "%{count}x"
 unknown_attacker = "Ship %{id}"
+
+[ui.tactics]
+map = "Map"
+mode = "Mode"
+pick_a_map = "Pick a map to draw on"
+drawing = "Drawing the map..."
+window_failed = "The tactics board window could not be opened"
 
 [ui.armor.outcome]
 penetration = "Penetration"

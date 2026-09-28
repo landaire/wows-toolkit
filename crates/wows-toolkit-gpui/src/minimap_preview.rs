@@ -400,6 +400,22 @@ pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCa
     Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
 }
 
+/// Draws one map with `commands` on it.
+///
+/// What the tactics board shows: the same renderer the battle is drawn through,
+/// with capture points and annotations on it rather than a replay's own frame.
+/// `None` when no build is open, or the open one ships no art for that map.
+pub fn render_map(
+    map_name: &str,
+    game_data: &crate::replay_inspector::GameDataCache,
+    commands: &[DrawCommand],
+) -> Option<Arc<RenderImage>> {
+    let loaded = game_data.newest_loaded()?;
+    let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
+    let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    Some(to_image(renderer.render(commands)))
+}
+
 /// Bakes `replay` into the frames a preview plays, rasterising them one at a
 /// time.
 ///

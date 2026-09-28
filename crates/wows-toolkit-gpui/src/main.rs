@@ -36,6 +36,7 @@ mod search_pills;
 mod settings;
 mod settings_store;
 mod stats;
+mod tactics;
 mod theme;
 mod toast;
 mod twitch;
