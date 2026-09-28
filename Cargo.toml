@@ -3,6 +3,7 @@ resolver = "3"
 members = [
     "crates/wows-toolkit",
     "crates/wows-toolkit-config",
+    "crates/wows-toolkit-hardening",
     "crates/wows-toolkit-gpui",
     "crates/wows-toolkit-viewmodel",
     "crates/wows-core",
@@ -45,6 +46,7 @@ wt-collab-protocol = { path = "crates/wt-collab-protocol" }
 wt-collab-egui = { path = "crates/wt-collab-egui" }
 wt-translations = { version = "0.16.0", path = "crates/wt-translations" }
 wows-toolkit-config = { path = "crates/wows-toolkit-config" }
+wows-toolkit-hardening = { path = "crates/wows-toolkit-hardening" }
 wows-toolkit-viewmodel = { path = "crates/wows-toolkit-viewmodel" }
 # Shared UI dependencies
 egui = "0.35"

@@ -56,6 +56,10 @@ pub mod keys {
     /// The commit the cached result mappings were last read at, which is what
     /// makes the next check one small request.
     pub const CONSTANTS_FILE_COMMIT: &str = "constants_file_commit";
+    /// Whether Code Integrity Guard is applied: a
+    /// `wows_toolkit_hardening::CodeIntegrityPreference`. The one process
+    /// mitigation with a real compatibility cost, so the one the reader chooses.
+    pub const CODE_INTEGRITY: &str = "code_integrity";
 }
 
 /// A proxy setting as a URL a client can take.

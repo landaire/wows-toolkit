@@ -101,6 +101,7 @@ wt-collab-client = { workspace = true }
 wt-collab-protocol = { workspace = true, features = ["egui"] }
 wt-collab-egui = { workspace = true }
 wows-toolkit-config = { workspace = true }
+wows-toolkit-hardening = { workspace = true }
 wows-toolkit-viewmodel = { workspace = true }
 web-time = { workspace = true }
 rand = "0.10"

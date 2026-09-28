@@ -1,0 +1,34 @@
+[package]
+name = "wows-toolkit-hardening"
+description = "Windows process mitigations both toolkit front ends apply before they open a window"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[lib]
+name = "wows_toolkit_hardening"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+# The policies themselves, the module inventory a crash report carries, and the
+# text-service probe that decides whether code integrity guard may be applied.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_Environment",
+    "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_Registry",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+] }
+
+[dev-dependencies]
+# The version-info tests write a file and read it back.
+tempfile = "3"

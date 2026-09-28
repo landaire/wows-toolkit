@@ -14618,12 +14618,24 @@ dependencies = [
  "wows-data-mgr",
  "wows-replay-insights",
  "wows-toolkit-config",
+ "wows-toolkit-hardening",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",
  "wowsunpack",
  "wt-collab-client",
  "wt-translations",
+]
+
+[[package]]
+name = "wows-toolkit-hardening"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -14815,6 +14827,7 @@ dependencies = [
  "wows-data-mgr",
  "wows-replay-insights",
  "wows-toolkit-config",
+ "wows-toolkit-hardening",
  "wows-toolkit-viewmodel",
  "wows_minimap_renderer",
  "wows_replays",

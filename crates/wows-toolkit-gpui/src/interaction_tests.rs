@@ -371,6 +371,7 @@ fn test_settings() -> GpuiSettings {
         language_selection_shown: true,
         suppress_gpu_encoder_warning: false,
         constants_commit: None,
+        code_integrity: Default::default(),
     }
 }
 

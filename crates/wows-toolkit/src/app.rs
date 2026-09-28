@@ -2275,7 +2275,7 @@ impl WowsToolkitApp {
 
                         let mut command = std::process::Command::new(current_process);
                         command.arg("finalize-update").arg("--replaced").arg(current_process_new_path);
-                        crate::hardening::prepare_child(&mut command)
+                        crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS)
                             .spawn()
                             .context("failed to execute updated process")
                     };
@@ -3979,7 +3979,7 @@ impl WowsToolkitApp {
                 let exe = std::path::Path::new(&wows_dir).join("WorldOfWarships.exe");
                 let mut command = std::process::Command::new(exe);
                 command.arg(&replay_path);
-                let _ = crate::hardening::prepare_child(&mut command).spawn();
+                let _ = crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn();
                 // Signal the replay parser to open the controls window.
                 // App-wide: opens the single reference window regardless of workspace.
                 ctx.data_mut(|data| {

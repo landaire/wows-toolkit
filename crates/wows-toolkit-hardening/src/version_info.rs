@@ -96,7 +96,7 @@ mod windows_version_info {
     use windows_sys::Win32::Storage::FileSystem::GetFileVersionInfoW;
     use windows_sys::Win32::Storage::FileSystem::VerQueryValueW;
 
-    use crate::util::registry::wide;
+    use crate::registry::wide;
 
     use super::CompanyName;
     use super::ProductName;
