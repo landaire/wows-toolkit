@@ -10,6 +10,7 @@ use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::Selectable;
+use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::v_flex;
@@ -23,6 +24,7 @@ use wows_replay_insights::cap_layout::CapLayout;
 use wows_replay_insights::cap_layout::CapLayoutDb;
 use wows_replay_insights::cap_layout::CapLayoutKey;
 use wows_toolkit_viewmodel::tactics::naming;
+use wows_toolkit_viewmodel::tactics::preset;
 use wowsunpack::game_types::WorldPos;
 
 use crate::replay_inspector::GameDataCache;
@@ -73,6 +75,29 @@ impl BoardCapPoint {
             // The layout states a neutral cap as a negative team, which is an
             // absence rather than a team.
             team: (point.team_id >= 0).then(|| wows_replays::types::TeamId::new(point.team_id)),
+        }
+    }
+
+    fn from_preset(saved: &preset::PresetCapPoint) -> Self {
+        Self {
+            index: saved.index,
+            world_x: saved.world_x,
+            world_z: saved.world_z,
+            radius: saved.radius,
+            team: (saved.team_id >= 0).then(|| wows_replays::types::TeamId::new(saved.team_id)),
+        }
+    }
+
+    fn to_preset(&self) -> preset::PresetCapPoint {
+        preset::PresetCapPoint {
+            index: self.index,
+            world_x: self.world_x,
+            world_z: self.world_z,
+            radius: self.radius,
+            // A cap nobody holds is stated as a negative team, which is the
+            // form the egui board writes and reads.
+            team_id: self.team.map(|team| team.raw()).unwrap_or(-1),
+            frozen: false,
         }
     }
 
@@ -225,6 +250,11 @@ pub struct TacticsBoard {
     /// read against. `None` until it has been painted once. Shared with the
     /// painter, which is the only thing that knows where the map landed.
     painted: std::rc::Rc<std::cell::Cell<Option<Bounds<Pixels>>>>,
+    /// What a saved board is called, as the reader is typing it.
+    preset_name: Entity<gpui_kit::component::input::InputState>,
+    /// Every board already saved, read when the window opens and after each
+    /// save so the list says what is there.
+    presets: Vec<String>,
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
     drawn: Option<Arc<RenderImage>>,
@@ -236,9 +266,20 @@ pub struct TacticsBoard {
 }
 
 impl TacticsBoard {
-    pub fn new(game_data: Option<GameDataCache>, layouts: CapLayoutDb, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        game_data: Option<GameDataCache>,
+        layouts: CapLayoutDb,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let maps = maps(&layouts, game_data.as_ref());
+        let preset_name = cx.new(|cx| {
+            gpui_kit::component::input::InputState::new(window, cx)
+                .placeholder(t!("ui.tactics.preset_name").into_owned())
+        });
         Self {
+            preset_name,
+            presets: preset::list_preset_names(),
             focus_handle: cx.focus_handle(),
             game_data,
             layouts,
@@ -255,6 +296,89 @@ impl TacticsBoard {
             drawing: false,
             stale: false,
         }
+    }
+
+    /// Saves the board under the name in the field.
+    ///
+    /// A board with no map is not a board: it names nothing to open again.
+    fn save_preset(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let name = self.preset_name.read(cx).value().trim().to_owned();
+        if name.is_empty() {
+            crate::toast::warn(t!("ui.tactics.preset_needs_a_name").into_owned(), window, cx);
+            return;
+        }
+        let Some(map) = self.map.clone() else {
+            crate::toast::warn(t!("ui.tactics.preset_needs_a_map").into_owned(), window, cx);
+            return;
+        };
+
+        let saved = preset::TacticsPreset {
+            name: name.clone(),
+            map_name: map.space,
+            map_id: map.map_id,
+            cap_points: self.caps.iter().map(BoardCapPoint::to_preset).collect(),
+            annotations: Vec::new(),
+        };
+        match preset::save_preset(&saved) {
+            Ok(()) => {
+                self.presets = preset::list_preset_names();
+                crate::toast::info(t!("ui.tactics.preset_saved", name = name).into_owned(), window, cx);
+                cx.notify();
+            }
+            Err(why) => {
+                crate::toast::failed(
+                    t!("ui.tactics.preset_save_failed", error = why.to_string()).into_owned(),
+                    window,
+                    cx,
+                );
+            }
+        }
+    }
+
+    /// Opens a saved board.
+    fn load_preset(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let read = match preset::load_preset(name) {
+            Ok(read) => read,
+            Err(why) => {
+                crate::toast::failed(
+                    t!("ui.tactics.preset_load_failed", error = why.to_string()).into_owned(),
+                    window,
+                    cx,
+                );
+                return;
+            }
+        };
+
+        // Matched by space name rather than by map id: a board saved from a map
+        // nothing has a layout for carries the id zero, which names no map.
+        let map = self.maps.iter().find(|map| map.space == read.map_name).cloned().unwrap_or_else(|| MapChoice {
+            map_id: read.map_id,
+            space: read.map_name.clone(),
+            label: read.map_name,
+        });
+        self.modes = modes(&self.layouts, map.map_id, self.game_data.as_ref());
+        // The saved capture points stand, whatever mode the map has: they are
+        // what the reader put there.
+        self.mode = None;
+        self.map = Some(map);
+        self.caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
+        self.selected = None;
+        self.adding = false;
+        self.redraw(cx);
+    }
+
+    /// Drops a saved board.
+    fn delete_preset(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Err(why) = preset::delete_preset(name) {
+            crate::toast::failed(
+                t!("ui.tactics.preset_delete_failed", error = why.to_string()).into_owned(),
+                window,
+                cx,
+            );
+            return;
+        }
+        self.presets = preset::list_preset_names();
+        cx.notify();
     }
 
     /// Where a window position falls on the map, in the map's own pixels.
@@ -550,6 +674,7 @@ impl TacticsBoard {
                     )),
             )
             .child(self.render_cap_tools(cx))
+            .child(self.render_presets(cx))
             .when(!self.modes.is_empty(), |this| {
                 this.child(
                     h_flex()
@@ -579,6 +704,75 @@ impl TacticsBoard {
                                             }
                                         }),
                                 )
+                            },
+                        ))),
+                )
+            })
+    }
+
+    /// Saving the board, and opening one that was saved.
+    fn render_presets(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let board = cx.entity();
+
+        v_flex()
+            .gap_1()
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(
+                        gpui_kit::component::input::Input::new(&self.preset_name)
+                            .id("tactics-preset-name")
+                            .small()
+                            .w(px(180.)),
+                    )
+                    .child({
+                        let board = board.clone();
+                        Button::new("tactics-preset-save")
+                            .label(t!("ui.tactics.preset_save").into_owned())
+                            .compact()
+                            .on_click(move |_event, window, cx: &mut App| {
+                                board.update(cx, |board, cx| board.save_preset(window, cx));
+                            })
+                    }),
+            )
+            .when(!self.presets.is_empty(), |this| {
+                this.child(
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(
+                            div()
+                                .text_xs()
+                                .text_color(crate::theme::text_dim())
+                                .child(t!("ui.tactics.presets").to_string()),
+                        )
+                        .child(h_flex().flex_wrap().gap_1().children(self.presets.iter().cloned().enumerate().map(
+                            |(index, name)| {
+                                let opening = board.clone();
+                                let dropping = board.clone();
+                                h_flex()
+                                    .gap_0p5()
+                                    .items_center()
+                                    .child({
+                                        let name = name.clone();
+                                        Button::new(("tactics-preset-open", index))
+                                            .label(name.clone())
+                                            .compact()
+                                            .on_click(move |_event, window, cx: &mut App| {
+                                                let name = name.clone();
+                                                opening.update(cx, |board, cx| board.load_preset(&name, window, cx));
+                                            })
+                                    })
+                                    .child(
+                                        Button::new(("tactics-preset-drop", index))
+                                            .label(t!("ui.tactics.preset_delete").into_owned())
+                                            .compact()
+                                            .on_click(move |_event, window, cx: &mut App| {
+                                                let name = name.clone();
+                                                dropping.update(cx, |board, cx| board.delete_preset(&name, window, cx));
+                                            }),
+                                    )
                             },
                         ))),
                 )
