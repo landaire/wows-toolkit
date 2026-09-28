@@ -25,6 +25,7 @@ workspace_binary(
         "//third-party/rust:arboard",
         "//third-party/rust:bytemuck",
         "//third-party/rust:ciborium",
+        "//third-party/rust:clap",
         "//third-party/rust:csv",
         "//third-party/rust:escaper",
         "//third-party/rust:fontdb",

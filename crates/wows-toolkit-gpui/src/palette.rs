@@ -1,7 +1,7 @@
 //! The command palette: everything the window can do, by name.
 //!
-//! Ports the egui app's `ui/command_palette.rs`, which opens on ctrl+shift+p
-//! over a fuzzy-matched list. What is offered here is the flat root set --
+//! Ports the egui app's `ui/command_palette.rs`, which opens on ctrl+k or
+//! ctrl+p over a fuzzy-matched list. What is offered here is the flat root set --
 //! going to a tab, setting the theme, opening a replay, the seeded searches.
 //! The egui palette's cascading sub-modes (search a player, a ship, a ship's
 //! armor) are not here yet; they need a bounded index query per keystroke.
