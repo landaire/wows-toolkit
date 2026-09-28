@@ -71,6 +71,13 @@ use wows_toolkit_viewmodel::armor::camera_perspective::CameraPerspective;
 use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
 use wows_toolkit_viewmodel::armor::camera_perspective::water_aim_point;
 
+use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
+use wows_toolkit_viewmodel::armor::arc::ArcPlate;
+use wows_toolkit_viewmodel::armor::arc::PlateKeyParts;
+use wows_toolkit_viewmodel::armor::arc::ZoneShape;
+use wows_toolkit_viewmodel::armor::arc::describe_arc;
+use wows_toolkit_viewmodel::armor::arc::isolate;
+
 use crate::viewport::camera;
 use crate::viewport::camera::ArcballCamera;
 use crate::viewport::camera::Axis;
@@ -92,6 +99,7 @@ use wowsunpack::ballistics::ShellParams;
 use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Km;
+use wowsunpack::game_params::types::Millimeters;
 
 /// The mode a ship opens on: its first, which is the one the game itself
 /// uses. `None` for a ship whose GameParams name none, where there is
@@ -147,6 +155,28 @@ const AIM_MARKER_REACH: f32 = 5000.0;
 const PERSPECTIVE_YAW_PER_PX: f32 = 0.005;
 const PERSPECTIVE_PITCH_PER_PX: f32 = 0.005;
 const PERSPECTIVE_ZOOM_PER_NOTCH: f32 = 0.001;
+
+/// Which of the two isolations an arc is being asked for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Isolate {
+    /// Only the plates the shell crossed.
+    Plates,
+    /// Every part of the zones it entered.
+    Zones,
+}
+
+/// One cast arc, as the analysis panel shows it.
+pub(crate) struct ArcSummary {
+    /// The colour the arc is drawn in, so the row and the line match.
+    pub(crate) color: [f32; 4],
+    pub(crate) hits: usize,
+    /// The plating the shell crossed, added up regardless of angle.
+    pub(crate) total_armor: Millimeters,
+    pub(crate) range: Km,
+    pub(crate) isolating_plates: bool,
+    pub(crate) isolating_zones: bool,
+    pub(crate) outcome: ArcOutcome,
+}
 
 /// Whether the armor's openings are marked, and how many were found.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1889,6 +1919,138 @@ impl ViewportView {
         cx.notify();
     }
 
+    /// Every cast arc, as the analysis panel reads them.
+    pub(crate) fn arcs(&self) -> Vec<ArcSummary> {
+        self.trajectories
+            .iter()
+            .enumerate()
+            .map(|(index, cast)| {
+                let plates: Vec<ArcPlate> = cast
+                    .hits
+                    .iter()
+                    .map(|hit| ArcPlate {
+                        zone: hit.zone.clone(),
+                        thickness: hit.thickness,
+                        material: hit.material.clone(),
+                    })
+                    .collect();
+                ArcSummary {
+                    color: TRAJECTORY_PALETTE[index % TRAJECTORY_PALETTE.len()],
+                    hits: cast.hits.len(),
+                    total_armor: Millimeters::from(cast.hits.iter().map(|hit| hit.thickness.value()).sum::<f32>()),
+                    range: cast.range,
+                    isolating_plates: cast.isolating_plates,
+                    isolating_zones: cast.isolating_zones,
+                    outcome: describe_arc(cast.sim.as_ref(), &plates),
+                }
+            })
+            .collect()
+    }
+
+    /// Drops one arc.
+    pub(crate) fn remove_trajectory(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.trajectories.len() {
+            return;
+        }
+        self.trajectories.remove(index);
+        self.apply_arc_isolation(cx);
+    }
+
+    /// Fires one arc from a different range, leaving the others where they are.
+    pub(crate) fn set_trajectory_range(&mut self, index: usize, range: Km, cx: &mut Context<Self>) {
+        let Some(old) = self.trajectories.get(index) else { return };
+        if (old.range.value() - range.value()).abs() < f32::EPSILON {
+            return;
+        }
+        let (hits, shell_dir) = (old.hits.clone(), old.shell_dir);
+        let (isolating_plates, isolating_zones) = (old.isolating_plates, old.isolating_zones);
+        let mut cast = self.build_cast_at(hits, shell_dir, range);
+        cast.isolating_plates = isolating_plates;
+        cast.isolating_zones = isolating_zones;
+        self.trajectories[index] = cast;
+        self.apply_arc_isolation(cx);
+    }
+
+    /// Hides what one arc did not cross, or stops hiding it.
+    ///
+    /// Plates and zones are two answers to one question, so asking for either
+    /// withdraws the other.
+    pub(crate) fn isolate_arc(&mut self, index: usize, what: Isolate, on: bool, cx: &mut Context<Self>) {
+        let Some(cast) = self.trajectories.get_mut(index) else { return };
+        match what {
+            Isolate::Plates => {
+                cast.isolating_plates = on;
+                cast.isolating_zones = false;
+            }
+            Isolate::Zones => {
+                cast.isolating_zones = on;
+                cast.isolating_plates = false;
+            }
+        }
+        self.apply_arc_isolation(cx);
+    }
+
+    /// The same for every arc at once, which is what reads out the whole cast.
+    pub(crate) fn isolate_all_arcs(&mut self, what: Isolate, cx: &mut Context<Self>) {
+        for cast in &mut self.trajectories {
+            cast.isolating_plates = what == Isolate::Plates;
+            cast.isolating_zones = what == Isolate::Zones;
+        }
+        self.apply_arc_isolation(cx);
+    }
+
+    /// Rebuilds the visibility the arcs' isolation asks for.
+    ///
+    /// The whole visibility is recomputed rather than adjusted, because an arc
+    /// that stops isolating has to give back exactly what it hid and nothing
+    /// else. With no arc isolating anything, the ship goes back to whole.
+    fn apply_arc_isolation(&mut self, cx: &mut Context<Self>) {
+        let mut hit_zones: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut hit_plates: std::collections::HashSet<PlateKeyParts> = std::collections::HashSet::new();
+        for cast in &self.trajectories {
+            for hit in &cast.hits {
+                if cast.isolating_zones {
+                    hit_zones.insert(hit.zone.clone());
+                }
+                if cast.isolating_plates {
+                    hit_plates.insert((
+                        hit.zone.clone(),
+                        hit.material.clone(),
+                        (hit.thickness.value() * 10.0).round() as i32,
+                    ));
+                }
+            }
+        }
+
+        self.undo_stack.push(VisibilitySnapshot {
+            part_visibility: self.part_visibility.clone(),
+            plate_visibility: self.plate_visibility.clone(),
+        });
+        self.part_visibility.clear();
+        self.plate_visibility.clear();
+        if let Some(armor) = self.current_armor.clone() {
+            let zones: Vec<ZoneShape<'_>> = armor
+                .zone_part_plates
+                .iter()
+                .map(|zone| ZoneShape {
+                    name: zone.name.as_str(),
+                    parts: zone.parts.iter().map(|part| (part.name.as_str(), part.plates.as_slice())).collect(),
+                })
+                .collect();
+            let isolation = isolate(&zones, &hit_zones, &hit_plates);
+            self.part_visibility = isolation.parts;
+            self.plate_visibility = isolation
+                .plates
+                .into_iter()
+                .map(|((zone, material_name, thickness_tenths), shown)| {
+                    (PlateKey { zone, material_name, thickness_tenths }, shown)
+                })
+                .collect();
+        }
+        self.reupload_current_armor(cx);
+        cx.notify();
+    }
+
     /// The direction a shell travels, given the bearing it comes in on.
     ///
     /// With a shell to fire the fall angle is the solver's; without one the
@@ -1910,20 +2072,36 @@ impl ViewportView {
     /// plates a ray crosses are still worth showing without a shell to send
     /// through them.
     fn cast_shell(&self) -> Option<(ShellParams, ImpactResult)> {
+        self.cast_shell_at(self.cast_range)
+    }
+
+    /// The same, fired from `range`.
+    fn cast_shell_at(&self, range: Km) -> Option<(ShellParams, ImpactResult)> {
         let ship = self.cast_ship.as_ref()?;
         // Armour-piercing first: it is the shell a trajectory through plating
         // says anything about. A ship carrying none still casts with what it
         // has rather than refusing.
         let shell = ship.shells.iter().find(|shell| shell.ammo_type == AmmoType::AP).or_else(|| ship.shells.first())?;
         let params = ShellParams::from_shell_info(shell)?;
-        let impact = solve_for_range(&params, self.cast_range.to_meters())?;
+        let impact = solve_for_range(&params, range.to_meters())?;
         Some((params, impact))
     }
 
     fn build_cast(&self, hits: Vec<trajectory::TrajectoryHit>, shell_dir: Vec3) -> trajectory::Trajectory {
-        let shell = self.cast_shell();
+        self.build_cast_at(hits, shell_dir, self.cast_range)
+    }
+
+    /// The same, at a range of its own: one arc's range is changed without
+    /// moving the others.
+    fn build_cast_at(
+        &self,
+        hits: Vec<trajectory::TrajectoryHit>,
+        shell_dir: Vec3,
+        range: Km,
+    ) -> trajectory::Trajectory {
+        let shell = self.cast_shell_at(range);
         let parts = shell.as_ref().map(|(params, impact)| (params, impact));
-        trajectory::cast(hits, shell_dir, parts, self.model_extent(), self.continue_on_ricochet)
+        trajectory::cast(hits, shell_dir, parts, self.model_extent(), self.continue_on_ricochet, range)
     }
 
     /// Re-runs every cast shell, for a change that alters where they end.
@@ -1934,7 +2112,12 @@ impl ViewportView {
         }
         let recast: Vec<trajectory::Trajectory> = std::mem::take(&mut self.trajectories)
             .into_iter()
-            .map(|old| self.build_cast(old.hits, old.shell_dir))
+            .map(|old| {
+                let mut cast = self.build_cast_at(old.hits, old.shell_dir, old.range);
+                cast.isolating_plates = old.isolating_plates;
+                cast.isolating_zones = old.isolating_zones;
+                cast
+            })
             .collect();
         self.trajectories = recast;
         self.reupload_current_armor(cx);

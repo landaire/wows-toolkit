@@ -22,6 +22,7 @@ use wowsunpack::ballistics::ShellSimResult;
 use wowsunpack::ballistics::simulate_arc;
 use wowsunpack::ballistics::simulate_shell_through_plates;
 use wowsunpack::game_params::types::Degrees;
+use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShipModelDistance;
 
@@ -80,6 +81,14 @@ pub struct Trajectory {
     pub sim: Option<ShellSimResult>,
     /// Where the fuse went off, when it did.
     pub detonation: Option<Vec3>,
+    /// The range this arc was cast from, which sets how steeply it falls. Kept
+    /// per arc so two can be compared at two ranges.
+    pub range: Km,
+    /// Whether this arc is hiding the plates it did not cross, and whether it is
+    /// hiding the zones it did not enter. Both at once is the same as zones, so
+    /// setting either one clears the other.
+    pub isolating_plates: bool,
+    pub isolating_zones: bool,
 }
 
 impl Trajectory {
@@ -204,6 +213,7 @@ pub fn cast(
     shell: Option<(&ShellParams, &ImpactResult)>,
     extent: f32,
     continue_on_ricochet: bool,
+    range: Km,
 ) -> Trajectory {
     let approach = approach_xz(&shell_dir);
     let (arc, sim, detonation) = match (shell, hits.first()) {
@@ -218,7 +228,7 @@ pub fn cast(
         (_, Some(first)) => (vec![first.position - approach * TRAILING_LENGTH, first.position], None, None),
         (_, None) => (Vec::new(), None, None),
     };
-    Trajectory { arc, hits, shell_dir, sim, detonation }
+    Trajectory { arc, hits, shell_dir, sim, detonation, range, isolating_plates: false, isolating_zones: false }
 }
 
 /// The colour an impact marker takes, by how square the strike was.
@@ -465,7 +475,7 @@ mod tests {
     fn a_cast_with_no_shell_still_reports_the_plates_it_crossed() {
         let hits = vec![hit(0.0, 32.0, 10.0), hit(3.0, 19.0, 20.0)];
 
-        let cast = cast(hits, Vec3::x(), None, 100.0, false);
+        let cast = cast(hits, Vec3::x(), None, 100.0, false, Km::new(10.0));
 
         assert_eq!(cast.hits.len(), 2);
         assert!(cast.sim.is_none(), "nothing was fired, so nothing was simulated");
@@ -476,7 +486,7 @@ mod tests {
 
     #[test]
     fn a_cast_that_hit_nothing_draws_nothing() {
-        let cast = cast(Vec::new(), Vec3::x(), None, 100.0, false);
+        let cast = cast(Vec::new(), Vec3::x(), None, 100.0, false, Km::new(10.0));
 
         assert!(cast.arc.is_empty());
         let (vertices, indices) = build_mesh(&cast, [1.0; 4], 1.0);
@@ -487,7 +497,7 @@ mod tests {
     #[test]
     fn every_index_the_mesh_emits_names_a_vertex_it_emitted() {
         let hits = vec![hit(0.0, 32.0, 10.0), hit(3.0, 19.0, 70.0)];
-        let cast = cast(hits, Vec3::x(), None, 100.0, false);
+        let cast = cast(hits, Vec3::x(), None, 100.0, false, Km::new(10.0));
 
         let (vertices, indices) = build_mesh(&cast, [1.0, 0.5, 0.2, 1.0], 1.0);
 
