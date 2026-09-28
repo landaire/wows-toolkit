@@ -2624,6 +2624,26 @@ impl Render for App {
             .child(div().flex_1().min_w(px(0.)).child(tabs))
             .child(div().flex_none().px_1().child(app_menu));
 
+        // A replay dragged onto the window opens, which is what the egui app does
+        // with one (`app.rs`'s `ui_file_drag_and_drop`). Only a replay, and only
+        // one: the inspector opens a file, not a set.
+        let dropped = cx.listener(|this: &mut Self, paths: &gpui_kit::ExternalPaths, window, cx| {
+            let replays: Vec<std::path::PathBuf> = paths
+                .paths()
+                .iter()
+                .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay"))
+                .cloned()
+                .collect();
+            match replays.as_slice() {
+                [] => crate::toast::warn(t!("ui.messages.drop_not_a_replay").into_owned(), window, cx),
+                [one] => {
+                    this.active_tab = AppTab::ReplayInspector;
+                    this.open_replay_from_search(one.clone(), window, cx);
+                }
+                _ => crate::toast::warn(t!("ui.messages.drop_one_at_a_time").into_owned(), window, cx),
+            }
+        });
+
         if let Some(report) = self.cache_said.take() {
             cx.defer_in(window, move |_this, window, cx| report.say(window, cx));
         }
@@ -2669,6 +2689,7 @@ impl Render for App {
             .track_focus(&self.focus_handle)
             .relative()
             .size_full()
+            .on_drop(dropped)
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
                 if event.is_held || !modifiers.control {

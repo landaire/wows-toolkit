@@ -114,8 +114,9 @@ have used it.
     context menu (`tab_state.rs:797`, `app.rs:300-311`). The port's `AppTab` is a
     fixed 7-entry strip (`app.rs:89-141`, `:2235-2257`): nothing closeable,
     nothing reorderable, no second listing and no second Search tab.
-15. **No drag and drop.** The egui app takes a replay dropped on the window with
-    a full-window scrim (`app.rs:2979-3037`). Nothing in the port handles a drop.
+15. **Drag and drop.** Done in part 2026-09-28: a replay dropped on the window
+    opens in the inspector, and a drop that is not one replay says so. The egui
+    app's full-window scrim while the file hovers is not drawn yet.
 16. **Tactics Board.** ~2700 lines: map, mode and preset pickers, "Populate Caps
     from Replays", editable capture points, ship placement, range circles
     (`replay/minimap_view/tactics.rs:704`). Absent, and its `WindowKind` geometry
@@ -155,14 +156,14 @@ have used it.
     opening or closing a replay. Still missing: the Tactics Board button, the
     shared-windows list and "Open for everyone", copy-localhost-link, and the
     spam-protection notice (which belongs to the shared viewports).
-23. **The live roster lost what made it useful**: the win-rate hover comparing
-    both scopes with battles and average damage, the hidden-profile eye and its
-    hover (the port draws the literal English "hidden"), the PR chip and its
-    hovers, the encounters hover, the notes pencil on a roster row, and the
-    win-rate row tint that shows a stacked lobby at a glance
-    (`ui/player_tracker/current_match.rs:471-473`, `:654`, `:702-710`,
-    `:741-743`, `:760-771`, `:839-844`). The Detailed roster also has no
-    scrollbar (`player_tracker/mod.rs:2199-2209`).
+23. **The live roster's detail.** Done 2026-09-28: the hidden-profile marker is
+    the eye with its own hover (and the two other absences are marked too, from the
+    catalogue rather than as bare English), and the encounters cell carries the
+    hover that says the total, how many fall in the period, and when they were last
+    seen. Still missing: the win-rate hover comparing both scopes, the PR chip and
+    its hovers, the notes pencil on a roster row, the win-rate row tint, and a
+    scrollbar on the Detailed roster
+    (`ui/player_tracker/current_match.rs:471`, `:706`, `:741`, `:760`).
 24. ~~**Tracker: no Clear Stats and no Populate Data From Replays.**~~ Done
     2026-09-28: the toolbar carries both. Clear asks first and then drops every
     player with their aliases, encounters and notes (`tracker::clear_tracker`, one
