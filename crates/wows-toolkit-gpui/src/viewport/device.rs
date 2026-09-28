@@ -27,16 +27,73 @@ pub struct GpuContext {
     pub queue: Arc<wgpu::Queue>,
 }
 
+/// Which adapter the armor viewport draws on.
+///
+/// gpui chooses the one the window is drawn through and offers no say in it, but
+/// this device is the viewport's own, so the command line steers it: the egui
+/// app's `--gpu-adapter` and `--cpu-renderer` mean this here.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub enum AdapterChoice {
+    /// Whatever wgpu calls the fastest, which is a graphics card where there is
+    /// one.
+    #[default]
+    Fastest,
+    /// The adapter whose name contains this, ignoring case. A name that matches
+    /// nothing leaves the viewport on the fastest rather than refusing to draw:
+    /// the reader asked for a preference, not for no armor viewer.
+    Named(String),
+    /// A CPU adapter, which on Windows is WARP.
+    Cpu,
+}
+
+/// What the command line asked for, for the device to read when it is stood up.
+///
+/// A launch-time decision read from a place the whole process shares, because the
+/// device is created long after the arguments are parsed and by code that has no
+/// business taking them as a parameter.
+static CHOICE: std::sync::OnceLock<AdapterChoice> = std::sync::OnceLock::new();
+
+/// Records what the command line asked for. Once per process; a second call is
+/// ignored.
+pub fn choose_adapter(choice: AdapterChoice) {
+    let _ = CHOICE.set(choice);
+}
+
+/// Every adapter this machine offers the viewport, as a reader asking for the
+/// list wants to see them.
+pub fn describe_adapters() -> String {
+    let instance = wgpu::Instance::default();
+    let mut lines = String::new();
+    for adapter in pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all())) {
+        let info = adapter.get_info();
+        lines.push_str(&format!(
+            "{} ({:?}, {:?}, driver {} {})
+",
+            info.name, info.device_type, info.backend, info.driver, info.driver_info
+        ));
+    }
+    if lines.is_empty() {
+        lines.push_str("No display adapter this build can draw on.\n");
+    }
+    lines
+}
+
 impl GpuContext {
     /// Stand up the owned device. Blocks on adapter/device requests via pollster.
     pub fn new() -> anyhow::Result<Self> {
         let instance = wgpu::Instance::default();
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            force_fallback_adapter: false,
-            compatible_surface: None,
-        }))
-        .map_err(|e| anyhow::anyhow!("no suitable wgpu adapter: {e}"))?;
+        let choice = CHOICE.get().cloned().unwrap_or_default();
+        let adapter = match pick_adapter(&instance, &choice) {
+            Some(found) => found,
+            // Nothing matched what was asked for, so wgpu's own pick stands: a
+            // preference that cannot be met is not a reason to draw nothing.
+            None => pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                force_fallback_adapter: false,
+                compatible_surface: None,
+            }))
+            .map_err(|e| anyhow::anyhow!("no suitable wgpu adapter: {e}"))?,
+        };
 
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
@@ -61,8 +118,26 @@ impl GpuContext {
     }
 
     /// Build the shared GPU pipeline for this device.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn pipeline(&self) -> GpuPipeline {
         GpuPipeline::new(&self.device, &self.queue)
+    }
+}
+
+/// The adapter `choice` names, where this machine has one.
+///
+/// `None` where it does not, which leaves wgpu's own pick to stand.
+fn pick_adapter(instance: &wgpu::Instance, choice: &AdapterChoice) -> Option<wgpu::Adapter> {
+    let offered: Vec<wgpu::Adapter> = pollster::block_on(instance.enumerate_adapters(wgpu::Backends::all()));
+    match choice {
+        AdapterChoice::Fastest => None,
+        AdapterChoice::Named(named) => {
+            let wanted = named.to_lowercase();
+            offered.into_iter().find(|adapter| adapter.get_info().name.to_lowercase().contains(&wanted))
+        }
+        AdapterChoice::Cpu => {
+            offered.into_iter().find(|adapter| adapter.get_info().device_type == wgpu::DeviceType::Cpu)
+        }
     }
 }
 

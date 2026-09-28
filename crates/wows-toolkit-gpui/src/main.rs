@@ -63,9 +63,22 @@ fn main() {
     // it had been honoured.
     // The cleanup step first, then the window: the binary this replaced is only
     // deletable once the process that spawned this one has exited, and it has.
-    if let cli::Invocation::FinalizeUpdate(replaced) = cli::parse() {
-        update::finalize(&replaced);
+    let invocation = cli::parse();
+    if let cli::Invocation::FinalizeUpdate(replaced) = &invocation {
+        update::finalize(replaced);
     }
+    if let cli::Invocation::ListGpus = &invocation {
+        let title = format!("{} display adapters", wows_toolkit_config::APP_NAME);
+        cli::report_startup_message(&title, &viewport::device::describe_adapters(), false);
+        std::process::exit(0);
+    }
+    let asked = match &invocation {
+        cli::Invocation::Run(cli) => (**cli).clone(),
+        // An update's cleanup step carries on into the window with nothing else
+        // asked of it.
+        _ => cli::Cli::default(),
+    };
+    viewport::device::choose_adapter(asked.adapter_choice());
 
     // The log file is what a bug report is copied from, so it is started before
     // anything that could fail. The setting is read straight from the database:
@@ -87,11 +100,11 @@ fn main() {
     // as a swapchain is. Read straight from the database for the same reason the
     // log setting is: the app that owns the pool does not exist yet.
     //
-    // The renderer ladder the egui app pins an adapter through has no counterpart
-    // here (see `docs/gpui-port-gaps.md`, item 13), so nothing is skipped for the
-    // sake of one: the policies are asked for on every launch.
+    // The renderer ladder the egui app can skip these for has no counterpart
+    // here (see `docs/gpui-port-gaps.md`, item 13), so only `--no-hardening`
+    // skips them.
     let report = wows_toolkit_hardening::apply_startup_mitigations(wows_toolkit_hardening::HardeningRequest {
-        hardening: wows_toolkit_hardening::Hardening::Apply,
+        hardening: asked.hardening(),
         code_integrity: wows_toolkit_hardening::CodeIntegrityPreference::from_startup_read(
             wows_toolkit_config::load_startup_setting(wows_toolkit_viewmodel::settings::keys::CODE_INTEGRITY),
         ),
