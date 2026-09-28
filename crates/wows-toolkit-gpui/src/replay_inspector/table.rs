@@ -1,6 +1,6 @@
 //! Custom virtualized player table (collapsed rows). Renders the M1
 //! presentation model with a fixed sortable header and a `gpui_kit::list`-backed
-//! body. The Actions/Name/ShipName columns stay pinned to the left edge
+//! body. The Name/ShipName columns stay pinned to the left edge
 //! (`STICKY_COLUMN_COUNT`); the remaining columns scroll horizontally inside
 //! a nested container per row and per header, all sharing one scroll handle
 //! so they stay aligned. This layer adds the per-column cell parity pass on
@@ -15,6 +15,7 @@
 //! breakdowns under ActualDamage/ReceivedDamage; see `expanded.rs`).
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
@@ -1071,16 +1072,14 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// the same `RawJsonPanel`/`SidePanel` side-panel slot the debug header's
 /// "Raw Metadata"/"Raw Results" buttons use.
 /// The handful of `PlayerRow` fields `build_actions_menu` actually reads,
-/// cloned out in `actions_cell` instead of the whole row: `PlayerRow` also
+/// cloned out in `row_actions` instead of the whole row: `PlayerRow` also
 /// carries achievements/ribbons/consumables/build/damage-interaction data
 /// (and `raw_metadata_json`, a full pretty-printed JSON dump) that the menu
 /// never touches, so cloning the whole struct there was a real per-visible-
 /// row, every-render cost for data the dropdown discards.
 struct ActionsMenuData {
-    /// Who the menu is about, as the row reads: clan tag, name, and ship. A
-    /// menu opened by a right-click carries no other sign of which row it came
-    /// from, and the rows are one line apart.
-    heading: String,
+    /// Who the menu is about, drawn as the row reads.
+    heading: MenuHeading,
     relation: Relation,
     has_vehicle_entity: bool,
     ship_config_url: Option<String>,
@@ -1089,22 +1088,90 @@ struct ActionsMenuData {
     raw_metadata_json: Option<String>,
 }
 
-/// The menu's heading: `[CLAN] Name -- Ship`, with whichever parts the row has.
+/// Who a row's menu is about, drawn as the menu's first item.
 ///
-/// A spectator recording has no ship for a row it never saw, and a player
-/// without a clan has no tag; neither leaves a stray separator behind.
-fn heading_for(row: &PlayerRow) -> String {
-    let name = match row.clan_tag.as_deref() {
-        Some(clan) if !clan.is_empty() => format!("{clan} {}", row.display_name),
-        _ => row.display_name.clone(),
+/// A menu opened by a right-click carries no other sign of which row it came
+/// from, and the rows are one line apart. Two lines and the class icon rather
+/// than one run of text, so the heading reads as the row does: the ship under
+/// the player, not punctuation between them.
+#[derive(Clone)]
+struct MenuHeading {
+    /// The class icon as the Name cell draws it, tinted to the player. `None`
+    /// until `IconCache` has the asset, which that cell falls back from the
+    /// same way.
+    icon: Option<Arc<RenderImage>>,
+    /// Stands in for an icon the cache does not have, as in the Name cell.
+    species: SharedString,
+    clan: Option<SharedString>,
+    clan_color: Hsla,
+    name: SharedString,
+    name_color: Hsla,
+    /// Empty for a row whose ship the recording never saw.
+    ship: SharedString,
+    /// The whole heading in one line, for a screen reader.
+    spoken: SharedString,
+}
+
+fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
+    let clan: Option<SharedString> = row.clan_tag.as_deref().filter(|clan| !clan.is_empty()).map(SharedString::from);
+
+    let mut spoken = String::new();
+    if let Some(clan) = clan.as_ref() {
+        spoken.push_str(clan);
+        spoken.push(' ');
+    }
+    spoken.push_str(&row.display_name);
+    if !row.ship_name.is_empty() {
+        spoken.push_str(", ");
+        spoken.push_str(&row.ship_name);
+    }
+
+    MenuHeading {
+        icon: icons.get(row.ship_class, player_color_kind_rgb(player_color_kind(row))),
+        species: row.ship_species_text.clone().into(),
+        clan,
+        clan_color: resolve_color(ColorRole::Fixed(row.clan_color_rgb)),
+        name: row.display_name.clone().into(),
+        name_color: resolve_color(ColorRole::Player(name_color_kind(row))),
+        ship: row.ship_name.clone().into(),
+        spoken: spoken.into(),
+    }
+}
+
+/// The heading as the menu's first item: the class icon, the clan tag and name
+/// in the colours the row gives them, and the ship on a second line.
+fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
+    let mut name_line = h_flex().gap_1().items_center();
+    if let Some(clan) = heading.clan.clone() {
+        name_line = name_line.child(div().flex_none().text_color(heading.clan_color).child(clan));
+    }
+    name_line = name_line.child(div().text_color(heading.name_color).child(heading.name.clone()));
+
+    let mut lines = v_flex().child(name_line);
+    if !heading.ship.is_empty() {
+        lines = lines.child(div().text_xs().text_color(crate::theme::text_dim()).child(heading.ship.clone()));
+    }
+
+    let icon = match heading.icon.clone() {
+        Some(image) => div().flex_none().w(px(16.)).child(img(image).w(px(16.)).h(px(16.))).into_any_element(),
+        None => div().flex_none().text_xs().child(heading.species.clone()).into_any_element(),
     };
-    if row.ship_name.is_empty() { name } else { format!("{name} -- {}", row.ship_name) }
+
+    h_flex()
+        .id("replay-actions-heading")
+        .test_support()
+        .aria_label(heading.spoken.clone())
+        .gap_1p5()
+        .items_center()
+        .child(icon)
+        .child(lines)
+        .into_any_element()
 }
 
 impl ActionsMenuData {
-    fn from_row(row: &PlayerRow) -> Self {
+    fn from_row(row: &PlayerRow, icons: &IconCache) -> Self {
         Self {
-            heading: heading_for(row),
+            heading: heading_for(row, icons),
             relation: row.relation,
             has_vehicle_entity: row.has_vehicle_entity,
             ship_config_url: row.ship_config_url.clone(),
@@ -1142,7 +1209,12 @@ fn build_actions_menu(
 ) -> PopupMenu {
     // Whose options these are, first: a right-click menu lands wherever the
     // pointer was, and the rows it could have come from are one line apart.
-    menu = menu.item(PopupMenuItem::label(row.heading.clone())).separator();
+    // Disabled because it is a heading and not one of the options; the kit
+    // draws the item's own text muted then, which the coloured name overrides.
+    let heading = row.heading.clone();
+    menu = menu
+        .item(PopupMenuItem::element(move |_window, _cx| menu_heading_element(&heading)).disabled(true))
+        .separator();
 
     let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
 
@@ -1194,7 +1266,6 @@ fn build_actions_menu(
     menu
 }
 
-/// The Actions column's cell: a ghost icon-only `...` button that opens
 /// The dots that open one row's actions, revealed while the pointer is on that
 /// row.
 ///
@@ -1209,15 +1280,10 @@ fn build_actions_menu(
 /// to `build_actions_menu` for the raw-metadata item's event. Only the menu's own
 /// small `ActionsMenuData` is cloned out of `row` (see its doc comment), not the
 /// whole `PlayerRow`.
-fn row_actions(
-    ix: usize,
-    row: &PlayerRow,
-    debug: bool,
-    entity: Entity<PlayerTable>,
-    group: SharedString,
-    name_edge: f32,
-) -> AnyElement {
-    let row = ActionsMenuData::from_row(row);
+fn row_actions(ix: usize, row: &PlayerRow, layout: &RowLayout, group: SharedString, name_edge: f32) -> AnyElement {
+    let debug = layout.debug;
+    let entity = layout.entity.clone();
+    let row = ActionsMenuData::from_row(row, layout.icons);
     let trigger = Button::new(("replay-row-actions", ix))
         .ghost()
         .xsmall()
@@ -1352,7 +1418,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     // A right-click anywhere on the row opens the same menu the dots do: it is
     // where a reader reaches for a row's actions, and the dots are what says so.
     let menu_entity = layout.entity.clone();
-    let menu_row = ActionsMenuData::from_row(row);
+    let menu_row = ActionsMenuData::from_row(row, layout.icons);
     let debug = layout.debug;
     let group = SharedString::from(format!("replay-row-{ix}"));
     h_flex()
@@ -1384,7 +1450,7 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
                 .track_scroll(layout.h_scroll)
                 .child(scrolling),
         )
-        .child(row_actions(ix, row, layout.debug, layout.entity.clone(), group, name_edge))
+        .child(row_actions(ix, row, layout, group, name_edge))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
         .context_menu(move |menu, _window, _cx| build_actions_menu(menu, &menu_row, debug, menu_entity.clone()))

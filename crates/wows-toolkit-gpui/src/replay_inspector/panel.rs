@@ -1401,13 +1401,29 @@ mod tests {
 
             // Whose options these are, said at the top: a right-click menu
             // lands wherever the pointer was, and the rows are one line apart.
-            let labels: Vec<String> = offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect();
+            // The heading is drawn, so what it says is read off its spoken form.
+            let heading = window.find("replay-actions-heading");
+            let spoken = heading.label().unwrap_or_default().to_owned();
             assert!(
-                labels
-                    .iter()
-                    .any(|label| label.contains("[RAIN]") && label.contains("Harvey635") && label.contains("Fletcher")),
-                "the menu names the clan, the player and the ship, got {labels:?}"
+                spoken.contains("[RAIN]") && spoken.contains("Harvey635") && spoken.contains("Fletcher"),
+                "the heading names the clan, the player and the ship, got {spoken:?}"
             );
+
+            // Two lines, the ship under the player, rather than one run of text
+            // with punctuation between them: the heading's row is taller than a
+            // row of the same menu that carries one line.
+            let one_line = offered
+                .iter()
+                .find(|(_, item)| item.label().is_some_and(|label| label.contains("WoWs Numbers")))
+                .map(|(_, item)| item.bounds().size.height)
+                .expect("the lookup item is offered");
+            assert!(
+                heading.bounds().size.height > one_line,
+                "the ship is on a second line: heading {:?} against a one-line item's {one_line:?}",
+                heading.bounds().size.height
+            );
+
+            let labels: Vec<String> = offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect();
             assert!(
                 labels.iter().any(|label| label.contains("WoWs Numbers")),
                 "including the lookup every row has, got {labels:?}"
