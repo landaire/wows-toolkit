@@ -1064,7 +1064,8 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// numbers" use `PopupMenuItem::link`, which opens via `cx.open_url`
 /// (gpui's own OS-opener, no `open`-crate dependency needed) and renders the
 /// external-link glyph the egui app's SHARE icon stood in for; the copy
-/// items write to the clipboard via `cx.write_to_clipboard`, matching
+/// items write to the clipboard via `cx.write_to_clipboard` and toast
+/// `ui.replay.build.link_copied` as the egui app does, matching
 /// `ui.ctx().copy_text` and the browser_view.rs "Copy Path" precedent. "View
 /// Raw Player Metadata" instead emits `PlayerTableEvent::ViewRawJson` on
 /// `entity`, matching the egui app's behavior of opening a viewer (not
@@ -1225,8 +1226,9 @@ fn build_actions_menu(
             let copy_url = url;
             menu = menu.item(
                 PopupMenuItem::new(t!("ui.replay.build.copy_link").into_owned()).icon(IconName::Copy).on_click(
-                    move |_event, _window, cx| {
+                    move |_event, window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(copy_url.clone()));
+                        crate::toast::ok(t!("ui.replay.build.link_copied").into_owned(), window, cx);
                     },
                 ),
             );
@@ -1235,8 +1237,9 @@ fn build_actions_menu(
         if let Some(url) = row.short_ship_config_url.clone() {
             menu = menu.item(
                 PopupMenuItem::new(t!("ui.replay.build.copy_short_link").into_owned()).icon(IconName::Copy).on_click(
-                    move |_event, _window, cx| {
+                    move |_event, window, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(url.clone()));
+                        crate::toast::ok(t!("ui.replay.build.link_copied").into_owned(), window, cx);
                     },
                 ),
             );

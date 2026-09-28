@@ -228,9 +228,19 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                 .child(
                     h_flex()
                         .gap_1()
-                        .child(copy_button("collab-copy-token", t!("ui.collab.copy_token").into_owned(), token))
+                        .child(copy_button(
+                            "collab-copy-token",
+                            t!("ui.collab.copy_token").into_owned(),
+                            token,
+                            t!("ui.collab.token_copied").into_owned(),
+                        ))
                         .children(web_link.map(|link| {
-                            copy_button("collab-copy-web-link", t!("ui.collab.copy_web_link").into_owned(), link)
+                            copy_button(
+                                "collab-copy-web-link",
+                                t!("ui.collab.copy_web_link").into_owned(),
+                                link,
+                                t!("ui.collab.web_link_copied").into_owned(),
+                            )
                         })),
                 ),
         );
@@ -308,13 +318,14 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
     body.into_any_element()
 }
 
-/// A button that puts `value` on the clipboard.
-fn copy_button(id: &'static str, label: String, value: String) -> AnyElement {
+/// A button that puts `value` on the clipboard and says so with `said`.
+fn copy_button(id: &'static str, label: String, value: String, said: String) -> AnyElement {
     Button::new(id)
         .label(label)
         .compact()
-        .on_click(move |_event, _window, cx: &mut App| {
+        .on_click(move |_event, window, cx: &mut App| {
             cx.write_to_clipboard(ClipboardItem::new_string(value.clone()));
+            crate::toast::ok(said.clone(), window, cx);
         })
         .into_any_element()
 }
