@@ -136,9 +136,12 @@ have used it.
     replays" on its context menu (`tab_state.rs:797`, `app.rs:300-311`), and keeps
     them across launches; here one listing is replaced by another. The port's
     `AppTab` is a fixed 7-entry strip, so there is also no second Search tab.
-15. **Drag and drop.** Done in part 2026-09-28: a replay dropped on the window
-    opens in the inspector, and a drop that is not one replay says so. The egui
-    app's full-window scrim while the file hovers is not drawn yet.
+15. ~~**Drag and drop.**~~ Done 2026-09-28: a replay dropped on the window opens
+    in the inspector, a drop that is not one replay says so, and while the drag
+    hovers a scrim over the window names the file it would open, or says one at a
+    time when there are several. What the scrim follows is gpui's own drag: an
+    entering file drag arrives as a drag of `ExternalPaths`, and a drag that leaves
+    is reported as a file-drop event, which a paint-time listener takes.
 16. **Tactics Board.** ~2700 lines: map, mode and preset pickers, "Populate Caps
     from Replays", editable capture points, ship placement, range circles
     (`replay/minimap_view/tactics.rs:704`). Absent, and its `WindowKind` geometry

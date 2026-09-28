@@ -486,6 +486,9 @@ pub struct App {
     /// The builds already put to the reader as missing, so a walk that runs
     /// again does not ask about the same ones twice.
     offered_builds: std::collections::BTreeSet<u32>,
+    /// The files being dragged over the window, while any are. What the scrim
+    /// says is which of them would open, or that only one may.
+    hovering_files: Option<Vec<PathBuf>>,
     /// The name this app appears under to the peers in a session. Written
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
@@ -635,6 +638,7 @@ impl App {
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
             offered_builds: std::collections::BTreeSet::new(),
+            hovering_files: None,
             cache_said: None,
             collab_name_input,
             index_progress: None,
@@ -735,6 +739,56 @@ impl App {
                 .text_xs()
                 .text_color(crate::theme::text_dim())
                 .children(jobs)
+                .into_any_element(),
+        )
+    }
+
+    /// Notes the files now being dragged over the window.
+    pub(crate) fn note_hovering_files(&mut self, paths: Vec<PathBuf>, cx: &mut Context<Self>) {
+        if self.hovering_files.as_deref() == Some(paths.as_slice()) {
+            return;
+        }
+        self.hovering_files = Some(paths);
+        cx.notify();
+    }
+
+    /// Takes the scrim down, for a drag that has left the window or landed.
+    pub(crate) fn forget_hovering_files(&mut self, cx: &mut Context<Self>) {
+        if self.hovering_files.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// The scrim over the window while files are being dragged onto it.
+    ///
+    /// The egui app draws the same thing (`app.rs`'s `ui_file_drag_and_drop`):
+    /// without it a drag has nothing to say it will be taken, and a reader
+    /// dragging two files learns only after letting go that one was expected.
+    pub(crate) fn drop_scrim(&self) -> Option<AnyElement> {
+        let hovering = self.hovering_files.as_deref()?;
+        let said = match hovering {
+            [] => return None,
+            [one] => {
+                let named = one.file_name().unwrap_or(one.as_os_str()).to_string_lossy().into_owned();
+                t!("ui.app.drop_to_load", file = named).into_owned()
+            }
+            _ => t!("ui.app.drop_one_at_a_time").into_owned(),
+        };
+
+        Some(
+            div()
+                .id("app-drop-scrim")
+                .test_support()
+                .aria_label(said.clone())
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                // theme-exempt: white on this overlay's own dark scrim, as the
+                // egui overlay is.
+                .bg(gpui_kit::black().opacity(0.75))
+                .child(div().text_lg().text_color(gpui_kit::white()).child(said))
                 .into_any_element(),
         )
     }
@@ -2954,6 +3008,36 @@ impl Render for App {
             .relative()
             .size_full()
             .on_drop(dropped)
+            // What is being dragged, while it is still being dragged: gpui turns
+            // an entering file drag into a drag of `ExternalPaths`, so this is
+            // where the scrim learns what it would take.
+            .on_drag_move(cx.listener(|this, event: &gpui_kit::DragMoveEvent<gpui_kit::ExternalPaths>, _window, cx| {
+                this.note_hovering_files(event.drag(cx).paths().to_vec(), cx);
+            }))
+            // A drag that leaves the window is reported as a file-drop event
+            // rather than a mouse one, which only a paint-time listener sees.
+            .child({
+                let watched = cx.entity().downgrade();
+                canvas(
+                    |_bounds, _window, _cx| {},
+                    move |_bounds, _state, window, _cx| {
+                        let watched = watched.clone();
+                        window.on_mouse_event::<gpui_kit::FileDropEvent>(move |event, phase, _window, cx| {
+                            if phase != gpui_kit::DispatchPhase::Bubble {
+                                return;
+                            }
+                            if !matches!(event, gpui_kit::FileDropEvent::Exited | gpui_kit::FileDropEvent::Ended) {
+                                return;
+                            }
+                            if let Some(app) = watched.upgrade() {
+                                app.update(cx, |this, cx| this.forget_hovering_files(cx));
+                            }
+                        });
+                    },
+                )
+                .absolute()
+                .size_0()
+            })
             .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                 let modifiers = event.keystroke.modifiers;
                 if event.is_held || !modifiers.control {
@@ -2980,6 +3064,9 @@ impl Render for App {
             .children(sheet_layer)
             .children(dialog_layer)
             .children(notification_layer)
+            // Over all of it: a drag is about to become a drop, and what it
+            // would do is the only thing worth reading while it hovers.
+            .children(self.drop_scrim())
     }
 }
 
