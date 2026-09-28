@@ -261,6 +261,8 @@ pub enum ReplayBrowserEvent {
     /// Write a video of each of these battles, which is what the marked set's
     /// own menu item asks for.
     RenderManyToVideo(Vec<PathBuf>),
+    /// Render each of these to a video and put the files on the clipboard.
+    RenderManyToClipboard(Vec<PathBuf>),
     /// The game has just written a replay into the watched directory, and the
     /// listing now holds it.
     ReplayAppeared(PathBuf),
@@ -1266,7 +1268,9 @@ impl Render for ReplayBrowser {
                     let batch_files = batch.clone();
                     let batch_paths = batch.clone();
                     let batch_render = batch.clone();
+                    let batch_clipboard = batch.clone();
                     let batch_entity = context_menu_entity.clone();
+                    let clipboard_entity = context_menu_entity.clone();
                     let copy_path = leaf.path.clone();
                     let copy_file = leaf.path.clone();
                     let in_game_path = leaf.path.clone();
@@ -1294,6 +1298,17 @@ impl Render for ReplayBrowser {
                                 let paths = batch_render.clone();
                                 batch_entity.update(cx, |_browser, cx| {
                                     cx.emit(ReplayBrowserEvent::RenderManyToVideo(paths));
+                                });
+                            }),
+                        )
+                        .item(
+                            PopupMenuItem::new(
+                                t!("ui.replay.context.render_to_clipboard_many", count = count).into_owned(),
+                            )
+                            .on_click(move |_event, _window, cx| {
+                                let paths = batch_clipboard.clone();
+                                clipboard_entity.update(cx, |_browser, cx| {
+                                    cx.emit(ReplayBrowserEvent::RenderManyToClipboard(paths));
                                 });
                             }),
                         )

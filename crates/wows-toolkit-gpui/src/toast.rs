@@ -50,6 +50,16 @@ pub fn stuck(key: &'static str, message: impl Into<SharedString>, window: &mut W
     push(Notification::warning(message.clone()).autohide(false).id1::<Stuck>(key), &message, window, cx);
 }
 
+/// A message that stays up while something runs, replaced as the work reports.
+///
+/// Keyed like [`stuck`], so a job reporting step after step keeps one message on
+/// screen rather than stacking them, and taken down with [`resolved`] when the
+/// work ends.
+pub fn progress(key: &'static str, message: impl Into<SharedString>, window: &mut Window, cx: &mut gpui_kit::App) {
+    let message = message.into();
+    push(Notification::info(message.clone()).autohide(false).id1::<Stuck>(key), &message, window, cx);
+}
+
 /// The identity of a [`stuck`] message, so one per state is on screen at a time.
 struct Stuck;
 

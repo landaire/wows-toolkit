@@ -59,6 +59,10 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::input::InputState;
 
 /// Sidebar width for the file browser, matching the egui app's left panel.
+/// Identifies the message a batch render keeps on screen while it runs, so each
+/// step replaces the last rather than stacking.
+const BATCH_PROGRESS: &str = "replay-batch-render";
+
 const BROWSER_WIDTH: Pixels = px(280.);
 const BROWSER_MIN_WIDTH: Pixels = px(180.);
 const BROWSER_MAX_WIDTH: Pixels = px(520.);
@@ -85,6 +89,22 @@ impl SearchableListItem for GroupingItem {
 /// language as the egui app's own menu does (`ui/replay_parser/mod.rs:4301`).
 /// `ReplayGrouping::label` is English, which is what the egui *selected* text
 /// still shows.
+/// Where a batch render's files go.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BatchTarget {
+    /// A directory the reader is asked for when the batch starts.
+    Directory,
+    /// A temporary directory, whose files go on the clipboard afterwards.
+    Clipboard,
+}
+
+/// Puts the rendered videos on the clipboard, or says why they are not there.
+fn copy_rendered_files(written: &[PathBuf]) -> Result<(), String> {
+    arboard::Clipboard::new()
+        .and_then(|mut clipboard| clipboard.set().file_list(written))
+        .map_err(|err| err.to_string())
+}
+
 const fn grouping_label_key(grouping: ReplayGrouping) -> &'static str {
     match grouping {
         ReplayGrouping::Date => "ui.replay.group.date",
@@ -443,6 +463,9 @@ impl ReplayInspectorView {
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
             ReplayBrowserEvent::RenderManyToVideo(paths) => self.render_many_to_video(paths.clone(), window, cx),
+            ReplayBrowserEvent::RenderManyToClipboard(paths) => {
+                self.render_many_to_clipboard(paths.clone(), window, cx)
+            }
             // The game has just finished a match. The egui app opens it
             // straight away when this is on, which is what the checkbox
             // promises.
@@ -495,16 +518,51 @@ impl ReplayInspectorView {
     /// says "Render N Replays to Video", and N open tabs baking tracks nobody
     /// watches is not that. Mirrors the egui app's own batch
     /// (`replay/renderer/video_export.rs:458`), which also writes into a chosen
-    /// folder; per-replay progress is not reported here yet, only the outcome.
+    /// folder.
     fn render_many_to_video(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
         if paths.is_empty() {
             return;
         }
+        self.render_many(paths, BatchTarget::Directory, window, cx);
+    }
+
+    /// Renders each marked battle and puts the files on the clipboard.
+    ///
+    /// The egui app's own batch to clipboard (`video_export.rs:488`): the videos
+    /// go to a temporary directory this process does not clean up, because the
+    /// clipboard holds paths into it until the reader pastes them.
+    fn render_many_to_clipboard(&mut self, paths: Vec<PathBuf>, window: &mut Window, cx: &mut Context<Self>) {
+        if paths.is_empty() {
+            return;
+        }
+        self.render_many(paths, BatchTarget::Clipboard, window, cx);
+    }
+
+    /// Runs one batch render, saying which replay it has reached and what it
+    /// managed in the end.
+    fn render_many(&mut self, paths: Vec<PathBuf>, target: BatchTarget, window: &mut Window, cx: &mut Context<Self>) {
         let Some(game_data) = self.game_data.clone() else { return };
-        let asked = crate::dialog::pick_folder(&t!("ui.replay.renderer.export_video"));
+        let to_clipboard = matches!(target, BatchTarget::Clipboard);
 
         cx.spawn_in(window, async move |_this, cx| {
-            let Some(out_dir) = asked.await else { return };
+            let out_dir = match target {
+                // Cancelled at the dialog.
+                BatchTarget::Directory => {
+                    match crate::dialog::pick_folder(&t!("ui.replay.renderer.export_video")).await {
+                        Some(picked) => picked,
+                        None => return,
+                    }
+                }
+                BatchTarget::Clipboard => match crate::replay_renderer::temporary_batch_dir() {
+                    Some(temporary) => temporary,
+                    None => {
+                        let _ = cx.update(|window, cx| {
+                            crate::toast::failed(t!("ui.replay.renderer.export_path_unusable").into_owned(), window, cx)
+                        });
+                        return;
+                    }
+                },
+            };
             let count = paths.len();
             let shown = out_dir.display().to_string();
             let _ = cx.update(|window, cx| {
@@ -515,22 +573,59 @@ impl ReplayInspectorView {
                 );
             });
 
+            let (report, mut steps) = futures::channel::mpsc::unbounded();
             let batch = cx.update(|_window, cx| {
                 // What a viewport would have shown, so a batch does not write a
                 // different video than the reader has been watching.
                 let defaults = crate::render_defaults::defaults(cx);
-                crate::replay_renderer::batch_export(paths, game_data, out_dir, defaults, cx)
+                crate::replay_renderer::batch_export(paths, game_data, out_dir, defaults, report, cx)
             });
             let Ok(batch) = batch else { return };
-            let (written, failed) = batch.await;
+
+            // One message, rewritten as the batch walks the set: forty replays is
+            // minutes of work, and a line that never moves reads as a hang.
+            let watch = {
+                let mut cx = cx.clone();
+                async move {
+                    while let Some(step) = futures::StreamExt::next(&mut steps).await {
+                        let told = cx.update(|window, cx| {
+                            crate::toast::progress(
+                                BATCH_PROGRESS,
+                                t!(
+                                    "ui.replay.renderer.batch_progress",
+                                    done = step.done + 1,
+                                    total = step.total,
+                                    replay = step.replay
+                                )
+                                .into_owned(),
+                                window,
+                                cx,
+                            );
+                        });
+                        if told.is_err() {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let ((written, failed), ()) = futures::future::join(batch, watch).await;
 
             let _ = cx.update(|window, cx| {
-                let said = if failed.is_empty() {
-                    t!("ui.replay.renderer.batch_all_written", written = written.len()).into_owned()
-                } else {
-                    t!("ui.replay.renderer.batch_finished", written = written.len(), failed = failed.len()).into_owned()
+                crate::toast::resolved(BATCH_PROGRESS, window, cx);
+                let copied = if to_clipboard && !written.is_empty() { copy_rendered_files(&written) } else { Ok(()) };
+                let said = match (&copied, failed.is_empty(), to_clipboard) {
+                    (Err(reason), _, _) => reason.clone(),
+                    (Ok(()), true, true) => t!("ui.replay.renderer.batch_copied", written = written.len()).into_owned(),
+                    (Ok(()), true, false) => {
+                        t!("ui.replay.renderer.batch_all_written", written = written.len()).into_owned()
+                    }
+                    (Ok(()), false, _) => {
+                        t!("ui.replay.renderer.batch_finished", written = written.len(), failed = failed.len())
+                            .into_owned()
+                    }
                 };
-                if failed.is_empty() {
+                if failed.is_empty() && copied.is_ok() {
                     crate::toast::ok(said, window, cx);
                 } else {
                     crate::toast::warn(said, window, cx);

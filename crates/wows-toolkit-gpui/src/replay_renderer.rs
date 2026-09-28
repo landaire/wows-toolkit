@@ -3148,12 +3148,16 @@ fn bake(
 /// `defaults` is what the reader saved as what a renderer opens with, so a
 /// batch writes what a viewport would have shown rather than the built-in set.
 ///
+/// `report` is told which replay the batch has reached before it is read, so the
+/// reader is not left watching a still line for forty files.
+///
 /// Returns the files written and the replays that failed.
 pub fn batch_export(
     paths: Vec<PathBuf>,
     game_data: GameDataCache,
     out_dir: PathBuf,
     defaults: wows_minimap_renderer::SavedRenderOptions,
+    report: futures::channel::mpsc::UnboundedSender<BatchStep>,
     cx: &App,
 ) -> Task<(Vec<PathBuf>, Vec<PathBuf>)> {
     let settings = export_settings_of(&defaults);
@@ -3163,8 +3167,11 @@ pub fn batch_export(
         let mut written = Vec::new();
         let mut failed = Vec::new();
         let cancel = AtomicBool::new(false);
+        let total = paths.len();
 
-        for path in paths {
+        for (index, path) in paths.into_iter().enumerate() {
+            let named = path.file_stem().unwrap_or(path.as_os_str()).to_string_lossy().into_owned();
+            let _ = report.unbounded_send(BatchStep { done: index, total, replay: named });
             let Some(stem) = path.file_stem() else {
                 failed.push(path);
                 continue;
@@ -3298,6 +3305,32 @@ pub struct ExportSettings {
 fn encoder_status() -> &'static wows_minimap_renderer::encoder::EncoderStatus {
     static STATUS: std::sync::OnceLock<wows_minimap_renderer::encoder::EncoderStatus> = std::sync::OnceLock::new();
     STATUS.get_or_init(wows_minimap_renderer::check_encoder)
+}
+
+/// Which replay of how many a batch has reached.
+///
+/// `done` counts the ones behind it, so the first report reads as none done of
+/// however many there are.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BatchStep {
+    pub done: usize,
+    pub total: usize,
+    /// The replay being read, by its file stem.
+    pub replay: String,
+}
+
+/// A directory a batch can write into that outlives this process, for the
+/// clipboard.
+///
+/// `None` when no temporary directory could be made, which is the only way this
+/// fails.
+pub fn temporary_batch_dir() -> Option<PathBuf> {
+    let dir = tempfile::Builder::new().prefix("wt-gpui-batch-").tempdir().ok()?;
+    let path = dir.path().to_path_buf();
+    // Kept: the clipboard will hold paths under it, and a directory removed on
+    // drop would leave them pointing at nothing.
+    let _ = dir.keep();
+    Some(path)
 }
 
 /// What a batch draws of what it baked, and whether dead ships are among it.
@@ -4477,6 +4510,54 @@ mod tests {
                 );
             })
             .expect("the window is open");
+    }
+
+    /// A batch says which replay it has reached before it reads it, in order,
+    /// and a replay it cannot read is reported as failed rather than stopping
+    /// the rest.
+    #[gpui_kit::test]
+    async fn a_batch_says_which_replay_it_has_reached(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let dir = tempfile::tempdir().expect("a temp directory");
+        // Not replays, so every one of them fails to bake: what is under test is
+        // the reporting and the walk, not what a battle looks like.
+        let paths: Vec<std::path::PathBuf> = ["first", "second"]
+            .into_iter()
+            .map(|stem| {
+                let path = dir.path().join(format!("{stem}.wowsreplay"));
+                std::fs::write(&path, b"not a replay").expect("the file is written");
+                path
+            })
+            .collect();
+
+        let (report, mut steps) = futures::channel::mpsc::unbounded();
+        let batch = cx.update(|cx| {
+            super::batch_export(
+                paths,
+                crate::replay_inspector::load::GameDataCache::new(dir.path().to_path_buf()),
+                dir.path().to_path_buf(),
+                wows_minimap_renderer::SavedRenderOptions::default(),
+                report,
+                cx,
+            )
+        });
+        let (written, failed) = batch.await;
+
+        assert!(written.is_empty(), "nothing renders out of files that are not replays");
+        assert_eq!(failed.len(), 2, "and both are reported rather than the walk stopping at the first");
+
+        let mut reached = Vec::new();
+        while let Some(step) = futures::StreamExt::next(&mut steps).await {
+            reached.push(step);
+        }
+        assert_eq!(
+            reached,
+            vec![
+                super::BatchStep { done: 0, total: 2, replay: "first".to_owned() },
+                super::BatchStep { done: 1, total: 2, replay: "second".to_owned() },
+            ],
+            "each replay is named as the batch reaches it"
+        );
     }
 
     /// A batch draws the reader's saved layers, less the two that would leave

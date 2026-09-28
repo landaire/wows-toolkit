@@ -62,13 +62,14 @@ have used it.
    over a whole directory, `app.rs:4712`) and the first-run consent dialogs are
    still absent, so the setting is only acted on for battles that land while the
    app is open.
-6. **Batch render.** Done in part 2026-09-28: the menu item now runs one
+6. ~~**Batch render.**~~ Done 2026-09-28: the menu item now runs one
    background batch (`replay_renderer::batch_export`) into a folder the reader
    picks, one file per replay, and reports how many were written and how many
    failed. A batch encodes with the reader's saved display defaults and export
-   settings (item 33). Not ported: per-replay progress (the egui app has a task
-   bar entry for it, which this port has no bar for -- item 19) and
-   batch-to-clipboard (`video_export.rs:488`).
+   settings (item 33), names the replay it has reached in one message it rewrites
+   as it goes, and can put the rendered files on the clipboard instead of into a
+   folder (`ui.replay.context.render_to_clipboard_many`). A frame count within the
+   replay being rendered waits on a task bar to put it in (item 19).
 7. **`check_for_updates` and `enable_logging` govern nothing.** No updater
    (item 11) and no log file (item 12) exist in the port.
 8. **Auto-export.** Done 2026-09-28: a replay the watcher reports is parsed and
