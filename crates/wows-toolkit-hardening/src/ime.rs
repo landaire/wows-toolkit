@@ -91,9 +91,9 @@ impl std::fmt::Display for TextService {
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TextServiceError {
     #[error("failed to open registry key {key}: {status}")]
-    OpenKey { key: String, status: crate::util::win32::Win32Status },
+    OpenKey { key: String, status: crate::win32::Win32Status },
     #[error("failed to enumerate subkeys of {key}: {status}")]
-    EnumerateKeys { key: String, status: crate::util::win32::Win32Status },
+    EnumerateKeys { key: String, status: crate::win32::Win32Status },
 }
 
 /// Classify a service from what its version resource claims.
@@ -127,8 +127,8 @@ mod windows_ime {
 
     use windows_sys::Win32::System::Registry::HKEY_CURRENT_USER;
 
-    use crate::util::registry::HKEY_LOCAL_MACHINE;
-    use crate::util::registry::RegKey;
+    use crate::registry::HKEY_LOCAL_MACHINE;
+    use crate::registry::RegKey;
 
     use super::TIP_KEY;
     use super::TextService;
@@ -144,7 +144,8 @@ mod windows_ime {
     fn inproc_server(clsid: &str) -> Option<PathBuf> {
         for parent in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
             let key = format!(r"SOFTWARE\Classes\CLSID\{clsid}\InprocServer32");
-            let Ok(server) = RegKey::open(parent, &key) else {
+            // SAFETY: both roots are well-known handles, live for the process.
+            let Ok(server) = (unsafe { RegKey::open(parent, &key) }) else {
                 continue;
             };
             // The default value holds the module path; an entry with the key but
@@ -166,7 +167,8 @@ mod windows_ime {
 
     /// Class ids registered as text services under one root.
     fn registered_clsids(parent: windows_sys::Win32::System::Registry::HKEY) -> Result<Vec<String>, TextServiceError> {
-        let key = RegKey::open(parent, TIP_KEY)
+        // SAFETY: the caller passes one of the well-known roots.
+        let key = unsafe { RegKey::open(parent, TIP_KEY) }
             .map_err(|status| TextServiceError::OpenKey { key: TIP_KEY.to_string(), status })?;
         key.subkey_names().map_err(|status| TextServiceError::EnumerateKeys { key: TIP_KEY.to_string(), status })
     }
@@ -195,7 +197,7 @@ mod windows_ime {
             let Some(module) = inproc_server(&name) else {
                 continue;
             };
-            let company = crate::hardening::version_info::read(&module).and_then(|info| info.company);
+            let company = crate::version_info::read(&module).and_then(|info| info.company);
             services.push(TextService { clsid: TextServiceClsid::new(name), origin: classify(company), module });
         }
 

@@ -97,6 +97,10 @@ pub struct GpuiSettings {
     /// The commit the cached result mappings were last read at. `None` until one
     /// has been read, which makes the first check a full one.
     pub constants_commit: Option<String>,
+    /// Whether Code Integrity Guard is applied. Read at startup before any window
+    /// exists; the control here writes it for the next launch, as the egui
+    /// settings tab's own does.
+    pub code_integrity: wows_toolkit_hardening::CodeIntegrityPreference,
 }
 
 impl GpuiSettings {
@@ -170,6 +174,10 @@ impl GpuiSettings {
             queries::get_setting::<bool>(pool, keys::SUPPRESS_GPU_ENCODER_WARNING).await.unwrap_or(false);
         let constants_commit =
             queries::get_setting::<Option<String>>(pool, keys::CONSTANTS_FILE_COMMIT).await.flatten();
+        let code_integrity =
+            queries::get_setting::<wows_toolkit_hardening::CodeIntegrityPreference>(pool, keys::CODE_INTEGRITY)
+                .await
+                .unwrap_or_default();
 
         Self {
             zoom,
@@ -199,6 +207,7 @@ impl GpuiSettings {
             language_selection_shown,
             suppress_gpu_encoder_warning,
             constants_commit,
+            code_integrity,
         }
     }
 }

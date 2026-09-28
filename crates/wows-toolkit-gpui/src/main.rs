@@ -76,6 +76,25 @@ fn main() {
     let _log_guard = logging::init(to_file);
     logging::install_panic_hook();
 
+    // Before any window exists, which is the only moment these are worth
+    // applying: extension points attach as a window is created and overlays hook
+    // as a swapchain is. Read straight from the database for the same reason the
+    // log setting is: the app that owns the pool does not exist yet.
+    //
+    // The renderer ladder the egui app pins an adapter through has no counterpart
+    // here (see `docs/gpui-port-gaps.md`, item 13), so nothing is skipped for the
+    // sake of one: the policies are asked for on every launch.
+    let report = wows_toolkit_hardening::apply_startup_mitigations(wows_toolkit_hardening::HardeningRequest {
+        hardening: wows_toolkit_hardening::Hardening::Apply,
+        code_integrity: wows_toolkit_config::load_startup_setting::<wows_toolkit_hardening::CodeIntegrityPreference>(
+            wows_toolkit_viewmodel::settings::keys::CODE_INTEGRITY,
+        )
+        .unwrap_or(None),
+    });
+    for (mitigation, outcome) in report.entries() {
+        tracing::info!("hardening: {mitigation} {outcome}");
+    }
+
     let app = gpui_kit::platform::application().with_assets(Assets);
     app.run(move |cx| {
         gpui_kit::component::init(cx);

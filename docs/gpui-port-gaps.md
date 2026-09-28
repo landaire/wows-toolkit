@@ -122,21 +122,26 @@ have used it.
     uses, the next launch reports what a crash left and offers to copy it, and the
     palette copies the newest log. `enable_logging` governs the file and now
     defaults on, as it does in the egui app.
-13. **No renderer or adapter control, and no process hardening.** The egui app
-    resolves a six-rung ladder and remembers per machine which rung worked
-    (`gpu/select.rs:19-35`, `boot.rs`), pins the Vulkan ICD
-    (`main.rs:302-315`), ranks Vulkan above DX12 to avoid the DXGI window-drag
-    stutter (`main.rs:371-376`), applies three Windows mitigations before any
-    window exists (`hardening/mod.rs:104-120`) with a `code_integrity` setting,
-    and exposes all of it through the five flags in `cli.rs`. The port has none
-    of it: gpui's backend with default options, and the armor viewport standing
-    up an independent `wgpu` device (`viewport/device.rs:33-39`) that can land on
-    a different adapter than the UI. `code_integrity` is the only egui settings
-    field the port has no control for, and it is moot until the mitigations
-    exist. The port now takes `--help` and `--version` and refuses the rest by
-    name (`crates/wows-toolkit-gpui/src/cli.rs`) rather than ignoring it, and
-    reports that message the way a release build can show it (own handle, then
-    the parent's console, then a message box).
+13. **No renderer or adapter control.** The process hardening is done
+    2026-09-28: it moved to `crates/wows-toolkit-hardening`, which both front ends
+    now apply -- extension points disabled, image loads restricted and code
+    integrity guard applied before any window exists, with the text-service probe
+    that decides whether the last of those would block an input method the reader
+    types with. The `code_integrity` setting has its control in the port's Settings
+    tab, writing the row the egui app reads, and both apps report what each policy
+    did to the log.
+
+    What has no counterpart here is the renderer ladder. The egui app resolves six
+    rungs, remembers which one worked, pins the Vulkan ICD and ranks Vulkan above
+    DX12 to dodge the DXGI window-drag stutter (`gpu/select.rs`, `main.rs:302-376`);
+    gpui draws through Direct3D 11 on Windows and walks the adapters itself
+    (`gpui-pre-windows`'s `directx_devices.rs`), with nothing an application can
+    choose, so there is no ladder to port and no ICD to pin. The armor viewport
+    still stands up its own `wgpu` device (`viewport/device.rs:33-39`), which can
+    land on a different adapter than the UI. The port takes `--help` and
+    `--version` and refuses the rest by name
+    (`crates/wows-toolkit-gpui/src/cli.rs`), reporting that the way a release build
+    can show it; the egui flags that pick a rung have nothing to pick here.
 
 ## Reach: surfaces and entry points
 

@@ -1,4 +1,4 @@
-//! Windows process mitigation policies.
+//! Windows process mitigation policies, shared by both toolkit front ends.
 //!
 //! Third-party software injects DLLs into this process and hooks graphics APIs.
 //! The observed result is deadlocks and crashes during rendering, usually
@@ -12,11 +12,13 @@
 pub mod ime;
 pub mod modules;
 pub mod policy;
+pub mod registry;
 pub mod version_info;
+pub mod win32;
 
 use std::sync::OnceLock;
 
-use crate::util::win32::Win32Status;
+use crate::win32::Win32Status;
 
 use ime::TextService;
 
@@ -200,6 +202,10 @@ impl std::fmt::Display for MitigationReport {
 
 /// Keep this process's hardening from reaching a child.
 ///
+/// `inherited_vars` are the environment variables this process set for its own
+/// renderer and must not hand on; the caller knows them, because the caller is
+/// what set them.
+///
 /// Two things leak into a child otherwise, and both matter most for the game:
 /// the Vulkan driver pin and layer suppression travel in the environment block
 /// that `CreateProcess` copies, and the suppressed error mode is inherited
@@ -210,8 +216,11 @@ impl std::fmt::Display for MitigationReport {
 ///
 /// The mitigation policies themselves are not inherited, so nothing here has to
 /// undo them.
-pub fn prepare_child(command: &mut std::process::Command) -> &mut std::process::Command {
-    for name in crate::gpu::PIN_VARS {
+pub fn prepare_child<'a>(
+    command: &'a mut std::process::Command,
+    inherited_vars: &[&str],
+) -> &'a mut std::process::Command {
+    for name in inherited_vars {
         command.env_remove(name);
     }
     #[cfg(windows)]

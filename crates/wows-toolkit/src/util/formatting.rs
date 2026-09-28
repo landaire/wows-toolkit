@@ -175,7 +175,7 @@ pub fn open_file_explorer(path: &Path) {
         {
             let mut command = Command::new("explorer.exe");
             command.arg("/select,").arg(path);
-            crate::hardening::prepare_child(&mut command).spawn().unwrap();
+            crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn().unwrap();
         }
     }
 }
@@ -198,7 +198,7 @@ pub fn open_directory(path: &Path) {
         {
             let mut command = Command::new("explorer.exe");
             command.arg(path);
-            let _ = crate::hardening::prepare_child(&mut command).spawn();
+            let _ = crate::hardening::prepare_child(&mut command, crate::gpu::PIN_VARS).spawn();
         }
     }
 }

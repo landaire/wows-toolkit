@@ -10,7 +10,7 @@
 //! function that silently does nothing.
 #![cfg(windows)]
 
-use crate::util::win32::Win32Status;
+use crate::win32::Win32Status;
 
 /// Block AppInit DLLs, global `SetWindowsHookEx` hooks, Winsock layered service
 /// providers, and legacy IMEs.
@@ -83,7 +83,7 @@ pub fn require_microsoft_signed_images() -> Result<(), Win32Status> {
 /// is nothing the user has to see.
 ///
 /// This is process-wide and, unlike the policies, is inherited by child
-/// processes; `crate::hardening::prepare_child` is what keeps it from reaching
+/// processes; `crate::prepare_child` is what keeps it from reaching
 /// the game.
 ///
 /// `SEM_FAILCRITICALERRORS` is the whole of it. `SEM_NOGPFAULTERRORBOX` is
@@ -116,5 +116,5 @@ fn apply<P>(
     // expects, and the length is that struct's own size. The call reads the
     // buffer and does not retain it.
     let ok = unsafe { SetProcessMitigationPolicy(kind, std::ptr::from_ref(policy).cast(), std::mem::size_of::<P>()) };
-    if ok != 0 { Ok(()) } else { Err(crate::util::win32::last_error()) }
+    if ok != 0 { Ok(()) } else { Err(crate::win32::last_error()) }
 }

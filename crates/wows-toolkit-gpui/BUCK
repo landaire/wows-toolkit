@@ -13,6 +13,7 @@ workspace_binary(
         "//crates/minimap-renderer:wows_minimap_renderer",
         "//crates/wows-battle-world:wows_battle_world",
         "//crates/wows-data-mgr:wows_data_mgr",
+        "//crates/wows-toolkit-hardening:wows_toolkit_hardening",
         "//third-party/rust:sys-locale",
         "//crates/wows-replay-insights:wows_replay_insights",
         "//crates/wows-replays:wows_replays",

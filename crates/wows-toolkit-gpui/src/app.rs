@@ -2550,6 +2550,47 @@ impl App {
         cx.notify();
     }
 
+    /// Whether unsigned code may load into this process, which is the one
+    /// mitigation with a compatibility cost worth a choice.
+    ///
+    /// Windows only: the policy does not exist elsewhere, and a control for one
+    /// that cannot be applied would be a control that does nothing. The change
+    /// lands at the next launch, because the policy cannot be lifted once a
+    /// process has started, which is what the label says.
+    #[cfg(windows)]
+    fn render_code_integrity_row(&self, cx: &mut Context<Self>) -> Option<gpui_kit::component::form::Field> {
+        use wows_toolkit_hardening::CodeIntegrityPreference;
+
+        let chosen = self.settings()?.code_integrity;
+        Some(
+            field()
+                .label(t!("ui.settings.app.code_integrity").to_string())
+                .description(t!("ui.settings.app.code_integrity_tooltip").to_string())
+                .child(h_flex().gap_2().children(CodeIntegrityPreference::ALL.map(|choice| {
+                    selectable(
+                        ("code-integrity", choice as usize),
+                        chosen == choice,
+                        Button::new(("code-integrity-button", choice as usize))
+                            .label(t!(choice.key()).to_string())
+                            .compact()
+                            .selected(chosen == choice)
+                            .on_click(cx.listener(move |this, _event, _window, cx| {
+                                this.edit_setting(keys::CODE_INTEGRITY, cx, |settings| {
+                                    settings.code_integrity = choice;
+                                    choice
+                                });
+                            })),
+                    )
+                }))),
+        )
+    }
+
+    /// Nothing, where the policy does not exist.
+    #[cfg(not(windows))]
+    fn render_code_integrity_row(&self, _cx: &mut Context<Self>) -> Option<gpui_kit::component::form::Field> {
+        None
+    }
+
     /// Adopts what may be shared: saved, and pushed into the replay inspector,
     /// which is what contributes a battle that lands.
     pub(crate) fn adopt_data_sharing(&mut self, mode: DataSharingMode, cx: &mut Context<Self>) {
@@ -2748,6 +2789,7 @@ impl App {
                             )
                         }))),
                 )
+                .children(self.render_code_integrity_row(cx))
                 .child(
                     field()
                         .label(t!("ui.settings.app.proxy_url").to_string())

@@ -171,7 +171,6 @@ pub fn probe() -> Result<Vec<AdapterRecord>, ProbeError> {
 mod windows_probe {
     use std::path::PathBuf;
 
-    use crate::util::registry::HKEY_LOCAL_MACHINE;
     use crate::util::registry::RegKey;
 
     use super::AdapterDescription;
@@ -183,7 +182,7 @@ mod windows_probe {
     use super::is_adapter_instance_key;
 
     pub(super) fn probe() -> Result<Vec<AdapterRecord>, ProbeError> {
-        let class_key = RegKey::open(HKEY_LOCAL_MACHINE, DISPLAY_CLASS_KEY)
+        let class_key = RegKey::open_local_machine(DISPLAY_CLASS_KEY)
             .map_err(|status| ProbeError::OpenKey { key: DISPLAY_CLASS_KEY.to_string(), status })?;
         let names = class_key
             .subkey_names()
@@ -193,7 +192,7 @@ mod windows_probe {
         for name in names.iter().filter(|name| is_adapter_instance_key(name)) {
             // A subkey that cannot be opened is one adapter's worth of missing
             // information, not a reason to report no adapters at all.
-            let Ok(instance) = RegKey::open(class_key.raw(), name) else {
+            let Ok(instance) = class_key.open_subkey(name) else {
                 continue;
             };
 

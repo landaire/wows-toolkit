@@ -18,7 +18,9 @@ pub mod collab;
 pub mod data;
 pub(crate) mod db;
 pub mod gpu;
-pub mod hardening;
+/// Windows process mitigations, shared with the GPUI port: both front ends apply
+/// the same policies before they open a window.
+pub use wows_toolkit_hardening as hardening;
 #[cfg(feature = "mod_manager")]
 mod mod_manager;
 // Also under test: the export's equivalence check needs the same headless
