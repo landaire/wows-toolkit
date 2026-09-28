@@ -53,7 +53,10 @@ use super::load_ship::ArmorZone;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::PlateKey;
 use super::load_ship::ZonePart;
+use wows_toolkit_viewmodel::armor::camera_perspective::LookMode;
+
 use super::viewport_view::CameraRingSettings;
+use super::viewport_view::PerspectiveSettings;
 use super::viewport_view::TrajectoryState;
 use super::viewport_view::ViewportView;
 use super::visibility::SidebarHighlightKey;
@@ -145,8 +148,10 @@ fn render_camera_rings_section(
     entity: &Entity<ViewportView>,
     rings: &CameraRingSettings,
     modes: &[String],
+    perspective: &PerspectiveSettings,
     fov_slider: &Entity<SliderState>,
     height_slider: &Entity<SliderState>,
+    perspective_fov_slider: &Entity<SliderState>,
 ) -> AnyElement {
     let has_modes = !modes.is_empty();
     let on = rings.shown && has_modes;
@@ -236,7 +241,82 @@ fn render_camera_rings_section(
                 ),
             ])))
         })
+        .child(render_perspective_rows(entity, perspective, perspective_fov_slider))
         .into_any_element()
+}
+
+/// The camera lock: put the eye on the ship's own orbit and look out from it.
+///
+/// Under the orbits because it follows the same trajectory and the same two
+/// sliders: which orbit is drawn is which orbit the eye rides.
+fn render_perspective_rows(
+    entity: &Entity<ViewportView>,
+    perspective: &PerspectiveSettings,
+    fov_slider: &Entity<SliderState>,
+) -> impl IntoElement + use<> {
+    let toggled = entity.clone();
+    let on = perspective.enabled;
+    v_flex()
+        .gap_1()
+        .child(
+            Checkbox::new("armor-camera-perspective")
+                .label(t!("ui.armor.camera_perspective").to_string())
+                .checked(on)
+                .on_click(move |checked, _window, cx| {
+                    let checked = *checked;
+                    toggled.update(cx, |view, cx| view.set_perspective_enabled(checked, cx));
+                }),
+        )
+        .when(on, |this| {
+            this.child(labeled_slider_row(
+                t!("ui.armor.perspective_fov").into_owned(),
+                fov_slider,
+                perspective.camera.fov_deg,
+                false,
+            ))
+            .child(
+                h_flex()
+                    .gap_2()
+                    .items_center()
+                    .child(div().w(px(96.)).text_xs().child(t!("ui.armor.perspective_projection").into_owned()))
+                    .child(h_flex().gap_1().children([
+                        look_mode_button(
+                            entity,
+                            "armor-perspective-proj-game",
+                            t!("ui.armor.perspective_proj_game").into_owned(),
+                            LookMode::Game,
+                            perspective.camera.look_mode,
+                        ),
+                        look_mode_button(
+                            entity,
+                            "armor-perspective-proj-center",
+                            t!("ui.armor.perspective_proj_center").into_owned(),
+                            LookMode::ThroughCenter,
+                            perspective.camera.look_mode,
+                        ),
+                    ])),
+            )
+        })
+}
+
+/// One of the two ways the locked camera can aim.
+fn look_mode_button(
+    entity: &Entity<ViewportView>,
+    id: &'static str,
+    label: String,
+    mode: LookMode,
+    chosen: LookMode,
+) -> AnyElement {
+    let entity = entity.clone();
+    let selected = mode == chosen;
+    crate::ui::selectable(
+        id,
+        selected,
+        Button::new(id).label(label).compact().selected(selected).on_click(move |_event, _window, cx: &mut App| {
+            entity.update(cx, |view, cx| view.set_perspective_look_mode(mode, cx));
+        }),
+    )
+    .into_any_element()
 }
 
 /// One of the zoom path's two field-of-view checkboxes.
@@ -1155,6 +1235,10 @@ struct DisplayPopoverSnapshot {
     camera_modes: Vec<String>,
     camera_fov_slider: Entity<SliderState>,
     camera_height_slider: Entity<SliderState>,
+    /// Whether the camera is locked to the ship's own orbit, and how it aims
+    /// from there.
+    perspective: PerspectiveSettings,
+    perspective_fov_slider: Entity<SliderState>,
     flat_slider: Entity<SliderState>,
     /// The colour each of the two lighting terms is tinted by. A picker keeps its
     /// own state, so these are the view's own rather than rebuilt per frame.
@@ -1190,6 +1274,8 @@ fn render_display_popover_content(
             cast_range_slider: view.display_sliders.cast_range.clone(),
             camera_fov_slider: view.display_sliders.camera_fov.clone(),
             camera_height_slider: view.display_sliders.camera_height.clone(),
+            perspective: view.perspective(),
+            perspective_fov_slider: view.display_sliders.perspective_fov.clone(),
             marker_slider: view.display_sliders.marker_opacity.clone(),
             has_markers: view.hits_drawn() > 0,
             flat_slider: view.lighting_sliders.flat_intensity.clone(),
@@ -1213,6 +1299,8 @@ fn render_display_popover_content(
         cast_range_slider,
         camera_fov_slider,
         camera_height_slider,
+        perspective,
+        perspective_fov_slider,
         waterline_slider,
         marker_slider,
         has_markers,
@@ -1334,8 +1422,10 @@ fn render_display_popover_content(
             entity,
             &camera_rings,
             &camera_modes,
+            &perspective,
             &camera_fov_slider,
             &camera_height_slider,
+            &perspective_fov_slider,
         ))
         .child(div().h(px(1.)).bg(border))
         .child(div().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.armor.lighting").to_string()))

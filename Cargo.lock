@@ -14648,6 +14648,7 @@ dependencies = [
  "jiff",
  "language-tags",
  "levenshtein",
+ "nalgebra",
  "pickled",
  "regex",
  "roxmltree 0.21.1",

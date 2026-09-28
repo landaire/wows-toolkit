@@ -232,6 +232,31 @@ pub(crate) fn build_ring_mesh(
     (vertices, indices)
 }
 
+/// A flat ring with a cross through it, lying on the water at `center`.
+///
+/// Where the locked camera is looking, which is the only thing on screen that
+/// says how far down the view is tilted. World space, since it is a point on
+/// the water rather than a point on the ship.
+pub(crate) fn build_water_marker(center: Vec3, radius: f32, color: [f32; 4]) -> (Vec<Vertex>, Vec<u32>) {
+    let mut vertices: Vec<Vertex> = Vec::new();
+    let mut indices: Vec<u32> = Vec::new();
+
+    let mut previous = center + Vec3::x() * radius;
+    for step in 1..=RING_SEGMENTS {
+        let around = (step as f32 / RING_SEGMENTS as f32) * std::f32::consts::TAU;
+        let point = center + Vec3::x() * (around.cos() * radius) + Vec3::z() * (around.sin() * radius);
+        push_segment(&mut vertices, &mut indices, previous, point, color, color);
+        previous = point;
+    }
+
+    let arm = radius * 0.5;
+    for axis in [Vec3::x(), Vec3::z()] {
+        push_segment(&mut vertices, &mut indices, center - axis * arm, center + axis * arm, color, color);
+    }
+
+    (vertices, indices)
+}
+
 /// The straight lines the camera eye travels between the two orbits, at
 /// evenly spaced bearings.
 pub(crate) fn build_zoom_path_mesh(

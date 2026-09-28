@@ -11,6 +11,7 @@ VIEWMODEL_DEPS = [
     "//third-party/rust:glob",
     "//third-party/rust:jiff",
     "//third-party/rust:language-tags",
+    "//third-party/rust:nalgebra",
     "//third-party/rust:levenshtein",
     "//third-party/rust:pickled",
     "//third-party/rust:regex",

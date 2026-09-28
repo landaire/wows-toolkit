@@ -1,4 +1,6 @@
-use crate::viewport_3d::types::Vec3;
+/// Model-space vectors, the same type both viewports use.
+pub type Vec3 = nalgebra::Vector3<f32>;
+
 use wowsunpack::game_params::types::CameraRing;
 use wowsunpack::game_params::types::CameraTrajectory;
 
@@ -36,13 +38,13 @@ impl Default for CameraPerspective {
 }
 
 /// Linear blend of two rings (inner -> outer) by `z`, clamped to 0..1.
-pub(crate) fn lerp_ring(a: &CameraRing, b: &CameraRing, z: f32) -> CameraRing {
+pub fn lerp_ring(a: &CameraRing, b: &CameraRing, z: f32) -> CameraRing {
     let z = z.clamp(0.0, 1.0);
     CameraRing { pos_center: a.pos_center.lerp(b.pos_center, z), semi_axes: a.semi_axes.lerp(b.semi_axes, z) }
 }
 
 /// Point on the ring at parameter `yaw`, matching `camera_ellipse::sample_ring_points`.
-pub(crate) fn eye_on_ring(ring: &CameraRing, waterline_dy: f32, yaw: f32) -> Vec3 {
+pub fn eye_on_ring(ring: &CameraRing, waterline_dy: f32, yaw: f32) -> Vec3 {
     let center = Vec3::new(ring.pos_center.x, ring.pos_center.y + waterline_dy, ring.pos_center.z);
     center + Vec3::new(yaw.cos() * ring.semi_axes.x, 0.0, yaw.sin() * ring.semi_axes.y)
 }
@@ -50,7 +52,7 @@ pub(crate) fn eye_on_ring(ring: &CameraRing, waterline_dy: f32, yaw: f32) -> Vec
 /// World-space point where the ray `eye + t*dir` meets the water plane Y=0.
 /// The denominator is forced downward so a near-horizontal ray yields a far
 /// (capped) point instead of diverging; `t` is clamped to `[0, max_dist]`.
-pub(crate) fn water_aim_point(eye: Vec3, dir: Vec3, max_dist: f32) -> Vec3 {
+pub fn water_aim_point(eye: Vec3, dir: Vec3, max_dist: f32) -> Vec3 {
     let denom = dir.y.min(-1e-4);
     let t = (-eye.y / denom).clamp(0.0, max_dist);
     eye + dir * t
@@ -92,7 +94,7 @@ impl CameraPerspective {
 
     /// Model-space eye and unit look direction. The horizontal look is the yaw
     /// ray (game) or toward-center (through-center), tilted down by `pitch`.
-    pub(crate) fn eye_and_look_dir(
+    pub fn eye_and_look_dir(
         &self,
         traj: &CameraTrajectory,
         fov_blend: f32,
@@ -108,13 +110,7 @@ impl CameraPerspective {
     /// Cap `pitch` per frame so the water aim point can never come nearer than
     /// the ship centerline along the look direction (never onto the camera's
     /// side of the hull). `.max(PITCH_MIN)` guards an inverted clamp range.
-    pub(crate) fn clamp_pitch_to_far_side(
-        &mut self,
-        traj: &CameraTrajectory,
-        fov_blend: f32,
-        height: f32,
-        waterline_dy: f32,
-    ) {
+    pub fn clamp_pitch_to_far_side(&mut self, traj: &CameraTrajectory, fov_blend: f32, height: f32, waterline_dy: f32) {
         let (eye, center, h) = self.eye_center_h(traj, fov_blend, height, waterline_dy);
         let d_center = (center.x - eye.x) * h.x + (center.z - eye.z) * h.z;
         let pitch_max = if d_center > 1e-3 { (eye.y / d_center).atan() } else { PITCH_MAX };
