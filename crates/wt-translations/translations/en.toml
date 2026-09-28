@@ -1557,6 +1557,9 @@ deselect = "Deselect"
 select_all = "Select All"
 no_data = "Shell data no longer available"
 sim_agrees = "Sim agrees"
+sim_unchecked = "%{count} shells could not be simulated"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "No armor plates hit"
 tracked = "%{salvos} salvos, %{shells} shells tracked"
 nothing_landed = "Nothing has landed on this ship yet"
@@ -1605,6 +1608,14 @@ shatter = "Shatter"
 overpenetration = "Overpenetration"
 underwater = "Underwater"
 unknown = "Unrecognized (%{raw})"
+stopped = "Stopped in the armor"
+
+# -- What this app's own simulation made of a shell --
+
+[ui.armor.sim]
+overmatch_rules_out_ricochet = "Overmatch, so no ricochet"
+always_ricochet_band = "Ricochet, in the always-ricochet band"
+ricochet_angle_too_low = "No ricochet possible, angle too low"
 
 # -- Advantage level labels --
 

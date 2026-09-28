@@ -387,6 +387,11 @@ pub struct IncomingContext {
     /// be told apart from them. Empty is not knowledge that none are main
     /// battery, and the filter reads it that way.
     pub main_battery: std::collections::HashSet<wows_replays::types::GameParamId>,
+    /// The shell each landed salvo was fired with, so the viewer can send that
+    /// shell through the hull itself and say whether it agrees with the server.
+    /// A salvo whose shell this build cannot name is left out rather than
+    /// simulated with a stand-in.
+    pub shells: std::collections::HashMap<wows_replays::types::GameParamId, wowsunpack::game_params::types::ShellInfo>,
 }
 
 /// What the viewport asks of whoever is hosting it.
@@ -406,7 +411,7 @@ pub enum RendererEvent {
         hits: Vec<PreExtractedHit>,
         /// Who was shooting at that ship, so the viewer can say which salvo a
         /// hit came from and offer one attacker at a time.
-        incoming: IncomingContext,
+        incoming: Box<IncomingContext>,
     },
     /// Playback moved, and the ship an armor viewer is already open on has
     /// taken different hits by this point.
@@ -1136,9 +1141,15 @@ impl ReplayRendererPanel {
         // The log reads the whole battle, not the part played so far: scrubbing
         // back would otherwise take salvos out of a list nobody was scrubbing.
         incoming.taken = feed.whole_battle().to_vec();
+        self.resolve_incoming_shells(&mut incoming);
         incoming.health = feed.health_strip();
         incoming.at = Some(GameClock(self.clock_of(self.at)));
-        cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: feed.taken().to_vec(), incoming });
+        cx.emit(RendererEvent::ShowArmor {
+            param_index,
+            display_name,
+            hits: feed.taken().to_vec(),
+            incoming: Box::new(incoming),
+        });
         self.armor_following = Some((entity_id, feed));
         self.close_ship_menu(cx);
     }
@@ -1183,6 +1194,26 @@ impl ReplayRendererPanel {
             }
         }
         context
+    }
+
+    /// Names the shell behind each salvo that landed on the ship.
+    fn resolve_incoming_shells(&self, context: &mut IncomingContext) {
+        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else {
+            // Without game data no shell can be named, so no shell can be
+            // simulated and the log carries no verdicts at all.
+            tracing::warn!("armor viewer: no game data loaded, so the incoming shells cannot be named");
+            return;
+        };
+        let provider = loaded.provider();
+        for hit in &context.taken {
+            let Some(salvo) = hit.hit.salvo.as_ref() else { continue };
+            if context.shells.contains_key(&salvo.params_id) {
+                continue;
+            }
+            if let Some(shell) = provider.resolve_shell_from_param_id(salvo.params_id) {
+                context.shells.insert(salvo.params_id, shell);
+            }
+        }
     }
 
     /// Tells a viewer that is already open what its ship has taken by where

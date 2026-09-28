@@ -12,8 +12,6 @@ use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
 use wowsunpack::game_params::types::ShipModelDistance;
 
-use wowsunpack::ballistics::is_overmatch;
-
 pub use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 pub use wows_toolkit_viewmodel::armor::penetration::ComparisonShipIndex;
 pub use wows_toolkit_viewmodel::armor::penetration::Ifhe;
@@ -152,64 +150,30 @@ pub fn model_distance(a: &Vec3, b: &Vec3) -> ShipModelDistance {
 /// outcomes.
 pub use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 
-/// What the simulation says became of the shell.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SimOutcome {
-    Citadel,
-    Penetration,
-    Overpenetration,
-    Ricochet,
-    Shatter,
-    /// Stopped in the armor without an identified ricochet or shatter.
-    Stopped,
-}
+/// The comparison itself is shared with the GPUI port, whose incoming-fire log
+/// says the same thing about the same shell
+/// (`wows_toolkit_viewmodel::armor::arc`).
+pub use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
+use wows_toolkit_viewmodel::armor::arc::Strike;
 
-impl SimOutcome {
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Citadel => "Citadel",
-            Self::Penetration => "Penetration",
-            Self::Overpenetration => "Overpenetration",
-            Self::Ricochet => "Ricochet",
-            Self::Shatter => "Shatter",
-            Self::Stopped => "Stopped",
-        }
-    }
-}
-
-/// The simulation's side of a disagreement with the server.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SimVerdict {
-    /// The simulation ran to this outcome.
-    Outcome(SimOutcome),
-    /// The plate is overmatched, which rules a ricochet out entirely.
-    OvermatchRulesOutRicochet,
-    /// The strike sits in the band where a ricochet is certain.
-    AlwaysRicochetBand,
-    /// The strike is too shallow for a ricochet to be possible at all.
-    RicochetAngleTooLow,
-}
-
-impl SimVerdict {
-    pub fn display_name(self) -> &'static str {
-        match self {
-            Self::Outcome(outcome) => outcome.display_name(),
-            Self::OvermatchRulesOutRicochet => "Overmatch (can't ricochet)",
-            Self::AlwaysRicochetBand => "Ricochet (always-ricochet zone)",
-            Self::RicochetAngleTooLow => "No ricochet possible (angle too low)",
-        }
-    }
-}
-
-/// How our simulation compares to the server.
-#[derive(Clone, Debug)]
-pub enum ComparisonVerdict {
-    /// Simulation matches server.
-    Match,
-    /// Angle is in the ricochet RNG zone; server's call is valid either way.
-    RicochetRngDefer { angle: Degrees, ricochet_start: Degrees, always_ricochet: Degrees },
-    /// Simulation disagrees with server.
-    Mismatch { sim: SimVerdict, server: ServerOutcome },
+/// The same, for this crate's own hit type.
+pub fn compare_with_server(
+    sim: &ShellSimResult,
+    hits: &[TrajectoryHit],
+    server_outcome: &ServerOutcome,
+    params: &ShellParams,
+) -> Option<ComparisonVerdict> {
+    let first = hits.first()?;
+    let strike = Strike { angle: first.angle_from_normal, thickness: first.thickness };
+    let plates: Vec<wows_toolkit_viewmodel::armor::arc::ArcPlate> = hits
+        .iter()
+        .map(|hit| wows_toolkit_viewmodel::armor::arc::ArcPlate {
+            zone: hit.zone.clone(),
+            thickness: hit.thickness,
+            material: hit.material.clone(),
+        })
+        .collect();
+    wows_toolkit_viewmodel::armor::arc::compare_with_server(sim, &plates, strike, server_outcome, params)
 }
 
 /// Overpen exit point comparison.
@@ -231,77 +195,4 @@ pub struct ServerVsSimComparison {
     pub sim: ShellSimResult,
     pub verdict: ComparisonVerdict,
     pub exit_divergence: Option<ExitDivergence>,
-}
-
-/// Classify the simulation's outcome for the shell.
-pub fn sim_outcome(sim: &ShellSimResult, hits: &[TrajectoryHit]) -> SimOutcome {
-    // A detonation takes priority even if the shell shattered or ricocheted on a
-    // later plate: the fragments still explode.
-    if sim.detonation.is_some() {
-        let Some(detonated_at) = sim.detonated_at else {
-            return SimOutcome::Overpenetration;
-        };
-        let inside_citadel =
-            enclosing_zone(hits, detonated_at).is_some_and(|zone| zone.to_lowercase().contains("citadel"));
-        return if inside_citadel { SimOutcome::Citadel } else { SimOutcome::Penetration };
-    }
-
-    let Some(stopped_at) = sim.stopped_at else {
-        return SimOutcome::Overpenetration;
-    };
-    match sim.plates.get(stopped_at.value()).map(|plate| plate.outcome) {
-        Some(PlateOutcome::Ricochet) => SimOutcome::Ricochet,
-        Some(PlateOutcome::Shatter) => SimOutcome::Shatter,
-        _ => SimOutcome::Stopped,
-    }
-}
-
-/// Compare a shell simulation result against the server's authoritative outcome.
-///
-/// Ricochet reasoning needs the first plate the shell struck, so this returns
-/// `None` when the ray produced no hits at all.
-pub fn compare_with_server(
-    sim: &ShellSimResult,
-    hits: &[TrajectoryHit],
-    server_outcome: &ServerOutcome,
-    params: &ShellParams,
-) -> Option<ComparisonVerdict> {
-    let first_hit = hits.first()?;
-    let strike_angle = first_hit.angle_from_normal;
-    let overmatched = is_overmatch(params.caliber, first_hit.thickness);
-    let ricochet_start = params.ricochet_angle.to_degrees();
-    let always_ricochet = params.always_ricochet_angle.to_degrees();
-
-    let mismatch = |sim_verdict| ComparisonVerdict::Mismatch { sim: sim_verdict, server: server_outcome.clone() };
-
-    if *server_outcome == ServerOutcome::Ricochet {
-        if overmatched {
-            return Some(mismatch(SimVerdict::OvermatchRulesOutRicochet));
-        }
-        if strike_angle >= always_ricochet {
-            return Some(ComparisonVerdict::Match);
-        }
-        if strike_angle >= ricochet_start {
-            return Some(ComparisonVerdict::RicochetRngDefer { angle: strike_angle, ricochet_start, always_ricochet });
-        }
-        return Some(mismatch(SimVerdict::RicochetAngleTooLow));
-    }
-
-    // Server didn't ricochet. Check if we think it should have.
-    if !overmatched && strike_angle >= always_ricochet {
-        return Some(mismatch(SimVerdict::AlwaysRicochetBand));
-    }
-
-    let outcome = sim_outcome(sim, hits);
-    let agrees = match server_outcome {
-        ServerOutcome::Penetration => outcome == SimOutcome::Penetration,
-        ServerOutcome::Citadel => outcome == SimOutcome::Citadel,
-        ServerOutcome::Shatter => outcome == SimOutcome::Shatter,
-        ServerOutcome::Overpenetration => outcome == SimOutcome::Overpenetration,
-        // The simulation models neither of these, so it cannot disagree.
-        ServerOutcome::Underwater | ServerOutcome::Unknown(_) => true,
-        ServerOutcome::Ricochet => false,
-    };
-
-    Some(if agrees { ComparisonVerdict::Match } else { mismatch(SimVerdict::Outcome(outcome)) })
 }

@@ -983,6 +983,8 @@ deselect = "Deseleziona"
 select_all = "Seleziona tutto"
 no_data = "Dati proiettile non più disponibili"
 sim_agrees = "Simulazione concorde"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "Nessuna piastra corazza colpita"
 
 # -- Etichette livello vantaggio --

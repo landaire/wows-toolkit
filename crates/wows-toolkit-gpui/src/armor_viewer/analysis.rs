@@ -45,6 +45,7 @@ use wows_replays::analyzer::decoder::HitType;
 use wows_replays::types::EntityId;
 use wows_replays::types::GameClock;
 use wows_toolkit_viewmodel::armor::arc::ArcOutcome;
+use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
 use wows_toolkit_viewmodel::armor::arc::StoppingPlate;
 use wows_toolkit_viewmodel::armor::incoming::IncomingSalvo;
 use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
@@ -323,6 +324,10 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
     let salvos = group_incoming(&incoming.context.taken, &incoming.filter, &enemies, &incoming.context.main_battery);
     let shells: usize = salvos.iter().map(|salvo| salvo.shells.len()).sum();
     let chosen = incoming.filter.attacker;
+    // Read once for the whole log rather than per line: every line reaches for
+    // the same viewport.
+    let viewport = view.active_viewport(cx);
+    let verdicts = viewport.read(cx);
 
     v_flex()
         .gap_1()
@@ -337,6 +342,12 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
                 .text_color(crate::theme::text_dim())
                 .child(t!("ui.armor.realtime.tracked", salvos = salvos.len(), shells = shells).to_string()),
         )
+        .children((verdicts.sim_unchecked() > 0).then(|| {
+            div()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.armor.realtime.sim_unchecked", count = verdicts.sim_unchecked()).to_string())
+        }))
         .child(
             div()
                 .text_xs()
@@ -376,7 +387,9 @@ fn render_incoming(view: &ArmorViewerPane, pane: &Entity<ArmorViewerPane>, cx: &
                 .gap_1()
                 .max_h(LOG_MAX_HEIGHT)
                 .overflow_y_scroll()
-                .children(salvos.iter().enumerate().map(|(index, salvo)| salvo_block(view, pane, index, salvo)))
+                .children(
+                    salvos.iter().enumerate().map(|(index, salvo)| salvo_block(view, pane, index, salvo, verdicts)),
+                )
                 .into_any_element()
         })
         .into_any_element()
@@ -524,6 +537,7 @@ fn salvo_block(
     pane: &Entity<ArmorViewerPane>,
     index: usize,
     salvo: &IncomingSalvo,
+    verdicts: &ViewportView,
 ) -> AnyElement {
     // A ship the roster did not name is one the frame had no row for, which
     // reads as its entity rather than as a blank.
@@ -561,14 +575,81 @@ fn salvo_block(
                 ),
         )
         .children(salvo.shells.iter().enumerate().map(|(shell_index, shell)| {
-            div()
+            let agreed = verdicts.sim_agreement(shell.shot_id);
+            h_flex()
                 .id(SharedString::from(format!("armor-incoming-shell-{index}-{shell_index}")))
+                .gap_1()
                 .pl(px(12.))
                 .text_xs()
-                .text_color(crate::theme::text_dim())
-                .child(format!("{}  {}", clock_label(shell.clock), hit_label(&shell.hit_type)))
+                .child(div().text_color(crate::theme::text_dim()).child(format!(
+                    "{}  {}",
+                    clock_label(shell.clock),
+                    hit_label(&shell.hit_type)
+                )))
+                .children(agreed.map(|said| div().text_color(rgb(said.standing.color())).child(said.label.clone())))
         }))
         .into_any_element()
+}
+
+/// What this app's own simulation made of a shell, worded for the log.
+///
+/// Worded when the comparison is run rather than per frame: a battleship's log
+/// runs to hundreds of lines, and each would otherwise translate and format
+/// itself again on every draw.
+pub(crate) struct SimAgreement {
+    pub(crate) label: SharedString,
+    pub(crate) standing: Agreement,
+}
+
+/// Whether the two agree, which is what colours the line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Agreement {
+    Agrees,
+    /// The angle falls in the band where the game rolls for a ricochet, so
+    /// either call is right and there is nothing to disagree about.
+    Deferred,
+    Disagrees,
+}
+
+impl Agreement {
+    fn color(self) -> u32 {
+        let semantic = crate::theme::semantic();
+        match self {
+            Self::Agrees => semantic.ok,
+            Self::Deferred => semantic.warn,
+            Self::Disagrees => semantic.error,
+        }
+    }
+}
+
+/// The reading beside a shell: whether this app's ballistics reach the same
+/// answer the server did.
+///
+/// The egui viewer says the same three things about the same shell
+/// (`replay/realtime_armor_viewer.rs`), in the panel beside its own hull.
+pub(crate) fn agreement(verdict: &ComparisonVerdict) -> SimAgreement {
+    match verdict {
+        ComparisonVerdict::Match => {
+            SimAgreement { label: t!("ui.armor.realtime.sim_agrees").into_owned().into(), standing: Agreement::Agrees }
+        }
+        ComparisonVerdict::RicochetRngDefer { angle, ricochet_start, always_ricochet } => SimAgreement {
+            label: t!(
+                "ui.armor.realtime.sim_rng_zone",
+                angle = format!("{:.1}", angle.value()),
+                from = format!("{:.1}", ricochet_start.value()),
+                to = format!("{:.1}", always_ricochet.value()),
+            )
+            .into_owned()
+            .into(),
+            standing: Agreement::Deferred,
+        },
+        ComparisonVerdict::Mismatch { sim, server } => SimAgreement {
+            label: t!("ui.armor.realtime.sim_disagrees", sim = t!(sim.label_key()), server = t!(server.label_key()),)
+                .into_owned()
+                .into(),
+            standing: Agreement::Disagrees,
+        },
+    }
 }
 
 /// A game clock as the log prints it: minutes and seconds into the battle.

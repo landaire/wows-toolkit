@@ -44,6 +44,7 @@ use wowsunpack::export::camo_textures::SchemeTextures;
 use wowsunpack::export::camouflage::UvTransform;
 use wowsunpack::game_params::keys::ComponentType;
 
+use super::analysis::SimAgreement;
 use super::camera_rings;
 use super::gaps;
 use super::splash;
@@ -93,6 +94,14 @@ use crate::viewport::types::MeshId;
 use crate::viewport::types::Vec2;
 use crate::viewport::types::Vec3;
 use crate::viewport::types::ViewRect;
+use wows_replay_insights::timeline::PreExtractedHit;
+use wows_replays::analyzer::battle_controller::state::ResolvedShotHit;
+use wows_replays::types::GameParamId;
+use wows_replays::types::ShotId;
+use wows_toolkit_viewmodel::armor::arc::ComparisonVerdict;
+use wows_toolkit_viewmodel::armor::arc::Strike;
+use wows_toolkit_viewmodel::armor::arc::compare_with_server;
+use wows_toolkit_viewmodel::armor::incoming::ServerOutcome;
 use wows_toolkit_viewmodel::armor::penetration::ComparisonShip;
 use wowsunpack::ballistics::ImpactResult;
 use wowsunpack::ballistics::ShellParams;
@@ -100,6 +109,7 @@ use wowsunpack::ballistics::solve_for_range;
 use wowsunpack::game_params::types::AmmoType;
 use wowsunpack::game_params::types::Km;
 use wowsunpack::game_params::types::Millimeters;
+use wowsunpack::game_params::types::ShellInfo;
 
 /// The mode a ship opens on: its first, which is the one the game itself
 /// uses. `None` for a ship whose GameParams name none, where there is
@@ -597,6 +607,14 @@ pub struct ViewportView {
     /// What this ship had taken when a replay viewport asked for it, drawn
     /// over the hull as the overlays are.
     hits: Vec<wows_replay_insights::timeline::PreExtractedHit>,
+    /// What this app's own simulation made of each landed shell, against what
+    /// the server said. Keyed by the shot, because that is what the log lists.
+    sim_verdicts: HashMap<ShotId, SimAgreement>,
+    /// How many armour-piercing shells the comparison could not reach an answer
+    /// on. Counted rather than left as a gap in the log: a blank line beside a
+    /// shell reads as nothing to say about it, and the reader should be able to
+    /// tell that from the check not having run.
+    sim_unchecked: usize,
     /// What the ship's health was at that moment, when a replay is driving
     /// this viewer. `None` when nothing is.
     hit_health: Option<f32>,
@@ -767,6 +785,8 @@ impl ViewportView {
             animating: false,
             held_keys: HashSet::new(),
             key_ticking: false,
+            sim_verdicts: HashMap::new(),
+            sim_unchecked: 0,
             pending_armor: None,
             ship_loading: None,
             current_armor: None,
@@ -1232,6 +1252,14 @@ impl ViewportView {
         self.gpu = GpuState::Ready { ctx, pipeline };
         if let Some(armor) = self.pending_armor.take() {
             self.upload_armor_now(armor);
+            // The comparison needs a hull, and the one it was asked for arrived
+            // before the device did, so it found none and did nothing.
+            if let Some((taken, shells)) = self.pane.as_ref().and_then(|pane| pane.upgrade()).and_then(|pane| {
+                let loaded = self.loaded_param_index().map(str::to_owned);
+                pane.read(cx).incoming().to_compare(loaded.as_deref())
+            }) {
+                self.compare_incoming(&taken, &shells, cx);
+            }
         }
         self.viewport.mark_dirty();
         cx.notify();
@@ -1469,6 +1497,102 @@ impl ViewportView {
         self.hits = hits;
         self.reupload_current_armor(cx);
         cx.notify();
+    }
+
+    /// What this app's own simulation made of a landed shell.
+    ///
+    /// Absent for a shell that was not simulated: one fired with something other
+    /// than armour-piercing, one whose salvo this build cannot name the shell
+    /// of, one whose victim's pose was not held at that moment, and one whose
+    /// server outcome the simulation does not model.
+    pub(crate) fn sim_agreement(&self, shot: ShotId) -> Option<&SimAgreement> {
+        self.sim_verdicts.get(&shot)
+    }
+
+    /// How many armour-piercing shells the comparison could not answer for.
+    pub(crate) fn sim_unchecked(&self) -> usize {
+        self.sim_unchecked
+    }
+
+    /// Sends each landed shell through this hull and compares the result with
+    /// what the server said the shell did.
+    ///
+    /// The reading beside each shell in the incoming-fire log, which is how a
+    /// disagreement between this app's ballistics and the game's is found. The
+    /// egui viewer runs the same comparison as it draws each trajectory
+    /// (`replay/realtime_armor_viewer.rs`); here it is run over the log rather
+    /// than over what is drawn, so a shell need not be picked to be read.
+    pub(crate) fn compare_incoming(
+        &mut self,
+        taken: &[PreExtractedHit],
+        shells: &HashMap<GameParamId, ShellInfo>,
+        cx: &mut Context<Self>,
+    ) {
+        let had = !self.sim_verdicts.is_empty() || self.sim_unchecked > 0;
+        self.sim_verdicts.clear();
+        self.sim_unchecked = 0;
+        if let Some(armor) = self.current_armor.clone() {
+            let center = armor.center();
+            for taken in taken {
+                let hit = &taken.hit;
+                let Some(shell) = hit.salvo.as_ref().and_then(|salvo| shells.get(&salvo.params_id)) else { continue };
+                // Only armour-piercing: the plate chain simulates AP, and
+                // calling an HE hit a mismatch would report on the simulation
+                // rather than on the shell.
+                if shell.ammo_type != AmmoType::AP {
+                    continue;
+                }
+                match self.compare_one(hit, shell, center) {
+                    Some(verdict) => {
+                        self.sim_verdicts.insert(hit.hit.shot_id, super::analysis::agreement(&verdict));
+                    }
+                    // A shell whose victim's pose was not held, whose flight
+                    // does not solve, whose ray crosses no plating, or whose
+                    // outcome the simulation does not model.
+                    None => self.sim_unchecked += 1,
+                }
+            }
+        }
+        if had || !self.sim_verdicts.is_empty() || self.sim_unchecked > 0 {
+            cx.notify();
+        }
+    }
+
+    /// One landed shell, cast back along the way it came.
+    fn compare_one(&self, hit: &ResolvedShotHit, shell: &ShellInfo, center: Vec3) -> Option<ComparisonVerdict> {
+        let arrival = wows_replay_insights::hull_impact::shell_arrival(hit)?;
+        // Placed without the hull's bounds, unlike a drawn marker: holding an
+        // impact inside them keeps a marker off open water, but a strike dragged
+        // to the hull's edge would be simulated through plating the shell never
+        // met and reported as a disagreement.
+        let at = wows_replay_insights::hull_impact::hull_impact(hit, [center.x, center.y, center.z], None)?;
+
+        let params = ShellParams::from_shell_info(shell)?;
+        // The arrival state comes from solving the shot's own flight: the
+        // terminal-ballistics velocity a hit carries is post-impact.
+        let impact = solve_for_range(&params, arrival.travelled)?;
+        let fall = impact.impact_angle_horizontal;
+        let (cos, sin) = (fall.cos(), fall.sin());
+        let bearing = arrival.bearing;
+        let shell_dir = Vec3::new(bearing.x * cos, -sin, bearing.z * cos).normalize();
+
+        // Cast from outside the hull along that bearing, so the ray crosses
+        // every plate the shell would have met rather than only those past the
+        // point it stopped at. Through the impact's own height, since a hit up a
+        // superstructure did not cross the belt.
+        let through = Vec3::new(at[0], at[1], at[2]);
+        let ray_hits = self.viewport.pick_all_ray_model_space(through - shell_dir * CAST_STANDOFF, shell_dir);
+        let hits = trajectory::build_hits(&ray_hits, &self.mesh_triangle_info, &shell_dir);
+        let first = hits.first()?;
+        let strike = Strike { angle: first.angle_from_normal, thickness: first.thickness };
+        let plates: Vec<ArcPlate> = hits
+            .iter()
+            .map(|hit| ArcPlate { zone: hit.zone.clone(), thickness: hit.thickness, material: hit.material.clone() })
+            .collect();
+
+        let sim = trajectory::simulate(&params, &impact, &hits, self.continue_on_ricochet);
+        let server = ServerOutcome::from_shell_hit_type(&hit.hit.hit_type.shell_hit);
+        compare_with_server(&sim, &plates, strike, &server, &params)
     }
 
     /// How many hits are drawn on the hull.

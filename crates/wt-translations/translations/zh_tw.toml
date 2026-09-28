@@ -983,6 +983,8 @@ deselect = "取消選擇"
 select_all = "全部選擇"
 no_data = "砲彈資料已不可用"
 sim_agrees = "模擬結果一致"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "未命中裝甲板"
 
 # -- 優勢等級標籤 --

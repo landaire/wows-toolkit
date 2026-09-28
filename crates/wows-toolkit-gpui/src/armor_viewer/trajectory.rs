@@ -150,7 +150,7 @@ pub fn build_hits(
 }
 
 /// Runs a shell through the plates a cast crossed.
-fn simulate(
+pub(crate) fn simulate(
     params: &ShellParams,
     impact: &ImpactResult,
     hits: &[TrajectoryHit],

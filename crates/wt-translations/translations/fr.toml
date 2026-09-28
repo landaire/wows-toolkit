@@ -983,6 +983,8 @@ deselect = "Désélectionner"
 select_all = "Tout sélectionner"
 no_data = "Données d'obus plus disponibles"
 sim_agrees = "Simulation concorde"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "Aucune plaque de blindage touchée"
 
 # -- Niveaux d'avantage --

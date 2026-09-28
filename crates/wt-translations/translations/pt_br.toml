@@ -939,6 +939,8 @@ deselect = "Desselecionar"
 select_all = "Selecionar tudo"
 no_data = "Os dados de projéteis não estão mais disponíveis"
 sim_agrees = "Simulação concorda"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "Nenhuma placa de blindagem atingida"
 
 [advantage]

@@ -983,6 +983,8 @@ deselect = "Deselecteren"
 select_all = "Alles selecteren"
 no_data = "Granatgegevens niet meer beschikbaar"
 sim_agrees = "Simulatie bevestigt"
+sim_rng_zone = "RNG zone (%{angle} deg in %{from}-%{to})"
+sim_disagrees = "Sim: %{sim} / Server: %{server}"
 no_armor_hit = "Geen pantserpanelen geraakt"
 
 # -- Labels voordeelniveau --
