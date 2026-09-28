@@ -365,6 +365,21 @@ impl ExportStage {
 
 impl EventEmitter<PanelEvent> for ReplayRendererPanel {}
 
+/// Who was firing at one ship, and with what.
+///
+/// Read off the battle rather than off the hits, because the filter has to be
+/// able to offer an attacker before any of their shells have landed.
+#[derive(Clone, Debug, Default)]
+pub struct IncomingContext {
+    /// Every enemy of the ship being looked at, named as the log lists them.
+    /// The keys are also what counts as incoming fire.
+    pub attackers: std::collections::BTreeMap<EntityId, String>,
+    /// The main battery shells of every ship in the battle, so secondaries can
+    /// be told apart from them. Empty is not knowledge that none are main
+    /// battery, and the filter reads it that way.
+    pub main_battery: std::collections::HashSet<wows_replays::types::GameParamId>,
+}
+
 /// What the viewport asks of whoever is hosting it.
 #[derive(Clone, Debug)]
 pub enum RendererEvent {
@@ -376,7 +391,14 @@ pub enum RendererEvent {
     /// The viewport owns neither the armor viewer nor the tab it sits in, so
     /// it says which ship and hands over the hits rather than opening
     /// anything itself.
-    ShowArmor { param_index: String, display_name: String, hits: Vec<PreExtractedHit> },
+    ShowArmor {
+        param_index: String,
+        display_name: String,
+        hits: Vec<PreExtractedHit>,
+        /// Who was shooting at that ship, so the viewer can say which salvo a
+        /// hit came from and offer one attacker at a time.
+        incoming: IncomingContext,
+    },
     /// Playback moved, and the ship an armor viewer is already open on has
     /// taken different hits by this point.
     ///
@@ -1096,9 +1118,48 @@ impl ReplayRendererPanel {
 
         let mut feed = crate::armor_viewer::realtime::RealtimeArmorFeed::new(timeline);
         feed.advance_to(GameClock(self.clock_of(self.at)));
-        cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: feed.taken().to_vec() });
+        let incoming = self.incoming_context(entity_id);
+        cx.emit(RendererEvent::ShowArmor { param_index, display_name, hits: feed.taken().to_vec(), incoming });
         self.armor_following = Some((entity_id, feed));
         self.close_ship_menu(cx);
+    }
+
+    /// Who was shooting at `victim`, and which shells are main battery ones.
+    ///
+    /// Read off the roster the frame already carries, which is the only place
+    /// that says which team a ship is on and what it is called at once.
+    fn incoming_context(&self, victim: EntityId) -> IncomingContext {
+        use wowsunpack::game_params::types::GameParamProvider as _;
+
+        let mut context = IncomingContext::default();
+        let Some(track) = self.track() else { return context };
+        let Some(commands) = track.frames.get(self.at) else { return context };
+        let Some(rows) = commands.iter().find_map(|command| {
+            let DrawCommand::TeamRoster { rows, .. } = command else { return None };
+            Some(rows)
+        }) else {
+            return context;
+        };
+        let Some(victim_team) = rows.iter().find(|row| row.entity_id == victim).map(|row| row.team_id) else {
+            return context;
+        };
+
+        for row in rows.iter().filter(|row| row.team_id != victim_team) {
+            context.attackers.insert(row.entity_id, format!("{} ({})", row.player_name, row.ship_name));
+        }
+
+        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else { return context };
+        let provider = loaded.provider();
+        for row in rows {
+            let Some(ship) = row.ship_param_id.and_then(|id| provider.game_param_by_id(id)) else { continue };
+            let Some(config) = ship.vehicle().and_then(|vehicle| vehicle.config_data()) else { continue };
+            for name in &config.main_battery_ammo {
+                if let Some(shell) = provider.game_param_by_name(name) {
+                    context.main_battery.insert(shell.id());
+                }
+            }
+        }
+        context
     }
 
     /// Tells a viewer that is already open what its ship has taken by where
@@ -1285,6 +1346,21 @@ impl ReplayRendererPanel {
         let Some(track) = self.track() else { return };
         let frame = track.frame_at(at + track.battle_start.seconds());
         self.go_to(frame, window, cx);
+    }
+
+    /// Moves playback to the frame `clock` falls in.
+    ///
+    /// The clock is the battle's own, as the replay's timeline states it, which
+    /// is what a salvo in the incoming-fire log is stamped with.
+    pub(crate) fn go_to_clock(&mut self, clock: GameClock, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(track) = self.track() else { return };
+        let frame = track.frame_at(clock.seconds());
+        self.go_to(frame, window, cx);
+    }
+
+    /// Whether this viewport is the one feeding an armor viewer.
+    pub(crate) fn is_following_armor(&self) -> bool {
+        self.armor_following.is_some()
     }
 
     fn jump_to_previous_event(&mut self, window: &mut Window, cx: &mut Context<Self>) {

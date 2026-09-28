@@ -174,10 +174,20 @@ have used it.
     The count rides on the menu item as it does there. A playback opened from that
     tab bakes through the same merge, so the map shows what the primary's team never
     saw, and an export of that playback writes what the map shows.
-18. **Realtime armor viewer as a window**, with its attacker filter, auto-scroll,
-    seek-to-salvo, show-secondaries and sim-agrees controls
-    (`replay/realtime_armor_viewer.rs:1198`, `ui.armor.realtime.*`). The hit
-    pipeline is ported; the surface is not.
+18. **Realtime armor viewer.** Done in part 2026-09-28: the Incoming Fire log is
+    there, in the panel this port already reads its armor questions in rather
+    than a window of its own. It lists what was fired at the ship salvo by salvo
+    -- who fired, when its first shell landed, and what the server said each one
+    did -- narrows to one attacker, counts or ignores secondary armament, and
+    moves the playback behind it to the moment a salvo landed. The grouping and
+    the outcome names are shared (`wows_toolkit_viewmodel::armor::incoming`),
+    including `ServerOutcome`, which moved out of the egui crate.
+
+    Not ported: the health timeline strip, and the sim-agrees marker that says
+    where this port's own simulation and the server disagree (the simulation is
+    run per cast arc here, not per landed shell). Auto-scroll has nothing to
+    scroll: the log is the panel's own list rather than a pane that follows
+    playback.
 19. ~~**The menu bar and the status bar.**~~ Done 2026-09-28: the strip's trailing
     end carries Check for Updates, About, Create Issue, Discord and Quit, and a
     status strip along the bottom names the jobs the app owns -- a game-data cache

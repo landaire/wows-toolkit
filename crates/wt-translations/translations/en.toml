@@ -1550,8 +1550,20 @@ select_all = "Select All"
 no_data = "Shell data no longer available"
 sim_agrees = "Sim agrees"
 no_armor_hit = "No armor plates hit"
+tracked = "%{salvos} salvos, %{shells} shells"
+shells = "%{count} shells"
+unmatched_salvo = "Unmatched shell"
 
 # -- Advantage level labels --
+
+[ui.armor.outcome]
+penetration = "Penetration"
+citadel = "Citadel"
+ricochet = "Ricochet"
+shatter = "Shatter"
+overpenetration = "Overpenetration"
+underwater = "Underwater"
+unknown = "Unrecognized (%{raw})"
 
 [advantage]
 absolute = "Absolute"
