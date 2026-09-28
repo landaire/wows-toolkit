@@ -218,6 +218,8 @@ pub struct ReplayRendererPanel {
     _export: Option<Task<()>>,
     /// Whether this viewport has a window to itself rather than a dock tab.
     popped_out: bool,
+    /// Whether ctrl is held, which is what puts the shortcut sheet up.
+    ctrl_held: bool,
     /// What the viewport draws of what it baked. Applied when a frame is
     /// rasterised rather than when it was baked, so a toggle takes effect on
     /// the next frame without walking the battle again.
@@ -437,6 +439,7 @@ impl ReplayRendererPanel {
             export_failure: None,
             _export: None,
             popped_out: false,
+            ctrl_held: false,
             // The options the track was baked under, so what is drawn at
             // first is exactly what is in it.
             options: playback_options_hidden(),
@@ -557,6 +560,7 @@ impl ReplayRendererPanel {
             export_failure: None,
             _export: None,
             popped_out: false,
+            ctrl_held: false,
             // The options the track was baked under, so what is drawn at
             // first is exactly what is in it.
             options: playback_options_hidden(),
@@ -1515,6 +1519,9 @@ impl ReplayRendererPanel {
             "escape" if self.has_tool() => self.take_up(Tool::None, cx),
             // What is picked out goes, as it does on the egui board.
             "delete" | "backspace" => self.erase_picked(cx),
+            // The nib, thinner and thicker, while a tool is in hand.
+            "[" if self.has_tool() => self.step_nib(-1.0, cx),
+            "]" if self.has_tool() => self.step_nib(1.0, cx),
             _ => return,
         }
         cx.stop_propagation();
@@ -2183,6 +2190,17 @@ impl ReplayRendererPanel {
         cx.notify();
     }
 
+    /// Widens or narrows the nib by `step`, within the range the egui board
+    /// offers (`replay/renderer/mod.rs`'s own bracket keys).
+    fn step_nib(&mut self, step: f32, cx: &mut Context<Self>) {
+        let width = (self.drawing.width() + step).clamp(MIN_NIB, MAX_NIB);
+        if (width - self.drawing.width()).abs() < f32::EPSILON {
+            return;
+        }
+        self.drawing.set_width(width);
+        cx.notify();
+    }
+
     /// Erases whatever is picked out, if anything is.
     fn erase_picked(&mut self, cx: &mut Context<Self>) {
         if self.picked.is_empty() {
@@ -2580,9 +2598,22 @@ impl Render for ReplayRendererPanel {
                                 ))
                         }))
                         .children(self.export_overlay(cx))
+                        // What the keys do, while ctrl is held: the chords are
+                        // not written anywhere else, so this is how they are
+                        // found.
+                        .when(self.ctrl_held, |this| this.child(shortcut_sheet(cx)))
                         .children(self.collab_overlay())
                         .children(self.rotation_handle_overlay(cx))
                         .children(self.consumable_reading(cx))
+                        .on_modifiers_changed(cx.listener(
+                            |this, event: &gpui_kit::ModifiersChangedEvent, _window, cx| {
+                                if this.ctrl_held == event.modifiers.secondary() {
+                                    return;
+                                }
+                                this.ctrl_held = event.modifiers.secondary();
+                                cx.notify();
+                            },
+                        ))
                         .on_mouse_down(MouseButton::Middle, cx.listener(Self::on_ping))
                         .on_mouse_down(MouseButton::Right, cx.listener(Self::on_right_click))
                         .on_scroll_wheel(cx.listener(Self::on_scroll))
@@ -2995,6 +3026,10 @@ const HANDLE_DISTANCE: Pixels = px(25.);
 /// width the egui toolbar opens on.
 const DEFAULT_INK: [u8; 4] = [255, 255, 255, 255];
 const DEFAULT_NIB: f32 = 2.0;
+
+/// What the bracket keys hold the nib between, as the egui board does.
+const MIN_NIB: f32 = 1.0;
+const MAX_NIB: f32 = 8.0;
 
 /// How long a ping stays on the map, in seconds.
 const PING_SECONDS: f32 = 1.0;
@@ -3582,35 +3617,91 @@ const TOGGLES: &[Toggle] = &[
 /// Selecting is `Tool::None`: nothing is being drawn, so the pointer goes to
 /// the map as it otherwise would.
 const TOOLS: &[ToolButton] = &[
-    ToolButton { id: "replay-renderer-tool-select", glyph: crate::icons::CURSOR, tool: || Tool::None },
-    ToolButton { id: "replay-renderer-tool-arrow", glyph: crate::icons::ARROW_BEND_UP_RIGHT, tool: || Tool::Arrow },
-    ToolButton { id: "replay-renderer-tool-freehand", glyph: crate::icons::PAINT_BRUSH, tool: || Tool::Freehand },
-    ToolButton { id: "replay-renderer-tool-line", glyph: crate::icons::LINE_SEGMENT, tool: || Tool::Line },
+    ToolButton {
+        id: "replay-renderer-tool-select",
+        glyph: crate::icons::CURSOR,
+        label: "ui.renderer.annotations.tool_select",
+        chord: None,
+        tool: || Tool::None,
+    },
+    ToolButton {
+        id: "replay-renderer-tool-arrow",
+        glyph: crate::icons::ARROW_BEND_UP_RIGHT,
+        label: "ui.renderer.annotations.tool_arrow",
+        chord: Some("Ctrl+1"),
+        tool: || Tool::Arrow,
+    },
+    ToolButton {
+        id: "replay-renderer-tool-freehand",
+        glyph: crate::icons::PAINT_BRUSH,
+        label: "ui.renderer.annotations.tool_freehand",
+        chord: Some("Ctrl+2"),
+        tool: || Tool::Freehand,
+    },
+    ToolButton {
+        id: "replay-renderer-tool-eraser",
+        glyph: crate::icons::ERASER,
+        label: "ui.renderer.annotations.tool_eraser",
+        chord: Some("Ctrl+3"),
+        tool: || Tool::Eraser,
+    },
+    ToolButton {
+        id: "replay-renderer-tool-line",
+        glyph: crate::icons::LINE_SEGMENT,
+        label: "ui.renderer.annotations.tool_line",
+        chord: Some("Ctrl+4"),
+        tool: || Tool::Line,
+    },
     ToolButton {
         id: "replay-renderer-tool-circle",
         glyph: crate::icons::CIRCLE,
+        label: "ui.renderer.annotations.tool_circle",
+        chord: Some("Ctrl+5"),
         tool: || Tool::Circle { filled: false },
     },
     ToolButton {
         id: "replay-renderer-tool-rectangle",
         glyph: crate::icons::SQUARE,
+        label: "ui.renderer.annotations.tool_rectangle",
+        chord: Some("Ctrl+6"),
         tool: || Tool::Rectangle { filled: false },
     },
     ToolButton {
         id: "replay-renderer-tool-triangle",
         glyph: crate::icons::TRIANGLE,
+        label: "ui.renderer.annotations.tool_triangle",
+        chord: Some("Ctrl+7"),
         tool: || Tool::Triangle { filled: false },
     },
-    ToolButton { id: "replay-renderer-tool-measure", glyph: crate::icons::RULER, tool: || Tool::Measurement },
-    ToolButton { id: "replay-renderer-tool-eraser", glyph: crate::icons::ERASER, tool: || Tool::Eraser },
+    ToolButton {
+        id: "replay-renderer-tool-measure",
+        glyph: crate::icons::RULER,
+        label: "ui.renderer.annotations.tool_measurement",
+        chord: Some("Ctrl+M"),
+        tool: || Tool::Measurement,
+    },
 ];
 
-/// One button on the toolbar: what it shows and what it puts in hand.
+/// One button on the toolbar: what it shows, what it is called, the chord that
+/// takes it up, and what it puts in hand.
 struct ToolButton {
     id: &'static str,
     glyph: &'static str,
+    label: &'static str,
+    /// `None` for the one tool that has no chord of its own: the selector, which
+    /// escape goes back to.
+    chord: Option<&'static str>,
     tool: fn() -> Tool,
 }
+
+/// One line in the cheat sheet's actions: the chord, and what it does.
+const ANNOTATION_ACTIONS: &[(&str, &str)] = &[
+    ("Ctrl+Z", "ui.renderer.annotations.action_undo"),
+    ("Ctrl+Click", "ui.renderer.annotations.action_multi_select"),
+    ("[ / ]", "ui.renderer.annotations.action_stroke_width"),
+    ("Del", "ui.renderer.annotations.action_delete"),
+    ("Esc", "ui.renderer.annotations.action_cancel"),
+];
 
 /// The ships that can be placed on the map, as the egui toolbar offers
 /// them, short name first.
@@ -3678,6 +3769,7 @@ fn tools_popover(
     let in_session = view.collab.is_active();
     let chosen = view.drawing.tool().clone();
     let ink = view.drawing.color();
+    let nib = view.drawing.width();
     let undoable = !view.history.is_empty();
     let picked_ship = picked_ship(view);
     let matches = view.matched_ships.clone();
@@ -3702,14 +3794,21 @@ fn tools_popover(
                     let owner = owner.clone();
                     let tool = button.tool;
                     let on = same_tool(&chosen, &tool());
+                    let named = match button.chord {
+                        Some(chord) => format!("{} ({chord})", t!(button.label)),
+                        None => t!(button.label).into_owned(),
+                    };
                     crate::ui::selectable(
                         button.id,
                         on,
-                        Button::new(button.id).child(crate::icons::icon(button.glyph)).compact().selected(on).on_click(
-                            move |_event, _window, cx: &mut App| {
+                        Button::new(button.id)
+                            .child(crate::icons::icon(button.glyph))
+                            .compact()
+                            .selected(on)
+                            .tooltip(named)
+                            .on_click(move |_event, _window, cx: &mut App| {
                                 owner.update(cx, |panel, cx| panel.take_up(tool(), cx));
-                            },
-                        ),
+                            }),
                     )
                 })))
                 .children(picked_ship.clone().map(|named| ship_chooser(&owner, &search, named, matches.clone(), _cx)))
@@ -3729,6 +3828,7 @@ fn tools_popover(
                         })
                 })
                 .child(crate::ui::rule_h(_cx))
+                .child(nib_row(&owner, nib))
                 .child(h_flex().gap_1().flex_wrap().children(INKS.iter().map(|(id, color)| {
                     let owner = owner.clone();
                     let color = *color;
@@ -3749,6 +3849,100 @@ fn tools_popover(
                 })))
                 .into_any_element()
         })
+        .into_any_element()
+}
+
+/// How thick what is drawn is, and the two steps either way.
+///
+/// The bracket keys move the same value, so the number here is what they change.
+fn nib_row(panel: &Entity<ReplayRendererPanel>, width: f32) -> AnyElement {
+    let thinner = panel.clone();
+    let thicker = panel.clone();
+
+    h_flex()
+        .gap_1()
+        .items_center()
+        .child(
+            div()
+                .flex_1()
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.renderer.annotations.nib").into_owned()),
+        )
+        .child(
+            Button::new("replay-renderer-nib-thinner")
+                .label("-")
+                .compact()
+                .disabled(width <= MIN_NIB)
+                .tooltip(t!("ui.renderer.annotations.thinner").into_owned())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    thinner.update(cx, |panel, cx| panel.step_nib(-1.0, cx));
+                }),
+        )
+        .child(
+            div()
+                .id("replay-renderer-nib")
+                .test_support()
+                .aria_label(format!("{width:.0}"))
+                .w(px(16.))
+                .text_xs()
+                .child(format!("{width:.0}")),
+        )
+        .child(
+            Button::new("replay-renderer-nib-thicker")
+                .label("+")
+                .compact()
+                .disabled(width >= MAX_NIB)
+                .tooltip(t!("ui.renderer.annotations.thicker").into_owned())
+                .on_click(move |_event, _window, cx: &mut App| {
+                    thicker.update(cx, |panel, cx| panel.step_nib(1.0, cx));
+                }),
+        )
+        .into_any_element()
+}
+
+/// What the keys do, shown in the corner while ctrl is held.
+///
+/// The egui board and renderer both put this up (`minimap_view/shapes.rs`'s
+/// `draw_shortcut_overlay`), which is how a reader finds the chords at all: none
+/// of them appear anywhere else.
+fn shortcut_sheet(cx: &App) -> AnyElement {
+    let heading = |text: String| div().text_xs().text_color(crate::theme::text_dim()).child(text);
+    let row = |chord: &'static str, named: String| {
+        h_flex()
+            .gap_2()
+            .justify_between()
+            .child(div().text_xs().child(chord))
+            .child(div().text_xs().text_color(crate::theme::text_dim()).child(named))
+    };
+
+    div()
+        .absolute()
+        .inset_0()
+        .flex()
+        .justify_end()
+        .items_end()
+        .p_2()
+        .child(
+            v_flex()
+                .id("replay-renderer-shortcuts")
+                .test_support()
+                .gap_1()
+                .p_2()
+                .rounded(px(6.))
+                .bg(cx.theme().popover)
+                .border_1()
+                .border_color(cx.theme().border)
+                .child(div().text_xs().child(t!("ui.renderer.annotations.shortcuts_title").into_owned()))
+                .child(heading(t!("ui.renderer.annotations.shortcuts_tools").into_owned()))
+                .children(
+                    TOOLS
+                        .iter()
+                        .filter_map(|button| button.chord.map(|chord| row(chord, t!(button.label).into_owned()))),
+                )
+                .child(heading(t!("ui.renderer.annotations.shortcuts_actions").into_owned()))
+                .children(ANNOTATION_ACTIONS.iter().map(|(chord, label)| row(chord, t!(*label).into_owned()))),
+        )
         .into_any_element()
 }
 
@@ -4510,6 +4704,54 @@ mod tests {
                 );
             })
             .expect("the window is open");
+    }
+
+    /// The bracket keys widen and narrow the nib, within the range the egui
+    /// board holds it to, and only while a tool is in hand.
+    #[gpui_kit::test]
+    fn the_bracket_keys_move_the_nib_within_its_range(cx: &mut TestAppContext) {
+        use wt_collab_client::drawing::Tool;
+
+        cx.update(gpui_kit::init);
+        let window = cx.open_window(size(px(900.), px(400.)), |window, cx| {
+            ReplayRendererPanel::ready_for_test(vec![0.0, 30.0], window, cx)
+        });
+
+        window
+            .update(cx, |panel, _window, cx| {
+                let opened_at = panel.drawing.width();
+
+                panel.take_up(Tool::Freehand, cx);
+                panel.step_nib(1.0, cx);
+                assert!(panel.drawing.width() > opened_at, "] draws thicker");
+
+                for _ in 0..20 {
+                    panel.step_nib(1.0, cx);
+                }
+                assert_eq!(panel.drawing.width(), super::MAX_NIB, "and stops at the thickest the board offers");
+
+                for _ in 0..20 {
+                    panel.step_nib(-1.0, cx);
+                }
+                assert_eq!(panel.drawing.width(), super::MIN_NIB, "as it does at the thinnest");
+            })
+            .expect("the window is open");
+    }
+
+    /// Every chord the cheat sheet lists is one the viewport answers to, so the
+    /// sheet cannot drift from the keys.
+    #[test]
+    fn the_cheat_sheet_lists_the_chords_that_work() {
+        for button in super::TOOLS {
+            let Some(chord) = button.chord else { continue };
+            let key = chord.strip_prefix("Ctrl+").expect("every tool chord is a ctrl one").to_ascii_lowercase();
+            assert_eq!(
+                super::tool_for_key(&key).map(|tool| std::mem::discriminant(&tool)),
+                Some(std::mem::discriminant(&(button.tool)())),
+                "{chord} is listed as {}",
+                button.label
+            );
+        }
     }
 
     /// A batch says which replay it has reached before it reads it, in order,
