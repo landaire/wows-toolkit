@@ -361,7 +361,10 @@ pub struct ReplayBrowser {
 /// rather than showing a list of raw ship and map ids, while the second never
 /// will, so the raw ids are all there is to show.
 enum GameData {
-    Loading,
+    /// With the version being loaded, when the install named one.
+    Loading {
+        version: Option<String>,
+    },
     Unavailable,
     Ready(Arc<GameMetadataProvider>),
 }
@@ -370,7 +373,7 @@ impl GameData {
     fn provider(&self) -> Option<&GameMetadataProvider> {
         match self {
             GameData::Ready(provider) => Some(provider),
-            GameData::Loading | GameData::Unavailable => None,
+            GameData::Loading { .. } | GameData::Unavailable => None,
         }
     }
 }
@@ -436,7 +439,7 @@ impl ReplayBrowser {
             selected_path: None,
             chosen_directory: None,
             open_requested: None,
-            game_data: GameData::Loading,
+            game_data: GameData::Loading { version: None },
             summaries: HashMap::new(),
             locale: None,
             build_cache: None,
@@ -474,12 +477,13 @@ impl ReplayBrowser {
     pub fn set_game_data(&mut self, status: &GameDataStatus, cx: &mut Context<Self>) {
         let new_state = match status {
             GameDataStatus::Ready(loaded) => GameData::Ready(Arc::clone(loaded.provider())),
-            GameDataStatus::Loading => GameData::Loading,
+            GameDataStatus::Loading { version } => GameData::Loading { version: version.clone() },
             GameDataStatus::Failed(_) => GameData::Unavailable,
         };
         let unchanged = match (&self.game_data, &new_state) {
             (GameData::Ready(current), GameData::Ready(new)) => Arc::ptr_eq(current, new),
-            (GameData::Loading, GameData::Loading) | (GameData::Unavailable, GameData::Unavailable) => true,
+            (GameData::Loading { version: current }, GameData::Loading { version: new }) => current == new,
+            (GameData::Unavailable, GameData::Unavailable) => true,
             _ => false,
         };
         if unchanged {
@@ -1217,12 +1221,21 @@ impl Render for ReplayBrowser {
             // list built before it loads is a list of raw ids. The egui app
             // never shows that state: it builds its listing as part of the
             // same load (`task/replays.rs::load_wows_files`).
-            ScanStatus::Loaded if matches!(self.game_data, GameData::Loading) => div()
-                .p_2()
-                .text_sm()
-                .text_color(crate::theme::text_dim())
-                .child(t!("ui.replay.loading_game_data").to_string())
-                .into_any_element(),
+            ScanStatus::Loaded if matches!(self.game_data, GameData::Loading { .. }) => {
+                let said = loading_said(&self.game_data);
+                h_flex()
+                    .id("replay-listing-loading")
+                    .test_support()
+                    .aria_label(said.clone())
+                    .p_2()
+                    .gap_2()
+                    .items_center()
+                    .text_sm()
+                    .text_color(crate::theme::text_dim())
+                    .child(Spinner::new())
+                    .child(said)
+                    .into_any_element()
+            }
             ScanStatus::Loaded => {
                 let entity = entity.clone();
                 let leaf_info = self.leaf_info.clone();
@@ -1678,6 +1691,20 @@ fn scan_replay_files(
     out
 }
 
+/// What the listing says while it waits for the game data.
+///
+/// The version comes from the install's own `preferences.xml`, so the line names
+/// what is being loaded rather than only that something is; without one it says
+/// what it can.
+fn loading_said(game_data: &GameData) -> String {
+    match game_data {
+        GameData::Loading { version: Some(version) } => {
+            t!("ui.replay.loading_game_data_version", version = version).into_owned()
+        }
+        _ => t!("ui.replay.loading_game_data").into_owned(),
+    }
+}
+
 /// The listed builds nothing on this machine can read, with how many replays
 /// each one accounts for.
 ///
@@ -1904,6 +1931,18 @@ mod tests {
             cx.update(|cx| browser.read(cx).chosen_directory().is_none()),
             "and forgets it once the install's own directory is listed again"
         );
+    }
+
+    /// The listing names the version it is waiting for, and says what it can
+    /// when the install named none.
+    #[test]
+    fn the_listing_names_the_version_it_is_loading() {
+        let named = super::loading_said(&super::GameData::Loading { version: Some("0.10.5.0".to_owned()) });
+        assert!(named.contains("0.10.5.0"), "got {named:?}");
+
+        let unnamed = super::loading_said(&super::GameData::Loading { version: None });
+        assert!(!unnamed.is_empty());
+        assert!(!unnamed.contains("0.10.5.0"));
     }
 
     /// A build nothing on this machine can read is reported once, with how many

@@ -304,7 +304,7 @@ impl ReplayInspectorView {
             collab_token: cx.new(|cx| InputState::new(window, cx).placeholder("toolkit-...".to_string())),
             dock_area,
             game_data: None,
-            game_data_status: GameDataStatus::Loading,
+            game_data_status: GameDataStatus::Loading { version: None },
             has_opened_replay: false,
             open_panels: HashMap::new(),
             current_replay: None,
@@ -401,7 +401,13 @@ impl ReplayInspectorView {
             .detach();
         }
         self.game_data = Some(game_data.clone());
-        self.game_data_status = GameDataStatus::Loading;
+        // Named from the install's own `preferences.xml`, which is a file read
+        // rather than a build load, so the listing can say which version it is
+        // waiting for while the load runs.
+        self.game_data_status = GameDataStatus::Loading {
+            version: super::load::installed_version(std::path::Path::new(&wows_dir))
+                .map(|version| format!("{}.{}.{}", version.major, version.minor, version.patch)),
+        };
         let status = self.game_data_status.clone();
         self.browser.update(cx, |browser, cx| {
             browser.start_scan(wows_dir.clone(), cx);
@@ -431,7 +437,7 @@ impl ReplayInspectorView {
                     GameDataStatus::Failed(reason) => {
                         crate::toast::failed(reason.clone(), window, cx);
                     }
-                    GameDataStatus::Loading => {}
+                    GameDataStatus::Loading { .. } => {}
                 }
                 cx.notify();
             });
@@ -1358,7 +1364,7 @@ impl Render for ReplayInspectorView {
                     .child(t!("ui.replay.game_data_failed", error = reason).to_string())
                     .into_any_element(),
             ),
-            GameDataStatus::Loading | GameDataStatus::Ready(_) => None,
+            GameDataStatus::Loading { .. } | GameDataStatus::Ready(_) => None,
         };
 
         let entity = cx.entity();
