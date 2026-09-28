@@ -4,6 +4,7 @@
 //! Colors are represented as `ColorRole`, resolved to real colors by the
 //! render layer (Milestone 2); no `gpui_kit`/`egui` color type appears here.
 
+use rust_i18n::t;
 use wows_replay_insights::personal_rating::PersonalRatingCategory;
 use wows_replays::types::Relation;
 use wows_toolkit_config::ReplaySettings;
@@ -136,9 +137,6 @@ pub enum BattleOutcome {
 
 pub(crate) const NDA: &str = "NDA";
 const DASH: &str = "-";
-const HEALS_TOOLTIP: &str = "Number of Repair Party activations observed for this player. May be inaccurate for ships not rendered on screen (i.e. enemy ships that were never spotted).";
-const HEALS_NO_REPAIR_TOOLTIP: &str = "This ship does not have a Repair Party consumable.";
-const NOT_SPOTTED_TOOLTIP: &str = "This ship was never spotted. Build info unavailable.";
 
 /// Display text, optional color role, and optional hover text for one cell.
 /// Plain data: no gpui_kit/egui type appears here.
@@ -259,7 +257,7 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
                 CellValue::plain(DASH)
             } else if !row.has_vehicle_entity {
                 CellValue::colored(DASH, ColorRole::CaptainPoints(CaptainPointsTier::Bad))
-                    .with_hover(NOT_SPOTTED_TOOLTIP)
+                    .with_hover(t!("ui.replay.build.not_spotted").into_owned())
             } else {
                 let mut cell = CellValue::colored(
                     row.skill_label_text.clone(),
@@ -347,8 +345,10 @@ pub fn cell_value(row: &PlayerRow, col: ReplayColumn, debug: bool) -> CellValue 
             None => CellValue::plain(DASH),
         },
         ReplayColumn::Heals => match row.heal_count {
-            Some(count) => CellValue::plain(count.to_string()).with_hover(HEALS_TOOLTIP),
-            None => CellValue::plain(DASH).with_hover(HEALS_NO_REPAIR_TOOLTIP),
+            Some(count) => {
+                CellValue::plain(count.to_string()).with_hover(t!("ui.replay.column.heals_tooltip").into_owned())
+            }
+            None => CellValue::plain(DASH).with_hover(t!("ui.replay.column.heals_no_repair_tooltip").into_owned()),
         },
         ReplayColumn::DistanceTraveled => match row.distance_traveled {
             Some(distance) => CellValue::plain(format!("{distance:.2}km")),

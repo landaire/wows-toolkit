@@ -94,8 +94,6 @@ use wows_toolkit_viewmodel::replay_export::FlattenedVehicle;
 use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::twitch;
 
-const LOADING_TITLE: &str = "Loading...";
-const FAILED_TITLE: &str = "Failed to load replay";
 const SIDE_PANEL_WIDTH: Pixels = px(360.);
 /// Which entity (if any) occupies the panel's single side-panel slot. Chat
 /// and the debug-mode raw viewers share the slot rather than each having
@@ -316,14 +314,18 @@ impl ReplayPanel {
             LoadState::Loaded(loaded) => loaded.title.replace([' ', '/'], "_"),
             _ => "replay".to_string(),
         };
-        let asked = crate::dialog::save_file(Some("Export results"), &format!("{name}.{}", format.extension()), None);
+        let asked = crate::dialog::save_file(
+            Some(&t!("ui.replay.export_results_title")),
+            &format!("{name}.{}", format.extension()),
+            None,
+        );
 
         cx.spawn(async move |this, cx| {
             let Some(path) = asked.await else { return };
             let written = cx.background_spawn(async move { write_export(&export, &path, format) }).await;
             let _ = this.update(cx, |this, cx| {
                 this.export_status = match written {
-                    Ok(()) => Some("Results exported".to_string()),
+                    Ok(()) => Some(t!("ui.replay.results_exported").into_owned()),
                     Err(err) => {
                         tracing::warn!("replay export failed: {err}");
                         Some(err.to_string())
@@ -534,9 +536,9 @@ impl BasePanel for ReplayPanel {
 impl Panel for ReplayPanel {
     fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         match &self.state {
-            LoadState::Loading => SharedString::from(LOADING_TITLE),
+            LoadState::Loading => SharedString::from(t!("ui.replay.loading").into_owned()),
             LoadState::Loaded(loaded) => loaded.title.clone(),
-            LoadState::Failed(_) => SharedString::from(FAILED_TITLE),
+            LoadState::Failed(_) => SharedString::from(t!("ui.messages.replay_load_failed").into_owned()),
         }
     }
 }
@@ -1064,13 +1066,21 @@ impl ReplayPanel {
 impl Render for ReplayPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let body = match &self.state {
-            LoadState::Loading => {
-                div().p_2().text_sm().text_color(crate::theme::text_dim()).child(LOADING_TITLE).into_any_element()
-            }
+            LoadState::Loading => div()
+                .p_2()
+                .text_sm()
+                .text_color(crate::theme::text_dim())
+                .child(t!("ui.replay.loading").into_owned())
+                .into_any_element(),
             LoadState::Failed(err) => v_flex()
                 .p_2()
                 .gap_1()
-                .child(div().text_sm().font_weight(FontWeight::BOLD).child(FAILED_TITLE))
+                .child(
+                    div()
+                        .text_sm()
+                        .font_weight(FontWeight::BOLD)
+                        .child(t!("ui.messages.replay_load_failed").into_owned()),
+                )
                 .child(div().text_sm().text_color(crate::theme::text_dim()).child(err.to_string()))
                 .into_any_element(),
             LoadState::Loaded(loaded) => {

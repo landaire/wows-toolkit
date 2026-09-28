@@ -354,7 +354,7 @@ impl ReplayInspectorView {
 
         if wows_dir.is_empty() {
             self.game_data = None;
-            self.game_data_status = GameDataStatus::Failed("World of Warships directory is not set".to_string());
+            self.game_data_status = GameDataStatus::Failed(t!("ui.messages.wows_dir_not_set").into_owned());
             let status = self.game_data_status.clone();
             self.browser.update(cx, |browser, cx| {
                 browser.start_scan(wows_dir, cx);

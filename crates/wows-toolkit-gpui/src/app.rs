@@ -1528,7 +1528,7 @@ impl App {
     fn paste_twitch_token(&mut self, cx: &mut Context<Self>) {
         let pasted = cx.read_from_clipboard().and_then(|item| item.text());
         let Some(pasted) = pasted else {
-            self.twitch_paste = Some(Err("The clipboard holds no text".to_string()));
+            self.twitch_paste = Some(Err(t!("ui.collab.clipboard_empty").into_owned()));
             cx.notify();
             return;
         };
