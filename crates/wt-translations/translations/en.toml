@@ -128,6 +128,7 @@ no_replays_detected = "No replays detected — is your WoWs directory properly c
 build_loaded = "Loaded build %{build}"
 downloading_game_data = "Downloading game data..."
 game_data_downloaded = "Downloaded game data for build %{build}"
+game_data_builds_downloaded = "Downloaded game data for %{count} build(s)"
 game_data_download_failed = "Could not download game data"
 game_data_build_download_failed = "Could not download game data for build %{build}"
 checking_game_data_updates = "Checking for game data updates..."
