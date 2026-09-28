@@ -183,12 +183,13 @@ have used it.
     blacklist (`data/replay_reconcile.rs:248`), and `replays_under` walks
     `temp.wowsreplay` so a live battle counts as a failure
     (`replay_index.rs:50-67`).
-28. **Cache housekeeping.** No startup migration of an old cache layout, no
-    `migrate_to_cas`, no `gc_unreferenced` (`app.rs:1502-1525`), and no pruning
-    of `game_params_{build}.bin` for builds no longer installed
+28. **Cache housekeeping.** Reporting is done 2026-09-28: every finished cache
+    job says what it found, clean or not, in the egui app's words. Still missing:
+    the startup migration of an old cache layout, `migrate_to_cas`,
+    `gc_unreferenced` (`app.rs:1502-1525`), and the pruning of
+    `game_params_{build}.bin` for builds no longer installed
     (`util/game_params.rs:59`) although the port writes those files
-    (`load.rs:104`). A clean Check or Validate also reports nothing at all
-    (`app.rs:1240-1270`): only failure gets a line.
+    (`load.rs:104`).
 29. ~~**Preview failures say nothing.**~~ Done 2026-09-27: `PreviewError::said`
     carries the egui popup's four messages (plus one for a render failure the
     egui path cannot have), `PreviewHover` keeps the reason for the watched row,
@@ -231,10 +232,8 @@ have used it.
     the standard environment variables, then the Windows configuration, and the
     port applies the bypass list too. The egui app's `util::proxy` is a re-export
     of it.
-37. **A live OS theme switch is not followed.** `apply_egui_theme` is called at
-    startup, on a theme change and on a zoom drag only; there is no appearance
-    observer, where egui's `ThemePreference::System` follows the desktop. Read
-    from code, not verified by running.
+37. ~~**A live OS theme switch is not followed.**~~ Done 2026-09-28: the window's
+    appearance observer re-applies the palette while the theme is "System".
 38. **Staged ingest progress.** The egui app reports Scanning, Downloading game
     data, Loading game data for a version, and Reading (`task/replays.rs:1579`);
     the port reports scan and read counts only, so a build being fetched or

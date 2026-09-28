@@ -8,6 +8,7 @@ use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::WindowExt as _;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants as _;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::command::Command;
 use gpui_kit::component::command::CommandState;
@@ -18,6 +19,8 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
+use gpui_kit::component::menu::DropdownMenu as _;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::searchable_list::SearchableListItem;
 use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::Select;
@@ -45,6 +48,82 @@ use crate::replay_inspector::MissingBuild;
 use crate::replay_inspector::ReplayInspectorView;
 use crate::replay_inspector::view::GameDataMissing;
 use crate::replay_inspector::view::ReplaySettingsChanged;
+
+/// Where the menu's links go, as the egui menu bar sends them.
+const ISSUES_URL: &str = "https://github.com/landaire/wows-toolkit/issues/new/choose";
+const DISCORD_URL: &str = "https://discord.gg/RJXjXHUj7rh";
+/// What the PR figures are credited to, which the About window links.
+const PR_INFO_URL: &str = "https://wows-numbers.com/personal/rating";
+const PROJECT_URL: &str = "https://github.com/landaire/wows-toolkit";
+
+/// Who made this, what it is built on, and where to look next.
+///
+/// The same lines as the egui About window (`app.rs`'s `build_about_window`),
+/// with this app's own version at the top: a bug report that names a build is
+/// worth more than one that does not.
+fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
+    window.open_alert_dialog(cx, move |alert, _window, _cx| {
+        alert
+            .title(t!("ui.windows.about").into_owned())
+            .description(
+                [
+                    format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION")),
+                    t!("ui.labels.made_by").into_owned(),
+                    t!("ui.labels.credits").into_owned(),
+                    format!("{} {PR_INFO_URL}", t!("ui.labels.pr_credits")),
+                    PROJECT_URL.to_string(),
+                ]
+                .join(
+                    "
+
+",
+                ),
+            )
+            .ok_text(t!("ui.buttons.view_github").into_owned())
+            .show_cancel(true)
+            .on_ok(move |_event, _window, cx| {
+                cx.open_url(PROJECT_URL);
+                true
+            })
+    });
+}
+
+/// What a finished cache job has to say, until the next draw says it.
+///
+/// Kept rather than said where it is decided: the job's completion runs without a
+/// window, and a message needs one.
+struct CacheReport {
+    said: String,
+    level: ReportLevel,
+}
+
+enum ReportLevel {
+    Ok,
+    Warn,
+    Failed,
+}
+
+impl CacheReport {
+    fn ok(said: String) -> Self {
+        Self { said, level: ReportLevel::Ok }
+    }
+
+    fn warn(said: String) -> Self {
+        Self { said, level: ReportLevel::Warn }
+    }
+
+    fn failed(said: String) -> Self {
+        Self { said, level: ReportLevel::Failed }
+    }
+
+    fn say(self, window: &mut Window, cx: &mut gpui_kit::App) {
+        match self.level {
+            ReportLevel::Ok => crate::toast::ok(self.said, window, cx),
+            ReportLevel::Warn => crate::toast::warn(self.said, window, cx),
+            ReportLevel::Failed => crate::toast::failed(self.said, window, cx),
+        }
+    }
+}
 
 /// The states the app reports with a message that stays until they are fixed.
 const STUCK_WOWS_DIR: &str = "wows-dir";
@@ -271,6 +350,8 @@ pub struct App {
     /// The game-data cache: what is there, what is stale, and what job is
     /// running against it.
     cache: game_data_cache::CacheState,
+    /// What the last finished cache job has to say, until a draw says it.
+    cache_said: Option<CacheReport>,
     /// The name this app appears under to the peers in a session. Written
     /// back to the row the Replay Inspector's own session popover reads.
     collab_name_input: Entity<InputState>,
@@ -370,6 +451,20 @@ impl App {
         });
         let proxy_edited = cx.subscribe(&proxy_input, Self::on_proxy_edited);
         let twitch_channel_edited = cx.subscribe(&twitch_channel_input, Self::on_twitch_channel_edited);
+        // The desktop switching between light and dark is followed while the
+        // theme is "System", which is what that choice means; the egui app gets
+        // this from `ThemePreference::System`.
+        let watched = cx.entity().downgrade();
+        let appearance_changed = window.observe_window_appearance(move |window, cx| {
+            let Some(app) = watched.upgrade() else { return };
+            app.update(cx, |this, cx| {
+                if this.theme != ThemeChoice::System {
+                    return;
+                }
+                theme::apply_egui_theme(this.theme, this.zoom, window, cx);
+                cx.notify();
+            });
+        });
         let cache_dir_edited = cx.subscribe(&cache_dir_input, Self::on_cache_dir_edited);
         let collab_name_edited = cx.subscribe(&collab_name_input, Self::on_collab_name_edited);
         // `Confirm(None)` is the cleared-selection case, which this combo
@@ -405,6 +500,7 @@ impl App {
             proxy_input,
             cache_dir_input,
             cache: game_data_cache::CacheState::default(),
+            cache_said: None,
             collab_name_input,
             index_progress: None,
             index_outcome: None,
@@ -422,6 +518,7 @@ impl App {
                 wows_dir_edited,
                 proxy_edited,
                 twitch_channel_edited,
+                appearance_changed,
                 cache_dir_edited,
                 collab_name_edited,
                 search_event,
@@ -1423,6 +1520,14 @@ impl App {
         match outcome {
             game_data_cache::CacheOutcome::Checked { tip, updates } => {
                 let clean = updates.is_empty();
+                // A clean result said nothing at all before: the spinner stopped
+                // and the reader was left to guess. The egui app reports both
+                // answers (`app.rs:2175`).
+                self.cache_said = Some(if clean {
+                    CacheReport::ok(t!("ui.messages.game_data_up_to_date").into_owned())
+                } else {
+                    CacheReport::warn(t!("ui.messages.game_data_updates_available", count = updates.len()).into_owned())
+                });
                 self.cache.updates = updates;
                 if clean {
                     self.remember_cache_tip(tip, cx);
@@ -1430,6 +1535,11 @@ impl App {
             }
             game_data_cache::CacheOutcome::Validated { tip, repair } => {
                 let clean = repair.is_empty();
+                self.cache_said = Some(if clean {
+                    CacheReport::ok(t!("ui.messages.game_data_cache_valid").into_owned())
+                } else {
+                    CacheReport::warn(t!("ui.messages.game_data_cache_invalid", count = repair.len()).into_owned())
+                });
                 self.cache.repair = repair;
                 if clean {
                     self.remember_cache_tip(tip, cx);
@@ -1443,11 +1553,18 @@ impl App {
                     self.cache.repair.clear();
                     self.cache.forget_stats();
                 }
+                self.cache_said = Some(if failed.is_empty() {
+                    CacheReport::ok(t!("ui.messages.game_data_builds_downloaded", count = fetched).into_owned())
+                } else {
+                    CacheReport::failed(t!("ui.messages.game_data_download_failed").into_owned())
+                });
                 if !failed.is_empty() {
                     self.cache.failure = Some(t!("ui.messages.game_data_download_failed").into_owned());
                 }
             }
-            game_data_cache::CacheOutcome::Failed(_) => {}
+            game_data_cache::CacheOutcome::Failed(reason) => {
+                self.cache_said = Some(CacheReport::failed(reason));
+            }
         }
         cx.notify();
     }
@@ -2444,6 +2561,38 @@ impl Render for App {
                 cx.notify();
             }));
 
+        // What the egui app's menu bar carries (`app.rs:4751`), at the end of
+        // the strip rather than in a row of its own: a row holding three items
+        // above the tabs is a web page's chrome, and this is a desktop window.
+        let app_menu = Button::new("app-menu")
+            .ghost()
+            .small()
+            .icon(IconName::Ellipsis)
+            .tooltip(t!("ui.menu.file").to_string())
+            .dropdown_menu(|menu, _window, _cx| {
+                menu.item(PopupMenuItem::new(t!("ui.menu.about").into_owned()).on_click(move |_event, window, cx| {
+                    show_about(window, cx);
+                }))
+                .separator()
+                .item(PopupMenuItem::link(t!("ui.buttons.create_issue").into_owned(), ISSUES_URL))
+                .item(PopupMenuItem::link(t!("ui.buttons.discord").into_owned(), DISCORD_URL))
+                .separator()
+                .item(PopupMenuItem::new(t!("ui.menu.quit").into_owned()).on_click(
+                    move |_event, _window, cx| {
+                        cx.quit();
+                    },
+                ))
+            });
+        let strip = h_flex()
+            .flex_none()
+            .items_center()
+            .child(div().flex_1().min_w(px(0.)).child(tabs))
+            .child(div().flex_none().px_1().child(app_menu));
+
+        if let Some(report) = self.cache_said.take() {
+            cx.defer_in(window, move |_this, window, cx| report.say(window, cx));
+        }
+
         let body = match self.active_tab {
             AppTab::Settings => self.render_settings_tab(cx).into_any_element(),
             AppTab::ReplayInspector => self.replay_inspector.clone().into_any_element(),
@@ -2497,7 +2646,7 @@ impl Render for App {
                     _ => {}
                 }
             }))
-            .child(tabs)
+            .child(strip)
             // The rule under the strip, in the tone meant to be seen: it is
             // what separates the chrome from the page rather than two greys
             // meeting.
