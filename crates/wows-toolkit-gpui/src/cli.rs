@@ -1,22 +1,66 @@
 //! What this process was asked to do on the command line.
 //!
-//! The egui app takes flags for the renderer ladder (`--cpu-renderer`,
-//! `--gpu-adapter`, `--gpu-safe-mode`, `--list-gpus`), for the process
-//! mitigations (`--no-hardening`) and for the updater's cleanup step
-//! (`finalize-update --replaced`, plus the bare-path form every released version
-//! emits). Each names something this port does not have: it renders through
-//! gpui's own backend with no adapter selection, applies no mitigations, and has
-//! no updater to finalize. A flag that parsed and then did nothing would be
-//! worse than one that is refused by name, so this takes none of them yet.
+//! `finalize-update --replaced <path>` is what an update spawns to delete the
+//! executable it replaced, and the bare-path form is the same thing as every
+//! released version emits it: those versions cannot be changed, so the form is
+//! accepted for as long as one of them can still update into this binary.
 //!
-//! What it does take is `--help` and `--version`, and it refuses anything else
-//! rather than starting the app as though the argument had been honoured.
+//! The egui app also takes flags for the renderer ladder (`--cpu-renderer`,
+//! `--gpu-adapter`, `--gpu-safe-mode`, `--list-gpus`) and for the process
+//! mitigations (`--no-hardening`). Each names something this port does not have:
+//! it renders through gpui's own backend with no adapter selection and applies no
+//! mitigations. A flag that parsed and then did nothing would be worse than one
+//! that is refused by name, so this takes none of them yet.
+
+use std::ffi::OsString;
+use std::path::PathBuf;
 
 use clap::Parser;
+use clap::Subcommand;
 
 #[derive(Debug, Default, Parser)]
 #[command(name = "wows-toolkit-gpui", version, about)]
-pub struct Cli {}
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Option<Command>,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Command {
+    /// Delete the binary this process replaced during an update.
+    FinalizeUpdate {
+        #[arg(long)]
+        replaced: PathBuf,
+    },
+}
+
+/// What this process was asked to do.
+#[derive(Debug)]
+pub enum Invocation {
+    /// Delete the named binary, then carry on and open the window.
+    FinalizeUpdate(PathBuf),
+    /// Open the window.
+    Run,
+}
+
+/// Subcommand names a bare path must not be mistaken for.
+const SUBCOMMANDS: &[&str] = &["finalize-update", "help"];
+
+/// The argument form every released version emits: the app, and the path of the
+/// binary it replaced.
+///
+/// Recognised before clap, because a bare filesystem path is ambiguous with a
+/// subcommand name and resolving that inside clap's grammar would hide the
+/// contract. Syntactic only: `update::finalize` decides whether the path may
+/// actually be deleted.
+fn legacy_finalize_target(args: &[OsString]) -> Option<PathBuf> {
+    let [_program, single] = args else { return None };
+    let text = single.to_str()?;
+    if text.starts_with('-') || SUBCOMMANDS.contains(&text) {
+        return None;
+    }
+    Some(PathBuf::from(single))
+}
 
 /// Reads the process arguments.
 ///
@@ -25,9 +69,17 @@ pub struct Cli {}
 /// clap's own printing, because a release build has no console of its own: clap
 /// would write into a handle nothing reads and the process would exit looking
 /// like it had crashed.
-pub fn parse() -> Cli {
-    match Cli::try_parse() {
-        Ok(cli) => cli,
+pub fn parse() -> Invocation {
+    let args: Vec<OsString> = std::env::args_os().collect();
+    if let Some(replaced) = legacy_finalize_target(&args) {
+        return Invocation::FinalizeUpdate(replaced);
+    }
+
+    match Cli::try_parse_from(&args) {
+        Ok(cli) => match cli.command {
+            Some(Command::FinalizeUpdate { replaced }) => Invocation::FinalizeUpdate(replaced),
+            None => Invocation::Run,
+        },
         Err(err) => {
             let title = format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION"));
             report_startup_message(&title, &err.render().to_string(), err.use_stderr());
@@ -129,8 +181,8 @@ mod tests {
     use super::*;
 
     /// A flag the egui app takes and this build does not is refused, not
-    /// swallowed: the user is told the renderer or the updater is not here yet
-    /// rather than left believing the launch honoured it.
+    /// swallowed: the user is told the renderer is not here yet rather than left
+    /// believing the launch honoured it.
     #[test]
     fn a_flag_this_build_does_not_have_is_refused() {
         for flag in ["--cpu-renderer", "--gpu-safe-mode", "--list-gpus", "--no-hardening"] {
@@ -143,5 +195,25 @@ mod tests {
     #[test]
     fn a_bare_launch_parses() {
         assert!(Cli::try_parse_from(["wows-toolkit-gpui"]).is_ok());
+    }
+
+    /// The cleanup step is taken both ways: as this build spawns it, and as every
+    /// released version spawns it, which is a bare path.
+    #[test]
+    fn the_finalize_step_is_taken_in_both_forms() {
+        let named = Cli::try_parse_from(["wows-toolkit-gpui", "finalize-update", "--replaced", "old.exe"])
+            .expect("the subcommand parses");
+        assert!(matches!(named.command, Some(Command::FinalizeUpdate { .. })));
+
+        let legacy = legacy_finalize_target(&["app".into(), "C:/x/wows_toolkit.exe.old".into()]);
+        assert_eq!(legacy, Some(PathBuf::from("C:/x/wows_toolkit.exe.old")));
+    }
+
+    /// A subcommand name and a flag are not paths, whatever they look like.
+    #[test]
+    fn a_subcommand_or_a_flag_is_not_a_legacy_path() {
+        assert_eq!(legacy_finalize_target(&["app".into(), "finalize-update".into()]), None);
+        assert_eq!(legacy_finalize_target(&["app".into(), "--help".into()]), None);
+        assert_eq!(legacy_finalize_target(&["app".into()]), None, "a bare launch names nothing");
     }
 }

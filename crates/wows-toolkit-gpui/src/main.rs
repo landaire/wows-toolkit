@@ -36,6 +36,7 @@ mod toast;
 mod twitch;
 mod ui;
 mod unpacker;
+mod update;
 mod upload;
 mod viewport;
 mod window_shell;
@@ -54,7 +55,11 @@ fn main() {
     // Before anything is opened: an argument this build does not take is
     // reported and the process exits, rather than a window appearing as though
     // it had been honoured.
-    let _cli = cli::parse();
+    // The cleanup step first, then the window: the binary this replaced is only
+    // deletable once the process that spawned this one has exited, and it has.
+    if let cli::Invocation::FinalizeUpdate(replaced) = cli::parse() {
+        update::finalize(&replaced);
+    }
 
     // The log file is what a bug report is copied from, so it is started before
     // anything that could fail. The setting is read straight from the database:
@@ -175,6 +180,9 @@ fn main() {
                 theme::apply_egui_theme(theme_choice, zoom, window, cx);
                 app_entity.update(cx, |app, cx| {
                     app.report_last_crash(window, cx);
+                    if loaded.check_for_updates {
+                        app.check_for_update(app::Asked::AtStartup, window, cx);
+                    }
                     app.apply_settings(loaded, window, cx);
                     app.apply_session_stats(session, window, cx);
                     app.start_player_tracker(pool, cx);

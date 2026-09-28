@@ -1,67 +1,16 @@
 use std::ffi::OsString;
 use std::io::Write;
-use std::path::Path;
 use std::path::PathBuf;
 
 use clap::Parser;
 use clap::Subcommand;
-use thiserror::Error;
 
-/// Why a replaced-binary path was rejected. This gates a delete driven by an
-/// untrusted argument, so each rejection carries the paths that caused it.
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum FinalizeError {
-    #[error("replaced binary {replaced:?} is not in the same directory as {current:?}")]
-    DifferentDirectory { replaced: PathBuf, current: PathBuf },
-    #[error("replaced binary {replaced:?} does not have a .old extension")]
-    UnexpectedName { replaced: PathBuf },
-    #[error("replaced binary {replaced:?} does not exist")]
-    Missing { replaced: PathBuf },
-}
-
-/// Decide whether `replaced` may be deleted by this process.
+/// What a finalize step may delete, and why a path was refused.
 ///
-/// The directory check keeps an argument from naming a file elsewhere on the
-/// system. The extension check narrows it further: every version that emits
-/// this argument produces `<exe>.old`.
-///
-/// Versions v0.1.10 through v0.1.40 spawned the replacement using `argv[0]`,
-/// which is relative when the app was launched by name from a shell, while
-/// `current_exe()` is always absolute. Normalizing both sides before the
-/// directory comparison is what makes those old launches still match; without
-/// it, `Some("")` (the relative parent) never equals an absolute directory
-/// and every update from those versions silently fails to finalize.
-///
-/// Returns the normalized `replaced` path on success. The caller must delete
-/// that returned path, not the argument it passed in: this makes the "nothing
-/// outside the executable's directory can be deleted" property true by
-/// construction, instead of resting on the raw argument happening to already
-/// be lexically equivalent to what was validated.
-pub fn validate_finalize_target(current_exe: &Path, replaced: &Path) -> Result<PathBuf, FinalizeError> {
-    // std::path::absolute is purely lexical (no filesystem access), so falling
-    // back to the un-normalized path on error only keeps the comparison
-    // stricter and can never widen what this function agrees to delete.
-    let current_exe = std::path::absolute(current_exe).unwrap_or_else(|_| current_exe.to_path_buf());
-    let replaced = std::path::absolute(replaced).unwrap_or_else(|_| replaced.to_path_buf());
-
-    if current_exe.parent() != replaced.parent() {
-        return Err(FinalizeError::DifferentDirectory { replaced, current: current_exe });
-    }
-
-    if replaced.extension() != Some("old".as_ref()) {
-        return Err(FinalizeError::UnexpectedName { replaced });
-    }
-
-    if !replaced.exists() {
-        return Err(FinalizeError::Missing { replaced });
-    }
-
-    // remove_file (via CreateFileW with FILE_FLAG_OPEN_REPARSE_POINT on
-    // Windows) unlinks a symlink or junction itself rather than following it,
-    // so the directory check above still bounds what actually gets deleted
-    // even if `replaced` is a reparse point.
-    Ok(replaced)
-}
+/// Moved to `wows_toolkit_viewmodel::update` so the GPUI port gates the same
+/// delete the same way; this is the path the rest of this crate uses.
+pub use wows_toolkit_viewmodel::update::FinalizeError;
+pub use wows_toolkit_viewmodel::update::validate_finalize_target;
 
 /// Subcommand names that must not be mistaken for a legacy path argument.
 const SUBCOMMAND_NAMES: &[&str] = &["finalize-update", "help"];
@@ -301,6 +250,7 @@ fn show_message_box(title: &str, message: &str, is_error: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     use std::ffi::OsString;
     use std::fs::File;
