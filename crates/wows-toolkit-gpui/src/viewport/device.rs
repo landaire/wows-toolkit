@@ -45,6 +45,18 @@ impl GpuContext {
             }))
             .map_err(|e| anyhow::anyhow!("failed to create wgpu device: {e}"))?;
 
+        // Said once, because this device is not the one the app draws through:
+        // gpui picks its own and exposes no choice, so a viewport landing on a
+        // different GPU than the window is worth being able to read off the log.
+        let info = adapter.get_info();
+        tracing::info!(
+            "armor viewport device: {} ({:?}, {:?}, driver {})",
+            info.name,
+            info.device_type,
+            info.backend,
+            info.driver_info
+        );
+
         Ok(Self { instance, adapter, device: Arc::new(device), queue: Arc::new(queue) })
     }
 

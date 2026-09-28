@@ -129,7 +129,8 @@ have used it.
     uses, the next launch reports what a crash left and offers to copy it, and the
     palette copies the newest log. `enable_logging` governs the file and now
     defaults on, as it does in the egui app.
-13. **No renderer or adapter control.** The process hardening is done
+13. ~~**No renderer or adapter control.**~~ Closed 2026-09-28 as far as it goes.
+    The process hardening is done
     2026-09-28: it moved to `crates/wows-toolkit-hardening`, which both front ends
     now apply -- extension points disabled, image loads restricted and code
     integrity guard applied before any window exists, with the text-service probe
@@ -144,11 +145,12 @@ have used it.
     gpui draws through Direct3D 11 on Windows and walks the adapters itself
     (`gpui-pre-windows`'s `directx_devices.rs`), with nothing an application can
     choose, so there is no ladder to port and no ICD to pin. The armor viewport
-    still stands up its own `wgpu` device (`viewport/device.rs:33-39`), which can
-    land on a different adapter than the UI. The port takes `--help` and
-    `--version` and refuses the rest by name
+    still stands up its own `wgpu` device, which can land on a different adapter
+    than the UI; it now says which one it got, since nothing can make the two
+    agree. The port takes `--help` and `--version` and refuses the rest by name
     (`crates/wows-toolkit-gpui/src/cli.rs`), reporting that the way a release build
-    can show it; the egui flags that pick a rung have nothing to pick here.
+    can show it; the egui flags that pick a rung have nothing to pick here, and
+    the egui app has no preferred-adapter setting to read either.
 
 ## Reach: surfaces and entry points
 
@@ -220,7 +222,7 @@ have used it.
     The count rides on the menu item as it does there. A playback opened from that
     tab bakes through the same merge, so the map shows what the primary's team never
     saw, and an export of that playback writes what the map shows.
-18. **Realtime armor viewer.** Done in the main 2026-09-28: the Incoming Fire log is
+18. ~~**Realtime armor viewer.**~~ Done 2026-09-28: the Incoming Fire log is
     there, in the panel this port already reads its armor questions in rather
     than a window of its own. It lists what was fired at the ship salvo by salvo
     -- who fired, when its first shell landed, and what the server said each one
