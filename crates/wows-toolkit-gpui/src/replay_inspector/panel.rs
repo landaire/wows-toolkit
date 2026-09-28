@@ -575,7 +575,12 @@ impl EventEmitter<PanelEvent> for ReplayPanel {}
 ///
 /// The panel owns neither the dock nor the renderer, so it says which replay
 /// rather than opening anything itself.
-pub struct RenderRequested(pub PathBuf);
+/// A panel asked for its battle to be played back, with the other recordings it
+/// is reading it through.
+pub struct RenderRequested {
+    pub path: PathBuf,
+    pub alts: Vec<PathBuf>,
+}
 
 impl EventEmitter<RenderRequested> for ReplayPanel {}
 
@@ -955,7 +960,10 @@ fn actions_menu(panel: Entity<ReplayPanel>, state: ActionsState) -> impl IntoEle
                     let panel = panel.clone();
                     move |_event, _window, cx| {
                         let path = path.clone();
-                        panel.update(cx, |_panel, cx| cx.emit(RenderRequested(path)));
+                        panel.update(cx, |panel, cx| {
+                            let alts = panel.alts.clone();
+                            cx.emit(RenderRequested { path, alts })
+                        });
                     }
                 }),
             );
@@ -1348,7 +1356,7 @@ mod tests {
         let panel = cx.update(|cx| window.root(cx).expect("the panel is open"));
         let _subscription = cx.update(|cx| {
             cx.subscribe(&panel, move |_view, event: &RenderRequested, _cx| {
-                let RenderRequested(path) = event;
+                let RenderRequested { path, .. } = event;
                 heard.borrow_mut().push(path.clone());
             })
         });

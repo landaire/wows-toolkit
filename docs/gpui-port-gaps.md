@@ -156,15 +156,14 @@ have used it.
     from Replays", editable capture points, ship placement, range circles
     (`replay/minimap_view/tactics.rs:704`). Absent, and its `WindowKind` geometry
     row is read and never used.
-17. **Alt perspective.** Done in part 2026-09-28: the open replay's Actions menu
+17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its
     own reason), and reads the battle again through both by way of
     `wows_battle_world::merged::MergedReplays`, the same merge the egui app uses.
-    The count rides on the menu item as it does there. Not ported: the renderer and
-    the video export still walk the primary recording alone, so what a merged report
-    reveals is in the table and not yet on the map
-    (`replay/renderer/playback.rs:205`).
+    The count rides on the menu item as it does there. A playback opened from that
+    tab bakes through the same merge, so the map shows what the primary's team never
+    saw, and an export of that playback writes what the map shows.
 18. **Realtime armor viewer as a window**, with its attacker filter, auto-scroll,
     seek-to-salvo, show-secondaries and sim-agrees controls
     (`replay/realtime_armor_viewer.rs:1198`, `ui.armor.realtime.*`). The hit

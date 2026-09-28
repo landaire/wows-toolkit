@@ -1080,8 +1080,8 @@ impl ReplayInspectorView {
         // A panel's Actions menu can ask for its own replay to be rendered,
         // which is this view's to do: it owns the dock the viewport opens in.
         self.panel_events.push(cx.subscribe_in(&panel, window, |this, _panel, event: &RenderRequested, window, cx| {
-            let RenderRequested(path) = event;
-            this.render_replay(path.clone(), window, cx);
+            let RenderRequested { path, alts } = event;
+            this.render_replay_with_alts(path.clone(), alts.clone(), window, cx);
         }));
         self.open_panels.insert(path.clone(), panel.downgrade());
         self.current_replay = Some(path);
@@ -1195,6 +1195,17 @@ impl ReplayInspectorView {
     /// A second ask for the same replay brings the tab it is in forward
     /// rather than baking the battle twice.
     pub(crate) fn render_replay(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.render_replay_with_alts(path, Vec::new(), window, cx);
+    }
+
+    /// The same, reading the battle through other recordings of it as well.
+    pub(crate) fn render_replay_with_alts(
+        &mut self,
+        path: PathBuf,
+        alts: Vec<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(game_data) = self.game_data.clone() else {
             tracing::warn!(
                 path = %path.display(),
@@ -1217,7 +1228,7 @@ impl ReplayInspectorView {
             .into();
         let link = self.collab.link();
         let panel = cx.new(|cx| {
-            let mut panel = ReplayRendererPanel::new(path.clone(), title, game_data, window, cx);
+            let mut panel = ReplayRendererPanel::new(path.clone(), alts, title, game_data, window, cx);
             panel.seed_collab(link, cx);
             panel
         });

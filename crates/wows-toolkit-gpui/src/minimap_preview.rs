@@ -309,6 +309,7 @@ pub fn extract_events(
 /// sampled more coarsely rather than costing more.
 pub fn bake_track(
     path: &std::path::Path,
+    alts: &[std::path::PathBuf],
     game_data: &crate::replay_inspector::GameDataCache,
     cancel: &AtomicBool,
     budget: usize,
@@ -316,6 +317,13 @@ pub fn bake_track(
     options: RenderOptions,
 ) -> Result<BakedTrack, PreviewError> {
     let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    // Other recordings of the same battle, so the map shows what the primary's
+    // team never saw. They were checked against this battle before they reached
+    // the tab that asked for this (`replay_inspector::load::check_alt`).
+    let mut merged = Vec::with_capacity(alts.len());
+    for alt in alts {
+        merged.push(ReplayFile::from_file(alt).map_err(|_| PreviewError::UnreadableReplay)?);
+    }
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build =
@@ -336,9 +344,15 @@ pub fn bake_track(
     renderer.set_fonts(assets::load_game_fonts(vfs));
     let target = renderer_for(Some(build), &map_name, vfs, Some(&version), SidePanelLayout::None)?;
 
-    let mut session =
-        MergedReplays::new(provider.entity_specs(), provider, loaded.base_constants(), session_version, &replay, &[])
-            .map_err(|_| PreviewError::UnreadableReplay)?;
+    let mut session = MergedReplays::new(
+        provider.entity_specs(),
+        provider,
+        loaded.base_constants(),
+        session_version,
+        &replay,
+        &merged,
+    )
+    .map_err(|_| PreviewError::UnreadableReplay)?;
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::with_budget(budget);

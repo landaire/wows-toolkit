@@ -220,6 +220,9 @@ pub struct ReplayRendererPanel {
     popped_out: bool,
     /// Whether ctrl is held, which is what puts the shortcut sheet up.
     ctrl_held: bool,
+    /// Other recordings of this battle, baked alongside it so the map shows what
+    /// the primary's team could not see.
+    alts: Vec<PathBuf>,
     /// What the viewport draws of what it baked. Applied when a frame is
     /// rasterised rather than when it was baked, so a toggle takes effect on
     /// the next frame without walking the battle again.
@@ -389,6 +392,7 @@ impl ReplayRendererPanel {
     /// Opens a viewport on `path` and starts baking it.
     pub fn new(
         path: PathBuf,
+        alts: Vec<PathBuf>,
         title: SharedString,
         game_data: GameDataCache,
         window: &mut Window,
@@ -440,6 +444,7 @@ impl ReplayRendererPanel {
             _export: None,
             popped_out: false,
             ctrl_held: false,
+            alts: Vec::new(),
             // The options the track was baked under, so what is drawn at
             // first is exactly what is in it.
             options: playback_options_hidden(),
@@ -493,6 +498,7 @@ impl ReplayRendererPanel {
             focus_handle: cx.focus_handle(),
         };
         panel.game_data = Some(game_data.clone());
+        panel.alts = alts;
         panel.start_bake(path.clone(), game_data.clone(), cx);
         panel.start_event_scan(path, game_data, cx);
         panel
@@ -561,6 +567,7 @@ impl ReplayRendererPanel {
             _export: None,
             popped_out: false,
             ctrl_held: false,
+            alts: Vec::new(),
             // The options the track was baked under, so what is drawn at
             // first is exactly what is in it.
             options: playback_options_hidden(),
@@ -1280,8 +1287,9 @@ impl ReplayRendererPanel {
 
     fn start_bake(&mut self, path: PathBuf, game_data: GameDataCache, cx: &mut Context<Self>) {
         let cancel = Arc::clone(&self.cancel);
+        let alts = self.alts.clone();
         self._bake = Some(cx.spawn(async move |this, cx| {
-            let baked = cx.background_spawn(async move { bake(&path, &game_data, &cancel) }).await;
+            let baked = cx.background_spawn(async move { bake(&path, &alts, &game_data, &cancel) }).await;
             let _ = this.update(cx, |this, cx| {
                 match baked {
                     Ok((track, renderer)) => {
@@ -3160,13 +3168,24 @@ pub enum RenderError {
 
 /// Walks `path`'s battle once, keeping every frame's draw commands and the
 /// renderer they are drawn through.
+///
+/// `alts` are other recordings of the same battle, read alongside it: the map
+/// then shows what the primary's team could not see.
 fn bake(
     path: &std::path::Path,
+    alts: &[PathBuf],
     game_data: &GameDataCache,
     cancel: &AtomicBool,
 ) -> Result<(Track, SharedPreviewRenderer), RenderError> {
-    let baked =
-        crate::minimap_preview::bake_track(path, game_data, cancel, TRACK_BUDGET, BAKE_INTERVAL, playback_options())?;
+    let baked = crate::minimap_preview::bake_track(
+        path,
+        alts,
+        game_data,
+        cancel,
+        TRACK_BUDGET,
+        BAKE_INTERVAL,
+        playback_options(),
+    )?;
     let track = Track {
         frames: baked.frames,
         clocks: baked.clocks,
@@ -3225,7 +3244,7 @@ pub fn batch_export(
             };
             let output = out_dir.join(stem).with_extension("mp4");
 
-            let baked = match bake(&path, &game_data, &cancel) {
+            let baked = match bake(&path, &[], &game_data, &cancel) {
                 Ok(baked) => baked,
                 Err(err) => {
                     tracing::warn!(path = %path.display(), error = %err, "batch render: the replay did not bake");
@@ -5263,6 +5282,7 @@ mod tests {
         let cancel = AtomicBool::new(false);
         let baked = crate::minimap_preview::bake_track(
             std::path::Path::new(&replay),
+            &[],
             &cache,
             &cancel,
             super::TRACK_BUDGET,
