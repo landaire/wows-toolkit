@@ -141,6 +141,28 @@ impl DataSharingMode {
     pub fn shares_anything(self) -> bool {
         !matches!(self, Self::Off)
     }
+
+    /// Reads the `send_replay_data` bool an older build wrote on its own.
+    ///
+    /// That bool meant build data, so it never resolves to `Replays`: sharing the
+    /// file itself is a choice that build only offered as sharing builds.
+    pub fn from_send_replay_data_bool(enabled: bool) -> Self {
+        if enabled { Self::BuildData } else { Self::Off }
+    }
+
+    /// Settles a disagreement between this mode and the `send_replay_data` bool
+    /// beside it.
+    ///
+    /// Both rows exist because an older build writes only the bool, so a
+    /// disagreement means the bool is the newer word on it. As with the bool
+    /// itself, agreeing with it never escalates to `Replays`.
+    pub fn reconcile_with_compat_bool(self, shared: bool) -> Self {
+        match (self, shared) {
+            (Self::Off, true) => Self::BuildData,
+            (mode, false) if mode.shares_anything() => Self::Off,
+            (mode, _) => mode,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -148,6 +170,26 @@ mod tests {
     use super::DataSharingMode;
     use super::ThemeChoice;
     use super::normalize_proxy_url;
+
+    /// The stored form is what is already in the database, so reading it as
+    /// anything else would misreport what the reader agreed to.
+    #[test]
+    fn the_mode_is_stored_snake_case() {
+        assert_eq!(serde_json::to_string(&DataSharingMode::Off).expect("it serializes"), "\"off\"");
+        assert_eq!(serde_json::to_string(&DataSharingMode::BuildData).expect("it serializes"), "\"build_data\"");
+        assert_eq!(serde_json::to_string(&DataSharingMode::Replays).expect("it serializes"), "\"replays\"");
+    }
+
+    /// The bool an older build wrote means build data, both ways round.
+    #[test]
+    fn the_legacy_bool_never_escalates_to_replays() {
+        assert_eq!(DataSharingMode::from_send_replay_data_bool(true), DataSharingMode::BuildData);
+        assert_eq!(DataSharingMode::from_send_replay_data_bool(false), DataSharingMode::Off);
+
+        assert_eq!(DataSharingMode::Off.reconcile_with_compat_bool(true), DataSharingMode::BuildData);
+        assert_eq!(DataSharingMode::Replays.reconcile_with_compat_bool(false), DataSharingMode::Off);
+        assert_eq!(DataSharingMode::Replays.reconcile_with_compat_bool(true), DataSharingMode::Replays);
+    }
 
     #[test]
     fn an_unset_proxy_is_absent_rather_than_an_empty_url() {

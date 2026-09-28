@@ -305,45 +305,10 @@ pub fn egui_theme_preference(choice: ThemeChoice) -> egui::ThemePreference {
     }
 }
 
-/// How much battle data the user has agreed to share with the server.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum DataSharingMode {
-    /// Share nothing.
-    #[default]
-    Off,
-    /// Send per-player build payloads to `/api/ship_builds`.
-    BuildData,
-    /// Send the raw replay file to `/api/replays` once end-of-battle results
-    /// are in the file or a post-battle grace window lapses. Never sends build
-    /// data; test-ship battles are not shared at all in this mode.
-    Replays,
-}
-
-impl DataSharingMode {
-    /// Migrate the legacy `send_replay_data` bool. `true` shared build data, so
-    /// map to `BuildData`; never escalate to `Replays`.
-    pub fn from_send_replay_data_bool(enabled: bool) -> Self {
-        if enabled { Self::BuildData } else { Self::Off }
-    }
-
-    /// Whether any data is shared. Used to persist a downgrade-compatible bool.
-    pub fn shares_anything(self) -> bool {
-        !matches!(self, Self::Off)
-    }
-
-    /// Reconcile a loaded mode against the downgrade-compat `send_replay_data`
-    /// bool when both persisted keys exist. An older app build writes only the
-    /// bool, so a disagreement means the bool is the newer signal; honor it
-    /// without ever escalating to Replays.
-    pub fn reconcile_with_compat_bool(self, shared: bool) -> Self {
-        match (self, shared) {
-            (Self::Off, true) => Self::BuildData,
-            (mode, false) if mode.shares_anything() => Self::Off,
-            (mode, _) => mode,
-        }
-    }
-}
+/// How much battle data the reader has agreed to share, shared with the port so
+/// both apps read the row the same way and share under the same rules
+/// (`wows_toolkit_viewmodel::upload`).
+pub use wows_toolkit_viewmodel::settings::DataSharingMode;
 
 /// External service integrations.
 #[derive(Default)]
@@ -359,58 +324,6 @@ pub struct CollabSettings {
     pub display_name: String,
     pub suppress_p2p_ip_warning: bool,
     pub disable_auto_open_session_windows: bool,
-}
-
-#[cfg(test)]
-mod data_sharing_mode_tests {
-    use super::DataSharingMode;
-
-    #[test]
-    fn serializes_to_stable_snake_case() {
-        assert_eq!(serde_json::to_string(&DataSharingMode::Off).unwrap(), "\"off\"");
-        assert_eq!(serde_json::to_string(&DataSharingMode::BuildData).unwrap(), "\"build_data\"");
-        assert_eq!(serde_json::to_string(&DataSharingMode::Replays).unwrap(), "\"replays\"");
-    }
-
-    #[test]
-    fn round_trips_through_json() {
-        for mode in [DataSharingMode::Off, DataSharingMode::BuildData, DataSharingMode::Replays] {
-            let s = serde_json::to_string(&mode).unwrap();
-            let back: DataSharingMode = serde_json::from_str(&s).unwrap();
-            assert_eq!(mode, back);
-        }
-    }
-
-    #[test]
-    fn legacy_bool_maps_without_escalation() {
-        assert_eq!(DataSharingMode::from_send_replay_data_bool(true), DataSharingMode::BuildData);
-        assert_eq!(DataSharingMode::from_send_replay_data_bool(false), DataSharingMode::Off);
-    }
-
-    #[test]
-    fn shares_anything_only_when_not_off() {
-        assert!(!DataSharingMode::Off.shares_anything());
-        assert!(DataSharingMode::BuildData.shares_anything());
-        assert!(DataSharingMode::Replays.shares_anything());
-    }
-
-    #[test]
-    fn reconcile_is_identity_when_bool_agrees() {
-        assert_eq!(DataSharingMode::Off.reconcile_with_compat_bool(false), DataSharingMode::Off);
-        assert_eq!(DataSharingMode::BuildData.reconcile_with_compat_bool(true), DataSharingMode::BuildData);
-        assert_eq!(DataSharingMode::Replays.reconcile_with_compat_bool(true), DataSharingMode::Replays);
-    }
-
-    #[test]
-    fn reconcile_honors_opt_out() {
-        assert_eq!(DataSharingMode::Replays.reconcile_with_compat_bool(false), DataSharingMode::Off);
-        assert_eq!(DataSharingMode::BuildData.reconcile_with_compat_bool(false), DataSharingMode::Off);
-    }
-
-    #[test]
-    fn reconcile_never_escalates_to_replays() {
-        assert_eq!(DataSharingMode::Off.reconcile_with_compat_bool(true), DataSharingMode::BuildData);
-    }
 }
 
 #[cfg(test)]

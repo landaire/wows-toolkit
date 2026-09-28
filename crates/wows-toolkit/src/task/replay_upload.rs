@@ -14,41 +14,21 @@ use crate::data::wows_data::ReplayBytes;
 use crate::ui::replay_parser::Replay;
 use crate::util::build_tracker;
 
-// The GPUI port states these rules in `wows_toolkit_viewmodel::upload`, which is
-// a copy of what is below. They converge once this crate's `DataSharingMode` is
-// the viewmodel's rather than its own type; see `docs/gpui-port-gaps.md`.
-
-/// Grace window measured from the instant this replay was first observed, not
-/// from its mtime: an archived file carries an mtime from months ago and would
-/// otherwise be past due the moment it is first indexed. When the window
-/// lapses the replay is uploaded as-is, results or not.
-pub const RAW_UPLOAD_GRACE: jiff::SignedDuration = jiff::SignedDuration::from_secs(30 * 60);
-
+// The rules themselves -- what a mode shares, which battles are eligible, and how
+// long a raw upload waits for results -- are `wows_toolkit_viewmodel::upload`,
+// which the GPUI port shares. What is left here is what only this crate has: the
+// packet-level scan that produces a `ResultsScan`, and the sending itself.
 /// Name of the entity method announcing the battle's end. Unlike the
 /// `BattleResults` packet, which only exists at or after
 /// `MODERN_PACKET_LAYOUT_MIN_VERSION`, this is present in every packet layout
 /// and is the only end-of-battle marker older replays can carry.
 const BATTLE_END_METHOD: &str = "onBattleEnd";
 
-/// Whether a replay's packet stream carries an end-of-battle marker.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResultsScan {
-    /// A marker was observed.
-    Present,
-    /// The walk consumed the whole stream and observed no marker.
-    Absent,
-    /// The walk stopped before the end of the stream, so the tail where the
-    /// markers live was never read. Presence is unknown, not absent.
-    Truncated,
-}
-
-impl ResultsScan {
-    /// True only when a marker was positively observed. `Truncated` is not
-    /// evidence of absence and must never be treated as such.
-    pub fn is_present(&self) -> bool {
-        matches!(self, Self::Present)
-    }
-}
+pub use wows_toolkit_viewmodel::upload::ReplayUploadAction;
+pub use wows_toolkit_viewmodel::upload::ReplayUploadSkipReason;
+pub use wows_toolkit_viewmodel::upload::ResultsScan;
+pub use wows_toolkit_viewmodel::upload::decide_upload_action;
+pub use wows_toolkit_viewmodel::upload::raw_replay_snapshot_state;
 
 /// Accumulates [`ResultsScan`] evidence while a caller walks a packet stream.
 #[derive(Debug, Default)]
@@ -87,38 +67,6 @@ impl ResultsScanner {
     }
 }
 
-/// Whether the raw replay file is ready for `/api/replays`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RawReplaySnapshotState {
-    /// End-of-battle results are in the file.
-    Complete,
-    /// No results yet; hold the upload until they arrive or the deadline fires.
-    IncompleteWithinGrace { deadline: RawUploadDeadline },
-    /// No results and the grace window has lapsed.
-    IncompleteGraceLapsed,
-}
-
-/// `Truncated` is deliberately treated like `Absent`: a walk that stopped early
-/// never reached the tail where the markers live, so it is not evidence the
-/// replay lacks results. Both wait out the window rather than uploading now.
-pub fn raw_replay_snapshot_state(
-    results: ResultsScan,
-    first_seen: jiff::Timestamp,
-    now: jiff::Timestamp,
-) -> RawReplaySnapshotState {
-    if results.is_present() {
-        return RawReplaySnapshotState::Complete;
-    }
-    // Saturate: an anchor close enough to jiff's range edge to overflow is
-    // garbage, and holding the upload for results is the conservative reading.
-    let deadline = first_seen.checked_add(RAW_UPLOAD_GRACE).unwrap_or(jiff::Timestamp::MAX);
-    if deadline <= now {
-        RawReplaySnapshotState::IncompleteGraceLapsed
-    } else {
-        RawReplaySnapshotState::IncompleteWithinGrace { deadline: RawUploadDeadline(deadline) }
-    }
-}
-
 /// Whether a ShipBuilds batch upload consults the sent-replay ledger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendReplayCachePolicy {
@@ -151,70 +99,12 @@ impl SendAllReplaysProgress {
     }
 }
 
-/// What the background parser should upload for a freshly parsed replay.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplayUploadAction {
-    /// Upload nothing.
-    Skip(ReplayUploadSkipReason),
-    /// Send the per-player build payloads to `/api/ship_builds`.
-    BuildData,
-    /// Send the raw replay file to `/api/replays`.
-    RawReplay,
-    /// Send nothing yet; retry when results arrive or the deadline fires.
-    AwaitResults { deadline: RawUploadDeadline },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReplayUploadSkipReason {
-    SharingDisabled,
-    IneligibleGameType,
-    /// Replays mode only shares raw replays, and a possible test-ship battle
-    /// must stay off `/api/replays`.
-    PossibleTestShip,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShipBuildsUploadOutcome {
     Skipped(ReplayUploadSkipReason),
     Sent,
     AwaitingResults { deadline: RawUploadDeadline },
     TransientFailure,
-}
-
-/// Decide what to upload. `self_confirmed_non_test` must be `true` only when the
-/// self player's ship is positively known not to be a test ship; any
-/// uncertainty is `false`, which keeps a possible test-ship replay off
-/// `/api/replays` (hard rule). Replays mode never falls back to build data;
-/// the two payloads are mutually exclusive. A raw upload additionally waits
-/// for end-of-battle results until the grace deadline fires.
-pub fn decide_upload_action(
-    mode: DataSharingMode,
-    is_valid_game_type: bool,
-    self_confirmed_non_test: bool,
-    raw_snapshot: RawReplaySnapshotState,
-) -> ReplayUploadAction {
-    if !is_valid_game_type {
-        return ReplayUploadAction::Skip(ReplayUploadSkipReason::IneligibleGameType);
-    }
-
-    match mode {
-        DataSharingMode::Off => ReplayUploadAction::Skip(ReplayUploadSkipReason::SharingDisabled),
-        DataSharingMode::BuildData => ReplayUploadAction::BuildData,
-        DataSharingMode::Replays => {
-            if !self_confirmed_non_test {
-                ReplayUploadAction::Skip(ReplayUploadSkipReason::PossibleTestShip)
-            } else {
-                match raw_snapshot {
-                    RawReplaySnapshotState::Complete | RawReplaySnapshotState::IncompleteGraceLapsed => {
-                        ReplayUploadAction::RawReplay
-                    }
-                    RawReplaySnapshotState::IncompleteWithinGrace { deadline } => {
-                        ReplayUploadAction::AwaitResults { deadline }
-                    }
-                }
-            }
-        }
-    }
 }
 
 pub(crate) fn build_shipbuilds_payload<T>(
@@ -389,6 +279,9 @@ mod tests {
     use std::net::TcpListener;
     use std::sync::mpsc;
     use std::time::Duration;
+
+    use wows_toolkit_viewmodel::upload::RAW_UPLOAD_GRACE;
+    use wows_toolkit_viewmodel::upload::RawReplaySnapshotState;
 
     use super::*;
 
