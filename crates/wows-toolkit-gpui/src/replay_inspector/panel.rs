@@ -1411,13 +1411,14 @@ mod tests {
                 "the heading names the clan, the player and the ship, got {spoken:?}"
             );
 
-            // And where it says it: the ship under the player, not beside it.
+            // And where it says it: the ship after the player, on the one line.
             let name = window.find("replay-actions-heading-name").bounds();
             let ship = window.find("replay-actions-heading-ship").bounds();
             assert!(
-                ship.origin.y >= name.origin.y + name.size.height,
-                "the ship line begins below the name line: {ship:?} against {name:?}"
+                ship.origin.x >= name.origin.x + name.size.width,
+                "the ship follows the player: {ship:?} against {name:?}"
             );
+            assert_eq!(ship.origin.y, name.origin.y, "on the same line");
 
             let labels: Vec<String> = offered.iter().filter_map(|(_, item)| item.label().map(str::to_owned)).collect();
             assert!(

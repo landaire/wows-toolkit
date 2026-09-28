@@ -1075,9 +1075,8 @@ struct ActionsMenuData {
 /// Who a row's menu is about, drawn as the menu's first item.
 ///
 /// A menu opened by a right-click carries no other sign of which row it came
-/// from, and the rows are one line apart. Two lines and the class icon rather
-/// than one run of text, so the heading reads as the row does: the ship under
-/// the player, not punctuation between them.
+/// from, and the rows are one line apart. One line, in the row's own order:
+/// clan tag, player, class icon, ship.
 #[derive(Clone)]
 struct MenuHeading {
     /// The class icon as the Name cell draws it, tinted to the player. `None`
@@ -1086,15 +1085,13 @@ struct MenuHeading {
     /// Stands in for an icon the cache does not have, as in the Name cell, so
     /// it is read only when `icon` is `None`.
     species: Option<SharedString>,
-    /// The division mark the Name cell draws, for a player who is in one.
-    division: Option<SharedString>,
     clan: Option<SharedString>,
     clan_color: Hsla,
     name: SharedString,
     name_color: Hsla,
     /// `None` for a row whose ship the recording never saw.
     ship: Option<SharedString>,
-    /// The whole heading in one line, for a screen reader.
+    /// The heading as one run of text, for a screen reader.
     spoken: SharedString,
 }
 
@@ -1122,7 +1119,6 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
     MenuHeading {
         icon,
         species,
-        division: row.division_label.clone().map(SharedString::from),
         clan,
         clan_color: resolve_color(ColorRole::Fixed(row.clan_color_rgb)),
         name: row.display_name.clone().into(),
@@ -1132,24 +1128,15 @@ fn heading_for(row: &PlayerRow, icons: &IconCache) -> MenuHeading {
     }
 }
 
-/// The heading as the menu's first item: the division mark, clan tag and name in
-/// the colours the row gives them, and the ship under them behind its class
-/// icon.
-///
-/// The icon rides the ship's own line rather than the whole block, because the
-/// kit indents every item by an icon's width once any item in the menu carries
-/// one (`PopupMenu::render_item`'s `has_left_icon`), and a second icon before
-/// that indent would put the heading's text out of the column the other items'
-/// labels start in.
+/// The heading as the menu's first item: the clan tag and the player in the
+/// colours the row gives them, then the ship behind its class icon.
 fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
-    let mut name_line = h_flex().gap_1().items_center().whitespace_nowrap();
-    if let Some(division) = heading.division.clone() {
-        name_line = name_line.child(div().flex_none().child(division));
-    }
+    let mut line = h_flex().gap_1().items_center().whitespace_nowrap();
+
     if let Some(clan) = heading.clan.clone() {
-        name_line = name_line.child(div().flex_none().text_color(heading.clan_color).child(clan));
+        line = line.child(div().flex_none().text_color(heading.clan_color).child(clan));
     }
-    name_line = name_line.child(
+    line = line.child(
         div()
             .id("replay-actions-heading-name")
             .test_support()
@@ -1159,36 +1146,24 @@ fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
             .child(heading.name.clone()),
     );
 
-    let mut lines = v_flex().min_w(px(0.)).child(name_line);
     if let Some(ship) = heading.ship.clone() {
-        let mut ship_line = h_flex().gap_1().items_center().whitespace_nowrap();
         if let Some(image) = heading.icon.clone() {
-            ship_line =
-                ship_line.child(div().flex_none().child(img(image).w(px(SHIP_ICON_WIDTH)).h(px(SHIP_ICON_WIDTH))));
+            line = line.child(div().flex_none().child(img(image).w(px(SHIP_ICON_WIDTH)).h(px(SHIP_ICON_WIDTH))));
         } else if let Some(species) = heading.species.clone() {
-            ship_line = ship_line.child(div().flex_none().text_xs().child(species));
+            line = line.child(div().flex_none().text_xs().child(species));
         }
-        lines = lines.child(
-            ship_line.child(
-                div()
-                    .id("replay-actions-heading-ship")
-                    .test_support()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .text_xs()
-                    .text_color(crate::theme::text_dim())
-                    .child(ship),
-            ),
+        line = line.child(
+            div()
+                .id("replay-actions-heading-ship")
+                .test_support()
+                .overflow_hidden()
+                .text_ellipsis()
+                .text_color(crate::theme::text_dim())
+                .child(ship),
         );
     }
 
-    h_flex()
-        .id("replay-actions-heading")
-        .test_support()
-        .aria_label(heading.spoken.clone())
-        .items_center()
-        .child(lines)
-        .into_any_element()
+    line.id("replay-actions-heading").test_support().aria_label(heading.spoken.clone()).into_any_element()
 }
 
 impl ActionsMenuData {
