@@ -14600,6 +14600,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
+ "sys-locale",
  "tempfile",
  "thiserror 2.0.20",
  "tiny-skia 0.12.0",

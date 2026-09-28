@@ -61,12 +61,13 @@ async fn load_settings(pool: &SqlitePool, ts: &mut TabState) -> Result<(), sqlx:
     if let Some(v) = queries::get_setting::<bool>(pool, "check_for_updates").await {
         s.app.check_for_updates = v;
     }
-    if let Some(v) = queries::get_setting::<crate::data::settings::DataSharingMode>(pool, "data_sharing_mode").await {
+    if let Some(v) = queries::get_setting::<crate::data::settings::DataSharingMode>(pool, keys::DATA_SHARING_MODE).await
+    {
         s.integrations.data_sharing_mode = v;
-        if let Some(b) = queries::get_setting::<bool>(pool, "send_replay_data").await {
+        if let Some(b) = queries::get_setting::<bool>(pool, keys::SEND_REPLAY_DATA).await {
             s.integrations.data_sharing_mode = s.integrations.data_sharing_mode.reconcile_with_compat_bool(b);
         }
-    } else if let Some(v) = queries::get_setting::<bool>(pool, "send_replay_data").await {
+    } else if let Some(v) = queries::get_setting::<bool>(pool, keys::SEND_REPLAY_DATA).await {
         s.integrations.data_sharing_mode = crate::data::settings::DataSharingMode::from_send_replay_data_bool(v);
     }
     if let Some(v) = queries::get_setting::<bool>(pool, "has_052_game_params_fix").await {

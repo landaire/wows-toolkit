@@ -16,6 +16,11 @@ pub mod keys {
     pub const ENABLE_LOGGING: &str = "enable_logging";
     pub const DEBUG_MODE: &str = "debug_mode";
     pub const DATA_SHARING_MODE: &str = "data_sharing_mode";
+    /// The older, coarser form of the same consent: whether anything is shared at
+    /// all. A build that knew only this row still reads it, so both apps write it
+    /// beside the mode and reconcile the two on load
+    /// (`DataSharingMode::reconcile_with_compat_bool`).
+    pub const SEND_REPLAY_DATA: &str = "send_replay_data";
     pub const PROXY_URL: &str = "proxy_url";
     pub const LOCALE: &str = "locale";
     pub const REPLAY_SETTINGS: &str = "replay_settings";

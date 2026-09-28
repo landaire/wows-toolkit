@@ -127,6 +127,12 @@ fn availability_said(availability: &wows_data_mgr::download_repo::RemoteAvailabi
     }
 }
 
+/// Whether a dragged or dropped path is a replay, which is the only thing this
+/// window takes.
+fn is_replay(path: &std::path::Path) -> bool {
+    path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay")
+}
+
 /// Who asked for the update check.
 ///
 /// A startup check that finds nothing says nothing; one the reader asked for says
@@ -219,13 +225,13 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
     });
 }
 
+/// How long a failure may be before it is worth a window rather than a toast.
+const TOO_LONG_TO_TOAST: usize = 160;
+
 /// What a finished cache job has to say, until the next draw says it.
 ///
 /// Kept rather than said where it is decided: the job's completion runs without a
 /// window, and a message needs one.
-/// How long a failure may be before it is worth a window rather than a toast.
-const TOO_LONG_TO_TOAST: usize = 160;
-
 struct CacheReport {
     said: String,
     level: ReportLevel,
@@ -786,13 +792,16 @@ impl App {
     /// dragging two files learns only after letting go that one was expected.
     pub(crate) fn drop_scrim(&self) -> Option<AnyElement> {
         let hovering = self.hovering_files.as_deref()?;
-        let said = match hovering {
-            [] => return None,
+        let replays: Vec<&PathBuf> = hovering.iter().filter(|path| is_replay(path)).collect();
+        let said = match replays.as_slice() {
+            // The drop will say the same, rather than the scrim promising
+            // something and the drop refusing it.
+            [] => t!("ui.messages.drop_not_a_replay").into_owned(),
             [one] => {
                 let named = one.file_name().unwrap_or(one.as_os_str()).to_string_lossy().into_owned();
                 t!("ui.app.drop_to_load", file = named).into_owned()
             }
-            _ => t!("ui.app.drop_one_at_a_time").into_owned(),
+            _ => t!("ui.messages.drop_one_at_a_time").into_owned(),
         };
 
         Some(
@@ -876,9 +885,6 @@ impl App {
             crate::toast::warn(t!("ui.dialogs.download_plan_no_cache_dir").into_owned(), window, cx);
             return;
         };
-        for build in &missing {
-            self.offered_builds.insert(build.build);
-        }
 
         // What the repository actually publishes for each build, and how much the
         // whole selection would fetch, before the reader is asked to commit to
@@ -946,6 +952,13 @@ impl App {
         proxy: String,
         cx: &mut Context<Self>,
     ) {
+        // Spent now the reader has said yes: the walk that follows a download
+        // reports whatever is still missing, and offering that again would be a
+        // loop rather than a question. A refused offer leaves the build worth
+        // asking about again.
+        for build in &missing {
+            self.offered_builds.insert(build.build);
+        }
         let builds: Vec<wows_data_mgr::download_repo::BuildUpdateStatus> = missing
             .iter()
             .map(|build| wows_data_mgr::download_repo::BuildUpdateStatus {
@@ -1046,9 +1059,11 @@ impl App {
                 crate::constants::Checked::Written { build, commit } => {
                     tracing::info!(build, "constants: the newest result mapping was written");
                     if let Some(settings) = this.settings_mut() {
-                        settings.constants_commit = commit.clone();
+                        settings.constants_commit = Some(commit.clone());
                     }
-                    settings_store::save(keys::CONSTANTS_FILE_COMMIT, &commit, cx);
+                    // Stored as a nullable string, which is what the egui app
+                    // reads: absent means never checked.
+                    settings_store::save(keys::CONSTANTS_FILE_COMMIT, &Some(commit), cx);
                     crate::toast::info(t!("ui.replay.constants_latest_written").into_owned(), window, cx);
                     this.replay_inspector.update(cx, |view, cx| view.reparse_open_replays(window, cx));
                 }
@@ -2404,6 +2419,10 @@ impl App {
             settings.data_sharing = mode;
             mode
         });
+        // The older bool beside it, which the egui app reconciles the mode against
+        // on load: writing only the mode would have that reconcile undo this
+        // choice on its next start.
+        settings_store::save(keys::SEND_REPLAY_DATA, &mode.shares_anything(), cx);
         self.replay_inspector.update(cx, |view, _cx| view.set_data_sharing(mode));
     }
 
@@ -3048,12 +3067,9 @@ impl Render for App {
         // with one (`app.rs`'s `ui_file_drag_and_drop`). Only a replay, and only
         // one: the inspector opens a file, not a set.
         let dropped = cx.listener(|this: &mut Self, paths: &gpui_kit::ExternalPaths, window, cx| {
-            let replays: Vec<std::path::PathBuf> = paths
-                .paths()
-                .iter()
-                .filter(|path| path.extension().and_then(|ext| ext.to_str()) == Some("wowsreplay"))
-                .cloned()
-                .collect();
+            this.forget_hovering_files(cx);
+            let replays: Vec<std::path::PathBuf> =
+                paths.paths().iter().filter(|path| is_replay(path)).cloned().collect();
             match replays.as_slice() {
                 [] => crate::toast::warn(t!("ui.messages.drop_not_a_replay").into_owned(), window, cx),
                 [one] => {

@@ -386,7 +386,7 @@ impl NetworkingThread {
         let result = self
             .runtime
             .block_on(wows_data_mgr::constants::fetch_latest_constants(current_commit.as_deref()))
-            .map(|latest| latest.map(|latest| (latest.data, latest.commit)))
+            .map(|latest| latest.map(|latest| (latest.data, Some(latest.commit))))
             .map_err(|err| format!("failed to fetch constants from GitHub: {err}"));
 
         match result {

@@ -34,6 +34,8 @@ parking_lot = "0.12.5"
 # The Settings tab reports and manages the game-data cache the egui app
 # writes: its size, its builds, and the remote repository it came from.
 wows-data-mgr = { workspace = true, features = ["constants", "download"] }
+# What language the machine reads in, for the question a first run asks.
+sys-locale = { workspace = true }
 humansize = "2.1.3"
 
 # Framework-neutral toolkit logic (listing rules, filters, queueing,

@@ -119,8 +119,21 @@ impl GpuiSettings {
         // On, as the egui app defaults it: the log file is what a bug report is
         // copied from, and a reader who has never touched the setting still gets one.
         let enable_logging = queries::get_setting::<bool>(pool, keys::ENABLE_LOGGING).await.unwrap_or(true);
-        let data_sharing =
-            queries::get_setting::<DataSharingMode>(pool, keys::DATA_SHARING_MODE).await.unwrap_or_default();
+        // Two rows, as the egui app keeps them: the mode, and the older bool that
+        // says only whether anything is shared. A build that knows only the bool
+        // writes just that, so a disagreement means the bool is the newer word on
+        // it; reading the mode alone would report a consent the reader has since
+        // withdrawn, or miss one they gave.
+        let data_sharing = match queries::get_setting::<DataSharingMode>(pool, keys::DATA_SHARING_MODE).await {
+            Some(mode) => match queries::get_setting::<bool>(pool, keys::SEND_REPLAY_DATA).await {
+                Some(shared) => mode.reconcile_with_compat_bool(shared),
+                None => mode,
+            },
+            None => queries::get_setting::<bool>(pool, keys::SEND_REPLAY_DATA)
+                .await
+                .map(DataSharingMode::from_send_replay_data_bool)
+                .unwrap_or_default(),
+        };
         // Stored as a nullable string: absent and empty both mean no proxy.
         let proxy_url =
             queries::get_setting::<Option<String>>(pool, keys::PROXY_URL).await.flatten().unwrap_or_default();

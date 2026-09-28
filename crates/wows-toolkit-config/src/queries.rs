@@ -173,6 +173,36 @@ pub async fn sent_replay_exists(pool: &SqlitePool, path: &str) -> Result<bool, s
     Ok(row.is_some())
 }
 
+/// When this replay was first seen by whichever app saw it first, recording
+/// `now` if this is its first sight.
+///
+/// The grace a raw upload waits for results through anchors here rather than on
+/// the file's own timestamp: an archived replay carries one from months ago and
+/// would be past due the moment it is first read, so the window would never hold
+/// anything but a battle still being played.
+pub async fn raw_upload_first_seen(
+    pool: &SqlitePool,
+    path: &str,
+    now: jiff::Timestamp,
+) -> Result<jiff::Timestamp, sqlx::Error> {
+    // Insert and read in one statement: a conflicting insert returns no row, so
+    // the update keeps the stored anchor and hands it back rather than leaving
+    // the caller to work out whether it won the race.
+    let seconds: i64 = sqlx::query_scalar(
+        "INSERT INTO raw_upload_first_seen (replay_path, first_seen) VALUES (?1, ?2) \
+         ON CONFLICT(replay_path) DO UPDATE SET first_seen = first_seen \
+         RETURNING first_seen",
+    )
+    .bind(path)
+    .bind(now.as_second())
+    .fetch_one(pool)
+    .await?;
+
+    // A stored value outside the range can only come from a damaged row; starting
+    // the window again is the conservative reading of it.
+    Ok(jiff::Timestamp::from_second(seconds).unwrap_or(now))
+}
+
 /// Delete sent replays not in the given set.
 pub async fn delete_stale_sent_replays(pool: &SqlitePool, current: &[String]) -> Result<(), sqlx::Error> {
     // Build a comma-separated list of placeholders.

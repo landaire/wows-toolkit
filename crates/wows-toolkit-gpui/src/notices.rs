@@ -125,7 +125,7 @@ pub fn before_software_encode(window: &mut Window, cx: &mut App, go: impl Fn(&mu
 /// and the point of switching it off is that the work just happens.
 fn ask(warning: Warning, window: &mut Window, cx: &mut App, go: impl Fn(&mut Window, &mut App) + 'static) {
     if warning.suppressed(cx) {
-        go(window, cx);
+        window.defer(cx, move |window, cx| go(window, cx));
         return;
     }
 
@@ -152,6 +152,9 @@ fn ask(warning: Warning, window: &mut Window, cx: &mut App, go: impl Fn(&mut Win
                         )
                     })
                     .child(
+                        // Written as it is ticked, as the egui dialog's own
+                        // checkbox is: ticking and then cancelling suppresses the
+                        // warning in both apps.
                         Checkbox::new("notice-suppress")
                             .label(t!("ui.labels.suppress_warning").to_string())
                             .checked(suppressed)
@@ -170,7 +173,8 @@ fn ask(warning: Warning, window: &mut Window, cx: &mut App, go: impl Fn(&mut Win
                             .label(t!("ui.buttons.continue_").into_owned())
                             .on_click(move |_event, window, cx: &mut App| {
                                 window.close_dialog(cx);
-                                go(window, cx);
+                                let go = Rc::clone(&go);
+                                window.defer(cx, move |window, cx| go(window, cx));
                             })
                     })
                     .child(
