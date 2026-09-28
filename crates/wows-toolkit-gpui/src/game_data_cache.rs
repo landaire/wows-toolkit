@@ -2,14 +2,15 @@
 //!
 //! The cache holds one dumped build per game version, so a replay recorded
 //! against a build the live install no longer has can still be opened. The
-//! egui app writes it on load; this port reports what is there and runs the
-//! same maintenance against the published repository, through
+//! egui app writes it on load and reads it to parse such a replay; this port
+//! does neither yet (`docs/gpui-port-gaps.md`), and reports what is there and
+//! runs the same maintenance against the published repository, through
 //! `wows_data_mgr::download_repo`, so both apps act on one cache.
 //!
 //! Every operation here reaches the network or walks a directory of several
-//! gigabytes, so all of them run off the UI thread and report back by
-//! channel. The egui settings tab measures the cache inline on the UI thread
-//! instead, which is what makes its Settings tab stutter on a large cache.
+//! gigabytes, so all of them run off the UI thread and report back by channel.
+//! The egui settings tab walks it on the UI thread, memoised until something
+//! invalidates the figure.
 
 use std::path::PathBuf;
 

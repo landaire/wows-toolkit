@@ -159,9 +159,9 @@ pub struct ReplayInspectorView {
     replay_settings: ReplaySettings,
     /// `AppPreferences.auto_load_latest_replay` in the egui app: seeded from
     /// the shared config DB in `apply_settings`, then flippable at runtime via
-    /// the header checkbox. Reflects the persisted intent only -- this port
-    /// has no replays-directory watcher yet, so toggling it does not
-    /// currently start or stop an auto-load; wiring that up is a follow-up.
+    /// the header checkbox, and read by the directory watcher when a replay
+    /// lands. The flip is not written back to the DB, so it lasts the session
+    /// (`docs/gpui-port-gaps.md`).
     auto_load_latest_replay: bool,
     /// Backing state for the header's grouping combo box. The live grouping
     /// lives on `browser`; this mirrors it so the closed combo shows the

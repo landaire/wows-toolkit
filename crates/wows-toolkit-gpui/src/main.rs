@@ -6,6 +6,7 @@ rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_trans
 
 mod app;
 mod armor_viewer;
+mod cli;
 mod collab;
 mod collab_popover;
 mod dialog;
@@ -47,6 +48,11 @@ const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1200.), px(800.));
 
 fn main() {
+    // Before anything is opened: an argument this build does not take is
+    // reported and the process exits, rather than a window appearing as though
+    // it had been honoured.
+    let _cli = cli::parse();
+
     // `RUST_LOG` overrides; absent that, `info` is the default so the crate's
     // `tracing::info!`/`warn!`/`error!` calls (scan errors, open-intent logs,
     // settings-load failures) show up on stderr without extra setup.

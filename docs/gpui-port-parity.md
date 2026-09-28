@@ -5,6 +5,11 @@ pane on 2026-09-23 against `crates/wows-toolkit/src/ui` and
 `crates/wows-toolkit/src/armor_viewer`. Each entry names the egui behaviour,
 what the port does instead, and what closing it takes.
 
+That scope is panes. What lives outside it -- the command line, the renderer and
+adapter selection, the process mitigations, the updater, the window and menu
+layer, the tactics board, and the dump cache that lets an old replay parse at all
+-- is in `docs/gpui-port-gaps.md`, audited 2026-09-27.
+
 `[done]` entries were closed in the same pass that produced this list and are
 kept so the next audit does not re-report them.
 
@@ -35,8 +40,9 @@ kept so the next audit does not re-report them.
   as in the dock; `toast.rs` refuses (and logs) rather than panicking on a window
   with no `Root` at all.
 - [done] The command palette is `gpui_kit::component::command` over
-  `palette.rs`, on ctrl+k and ctrl+shift+p. The egui palette's cascading
-  sub-modes (search a player, a ship, a ship's armor) are not ported.
+  `palette.rs`, on ctrl+k and ctrl+p, which is what the egui app binds. The
+  egui palette's cascading sub-modes (search a player, a ship, a ship's armor)
+  are not ported, nor are its eight other actions; see the gaps list.
 - [done] The file viewers and the raw-JSON panels are read-only
   `EditorState`s with a grammar, so they highlight, select and search.
 - [done] The settings tab is `component::form`: one labelled section card
@@ -801,7 +807,8 @@ kept so the next audit does not re-report them.
   newest cached build and keep an older one; it now orders by the build
   number the name carries, and leaves alone a directory carrying none. The
   measurement, the pruning and the jobs all run off the UI thread here, where
-  the egui tab walks the cache inline every frame it draws. The repository
+  the egui tab walks the cache on the UI thread and memoises the result until
+  something invalidates it. The repository
   commit is written back only when a run finds nothing to do, so a run that
   found work is re-checked rather than skipped.
 - [done] Automatic replay data export is not configurable. The Replay
@@ -835,7 +842,9 @@ kept so the next audit does not re-report them.
 - [done] The Settings tab flags an invalid WoWs directory on the tab strip.
 - [done] The WoWs directory field tints and says so when the path is not an
   install. It is still not locked while a load is running.
-- [done] `show_entity_id` has a checkbox. `auto_dump_game_data` does not.
+- [done] `show_entity_id` and `auto_dump_game_data` both have a checkbox. The
+  auto-dump one governs nothing yet: no dump runs here, so the cache this port
+  maintains is one only the egui app fills. See the gaps list.
 - [done] The collaboration section is absent. The Settings tab carries it:
   the session display name, the peer-to-peer address warning suppression, and
   the auto-open toggle, written to the same three rows the egui tab reads. The
