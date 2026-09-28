@@ -434,14 +434,12 @@ kept so the next audit does not re-report them.
   chat pane reveals its copy button the same way). The table gets that column's
   width back, and the actions stay where the row is. Both ways in are headed by
   the player they belong to, since a right-click menu lands wherever the pointer
-  was and the rows it could have come from are one line apart: the division mark,
-  clan tag and name in the colours the row gives them, and the ship on a second
-  line under them behind its class icon. The icon rides the ship's line because
-  the kit indents every item by an icon's width as soon as any item in the menu
-  carries one. The heading is a disabled item, which the kit skips when the
-  arrows walk the menu; pressing Enter while it is the selection (the kit selects
-  item 0 on the first Down, disabled or not) closes the menu without doing
-  anything, which needs a `PopupMenu::confirm` guard in the kit to fix.
+  was and the rows it could have come from are one line apart: one line reading
+  clan tag, player, class icon, ship, with the clan tag and the player in the
+  colours the row gives them. The heading is a disabled item, which the kit skips
+  when the arrows walk the menu; pressing Enter while it is the selection (the
+  kit selects item 0 on the first Down, disabled or not) closes the menu without
+  doing anything, which needs a `PopupMenu::confirm` guard in the kit to fix.
 - [done] The header's Actions menu carries "Hide My Test Ship Stats", and is shown
   only for a test ship, which is the case it means anything in. Open in Game
   and Show Replay Controls are in the listing's row menu instead. The match
