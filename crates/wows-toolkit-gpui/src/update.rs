@@ -79,7 +79,12 @@ const GITHUB_JSON: &str = "application/vnd.github+json";
 /// `finalize-update --replaced <old>` to delete what it replaced. This is the
 /// same sequence the egui app performs (`app.rs`'s `UpdateDownloaded` arm), so a
 /// binary installed by either can be finalized by either.
-pub fn install(asset_url: String, proxy: String, cx: &App) -> Task<Result<(), String>> {
+pub fn install(
+    asset_url: String,
+    proxy: String,
+    progress: futures::channel::mpsc::UnboundedSender<Downloaded>,
+    cx: &App,
+) -> Task<Result<(), String>> {
     let runtime = crate::runtime::runtime(cx);
     cx.background_spawn(async move {
         let runtime = runtime.ok_or_else(|| "no runtime to download on".to_owned())?;
@@ -87,21 +92,35 @@ pub fn install(asset_url: String, proxy: String, cx: &App) -> Task<Result<(), St
         let downloaded = current.with_extension("new");
 
         runtime.block_on(async {
+            use tokio::io::AsyncWriteExt as _;
+
             let client =
                 crate::http::client(&proxy, reqwest::redirect::Policy::default()).map_err(|e| e.to_string())?;
-            let bytes = client
-                .get(&asset_url)
-                .send()
-                .await
-                .map_err(|err| err.to_string())?
-                .bytes()
-                .await
-                .map_err(|err| err.to_string())?;
-            tokio::fs::write(&downloaded, &bytes).await.map_err(|err| err.to_string())
+            let mut response = client.get(&asset_url).send().await.map_err(|err| err.to_string())?;
+            let total = response.content_length();
+            let mut file = tokio::fs::File::create(&downloaded).await.map_err(|err| err.to_string())?;
+            let mut read = 0u64;
+            // Written as it arrives rather than held whole: the reader is told
+            // how far it has got, and a release is tens of megabytes.
+            while let Some(chunk) = response.chunk().await.map_err(|err| err.to_string())? {
+                read += chunk.len() as u64;
+                file.write_all(&chunk).await.map_err(|err| err.to_string())?;
+                let _ = progress.unbounded_send(Downloaded { read, total });
+            }
+            file.flush().await.map_err(|err| err.to_string())
         })?;
 
         swap_in(&current, &downloaded)
     })
+}
+
+/// How much of the new executable has arrived.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Downloaded {
+    pub read: u64,
+    /// How much there is to read. `None` when the server did not say, which is
+    /// a download with no end in sight rather than an empty one.
+    pub total: Option<u64>,
 }
 
 /// Puts `downloaded` where `current` is and starts it.

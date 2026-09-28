@@ -170,22 +170,54 @@ fn offer_update(
             .on_ok(move |_event, window, cx| {
                 let asset_url = asset_url.clone();
                 let proxy = proxy.clone();
-                crate::toast::info(installing_said.clone(), window, cx);
-                let installing = crate::update::install(asset_url, proxy, cx);
+                crate::toast::stuck(UPDATE_PROGRESS, installing_said.clone(), window, cx);
+                let (reports, mut progress) = futures::channel::mpsc::unbounded();
+                let installing = crate::update::install(asset_url, proxy, reports, cx);
                 window
                     .spawn(cx, async move |cx| {
+                        let listen = async {
+                            while let Some(step) = futures::StreamExt::next(&mut progress).await {
+                                let said = describe_download(step);
+                                if cx
+                                    .update(|window, cx| crate::toast::progress(UPDATE_PROGRESS, said, window, cx))
+                                    .is_err()
+                                {
+                                    break;
+                                }
+                            }
+                        };
                         // Only a failure returns: a successful install restarts
                         // the app from the new executable.
-                        if let Err(reason) = installing.await {
-                            let _ = cx.update(|window, cx| {
+                        let (installed, ()) = futures::future::join(installing, listen).await;
+                        let _ = cx.update(|window, cx| {
+                            crate::toast::resolved(UPDATE_PROGRESS, window, cx);
+                            if let Err(reason) = installed {
                                 crate::toast::failed(reason, window, cx);
-                            });
-                        }
+                            }
+                        });
                     })
                     .detach();
                 true
             })
     });
+}
+
+/// Identifies the message the update download keeps on screen, so each step
+/// replaces the last rather than stacking.
+const UPDATE_PROGRESS: &str = "update-download";
+
+/// How far the download has got, in the reader's own terms.
+fn describe_download(step: crate::update::Downloaded) -> String {
+    let read = humansize::format_size(step.read, humansize::BINARY);
+    match step.total {
+        Some(total) => {
+            let total = humansize::format_size(total, humansize::BINARY);
+            t!("ui.messages.update_downloading", read = read, total = total).into_owned()
+        }
+        // A server that did not say how much there is leaves only how much has
+        // arrived, which is still worth saying.
+        None => t!("ui.messages.update_downloading_unknown", read = read).into_owned(),
+    }
 }
 
 /// Who made this, what it is built on, and where to look next.
