@@ -1580,6 +1580,7 @@ preset_save_failed = "The board could not be saved: %{error}"
 preset_load_failed = "The board could not be opened: %{error}"
 preset_delete_failed = "The board could not be dropped: %{error}"
 presets = "Saved boards"
+clear_drawing = "Clear drawing"
 
 [ui.armor.outcome]
 penetration = "Penetration"

@@ -9,6 +9,7 @@
 use std::sync::Arc;
 
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Disableable;
 use gpui_kit::component::Selectable;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
@@ -230,6 +231,44 @@ const MIN_CAP_RADIUS: f32 = 50.0;
 /// What a capture point added by hand starts as.
 const NEW_CAP_RADIUS: f32 = 600.0;
 
+/// What a board draws in until the reader picks otherwise, matching the ink and
+/// nib the replay viewport starts with.
+const DEFAULT_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0xff];
+const DEFAULT_NIB: f32 = 2.0;
+
+/// The inks the board offers, which are the replay viewport's own.
+const INKS: [[u8; 4]; 6] = [
+    [0xff, 0xd7, 0x3a, 0xff],
+    [0xe8, 0x73, 0x7b, 0xff],
+    [0x6f, 0xd9, 0x8a, 0xff],
+    [0x7f, 0xb4, 0xe8, 0xff],
+    [0xe9, 0xe5, 0xdd, 0xff],
+    [0x1a, 0x1a, 0x18, 0xff],
+];
+
+/// How wide the nib can be drawn, which is the span the replay viewport holds
+/// its own to.
+const MIN_NIB: f32 = 1.0;
+const MAX_NIB: f32 = 8.0;
+
+/// The tools the board offers, in the order the egui board takes them up.
+///
+/// The shapes are drawn hollow: a board is read through, and a filled one hides
+/// the map it is about.
+fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str)> {
+    use wt_collab_client::drawing::Tool;
+    vec![
+        (Tool::Freehand, "ui.renderer.annotations.freehand"),
+        (Tool::Line, "ui.renderer.annotations.line"),
+        (Tool::Arrow, "ui.renderer.annotations.arrow"),
+        (Tool::Circle { filled: false }, "ui.renderer.annotations.circle"),
+        (Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle"),
+        (Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle"),
+        (Tool::Measurement, "ui.renderer.annotations.measure"),
+        (Tool::Eraser, "ui.renderer.annotations.eraser"),
+    ]
+}
+
 /// The board itself.
 pub struct TacticsBoard {
     focus_handle: FocusHandle,
@@ -242,10 +281,18 @@ pub struct TacticsBoard {
     caps: Vec<BoardCapPoint>,
     /// Which capture point the reader is working on, by its place in `caps`.
     selected: Option<usize>,
+    /// Where the pointer is on the map, which is what the part-drawn shape is
+    /// built against. `None` while it is off the map.
+    pointer_at: Option<[f32; 2]>,
     /// The drag in progress, and what it is doing.
     dragging: Option<(usize, CapDrag)>,
     /// Whether the next click on the map places a capture point.
     adding: bool,
+    /// The tool in hand and the shape it is part way through, which is the same
+    /// state machine the replay viewport draws with.
+    drawing: wt_collab_client::drawing::Drawing,
+    /// What has been drawn on the board.
+    annotations: Vec<wt_collab_client::types::Annotation>,
     /// Where the map was last painted, which is what a pointer position is
     /// read against. `None` until it has been painted once. Shared with the
     /// painter, which is the only thing that knows where the map landed.
@@ -260,7 +307,7 @@ pub struct TacticsBoard {
     drawn: Option<Arc<RenderImage>>,
     /// Whether a rasterisation is in flight, so a burst of edits asks for one
     /// redraw rather than one each.
-    drawing: bool,
+    rasterising: bool,
     /// Whether anything changed while one was in flight.
     stale: bool,
 }
@@ -289,11 +336,14 @@ impl TacticsBoard {
             mode: None,
             caps: Vec::new(),
             selected: None,
+            pointer_at: None,
             dragging: None,
             adding: false,
+            drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
+            annotations: Vec::new(),
             painted: std::rc::Rc::new(std::cell::Cell::new(None)),
             drawn: None,
-            drawing: false,
+            rasterising: false,
             stale: false,
         }
     }
@@ -317,7 +367,7 @@ impl TacticsBoard {
             map_name: map.space,
             map_id: map.map_id,
             cap_points: self.caps.iter().map(BoardCapPoint::to_preset).collect(),
-            annotations: Vec::new(),
+            annotations: self.annotations.iter().map(preset::PresetAnnotation::from_annotation).collect(),
         };
         match preset::save_preset(&saved) {
             Ok(()) => {
@@ -362,6 +412,7 @@ impl TacticsBoard {
         self.mode = None;
         self.map = Some(map);
         self.caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
+        self.annotations = read.annotations.iter().map(preset::PresetAnnotation::to_annotation).collect();
         self.selected = None;
         self.adding = false;
         self.redraw(cx);
@@ -501,8 +552,71 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
+    /// Whether a drawing tool is in hand, which is what takes the pointer away
+    /// from the capture points.
+    fn has_tool(&self) -> bool {
+        *self.drawing.tool() != wt_collab_client::drawing::Tool::None
+    }
+
+    /// Takes up a tool, or puts it down again when it is already in hand.
+    pub fn set_tool(&mut self, tool: wt_collab_client::drawing::Tool, cx: &mut Context<Self>) {
+        let putting_down = *self.drawing.tool() == tool;
+        let next = if putting_down { wt_collab_client::drawing::Tool::None } else { tool };
+        self.drawing.set_tool(next);
+        // A tool in hand is not also placing capture points.
+        if !putting_down {
+            self.adding = false;
+            self.selected = None;
+        }
+        cx.notify();
+    }
+
+    /// Draws in a different ink from here on. What is already drawn keeps the
+    /// ink it was drawn in.
+    pub fn set_ink(&mut self, ink: [u8; 4], cx: &mut Context<Self>) {
+        self.drawing.set_color(ink);
+        cx.notify();
+    }
+
+    /// Widens or narrows the nib, within what the board draws with.
+    pub fn step_nib(&mut self, by: f32, cx: &mut Context<Self>) {
+        let stepped = (self.drawing.width() + by).clamp(MIN_NIB, MAX_NIB);
+        self.drawing.set_width(stepped);
+        cx.notify();
+    }
+
+    /// Takes everything drawn off the board, leaving the capture points.
+    pub fn clear_annotations(&mut self, cx: &mut Context<Self>) {
+        if self.annotations.is_empty() {
+            return;
+        }
+        self.annotations.clear();
+        self.redraw(cx);
+    }
+
+    /// Hands a pointer event to the tool and keeps what it drew.
+    fn stroke(&mut self, stroke: wt_collab_client::drawing::Stroke, cx: &mut Context<Self>) {
+        match self.drawing.handle(stroke, &self.annotations) {
+            Some(wt_collab_client::drawing::Drawn::Added(annotation)) => self.annotations.push(annotation),
+            // The index names a shape that was there when the stroke began, so
+            // it is checked rather than trusted.
+            Some(wt_collab_client::drawing::Drawn::Erased(index)) if index < self.annotations.len() => {
+                self.annotations.remove(index);
+            }
+            _ => {}
+        }
+        self.redraw(cx);
+    }
+
     fn on_mouse_down(&mut self, event: &MouseDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         if event.button != MouseButton::Left {
+            return;
+        }
+        // A tool in hand takes the drag: a reader drawing a line is not asking
+        // to move the capture point under it.
+        if self.has_tool() {
+            let Some(at) = self.map_point(event.position) else { return };
+            self.stroke(wt_collab_client::drawing::Stroke::Began { at: [at.0, at.1] }, cx);
             return;
         }
         if self.adding {
@@ -523,6 +637,14 @@ impl TacticsBoard {
     }
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.drawing.is_drawing() {
+            let Some(at) = self.map_point(event.position) else { return };
+            // Straight lines are not asked for here: the board has no
+            // modifier on its pointer yet, and a freehand stroke is what the
+            // tool draws without one.
+            self.stroke(wt_collab_client::drawing::Stroke::Moved { at: [at.0, at.1], straight: false }, cx);
+            return;
+        }
         let Some((index, what)) = self.dragging else { return };
         let Some((x, z)) = self.world_point(event.position) else { return };
         let Some(cap) = self.caps.get_mut(index) else { return };
@@ -539,7 +661,12 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
-    fn on_mouse_up(&mut self, _event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+    fn on_mouse_up(&mut self, event: &MouseUpEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        if self.drawing.is_drawing() {
+            let Some(at) = self.map_point(event.position) else { return };
+            self.stroke(wt_collab_client::drawing::Stroke::Ended { at: [at.0, at.1] }, cx);
+            return;
+        }
         if self.dragging.take().is_some() {
             cx.notify();
         }
@@ -589,17 +716,24 @@ impl TacticsBoard {
             return;
         };
         let Some(game_data) = self.game_data.clone() else { return };
-        if self.drawing {
+        if self.rasterising {
             self.stale = true;
             return;
         }
-        self.drawing = true;
+        self.rasterising = true;
 
         let caps = self.caps.clone();
+        let mut annotations = self.annotations.clone();
+        // The shape under the pointer is drawn the way the finished one will
+        // be, so what the reader sees while dragging is what they get.
+        if let Some(part_drawn) = self.pointer_at.and_then(|at| self.drawing.in_progress(at)) {
+            annotations.push(part_drawn);
+        }
         cx.spawn(async move |this, cx| {
-            let drawn = cx.background_spawn(async move { rasterise(&map.space, &game_data, &caps) }).await;
+            let drawn =
+                cx.background_spawn(async move { rasterise(&map.space, &game_data, &caps, &annotations) }).await;
             let _ = this.update(cx, |this, cx| {
-                this.drawing = false;
+                this.rasterising = false;
                 if let Some(drawn) = drawn {
                     this.drawn = Some(drawn);
                 }
@@ -617,10 +751,17 @@ impl TacticsBoard {
 ///
 /// `None` when the loaded build ships no art for that map, which is what the
 /// board says rather than showing an empty square.
-fn rasterise(space: &str, game_data: &GameDataCache, caps: &[BoardCapPoint]) -> Option<Arc<RenderImage>> {
+fn rasterise(
+    space: &str,
+    game_data: &GameDataCache,
+    caps: &[BoardCapPoint],
+    annotations: &[wt_collab_client::types::Annotation],
+) -> Option<Arc<RenderImage>> {
     let loaded = game_data.newest_loaded()?;
     let map = wows_minimap_renderer::assets::load_map_info(space, loaded.vfs())?;
-    let commands: Vec<DrawCommand> = caps.iter().map(|cap| cap.command(&map)).collect();
+    let mut commands: Vec<DrawCommand> = caps.iter().map(|cap| cap.command(&map)).collect();
+    // Over the zones, so a line drawn across one is not buried under it.
+    commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
     crate::minimap_preview::render_map(space, game_data, &commands)
 }
 
@@ -674,6 +815,7 @@ impl TacticsBoard {
                     )),
             )
             .child(self.render_cap_tools(cx))
+            .child(self.render_draw_tools(cx))
             .child(self.render_presets(cx))
             .when(!self.modes.is_empty(), |this| {
                 this.child(
@@ -707,6 +849,79 @@ impl TacticsBoard {
                             },
                         ))),
                 )
+            })
+    }
+
+    /// What can be drawn on the board, and in what.
+    fn render_draw_tools(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let board = cx.entity();
+        let in_hand = self.drawing.tool().clone();
+        let nib = self.drawing.width();
+        let has_drawing = !self.annotations.is_empty();
+
+        h_flex()
+            .gap_1()
+            .flex_wrap()
+            .items_center()
+            .children(tools().into_iter().enumerate().map(|(index, (tool, key))| {
+                let board = board.clone();
+                let chosen = in_hand == tool;
+                crate::ui::selectable(
+                    ("tactics-tool", index),
+                    chosen,
+                    Button::new(("tactics-tool-button", index))
+                        .label(t!(key).into_owned())
+                        .compact()
+                        .selected(chosen)
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            let tool = tool.clone();
+                            board.update(cx, |board, cx| board.set_tool(tool, cx));
+                        }),
+                )
+            }))
+            .children(INKS.iter().enumerate().map(|(index, ink)| {
+                let board = board.clone();
+                let ink = *ink;
+                let chosen = self.drawing.color() == ink;
+                crate::ui::selectable(
+                    ("tactics-ink", index),
+                    chosen,
+                    Button::new(("tactics-ink-button", index))
+                        .compact()
+                        .selected(chosen)
+                        .child(div().size_3().rounded_full().bg(rgb(u32::from_be_bytes([0, ink[0], ink[1], ink[2]]))))
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.set_ink(ink, cx));
+                        }),
+                )
+            }))
+            .child({
+                let board = board.clone();
+                Button::new("tactics-nib-down").label("-").compact().disabled(nib <= MIN_NIB).on_click(
+                    move |_event, _window, cx: &mut App| {
+                        board.update(cx, |board, cx| board.step_nib(-1.0, cx));
+                    },
+                )
+            })
+            .child(div().text_xs().text_color(crate::theme::text_dim()).child(format!("{nib:.0}")))
+            .child({
+                let board = board.clone();
+                Button::new("tactics-nib-up").label("+").compact().disabled(nib >= MAX_NIB).on_click(
+                    move |_event, _window, cx: &mut App| {
+                        board.update(cx, |board, cx| board.step_nib(1.0, cx));
+                    },
+                )
+            })
+            .when(has_drawing, |this| {
+                this.child({
+                    let board = board.clone();
+                    Button::new("tactics-clear-drawing")
+                        .label(t!("ui.tactics.clear_drawing").into_owned())
+                        .compact()
+                        .on_click(move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.clear_annotations(cx));
+                        })
+                })
             })
     }
 
