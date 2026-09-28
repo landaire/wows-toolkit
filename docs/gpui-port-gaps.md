@@ -182,9 +182,14 @@ have used it.
     own read in its tab, a batch render or a bulk contribution in a message it
     rewrites as it goes, and an outcome nobody was watching for through
     `JobReport` (item 32). Nothing runs unreported.
-20. **Palette is a third of egui's.** Still missing: the three cascading sub-modes
-    (search a player, my matches in ship, view armor for ship,
-    `ui/command_palette.rs:129-131`).
+20. ~~**Palette is a third of egui's.**~~ Done 2026-09-28: the three cascading
+    modes are there (search a player, my matches in ship, view armor for ship),
+    filled from the index and the loaded build's ship catalogue and offered as rows
+    the palette then filters as the reader types. A player or ship row leads to the
+    search the shared seeds express (`query_bar::seed`, printed through
+    `query_text::print_query`, which a test parses back); an armor row opens that
+    ship in the Armor Viewer. A mode with nothing in it says so rather than opening
+    an empty list.
     Landed 2026-09-28: Copy latest log, Open replay directory, Index All Replays,
     Refresh Persisted Replay Data, Import constants, and both Send All Replays
     entries. "Games I died

@@ -41,6 +41,13 @@ pub struct ShipEntry {
     pub tier: u32,
 }
 
+impl ShipCatalog {
+    /// Every ship in it, nation by nation and class by class.
+    pub fn ships(&self) -> impl Iterator<Item = &ShipEntry> {
+        self.nations.iter().flat_map(|nation| nation.classes.iter()).flat_map(|class| class.ships.iter())
+    }
+}
+
 /// Canonical display order for ship classes.
 fn species_order(s: &Species) -> u32 {
     match s {

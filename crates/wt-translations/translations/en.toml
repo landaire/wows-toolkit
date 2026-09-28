@@ -349,6 +349,12 @@ games_i_died_in = "Games I died in"
 games_i_won = "Games I won"
 send_all_replays = "Send All Replays to ShipBuilds"
 send_all_replays_again = "Send All Replays to ShipBuilds (ignore the ledger)"
+search_players = "Search players..."
+my_matches_in_ship = "My matches in ship..."
+view_armor_for_ship = "View armor for ship..."
+matches_found = "%{count} match(es)"
+nothing_indexed = "Nothing is indexed yet"
+no_ship_catalogue = "Load a game build first"
 
 [ui.settings.twitch]
 heading = "Twitch Settings"
