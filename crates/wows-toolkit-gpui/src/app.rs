@@ -67,6 +67,15 @@ fn check_for_update_from_menu(window: &mut Window, cx: &mut gpui_kit::App) {
     app.update(cx, |app, cx| app.check_for_update(Asked::ByHand, window, cx));
 }
 
+/// One running job on the status strip: what it is, and how far it has got.
+fn status_job(named: String, progress: Option<(u64, u64)>) -> AnyElement {
+    let counted = progress
+        .filter(|(_, total)| *total > 0)
+        .map(|(done, total)| t!("ui.app.status_of", done = done, total = total).into_owned());
+
+    h_flex().gap_1().items_center().child(Spinner::new().xsmall()).child(named).children(counted).into_any_element()
+}
+
 /// Who asked for the update check.
 ///
 /// A startup check that finds nothing says nothing; one the reader asked for says
@@ -628,6 +637,50 @@ impl App {
             });
         })
         .detach();
+    }
+
+    /// What is running, along the bottom of the window.
+    ///
+    /// The egui app has a status panel that names every background task and its
+    /// progress (`app.rs`'s `build_bottom_panel`); this names the two the app owns
+    /// -- a game-data cache job and an index build -- so neither runs invisibly.
+    /// A tab's own work (a directory scan, a replay parse) is still reported by
+    /// that tab and not here.
+    fn status_strip(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        let mut jobs: Vec<AnyElement> = Vec::new();
+
+        if let Some(job) = self.cache.running {
+            let named = match job {
+                game_data_cache::CacheJob::Checking => t!("ui.app.status_cache_checking"),
+                game_data_cache::CacheJob::Validating => t!("ui.app.status_cache_validating"),
+                game_data_cache::CacheJob::Downloading => t!("ui.app.status_cache_downloading"),
+            };
+            jobs.push(status_job(named.into_owned(), self.cache.progress.map(|at| (at.done, at.total))));
+        }
+        if let Some(step) = self.index_progress {
+            jobs.push(status_job(t!("ui.app.status_indexing").into_owned(), Some((step.done, step.total))));
+        }
+
+        if jobs.is_empty() {
+            return None;
+        }
+
+        Some(
+            h_flex()
+                .id("app-status-strip")
+                .test_support()
+                .flex_none()
+                .gap_3()
+                .items_center()
+                .px_2()
+                .py_1()
+                .border_t_1()
+                .border_color(cx.theme().border)
+                .text_xs()
+                .text_color(crate::theme::text_dim())
+                .children(jobs)
+                .into_any_element(),
+        )
     }
 
     /// Reports what the last run's crash left behind, once.
@@ -2819,6 +2872,7 @@ impl Render for App {
             // meeting.
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
             .child(div().flex_1().min_h(px(0.)).bg(cx.theme().background).child(body))
+            .children(self.status_strip(cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
             // Dialogs, sheets and toasts are held by `Root` but drawn by
             // whoever renders the window's own view, so they go last and over

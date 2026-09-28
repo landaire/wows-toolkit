@@ -566,6 +566,66 @@ fn dump_for_build(dump_base: &Path, build: u32, version: Option<&str>) -> Option
     })
 }
 
+/// Drops the per-build caches for builds nothing can open any more.
+///
+/// A `game_params_<build>.bin` is hundreds of megabytes and one is written per
+/// build ever opened, so a year of game updates leaves gigabytes behind
+/// (`util/game_params.rs`'s `cleanup_stale_caches` is the egui app's equivalent).
+///
+/// A build is kept when the install has it or the game-data cache has a dump for
+/// it: this port opens both, and a dumped build's cache is as expensive to rebuild
+/// as an installed one's. The egui app keeps only installed builds, which is the
+/// one deliberate difference here.
+pub fn prune_stale_caches(wows_dir: &Path, dump_base: Option<&Path>) {
+    let Some(storage_dir) = wows_toolkit_config::storage_dir() else { return };
+
+    let mut keep: std::collections::HashSet<u32> =
+        wowsunpack::game_data::list_available_builds(wows_dir).unwrap_or_default().into_iter().collect();
+    if let Some(base) = dump_base {
+        let index = wows_data_mgr::builds::BuildsIndex::load(&base.join("builds.toml"));
+        keep.extend(index.builds.iter().map(|entry| entry.build));
+        // A dump written before the index existed is named for its build.
+        if let Ok(entries) = std::fs::read_dir(base) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let Some(build) = name.to_string_lossy().rsplit('_').next().and_then(|tail| tail.parse::<u32>().ok())
+                else {
+                    continue;
+                };
+                if entry.path().join("metadata.toml").exists() {
+                    keep.insert(build);
+                }
+            }
+        }
+    }
+
+    // Nothing to compare against is not licence to delete everything: an install
+    // that could not be listed and no cache means this pass knows nothing.
+    if keep.is_empty() {
+        return;
+    }
+
+    // The cache from before these were keyed by build, which no build can use.
+    let _ = std::fs::remove_file(storage_dir.join("game_params.bin"));
+
+    let Ok(entries) = std::fs::read_dir(&storage_dir) else { return };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        let stale = stale_cache_build(&name).is_some_and(|build| !keep.contains(&build));
+        if stale && let Err(err) = std::fs::remove_file(entry.path()) {
+            tracing::warn!(file = %name, error = %err, "a stale per-build cache could not be dropped");
+        }
+    }
+}
+
+/// The build a per-build cache file belongs to, if it is one.
+fn stale_cache_build(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix("game_params_").and_then(|rest| rest.strip_suffix(".bin"));
+    let rest = rest.or_else(|| name.strip_prefix("constants_").and_then(|rest| rest.strip_suffix(".json")));
+    rest?.parse().ok()
+}
+
 /// Outcome of [`spawn_startup_preload`]: the current installed build's game
 /// data, loaded once at app startup rather than on the first replay click.
 /// The browser and every [`ReplayPanel`](super::panel::ReplayPanel) consume
@@ -990,6 +1050,17 @@ mod session_stat_tests {
 
 #[cfg(test)]
 mod tests {
+    /// A per-build cache file is recognised by its name, and nothing else in the
+    /// storage directory is: the settings database lives there too.
+    #[test]
+    fn only_a_per_build_cache_is_named_as_one() {
+        assert_eq!(super::stale_cache_build("game_params_12345.bin"), Some(12345));
+        assert_eq!(super::stale_cache_build("constants_12345.json"), Some(12345));
+        assert_eq!(super::stale_cache_build("wows_toolkit.db"), None);
+        assert_eq!(super::stale_cache_build("game_params.bin"), None, "the unkeyed one is handled on its own");
+        assert_eq!(super::stale_cache_build("game_params_notabuild.bin"), None);
+    }
+
     /// A build the install no longer has is answered from the game-data cache:
     /// by its own number where the cache holds it, by another dump of the same
     /// version otherwise (build numbers are per server), and by a pre-index
