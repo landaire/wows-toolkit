@@ -1661,7 +1661,7 @@ impl Render for ReplayBrowser {
 /// `available_builds` gate and the (functionally redundant -- both loop
 /// entries were the identical path) double directory-existence check in the
 /// original are both dropped as out of scope for a directory-only lookup.
-fn resolve_replays_dir(wows_dir: &Path) -> PathBuf {
+pub(crate) fn resolve_replays_dir(wows_dir: &Path) -> PathBuf {
     let default_dir = wows_dir.join("replays");
 
     let Some(version_str) =

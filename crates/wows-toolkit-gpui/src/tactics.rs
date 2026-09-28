@@ -269,6 +269,13 @@ fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str)> {
     ]
 }
 
+/// How far a walk of the replay directory has got.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScanProgress {
+    pub read: usize,
+    pub total: usize,
+}
+
 /// The board itself.
 pub struct TacticsBoard {
     focus_handle: FocusHandle,
@@ -302,6 +309,11 @@ pub struct TacticsBoard {
     /// Every board already saved, read when the window opens and after each
     /// save so the list says what is there.
     presets: Vec<String>,
+    /// How far a walk of the replay directory has got, when one is running. It
+    /// is what fills the mode picker for a machine with no layouts recorded.
+    scanning: Option<ScanProgress>,
+    /// Where the replays are, so the walk knows what to read.
+    replays_dir: Option<std::path::PathBuf>,
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
     drawn: Option<Arc<RenderImage>>,
@@ -327,6 +339,8 @@ impl TacticsBoard {
         Self {
             preset_name,
             presets: preset::list_preset_names(),
+            scanning: None,
+            replays_dir: None,
             focus_handle: cx.focus_handle(),
             game_data,
             layouts,
@@ -346,6 +360,108 @@ impl TacticsBoard {
             rasterising: false,
             stale: false,
         }
+    }
+
+    /// Points the board at the replays a scan would read.
+    pub fn set_replays_dir(&mut self, dir: Option<std::path::PathBuf>, cx: &mut Context<Self>) {
+        self.replays_dir = dir;
+        cx.notify();
+    }
+
+    /// Reads every replay for the capture layouts of the modes they were played
+    /// in.
+    ///
+    /// The layouts are what the mode picker offers, and the only place they can
+    /// be read from is a battle that used them. Each is written once: a machine
+    /// with a year of replays pays for this walk once and never again.
+    fn scan_replays(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.scanning.is_some() {
+            return;
+        }
+        let Some(dir) = self.replays_dir.clone() else {
+            crate::toast::warn(t!("ui.messages.wows_dir_not_set").into_owned(), window, cx);
+            return;
+        };
+        let Some(loaded) = self.game_data.as_ref().and_then(|data| data.newest_loaded()) else {
+            crate::toast::warn(t!("ui.tactics.scan_needs_game_data").into_owned(), window, cx);
+            return;
+        };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let Some(runtime) = crate::runtime::runtime(cx) else { return };
+
+        let provider = loaded.provider().clone();
+        let constants = loaded.base_constants().clone();
+        let known = self.layouts.clone();
+        self.scanning = Some(ScanProgress { read: 0, total: 0 });
+        cx.notify();
+
+        // The walk reports itself as it goes rather than being polled: a ticker
+        // would keep firing with nothing to say, and in the test executor it
+        // would never stop.
+        let (reports, mut progress) = futures::channel::mpsc::unbounded();
+
+        cx.spawn_in(window, async move |this, cx| {
+            let walk = cx.background_spawn(async move {
+                let mut found = known;
+                let files = replay_files(&dir);
+                let total = files.len();
+                let _ = reports.unbounded_send(ScanProgress { read: 0, total });
+                let mut added = 0usize;
+                for (read, path) in files.iter().enumerate() {
+                    if let Some(layout) = layout_of(path, provider.as_ref(), &constants, &found)
+                        && found.insert(layout)
+                    {
+                        added += 1;
+                    }
+                    let _ = reports.unbounded_send(ScanProgress { read: read + 1, total });
+                }
+                if added > 0
+                    && let Err(err) = runtime.handle().block_on(found.save_to_db(&pool))
+                {
+                    tracing::warn!("tactics: the capture layouts were not saved: {err}");
+                }
+                (found, added, total)
+            });
+
+            let listen = {
+                let this = this.clone();
+                let mut cx = cx.clone();
+                async move {
+                    while let Some(step) = futures::StreamExt::next(&mut progress).await {
+                        let open = this.update(&mut cx, |this, cx| {
+                            // Only while this walk is the one running: a board
+                            // whose walk was replaced is not reporting on it.
+                            if this.scanning.is_none() {
+                                return false;
+                            }
+                            this.scanning = Some(step);
+                            cx.notify();
+                            true
+                        });
+                        if !matches!(open, Ok(true)) {
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let (found, ()) = futures::future::join(walk, listen).await;
+
+            let _ = this.update_in(cx, |this, window, cx| {
+                let (found, added, total) = found;
+                this.scanning = None;
+                this.layouts = found;
+                // The map list grows with what the walk turned up, and the
+                // modes of whichever map the board is on.
+                this.maps = maps(&this.layouts, this.game_data.as_ref());
+                if let Some(map) = this.map.clone() {
+                    this.modes = modes(&this.layouts, map.map_id, this.game_data.as_ref());
+                }
+                crate::toast::info(t!("ui.tactics.scan_done", added = added, total = total).into_owned(), window, cx);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// Saves the board under the name in the field.
@@ -747,6 +863,46 @@ impl TacticsBoard {
     }
 }
 
+/// Every replay in `dir`, deepest first, as the index walks them.
+fn replay_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut found = Vec::new();
+    let Ok(entries) = std::fs::read_dir(dir) else { return found };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            found.extend(replay_files(&path));
+            continue;
+        }
+        // The battle in progress has no results and no layout to read; it is
+        // also being written to while this reads it.
+        if path.extension().is_some_and(|ext| ext == "wowsreplay")
+            && path.file_name().is_some_and(|name| name != "temp.wowsreplay")
+        {
+            found.push(path);
+        }
+    }
+    found
+}
+
+/// The capture layout `path` was played on, when it is one nothing has yet.
+///
+/// The replay's own metadata says which layout it used, so a battle on a layout
+/// already recorded is not parsed at all: that is the difference between a walk
+/// that takes seconds and one that takes an hour.
+fn layout_of(
+    path: &std::path::Path,
+    provider: &wowsunpack::game_params::provider::GameMetadataProvider,
+    constants: &wows_replays::game_constants::GameConstants,
+    known: &CapLayoutDb,
+) -> Option<wows_replay_insights::cap_layout::CapLayout> {
+    let replay = wows_replays::ReplayFile::from_file(path).ok()?;
+    let key = CapLayoutKey { map_id: replay.meta.mapId, scenario_config_id: replay.meta.scenarioConfigId };
+    if known.contains(&key) {
+        return None;
+    }
+    wows_replay_insights::cap_layout::extract_cap_layout_from_replay(path, provider, Some(constants))
+}
+
 /// Draws `space` with `caps` on it.
 ///
 /// `None` when the loaded build ships no art for that map, which is what the
@@ -817,6 +973,7 @@ impl TacticsBoard {
             .child(self.render_cap_tools(cx))
             .child(self.render_draw_tools(cx))
             .child(self.render_presets(cx))
+            .child(self.render_scan(cx))
             .when(!self.modes.is_empty(), |this| {
                 this.child(
                     h_flex()
@@ -850,6 +1007,30 @@ impl TacticsBoard {
                         ))),
                 )
             })
+    }
+
+    /// Reading the replays for the modes they were played in.
+    fn render_scan(&self, cx: &mut Context<Self>) -> impl IntoElement + use<> {
+        let board = cx.entity();
+        match self.scanning {
+            Some(progress) => h_flex()
+                .gap_2()
+                .items_center()
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child(if progress.total == 0 {
+                    t!("ui.tactics.scan_running").into_owned()
+                } else {
+                    format!("{} / {}", progress.read, progress.total)
+                }))
+                .into_any_element(),
+            None => Button::new("tactics-scan")
+                .label(t!("ui.tactics.scan_replays").into_owned())
+                .compact()
+                .tooltip(t!("ui.tactics.scan_replays_tooltip").to_string())
+                .on_click(move |_event, window, cx: &mut App| {
+                    board.update(cx, |board, cx| board.scan_replays(window, cx));
+                })
+                .into_any_element(),
+        }
     }
 
     /// What can be drawn on the board, and in what.
