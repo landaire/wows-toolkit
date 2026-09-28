@@ -618,6 +618,11 @@ impl ReplayBrowser {
         .detach();
     }
 
+    /// Every replay the listing holds, in the order it walked them.
+    pub fn listed_paths(&self) -> Vec<PathBuf> {
+        self.files.iter().map(|file| file.path.clone()).collect()
+    }
+
     /// The directory the listing is reading, when it is not the install's.
     pub fn chosen_directory(&self) -> Option<&Path> {
         self.chosen_directory.as_deref()

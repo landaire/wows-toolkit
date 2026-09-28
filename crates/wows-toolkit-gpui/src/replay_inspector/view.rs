@@ -63,6 +63,9 @@ use gpui_kit::component::input::InputState;
 /// step replaces the last rather than stacking.
 const BATCH_PROGRESS: &str = "replay-batch-render";
 
+/// The same, for the pass that contributes every listed battle.
+const CONTRIBUTE_PROGRESS: &str = "replay-contribute-all";
+
 const BROWSER_WIDTH: Pixels = px(280.);
 const BROWSER_MIN_WIDTH: Pixels = px(180.);
 const BROWSER_MAX_WIDTH: Pixels = px(520.);
@@ -652,6 +655,83 @@ impl ReplayInspectorView {
         .detach();
     }
 
+    /// Contributes every listed battle, as the data-sharing setting asks.
+    ///
+    /// The egui app's "Send all replays to ShipBuilds" (`app.rs:4712`): a pass
+    /// over what is listed rather than only what lands while the app is open. The
+    /// ledger decides what is actually sent, so a second pass costs a read of the
+    /// ledger per replay and nothing else.
+    pub(crate) fn contribute_all(
+        &mut self,
+        ledger: crate::upload::LedgerUse,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        use wows_toolkit_viewmodel::settings::DataSharingMode;
+
+        if self.data_sharing == DataSharingMode::Off {
+            crate::toast::warn(t!("ui.replay.contribute_nothing_shared").into_owned(), window, cx);
+            return;
+        }
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(pool) = crate::settings_store::pool(cx) else { return };
+        let paths = self.browser.read(cx).listed_paths();
+        if paths.is_empty() {
+            crate::toast::warn(t!("ui.replay.contribute_none_listed").into_owned(), window, cx);
+            return;
+        }
+        let mode = self.data_sharing;
+        let total = paths.len();
+
+        cx.spawn_in(window, async move |_this, cx| {
+            let mut sent = 0usize;
+            for (index, path) in paths.into_iter().enumerate() {
+                let told = cx.update(|window, cx| {
+                    crate::toast::progress(
+                        CONTRIBUTE_PROGRESS,
+                        t!("ui.replay.contributing", done = index + 1, total = total).into_owned(),
+                        window,
+                        cx,
+                    );
+                });
+                if told.is_err() {
+                    return;
+                }
+
+                let parse = match cx.update(|_window, cx| spawn_parse(path.clone(), game_data.clone(), None, cx)) {
+                    Ok(parse) => parse,
+                    Err(_) => return,
+                };
+                let Ok(parsed) = parse.await else {
+                    tracing::warn!(path = %path.display(), "sharing: the replay did not parse");
+                    continue;
+                };
+
+                let candidate = crate::upload::Candidate {
+                    path: path.clone(),
+                    shareable: parsed.shareable,
+                    // A replay already on disk is not one that just landed, so the
+                    // grace window it would wait through has long lapsed.
+                    first_seen: jiff::Timestamp::now() - wows_toolkit_viewmodel::upload::RAW_UPLOAD_GRACE,
+                };
+                let Ok(contributed) = cx.update(|_window, cx| {
+                    crate::upload::contribute(candidate, mode, ledger, pool.clone(), String::new(), cx)
+                }) else {
+                    return;
+                };
+                if matches!(contributed.await, crate::upload::Outcome::Sent) {
+                    sent += 1;
+                }
+            }
+
+            let _ = cx.update(|window, cx| {
+                crate::toast::resolved(CONTRIBUTE_PROGRESS, window, cx);
+                crate::toast::ok(t!("ui.replay.contributed", sent = sent, total = total).into_owned(), window, cx);
+            });
+        })
+        .detach();
+    }
+
     /// Contributes a battle that has just landed, if the reader asked for that.
     ///
     /// This is what the data-sharing setting governs: off sends nothing, build
@@ -688,7 +768,9 @@ impl ReplayInspectorView {
                 // reported is: the grace window for its results starts here.
                 first_seen: jiff::Timestamp::now(),
             };
-            let sent = cx.update(|cx| crate::upload::contribute(candidate, mode, pool, proxy, cx));
+            let sent = cx.update(|cx| {
+                crate::upload::contribute(candidate, mode, crate::upload::LedgerUse::Consult, pool, proxy, cx)
+            });
             match sent.await {
                 crate::upload::Outcome::Sent => {
                     tracing::info!(path = %named.display(), "sharing: the battle was contributed")

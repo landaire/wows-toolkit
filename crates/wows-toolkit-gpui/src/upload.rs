@@ -57,6 +57,19 @@ pub struct Shareable {
     pub builds: Vec<BuildTrackerPayload>,
 }
 
+/// Whether the sent-replay ledger decides what is skipped.
+///
+/// The egui app's `SendReplayCachePolicy`: a bulk pass is normally over what has
+/// not been sent, but a reader told the service lost what they sent needs a pass
+/// that sends it all again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerUse {
+    /// Skip what the ledger says was already sent, which is every ordinary send.
+    Consult,
+    /// Send it whether the ledger has it or not.
+    Ignore,
+}
+
 /// One replay's contribution: the file, and what the parse found in it.
 pub struct Candidate {
     pub path: PathBuf,
@@ -72,6 +85,7 @@ pub struct Candidate {
 pub fn contribute(
     candidate: Candidate,
     mode: DataSharingMode,
+    ledger: LedgerUse,
     pool: sqlx::sqlite::SqlitePool,
     proxy: String,
     cx: &App,
@@ -79,22 +93,30 @@ pub fn contribute(
     let runtime = crate::runtime::runtime(cx);
     cx.background_spawn(async move {
         let Some(runtime) = runtime else { return Outcome::Failed("no runtime to send on".to_owned()) };
-        runtime.block_on(async move { send(candidate, mode, &pool, &proxy).await })
+        runtime.block_on(async move { send(candidate, mode, ledger, &pool, &proxy).await })
     })
 }
 
-async fn send(candidate: Candidate, mode: DataSharingMode, pool: &sqlx::sqlite::SqlitePool, proxy: &str) -> Outcome {
+async fn send(
+    candidate: Candidate,
+    mode: DataSharingMode,
+    ledger: LedgerUse,
+    pool: &sqlx::sqlite::SqlitePool,
+    proxy: &str,
+) -> Outcome {
     let path = candidate.path.clone();
     let recorded = path.to_string_lossy().into_owned();
 
     // The ledger first: a replay already contributed is not read again, whichever
     // app read it the first time.
-    match wows_toolkit_config::queries::sent_replay_exists(pool, &recorded).await {
-        Ok(true) => return Outcome::AlreadySent,
-        Ok(false) => {}
-        // A ledger that cannot be read is not a reason to send again: a second
-        // copy of a replay is worse for the service than a missing one.
-        Err(err) => return Outcome::Failed(format!("the sent-replay ledger could not be read: {err}")),
+    if ledger == LedgerUse::Consult {
+        match wows_toolkit_config::queries::sent_replay_exists(pool, &recorded).await {
+            Ok(true) => return Outcome::AlreadySent,
+            Ok(false) => {}
+            // A ledger that cannot be read is not a reason to send again: a second
+            // copy of a replay is worse for the service than a missing one.
+            Err(err) => return Outcome::Failed(format!("the sent-replay ledger could not be read: {err}")),
+        }
     }
 
     let shareable = &candidate.shareable;

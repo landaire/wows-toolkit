@@ -1244,6 +1244,10 @@ impl App {
                 crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
             }
             PaletteAction::IndexAllReplays => self.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx),
+            PaletteAction::ContributeAllReplays(ledger) => {
+                self.active_tab = AppTab::ReplayInspector;
+                self.replay_inspector.update(cx, |view, cx| view.contribute_all(ledger, window, cx));
+            }
             PaletteAction::OpenReplayDirectory => {
                 self.active_tab = AppTab::ReplayInspector;
                 self.replay_inspector.update(cx, |view, cx| view.open_directory(window, cx));
