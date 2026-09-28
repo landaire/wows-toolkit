@@ -5,12 +5,13 @@
 //! released version emits it: those versions cannot be changed, so the form is
 //! accepted for as long as one of them can still update into this binary.
 //!
-//! The egui app also takes flags for the renderer ladder (`--cpu-renderer`,
-//! `--gpu-adapter`, `--gpu-safe-mode`, `--list-gpus`) and for the process
-//! mitigations (`--no-hardening`). Each names something this port does not have:
-//! it renders through gpui's own backend with no adapter selection and applies no
-//! mitigations. A flag that parsed and then did nothing would be worse than one
-//! that is refused by name, so this takes none of them yet.
+//! The egui app's renderer flags are taken as far as they mean anything here.
+//! gpui picks the adapter it draws the window through and offers no say in it,
+//! but the armor viewport stands up a `wgpu` device of its own, so
+//! `--gpu-adapter`, `--cpu-renderer` and `--list-gpus` steer and report that one.
+//! `--no-hardening` skips the process mitigations, which this port applies.
+//! `--gpu-safe-mode` names a rung of a ladder that has no counterpart here, so it
+//! is still refused rather than parsed and ignored.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -18,14 +19,57 @@ use std::path::PathBuf;
 use clap::Parser;
 use clap::Subcommand;
 
-#[derive(Debug, Default, Parser)]
+#[derive(Clone, Debug, Default, Parser)]
 #[command(name = "wows-toolkit-gpui", version, about)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Draw the armor viewport on the CPU (WARP) rather than a graphics card.
+    #[arg(long, conflicts_with = "gpu_adapter")]
+    pub cpu_renderer: bool,
+
+    /// Draw the armor viewport on the adapter whose name contains NAME.
+    #[arg(long, value_name = "NAME")]
+    pub gpu_adapter: Option<String>,
+
+    /// List the adapters the armor viewport can draw on, and exit.
+    #[arg(long)]
+    pub list_gpus: bool,
+
+    /// Start without the process mitigations.
+    ///
+    /// For a machine the policies break: the app starts at all, and says in the
+    /// log that it was asked to skip them.
+    #[arg(long)]
+    pub no_hardening: bool,
 }
 
-#[derive(Debug, Subcommand)]
+impl Cli {
+    /// Which adapter the armor viewport's own device should take.
+    pub fn adapter_choice(&self) -> crate::viewport::device::AdapterChoice {
+        use crate::viewport::device::AdapterChoice;
+
+        if self.cpu_renderer {
+            return AdapterChoice::Cpu;
+        }
+        match &self.gpu_adapter {
+            Some(named) => AdapterChoice::Named(named.clone()),
+            None => AdapterChoice::Fastest,
+        }
+    }
+
+    /// Whether the process mitigations are applied.
+    pub fn hardening(&self) -> wows_toolkit_hardening::Hardening {
+        if self.no_hardening {
+            wows_toolkit_hardening::Hardening::Skip(wows_toolkit_hardening::SkipReason::CommandLine)
+        } else {
+            wows_toolkit_hardening::Hardening::Apply
+        }
+    }
+}
+
+#[derive(Clone, Debug, Subcommand)]
 pub enum Command {
     /// Delete the binary this process replaced during an update.
     FinalizeUpdate {
@@ -39,8 +83,10 @@ pub enum Command {
 pub enum Invocation {
     /// Delete the named binary, then carry on and open the window.
     FinalizeUpdate(PathBuf),
+    /// Say which adapters the armor viewport can draw on, and exit.
+    ListGpus,
     /// Open the window.
-    Run,
+    Run(Box<Cli>),
 }
 
 /// Subcommand names a bare path must not be mistaken for.
@@ -78,7 +124,8 @@ pub fn parse() -> Invocation {
     match Cli::try_parse_from(&args) {
         Ok(cli) => match cli.command {
             Some(Command::FinalizeUpdate { replaced }) => Invocation::FinalizeUpdate(replaced),
-            None => Invocation::Run,
+            None if cli.list_gpus => Invocation::ListGpus,
+            None => Invocation::Run(Box::new(cli)),
         },
         Err(err) => {
             let title = format!("{} v{}", wows_toolkit_config::APP_NAME, env!("CARGO_PKG_VERSION"));
@@ -125,7 +172,7 @@ fn console_writer() -> Option<std::fs::File> {
 /// the file. Only a launch with no handle at all falls through to the parent's
 /// console, which cannot be redirected, and then to a message box. (The egui app
 /// goes straight to the console, so its redirect leaves the file empty.)
-fn report_startup_message(title: &str, message: &str, is_error: bool) {
+pub fn report_startup_message(title: &str, message: &str, is_error: bool) {
     use std::io::Write as _;
 
     let mut out = std::io::stdout();
@@ -181,14 +228,50 @@ mod tests {
     use super::*;
 
     /// A flag the egui app takes and this build does not is refused, not
-    /// swallowed: the user is told the renderer is not here yet rather than left
+    /// swallowed: the user is told it means nothing here rather than left
     /// believing the launch honoured it.
     #[test]
     fn a_flag_this_build_does_not_have_is_refused() {
-        for flag in ["--cpu-renderer", "--gpu-safe-mode", "--list-gpus", "--no-hardening"] {
-            let refused = Cli::try_parse_from(["wows-toolkit-gpui", flag]);
-            assert!(refused.is_err(), "{flag} is not taken yet, so it has to be refused");
-        }
+        // Only the rung of a ladder that has no counterpart here.
+        let refused = Cli::try_parse_from(["wows-toolkit-gpui", "--gpu-safe-mode"]);
+        assert!(refused.is_err(), "there is no ladder to take a rung of");
+    }
+
+    /// The renderer flags that do mean something are taken, and steer the one
+    /// device this port picks: the armor viewport's own.
+    #[test]
+    fn the_renderer_flags_that_mean_something_are_taken() {
+        use crate::viewport::device::AdapterChoice;
+
+        let bare = Cli::try_parse_from(["wows-toolkit-gpui"]).expect("a bare launch");
+        assert_eq!(bare.adapter_choice(), AdapterChoice::Fastest);
+        assert_eq!(bare.hardening(), wows_toolkit_hardening::Hardening::Apply);
+
+        let on_cpu = Cli::try_parse_from(["wows-toolkit-gpui", "--cpu-renderer"]).expect("--cpu-renderer");
+        assert_eq!(on_cpu.adapter_choice(), AdapterChoice::Cpu);
+
+        let named = Cli::try_parse_from(["wows-toolkit-gpui", "--gpu-adapter", "nvidia"]).expect("--gpu-adapter");
+        assert_eq!(named.adapter_choice(), AdapterChoice::Named("nvidia".into()));
+
+        let bare_bones = Cli::try_parse_from(["wows-toolkit-gpui", "--no-hardening"]).expect("--no-hardening");
+        assert_eq!(
+            bare_bones.hardening(),
+            wows_toolkit_hardening::Hardening::Skip(wows_toolkit_hardening::SkipReason::CommandLine)
+        );
+
+        // Naming an adapter and asking for the CPU are different answers to the
+        // same question, so they cannot both be given.
+        assert!(
+            Cli::try_parse_from(["wows-toolkit-gpui", "--cpu-renderer", "--gpu-adapter", "nvidia"]).is_err(),
+            "one device, one choice"
+        );
+    }
+
+    /// Asking for the list is not a launch: it says what it found and exits.
+    #[test]
+    fn asking_for_the_adapters_is_not_a_launch() {
+        let cli = Cli::try_parse_from(["wows-toolkit-gpui", "--list-gpus"]).expect("--list-gpus");
+        assert!(cli.list_gpus);
     }
 
     /// And a bare launch takes no arguments at all.
