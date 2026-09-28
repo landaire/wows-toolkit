@@ -1581,6 +1581,11 @@ preset_load_failed = "The board could not be opened: %{error}"
 preset_delete_failed = "The board could not be dropped: %{error}"
 presets = "Saved boards"
 clear_drawing = "Clear drawing"
+scan_replays = "Populate caps from replays"
+scan_replays_tooltip = "Read the replays for the capture layouts of the modes they were played in"
+scan_needs_game_data = "Load a game build first"
+scan_running = "Reading replays..."
+scan_done = "Read %{total} replays and found %{added} new layouts"
 
 [ui.armor.outcome]
 penetration = "Penetration"

@@ -1410,6 +1410,18 @@ impl App {
         theme::apply_egui_theme(choice, self.zoom, window, cx);
     }
 
+    /// Where the replays are, as the listing resolves it.
+    ///
+    /// `None` until the game directory is set, which is what a board says when
+    /// asked to read replays it cannot find.
+    fn replays_dir(&self) -> Option<std::path::PathBuf> {
+        let wows_dir = self.settings().map(|settings| settings.wows_dir.clone())?;
+        if wows_dir.is_empty() {
+            return None;
+        }
+        Some(crate::replay_inspector::browser_view::resolve_replays_dir(std::path::Path::new(&wows_dir)))
+    }
+
     /// Opens a tactics board in a window of its own.
     ///
     /// Its own window rather than a tab, as the egui board is: a board is drawn
@@ -1417,7 +1429,12 @@ impl App {
     pub(crate) fn open_tactics_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let game_data = self.replay_inspector.read(cx).game_data();
         let layouts = self.cap_layouts.clone();
-        let board = cx.new(|cx| crate::tactics::TacticsBoard::new(game_data, layouts, window, cx));
+        let replays_dir = self.replays_dir();
+        let board = cx.new(|cx| {
+            let mut board = crate::tactics::TacticsBoard::new(game_data, layouts, window, cx);
+            board.set_replays_dir(replays_dir, cx);
+            board
+        });
         let options =
             crate::window_shell::options(wows_toolkit_config::WindowKind::TacticsBoard, board.read(cx).title(), cx);
         let opened = cx.open_window(options, move |window, cx| {
