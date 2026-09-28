@@ -216,12 +216,13 @@ have used it.
     carries the egui popup's four messages (plus one for a render failure the
     egui path cannot have), `PreviewHover` keeps the reason for the watched row,
     and both surfaces draw it where the map would have been.
-30. **Annotations are mouse-only.** `Ctrl+1`..`Ctrl+7`, `Ctrl+M`, the Ctrl-held
-    cheat sheet, `Escape`, `Delete`, `[`/`]`, and annotation undo
-    (`replay/minimap_view/shapes.rs:84-131`, `replay/renderer/mod.rs:2162-2252`).
-    Query-bar pill stepping with the arrows and `Ctrl`-click row selection are
-    also unbound. Every chord in the port is a hand-rolled `on_key_down` match
-    rather than a gpui action, so none are rebindable or discoverable.
+30. **Annotation keys.** Done in part 2026-09-28: ctrl and a digit take up each
+    tool in the egui board's own order, ctrl+m the measurement, escape puts the tool
+    down, and delete or backspace erases what is picked out. Still missing: the
+    Ctrl-held cheat sheet overlay, `[`/`]` for stroke width, query-bar pill stepping
+    with the arrows, and `Ctrl`-click row selection in the listing. Every chord in
+    the port is a hand-rolled `on_key_down` match rather than a gpui action, so none
+    are rebindable or discoverable.
 31. **Armor viewer**: no export options at all (contents, LOD, resolution, camo,
     size estimate -- `armor_viewer/export_dialog.rs:426` against the hardcoded
     `DEFAULT_LOD` at `armor_viewer/pane.rs:710`), no Analysis window with its

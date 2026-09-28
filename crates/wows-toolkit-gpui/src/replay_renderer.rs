@@ -1445,6 +1445,17 @@ impl ReplayRendererPanel {
             return;
         }
         let shift = event.keystroke.modifiers.shift;
+        let ctrl = event.keystroke.modifiers.secondary();
+
+        // The drawing tools, which were mouse-only here: the egui board takes
+        // ctrl and a digit for each (`replay/minimap_view/shapes.rs:84`), and a
+        // reader drawing over a battle has one hand on the mouse.
+        if ctrl && let Some(tool) = tool_for_key(event.keystroke.key.as_str()) {
+            self.take_up(tool, cx);
+            cx.stop_propagation();
+            return;
+        }
+
         match event.keystroke.key.as_str() {
             "space" => self.toggle_playing(window, cx),
             "up" => self.step_speed(1, window, cx),
@@ -1453,6 +1464,11 @@ impl ReplayRendererPanel {
             "right" if !shift => self.seek_by(SEEK_STEP, window, cx),
             "left" => self.jump_to_previous_event(window, cx),
             "right" => self.jump_to_next_event(window, cx),
+            // Puts the tool down and drops what was half-drawn, which is what a
+            // reader expects of escape with something in hand.
+            "escape" if self.has_tool() => self.take_up(Tool::None, cx),
+            // What is picked out goes, as it does on the egui board.
+            "delete" | "backspace" => self.erase_picked(cx),
             _ => return,
         }
         cx.stop_propagation();
@@ -2101,6 +2117,23 @@ impl ReplayRendererPanel {
         let Some(was) = self.history.pop() else { return };
         self.collab.restore(&was);
         // What was picked out may no longer be there.
+        self.picked.clear();
+        self.draw_current(cx);
+        cx.notify();
+    }
+
+    /// Erases whatever is picked out, if anything is.
+    fn erase_picked(&mut self, cx: &mut Context<Self>) {
+        if self.picked.is_empty() {
+            return;
+        }
+        self.remember();
+        // Highest index first: erasing shifts what is after it.
+        let mut picked: Vec<usize> = self.picked.picked().to_vec();
+        picked.sort_unstable_by(|a, b| b.cmp(a));
+        for index in picked {
+            self.collab.erase_annotation(index);
+        }
         self.picked.clear();
         self.draw_current(cx);
         cx.notify();
@@ -3108,6 +3141,23 @@ pub fn batch_export(
     })
 }
 
+/// The tool a digit takes up, in the order the egui board numbers them
+/// (`replay/minimap_view/shapes.rs:88-104`): the two apps' readers learn one set
+/// of keys. `m` is the measurement, as it is there.
+fn tool_for_key(key: &str) -> Option<Tool> {
+    Some(match key {
+        "1" => Tool::Arrow,
+        "2" => Tool::Freehand,
+        "3" => Tool::Eraser,
+        "4" => Tool::Line,
+        "5" => Tool::Circle { filled: false },
+        "6" => Tool::Rectangle { filled: false },
+        "7" => Tool::Triangle { filled: false },
+        "m" => Tool::Measurement,
+        _ => return None,
+    })
+}
+
 /// One rasterised frame, as an image gpui can draw.
 fn to_image(frame: image::RgbImage) -> Arc<RenderImage> {
     let (width, height) = frame.dimensions();
@@ -3993,6 +4043,23 @@ fn zoom_slider() -> SliderState {
 
 #[cfg(test)]
 mod tests {
+    /// The drawing tools answer to the keys the egui board uses, so a reader who
+    /// learned them there does not learn them again.
+    #[test]
+    fn the_tool_shortcuts_are_the_egui_boards() {
+        use wt_collab_client::drawing::Tool;
+
+        assert_eq!(super::tool_for_key("1"), Some(Tool::Arrow));
+        assert_eq!(super::tool_for_key("2"), Some(Tool::Freehand));
+        assert_eq!(super::tool_for_key("3"), Some(Tool::Eraser));
+        assert_eq!(super::tool_for_key("4"), Some(Tool::Line));
+        assert_eq!(super::tool_for_key("5"), Some(Tool::Circle { filled: false }));
+        assert_eq!(super::tool_for_key("6"), Some(Tool::Rectangle { filled: false }));
+        assert_eq!(super::tool_for_key("7"), Some(Tool::Triangle { filled: false }));
+        assert_eq!(super::tool_for_key("m"), Some(Tool::Measurement));
+        assert_eq!(super::tool_for_key("8"), None, "a key that is not a tool takes nothing up");
+    }
+
     use gpui_kit::AppContext;
     use gpui_kit::TestAppContext;
     use gpui_kit::px;
