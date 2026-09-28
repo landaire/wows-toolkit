@@ -102,10 +102,17 @@ fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> A
                 .label(t!("ui.collab.start_session").to_string())
                 .compact()
                 .disabled(!named)
-                .on_click(cx.listener(|view: &mut V, _event, _window, cx| {
-                    let version = toolkit_version();
-                    view.collab_mut().host(version, cx);
-                    cx.notify();
+                // Hosting tells every peer where this machine is, which the
+                // reader is asked about before it happens.
+                .on_click(cx.listener(|_view: &mut V, _event, window, cx| {
+                    let owner = cx.entity();
+                    crate::notices::before_revealing_address(window, cx, move |_window, cx| {
+                        let version = toolkit_version();
+                        owner.update(cx, |view: &mut V, cx| {
+                            view.collab_mut().host(version, cx);
+                            cx.notify();
+                        });
+                    });
                 })),
         )
         .child(crate::ui::rule_h(cx))
@@ -116,11 +123,17 @@ fn render_start<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> A
                 .label(t!("ui.collab.paste_and_join").to_string())
                 .compact()
                 .disabled(!named)
-                .on_click(cx.listener(|view: &mut V, _event, _window, cx| {
+                .on_click(cx.listener(|view: &mut V, _event, window, cx| {
                     let token = view.token_input().read(cx).value().to_string();
-                    let version = toolkit_version();
-                    view.collab_mut().join(token, version, cx);
-                    cx.notify();
+                    let owner = cx.entity();
+                    crate::notices::before_revealing_address(window, cx, move |_window, cx| {
+                        let token = token.clone();
+                        let version = toolkit_version();
+                        owner.update(cx, |view: &mut V, cx| {
+                            view.collab_mut().join(token, version, cx);
+                            cx.notify();
+                        });
+                    });
                 })),
         )
         .children(failure.map(|reason| {

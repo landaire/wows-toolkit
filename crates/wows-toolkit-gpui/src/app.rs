@@ -223,6 +223,9 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
 ///
 /// Kept rather than said where it is decided: the job's completion runs without a
 /// window, and a message needs one.
+/// How long a failure may be before it is worth a window rather than a toast.
+const TOO_LONG_TO_TOAST: usize = 160;
+
 struct CacheReport {
     said: String,
     level: ReportLevel,
@@ -251,7 +254,16 @@ impl CacheReport {
         match self.level {
             ReportLevel::Ok => crate::toast::ok(self.said, window, cx),
             ReportLevel::Warn => crate::toast::warn(self.said, window, cx),
-            ReportLevel::Failed => crate::toast::failed(self.said, window, cx),
+            ReportLevel::Failed => {
+                // A sentence is a toast; a chain of causes is what a bug report
+                // is made of, and a toast can be neither read at length nor
+                // copied.
+                if self.said.len() > TOO_LONG_TO_TOAST || self.said.lines().count() > 1 {
+                    crate::notices::show_error(self.said, window, cx);
+                } else {
+                    crate::toast::failed(self.said, window, cx);
+                }
+            }
         }
     }
 }
@@ -958,7 +970,7 @@ impl App {
     /// Adopts a language: saved, applied to the catalogue every `t!` reads,
     /// and pushed into the tabs that translate their own rows so they are
     /// rebuilt in it rather than waiting for a restart.
-    fn set_locale(&mut self, code: String, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn set_locale(&mut self, code: String, window: &mut Window, cx: &mut Context<Self>) {
         let Some(settings) = self.settings_mut() else { return };
         if settings.locale.as_deref() == Some(code.as_str()) {
             return;
@@ -1228,6 +1240,10 @@ impl App {
             }
             PaletteAction::SearchFor(query) => self.run_search(query.to_string(), window, cx),
             PaletteAction::CopyLatestLog => self.copy_latest_log(window, cx),
+            PaletteAction::RefreshPersistedData => {
+                crate::first_run::confirm_refresh_persisted_data(&cx.entity(), window, cx)
+            }
+            PaletteAction::IndexAllReplays => self.build_replay_index(crate::replay_index::IndexMode::FillGaps, cx),
             PaletteAction::OpenReplayDirectory => {
                 self.active_tab = AppTab::ReplayInspector;
                 self.replay_inspector.update(cx, |view, cx| view.open_directory(window, cx));
@@ -1718,7 +1734,7 @@ impl App {
     /// The whole directory rather than what changed: this is the control for
     /// building an index that is not there, or rebuilding one whose rows an
     /// older parse got wrong.
-    fn build_replay_index(&mut self, mode: crate::replay_index::IndexMode, cx: &mut Context<Self>) {
+    pub(crate) fn build_replay_index(&mut self, mode: crate::replay_index::IndexMode, cx: &mut Context<Self>) {
         if self.index_cancel.is_some() {
             return;
         }
@@ -2302,6 +2318,16 @@ impl App {
         cx.notify();
     }
 
+    /// Adopts what may be shared: saved, and pushed into the replay inspector,
+    /// which is what contributes a battle that lands.
+    pub(crate) fn adopt_data_sharing(&mut self, mode: DataSharingMode, cx: &mut Context<Self>) {
+        self.edit_setting(keys::DATA_SHARING_MODE, cx, |settings| {
+            settings.data_sharing = mode;
+            mode
+        });
+        self.replay_inspector.update(cx, |view, _cx| view.set_data_sharing(mode));
+    }
+
     /// Rewrites the whole `ReplaySettings` blob, which is stored as one row,
     /// and pushes it into the replay inspector so its columns follow.
     fn edit_replay_settings(&mut self, cx: &mut Context<Self>, apply: impl FnOnce(&mut ReplaySettings)) {
@@ -2481,10 +2507,7 @@ impl App {
                                     .selected(data_sharing == mode)
                                     .tooltip(mode.description())
                                     .on_click(cx.listener(move |this, _event, _window, cx| {
-                                        this.edit_setting(keys::DATA_SHARING_MODE, cx, |settings| {
-                                            settings.data_sharing = mode;
-                                            mode
-                                        });
+                                        this.adopt_data_sharing(mode, cx);
                                     })),
                             )
                         }))),

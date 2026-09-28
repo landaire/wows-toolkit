@@ -496,6 +496,12 @@ impl ReplayInspectorView {
         }
     }
 
+    /// Adopts what the reader agreed to share, so a battle landing after the
+    /// change is contributed under the new setting rather than the old one.
+    pub(crate) fn set_data_sharing(&mut self, mode: wows_toolkit_viewmodel::settings::DataSharingMode) {
+        self.data_sharing = mode;
+    }
+
     /// Reads the listed directory again, for game data that has since arrived.
     pub(crate) fn relist(&mut self, cx: &mut Context<Self>) {
         self.browser.update(cx, |browser, cx| browser.relist(cx));

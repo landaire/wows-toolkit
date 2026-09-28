@@ -86,6 +86,14 @@ pub struct GpuiSettings {
     pub suppress_p2p_ip_warning: bool,
     /// Whether windows a session opens are left for the reader to open.
     pub disable_auto_open_session_windows: bool,
+    /// Whether the reader has been asked what battle data to share, and whether
+    /// they have been offered sharing whole replays since.
+    pub build_consent_shown: bool,
+    pub replay_consent_shown: bool,
+    /// Whether the reader has been asked which language to read in.
+    pub language_selection_shown: bool,
+    /// Whether the notice that an export encoded in software is suppressed.
+    pub suppress_gpu_encoder_warning: bool,
 }
 
 impl GpuiSettings {
@@ -136,6 +144,14 @@ impl GpuiSettings {
             queries::get_setting::<bool>(pool, keys::SUPPRESS_P2P_IP_WARNING).await.unwrap_or(false);
         let disable_auto_open_session_windows =
             queries::get_setting::<bool>(pool, keys::DISABLE_AUTO_OPEN_SESSION_WINDOWS).await.unwrap_or(false);
+        // Never asked is what a first run is, so all three default to not shown.
+        let build_consent_shown = queries::get_setting::<bool>(pool, keys::BUILD_CONSENT_SHOWN).await.unwrap_or(false);
+        let replay_consent_shown =
+            queries::get_setting::<bool>(pool, keys::REPLAY_CONSENT_SHOWN).await.unwrap_or(false);
+        let language_selection_shown =
+            queries::get_setting::<bool>(pool, keys::LANGUAGE_SELECTION_SHOWN).await.unwrap_or(false);
+        let suppress_gpu_encoder_warning =
+            queries::get_setting::<bool>(pool, keys::SUPPRESS_GPU_ENCODER_WARNING).await.unwrap_or(false);
 
         Self {
             zoom,
@@ -160,6 +176,10 @@ impl GpuiSettings {
             collab_display_name,
             suppress_p2p_ip_warning,
             disable_auto_open_session_windows,
+            build_consent_shown,
+            replay_consent_shown,
+            language_selection_shown,
+            suppress_gpu_encoder_warning,
         }
     }
 }
