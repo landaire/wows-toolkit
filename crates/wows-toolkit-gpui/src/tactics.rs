@@ -161,6 +161,18 @@ fn team_color(team: Option<wows_replays::types::TeamId>) -> [u8; 3] {
     }
 }
 
+/// How wide a world unit is: the game measures in 30-metre units, so a zone
+/// stated in kilometres is that many thirty-metre steps.
+const WORLD_UNITS_PER_KM: f32 = 1000.0 / 30.0;
+
+/// How far one press moves a zone's width, in kilometres.
+const RADIUS_STEP_KM: f32 = 0.5;
+
+/// A zone's width in the units it is talked about in.
+fn radius_km(radius: f32) -> f32 {
+    radius / WORLD_UNITS_PER_KM
+}
+
 /// How much one notch of the wheel changes the zoom.
 const ZOOM_PER_NOTCH: f32 = 0.004;
 
@@ -357,6 +369,19 @@ impl RangeCircle {
     }
 }
 
+/// What is on the board, as an undo step holds it.
+#[derive(Clone, Debug, PartialEq)]
+struct BoardState {
+    caps: Vec<BoardCapPoint>,
+    annotations: Vec<wt_collab_client::types::Annotation>,
+}
+
+/// How many changes can be taken back.
+///
+/// A board is edited in small steps and the whole of what is on it is kept per
+/// step, so the stack is held to a depth rather than growing with the session.
+const HISTORY_DEPTH: usize = 50;
+
 /// A ship waiting to be placed on the board.
 #[derive(Clone, Debug)]
 pub struct PlacedShip {
@@ -457,6 +482,12 @@ pub struct TacticsBoard {
     view: wows_minimap_renderer::viewport::MapViewport,
     /// The pan in progress, and where the pointer was when it last moved.
     panning: Option<Point<Pixels>>,
+    /// What the board held before each change, so a change can be taken back.
+    /// The map and the mode are not in it: those are what the board is set on
+    /// rather than what is on it.
+    history: Vec<BoardState>,
+    /// What was taken back, so it can be put back again.
+    undone: Vec<BoardState>,
     /// Whether a rasterisation is in flight, so a burst of edits asks for one
     /// redraw rather than one each.
     rasterising: bool,
@@ -532,6 +563,8 @@ impl TacticsBoard {
             no_art: false,
             view: wows_minimap_renderer::viewport::MapViewport::default(),
             panning: None,
+            history: Vec::new(),
+            undone: Vec::new(),
             rasterising: false,
             stale: false,
         }
@@ -900,8 +933,55 @@ impl TacticsBoard {
         cx.notify();
     }
 
+    /// Remembers what is on the board, before changing it.
+    ///
+    /// A change made after something was taken back is the new end of the line,
+    /// so what was undone is dropped rather than redone into a board that has
+    /// moved on.
+    fn remember(&mut self) {
+        self.history.push(BoardState { caps: self.caps.clone(), annotations: self.annotations.clone() });
+        if self.history.len() > HISTORY_DEPTH {
+            self.history.remove(0);
+        }
+        self.undone.clear();
+    }
+
+    /// Whether there is a change to take back, and one to put back.
+    pub fn can_undo(&self) -> bool {
+        !self.history.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.undone.is_empty()
+    }
+
+    /// Takes the last change back.
+    pub fn undo(&mut self, cx: &mut Context<Self>) {
+        let Some(was) = self.history.pop() else { return };
+        self.undone.push(BoardState { caps: self.caps.clone(), annotations: self.annotations.clone() });
+        self.adopt(was, cx);
+    }
+
+    /// Puts back what was taken.
+    pub fn redo(&mut self, cx: &mut Context<Self>) {
+        let Some(again) = self.undone.pop() else { return };
+        self.history.push(BoardState { caps: self.caps.clone(), annotations: self.annotations.clone() });
+        self.adopt(again, cx);
+    }
+
+    /// Puts the board back to a step.
+    fn adopt(&mut self, state: BoardState, cx: &mut Context<Self>) {
+        self.caps = state.caps;
+        self.annotations = state.annotations;
+        // The selection named a place in a list that has just been replaced.
+        self.selected = None;
+        self.dragging = None;
+        self.redraw(cx);
+    }
+
     /// Places a capture point where the reader clicked.
     fn add_cap_at(&mut self, world: (f32, f32), cx: &mut Context<Self>) {
+        self.remember();
         // Lettered past the highest already there, so a cap taken off does not
         // hand its letter to the next one placed.
         let index = self.caps.iter().map(|cap| cap.index + 1).max().unwrap_or(0);
@@ -927,6 +1007,7 @@ impl TacticsBoard {
         if self.caps.get(at).is_none_or(|cap| cap.frozen) {
             return;
         }
+        self.remember();
         self.selected = None;
         // The letters the others carry stand: a cap is lettered by what it was
         // called, and renumbering would rename the ones that stayed.
@@ -934,11 +1015,30 @@ impl TacticsBoard {
         self.redraw(cx);
     }
 
+    /// Widens or narrows the selected zone by half a kilometre.
+    ///
+    /// Read and set in kilometres, which is how a cap circle is talked about;
+    /// the model itself is in the world's own units.
+    pub fn step_selected_radius(&mut self, by_km: f32, cx: &mut Context<Self>) {
+        let Some(at) = self.selected else { return };
+        if self.caps.get(at).is_none_or(|cap| cap.frozen) {
+            return;
+        }
+        self.remember();
+        let Some(cap) = self.caps.get_mut(at) else { return };
+        cap.radius = (cap.radius + by_km * WORLD_UNITS_PER_KM).max(MIN_CAP_RADIUS);
+        self.redraw(cx);
+    }
+
     /// Hands the selected capture point to the next team round: nobody, the
     /// reader's side, then the other.
     pub fn cycle_selected_team(&mut self, cx: &mut Context<Self>) {
         let Some(at) = self.selected else { return };
-        let Some(cap) = self.caps.get_mut(at).filter(|cap| !cap.frozen) else { return };
+        if self.caps.get(at).is_none_or(|cap| cap.frozen) {
+            return;
+        }
+        self.remember();
+        let Some(cap) = self.caps.get_mut(at) else { return };
         cap.team = match cap.team.map(|team| team.raw()) {
             None => Some(wows_replays::types::TeamId::new(0)),
             Some(0) => Some(wows_replays::types::TeamId::new(1)),
@@ -952,6 +1052,7 @@ impl TacticsBoard {
         if self.caps.is_empty() {
             return;
         }
+        self.remember();
         self.caps.clear();
         self.selected = None;
         self.redraw(cx);
@@ -1102,6 +1203,7 @@ impl TacticsBoard {
         if self.annotations.is_empty() {
             return;
         }
+        self.remember();
         self.annotations.clear();
         self.redraw(cx);
     }
@@ -1148,6 +1250,7 @@ impl TacticsBoard {
         // to move the capture point under it.
         if self.has_tool() {
             let Some(at) = self.map_point(event.position) else { return };
+            self.remember();
             self.stroke(wt_collab_client::drawing::Stroke::Began { at: [at.0, at.1] }, cx);
             return;
         }
@@ -1165,6 +1268,11 @@ impl TacticsBoard {
         match self.cap_under(event.position) {
             Some((index, what)) => {
                 self.selected = Some(index);
+                if what != CapDrag::None {
+                    // Taken as the drag begins: the pointer moves it many times
+                    // and all of that is one change to take back.
+                    self.remember();
+                }
                 self.dragging = Some((index, what));
             }
             // A drag past every zone moves the map, which is what a reader
@@ -1496,13 +1604,43 @@ impl Drop for TacticsBoard {
     }
 }
 
+impl TacticsBoard {
+    /// The board's keyboard: the chords the egui board takes.
+    ///
+    /// Ctrl+Z takes a change back and Ctrl+Y or Ctrl+Shift+Z puts it back;
+    /// Escape puts the tool down, and Delete erases the capture point picked
+    /// out.
+    fn on_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
+        let modifiers = event.keystroke.modifiers;
+        if modifiers.secondary() {
+            match event.keystroke.key.as_str() {
+                "z" if !modifiers.shift => self.undo(cx),
+                "y" | "z" => self.redo(cx),
+                _ => {}
+            }
+            return;
+        }
+        match event.keystroke.key.as_str() {
+            "escape" => self.set_tool(wt_collab_client::drawing::Tool::None, cx),
+            "delete" | "backspace" => self.remove_selected(cx),
+            _ => {}
+        }
+    }
+}
+
 impl Render for TacticsBoard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         // Taken at draw time because nothing else knows it, and the menu needs
         // it to bring this board forward.
         self.window = Some(window.window_handle());
         let border = cx.theme().border;
-        v_flex().size_full().child(self.render_toolbar(cx)).child(div().h(px(1.)).bg(border)).child(self.render_map(cx))
+        v_flex()
+            .size_full()
+            .track_focus(&self.focus_handle)
+            .on_key_down(cx.listener(Self::on_key))
+            .child(self.render_toolbar(cx))
+            .child(div().h(px(1.)).bg(border))
+            .child(self.render_map(cx))
     }
 }
 
@@ -1918,6 +2056,28 @@ impl TacticsBoard {
                         .text_color(crate::theme::text_dim())
                         .child(t!("ui.tactics.selected_cap", letter = cap.letter()).into_owned()),
                 )
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(crate::theme::text_dim())
+                        .child(t!("ui.tactics.cap_radius", km = format!("{:.1}", radius_km(cap.radius))).into_owned()),
+                )
+                .child({
+                    let board = board.clone();
+                    Button::new("tactics-cap-narrow").label("-").compact().on_click(
+                        move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.step_selected_radius(-RADIUS_STEP_KM, cx));
+                        },
+                    )
+                })
+                .child({
+                    let board = board.clone();
+                    Button::new("tactics-cap-widen").label("+").compact().on_click(
+                        move |_event, _window, cx: &mut App| {
+                            board.update(cx, |board, cx| board.step_selected_radius(RADIUS_STEP_KM, cx));
+                        },
+                    )
+                })
                 .child({
                     let board = board.clone();
                     Button::new("tactics-cap-team").label(t!("ui.tactics.cap_team").into_owned()).compact().on_click(
@@ -1935,6 +2095,26 @@ impl TacticsBoard {
                             board.update(cx, |board, cx| board.remove_selected(cx));
                         })
                 })
+            })
+            .child({
+                let board = board.clone();
+                Button::new("tactics-undo")
+                    .label(t!("ui.renderer.annotations.undo").into_owned())
+                    .compact()
+                    .disabled(!self.can_undo())
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        board.update(cx, |board, cx| board.undo(cx));
+                    })
+            })
+            .child({
+                let board = board.clone();
+                Button::new("tactics-redo")
+                    .label(t!("ui.renderer.annotations.redo").into_owned())
+                    .compact()
+                    .disabled(!self.can_redo())
+                    .on_click(move |_event, _window, cx: &mut App| {
+                        board.update(cx, |board, cx| board.redo(cx));
+                    })
             })
             .when(has_caps, |this| {
                 this.child({
@@ -2002,6 +2182,15 @@ mod tests {
             cap.index = index;
         }
         assert_eq!(caps.iter().map(BoardCapPoint::letter).collect::<Vec<_>>(), ["A", "B"]);
+    }
+
+    /// A cap circle is talked about in kilometres, and the model holds it in the
+    /// game's own thirty-metre units.
+    #[test]
+    fn a_zone_reads_in_kilometres() {
+        // The default a placed cap starts at is about the 5 km a cap circle is.
+        assert!((super::radius_km(super::NEW_CAP_RADIUS) - 4.5).abs() < 0.01);
+        assert!((super::radius_km(super::WORLD_UNITS_PER_KM) - 1.0).abs() < 0.001);
     }
 
     /// A zone reads by the team that holds it, and by nobody's colour when it

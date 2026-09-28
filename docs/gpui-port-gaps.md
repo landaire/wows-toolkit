@@ -197,10 +197,15 @@ have used it.
     goes back to the whole map on a double click, through the same window the
     replay viewport uses (`MapViewport`).
 
-    Not ported: undo and redo over what is drawn, picking a drawn shape back up
-    to move or turn it, the map pings and the grid, the per-cap radius typed in
-    kilometres, and the collab sync that puts one board in front of a whole
-    session, which waits on item 22's client-frame viewports.
+    A change to what is on the board can be taken back and put back again, by
+    the buttons or by Ctrl+Z and Ctrl+Y, and a zone's width reads and steps in
+    kilometres beside the cap it belongs to. Escape puts the tool down and
+    Delete erases the cap picked out, which are the egui board's own chords.
+
+    Not ported: picking a drawn shape back up to move or turn it, and the map
+    pings and grid, which are a session's rather than a board's. The collab sync
+    that puts one board in front of a whole session waits on item 22's
+    client-frame viewports.
 17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its
