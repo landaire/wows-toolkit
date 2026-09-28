@@ -19,11 +19,17 @@ kept so the next audit does not re-report them.
   art read out of the install being replaced.
 - [done] Toasts: `Root` holds the queue but the window's own view has to draw the
   layer, which `App::render` now does; before that every toast and dialog was
-  silent. Wired: the game-data load and its empty-replays warning, an invalid
-  game directory, a failed replay parse, the Twitch credential, a copied
-  login, path and chat, a saved chat, and the armor export. The rest of the
-  egui app's 88 belong to features not ported yet (collab sessions, the
-  replay renderer, the game-data cache, constants, the updater).
+  silent. They are the kit's own `Notification`, not a copy of the egui app's
+  bottom-right stack. Wired: the game-data load and its empty-replays warning,
+  an invalid game directory, a failed replay parse, the Twitch credential, a
+  copied login, path, chat, build link, WG ID, session token and web link, a
+  saved chat, and both export paths (the armor pane's and the viewport's own,
+  which only logged). The rest of the egui app's 88 belong to features not
+  ported yet (collab sessions, the replay renderer, the game-data cache,
+  constants, the updater) or to structure the port does not have: its
+  opened_directory/open_no_directory notices are about workspaces, and a
+  missing replay disables the Search row's open button rather than toasting
+  when it is pressed.
 - [done] The command palette is `gpui_kit::component::command` over
   `palette.rs`, on ctrl+k and ctrl+shift+p. The egui palette's cascading
   sub-modes (search a player, a ship, a ship's armor) are not ported.

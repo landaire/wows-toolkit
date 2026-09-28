@@ -1874,8 +1874,10 @@ fn player_detail_block(
                 .ghost()
                 .xsmall()
                 .tooltip(t!("ui.player_tracker.copy_wg_id").into_owned())
-                .on_click(move |_event, _window, cx: &mut App| {
-                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(account.0.to_string()));
+                .on_click(move |_event, window, cx: &mut App| {
+                    let id = account.0.to_string();
+                    cx.write_to_clipboard(gpui_kit::ClipboardItem::new_string(id.clone()));
+                    crate::toast::ok(t!("ui.player_tracker.copied_wg_id", id = id).into_owned(), window, cx);
                 }),
         );
 
