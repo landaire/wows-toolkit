@@ -85,8 +85,8 @@ fn status_job(named: String, progress: Option<(u64, u64)>) -> AnyElement {
 fn describe_missing_builds(
     missing: &[MissingBuild],
     plan: Option<&wows_data_mgr::download_repo::DownloadPlan>,
-) -> String {
-    let rows: Vec<String> = missing
+) -> Vec<(u32, String)> {
+    missing
         .iter()
         .map(|build| {
             let named = t!(
@@ -98,19 +98,13 @@ fn describe_missing_builds(
             let said = plan
                 .and_then(|plan| plan.resolved.iter().find(|resolved| resolved.requested_build == build.build))
                 .map(|resolved| availability_said(&resolved.availability));
-            match said {
+            let row = match said {
                 Some(said) => format!("{named} -- {needed} -- {said}"),
                 None => format!("{named} -- {needed}"),
-            }
+            };
+            (build.build, row)
         })
-        .collect();
-
-    let mut described = format!("{}\n\n{}", t!("ui.dialogs.download_game_data_intro"), rows.join("\n"));
-    if let Some(plan) = plan {
-        described.push_str("\n\n");
-        described.push_str(&t!("ui.dialogs.download_objects_to_fetch", count = plan.unique_missing_objects));
-    }
-    described
+        .collect()
 }
 
 /// How one build's availability reads in the offer.
@@ -867,11 +861,10 @@ impl App {
     /// Offers to fetch the game data a directory of replays needs and this
     /// machine does not have.
     ///
-    /// Ports the egui app's download prompt (`app.rs`'s `GameDataDownloadPrompt`)
-    /// down to the choice it exists for: without this the rows are listed and
-    /// silently refuse to open. The egui window also reports each build's remote
-    /// availability and an object count before the reader commits; those are a
-    /// second read of the repository, and are not offered here yet.
+    /// Ports the egui app's download prompt (`app.rs`'s `GameDataDownloadPrompt`):
+    /// without it the rows are listed and silently refuse to open. Each build is a
+    /// row the reader can untick, with what the repository has for it beside it,
+    /// and the whole selection's object count under them.
     fn offer_missing_game_data(&mut self, missing: Vec<MissingBuild>, window: &mut Window, cx: &mut Context<Self>) {
         // Each build is put to the reader once a session: a walk that runs again
         // after a download reports whatever it still cannot read, and offering
@@ -917,26 +910,95 @@ impl App {
                     }
                 };
                 let proxy = this.proxy_url();
-                let described = describe_missing_builds(&missing, plan.as_ref());
+                let rows = describe_missing_builds(&missing, plan.as_ref());
+                let total = plan.as_ref().map(|plan| plan.unique_missing_objects);
+                // Everything is ticked to begin with, because the reader was asked
+                // about these builds for the replays waiting on them.
+                let ticked: Rc<std::cell::RefCell<std::collections::BTreeSet<u32>>> =
+                    Rc::new(std::cell::RefCell::new(missing.iter().map(|build| build.build).collect()));
                 let entity = cx.entity().downgrade();
                 let _ = held.update(cx, move |_root: gpui_kit::AnyView, window, cx| {
-                    window.open_alert_dialog(cx, move |alert, _window, _cx| {
+                    window.open_dialog(cx, move |dialog, _window, _cx| {
                         let entity = entity.clone();
                         let missing = missing.clone();
                         let base = asked.clone();
                         let proxy = proxy.clone();
-                        alert
+                        let ticked = Rc::clone(&ticked);
+                        let picking = Rc::clone(&ticked);
+
+                        dialog
                             .title(t!("ui.windows.download_game_data").into_owned())
-                            .description(described.clone())
-                            .show_cancel(true)
-                            .on_ok(move |_event, _window, cx| {
-                                let Some(entity) = entity.upgrade() else { return true };
-                                let missing = missing.clone();
-                                let base = base.clone();
-                                let proxy = proxy.clone();
-                                entity.update(cx, |this, cx| this.fetch_missing_game_data(missing, base, proxy, cx));
-                                true
-                            })
+                            .child(
+                                v_flex()
+                                    .id("download-offer")
+                                    .gap_1()
+                                    .max_w(px(560.))
+                                    .child(
+                                        div().text_sm().child(t!("ui.dialogs.download_game_data_intro").into_owned()),
+                                    )
+                                    .children(rows.iter().cloned().map(|(build, said)| {
+                                        let picking = Rc::clone(&picking);
+                                        let on = picking.borrow().contains(&build);
+                                        Checkbox::new(("download-build", build as usize))
+                                            .label(said)
+                                            .checked(on)
+                                            .on_click(move |checked, _window, _cx| {
+                                                let mut picked = picking.borrow_mut();
+                                                if *checked {
+                                                    picked.insert(build);
+                                                } else {
+                                                    picked.remove(&build);
+                                                }
+                                            })
+                                    }))
+                                    .children(total.map(|count| {
+                                        div().text_xs().text_color(theme::text_dim()).child(
+                                            t!("ui.dialogs.download_objects_to_fetch", count = count).into_owned(),
+                                        )
+                                    })),
+                            )
+                            .footer(
+                                h_flex()
+                                    .gap_2()
+                                    .justify_end()
+                                    .child({
+                                        let entity = entity.clone();
+                                        let missing = missing.clone();
+                                        let base = base.clone();
+                                        let proxy = proxy.clone();
+                                        let ticked = Rc::clone(&ticked);
+                                        Button::new("download-offer-ok")
+                                            .primary()
+                                            .label(t!("ui.buttons.download").into_owned())
+                                            .small()
+                                            .on_click(move |_event, window, cx: &mut gpui_kit::App| {
+                                                let wanted: Vec<MissingBuild> = {
+                                                    let picked = ticked.borrow();
+                                                    missing
+                                                        .iter()
+                                                        .filter(|build| picked.contains(&build.build))
+                                                        .cloned()
+                                                        .collect()
+                                                };
+                                                window.close_dialog(cx);
+                                                if wanted.is_empty() {
+                                                    return;
+                                                }
+                                                let Some(entity) = entity.upgrade() else { return };
+                                                let base = base.clone();
+                                                let proxy = proxy.clone();
+                                                entity.update(cx, |this, cx| {
+                                                    this.fetch_missing_game_data(wanted, base, proxy, cx)
+                                                });
+                                            })
+                                    })
+                                    .child(
+                                        Button::new("download-offer-cancel")
+                                            .label(t!("ui.buttons.cancel").into_owned())
+                                            .small()
+                                            .on_click(|_event, window, cx: &mut gpui_kit::App| window.close_dialog(cx)),
+                                    ),
+                            )
                     });
                 });
             },
@@ -3205,10 +3267,10 @@ mod tests {
         ResolvedBuild { requested_build: build, requested_version: None, availability }
     }
 
-    /// The offer says what the repository has for each build and what the whole
-    /// selection would fetch, so the reader is not agreeing to an unknown.
+    /// Each build is a row of its own, so the reader can leave one out, and each
+    /// row says what the repository has for it.
     #[test]
-    fn the_offer_names_each_builds_availability_and_the_total() {
+    fn every_build_is_a_row_that_says_what_is_published_for_it() {
         let missing = vec![waiting(7062104, "0.10.5.0", 3), waiting(3747819, "0.6.9.0", 1)];
         let plan = DownloadPlan {
             unique_missing_objects: 412,
@@ -3218,13 +3280,14 @@ mod tests {
             ],
         };
 
-        let said = describe_missing_builds(&missing, Some(&plan));
+        let rows = describe_missing_builds(&missing, Some(&plan));
 
-        assert!(said.contains("0.10.5.0"), "got {said:?}");
-        assert!(said.contains("3 replay(s)"), "got {said:?}");
-        assert!(said.contains("published"), "got {said:?}");
-        assert!(said.contains("never published"), "the build nothing was published for says so: {said:?}");
-        assert!(said.contains("412"), "and the whole selection's object count is there: {said:?}");
+        assert_eq!(rows.len(), 2, "one row per build, so one tick per build");
+        assert_eq!(rows[0].0, 7062104, "the row carries the build it would fetch");
+        assert!(rows[0].1.contains("0.10.5.0"), "got {rows:?}");
+        assert!(rows[0].1.contains("3 replay(s)"), "got {rows:?}");
+        assert!(rows[0].1.contains("published"), "got {rows:?}");
+        assert!(rows[1].1.contains("never published"), "got {rows:?}");
     }
 
     /// A nearest published build is named, since downloading it may still not
@@ -3240,10 +3303,10 @@ mod tests {
             )],
         };
 
-        let said = describe_missing_builds(&missing, Some(&plan));
+        let rows = describe_missing_builds(&missing, Some(&plan));
 
-        assert!(said.contains("0.10.5.1"), "got {said:?}");
-        assert!(said.contains("7070000"), "got {said:?}");
+        assert!(rows[0].1.contains("0.10.5.1"), "got {rows:?}");
+        assert!(rows[0].1.contains("7070000"), "got {rows:?}");
     }
 
     /// A repository that could not be asked leaves the availability out rather
@@ -3252,10 +3315,10 @@ mod tests {
     fn an_unasked_repository_leaves_the_availability_out() {
         let missing = vec![waiting(7062104, "0.10.5.0", 2)];
 
-        let said = describe_missing_builds(&missing, None);
+        let rows = describe_missing_builds(&missing, None);
 
-        assert!(said.contains("0.10.5.0"), "got {said:?}");
-        assert!(said.contains("2 replay(s)"), "got {said:?}");
-        assert!(!said.contains("published"), "nothing is claimed about what is there: {said:?}");
+        assert!(rows[0].1.contains("0.10.5.0"), "got {rows:?}");
+        assert!(rows[0].1.contains("2 replay(s)"), "got {rows:?}");
+        assert!(!rows[0].1.contains("published"), "nothing is claimed about what is there: {rows:?}");
     }
 }
