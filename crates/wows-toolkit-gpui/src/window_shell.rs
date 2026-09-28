@@ -5,9 +5,18 @@
 //! (`wows_toolkit_config::WindowKind`). This is the port's equivalent: the
 //! options a second window opens with, read from the same rows.
 
+use gpui_kit::AnyView;
 use gpui_kit::Bounds;
+use gpui_kit::Context;
+use gpui_kit::IntoElement;
+use gpui_kit::ParentElement as _;
+use gpui_kit::Render;
+use gpui_kit::Styled as _;
+use gpui_kit::Window;
 use gpui_kit::WindowBounds;
 use gpui_kit::WindowOptions;
+use gpui_kit::component::Root;
+use gpui_kit::div;
 use gpui_kit::point;
 use gpui_kit::px;
 use gpui_kit::size;
@@ -61,5 +70,33 @@ fn bounds_for(saved: Option<WindowSettings>) -> WindowBounds {
         WindowBounds::Maximized(bounds)
     } else {
         WindowBounds::Windowed(bounds)
+    }
+}
+
+/// What a secondary window's own view draws: its content, and the layers `Root`
+/// holds but does not draw itself.
+///
+/// `Root` keeps the dialog, sheet and notification queues; whoever renders the
+/// window's view has to put them on screen, which the main window does in
+/// `App::render`. A window opened straight around a panel has no such view, so
+/// everything queued there -- every toast the panel reports -- is queued and
+/// never seen.
+pub struct Shell {
+    content: AnyView,
+}
+
+impl Shell {
+    pub fn new(content: impl Into<AnyView>) -> Self {
+        Self { content: content.into() }
+    }
+}
+
+impl Render for Shell {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let sheets = Root::render_sheet_layer(window, cx);
+        let dialogs = Root::render_dialog_layer(window, cx);
+        let notifications = Root::render_notification_layer(window, cx);
+
+        div().size_full().child(self.content.clone()).children(sheets).children(dialogs).children(notifications)
     }
 }

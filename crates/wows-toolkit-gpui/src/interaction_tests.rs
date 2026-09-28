@@ -1854,6 +1854,44 @@ fn a_toast_reaches_the_screen(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// A toast reaches the screen of a secondary window too.
+///
+/// A popped-out panel's window is rooted in a `Shell` for exactly this: rooted
+/// straight in the panel, the `Root` holds the queue and nothing draws it, so
+/// the renderer's own messages are queued and never seen.
+#[gpui_kit::test]
+fn a_toast_reaches_a_secondary_windows_screen(cx: &mut TestAppContext) {
+    struct Panel;
+    impl gpui_kit::Render for Panel {
+        fn render(
+            &mut self,
+            _window: &mut gpui_kit::Window,
+            _cx: &mut gpui_kit::Context<Self>,
+        ) -> impl gpui_kit::IntoElement {
+            gpui_kit::div()
+        }
+    }
+
+    cx.update(gpui_kit::init);
+    let window = cx.open_window(size(px(400.), px(200.)), |window, cx| {
+        let panel = cx.new(|_cx| Panel);
+        let shell: gpui_kit::AnyView = cx.new(|_cx| crate::window_shell::Shell::new(panel)).into();
+        gpui_kit::component::Root::new(shell, window, cx)
+    });
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        crate::toast::ok("exported", window, cx);
+    })
+    .expect("the test window stays open");
+
+    cx.update_window(window.into(), |_, window, cx| {
+        window.render_frame(cx);
+        assert!(window.try_find("notification").is_some(), "the toast is on screen");
+    })
+    .expect("the test window stays open");
+}
+
 /// The palette dialog reaches the screen.
 ///
 /// The dialog is held by `Root` but drawn by the window's own view, so a view
