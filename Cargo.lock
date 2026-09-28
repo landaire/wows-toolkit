@@ -14604,6 +14604,7 @@ dependencies = [
  "tiny-skia 0.12.0",
  "tokio",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "twitch_api",
  "unidecode",
