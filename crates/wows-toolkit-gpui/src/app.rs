@@ -1417,7 +1417,7 @@ impl App {
     pub(crate) fn open_tactics_board(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let game_data = self.replay_inspector.read(cx).game_data();
         let layouts = self.cap_layouts.clone();
-        let board = cx.new(|cx| crate::tactics::TacticsBoard::new(game_data, layouts, cx));
+        let board = cx.new(|cx| crate::tactics::TacticsBoard::new(game_data, layouts, window, cx));
         let options =
             crate::window_shell::options(wows_toolkit_config::WindowKind::TacticsBoard, board.read(cx).title(), cx);
         let opened = cx.open_window(options, move |window, cx| {
