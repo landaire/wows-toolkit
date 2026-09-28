@@ -30,6 +30,11 @@ use wowsunpack::game_types::WorldPos;
 
 use crate::replay_inspector::GameDataCache;
 
+/// A board's walk of the replays recorded layouts nothing had before.
+///
+/// Raised to the app, which holds the copy a board opened later starts from.
+pub struct LayoutsFound(pub CapLayoutDb);
+
 /// One map the board can be set on.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapChoice {
@@ -367,7 +372,9 @@ const SHIP_MATCHES: usize = 10;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ScanProgress {
     pub read: usize,
-    pub total: usize,
+    /// How many there are to read. `None` until the directory has been walked,
+    /// which is not the same as a directory holding none.
+    pub total: Option<usize>,
 }
 
 /// The board itself.
@@ -411,6 +418,10 @@ pub struct TacticsBoard {
     scanning: Option<ScanProgress>,
     /// Where the replays are, so the walk knows what to read.
     replays_dir: Option<std::path::PathBuf>,
+    /// Set when the board goes away, which is what stops a walk part way
+    /// through rather than leaving it reading a year of replays for a window
+    /// nobody has open.
+    scan_cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// The game version the ranges are read at. `None` before the install has
     /// been read, which draws them at the newest layout this build knows.
     version: Option<wowsunpack::data::Version>,
@@ -435,6 +446,9 @@ pub struct TacticsBoard {
     /// The map as it was last rasterised. `None` until one is drawn, which is
     /// what the placeholder stands in for.
     drawn: Option<Arc<RenderImage>>,
+    /// Whether the last attempt to draw the map found no art for it, which is
+    /// what the board says rather than claiming to still be drawing.
+    no_art: bool,
     /// Whether a rasterisation is in flight, so a burst of edits asks for one
     /// redraw rather than one each.
     rasterising: bool,
@@ -479,6 +493,7 @@ impl TacticsBoard {
             presets: preset::list_preset_names(),
             scanning: None,
             replays_dir: None,
+            scan_cancelled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             version: None,
             ship_search,
             matched_ships: Vec::new(),
@@ -506,6 +521,7 @@ impl TacticsBoard {
             window: None,
             painted: std::rc::Rc::new(std::cell::Cell::new(None)),
             drawn: None,
+            no_art: false,
             rasterising: false,
             stale: false,
         }
@@ -548,7 +564,9 @@ impl TacticsBoard {
         let provider = loaded.provider().clone();
         let constants = loaded.base_constants().clone();
         let known = self.layouts.clone();
-        self.scanning = Some(ScanProgress { read: 0, total: 0 });
+        self.scan_cancelled = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let cancelled = std::sync::Arc::clone(&self.scan_cancelled);
+        self.scanning = Some(ScanProgress { read: 0, total: None });
         cx.notify();
 
         // The walk reports itself as it goes rather than being polled: a ticker
@@ -561,16 +579,19 @@ impl TacticsBoard {
                 let mut found = known;
                 let files = replay_files(&dir);
                 let total = files.len();
-                let _ = reports.unbounded_send(ScanProgress { read: 0, total });
+                let _ = reports.unbounded_send(ScanProgress { read: 0, total: Some(total) });
                 let mut fresh = Vec::new();
                 for (read, path) in files.iter().enumerate() {
+                    if cancelled.load(std::sync::atomic::Ordering::Relaxed) {
+                        break;
+                    }
                     if let Some(layout) = layout_of(path, provider.as_ref(), &constants, &found) {
                         let kept = layout.clone();
                         if found.insert(layout) {
                             fresh.push(kept);
                         }
                     }
-                    let _ = reports.unbounded_send(ScanProgress { read: read + 1, total });
+                    let _ = reports.unbounded_send(ScanProgress { read: read + 1, total: Some(total) });
                 }
                 // Each new layout on its own rather than the whole cache: this
                 // walk holds a copy taken when the board opened, and writing all
@@ -626,6 +647,11 @@ impl TacticsBoard {
                     this.modes = modes(&this.layouts, map_id, this.game_data.as_ref());
                 }
                 crate::toast::info(t!("ui.tactics.scan_done", added = added, total = total).into_owned(), window, cx);
+                // The app holds the copy a later board starts from, which would
+                // otherwise not know what this walk turned up.
+                if added > 0 {
+                    cx.emit(LayoutsFound(this.layouts.clone()));
+                }
                 cx.notify();
             });
         })
@@ -1245,6 +1271,7 @@ impl TacticsBoard {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.rasterising = false;
+                this.no_art = drawn.is_none();
                 if let Some(drawn) = drawn {
                     this.drawn = Some(drawn);
                 }
@@ -1310,8 +1337,8 @@ fn layout_of(
 
 /// Draws `space` with `caps` on it.
 ///
-/// `None` when the loaded build ships no art for that map, which is what the
-/// board says rather than showing an empty square.
+/// `None` when the loaded build ships no art for that map, which the board says
+/// rather than claiming to still be drawing it.
 fn rasterise(
     space: &str,
     game_data: &GameDataCache,
@@ -1361,6 +1388,8 @@ fn ship_ranges(
     circles
 }
 
+impl EventEmitter<LayoutsFound> for TacticsBoard {}
+
 impl Focusable for TacticsBoard {
     fn focus_handle(&self, _cx: &App) -> FocusHandle {
         self.focus_handle.clone()
@@ -1371,6 +1400,14 @@ impl TacticsBoard {
     /// The window this board is drawn in.
     pub fn window(&self) -> Option<AnyWindowHandle> {
         self.window
+    }
+}
+
+impl Drop for TacticsBoard {
+    fn drop(&mut self) {
+        // A board that has gone is not still reading replays for a window
+        // nobody has open.
+        self.scan_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
@@ -1474,10 +1511,9 @@ impl TacticsBoard {
             Some(progress) => h_flex()
                 .gap_2()
                 .items_center()
-                .child(div().text_xs().text_color(crate::theme::text_dim()).child(if progress.total == 0 {
-                    t!("ui.tactics.scan_running").into_owned()
-                } else {
-                    format!("{} / {}", progress.read, progress.total)
+                .child(div().text_xs().text_color(crate::theme::text_dim()).child(match progress.total {
+                    Some(total) => format!("{} / {total}", progress.read),
+                    None => t!("ui.tactics.scan_running").into_owned(),
                 }))
                 .into_any_element(),
             None => Button::new("tactics-scan")
@@ -1729,6 +1765,8 @@ impl TacticsBoard {
                 .text_color(crate::theme::text_dim())
                 .child(if self.map.is_none() {
                     t!("ui.tactics.pick_a_map").to_string()
+                } else if self.no_art {
+                    t!("ui.tactics.no_map_art").to_string()
                 } else {
                     t!("ui.tactics.drawing").to_string()
                 })
