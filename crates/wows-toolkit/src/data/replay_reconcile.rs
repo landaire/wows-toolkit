@@ -241,49 +241,13 @@ pub async fn raw_upload_first_seen(
     Ok(jiff::Timestamp::from_second(seconds).unwrap_or(now))
 }
 
-/// Persistent set of files that panicked or hard-errored, keyed by path + mtime,
-/// so they are not retried every launch. A replaced file (new mtime) recovers.
-/// Serialized as JSON in the settings table under `replay_unindexable`.
-#[derive(Default, Serialize, Deserialize)]
-pub struct Unindexable {
-    entries: HashSet<(String, i64)>,
-}
-
-impl Unindexable {
-    const SETTING_KEY: &'static str = "replay_unindexable";
-
-    fn key(path: &Path) -> Option<(String, i64)> {
-        let mtime = std::fs::metadata(path)
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)?;
-        Some((path.to_string_lossy().to_string(), mtime))
-    }
-
-    pub fn contains(&self, path: &Path) -> bool {
-        Self::key(path).map(|k| self.entries.contains(&k)).unwrap_or(false)
-    }
-
-    /// Record the file as un-processable. Returns true when this is a new entry
-    /// (so the caller knows the set is dirty and needs persisting).
-    pub fn insert(&mut self, path: &Path) -> bool {
-        match Self::key(path) {
-            Some(k) => self.entries.insert(k),
-            None => false,
-        }
-    }
-
-    /// Load the persisted blacklist from the settings table, or an empty set.
-    pub async fn load(pool: &sqlx::SqlitePool) -> Self {
-        crate::db::queries::get_setting::<Self>(pool, Self::SETTING_KEY).await.unwrap_or_default()
-    }
-
-    /// Persist the blacklist to the settings table.
-    pub async fn save(&self, pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
-        crate::db::queries::set_setting(pool, Self::SETTING_KEY, self).await
-    }
-}
+/// The files a parse could not read, remembered so they are not retried every
+/// launch.
+///
+/// Moved to `wows_toolkit_config::index::unindexable` so the GPUI port shares the
+/// one ledger: it is a single row in the settings table, and both apps walk the
+/// same directory.
+pub use wows_toolkit_config::index::unindexable::Unindexable;
 
 #[cfg(test)]
 mod tests {

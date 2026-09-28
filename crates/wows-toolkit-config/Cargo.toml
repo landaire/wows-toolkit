@@ -26,3 +26,6 @@ test-support = []
 [dev-dependencies]
 tokio = { version = "1.53", features = ["rt", "macros"] }
 tempfile = "3.27.0"
+# Setting a file's modification time, to show the unindexable ledger forgets a
+# replaced file.
+filetime = "0.2"

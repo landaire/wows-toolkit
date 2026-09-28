@@ -19,6 +19,7 @@ use wows_toolkit_config::index::query;
 use wows_toolkit_config::index::rows::IndexWriteMode;
 use wows_toolkit_config::index::rows::ResultsWrite;
 use wows_toolkit_config::index::rows::SourceId;
+use wows_toolkit_config::index::unindexable::Unindexable;
 use wows_toolkit_viewmodel::index_rows::ConstantsFit;
 use wows_toolkit_viewmodel::index_rows::IndexContext;
 use wows_toolkit_viewmodel::index_rows::map_rows;
@@ -40,6 +41,8 @@ pub struct IndexProgress {
     /// Replays that could not be read or parsed. Expected on a directory
     /// holding a partial recording or a build whose data is absent.
     pub failed: u64,
+    /// Replays this pass did not read: already indexed, or known unreadable.
+    pub skipped: u64,
 }
 
 /// Every replay under `root`, newest first.
@@ -56,6 +59,12 @@ pub fn replays_under(root: &Path) -> Vec<PathBuf> {
             if path.extension().and_then(|ext| ext.to_str()) != Some(REPLAY_EXTENSION) {
                 return None;
             }
+            // The live recording, which grows for as long as the battle runs: it
+            // has no results yet and is rewritten as the next battle's. Counting
+            // it as a failure is how the port used to report an open battle.
+            if path.file_name().is_some_and(|name| name == LIVE_REPLAY) {
+                return None;
+            }
             // A file whose time cannot be read still indexes; it simply sorts
             // as the oldest.
             let modified = entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH);
@@ -65,6 +74,21 @@ pub fn replays_under(root: &Path) -> Vec<PathBuf> {
     // Reversed, so the newest is first.
     found.sort_by_key(|(modified, _)| std::cmp::Reverse(*modified));
     found.into_iter().map(|(_, path)| path).collect()
+}
+
+/// The file the game writes the battle in progress into.
+const LIVE_REPLAY: &str = "temp.wowsreplay";
+
+/// How much of the directory a pass re-reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexMode {
+    /// Read what is not indexed yet and leave the rest alone. What the Build
+    /// Index button asks for, and what makes a second run cheap.
+    FillGaps,
+    /// Read everything again, whatever the index already holds. For rows an
+    /// earlier pass decoded through constants that did not fit: the egui app's
+    /// own `ReindexMode::RefreshAll` (`task/replays.rs:1370`).
+    RefreshAll,
 }
 
 /// Why a replay contributed nothing.
@@ -137,10 +161,24 @@ pub fn build_index(
     root: &Path,
     game_data: &GameDataCache,
     cancel: &Arc<AtomicBool>,
+    mode: IndexMode,
     report: impl Fn(IndexProgress),
 ) -> Result<IndexProgress, wows_toolkit_config::index::rows::IndexError> {
     let now = Timestamp::now();
     let source_id = runtime.block_on(query::ensure_default_source(pool, root, now))?;
+
+    // What is already in, so a second run costs a directory listing rather than
+    // a re-parse of every replay in it. The egui app skips on the same ledger
+    // (`task/replays.rs:1434`).
+    let indexed: std::collections::HashSet<String> = match mode {
+        IndexMode::FillGaps => runtime.block_on(query::record_paths_in_source(pool, source_id)).unwrap_or_default(),
+        IndexMode::RefreshAll => std::collections::HashSet::new(),
+    };
+    // And what could not be read before, so an unreadable file is not re-read on
+    // every pass. Keyed by path and modification time, so a replaced file is
+    // tried again.
+    let mut unindexable = runtime.block_on(Unindexable::load(pool));
+    let mut ledger_grew = false;
 
     let replays = replays_under(root);
     let mut progress = IndexProgress { total: replays.len() as u64, ..IndexProgress::default() };
@@ -150,16 +188,30 @@ pub fn build_index(
         if cancel.load(Ordering::Relaxed) {
             break;
         }
+        let known = indexed.contains(path.to_string_lossy().as_ref());
+        if known || unindexable.contains(&path) {
+            progress.skipped += 1;
+            progress.done += 1;
+            report(progress);
+            continue;
+        }
+
         match index_one(runtime, pool, &path, game_data, source_id, Timestamp::now()) {
             Ok(()) => progress.indexed += 1,
             Err(err) => {
                 tracing::warn!("replay index: {} contributed nothing: {err}", path.display());
                 progress.failed += 1;
+                ledger_grew |= unindexable.insert(&path);
             }
         }
         progress.done += 1;
         report(progress);
     }
+
+    if ledger_grew && let Err(err) = runtime.block_on(unindexable.save(pool)) {
+        tracing::warn!("replay index: the unreadable-file ledger was not written: {err}");
+    }
+
     Ok(progress)
 }
 
@@ -179,6 +231,9 @@ mod tests {
         touch(dir.path(), "a.wowsreplay");
         touch(dir.path(), "notes.txt");
         touch(dir.path(), "temp.wowsreplay.part");
+        // The battle in progress: it has no results yet and is rewritten as the
+        // next battle's, so counting it as a failure is all it could contribute.
+        touch(dir.path(), "temp.wowsreplay");
         std::fs::create_dir(dir.path().join("sub")).expect("the directory can be made");
         touch(&dir.path().join("sub"), "b.wowsreplay");
 

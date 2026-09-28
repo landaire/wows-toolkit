@@ -178,13 +178,11 @@ have used it.
     (`ReplayPanel::reparse`), a removal drops the row with its marking and
     highlight, and both watcher failures are toasted in the egui app's words
     through a typed `WatchFailure`.
-27. **Indexing.** Nothing indexes as replays are read (egui does it per replay,
-    `task/replays.rs:540-552`), Build Index re-parses every replay every run (no
-    skip of indexed rows), there is no re-index/repair pass for rows decoded
-    through the wrong constants (`IndexWriteMode::Replace`), no unindexable
-    blacklist (`data/replay_reconcile.rs:248`), and `replays_under` walks
-    `temp.wowsreplay` so a live battle counts as a failure
-    (`replay_index.rs:50-67`).
+27. ~~**Indexing.**~~ Done 2026-09-28: a battle that lands is indexed as it
+    lands, Build Index skips what is already in (and says how many it skipped),
+    Re-index Everything reads the lot again for rows an older parse got wrong, the
+    unreadable-file ledger moved to `wows_toolkit_config::index::unindexable` so
+    both apps share it, and the walk leaves `temp.wowsreplay` alone.
 28. **Cache housekeeping.** Reporting is done 2026-09-28: every finished cache
     job says what it found, clean or not, in the egui app's words. Still missing:
     the startup migration of an old cache layout, `migrate_to_cas`,

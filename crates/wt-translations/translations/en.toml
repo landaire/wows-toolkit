@@ -296,8 +296,12 @@ current_path = "Current Replay Path"
 heading = "Replay Index"
 description = "The searchable record of every replay in your directory"
 build = "Build Index"
+rebuild = "Re-index Everything"
+rebuild_hint = "Read every replay again, for rows an older parse got wrong. Build Index reads only what is missing."
 progress = "%{done} of %{total} read, %{failed} could not be"
+progress_skipped = "%{done} of %{total} read, %{skipped} already in, %{failed} could not be"
 built = "Indexed %{indexed} replays, %{failed} could not be read"
+built_with_skipped = "Indexed %{indexed} replays, %{skipped} were already in, %{failed} could not be read"
 
 [ui.settings.session]
 heading = "Session Settings"
