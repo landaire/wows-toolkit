@@ -24,7 +24,7 @@ have used it.
    ported from the egui path: the forward-only constants bridge between loaded
    builds, and the LRU eviction of non-main builds (the port keeps every build it
    has loaded for the session).
-2. **Download offer for a missing build.** Done in part 2026-09-28: a scan
+2. ~~**Download offer for a missing build.**~~ Done 2026-09-28: a scan
    reports the builds nothing can read (`missing_builds`), and the app asks the
    repository what it publishes for each of them (`game_data_cache::plan`) before
    offering. The confirmation names each build, its version, how many replays wait
@@ -32,9 +32,10 @@ have used it.
    / unreachable), plus how many objects the whole selection would fetch; the
    download then runs through the same job and progress line the Settings section
    uses, and the listing is walked again once data lands, so the previews and the
-   build warnings are redrawn without the reader reopening anything. Each build is
-   put to the reader once a session. Not ported: per-build ticks, so the offer is
-   all of them or none.
+   build warnings are redrawn without the reader reopening anything. Each build is a
+   row the reader can untick, so an offer of six can be answered with two, and a
+   build is only spent once the reader has said yes to it: a cancelled offer or a
+   failed download leaves it worth asking about again.
 3. ~~**`auto_dump_game_data` is a checkbox over nothing.**~~ Done 2026-09-28:
    loading the installed build writes it to the cache on a thread of its own,
    under the version the install's `preferences.xml` names, skipping a dump
