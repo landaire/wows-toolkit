@@ -1567,6 +1567,7 @@ shells = "%{count}x"
 unknown_attacker = "Ship %{id}"
 
 [ui.tactics]
+a_peers_board = "A board shared by someone else in this session"
 map = "Map"
 map_hint = "Find a map"
 mode = "Mode"

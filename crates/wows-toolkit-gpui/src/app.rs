@@ -670,6 +670,21 @@ impl App {
             let crate::replay_inspector::view::SearchDirectory(root) = event;
             this.search_directory(root.clone(), window, cx);
         });
+        // A session starting or stopping reaches the tactics board too: a board
+        // is one of the windows a session is on.
+        let session_shared = cx.subscribe(&replay_inspector, |this, _view, event, cx| {
+            let crate::replay_inspector::view::SessionShared(link) = event;
+            this.share_session_with_board(link.clone(), cx);
+        });
+        // The collab popover's own Tactics Board button. The board is this app's
+        // window, so the ask arrives here.
+        let board_requested = cx.subscribe_in(
+            &replay_inspector,
+            window,
+            |this, _view, _event: &crate::replay_inspector::view::TacticsBoardRequested, window, cx| {
+                this.open_tactics_board(window, cx);
+            },
+        );
         let wows_dir_edited = cx.subscribe_in(&wows_dir_input, window, Self::on_wows_dir_edited);
         let search_event = cx.subscribe_in(&search, window, Self::on_search_event);
         // A "find matches" button on a tracker row asks a question the Search
@@ -755,6 +770,8 @@ impl App {
                 game_data_missing,
                 constants_unfit,
                 search_directory,
+                session_shared,
+                board_requested,
                 wows_dir_edited,
                 proxy_edited,
                 twitch_channel_edited,
@@ -1498,9 +1515,15 @@ impl App {
             return;
         }
 
+        // The session this app is in, if any: a board opened while one is
+        // running is one of the windows that session is on.
+        let link = self.replay_inspector.read(cx).session_link();
         let board = cx.new(|cx| {
             let mut board = crate::tactics::TacticsBoard::new(game_data, layouts, window, cx);
             board.set_install(replays_dir, version, cx);
+            if link.is_active() {
+                board.set_collab(link, cx);
+            }
             board
         });
         self.tactics_board = Some(board.downgrade());
@@ -1524,6 +1547,17 @@ impl App {
         if let Err(err) = opened {
             tracing::warn!("tactics board: the window could not be opened: {err}");
             crate::toast::failed(t!("ui.tactics.window_failed").into_owned(), window, cx);
+        }
+    }
+
+    /// Hands the tactics board its end of a session.
+    ///
+    /// Nothing is opened here: a board with no map of its own takes up a peer's
+    /// as it follows the session, which is where the boards a joiner is sent
+    /// after the handshake turn up.
+    fn share_session_with_board(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+        if let Some(board) = self.tactics_board.as_ref().and_then(|handle| handle.upgrade()) {
+            board.update(cx, |board, cx| board.set_collab(link, cx));
         }
     }
 

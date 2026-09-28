@@ -14,6 +14,12 @@ A feature is "absent" here only where a negative search for the egui symbol and
 its translation key was confirmed by reading the port's code path that would
 have used it.
 
+Every item is closed as of 2026-09-28. Two are closed as far as they go rather
+than matched: the renderer ladder (item 13) has nothing to port, because gpui
+chooses its own adapter and exposes no choice, and a peer watching the host's
+rendered frames (item 22) is an architecture this port does not have, since a
+peer here plays the battle back from its own copy.
+
 ## Blocking: the port cannot do the thing it is for
 
 1. ~~**No replay from an uninstalled build can be opened.**~~ Done 2026-09-28:
@@ -211,9 +217,12 @@ have used it.
     reach at every zoom. The two directions between the map and the element are
     one reading (`Letterbox`), so the handle is pressed where it was drawn.
 
+    The board is a session's as much as a reader's: what it is set on, its
+    capture points and what is drawn on it all travel, and it draws from art a
+    peer sent where this build ships none. See item 22.
+
     Not there: the map pings and the grid, which belong to a session rather than
-    to a board. The collab sync that puts one board in front of a whole session
-    waits on item 22's client-frame viewports.
+    to a board.
 17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its
@@ -299,7 +308,8 @@ have used it.
 
 ## Detail: things that are ported but thinner
 
-22. **Collab.** The session notifications are done (2026-09-27): `poll` returns
+22. ~~**Collab.**~~ Closed 2026-09-28 but for the client-frame viewports, which
+    are an architecture decision. The session notifications are done (2026-09-27): `poll` returns
     typed `SessionNotice`s the header says after its draw -- started or connected
     by role, joined, left, timed out, ended, error, rejected, and the host
     opening or closing a replay. Done 2026-09-28: the popover lists what the
@@ -312,8 +322,35 @@ have used it.
     own copy of the replay, which is better where they have it and impossible where
     they do not. Closing that difference means a frame-receiving viewport
     (`launch_client_renderer`), which is an architecture decision rather than a
-    missing control. The Tactics Board button waits on item 16, and the
-    spam-protection notice on the shared viewports.
+    missing control, and the spam-protection notice that stops a session opening
+    replays faster than a peer can read them belongs to those same viewports.
+
+    The tactics board sync did not, and is done 2026-09-28. The popover carries
+    the Tactics Board button, which opens the board the session is on. A board
+    announces the map it is set on with that map's art, so a peer draws it from
+    what it was sent rather than needing the build it came from
+    (`PreviewRenderer::with_art`). Its capture points travel by id, so a zone one
+    reader moves is the same zone on every board, and what is drawn on it goes
+    through the same annotation sync the replay viewport uses, keyed by the
+    board. A peer that has no board of its own opens one on a board a peer has,
+    and says whose it is; closing the window takes it out of the session. One
+    board at a time, as the rest of this app's windows are: a reader with their
+    own board open keeps it.
+
+    Drawing also works with nobody connected, which it did not: a shape drawn
+    outside a session was sent to a session that was not there and never drawn at
+    all. `CollabLink` holds what this end has drawn while there is no session to
+    hold it, and carries it across a session starting or ending, so the shapes
+    stay on the map either way.
+
+    Two limits are the shared drawing layer's rather than either front end's, and
+    both apply to the replay viewport as much as to a board. A selection is a set
+    of places in a list (`wt_collab_protocol::drawing::Selection`), while the
+    session keys shapes by id, so a peer erasing a shape shifts the indices a
+    drag or a delete is about, and the check that guards them can only see a list
+    that has grown shorter. And `undo_plan` is order-blind, so a shape put back
+    lands at the end of the list rather than where it was. Closing either means
+    keying a selection by id, in the crate both apps draw through.
 23. ~~**The live roster's detail.**~~ Done 2026-09-28: the hidden-profile marker is
     the eye with its own hover (and the two other absences are marked too, from the
     catalogue rather than as bare English), and the encounters cell carries the

@@ -61,6 +61,10 @@ pub struct ModeChoice {
 /// its zone is the question the board exists to ask.
 #[derive(Clone, Debug, PartialEq)]
 pub struct BoardCapPoint {
+    /// What a session calls this zone. Its place in the list is not that: a
+    /// peer's list is its own, and a zone moved by one has to be the same zone
+    /// on every board.
+    pub id: crate::collab::CapPointId,
     /// Its place in the alphabet: A, B, C.
     pub index: usize,
     /// Where it sits, in the world's own coordinates.
@@ -88,6 +92,7 @@ impl BoardCapPoint {
             // absence rather than a team.
             team: (point.team_id >= 0).then(|| wows_replays::types::TeamId::new(point.team_id)),
             frozen: true,
+            id: crate::collab::CapPointId::fresh(),
         }
     }
 
@@ -99,6 +104,7 @@ impl BoardCapPoint {
             radius: saved.radius,
             team: (saved.team_id >= 0).then(|| wows_replays::types::TeamId::new(saved.team_id)),
             frozen: saved.frozen,
+            id: crate::collab::CapPointId::fresh(),
         }
     }
 
@@ -112,6 +118,34 @@ impl BoardCapPoint {
             // form the egui board writes and reads.
             team_id: self.team.map(|team| team.raw()).unwrap_or(-1),
             frozen: self.frozen,
+        }
+    }
+
+    /// This zone as a session states it.
+    fn to_wire(&self) -> wt_collab_client::protocol::WireCapPoint {
+        wt_collab_client::protocol::WireCapPoint {
+            id: self.id.raw(),
+            index: self.index as u32,
+            world_x: self.world_x,
+            world_z: self.world_z,
+            radius: self.radius,
+            // A zone nobody holds is stated as a negative team, which is the
+            // form the wire and the egui board both use.
+            team_id: self.team.map(|team| team.raw()).unwrap_or(-1),
+            frozen: self.frozen,
+        }
+    }
+
+    /// The same, read back.
+    fn from_wire(wire: &wt_collab_client::protocol::WireCapPoint) -> Self {
+        Self {
+            id: crate::collab::CapPointId::new(wire.id),
+            index: wire.index as usize,
+            world_x: wire.world_x,
+            world_z: wire.world_z,
+            radius: wire.radius,
+            team: (wire.team_id >= 0).then(|| wows_replays::types::TeamId::new(wire.team_id)),
+            frozen: wire.frozen,
         }
     }
 
@@ -464,7 +498,9 @@ impl RangeCircle {
 #[derive(Clone, Debug, PartialEq)]
 struct BoardState {
     caps: Vec<BoardCapPoint>,
-    annotations: Vec<wt_collab_client::types::Annotation>,
+    /// With the ids the shapes are known by, so putting a step back is the same
+    /// change to a session as it is to a board nobody else can see.
+    annotations: Vec<wt_collab_client::drawing::Held>,
 }
 
 /// How many changes can be taken back.
@@ -518,8 +554,39 @@ pub struct TacticsBoard {
     /// The tool in hand and the shape it is part way through, which is the same
     /// state machine the replay viewport draws with.
     drawing: wt_collab_client::drawing::Drawing,
-    /// What has been drawn on the board.
-    annotations: Vec<wt_collab_client::types::Annotation>,
+    /// This board's end of a collab session, which also holds what has been
+    /// drawn on it when there is no session to hold it.
+    collab: crate::collab::CollabLink,
+    /// What this board is called in a session. A board is one window of several
+    /// a session can be on, and every message about it carries this.
+    board_id: crate::collab::BoardId,
+    /// The art a peer sent for this board, for a map this build has none of.
+    /// `None` for a board drawn from art this build ships.
+    peer_art: Option<Arc<image::RgbImage>>,
+    /// What that map measures, sent with the art. Without it a world position
+    /// cannot be placed on the board at all, and this build has nothing to read
+    /// it from for a map it does not ship.
+    peer_map_info: Option<wows_minimap_renderer::MapInfo>,
+    /// Who opened the board in the session. `None` for one nobody has shared,
+    /// which is every board outside a session.
+    owner: Option<crate::collab::UserId>,
+    /// Which version of the session's capture points and shapes this board has
+    /// taken, so a change made by a peer is noticed without comparing lists
+    /// every tick.
+    adopted_caps: Option<u64>,
+    adopted_shapes: Option<u64>,
+    /// Whether this board has told the session which map it is on. Announced
+    /// once per map rather than per tick.
+    announced: bool,
+    /// The session's end of this board, held back until the session has been
+    /// told the board exists.
+    ///
+    /// Anything sent for a board the session does not hold is dropped by the
+    /// peer task, so the board draws on its own end until the announcement has
+    /// gone over and only then starts speaking to the session.
+    joining: Option<crate::collab::CollabLink>,
+    /// Kept alive while a session is running, to notice what peers change.
+    _collab_tick: Option<Task<()>>,
     /// The window this board is drawn in, remembered so the menu can bring it
     /// forward. `None` until it has been drawn once.
     window: Option<AnyWindowHandle>,
@@ -655,7 +722,16 @@ impl TacticsBoard {
             dragging: None,
             adding: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
-            annotations: Vec::new(),
+            collab: crate::collab::CollabLink::default(),
+            board_id: crate::collab::BoardId::fresh(),
+            peer_art: None,
+            peer_map_info: None,
+            owner: None,
+            adopted_caps: None,
+            adopted_shapes: None,
+            announced: false,
+            joining: None,
+            _collab_tick: None,
             window: None,
             painted: std::rc::Rc::new(std::cell::Cell::new(None)),
             drawn: None,
@@ -824,7 +900,7 @@ impl TacticsBoard {
             // which is the form the egui board writes and reads.
             map_id: map.map_id.unwrap_or(0),
             cap_points: self.caps.iter().map(BoardCapPoint::to_preset).collect(),
-            annotations: self.annotations.iter().map(preset::PresetAnnotation::from_annotation).collect(),
+            annotations: self.shapes().iter().map(preset::PresetAnnotation::from_annotation).collect(),
         };
         match preset::save_preset(&saved) {
             Ok(()) => {
@@ -870,10 +946,12 @@ impl TacticsBoard {
         // what the reader put there.
         self.mode = None;
         self.map = Some(map);
-        self.caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
-        self.annotations = read.annotations.iter().map(preset::PresetAnnotation::to_annotation).collect();
+        let caps = read.cap_points.iter().map(BoardCapPoint::from_preset).collect();
+        self.set_caps(caps);
+        self.replace_shapes(read.annotations.iter().map(preset::PresetAnnotation::to_annotation).collect());
         self.selected = None;
         self.adding = false;
+        self.announce_again(cx);
         self.redraw(cx);
     }
 
@@ -969,7 +1047,7 @@ impl TacticsBoard {
     /// means, and a circle looks the same at every angle.
     fn handle_under(&self, position: Point<Pixels>) -> Option<(usize, wt_collab_client::types::Annotation)> {
         let index = self.picked.single()?;
-        let annotation = self.annotations.get(index)?.clone();
+        let annotation = self.collab.annotation_at(index)?;
         if !wt_collab_client::drawing::can_rotate(&annotation) {
             return None;
         }
@@ -986,11 +1064,11 @@ impl TacticsBoard {
     /// out of a saved preset.
     fn rotation_handle_overlay(&self) -> Option<AnyElement> {
         let index = self.picked.single()?;
-        let annotation = self.annotations.get(index)?;
-        if !wt_collab_client::drawing::can_rotate(annotation) {
+        let annotation = self.collab.annotation_at(index)?;
+        if !wt_collab_client::drawing::can_rotate(&annotation) {
             return None;
         }
-        let (handle, anchor) = self.rotation_handle(annotation)?;
+        let (handle, anchor) = self.rotation_handle(&annotation)?;
         Some(
             div()
                 .absolute()
@@ -1036,6 +1114,12 @@ impl TacticsBoard {
     /// The map's own coordinate metadata, which is what turns a map pixel into
     /// a world position and back.
     fn map_info(&self) -> Option<wows_minimap_renderer::MapInfo> {
+        // What a peer sent first: a board shared from a build this one does not
+        // have takes its measurements off the wire, because this build has none
+        // for that map to read.
+        if let Some(sent) = self.peer_map_info.clone() {
+            return Some(sent);
+        }
         let map = self.map.as_ref()?;
         let loaded = self.game_data.as_ref()?.newest_loaded()?;
         wows_minimap_renderer::assets::load_map_info(&map.space, loaded.vfs())
@@ -1102,7 +1186,7 @@ impl TacticsBoard {
     /// press one exactly, which is why the shared reader takes a distance.
     fn shape_under(&self, position: Point<Pixels>) -> Option<usize> {
         let at = self.map_point(position)?;
-        wt_collab_client::drawing::nearest_within(&self.annotations, [at.0, at.1], SHAPE_REACH_PX)
+        wt_collab_client::drawing::nearest_within(&self.shapes(), [at.0, at.1], SHAPE_REACH_PX)
     }
 
     /// Erases the shapes the reader has picked out.
@@ -1115,9 +1199,7 @@ impl TacticsBoard {
         // Highest first, so an index is not shifted out from under the next.
         going.sort_unstable_by(|a, b| b.cmp(a));
         for at in going {
-            if at < self.annotations.len() {
-                self.annotations.remove(at);
-            }
+            self.collab.erase_annotation(at);
         }
         self.picked.clear();
         self.redraw(cx);
@@ -1129,7 +1211,7 @@ impl TacticsBoard {
     /// so what was undone is dropped rather than redone into a board that has
     /// moved on.
     fn remember(&mut self) {
-        self.history.push(BoardState { caps: self.caps.clone(), annotations: self.annotations.clone() });
+        self.history.push(self.board_state());
         if self.history.len() > HISTORY_DEPTH {
             self.history.remove(0);
         }
@@ -1148,25 +1230,294 @@ impl TacticsBoard {
     /// Takes the last change back.
     pub fn undo(&mut self, cx: &mut Context<Self>) {
         let Some(was) = self.history.pop() else { return };
-        self.undone.push(BoardState { caps: self.caps.clone(), annotations: self.annotations.clone() });
+        self.undone.push(self.board_state());
         self.adopt(was, cx);
     }
 
     /// Puts back what was taken.
     pub fn redo(&mut self, cx: &mut Context<Self>) {
         let Some(again) = self.undone.pop() else { return };
-        self.history.push(BoardState { caps: self.caps.clone(), annotations: self.annotations.clone() });
+        self.history.push(self.board_state());
         self.adopt(again, cx);
     }
 
     /// Puts the board back to a step.
     fn adopt(&mut self, state: BoardState, cx: &mut Context<Self>) {
-        self.caps = state.caps;
-        self.annotations = state.annotations;
+        self.set_caps(state.caps);
+        self.collab.restore(&state.annotations);
         // The selection named a place in a list that has just been replaced.
         self.selected = None;
         self.dragging = None;
+        self.picked.clear();
         self.redraw(cx);
+    }
+
+    /// Hands this board its end of a session, or takes it away again.
+    ///
+    /// What was drawn stays on the board either way: a session starting under an
+    /// open board hears about it, and one ending leaves it where the reader can
+    /// still see it.
+    pub fn set_collab(&mut self, link: crate::collab::CollabLink, cx: &mut Context<Self>) {
+        self.announced = false;
+        self.adopted_caps = None;
+        self.adopted_shapes = None;
+        if !link.is_active() {
+            // A session ending. What it held is carried onto this board's own
+            // end, where the reader can still see it.
+            let carried = self.collab.annotations_held();
+            self.joining = None;
+            self.collab = crate::collab::CollabLink::default().on_board(self.board_id);
+            self.collab.adopt(carried);
+            self.follow_collab(cx);
+            self.redraw(cx);
+            return;
+        }
+        // Held back until the announcement has gone over, because the session
+        // drops anything sent for a board it does not hold yet.
+        self.joining = Some(link.on_board(self.board_id));
+        self.follow_collab(cx);
+        self.announce(cx);
+    }
+
+    /// Opens this board on one a peer already has, rather than on a map of this
+    /// reader's choosing.
+    ///
+    /// The art comes with it: the peer who opened the board may be on a build
+    /// this one does not have, and a board nobody can draw is not shared.
+    pub fn adopt_session_board(&mut self, board: crate::collab::SessionBoard, cx: &mut Context<Self>) {
+        self.board_id = board.board_id;
+        self.owner = Some(board.owner_user_id);
+        self.collab = self.collab.on_board(board.board_id);
+        self.map = Some(MapChoice {
+            map_id: (board.map.map_id > 0).then_some(board.map.map_id),
+            space: board.map.space,
+            label: board.map.label,
+        });
+        self.modes = modes(&self.layouts, self.map.as_ref().and_then(|map| map.map_id), self.game_data.as_ref());
+        self.mode = None;
+        // Already in the session by definition, so nothing is announced back.
+        self.announced = true;
+        self.peer_map_info = board.map.info.clone();
+        self.peer_art = board.map.art_png.as_ref().and_then(|png| match image::load_from_memory(png) {
+            Ok(art) => Some(Arc::new(art.to_rgb8())),
+            // Art that will not decode leaves the board drawn from this build's
+            // own, which is the state a board with no art sent is in.
+            Err(err) => {
+                tracing::warn!("tactics board: the art a peer sent could not be read: {err}");
+                None
+            }
+        });
+        self.follow_collab(cx);
+        self.follow_session(cx);
+        self.redraw(cx);
+    }
+
+    /// Whether this board is one a peer opened rather than this reader.
+    pub fn is_a_peers(&self) -> bool {
+        self.owner.is_some_and(|owner| self.collab.my_user_id() != Some(owner))
+    }
+
+    /// Tells the session which map this board is on, then hands it everything
+    /// already on the board.
+    ///
+    /// In that order, and through the one channel, because the session drops
+    /// anything sent for a board it does not hold. Nothing happens without a map
+    /// chosen: there is no board to announce until there is something to draw
+    /// on, and what the reader draws meanwhile stays on this end until there is.
+    fn announce(&mut self, cx: &mut Context<Self>) {
+        if self.announced || self.joining.is_none() {
+            return;
+        }
+        let (Some(map), Some(game_data)) = (self.map.clone(), self.game_data.clone()) else { return };
+        self.announced = true;
+        cx.spawn(async move |this, cx| {
+            let space = map.space.clone();
+            let read = game_data.clone();
+            let art = cx
+                .background_executor()
+                .spawn(async move {
+                    let loaded = read.newest_loaded()?;
+                    let art = wows_minimap_renderer::assets::load_map_image(&space, loaded.vfs());
+                    let info = wows_minimap_renderer::assets::load_map_info(&space, loaded.vfs());
+                    Some((art.as_ref().and_then(encode_png), info))
+                })
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                let Some(session) = this.joining.take() else { return };
+                // Read before the swap: what the board holds is on its own end
+                // until now.
+                let carried = this.collab.annotations_held();
+                let caps: Vec<wt_collab_client::protocol::WireCapPoint> =
+                    this.caps.iter().map(BoardCapPoint::to_wire).collect();
+                // Both absent where no build is open, which is a board a peer
+                // can still draw from the map name if it has that build.
+                let (art_png, info) = art.unwrap_or((None, None));
+                session.announce_board(crate::collab::BoardMap {
+                    space: map.space,
+                    label: map.label,
+                    // The wire states a map with no recorded layout as the id
+                    // zero, which is the form the egui board sends and reads.
+                    map_id: map.map_id.unwrap_or(0),
+                    art_png,
+                    info,
+                });
+                session.adopt(carried);
+                for cap in caps {
+                    session.set_cap(cap);
+                }
+                this.collab = session;
+                this.follow_session(cx);
+                this.redraw(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Says the board is on a different map than the session was told.
+    ///
+    /// The announcement carries the map, so changing it means announcing again
+    /// under the same board: every peer is drawing the map this one named.
+    fn announce_again(&mut self, cx: &mut Context<Self>) {
+        if !self.collab.is_active() && self.joining.is_none() {
+            return;
+        }
+        if self.joining.is_none() {
+            self.joining = Some(self.collab.clone());
+        }
+        self.announced = false;
+        self.announce(cx);
+    }
+
+    /// Notices what peers change, while a session is running.
+    fn follow_collab(&mut self, cx: &mut Context<Self>) {
+        if !self.collab.is_active() {
+            self._collab_tick = None;
+            return;
+        }
+        if self._collab_tick.is_some() {
+            return;
+        }
+        self._collab_tick = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(COLLAB_TICK).await;
+                let running = this
+                    .update(cx, |this, cx| {
+                        if !this.collab.is_active() && this.joining.is_none() {
+                            return false;
+                        }
+                        this.adopt_a_peers_board(cx);
+                        this.follow_session(cx);
+                        true
+                    })
+                    .unwrap_or(false);
+                if !running {
+                    return;
+                }
+            }
+        }));
+    }
+
+    /// Opens this board on a peer's, where the reader has not chosen a map.
+    ///
+    /// Checked as the session is followed rather than once when it starts: a
+    /// joiner is sent the boards the session is on after the handshake, so at
+    /// the moment it connects there are none to adopt.
+    fn adopt_a_peers_board(&mut self, cx: &mut Context<Self>) {
+        if self.map.is_some() {
+            return;
+        }
+        let mine = self.collab.my_user_id();
+        let link = self.joining.clone().unwrap_or_else(|| self.collab.clone());
+        let Some(board) = link.session_boards().into_iter().find(|board| Some(board.owner_user_id) != mine) else {
+            return;
+        };
+        tracing::info!("tactics board: opening on a board shared in this session");
+        self.adopt_session_board(board, cx);
+    }
+
+    /// Takes what the session holds that this board has not drawn yet.
+    fn follow_session(&mut self, cx: &mut Context<Self>) {
+        let Some(versions) = self.collab.board_versions() else { return };
+        let mut changed = false;
+
+        if self.adopted_caps != Some(versions.caps) {
+            self.adopted_caps = Some(versions.caps);
+            let mut caps: Vec<BoardCapPoint> = self.collab.board_caps().iter().map(BoardCapPoint::from_wire).collect();
+            // By letter, so the board reads A to Z whichever order the session
+            // happens to hold them in.
+            caps.sort_by_key(|cap| cap.index);
+            if caps != self.caps {
+                self.caps = caps;
+                // The selection named a place in a list that has been replaced.
+                self.selected = None;
+                self.dragging = None;
+                changed = true;
+            }
+        }
+
+        // The shapes are held by the link, so a bump only means this board is
+        // drawing a list that has moved on.
+        if self.adopted_shapes != Some(versions.shapes) {
+            self.adopted_shapes = Some(versions.shapes);
+            self.picked.retain_to(self.collab.annotation_count());
+            changed = true;
+        }
+
+        if changed {
+            self.redraw(cx);
+        }
+    }
+
+    /// Puts `caps` on the board, telling the session what changed.
+    ///
+    /// By difference rather than by sending the lot: a session holds capture
+    /// points by id, and re-sending an unchanged one would have every peer
+    /// redraw its board for nothing.
+    fn set_caps(&mut self, caps: Vec<BoardCapPoint>) {
+        let was: Vec<crate::collab::CapPointId> = self.caps.iter().map(|cap| cap.id).collect();
+        for gone in was.iter().filter(|id| !caps.iter().any(|cap| cap.id == **id)) {
+            self.collab.remove_cap(*gone);
+        }
+        for cap in &caps {
+            if !self.caps.iter().any(|held| held == cap) {
+                self.collab.set_cap(cap.to_wire());
+            }
+        }
+        self.caps = caps;
+    }
+
+    /// Says that one capture point changed, so every board in the session shows
+    /// the same zone in the same place.
+    fn report_cap(&self, index: usize) {
+        if let Some(cap) = self.caps.get(index) {
+            self.collab.set_cap(cap.to_wire());
+        }
+    }
+
+    /// What is on the board, for an undo step to hold.
+    fn board_state(&self) -> BoardState {
+        BoardState { caps: self.caps.clone(), annotations: self.collab.annotations_held() }
+    }
+
+    /// The shapes drawn on the board.
+    ///
+    /// Held by the link rather than by the board: with a session it is the
+    /// session's list, and without one the link's own, so the same code draws
+    /// and edits either.
+    pub fn shapes(&self) -> Vec<wt_collab_client::types::Annotation> {
+        self.collab.annotations()
+    }
+
+    /// Puts `shapes` on the board in place of what is there, which is what
+    /// opening a saved board does.
+    fn replace_shapes(&mut self, shapes: Vec<wt_collab_client::types::Annotation>) {
+        for at in (0..self.collab.annotation_count()).rev() {
+            self.collab.erase_annotation(at);
+        }
+        for shape in shapes {
+            self.collab.add_annotation(shape);
+        }
+        self.picked.clear();
     }
 
     /// Places a capture point where the reader clicked.
@@ -1176,6 +1527,7 @@ impl TacticsBoard {
         // hand its letter to the next one placed.
         let index = self.caps.iter().map(|cap| cap.index + 1).max().unwrap_or(0);
         self.caps.push(BoardCapPoint {
+            id: crate::collab::CapPointId::fresh(),
             index,
             world_x: world.0,
             world_z: world.1,
@@ -1183,6 +1535,7 @@ impl TacticsBoard {
             team: None,
             frozen: false,
         });
+        self.report_cap(self.caps.len() - 1);
         self.selected = Some(index);
         self.adding = false;
         self.redraw(cx);
@@ -1201,7 +1554,8 @@ impl TacticsBoard {
         self.selected = None;
         // The letters the others carry stand: a cap is lettered by what it was
         // called, and renumbering would rename the ones that stayed.
-        self.caps.remove(at);
+        let gone = self.caps.remove(at);
+        self.collab.remove_cap(gone.id);
         self.redraw(cx);
     }
 
@@ -1217,6 +1571,7 @@ impl TacticsBoard {
         self.remember();
         let Some(cap) = self.caps.get_mut(at) else { return };
         cap.radius = (cap.radius + by_km * WORLD_UNITS_PER_KM).max(MIN_CAP_RADIUS);
+        self.report_cap(at);
         self.redraw(cx);
     }
 
@@ -1234,6 +1589,7 @@ impl TacticsBoard {
             Some(0) => Some(wows_replays::types::TeamId::new(1)),
             Some(_) => None,
         };
+        self.report_cap(at);
         self.redraw(cx);
     }
 
@@ -1243,7 +1599,9 @@ impl TacticsBoard {
             return;
         }
         self.remember();
-        self.caps.clear();
+        for gone in std::mem::take(&mut self.caps) {
+            self.collab.remove_cap(gone.id);
+        }
         self.selected = None;
         self.redraw(cx);
     }
@@ -1348,28 +1706,34 @@ impl TacticsBoard {
     ///
     /// The tool draws a marker of a species; the identity behind it is what the
     /// reader picked, and only this side knows it.
-    fn name_placed_ship(&mut self) {
-        let Some(placed) = self.placing.clone() else { return };
-        let Some(wt_collab_client::types::Annotation::Ship { config, .. }) = self.annotations.last_mut() else {
-            return;
-        };
-        *config = Some(wt_collab_client::types::AnnotationShipConfig {
-            param_id: placed.param_id,
-            ship_name: placed.name,
-            range_filter: self.range_filter.clone(),
-            // Stock hull and no modifiers until the reader says otherwise,
-            // which is where the egui chooser leaves it.
-            ..Default::default()
-        });
+    fn add_shape(&mut self, mut annotation: wt_collab_client::types::Annotation) {
+        // Named before it goes over rather than after: in a session the add is a
+        // message, and the list it would be named in has not caught up yet.
+        if let wt_collab_client::types::Annotation::Ship { config, .. } = &mut annotation
+            && let Some(placed) = self.placing.clone()
+        {
+            *config = Some(wt_collab_client::types::AnnotationShipConfig {
+                param_id: placed.param_id,
+                ship_name: placed.name,
+                range_filter: self.range_filter.clone(),
+                // Stock hull and no modifiers until the reader says otherwise,
+                // which is where the egui chooser leaves it.
+                ..Default::default()
+            });
+        }
+        self.collab.add_annotation(annotation);
     }
 
     /// Turns one circle on or off, for the ships already placed and the ones to
     /// come.
     pub fn set_range_circle(&mut self, circle: RangeCircle, on: bool, cx: &mut Context<Self>) {
         circle.set(&mut self.range_filter, on);
-        for annotation in &mut self.annotations {
-            let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = annotation else { continue };
+        for (at, mut annotation) in self.shapes().into_iter().enumerate() {
+            let wt_collab_client::types::Annotation::Ship { config: Some(config), .. } = &mut annotation else {
+                continue;
+            };
             circle.set(&mut config.range_filter, on);
+            self.collab.update_annotation(at, annotation);
         }
         self.redraw(cx);
     }
@@ -1390,29 +1754,19 @@ impl TacticsBoard {
 
     /// Takes everything drawn off the board, leaving the capture points.
     pub fn clear_annotations(&mut self, cx: &mut Context<Self>) {
-        if self.annotations.is_empty() {
+        if self.collab.annotation_count() == 0 {
             return;
         }
         self.remember();
-        self.annotations.clear();
+        self.replace_shapes(Vec::new());
         self.redraw(cx);
     }
 
     /// Hands a pointer event to the tool and keeps what it drew.
     fn stroke(&mut self, stroke: wt_collab_client::drawing::Stroke, cx: &mut Context<Self>) {
-        match self.drawing.handle(stroke, &self.annotations) {
-            Some(wt_collab_client::drawing::Drawn::Added(annotation)) => {
-                let placed_a_ship = matches!(annotation, wt_collab_client::types::Annotation::Ship { .. });
-                self.annotations.push(annotation);
-                if placed_a_ship {
-                    self.name_placed_ship();
-                }
-            }
-            // The index names a shape that was there when the stroke began, so
-            // it is checked rather than trusted.
-            Some(wt_collab_client::drawing::Drawn::Erased(index)) if index < self.annotations.len() => {
-                self.annotations.remove(index);
-            }
+        match self.drawing.handle(stroke, &self.shapes()) {
+            Some(wt_collab_client::drawing::Drawn::Added(annotation)) => self.add_shape(annotation),
+            Some(wt_collab_client::drawing::Drawn::Erased(index)) => self.collab.erase_annotation(index),
             _ => {}
         }
         self.redraw(cx);
@@ -1421,14 +1775,8 @@ impl TacticsBoard {
     /// The same, for a stroke that only moved the shape being built: the frame
     /// is redrawn by the pointer that moved it, not again here.
     fn stroke_without_redraw(&mut self, stroke: wt_collab_client::drawing::Stroke) {
-        if let Some(wt_collab_client::drawing::Drawn::Added(annotation)) =
-            self.drawing.handle(stroke, &self.annotations)
-        {
-            let placed_a_ship = matches!(annotation, wt_collab_client::types::Annotation::Ship { .. });
-            self.annotations.push(annotation);
-            if placed_a_ship {
-                self.name_placed_ship();
-            }
+        if let Some(wt_collab_client::drawing::Drawn::Added(annotation)) = self.drawing.handle(stroke, &self.shapes()) {
+            self.add_shape(annotation);
         }
     }
 
@@ -1470,14 +1818,14 @@ impl TacticsBoard {
                 && self.shape_under(event.position).is_some_and(|found| self.picked.picked().contains(&found))
             {
                 self.remember();
-                self.moving = Some(([at.0, at.1], self.annotations.clone()));
+                self.moving = Some(([at.0, at.1], self.shapes()));
                 return;
             }
             // Otherwise a press on one picks it out, and ctrl adds it to
             // whatever is already picked. The reach is the shared one, which is
             // what the replay viewport picks with too.
             let was: Vec<usize> = self.picked.picked().to_vec();
-            self.picked.click(&self.annotations, [at.0, at.1], event.modifiers.secondary());
+            self.picked.click(&self.shapes(), [at.0, at.1], event.modifiers.secondary());
             if self.picked.picked() != was.as_slice() {
                 cx.notify();
                 return;
@@ -1540,9 +1888,7 @@ impl TacticsBoard {
                 &mut turned,
                 wt_collab_client::drawing::bearing(middle, [at.0, at.1]),
             );
-            if let Some(held) = self.annotations.get_mut(index) {
-                *held = turned;
-            }
+            self.collab.update_annotation(index, turned);
             self.redraw(cx);
             return;
         }
@@ -1550,11 +1896,13 @@ impl TacticsBoard {
         if let Some((from, was)) = self.moving.clone() {
             let Some(at) = self.map_point(event.position) else { return };
             let delta = [at.0 - from[0], at.1 - from[1]];
-            self.annotations = was;
+            // Measured from where the drag began rather than from the last
+            // position, so the shape does not creep as the pointer stutters.
             for index in self.picked.picked() {
-                if let Some(annotation) = self.annotations.get_mut(*index) {
-                    wt_collab_client::drawing::move_annotation(annotation, delta);
-                }
+                let Some(annotation) = was.get(*index) else { continue };
+                let mut moved = annotation.clone();
+                wt_collab_client::drawing::move_annotation(&mut moved, delta);
+                self.collab.update_annotation(*index, moved);
             }
             self.redraw(cx);
             return;
@@ -1592,6 +1940,11 @@ impl TacticsBoard {
         self.panning = None;
         self.moving = None;
         self.turning = None;
+        // Said once, when it is let go: a drag moves a zone at pointer-event
+        // rate, and every peer would redraw its board for each of them.
+        if let Some((index, _)) = self.dragging {
+            self.report_cap(index);
+        }
         let held = self.dragging.take().is_some();
         // A shape part way through is abandoned rather than finished somewhere
         // the reader did not put it.
@@ -1649,8 +2002,12 @@ impl TacticsBoard {
         // The first mode the map has, so a board opens with capture points on
         // it rather than empty.
         self.mode = self.modes.first().map(|mode| mode.key.clone());
-        self.caps = self.mode.as_ref().map(|key| caps_of(&self.layouts, key)).unwrap_or_default();
+        let caps = self.mode.as_ref().map(|key| caps_of(&self.layouts, key)).unwrap_or_default();
+        self.set_caps(caps);
         self.map = Some(map);
+        // A board is announced with the map it is on, so a different map is a
+        // different announcement under the same board.
+        self.announce_again(cx);
         self.redraw(cx);
     }
 
@@ -1662,12 +2019,13 @@ impl TacticsBoard {
     pub fn set_mode(&mut self, key: CapLayoutKey, cx: &mut Context<Self>) {
         if self.mode.as_ref() == Some(&key) {
             self.mode = None;
-            self.caps.clear();
+            self.set_caps(Vec::new());
             self.selected = None;
             self.redraw(cx);
             return;
         }
-        self.caps = caps_of(&self.layouts, &key);
+        let caps = caps_of(&self.layouts, &key);
+        self.set_caps(caps);
         self.selected = None;
         self.mode = Some(key);
         self.redraw(cx);
@@ -1701,12 +2059,16 @@ impl TacticsBoard {
         self.rasterising = true;
 
         let view = self.view;
+        let art = self.peer_art.clone();
+        let sent_info = self.peer_map_info.clone();
+        let board_id = self.board_id;
         let caps = self.caps.clone();
-        let mut annotations = self.annotations.clone();
+        let shapes = self.shapes();
+        let mut annotations = shapes.clone();
         // A shape the reader has picked out is drawn again underneath in a
         // wider stroke, which is what says it is the one a drag will move.
         let mut under: Vec<wt_collab_client::types::Annotation> =
-            self.picked.picked().iter().filter_map(|at| self.annotations.get(*at)).map(halo).collect();
+            self.picked.picked().iter().filter_map(|at| shapes.get(*at)).map(halo).collect();
         under.append(&mut annotations);
         let mut annotations = under;
         // The shape under the pointer is drawn the way the finished one will
@@ -1716,7 +2078,21 @@ impl TacticsBoard {
         }
         cx.spawn(async move |this, cx| {
             let drawn = cx
-                .background_spawn(async move { rasterise(&map.space, &game_data, version, view, &caps, &annotations) })
+                .background_spawn(async move {
+                    rasterise(
+                        Drawing {
+                            space: &map.space,
+                            art: art.as_ref(),
+                            info: sent_info.as_ref(),
+                            board_id: board_id.raw(),
+                        },
+                        &game_data,
+                        version,
+                        view,
+                        &caps,
+                        &annotations,
+                    )
+                })
                 .await;
             let _ = this.update(cx, |this, cx| {
                 this.rasterising = false;
@@ -1788,8 +2164,20 @@ fn layout_of(
 ///
 /// `None` when the loaded build ships no art for that map, which the board says
 /// rather than claiming to still be drawing it.
+/// What a board draws its map from: this build's art for a space, or art a peer
+/// sent for a board this build has none for.
+struct Drawing<'a> {
+    space: &'a str,
+    art: Option<&'a Arc<image::RgbImage>>,
+    /// What the map measures, where it came off the wire with the art.
+    info: Option<&'a wows_minimap_renderer::MapInfo>,
+    /// Names the entry a renderer over peer art is kept under, since the art
+    /// belongs to the board rather than to a map this build ships.
+    board_id: u64,
+}
+
 fn rasterise(
-    space: &str,
+    drawing: Drawing<'_>,
     game_data: &GameDataCache,
     version: Option<wowsunpack::data::Version>,
     view: wows_minimap_renderer::viewport::MapViewport,
@@ -1797,14 +2185,40 @@ fn rasterise(
     annotations: &[wt_collab_client::types::Annotation],
 ) -> Option<Arc<RenderImage>> {
     let loaded = game_data.newest_loaded()?;
-    let map = wows_minimap_renderer::assets::load_map_info(space, loaded.vfs())?;
+    // The measurements a peer sent, where this build ships none for the map.
+    let map = match drawing.info.cloned() {
+        Some(sent) => sent,
+        None => wows_minimap_renderer::assets::load_map_info(drawing.space, loaded.vfs())?,
+    };
     let mut commands: Vec<DrawCommand> = caps.iter().map(|cap| cap.command(&map)).collect();
     // Under the markers, so a ship is not buried under its own circles.
     commands.extend(ship_ranges(annotations, game_data, version, map.space_size as f32));
     // Over the zones, so a line drawn across one is not buried under it.
     commands.extend(annotations.iter().flat_map(wt_collab_client::geometry::annotation_commands));
-    crate::minimap_preview::render_map(space, game_data, view, &commands)
+    match drawing.art {
+        Some(art) => crate::minimap_preview::render_map_art(
+            &format!("board-{}", drawing.board_id),
+            art,
+            game_data,
+            view,
+            &commands,
+        ),
+        None => crate::minimap_preview::render_map(drawing.space, game_data, view, &commands),
+    }
 }
+
+/// A map image as a PNG, for sending to a peer.
+///
+/// `None` when it cannot be encoded, which leaves the board announced without
+/// art rather than not announced at all.
+fn encode_png(art: &image::RgbImage) -> Option<Vec<u8>> {
+    let mut png = Vec::new();
+    art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok()?;
+    Some(png)
+}
+
+/// How often a board looks at what the session holds.
+const COLLAB_TICK: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// The range circles the placed ships show.
 ///
@@ -1858,6 +2272,12 @@ impl Drop for TacticsBoard {
         // A board that has gone is not still reading replays for a window
         // nobody has open.
         self.scan_cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+        // Nor is it still a board the session is on, which a peer would
+        // otherwise be offered. Only this app's own: closing the window on a
+        // board a peer shared would take it off their board too.
+        if !self.is_a_peers() {
+            self.collab.close_board();
+        }
     }
 }
 
@@ -1899,6 +2319,16 @@ impl Render for TacticsBoard {
             .track_focus(&self.focus_handle)
             .on_key_down(cx.listener(Self::on_key))
             .child(self.render_toolbar(cx))
+            // Says why zones and shapes this reader did not put there are on the
+            // board: it is a peer's, opened because the session is on it.
+            .children(self.is_a_peers().then(|| {
+                div()
+                    .px_2()
+                    .pb_1()
+                    .text_xs()
+                    .text_color(crate::theme::text_dim())
+                    .child(t!("ui.tactics.a_peers_board").to_string())
+            }))
             .child(div().h(px(1.)).bg(border))
             .child(self.render_map(cx))
     }
@@ -2015,7 +2445,7 @@ impl TacticsBoard {
         let board = cx.entity();
         let in_hand = self.drawing.tool().clone();
         let nib = self.drawing.width();
-        let has_drawing = !self.annotations.is_empty();
+        let has_drawing = self.collab.annotation_count() > 0;
 
         h_flex()
             .gap_1()
@@ -2410,7 +2840,15 @@ mod tests {
     use super::team_color;
 
     fn cap(index: usize, x: f32, z: f32, radius: f32) -> BoardCapPoint {
-        BoardCapPoint { index, world_x: x, world_z: z, radius, team: None, frozen: false }
+        BoardCapPoint {
+            id: crate::collab::CapPointId::new(index as u64 + 1),
+            index,
+            world_x: x,
+            world_z: z,
+            radius,
+            team: None,
+            frozen: false,
+        }
     }
 
     /// A press inside a zone moves it; one near its edge widens it. The band is
@@ -2520,8 +2958,15 @@ mod coordinate_tests {
     fn a_press_at_the_centre_lands_on_a_zone_drawn_there() {
         let map = map(1200);
         let centre = map.minimap_to_world_f32(MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE as f32 / 2.0, MINIMAP_SIZE);
-        let cap =
-            BoardCapPoint { index: 0, world_x: centre.x, world_z: centre.z, radius: 150.0, team: None, frozen: false };
+        let cap = BoardCapPoint {
+            id: crate::collab::CapPointId::new(1),
+            index: 0,
+            world_x: centre.x,
+            world_z: centre.z,
+            radius: 150.0,
+            team: None,
+            frozen: false,
+        };
 
         let drawn =
             map.world_to_minimap(wowsunpack::game_types::WorldPos::new(cap.world_x, 0.0, cap.world_z), MINIMAP_SIZE);

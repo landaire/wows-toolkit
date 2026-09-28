@@ -258,6 +258,14 @@ pub struct InspectorSettings {
 /// row back. Carries the whole blob because that is how it is stored.
 pub struct ReplaySettingsChanged(pub ReplaySettings);
 
+/// The session started or stopped, for whoever owns a window this view does
+/// not: the tactics board is the app's, and it draws in the session too.
+pub struct SessionShared(pub crate::collab::CollabLink);
+
+/// The collab popover's Tactics Board button. The board is the app's window, so
+/// the ask goes up rather than opening anything here.
+pub struct TacticsBoardRequested;
+
 /// A workspace asked for its own directory to be searched.
 ///
 /// Raised to the app, which owns the Search tab the query is run in.
@@ -294,6 +302,8 @@ enum OpenTarget {
 impl EventEmitter<ReplaySettingsChanged> for ReplayInspectorView {}
 impl EventEmitter<GameDataMissing> for ReplayInspectorView {}
 impl EventEmitter<SearchDirectory> for ReplayInspectorView {}
+impl EventEmitter<SessionShared> for ReplayInspectorView {}
+impl EventEmitter<TacticsBoardRequested> for ReplayInspectorView {}
 impl EventEmitter<ConstantsUnfit> for ReplayInspectorView {}
 
 /// A viewport asked for an armor viewer on one of the battle's ships, with
@@ -1426,12 +1436,23 @@ impl ReplayInspectorView {
             return;
         }
         self.session_shared = active;
-        let link = self.collab.link();
+        // One link each rather than one cloned to all: a link holds what its own
+        // viewport has drawn while there is no session to hold it, and a shared
+        // one would put every viewport's drawings on every other.
         for panel in self.open_renderers.values() {
             if let Some(panel) = panel.upgrade() {
-                panel.update(cx, |panel, cx| panel.set_collab(link.clone(), cx));
+                let link = self.collab.link();
+                panel.update(cx, |panel, cx| panel.set_collab(link, cx));
             }
         }
+        // The tactics board is a window this view does not own, and it draws in
+        // the session as a viewport does.
+        cx.emit(SessionShared(self.collab.link()));
+    }
+
+    /// Whether a session is running, for a window this view does not own.
+    pub fn session_link(&self) -> crate::collab::CollabLink {
+        self.collab.link()
     }
 
     /// Answers a viewport that asked for a window of its own, or for an
@@ -1799,9 +1820,7 @@ impl Render for ReplayInspectorView {
         // checkbox, grouping selector, column-filter checkboxes, the session
         // popover -- in the same left-to-right order. Rendering a replay is
         // not here: it belongs to a replay, and an opened one carries it in
-        // its own Actions menu. The Tactics Board button that header also
-        // carries is not ported: it opens a board this app has no drawing
-        // surface for.
+        // its own Actions menu.
         self.collab.display_name = self.collab_name.read(cx).value().trim().to_string();
         self.collab.bind(&entity, cx);
         // The session's event inbox is unbounded, so it is drained here every
@@ -1936,6 +1955,10 @@ impl crate::collab_popover::SessionHost for ReplayInspectorView {
 
     fn token_input(&self) -> &Entity<InputState> {
         &self.collab_token
+    }
+
+    fn request_tactics_board(&mut self, cx: &mut Context<Self>) {
+        cx.emit(TacticsBoardRequested);
     }
 }
 

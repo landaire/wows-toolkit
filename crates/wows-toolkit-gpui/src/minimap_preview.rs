@@ -53,6 +53,9 @@ pub type SharedPreviewRenderer = Arc<Mutex<PreviewRenderer>>;
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RendererKey {
     build: Option<NonZeroU32>,
+    /// The map drawn, or the board whose art was handed over. A board's art
+    /// comes off the wire rather than out of a build, so it cannot share the
+    /// entry a map name names.
     map: String,
     /// The canvas a renderer was built for. A viewport showing the team
     /// rosters needs gutters the hover previews have no room for, so the two
@@ -423,6 +426,59 @@ pub fn render_map(
         renderer.render_at(view, commands)
     };
     Some(map_only_image(canvas))
+}
+
+/// The same, over art the caller holds rather than art this build ships.
+///
+/// What a collab peer draws a shared tactics board with: the board's art is sent
+/// to it, because the reader who opened the board may be on a build this one does
+/// not have. `held_as` names the entry the built renderer is kept under, and is
+/// the board's own id rather than a map name for that reason.
+///
+/// `None` when no build is open: the fonts and icons drawn over the art are this
+/// build's, and a board with neither is not worth drawing.
+pub fn render_map_art(
+    held_as: &str,
+    art: &image::RgbImage,
+    game_data: &crate::replay_inspector::GameDataCache,
+    view: wows_minimap_renderer::viewport::MapViewport,
+    commands: &[DrawCommand],
+) -> Option<Arc<RenderImage>> {
+    let loaded = game_data.newest_loaded()?;
+    let renderer = renderer_for_art(held_as, art, loaded.vfs());
+    let canvas = {
+        let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        renderer.render_at(view, commands)
+    };
+    Some(map_only_image(canvas))
+}
+
+/// The renderer kept for `held_as`, built over `art` if there is not one yet.
+fn renderer_for_art(held_as: &str, art: &image::RgbImage, vfs: &VfsPath) -> SharedPreviewRenderer {
+    let key = RendererKey { build: None, map: held_as.to_owned(), layout: SidePanelLayout::None };
+    {
+        let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(at) = cache.iter().position(|held| held.key == key) {
+            let entry = cache.remove(at);
+            let renderer = Arc::clone(&entry.renderer);
+            cache.push(entry);
+            return renderer;
+        }
+    }
+
+    // Built outside the lock, as `renderer_for` builds its own and for the same
+    // reason: reading a build's fonts and icons takes long enough to stall
+    // every other preview if the cache were held through it.
+    let renderer: SharedPreviewRenderer =
+        Arc::new(Mutex::new(PreviewRenderer::with_art(art.clone(), vfs, None, SidePanelLayout::None)));
+
+    let mut cache = RENDERERS.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    cache.retain(|held| held.key != key);
+    cache.push(CachedRenderer { key, renderer: Arc::clone(&renderer) });
+    while cache.len() > RENDERER_CACHE_SIZE {
+        cache.remove(0);
+    }
+    renderer
 }
 
 /// The map layer of a rendered canvas, at its own size.

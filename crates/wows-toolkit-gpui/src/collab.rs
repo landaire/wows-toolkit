@@ -180,6 +180,9 @@ impl CollabState {
         CollabLink {
             state: Some(Arc::clone(&self.state)),
             local_tx: self.handle.as_ref().map(|handle| handle.local_tx.clone()),
+            board: None,
+            alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
+            next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
         }
     }
 
@@ -259,6 +262,14 @@ impl CollabState {
         };
         self.failure = None;
         self.hosting = hosting;
+        // What the last session was left holding is not this one's: its own list
+        // arrives with the handshake, and until then there is nothing drawn in
+        // it. Kept past `leave` so a viewport could carry it onto its own end.
+        {
+            let mut held = self.state.lock();
+            held.current_annotation_sync = None;
+            held.tactics_boards.clear();
+        }
         self.handle = Some(wt_collab_client::peer::start_peer_session(runtime, mode, Arc::clone(&self.state)));
     }
 
@@ -273,7 +284,15 @@ impl CollabState {
         }
         self.hosting = false;
         self.token_revealed = false;
-        self.state.lock().clear_session_data();
+        let mut held = self.state.lock();
+        // Held back from the clearing: a session ending does not rub out what
+        // was drawn in it, and each viewport reads it once more as it is handed
+        // an inert link. `start` clears it when a new session begins.
+        let drawn = held.current_annotation_sync.take();
+        let boards = std::mem::take(&mut held.tactics_boards);
+        held.clear_session_data();
+        held.current_annotation_sync = drawn;
+        held.tactics_boards = boards;
     }
 
     /// Locks or unlocks what peers may change.
@@ -519,6 +538,36 @@ mod tests {
         assert!(!collab.token_revealed);
         assert_eq!(collab.status(), SessionStatus::Idle);
     }
+
+    /// Leaving does not rub out what was drawn in the session: each viewport is
+    /// handed an inert link and reads the shapes onto its own end as it takes
+    /// one, which it cannot do if they have already been cleared.
+    #[test]
+    fn leaving_leaves_what_was_drawn_where_a_viewport_can_carry_it() {
+        let mut collab = CollabState::default();
+        {
+            let mut held = collab.state.lock();
+            held.status = SessionStatus::Active;
+            held.current_annotation_sync = Some(wt_collab_client::AnnotationSyncState {
+                annotations: vec![wt_collab_client::types::Annotation::Circle {
+                    center: [1.0, 2.0],
+                    radius: 3.0,
+                    color: [255, 0, 0, 255],
+                    width: 2.0,
+                    filled: false,
+                }],
+                owners: vec![1],
+                ids: vec![77],
+            });
+            held.tactics_boards.insert(42, wt_collab_client::TacticsBoardSessionState::default());
+        }
+
+        collab.leave();
+
+        let held = collab.state.lock();
+        assert!(held.current_annotation_sync.is_some(), "still readable for the viewport that draws it");
+        assert!(held.tactics_boards.contains_key(&42), "and so is the board's own");
+    }
 }
 
 /// A viewport's end of a collab session.
@@ -529,12 +578,96 @@ mod tests {
 pub struct CollabLink {
     state: Option<Arc<Mutex<SessionState>>>,
     local_tx: Option<std::sync::mpsc::Sender<LocalEvent>>,
+    /// Which tactics board this link speaks for. `None` is the replay context,
+    /// which is the one window a session has without anyone opening one.
+    board: Option<u64>,
+    /// What this end holds while there is no session to hold it.
+    ///
+    /// Drawing on a map is not a collab feature: a reader alone draws on their
+    /// own replay and nobody else sees it. Without this a shape would be sent to
+    /// a session that is not there and never drawn.
+    alone: Arc<Mutex<wt_collab_client::AnnotationSyncState>>,
+    /// Ids for the shapes added while alone. They only have to tell this end's
+    /// own shapes apart; a session assigns its own.
+    next_alone_id: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl CollabLink {
     /// Whether there is a session to talk to.
     pub fn is_active(&self) -> bool {
         self.local_tx.is_some()
+    }
+
+    /// The same link, speaking for one tactics board.
+    ///
+    /// A board's shapes and capture points are its own: two boards open on
+    /// different maps in one session do not share them, and neither shares the
+    /// replay's. Its own store too, for the same reason.
+    pub fn on_board(&self, board_id: BoardId) -> Self {
+        Self {
+            state: self.state.clone(),
+            local_tx: self.local_tx.clone(),
+            board: Some(board_id.raw()),
+            alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
+            next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+        }
+    }
+
+    /// Puts `held` on this link, whichever end is holding.
+    ///
+    /// For a session starting or ending under an open viewport: what was drawn
+    /// before stays on the map, and a session hears about it as though it had
+    /// just been drawn, which is how the egui host pushes what it already had.
+    pub fn adopt(&self, held: Vec<wt_collab_client::drawing::Held>) {
+        if let Some(tx) = &self.local_tx {
+            // Under the ids they already carry, so a step remembered for an undo
+            // still names these shapes afterwards, and in order, so the session
+            // holds them the way the reader drew them.
+            for one in held {
+                let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set {
+                    board_id: self.board,
+                    id: one.id,
+                    annotation: one.annotation,
+                    owner: one.owner,
+                }));
+            }
+            return;
+        }
+        let mut alone = self.alone.lock();
+        *alone = wt_collab_client::AnnotationSyncState {
+            annotations: held.iter().map(|one| one.annotation.clone()).collect(),
+            owners: held.iter().map(|one| one.owner).collect(),
+            ids: held.iter().map(|one| one.id).collect(),
+        };
+        let highest = alone.ids.iter().copied().max().unwrap_or_default();
+        self.next_alone_id.store(highest + 1, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Who this app is in the session, where it is in one.
+    ///
+    /// `None` outside a session: a user id is assigned by the server, and a
+    /// reader alone has not been given one.
+    pub fn my_user_id(&self) -> Option<UserId> {
+        let state = self.state.as_ref()?;
+        self.is_active().then(|| UserId(state.lock().my_user_id))
+    }
+
+    /// The shapes this link speaks for, as the session holds them.
+    fn sync_of<'a>(&self, held: &'a SessionState) -> Option<&'a wt_collab_client::AnnotationSyncState> {
+        match self.board {
+            Some(board_id) => held.tactics_boards.get(&board_id).map(|board| &board.annotation_sync),
+            None => held.current_annotation_sync.as_ref(),
+        }
+    }
+
+    /// The shapes this link speaks for, wherever they are held.
+    fn held(&self) -> wt_collab_client::AnnotationSyncState {
+        if !self.is_active() {
+            return self.alone.lock().clone();
+        }
+        let Some(state) = &self.state else { return wt_collab_client::AnnotationSyncState::default() };
+        let held = state.lock();
+        self.sync_of(&held).cloned().unwrap_or_default()
     }
 
     /// Where every other peer's pointer is, in minimap space.
@@ -569,25 +702,51 @@ impl CollabLink {
 
     /// What everyone in the session has drawn on the map.
     pub fn annotations(&self) -> Vec<wt_collab_client::types::Annotation> {
-        let Some(state) = &self.state else { return Vec::new() };
-        state.lock().current_annotation_sync.as_ref().map(|sync| sync.annotations.clone()).unwrap_or_default()
+        self.held().annotations
+    }
+
+    /// How many shapes there are, without copying them to count them.
+    pub fn annotation_count(&self) -> usize {
+        if !self.is_active() {
+            return self.alone.lock().annotations.len();
+        }
+        let Some(state) = &self.state else { return 0 };
+        let held = state.lock();
+        self.sync_of(&held).map(|sync| sync.annotations.len()).unwrap_or_default()
+    }
+
+    /// The shape at `index`, without copying the rest.
+    pub fn annotation_at(&self, index: usize) -> Option<wt_collab_client::types::Annotation> {
+        if !self.is_active() {
+            return self.alone.lock().annotations.get(index).cloned();
+        }
+        let state = self.state.as_ref()?;
+        let held = state.lock();
+        self.sync_of(&held)?.annotations.get(index).cloned()
     }
 
     /// Puts `annotation` on the map for everyone in the session.
     pub fn add_annotation(&self, annotation: wt_collab_client::types::Annotation) {
-        let Some(tx) = &self.local_tx else { return };
-        let owner = self.state.as_ref().map(|state| state.lock().my_user_id).unwrap_or_default();
-        let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::new_annotation(
-            annotation, owner,
-        )));
+        let owner = self.my_user_id().map(UserId::raw).unwrap_or_default();
+        let Some(tx) = &self.local_tx else {
+            let id = self.next_alone_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut alone = self.alone.lock();
+            alone.annotations.push(annotation);
+            alone.owners.push(owner);
+            alone.ids.push(id);
+            return;
+        };
+        let mut event = wt_collab_client::peer::LocalAnnotationEvent::new_annotation(annotation, owner);
+        if let wt_collab_client::peer::LocalAnnotationEvent::Set { board_id, .. } = &mut event {
+            *board_id = self.board;
+        }
+        let _ = tx.send(LocalEvent::Annotation(event));
     }
 
     /// Everything the session holds, with the ids and owners it keys them
     /// by. What a snapshot for undo is taken of.
     pub fn annotations_held(&self) -> Vec<wt_collab_client::drawing::Held> {
-        let Some(state) = &self.state else { return Vec::new() };
-        let held = state.lock();
-        let Some(sync) = held.current_annotation_sync.as_ref() else { return Vec::new() };
+        let sync = self.held();
         sync.annotations
             .iter()
             .enumerate()
@@ -604,16 +763,19 @@ impl CollabLink {
         use wt_collab_client::drawing::Change;
         use wt_collab_client::peer::LocalAnnotationEvent;
 
-        let Some(tx) = &self.local_tx else { return };
+        let Some(tx) = &self.local_tx else {
+            self.adopt(was.to_vec());
+            return;
+        };
         for change in wt_collab_client::drawing::undo_plan(was, &self.annotations_held()) {
             let event = match change {
                 Change::Set(held) => LocalAnnotationEvent::Set {
-                    board_id: None,
+                    board_id: self.board,
                     id: held.id,
                     annotation: held.annotation,
                     owner: held.owner,
                 },
-                Change::Remove(id) => LocalAnnotationEvent::Remove { board_id: None, id },
+                Change::Remove(id) => LocalAnnotationEvent::Remove { board_id: self.board, id },
             };
             let _ = tx.send(LocalEvent::Annotation(event));
         }
@@ -625,16 +787,18 @@ impl CollabLink {
     /// For a shape the reader has moved or turned: sending a new id would
     /// leave the old one on everyone else's map beside the new one.
     pub fn update_annotation(&self, index: usize, annotation: wt_collab_client::types::Annotation) {
-        let Some(tx) = &self.local_tx else { return };
-        let Some(state) = &self.state else { return };
-        let (id, owner) = {
-            let held = state.lock();
-            let Some(sync) = held.current_annotation_sync.as_ref() else { return };
-            let Some(id) = sync.ids.get(index).copied() else { return };
-            (id, sync.owners.get(index).copied().unwrap_or_default())
+        let Some(tx) = &self.local_tx else {
+            let mut alone = self.alone.lock();
+            if let Some(held) = alone.annotations.get_mut(index) {
+                *held = annotation;
+            }
+            return;
         };
+        let sync = self.held();
+        let Some(id) = sync.ids.get(index).copied() else { return };
+        let owner = sync.owners.get(index).copied().unwrap_or_default();
         let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set {
-            board_id: None,
+            board_id: self.board,
             id,
             annotation,
             owner,
@@ -647,16 +811,100 @@ impl CollabLink {
     /// wire because the session is keyed that way and another peer may have
     /// added one in between.
     pub fn erase_annotation(&self, index: usize) {
-        let Some(tx) = &self.local_tx else { return };
-        let Some(state) = &self.state else { return };
-        let id = {
-            let held = state.lock();
-            let Some(sync) = held.current_annotation_sync.as_ref() else { return };
-            let Some(id) = sync.ids.get(index).copied() else { return };
-            id
+        let Some(tx) = &self.local_tx else {
+            let mut alone = self.alone.lock();
+            if index < alone.annotations.len() {
+                alone.annotations.remove(index);
+                alone.owners.remove(index);
+                alone.ids.remove(index);
+            }
+            return;
         };
-        let _ = tx
-            .send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Remove { board_id: None, id }));
+        let Some(id) = self.held().ids.get(index).copied() else { return };
+        let _ = tx.send(LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Remove {
+            board_id: self.board,
+            id,
+        }));
+    }
+
+    /// Puts this board's map in front of the session, so a peer can open the
+    /// same board rather than being told one exists.
+    ///
+    /// The map art travels with it: a peer may not have the build the map came
+    /// from, and a board nobody can draw is not a shared board.
+    /// The session drops anything sent for a board it does not hold, so this has
+    /// to reach the peer task before the board's zones and shapes do.
+    pub fn announce_board(&self, map: BoardMap) {
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let _ = tx.send(LocalEvent::TacticsMapOpened {
+            board_id,
+            owner_user_id: self.my_user_id().map(UserId::raw).unwrap_or_default(),
+            map_name: map.space,
+            display_name: map.label,
+            map_id: map.map_id,
+            map_image_png: map.art_png.unwrap_or_default(),
+            map_info: map.info,
+        });
+    }
+
+    /// Takes this board out of the session, so a peer stops being offered a board
+    /// nobody is looking at.
+    pub fn close_board(&self) {
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let _ = tx.send(LocalEvent::TacticsMapClosed { board_id });
+    }
+
+    /// Puts a capture point on this board for everyone in the session.
+    pub fn set_cap(&self, cap: wt_collab_client::protocol::WireCapPoint) {
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let _ = tx.send(LocalEvent::CapPoint { board_id, event: wt_collab_client::peer::LocalCapPointEvent::Set(cap) });
+    }
+
+    /// Takes one off it.
+    pub fn remove_cap(&self, id: CapPointId) {
+        let (Some(tx), Some(board_id)) = (&self.local_tx, self.board) else { return };
+        let _ = tx.send(LocalEvent::CapPoint {
+            board_id,
+            event: wt_collab_client::peer::LocalCapPointEvent::Remove { id: id.raw() },
+        });
+    }
+
+    /// This board's capture points as the session holds them.
+    pub fn board_caps(&self) -> Vec<wt_collab_client::protocol::WireCapPoint> {
+        let (Some(state), Some(board_id)) = (&self.state, self.board) else { return Vec::new() };
+        let held = state.lock();
+        held.tactics_boards.get(&board_id).map(|board| board.cap_point_sync.cap_points.clone()).unwrap_or_default()
+    }
+
+    /// Which version of this board's capture points and shapes the session is
+    /// on, so a board can tell that nothing has changed without comparing lists.
+    pub fn board_versions(&self) -> Option<BoardVersions> {
+        let (state, board_id) = (self.state.as_ref()?, self.board?);
+        let held = state.lock();
+        let board = held.tactics_boards.get(&board_id)?;
+        Some(BoardVersions { caps: board.cap_point_sync_version, shapes: board.annotation_sync_version })
+    }
+
+    /// The boards open in the session, with who opened each. What a peer reads
+    /// to open the same boards the host has.
+    pub fn session_boards(&self) -> Vec<SessionBoard> {
+        let Some(state) = &self.state else { return Vec::new() };
+        let held = state.lock();
+        held.tactics_boards
+            .iter()
+            .map(|(board_id, board)| SessionBoard {
+                board_id: BoardId::new(*board_id),
+                owner_user_id: UserId::new(board.owner_user_id),
+                map: BoardMap {
+                    space: board.tactics_map.map_name.clone(),
+                    label: board.tactics_map.display_name.clone(),
+                    map_id: board.tactics_map.map_id,
+                    art_png: (!board.tactics_map.map_image_png.is_empty())
+                        .then(|| board.tactics_map.map_image_png.clone()),
+                    info: board.tactics_map.map_info.clone(),
+                },
+            })
+            .collect()
     }
 
     /// Forgets the pings whose ripple has finished.
@@ -674,8 +922,103 @@ impl CollabLink {
     #[cfg(test)]
     pub(crate) fn for_test(state: Arc<Mutex<SessionState>>) -> (Self, std::sync::mpsc::Receiver<LocalEvent>) {
         let (tx, rx) = std::sync::mpsc::channel();
-        (Self { state: Some(state), local_tx: Some(tx) }, rx)
+        (
+            Self {
+                state: Some(state),
+                local_tx: Some(tx),
+                board: None,
+                alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
+                next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            },
+            rx,
+        )
     }
+}
+
+/// Who someone is in a session. Assigned by the server, so a reader alone has
+/// none.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct UserId(u64);
+
+impl UserId {
+    pub fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+}
+
+/// What a tactics board is called in a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct BoardId(u64);
+
+impl BoardId {
+    pub fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// A name nothing else in the session holds.
+    pub fn fresh() -> Self {
+        Self(wt_collab_client::peer::fresh_id())
+    }
+}
+
+/// What a capture point is called in a session. Its place in a list is not
+/// that: every peer's list is its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct CapPointId(u64);
+
+impl CapPointId {
+    pub fn new(raw: u64) -> Self {
+        Self(raw)
+    }
+
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// A name nothing else in the session holds.
+    pub fn fresh() -> Self {
+        Self(wt_collab_client::peer::fresh_id())
+    }
+}
+
+/// How far the session has moved on for one board. Named rather than a pair of
+/// counters: the two are the same type, and swapping them would compile.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoardVersions {
+    pub caps: u64,
+    pub shapes: u64,
+}
+
+/// The map a tactics board is set on, as a session carries it.
+#[derive(Clone, Debug, Default)]
+pub struct BoardMap {
+    /// The map's space name, which is what the renderer loads art by.
+    pub space: String,
+    /// What the map is called to a reader.
+    pub label: String,
+    pub map_id: u32,
+    /// The drawn map as a PNG, for a peer whose build ships none for this map.
+    /// `None` where there was no art to send, which the wire states as an empty
+    /// one.
+    pub art_png: Option<Vec<u8>>,
+    /// What the map measures, for placing a world position on it.
+    pub info: Option<wows_minimap_renderer::map_data::MapInfo>,
+}
+
+/// One board open in the session.
+#[derive(Clone, Debug)]
+pub struct SessionBoard {
+    pub board_id: BoardId,
+    pub owner_user_id: UserId,
+    pub map: BoardMap,
 }
 
 #[cfg(test)]
@@ -732,6 +1075,91 @@ mod annotation_tests {
         assert_eq!(sent, vec![88]);
     }
 
+    /// Alone, what is drawn is kept on this end: a reader with nobody connected
+    /// draws on their own map and nobody else sees it.
+    #[test]
+    fn drawing_alone_keeps_the_shape_on_this_end() {
+        let link = CollabLink::default();
+        assert!(link.annotations().is_empty());
+
+        link.add_annotation(circle(5.0));
+        link.add_annotation(circle(6.0));
+        assert_eq!(link.annotations().len(), 2);
+
+        link.erase_annotation(0);
+        assert_eq!(link.annotations(), vec![circle(6.0)], "and rubbing one out takes that one");
+
+        link.update_annotation(0, circle(9.0));
+        assert_eq!(link.annotations(), vec![circle(9.0)]);
+    }
+
+    /// Each shape drawn alone gets an id of its own, so an undo can name one.
+    #[test]
+    fn a_shape_drawn_alone_gets_its_own_id() {
+        let link = CollabLink::default();
+        link.add_annotation(circle(5.0));
+        link.add_annotation(circle(6.0));
+        let ids: Vec<u64> = link.annotations_held().iter().map(|held| held.id).collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1]);
+    }
+
+    /// A session starting under an open viewport is told what was already drawn,
+    /// rather than the map going blank.
+    #[test]
+    fn what_was_drawn_alone_reaches_a_session_that_starts_after_it() {
+        let alone = CollabLink::default();
+        alone.add_annotation(circle(5.0));
+
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        let (joined, events) = CollabLink::for_test(Arc::clone(&state));
+        joined.adopt(alone.annotations_held());
+
+        let sent: Vec<wt_collab_client::types::Annotation> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set { annotation, .. }) => {
+                    Some(annotation)
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, vec![circle(5.0)]);
+    }
+
+    /// And a session ending leaves what it held where the reader can see it.
+    #[test]
+    fn what_a_session_held_stays_when_it_ends() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().current_annotation_sync = Some(AnnotationSyncState {
+            annotations: vec![circle(5.0), circle(6.0)],
+            ids: vec![77, 88],
+            owners: vec![1, 2],
+        });
+        let (joined, _events) = CollabLink::for_test(Arc::clone(&state));
+
+        let ended = CollabLink::default();
+        ended.adopt(joined.annotations_held());
+        assert_eq!(ended.annotations(), vec![circle(5.0), circle(6.0)]);
+        // The next shape drawn does not take an id one of these already has.
+        ended.add_annotation(circle(7.0));
+        let ids: Vec<u64> = ended.annotations_held().iter().map(|held| held.id).collect();
+        assert_eq!(ids.len(), 3);
+        assert!(!ids[..2].contains(&ids[2]), "{ids:?}");
+    }
+
+    /// A board's shapes are its own, not the replay's.
+    #[test]
+    fn a_board_holds_its_own_shapes() {
+        let replay = CollabLink::default();
+        let board = replay.on_board(BoardId::new(12));
+        replay.add_annotation(circle(5.0));
+        board.add_annotation(circle(6.0));
+
+        assert_eq!(replay.annotations(), vec![circle(5.0)]);
+        assert_eq!(board.annotations(), vec![circle(6.0)]);
+    }
+
     /// An index past what the session holds sends nothing, rather than
     /// rubbing out whatever happens to be last.
     #[test]
@@ -753,4 +1181,175 @@ mod annotation_tests {
 #[cfg(test)]
 pub(crate) fn push_ping_aged(state: &Arc<Mutex<SessionState>>, pos: [f32; 2], age: std::time::Duration) {
     state.lock().pings.push(PeerPing { user_id: 7, color: [255, 0, 0], pos, time: web_time::Instant::now() - age });
+}
+
+#[cfg(test)]
+mod board_tests {
+    use super::BoardId;
+    use super::CapPointId;
+    use super::CollabLink;
+    use super::LocalEvent;
+    use super::SessionState;
+    use super::UserId;
+    use parking_lot::Mutex;
+    use std::sync::Arc;
+    use wt_collab_client::TacticsBoardSessionState;
+    use wt_collab_client::protocol::WireCapPoint;
+
+    fn circle(radius: f32) -> wt_collab_client::types::Annotation {
+        wt_collab_client::types::Annotation::Circle {
+            center: [10.0, 10.0],
+            radius,
+            color: [255, 0, 0, 255],
+            width: 2.0,
+            filled: false,
+        }
+    }
+
+    fn zone(id: u64, index: u32) -> WireCapPoint {
+        WireCapPoint { id, index, world_x: 1.0, world_z: 2.0, radius: 150.0, team_id: -1, frozen: false }
+    }
+
+    /// A zone placed on a board reaches the session under that board's name, not
+    /// the replay's.
+    #[test]
+    fn a_zone_reaches_the_session_under_its_board() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+        let board = link.on_board(BoardId::new(42));
+
+        board.set_cap(zone(7, 0));
+        board.remove_cap(CapPointId::new(7));
+
+        let sent: Vec<(u64, bool)> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::CapPoint { board_id, event } => {
+                    Some((board_id, matches!(event, wt_collab_client::peer::LocalCapPointEvent::Set(_))))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, vec![(42, true), (42, false)]);
+    }
+
+    /// A board with no session sends nothing and asks nothing: a reader alone
+    /// still has capture points, held by the board itself.
+    #[test]
+    fn a_board_alone_reads_no_zones_from_a_session() {
+        let board = CollabLink::default().on_board(BoardId::new(42));
+        board.set_cap(zone(7, 0));
+        assert!(board.board_caps().is_empty());
+        assert!(board.board_versions().is_none());
+    }
+
+    /// What the session holds for one board is that board's, and the versions
+    /// say whether it has moved on.
+    #[test]
+    fn a_board_reads_its_own_zones_and_versions() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().tactics_boards.insert(
+            42,
+            TacticsBoardSessionState {
+                cap_point_sync: wt_collab_client::CapPointSyncState { cap_points: vec![zone(7, 0), zone(8, 1)] },
+                cap_point_sync_version: 3,
+                annotation_sync_version: 5,
+                ..Default::default()
+            },
+        );
+        let (link, _events) = CollabLink::for_test(Arc::clone(&state));
+
+        let board = link.on_board(BoardId::new(42));
+        assert_eq!(board.board_caps().len(), 2);
+        assert_eq!(board.board_versions(), Some(super::BoardVersions { caps: 3, shapes: 5 }));
+
+        let other = link.on_board(BoardId::new(43));
+        assert!(other.board_caps().is_empty(), "another board's zones are not this one's");
+        assert!(other.board_versions().is_none());
+    }
+
+    /// What a peer opened is listed with the art it sent, so a board can be
+    /// opened on it without the build it came from.
+    #[test]
+    fn the_boards_a_session_is_on_carry_their_art() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        state.lock().tactics_boards.insert(
+            42,
+            TacticsBoardSessionState {
+                owner_user_id: 9,
+                tactics_map: wt_collab_client::TacticsMapInfo {
+                    map_name: "spaces/13_OC_new_dawn".into(),
+                    display_name: "New Dawn".into(),
+                    map_id: 13,
+                    map_image_png: vec![1, 2, 3],
+                    map_info: None,
+                },
+                ..Default::default()
+            },
+        );
+        let (link, _events) = CollabLink::for_test(Arc::clone(&state));
+
+        let [board] = &link.session_boards()[..] else { panic!("one board is open") };
+        assert_eq!(board.board_id, BoardId::new(42));
+        assert_eq!(board.owner_user_id, UserId::new(9));
+        assert_eq!(board.map.space, "spaces/13_OC_new_dawn");
+        assert_eq!(board.map.label, "New Dawn");
+        assert_eq!(board.map.art_png, Some(vec![1, 2, 3]));
+    }
+
+    /// A shape carried into a session keeps the id it already had, so a step
+    /// remembered for an undo still names it afterwards.
+    #[test]
+    fn a_carried_shape_keeps_the_id_it_had() {
+        use wt_collab_client::drawing::Held;
+
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+        let held = vec![
+            Held { id: 77, owner: 3, annotation: circle(5.0) },
+            Held { id: 88, owner: 4, annotation: circle(6.0) },
+        ];
+
+        link.adopt(held);
+
+        let sent: Vec<(u64, u64)> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::Annotation(wt_collab_client::peer::LocalAnnotationEvent::Set { id, owner, .. }) => {
+                    Some((id, owner))
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(sent, vec![(77, 3), (88, 4)], "in the order they were drawn, under their own ids and owners");
+    }
+
+    /// Announcing says which map, under this board's name.
+    #[test]
+    fn announcing_says_which_map_the_board_is_on() {
+        let state = Arc::new(Mutex::new(SessionState::default()));
+        let (link, events) = CollabLink::for_test(Arc::clone(&state));
+        let board = link.on_board(BoardId::new(42));
+
+        board.announce_board(super::BoardMap {
+            space: "spaces/13_OC_new_dawn".into(),
+            label: "New Dawn".into(),
+            map_id: 13,
+            art_png: Some(vec![9]),
+            info: None,
+        });
+        board.close_board();
+
+        let said: Vec<String> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                LocalEvent::TacticsMapOpened { board_id, map_name, map_id, .. } => {
+                    Some(format!("opened {board_id} {map_name} {map_id}"))
+                }
+                LocalEvent::TacticsMapClosed { board_id } => Some(format!("closed {board_id}")),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(said, vec!["opened 42 spaces/13_OC_new_dawn 13", "closed 42"]);
+    }
 }

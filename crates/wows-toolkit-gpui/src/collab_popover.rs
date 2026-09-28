@@ -35,6 +35,11 @@ pub trait SessionHost: 'static {
     fn name_input(&self) -> &Entity<InputState>;
     /// The field a session token is pasted into.
     fn token_input(&self) -> &Entity<InputState>;
+    /// Asks for a tactics board. Said rather than done: the board is a window
+    /// this popover's host does not own.
+    fn request_tactics_board(&mut self, cx: &mut Context<Self>)
+    where
+        Self: Sized;
 }
 
 /// The link to a locally served web client, in a debug build.
@@ -290,6 +295,17 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
     // drawing belong to. The egui popover lists the same windows, with a button to
     // open each; this app plays a battle back from its own copy, so a reader with
     // the same replay opens it themselves.
+    //
+    // A board is the exception: it is drawn from what the session says rather
+    // than from a replay, so one button opens the board the session is on.
+    body = body.child(crate::ui::rule_h(cx)).child(
+        Button::new("collab-tactics-board")
+            .label(t!("ui.collab.tactics_board").to_string())
+            .compact()
+            .w_full()
+            .on_click(cx.listener(|view: &mut V, _event, _window, cx| view.request_tactics_board(cx))),
+    );
+
     if !shared.is_empty() {
         body = body.child(crate::ui::rule_h(cx)).child(
             v_flex()
