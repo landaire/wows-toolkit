@@ -204,10 +204,14 @@ have used it.
 
     A drawn shape can be picked back up: a press on one picks it out and draws a
     halo under it, ctrl adds another, a drag moves what is picked, and Delete
-    erases it. Turning a shape by its handle is not there, and nor are the map
-    pings or the grid, which belong to a session rather than to a board. The
-    collab sync that puts one board in front of a whole session waits on item
-    22's client-frame viewports.
+    erases it. One picked shape that has a bearing carries the handle it is
+    turned by, the same handle the replay viewport draws, at the same size and
+    reach at every zoom. The two directions between the map and the element are
+    one reading (`Letterbox`), so the handle is pressed where it was drawn.
+
+    Not there: the map pings and the grid, which belong to a session rather than
+    to a board. The collab sync that puts one board in front of a whole session
+    waits on item 22's client-frame viewports.
 17. ~~**Alt perspective.**~~ Done 2026-09-28: the open replay's Actions menu
     takes another recording of the same battle, refuses one that is not (a different
     version, a different battle, or one whose battle cannot be read, each with its

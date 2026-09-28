@@ -208,6 +208,58 @@ fn halo(annotation: &wt_collab_client::types::Annotation) -> wt_collab_client::t
 const HALO_WIDTH: f32 = 4.0;
 const HALO_INK: [u8; 4] = [0xff, 0xd7, 0x3a, 0x80];
 
+/// Where the drawn map landed in the element that painted it, and how much it
+/// was scaled to fit.
+///
+/// The frame is drawn to fit without stretching, so it is letterboxed: its top
+/// left corner is not the element's own. Held apart from the board so the two
+/// directions cannot drift: a handle placed by one and pressed by the other has
+/// to agree to the pixel.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Letterbox {
+    left: f32,
+    top: f32,
+    scale: f32,
+    /// The frame's own size, which is what a point is held inside.
+    frame: (f32, f32),
+}
+
+impl Letterbox {
+    /// `None` for a frame with no extent, which nothing can be placed against.
+    fn fitting(bounds: Bounds<Pixels>, frame: (f32, f32)) -> Option<Self> {
+        if frame.0 <= 0.0 || frame.1 <= 0.0 {
+            return None;
+        }
+        let scale = (bounds.size.width.as_f32() / frame.0).min(bounds.size.height.as_f32() / frame.1);
+        Some(Self {
+            left: bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - frame.0 * scale) / 2.0,
+            top: bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - frame.1 * scale) / 2.0,
+            scale,
+            frame,
+        })
+    }
+
+    /// An element position as a point in the frame. `None` for one in the
+    /// margin beside a map that does not fill its element.
+    fn to_frame(self, at: (f32, f32)) -> Option<(f32, f32)> {
+        let (x, y) = ((at.0 - self.left) / self.scale, (at.1 - self.top) / self.scale);
+        (x >= 0.0 && x < self.frame.0 && y >= 0.0 && y < self.frame.1).then_some((x, y))
+    }
+
+    /// A point in the frame as an element position. `None` for one the frame
+    /// does not show, which has nowhere on screen to be.
+    fn to_element(self, at: (f32, f32)) -> Option<(f32, f32)> {
+        (at.0 >= 0.0 && at.0 < self.frame.0 && at.1 >= 0.0 && at.1 < self.frame.1)
+            .then_some((self.left + at.0 * self.scale, self.top + at.1 * self.scale))
+    }
+}
+
+/// How big a turning handle is drawn, how far above the shape it sits, and in
+/// what. The egui board's own figures, in screen pixels at any zoom.
+const HANDLE_RADIUS: Pixels = px(5.);
+const HANDLE_DISTANCE: Pixels = px(25.);
+const HANDLE_COLOR: u32 = 0xFFFF64;
+
 /// How near a drawn shape a press has to land to pick it out, in map pixels.
 /// A line is one pixel wide and nobody presses one exactly.
 const SHAPE_REACH_PX: f32 = 10.0;
@@ -531,6 +583,10 @@ pub struct TacticsBoard {
     picked: wt_collab_client::drawing::Selection,
     /// A move in progress: where it began, and what was on the board then.
     moving: Option<([f32; 2], Vec<wt_collab_client::types::Annotation>)>,
+    /// A turn in progress: which shape, and how it stood before the handle was
+    /// taken hold of. Held because a turn is read as a bearing from the shape's
+    /// middle each time the pointer moves, not as a step from where it last was.
+    turning: Option<(usize, wt_collab_client::types::Annotation)>,
     /// Whether a rasterisation is in flight, so a burst of edits asks for one
     /// redraw rather than one each.
     rasterising: bool,
@@ -610,6 +666,7 @@ impl TacticsBoard {
             undone: Vec::new(),
             picked: wt_collab_client::drawing::Selection::default(),
             moving: None,
+            turning: None,
             rasterising: false,
             stale: false,
         }
@@ -856,42 +913,103 @@ impl TacticsBoard {
     /// `None` before the map has been painted once, and for a position in the
     /// margin beside a map that does not fill its element.
     fn map_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
-        let bounds = self.painted.get()?;
-        let drawn = self.drawn.as_ref()?;
-        let size = drawn.size(0);
-        let (width, height) = (size.width.0 as f32, size.height.0 as f32);
-        if width <= 0.0 || height <= 0.0 {
-            return None;
-        }
-        // Drawn to fit without stretching, so one scale covers both directions.
-        let scale = (bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height);
-        let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - width * scale) / 2.0;
-        let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - height * scale) / 2.0;
-        let (x, y) = ((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale);
-        if x < 0.0 || x >= width || y < 0.0 || y >= height {
-            return None;
-        }
+        let (x, y) = self.drawn_point(position)?;
         // The frame shows the part of the map the window names, so a drawn
         // point is turned back into a map one before anything reads it.
         Some(self.view.to_map(x, y))
+    }
+
+    /// How the drawn map sits in the element it was painted in.
+    ///
+    /// `None` before it has been painted once, and for a frame with no extent,
+    /// which nothing can be placed against either way.
+    fn letterbox(&self) -> Option<Letterbox> {
+        let bounds = self.painted.get()?;
+        let size = self.drawn.as_ref()?.size(0);
+        Letterbox::fitting(bounds, (size.width.0 as f32, size.height.0 as f32))
     }
 
     /// Where a window position falls in the drawn frame, before the window is
     /// undone. What a zoom about the pointer needs, since it re-anchors on a
     /// drawn point rather than a map one.
     fn drawn_point(&self, position: Point<Pixels>) -> Option<(f32, f32)> {
-        let bounds = self.painted.get()?;
-        let drawn = self.drawn.as_ref()?;
-        let size = drawn.size(0);
-        let (width, height) = (size.width.0 as f32, size.height.0 as f32);
-        if width <= 0.0 || height <= 0.0 {
+        self.letterbox()?.to_frame((position.x.as_f32(), position.y.as_f32()))
+    }
+
+    /// Where a map point lands in the element.
+    ///
+    /// The other way round from [`Self::map_point`], for a control that has to
+    /// sit over the shape it belongs to. `None` for a point the window has
+    /// scrolled off the map, which has nowhere on screen to be.
+    fn element_point(&self, at: (f32, f32)) -> Option<(Pixels, Pixels)> {
+        let (x, y) = self.letterbox()?.to_element((self.view.x(at.0), self.view.y(at.1)))?;
+        Some((px(x), px(y)))
+    }
+
+    /// Where a shape's turning handle sits in the element, and where the line to
+    /// it starts.
+    ///
+    /// Above the shape by a fixed number of pixels rather than a map distance,
+    /// so the handle keeps its size and its reach at every zoom, as the egui
+    /// board's does.
+    fn rotation_handle(
+        &self,
+        annotation: &wt_collab_client::types::Annotation,
+    ) -> Option<((Pixels, Pixels), (Pixels, Pixels))> {
+        let [left, top, right, _] = wt_collab_client::drawing::annotation_bounds(annotation);
+        let anchor = self.element_point(((left + right) / 2.0, top))?;
+        Some(((anchor.0, anchor.1 - HANDLE_DISTANCE), anchor))
+    }
+
+    /// The shape whose turning handle is under `position`, if the pointer is on
+    /// one.
+    ///
+    /// A handle belongs to a single picked shape that has a bearing at all:
+    /// turning several at once about their own middles is not what one handle
+    /// means, and a circle looks the same at every angle.
+    fn handle_under(&self, position: Point<Pixels>) -> Option<(usize, wt_collab_client::types::Annotation)> {
+        let index = self.picked.single()?;
+        let annotation = self.annotations.get(index)?.clone();
+        if !wt_collab_client::drawing::can_rotate(&annotation) {
             return None;
         }
-        let scale = (bounds.size.width.as_f32() / width).min(bounds.size.height.as_f32() / height);
-        let left = bounds.origin.x.as_f32() + (bounds.size.width.as_f32() - width * scale) / 2.0;
-        let top = bounds.origin.y.as_f32() + (bounds.size.height.as_f32() - height * scale) / 2.0;
-        let (x, y) = ((position.x.as_f32() - left) / scale, (position.y.as_f32() - top) / scale);
-        (x >= 0.0 && x < width && y >= 0.0 && y < height).then_some((x, y))
+        let (handle, _) = self.rotation_handle(&annotation)?;
+        let reach = HANDLE_RADIUS + px(8.);
+        let away = (position.x - handle.0).as_f32().hypot((position.y - handle.1).as_f32());
+        (away < reach.as_f32()).then_some((index, annotation))
+    }
+
+    /// The handle a picked shape is turned by, drawn over the map.
+    ///
+    /// An element rather than part of the frame: it is a control rather than
+    /// something drawn on the map, so it keeps its size at every zoom and stays
+    /// out of a saved preset.
+    fn rotation_handle_overlay(&self) -> Option<AnyElement> {
+        let index = self.picked.single()?;
+        let annotation = self.annotations.get(index)?;
+        if !wt_collab_client::drawing::can_rotate(annotation) {
+            return None;
+        }
+        let (handle, anchor) = self.rotation_handle(annotation)?;
+        Some(
+            div()
+                .absolute()
+                .left(handle.0 - HANDLE_RADIUS)
+                .top(handle.1 - HANDLE_RADIUS)
+                .child(div().size(HANDLE_RADIUS * 2.0).rounded_full().bg(gpui_kit::rgb(HANDLE_COLOR)))
+                // The stem back to the shape, so the handle reads as belonging
+                // to it rather than floating over the map.
+                .child(
+                    div()
+                        .absolute()
+                        .left(HANDLE_RADIUS)
+                        .top(HANDLE_RADIUS)
+                        .w(px(1.))
+                        .h(anchor.1 - handle.1)
+                        .bg(gpui_kit::rgb(HANDLE_COLOR)),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Zooms the map about the pointer, so what is under it stays there.
@@ -1337,6 +1455,14 @@ impl TacticsBoard {
             self.reset_view(cx);
             return;
         }
+        // The handle takes the drag before anything else: it sits above the
+        // shape, over map nobody is reaching for.
+        if let Some((index, annotation)) = self.handle_under(event.position) {
+            self.remember();
+            self.turning = Some((index, annotation));
+            return;
+        }
+
         if let Some(at) = self.map_point(event.position) {
             // A shape already picked out is dragged as a whole, which is what
             // moving a line or a circle means.
@@ -1405,6 +1531,22 @@ impl TacticsBoard {
             return;
         }
 
+        if let Some((index, before)) = self.turning.clone() {
+            let Some(at) = self.map_point(event.position) else { return };
+            let [left, top, right, bottom] = wt_collab_client::drawing::annotation_bounds(&before);
+            let middle = [(left + right) / 2.0, (top + bottom) / 2.0];
+            let mut turned = before;
+            wt_collab_client::drawing::rotate_annotation(
+                &mut turned,
+                wt_collab_client::drawing::bearing(middle, [at.0, at.1]),
+            );
+            if let Some(held) = self.annotations.get_mut(index) {
+                *held = turned;
+            }
+            self.redraw(cx);
+            return;
+        }
+
         if let Some((from, was)) = self.moving.clone() {
             let Some(at) = self.map_point(event.position) else { return };
             let delta = [at.0 - from[0], at.1 - from[1]];
@@ -1449,6 +1591,7 @@ impl TacticsBoard {
     fn release(&mut self, cx: &mut Context<Self>) {
         self.panning = None;
         self.moving = None;
+        self.turning = None;
         let held = self.dragging.take().is_some();
         // A shape part way through is abandoned rather than finished somewhere
         // the reader did not put it.
@@ -2132,6 +2275,7 @@ impl TacticsBoard {
                 .absolute()
                 .inset_0(),
             )
+            .children(self.rotation_handle_overlay())
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_move(cx.listener(Self::on_mouse_move))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
@@ -2424,5 +2568,56 @@ mod coordinate_tests {
                 "a {space}-unit map gives a {on_screen}px band, not {RESIZE_BAND_PX}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod letterbox_tests {
+    use super::Letterbox;
+    use gpui_kit::Bounds;
+    use gpui_kit::Pixels;
+    use gpui_kit::Point;
+    use gpui_kit::Size;
+    use gpui_kit::px;
+
+    fn element(width: f32, height: f32) -> Bounds<Pixels> {
+        Bounds { origin: Point { x: px(10.), y: px(20.) }, size: Size { width: px(width), height: px(height) } }
+    }
+
+    /// A frame narrower than its element is centred in it rather than stretched.
+    #[test]
+    fn a_frame_is_centred_in_the_element() {
+        let fit = Letterbox::fitting(element(400., 200.), (100., 100.)).expect("a frame with extent");
+        assert_eq!(fit.scale, 2.0, "held to the tighter direction");
+        assert_eq!(fit.top, 20.0, "filling it top to bottom");
+        assert_eq!(fit.left, 110.0, "and centred across it");
+    }
+
+    /// The two directions agree to the pixel, which is what lets a handle be
+    /// placed by one and pressed by the other.
+    #[test]
+    fn the_two_directions_are_each_others_inverse() {
+        let fit = Letterbox::fitting(element(400., 200.), (100., 100.)).expect("a frame with extent");
+        for at in [(0.0, 0.0), (50.0, 50.0), (99.0, 1.0)] {
+            let on_screen = fit.to_element(at).expect("a point the frame shows");
+            let back = fit.to_frame(on_screen).expect("and it is over the map");
+            assert!((back.0 - at.0).abs() < 1e-3 && (back.1 - at.1).abs() < 1e-3, "{at:?} -> {back:?}");
+        }
+    }
+
+    /// A press in the margin beside the map is not on it, and a point the frame
+    /// does not show has nowhere on screen to be.
+    #[test]
+    fn a_point_outside_is_refused_both_ways() {
+        let fit = Letterbox::fitting(element(400., 200.), (100., 100.)).expect("a frame with extent");
+        assert!(fit.to_frame((20.0, 100.0)).is_none(), "in the left margin");
+        assert!(fit.to_element((-1.0, 50.0)).is_none(), "off the frame");
+        assert!(fit.to_element((100.0, 50.0)).is_none(), "and past its far edge");
+    }
+
+    /// A frame with no extent cannot be placed against at all.
+    #[test]
+    fn a_frame_with_no_extent_is_refused() {
+        assert!(Letterbox::fitting(element(400., 200.), (0., 100.)).is_none());
     }
 }
