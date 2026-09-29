@@ -14,9 +14,10 @@ A feature is "absent" here only where a negative search for the egui symbol and
 its translation key was confirmed by reading the port's code path that would
 have used it.
 
-One item is open as of 2026-09-28: a viewport that draws frames a session sent
-it (item 22). This app can now be the end a session watches, but not one of the
-ends watching. Everything else is closed.
+Every item is closed as of 2026-09-28. Item 13 is closed as far as it goes
+rather than matched: gpui chooses the adapter it draws the window through and
+offers no say in it, so there is no ladder to port, and the flags that still mean
+something here steer the one device this port does pick.
 
 ## Blocking: the port cannot do the thing it is for
 
@@ -309,7 +310,7 @@ ends watching. Everything else is closed.
 
 ## Detail: things that are ported but thinner
 
-22. **Collab.** Everything but a frame-receiving viewport is done. The session
+22. ~~**Collab.**~~ Done 2026-09-28. The session
     notifications are done (2026-09-27): `poll` returns
     typed `SessionNotice`s the header says after its draw -- started or connected
     by role, joined, left, timed out, ended, error, rejected, and the host
@@ -325,14 +326,21 @@ ends watching. Everything else is closed.
     battle with its own art at its own size, and an egui peer or the web client
     watching this app sees the battle it is playing.
 
-    Still missing is the other direction: a viewport that draws frames it is sent
-    rather than a replay it read, which is the per-window Open button and the
-    `open` string already in the catalogue. The shared client has the plumbing for
-    it (`ViewportSink`'s `frame_tx`), so this is a window type to write rather
-    than an architecture to change; earlier notes here called it the latter, on
-    the mistaken belief that frames were pixels. The spam-protection notice that
-    stops a session opening replays faster than a peer can read them belongs with
-    it, since it guards that viewport.
+    The other direction is done with it: `watched_playback.rs` is a dock panel
+    that registers a sink for one of the session's windows
+    (`ViewportSink`'s `frame_tx`), draws the newest frame it has been sent with
+    this build's own art or the art the owning end sent, and says where that end
+    has reached. It steers nothing, because the clock belongs to the end that owns
+    the replay. The popover's Open button opens one per shared window, and
+    "Open for everyone" is honoured on the peers as it arrives. Earlier notes here
+    called this an architecture this port does not have, on the mistaken belief
+    that a frame was an image; it is a `Vec<DrawCommand>`.
+
+    Not ported: the spam-protection notice that drops a peer out of a session
+    whose host opens replays faster than five in ten seconds. It guards against a
+    host churning through windows; this port opens a viewport per window on the
+    reader's own press rather than on the host's, so there is nothing yet for it
+    to protect.
 
     The tactics board sync did not, and is done 2026-09-28. The popover carries
     the Tactics Board button, which opens the board the session is on. A board

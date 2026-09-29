@@ -23,6 +23,7 @@ use wt_collab_client::Permissions;
 use wt_collab_client::SessionStatus;
 
 use crate::collab::CollabState;
+use crate::collab::SharedWindow as CollabSharedWindow;
 
 /// How wide the popover sits, matching the egui one's own minimum.
 const WIDTH: Pixels = px(300.);
@@ -38,6 +39,10 @@ pub trait SessionHost: 'static {
     /// Asks for a tactics board. Said rather than done: the board is a window
     /// this popover's host does not own.
     fn request_tactics_board(&mut self, cx: &mut Context<Self>)
+    where
+        Self: Sized;
+    /// Opens a viewport on a battle the session is playing elsewhere.
+    fn watch_shared_window(&mut self, shared: CollabSharedWindow, window: &mut Window, cx: &mut Context<Self>)
     where
         Self: Sized;
 }
@@ -292,12 +297,12 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
     }
 
     // What the session is on, so a reader knows which battle the cursors and the
-    // drawing belong to. The egui popover lists the same windows, with a button to
-    // open each; this app plays a battle back from its own copy, so a reader with
-    // the same replay opens it themselves.
+    // drawing belong to, with a button to open each: a window is drawn from the
+    // frames the end that owns the replay sends, so a reader with no copy of it
+    // sees the battle anyway.
     //
-    // A board is the exception: it is drawn from what the session says rather
-    // than from a replay, so one button opens the board the session is on.
+    // The board is listed on its own button rather than among them, because it is
+    // drawn from what the session says about it rather than from any replay.
     body = body.child(crate::ui::rule_h(cx)).child(
         Button::new("collab-tactics-board")
             .label(t!("ui.collab.tactics_board").to_string())
@@ -311,21 +316,31 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
             v_flex()
                 .gap_1()
                 .child(div().text_xs().font_weight(FontWeight::BOLD).child(t!("ui.collab.shared_windows").to_string()))
-                .children(shared.into_iter().map(|window| {
+                .children(shared.into_iter().map(|battle| {
+                    let replay_id = battle.replay_id;
                     h_flex()
-                        .id(SharedString::from(format!("collab-shared-{}", window.replay_id)))
+                        .id(SharedString::from(format!("collab-shared-{replay_id}")))
                         .test_support()
-                        .aria_label(window.replay_name.clone())
+                        .aria_label(battle.replay_name.clone())
                         .gap_1()
                         .items_center()
                         .text_xs()
                         .child(crate::icons::icon(crate::icons::MONITOR))
-                        .child(div().flex_1().min_w(px(0.)).truncate().child(window.replay_name))
-                        .child(div().text_color(crate::theme::text_dim()).child(window.map))
+                        .child(div().flex_1().min_w(px(0.)).truncate().child(battle.replay_name.clone()))
+                        .child(div().text_color(crate::theme::text_dim()).child(battle.map.clone()))
+                        // Drawn from the frames the end that owns the replay
+                        // sends, which is what a reader with no copy of it has.
+                        .child(
+                            Button::new(("collab-open-shared", replay_id as usize))
+                                .label(t!("ui.collab.open").to_string())
+                                .compact()
+                                .on_click(cx.listener(move |view: &mut V, _event, window, cx| {
+                                    view.watch_shared_window(battle.clone(), window, cx);
+                                })),
+                        )
                         // Only the end the session watches can tell the rest to
                         // open one, which is what the egui popover gates it on.
                         .when(may_steer, |this| {
-                            let replay_id = window.replay_id;
                             this.child(
                                 Button::new(("collab-open-for-everyone", replay_id as usize))
                                     .label(t!("ui.collab.open_for_everyone").to_string())

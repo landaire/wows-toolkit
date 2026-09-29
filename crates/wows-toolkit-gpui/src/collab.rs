@@ -143,6 +143,8 @@ impl CollabState {
             .map(|replay| SharedWindow {
                 replay_id: replay.replay_id,
                 replay_name: replay.replay_name.clone(),
+                map_name: replay.map_name.clone(),
+                art_png: (!replay.map_image_png.is_empty()).then(|| replay.map_image_png.clone()),
                 // The protocol carries no display name as an empty string,
                 // which is the map's own name here rather than a blank label.
                 map: match replay.display_name.as_str() {
@@ -432,11 +434,17 @@ impl SessionNotice {
 }
 
 /// One battle the session is on.
+#[derive(Clone, Debug)]
 pub struct SharedWindow {
     pub replay_id: u64,
     pub replay_name: String,
     /// The map it is played on, translated where the host said so.
     pub map: String,
+    /// The map's space name, for a viewport that has this build's own art.
+    pub map_name: String,
+    /// The art the end that owns the replay sent, for a map this build ships
+    /// none of. `None` where it sent none, which the wire states as empty.
+    pub art_png: Option<Vec<u8>>,
 }
 
 /// One participant, as the roster shows them.
@@ -952,6 +960,38 @@ impl CollabLink {
         let _ = commands.send(wt_collab_client::SessionCommand::ReplayClosed { replay_id: replay_id.raw() });
     }
 
+    /// Asks the session to send this end the frames of one of its windows.
+    ///
+    /// No waker is registered with the sink: the shared one is a plain callback,
+    /// and reaching a gpui entity from the peer task would need a channel into
+    /// the UI thread that the viewport is already draining. It looks for frames
+    /// on its own timer instead.
+    pub fn watch_window(
+        &self,
+        replay_id: ReplayId,
+        frames: std::sync::mpsc::SyncSender<wt_collab_client::PlaybackFrame>,
+    ) {
+        let Some(state) = &self.state else { return };
+        state.lock().register_viewport_sink(
+            replay_id.raw(),
+            wt_collab_client::ViewportSink { frame_tx: Some(frames), wake: None },
+        );
+    }
+
+    /// Says this end has stopped drawing one of the session's windows.
+    pub fn stop_watching(&self, replay_id: ReplayId) {
+        let Some(state) = &self.state else { return };
+        state.lock().viewport_sinks.remove(&replay_id.raw());
+    }
+
+    /// The windows the host has asked every peer to open, taken as they are read:
+    /// an ask that has been answered is not one to answer again.
+    pub fn take_forced_windows(&self) -> Vec<u64> {
+        let Some(state) = &self.state else { return Vec::new() };
+        let mut held = state.lock();
+        held.force_open_window_ids.drain().collect()
+    }
+
     /// Asks every peer to open one of the session's windows.
     pub fn open_for_everyone(&self, window_id: u64) {
         let Some(commands) = &self.commands else { return };
@@ -1040,6 +1080,11 @@ impl BoardId {
 pub struct ReplayId(u64);
 
 impl ReplayId {
+    /// A name the session already holds, read back off the wire.
+    pub fn from_raw(raw: u64) -> Self {
+        Self(raw)
+    }
+
     pub fn raw(self) -> u64 {
         self.0
     }
