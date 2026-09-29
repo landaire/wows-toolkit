@@ -3144,7 +3144,12 @@ where
     I: IntoIterator<Item = Param>,
 {
     fn from(value: I) -> Self {
-        let params: Vec<Rc<Param>> = value.into_iter().map(Rc::new).collect();
+        // `Vec<Param>` -> `Vec<Rc<Param>>` is an in-place collect: the source
+        // buffer is reused, so the capacity it keeps is the one a 1016-byte
+        // element needed, not an 8-byte pointer. Unshrunk that is 16 MiB of
+        // slack held for the life of the provider.
+        let mut params: Vec<Rc<Param>> = value.into_iter().map(Rc::new).collect();
+        params.shrink_to_fit();
         let lookups = build_param_lookups(params.as_ref());
 
         Self { params, id_to_params: lookups.by_id, index_to_params: lookups.by_index, name_to_params: lookups.by_name }
