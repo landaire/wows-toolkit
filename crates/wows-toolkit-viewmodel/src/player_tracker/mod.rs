@@ -183,13 +183,19 @@ impl Default for Sort {
 }
 
 impl Sort {
-    /// Clicking a column: the same column flips direction, a new one starts at
-    /// its own default.
+    /// Clicking a column: a new one starts at its own default, the same one
+    /// flips, and a third click puts the table back the way it opened.
+    ///
+    /// The third state is what lets a reader undo a sort without having to
+    /// know which column the table sorts by to begin with.
     pub fn toggled(self, column: SortColumn) -> Self {
-        if self.column == column {
+        if self.column != column {
+            return Self { column, order: column.default_order() };
+        }
+        if self.order == column.default_order() {
             Self { column, order: self.order.reversed() }
         } else {
-            Self { column, order: column.default_order() }
+            Self::default()
         }
     }
 }
@@ -294,6 +300,40 @@ pub fn visible_player_rows(
         sort.order.apply(ordering).then_with(|| a.facet.account_id.cmp(&b.facet.account_id))
     });
     rows
+}
+
+#[cfg(test)]
+mod sort_cycle_tests {
+    use super::ClanSort;
+    use super::ClanSortColumn;
+    use super::Sort;
+    use super::SortColumn;
+
+    #[test]
+    fn a_third_click_on_one_column_returns_the_table_to_its_default() {
+        let default = Sort::default();
+        let first = default.toggled(SortColumn::Name);
+        assert_eq!(first.order, SortColumn::Name.default_order(), "a new column opens at its own direction");
+        let second = first.toggled(SortColumn::Name);
+        assert_eq!(second.order, SortColumn::Name.default_order().reversed(), "the second click reverses it");
+        let third = second.toggled(SortColumn::Name);
+        assert_eq!(third, default, "the third click resets rather than flipping back");
+    }
+
+    #[test]
+    fn moving_to_another_column_does_not_reset() {
+        let sorted = Sort::default().toggled(SortColumn::Name).toggled(SortColumn::Name);
+        let moved = sorted.toggled(SortColumn::Clan);
+        assert_eq!(moved.column, SortColumn::Clan);
+        assert_eq!(moved.order, SortColumn::Clan.default_order());
+    }
+
+    #[test]
+    fn the_clans_table_cycles_the_same_way() {
+        let default = ClanSort::default();
+        let third = default.toggled(ClanSortColumn::Clan).toggled(ClanSortColumn::Clan).toggled(ClanSortColumn::Clan);
+        assert_eq!(third, default);
+    }
 }
 
 #[cfg(test)]
@@ -520,11 +560,15 @@ impl Default for ClanSort {
 }
 
 impl ClanSort {
+    /// The same three states [`Sort::toggled`] cycles through.
     pub fn toggled(self, column: ClanSortColumn) -> Self {
-        if self.column == column {
+        if self.column != column {
+            return Self { column, order: column.default_order() };
+        }
+        if self.order == column.default_order() {
             Self { column, order: self.order.reversed() }
         } else {
-            Self { column, order: column.default_order() }
+            Self::default()
         }
     }
 }
