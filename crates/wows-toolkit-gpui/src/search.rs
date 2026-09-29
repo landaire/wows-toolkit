@@ -909,10 +909,44 @@ impl SearchView {
     pub(crate) fn hover_row(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
         self.preview_anchor = position;
         let cache = self.game_data.clone();
+        self.resolve_hovered_ship(&path, cx);
         // The index records a match's map under the name it displays, not the
         // one the art is stored under, so a result has no map to draw ahead of
         // its bake; the bake's own map stands in.
         self.preview.enter(path, None, cache, cx, |panel| &mut panel.preview);
+    }
+
+    /// Loads the hovered row's own build, if it is not open, and names its ship
+    /// from it.
+    ///
+    /// [`Self::resolve_ship_names`] deliberately asks only builds already open,
+    /// because a result set can span years. One row under the pointer is the
+    /// other case: its build is about to be loaded for the preview anyway, so
+    /// the name and class icon beside it need not stay on what the index stored.
+    fn resolve_hovered_ship(&mut self, path: &std::path::Path, cx: &mut Context<Self>) {
+        let Some(game_data) = self.game_data.clone() else { return };
+        let Some(hit) = self.hits.iter().find(|hit| hit.replay_path == path) else { return };
+        let Some(key) = hit.version_build.zip(hit.self_ship_id) else { return };
+        if self.resolved_ships.contains_key(&key) {
+            return;
+        }
+
+        let (build, ship_id) = key;
+        cx.spawn(async move |this, cx| {
+            let named = cx
+                .background_spawn(async move {
+                    let loaded = game_data.get_or_load_build_for(build, None).ok()?;
+                    ship_display::try_resolve_ship_name(ship_id, Some(loaded.provider()))
+                })
+                .await;
+
+            let Some(name) = named else { return };
+            let _ = this.update(cx, |this, cx| {
+                this.resolved_ships.insert(key, name);
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     /// The pointer left the results.
@@ -1898,19 +1932,23 @@ impl Render for SearchView {
             // Why there is none, where the map would have been: a replay from a
             // build that is not installed is the ordinary case.
             None => self.preview.failure().map(|reason| {
-                h_flex()
+                // A column, clipped: the reason is a sentence rather than a
+                // word, and a row flex would run it off the side of the map's
+                // square instead of wrapping it inside.
+                v_flex()
                     .id("search-preview-failed")
                     .test_support()
                     .aria_label(reason.clone())
                     .w(px(PREVIEW_WIDTH))
                     .h(px(PREVIEW_WIDTH))
                     .bg(crate::preview_hover::MAP_PLACEHOLDER)
+                    .overflow_hidden()
                     .items_center()
                     .justify_center()
                     .p_2()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(reason.clone())
+                    .child(div().w_full().child(reason.clone()))
                     .into_any_element()
             }),
         };
