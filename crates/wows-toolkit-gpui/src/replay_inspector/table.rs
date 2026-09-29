@@ -387,6 +387,16 @@ pub struct PlayerTable {
     /// so the new width follows the pointer's total travel rather than
     /// accumulating per-frame deltas.
     resizing: Option<ColumnDrag>,
+    /// The row and column the right button was last pressed on, which is what
+    /// "copy cell" copies. A right-click menu carries no pointer position of
+    /// its own, and the cell is what was under it. Taken when a menu reads it,
+    /// so a press that lands on a row but not on one of its cells offers
+    /// nothing rather than whatever was pressed before.
+    right_clicked_cell: Option<(AccountId, ReplayColumn)>,
+    /// The table's own width, measured as it is laid out, so the frozen
+    /// section's cap can be worked out in pixels. `None` before the first
+    /// frame.
+    viewport_width: Option<Pixels>,
 }
 
 /// A column-width drag in progress.
@@ -414,6 +424,19 @@ const COLUMN_WIDTHS_KEY: &str = "replay_column_widths_v2";
 
 /// The width of the strip on a header's trailing edge that starts a drag.
 const RESIZE_GRIP: Pixels = px(6.);
+
+/// The most of the table's width the two frozen columns may take.
+///
+/// They are laid out at their own content width, which on a narrow dock panel
+/// is wider than the panel itself. Left to it they would paint past the
+/// panel's edge over whatever is beside it, and leave the scrolling columns no
+/// room to be reached at all. Capped, they clip instead, and the rest of the
+/// table stays scrollable.
+const STICKY_MAX_FRACTION: f32 = 0.6;
+
+/// Room kept for the horizontal scrollbar, so it is still reachable however
+/// wide the frozen columns are drawn.
+const H_SCROLLBAR_MIN_WIDTH: Pixels = px(80.);
 
 impl PlayerTable {
     /// Builds the table for `model` and kicks off resolving every icon its
@@ -467,6 +490,8 @@ impl PlayerTable {
             widths_loaded: false,
             width_overrides: vec![None; ReplayColumn::ALL.len()],
             resizing: None,
+            right_clicked_cell: None,
+            viewport_width: None,
             widths_dirty: true,
         }
     }
@@ -692,6 +717,52 @@ impl PlayerTable {
         .detach();
     }
 
+    /// Records which cell the right button went down on, so the menu that
+    /// follows knows which one to copy.
+    fn note_right_clicked_cell(&mut self, player: AccountId, col: ReplayColumn) {
+        self.right_clicked_cell = Some((player, col));
+    }
+
+    /// The cell a menu about to be built may copy, which it consumes: the next
+    /// press has to record its own.
+    fn take_right_clicked_cell(&mut self) -> Option<(AccountId, ReplayColumn)> {
+        self.right_clicked_cell.take()
+    }
+
+    /// The widest the two frozen columns may be drawn, in pixels. `None` until
+    /// the table has been laid out once.
+    fn sticky_cap(&self) -> Option<Pixels> {
+        self.viewport_width.map(|width| width * STICKY_MAX_FRACTION)
+    }
+
+    /// One cell's text as the table draws it.
+    fn cell_text(&self, player: AccountId, col: ReplayColumn) -> Option<String> {
+        let row = self.model.rows.iter().find(|row| row.db_id == player)?;
+        Some(cell_value(row, col, self.debug).text.to_string())
+    }
+
+    /// One row's visible cells, tab separated, which is what a spreadsheet
+    /// reads back as columns.
+    fn row_text(&self, player: AccountId) -> Option<String> {
+        let row = self.model.rows.iter().find(|row| row.db_id == player)?;
+        Some(
+            self.model
+                .columns
+                .iter()
+                .map(|col| cell_value(row, *col, self.debug).text.to_string())
+                .collect::<Vec<_>>()
+                .join("\t"),
+        )
+    }
+
+    /// The whole table: the column headings, then every row in the order the
+    /// table is sorted into.
+    fn table_text(&self) -> String {
+        let mut lines = vec![self.model.columns.iter().map(|col| column_label(*col)).collect::<Vec<_>>().join("\t")];
+        lines.extend(self.model.rows.iter().filter_map(|row| self.row_text(row.db_id)));
+        lines.join("\n")
+    }
+
     /// Puts `col` back on its content-fitted width.
     fn reset_column_width(&mut self, col: ReplayColumn, cx: &mut Context<Self>) {
         self.resizing = None;
@@ -726,6 +797,10 @@ impl PlayerTable {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                    // The grip sits inside the header, and the header sorts
+                    // when it is clicked. Without this, letting go of a drag
+                    // over the header also re-sorts the table.
+                    cx.stop_propagation();
                     // Double-clicking a grip puts that column back on its
                     // content, which is the usual way out of a drag that
                     // went too far.
@@ -745,6 +820,7 @@ impl PlayerTable {
                 let sorted = self.sort.column() == sort_column;
                 let sort = self.sort;
                 base.id(("replay-header", col as usize))
+                    .test_support()
                     .flex()
                     .items_center()
                     .gap_1()
@@ -785,9 +861,21 @@ fn hover_tooltip(text: SharedString) -> impl Fn(&mut Window, &mut App) -> AnyVie
 /// One body cell: fixed-width, ellipsis-clipped, colored when the model gives
 /// the cell a color role, with a hover tooltip when it carries breakdown or
 /// explanatory text. `ix`/`col` key the cell's `ElementId` so the tooltip
-/// hookup is unique per row/column.
-fn cell_element(ix: usize, col: ReplayColumn, cell: CellValue, width: f32) -> AnyElement {
+/// hookup is unique per row/column; `player` is who the cell is about, which
+/// is what a right-click records.
+#[allow(clippy::too_many_arguments)]
+fn cell_element(
+    ix: usize,
+    player: AccountId,
+    col: ReplayColumn,
+    cell: CellValue,
+    width: f32,
+    entity: &Entity<PlayerTable>,
+) -> AnyElement {
     let base = div()
+        .id(("replay-cell", ix * CELL_ID_STRIDE + col as usize))
+        .test_support()
+        .on_mouse_down(MouseButton::Right, note_cell(entity, player, col))
         .w(px(width))
         .flex_none()
         .px_1()
@@ -798,10 +886,7 @@ fn cell_element(ix: usize, col: ReplayColumn, cell: CellValue, width: f32) -> An
         .child(crate::ui::selectable_text(("replay-cell-text", ix * CELL_ID_STRIDE + col as usize), cell.text));
 
     match cell.hover {
-        Some(text) => base
-            .id(("replay-cell", ix * CELL_ID_STRIDE + col as usize))
-            .tooltip(hover_tooltip(text.into()))
-            .into_any_element(),
+        Some(text) => base.tooltip(hover_tooltip(text.into())).into_any_element(),
         None => base.into_any_element(),
     }
 }
@@ -817,6 +902,7 @@ fn expand_caret(ix: usize, entity: Entity<PlayerTable>, is_expanded: bool) -> An
     let icon = if is_expanded { IconName::ChevronDown } else { IconName::ChevronRight };
     div()
         .id(("replay-row-caret", ix))
+        .test_support()
         .flex_none()
         .cursor_pointer()
         .on_click(move |_event: &ClickEvent, _window, cx: &mut App| {
@@ -843,7 +929,16 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     let name_color = resolve_color(ColorRole::Player(name_color_kind(row)));
     let icon_tint = player_color_kind_rgb(player_color_kind(row));
 
-    let mut cell = h_flex().w(px(width)).flex_none().gap_1().px_1().items_center().overflow_hidden();
+    let mut cell = h_flex()
+        .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Name as usize))
+        .test_support()
+        .on_mouse_down(MouseButton::Right, note_cell(&layout.entity, row.db_id, ReplayColumn::Name))
+        .w(px(width))
+        .flex_none()
+        .gap_1()
+        .px_1()
+        .items_center()
+        .overflow_hidden();
     cell = cell.child(expand_caret(ix, layout.entity.clone(), layout.is_expanded));
 
     cell = match layout.icons.get(row.ship_class, icon_tint) {
@@ -864,7 +959,8 @@ fn name_cell(ix: usize, row: &PlayerRow, layout: &RowLayout, width: f32) -> AnyE
     };
 
     if let Some(div_label) = row.division_label.as_ref() {
-        cell = cell.child(div().flex_none().child(div_label.clone()));
+        cell =
+            cell.child(div().flex_none().child(crate::ui::selectable_text(("replay-division", ix), div_label.clone())));
     }
     if let Some(clan) = row.clan_tag.as_ref() {
         cell = cell.child(
@@ -1003,11 +1099,11 @@ fn twitch_chip(ix: usize, candidates: &[SniperCandidate]) -> Option<AnyElement> 
 /// when the underlying cell shows the real skill label, not the enemy/
 /// no-vehicle-entity dash cases (which fall through to the generic
 /// `cell_element`).
-fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElement {
+fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32, entity: &Entity<PlayerTable>) -> AnyElement {
     let cell = cell_value(row, ReplayColumn::Skills, debug);
     let shows_real_label = row.has_vehicle_entity && (!row.relation.is_enemy() || debug);
     if !shows_real_label {
-        return cell_element(ix, ReplayColumn::Skills, cell, width);
+        return cell_element(ix, row.db_id, ReplayColumn::Skills, cell, width, entity);
     }
 
     let color = cell
@@ -1038,17 +1134,24 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
         has_markers = true;
     }
 
-    let base = div().w(px(width)).flex_none().px_1().child(
-        h_flex().gap_1().items_center().overflow_hidden().when(has_markers, |el| el.child(markers)).child(
-            div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(color).child(cell.text.clone()),
-        ),
-    );
+    let base = div()
+        .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize))
+        .test_support()
+        .on_mouse_down(MouseButton::Right, note_cell(entity, row.db_id, ReplayColumn::Skills))
+        .w(px(width))
+        .flex_none()
+        .px_1()
+        .child(h_flex().gap_1().items_center().overflow_hidden().when(has_markers, |el| el.child(markers)).child(
+            div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(color).child(
+                crate::ui::selectable_text(
+                    ("replay-cell-text", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize),
+                    cell.text.clone(),
+                ),
+            ),
+        ));
 
     match cell.hover {
-        Some(text) => base
-            .id(("replay-cell", ix * CELL_ID_STRIDE + ReplayColumn::Skills as usize))
-            .tooltip(hover_tooltip(text.into()))
-            .into_any_element(),
+        Some(text) => base.tooltip(hover_tooltip(text.into())).into_any_element(),
         None => base.into_any_element(),
     }
 }
@@ -1062,6 +1165,9 @@ fn skills_cell(ix: usize, row: &PlayerRow, debug: bool, width: f32) -> AnyElemen
 /// One per row, shared by the dots and the row's right-click menu through an
 /// `Rc`, since both offer the same items for the same player.
 struct ActionsMenuData {
+    /// Whose row this is, so the menu can copy it whatever the table is sorted
+    /// into since.
+    player: AccountId,
     /// Who the menu is about, drawn as the row reads.
     heading: MenuHeading,
     relation: Relation,
@@ -1169,6 +1275,7 @@ fn menu_heading_element(heading: &MenuHeading) -> AnyElement {
 impl ActionsMenuData {
     fn from_row(row: &PlayerRow, icons: &IconCache) -> Self {
         Self {
+            player: row.db_id,
             heading: heading_for(row, icons),
             relation: row.relation,
             has_vehicle_entity: row.has_vehicle_entity,
@@ -1178,6 +1285,14 @@ impl ActionsMenuData {
             raw_metadata_json: row.raw_metadata_json.clone(),
         }
     }
+}
+
+/// Where a menu was opened from, which decides whether it can offer to copy
+/// one cell: the dots stand at the end of the row rather than over a cell.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuOrigin {
+    RowRightClick,
+    RowDots,
 }
 
 /// Builds a row's actions menu, mirroring the egui app's
@@ -1205,6 +1320,8 @@ fn build_actions_menu(
     row: &ActionsMenuData,
     debug: bool,
     entity: Entity<PlayerTable>,
+    origin: MenuOrigin,
+    cx: &mut App,
 ) -> PopupMenu {
     // Whose options these are, first: a right-click menu lands wherever the
     // pointer was, and the rows it could have come from are one line apart.
@@ -1216,6 +1333,9 @@ fn build_actions_menu(
         .separator();
 
     let show_ship_config = (!row.relation.is_enemy() || debug) && row.has_vehicle_entity;
+    // Whether anything stands between the heading's separator and the copy
+    // block's, so the two never land back to back.
+    let mut wrote_links = false;
 
     if show_ship_config {
         let mut added_any = false;
@@ -1246,11 +1366,48 @@ fn build_actions_menu(
         if added_any {
             menu = menu.separator();
         }
+        wrote_links |= added_any;
     }
 
     if let Some(url) = row.wows_numbers_url.clone() {
         menu = menu.item(PopupMenuItem::link(t!("ui.replay.build.open_wows_numbers").into_owned(), url));
+        wrote_links = true;
     }
+
+    // What the row says, for a reader taking it somewhere else, beside the
+    // cells' own selectable text.
+    //
+    // The pressed cell is consumed whether or not it is used, so a press that
+    // landed on the row but not on a cell -- the blank end of the row, the
+    // dots -- offers nothing rather than the cell pressed before it.
+    let pressed = match origin {
+        MenuOrigin::RowRightClick => entity.update(cx, |this, _cx| this.take_right_clicked_cell()),
+        MenuOrigin::RowDots => None,
+    };
+    if wrote_links {
+        menu = menu.separator();
+    }
+    if let Some((player, col)) = pressed.filter(|(player, _)| *player == row.player) {
+        let table = entity.clone();
+        menu = menu.item(
+            PopupMenuItem::new(t!("ui.replay.context.copy_cell").into_owned())
+                .icon(IconName::Copy)
+                .on_click(move |_event, window, cx| copy_text(table.read(cx).cell_text(player, col), window, cx)),
+        );
+    }
+    let table = entity.clone();
+    let player = row.player;
+    menu = menu.item(
+        PopupMenuItem::new(t!("ui.replay.context.copy_row").into_owned())
+            .icon(IconName::Copy)
+            .on_click(move |_event, window, cx| copy_text(table.read(cx).row_text(player), window, cx)),
+    );
+    let table = entity.clone();
+    menu = menu.item(
+        PopupMenuItem::new(t!("ui.replay.context.copy_table").into_owned())
+            .icon(IconName::Copy)
+            .on_click(move |_event, window, cx| copy_text(Some(table.read(cx).table_text()), window, cx)),
+    );
 
     if debug && let Some(json) = row.raw_metadata_json.clone() {
         menu = menu.separator();
@@ -1265,6 +1422,28 @@ fn build_actions_menu(
     }
 
     menu
+}
+
+/// Writes `text` to the clipboard and says so.
+///
+/// `None` means the player the menu was opened on is no longer in the table,
+/// which happens only if the replay is reloaded while the menu is open; there
+/// is nothing to say about it that the emptied table does not already say.
+fn copy_text(text: Option<String>, window: &mut Window, cx: &mut App) {
+    let Some(text) = text else { return };
+    cx.write_to_clipboard(ClipboardItem::new_string(text));
+    crate::toast::ok(t!("ui.replay.context.copied").into_owned(), window, cx);
+}
+
+/// Records which cell a right-click landed on, so the row's menu knows which
+/// one to copy. The press is not consumed: the menu belongs to the row.
+fn note_cell(
+    entity: &Entity<PlayerTable>,
+    player: AccountId,
+    col: ReplayColumn,
+) -> impl Fn(&MouseDownEvent, &mut Window, &mut App) + 'static + use<> {
+    let entity = entity.clone();
+    move |_event, _window, cx| entity.update(cx, |this, _cx| this.note_right_clicked_cell(player, col))
 }
 
 /// The dots that open one row's actions, revealed while the pointer is on that
@@ -1293,13 +1472,14 @@ fn row_actions(
         .xsmall()
         .icon(IconName::Ellipsis)
         .tooltip(t!("ui.replay.row_actions_hint").to_string());
-    let menu_button =
-        trigger.dropdown_menu(move |menu, _window, _cx| build_actions_menu(menu, &row, debug, entity.clone()));
+    let menu_button = trigger.dropdown_menu(move |menu, _window, cx| {
+        build_actions_menu(menu, &row, debug, entity.clone(), MenuOrigin::RowDots, cx)
+    });
 
     div()
         .absolute()
         .inset_0()
-        .left(px(name_edge - ROW_ACTIONS_WIDTH))
+        .left(px((name_edge - ROW_ACTIONS_WIDTH).max(0.)))
         .w(px(ROW_ACTIONS_WIDTH))
         .h(px(ROW_ACTIONS_WIDTH))
         .invisible()
@@ -1317,8 +1497,8 @@ fn render_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &RowLayout
     let width = layout.column_widths[col as usize].as_f32();
     match col {
         ReplayColumn::Name => name_cell(ix, row, layout, width),
-        ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width),
-        _ => cell_element(ix, col, cell_value(row, col, layout.debug), width),
+        ReplayColumn::Skills => skills_cell(ix, row, layout.debug, width, &layout.entity),
+        _ => cell_element(ix, row.db_id, col, cell_value(row, col, layout.debug), width, &layout.entity),
     }
 }
 
@@ -1361,6 +1541,10 @@ fn render_column_cell(ix: usize, col: ReplayColumn, row: &PlayerRow, layout: &Ro
 /// Bundled into one struct so `render_row` stays under clippy's
 /// argument-count limit.
 struct RowLayout<'a> {
+    /// The widest the frozen section may be drawn, so the dots can sit at its
+    /// visible end rather than at an edge the clip has moved. `None` on the
+    /// first frame, before the table has been measured.
+    sticky_cap: Option<f32>,
     sticky_columns: &'a [ReplayColumn],
     scroll_columns: &'a [ReplayColumn],
     scroll_width: f32,
@@ -1392,7 +1576,11 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
     // centred on that line; an expanded row grows detail downward under each
     // column, which only lines up if the columns start at the same top edge.
     let align_top = layout.is_expanded;
-    let mut sticky = h_flex().flex_none().map(|el| if align_top { el.items_start() } else { el.items_center() });
+    let mut sticky = h_flex()
+        .min_w(px(0.))
+        .max_w(relative(STICKY_MAX_FRACTION))
+        .overflow_hidden()
+        .map(|el| if align_top { el.items_start() } else { el.items_center() });
     for &col in layout.sticky_columns {
         sticky = sticky.child(render_column_cell(ix, col, row, layout));
     }
@@ -1405,6 +1593,13 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
         .take_while(|col| **col != ReplayColumn::ShipName)
         .map(|col| layout.column_widths[*col as usize].as_f32())
         .sum();
+    // Where the Name column ends as drawn: on a panel too narrow for the
+    // frozen pair the section is clipped, and the dots belong at the end of
+    // what is on screen rather than over the scrolling columns.
+    let name_edge = match layout.sticky_cap {
+        Some(cap) => name_edge.min(cap),
+        None => name_edge,
+    };
 
     let mut scrolling = h_flex()
         .w(px(layout.scroll_width))
@@ -1457,7 +1652,9 @@ fn render_row(ix: usize, row: &PlayerRow, layout: &RowLayout, hover_bg: Hsla, cx
         .child(row_actions(ix, Rc::clone(&menu_row), layout, group, name_edge))
         // Wraps the row, so it goes last: the menu is a container around
         // what it belongs to rather than a style on it.
-        .context_menu(move |menu, _window, _cx| build_actions_menu(menu, &menu_row, debug, menu_entity.clone()))
+        .context_menu(move |menu, _window, cx| {
+            build_actions_menu(menu, &menu_row, debug, menu_entity.clone(), MenuOrigin::RowRightClick, cx)
+        })
         .into_any_element()
 }
 
@@ -1486,6 +1683,7 @@ impl Render for PlayerTable {
         // Resolved once per frame so the header, the rows and the scrolling
         // section's total all read the same number.
         self.drawn_widths = ReplayColumn::ALL.iter().map(|col| self.width_of(*col)).collect();
+        let sticky_cap = self.sticky_cap().map(f32::from);
         let scroll_width: f32 = scroll_columns.iter().map(|col| self.drawn_widths[*col as usize].as_f32()).sum();
         // Where the scrolling portion starts, which is where its own bar
         // belongs: the sticky columns to its left do not move.
@@ -1496,7 +1694,13 @@ impl Render for PlayerTable {
             .flex_none()
             .border_b_1()
             .border_color(border)
-            .child(h_flex().flex_none().children(sticky_columns.iter().map(|col| self.header_cell(*col, cx))))
+            .child(
+                h_flex()
+                    .min_w(px(0.))
+                    .max_w(relative(STICKY_MAX_FRACTION))
+                    .overflow_hidden()
+                    .children(sticky_columns.iter().map(|col| self.header_cell(*col, cx))),
+            )
             .child(
                 div()
                     .id("replay-header-h-scroll")
@@ -1520,6 +1724,7 @@ impl Render for PlayerTable {
             let is_expanded = table.expanded.contains(&row.db_id);
             let selected = table.selected == Some(row.db_id);
             let layout = RowLayout {
+                sticky_cap,
                 sticky_columns: &sticky_columns,
                 scroll_columns: &scroll_columns,
                 scroll_width,
@@ -1564,15 +1769,286 @@ impl Render for PlayerTable {
             .child(Scrollbar::vertical(&self.list_state))
             // Along the bottom of the scrolling columns. Without it there is
             // nothing to say the table runs past its right edge, and a
-            // reader has no reason to look.
+            // reader has no reason to look. The frozen columns are stood off
+            // with a spacer that gives way rather than a fixed offset, so on a
+            // panel too narrow for them the bar is still there to be used.
             .child(
-                div()
+                h_flex()
                     .absolute()
-                    .left(px(sticky_width))
+                    .left_0()
                     .right_0()
                     .bottom_0()
                     .h(px(12.))
-                    .child(Scrollbar::horizontal(&self.h_scroll)),
+                    // The same cap the frozen section is drawn at, so the bar
+                    // starts where those columns end rather than over them.
+                    .child(div().w(px(sticky_cap.map_or(sticky_width, |cap| sticky_width.min(cap)))))
+                    .child(div().flex_1().min_w(H_SCROLLBAR_MIN_WIDTH).child(Scrollbar::horizontal(&self.h_scroll))),
             )
+            // The table's own width, for the cap above. Painted over everything
+            // and hit-testing nothing.
+            .child(
+                canvas(
+                    {
+                        let measure = cx.weak_entity();
+                        move |bounds: Bounds<Pixels>, _window, cx| {
+                            let _ = measure.update(cx, |this: &mut Self, cx| {
+                                if this.viewport_width != Some(bounds.size.width) {
+                                    this.viewport_width = Some(bounds.size.width);
+                                    cx.notify();
+                                }
+                            });
+                        }
+                    },
+                    |_bounds, _prepaint, _window, _cx| {},
+                )
+                .absolute()
+                .inset_0(),
+            )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::AppContext as _;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt as _;
+    use wows_replays::analyzer::battle_controller::BattleResult;
+    use wows_replays::types::TeamId;
+    use wowsunpack::vfs::MemoryFS;
+    use wowsunpack::vfs::VfsPath;
+
+    use super::super::columns::ReplayColumn;
+    use super::super::model::MatchContext;
+    use super::super::model::ReplayReportModel;
+    use super::super::sort::SortColumn;
+    use super::super::test_support::base_row;
+    use super::PlayerTable;
+    use wows_replays::types::Relation;
+
+    fn two_row_model() -> ReplayReportModel {
+        ReplayReportModel {
+            self_team: TeamId::from(0i64),
+            rows: vec![base_row(1, Relation::new(0), true), base_row(2, Relation::new(2), false)],
+            battle_result: Some(BattleResult::Win(0)),
+            columns: ReplayColumn::ALL.to_vec(),
+            map: "Ocean".to_string(),
+            chat: Vec::new(),
+            timestamp: jiff::Timestamp::UNIX_EPOCH,
+            context: MatchContext::default(),
+        }
+    }
+
+    fn open_table(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<PlayerTable> {
+        open_table_at(cx, px(1400.))
+    }
+
+    fn open_table_at(cx: &mut TestAppContext, width: gpui_kit::Pixels) -> gpui_kit::WindowHandle<PlayerTable> {
+        cx.update(gpui_kit::init);
+        cx.open_window(size(width, px(600.)), |_window, cx| {
+            let vfs: VfsPath = MemoryFS::new().into();
+            PlayerTable::new(two_row_model(), vfs, false, cx)
+        })
+    }
+
+    /// Widening a column is not a request to re-sort by it: the grip lies
+    /// inside the header, which sorts when it is clicked.
+    #[gpui_kit::test]
+    fn dragging_a_header_grip_leaves_the_sort_alone(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let table = window.entity(cx).expect("the window has a root view");
+        let before = cx.update(|cx| table.read(cx).sort);
+
+        let grip = ("replay-header-grip", ReplayColumn::ShipName as usize);
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(grip).bounds().center();
+            window.drag(from, gpui_kit::point(from.x + px(40.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        assert_eq!(cx.update(|cx| table.read(cx).sort), before, "the drag widened the column and nothing else");
+    }
+
+    /// Every column occupies its own strip: each cell begins where the one
+    /// before it ended, and the header sits over the cells it names. Checked
+    /// while collapsed, while a row's detail is open (which re-measures the
+    /// widths) and after a column has been dragged narrower than its content.
+    #[gpui_kit::test]
+    fn each_column_begins_where_the_one_before_it_ended(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let columns = two_row_model().columns;
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert_columns_tile(&columns, "collapsed", window);
+
+            // A row with its detail open, which is what re-measures the widths.
+            window.click(("replay-row-caret", 0usize), cx);
+            window.render_frame(cx);
+            assert_columns_tile(&columns, "expanded", window);
+
+            // And with the leading column dragged well under its content.
+            let grip = window.find(("replay-header-grip", ReplayColumn::Name as usize)).bounds().center();
+            window.drag(grip, gpui_kit::point(grip.x - px(140.), grip.y), cx);
+            window.render_frame(cx);
+            assert_columns_tile(&columns, "narrowed", window);
+        })
+        .expect("the window is open");
+    }
+
+    /// Asserts the drawn columns tile left to right with no gap or overlap,
+    /// and that each header sits over its own cells.
+    fn assert_columns_tile(columns: &[ReplayColumn], state: &str, window: &mut gpui_kit::Window) {
+        let mut edge: Option<gpui_kit::Pixels> = None;
+        for col in columns {
+            let cell = window.find(("replay-cell", 0usize * super::CELL_ID_STRIDE + *col as usize)).bounds();
+            if let Some(edge) = edge {
+                assert_eq!(cell.origin.x, edge, "{state}: {col:?} does not start where the column before it ended");
+            }
+            if let Some(header) = window.try_find(("replay-header", *col as usize)) {
+                let header = header.bounds();
+                assert_eq!(header.origin.x, cell.origin.x, "{state}: {col:?}'s header is not over its cells");
+                assert_eq!(header.size.width, cell.size.width, "{state}: {col:?}'s header is not its cells' width");
+            }
+            edge = Some(cell.origin.x + cell.size.width);
+        }
+    }
+
+    /// A panel narrower than the two frozen columns keeps the table inside
+    /// itself: the frozen pair gives way rather than running past the panel's
+    /// edge over whatever is beside it, and the scrolling columns keep room to
+    /// be reached.
+    #[gpui_kit::test]
+    fn a_panel_narrower_than_the_frozen_columns_still_holds_the_table(cx: &mut TestAppContext) {
+        let panel = px(240.);
+        let window = open_table_at(cx, panel);
+        let table = window.entity(cx).expect("the window has a root view");
+        let columns = two_row_model().columns;
+        let scrolling = columns[super::STICKY_COLUMN_COUNT];
+
+        cx.update_window(window.into(), |_, window, cx| window.render_frame(cx)).expect("the window is open");
+
+        // Without this the assertions below would hold on a fixture whose two
+        // frozen columns happened to fit, and the clamp would go untested.
+        let wanted: gpui_kit::Pixels = cx.update(|cx| {
+            let table = table.read(cx);
+            columns.iter().take(super::STICKY_COLUMN_COUNT).map(|col| table.width_of(*col)).sum()
+        });
+        assert!(
+            wanted > panel * super::STICKY_MAX_FRACTION,
+            "the fixture's frozen columns want {wanted:?}, which must exceed the {:?} cap for this to test it",
+            panel * super::STICKY_MAX_FRACTION
+        );
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let first_scrolling =
+                window.find(("replay-cell", 0usize * super::CELL_ID_STRIDE + scrolling as usize)).bounds();
+            assert!(
+                first_scrolling.origin.x < panel,
+                "the scrolling columns start inside the panel, at {:?} of {panel:?}",
+                first_scrolling.origin.x
+            );
+            assert!(
+                first_scrolling.origin.x <= panel * super::STICKY_MAX_FRACTION,
+                "the frozen columns take no more than their share, leaving {:?} of {panel:?}",
+                first_scrolling.origin.x
+            );
+        })
+        .expect("the window is open");
+    }
+
+    /// A column follows its content until the reader sets its width, and then
+    /// keeps what they set even when the content later measures wider.
+    #[gpui_kit::test]
+    fn a_width_the_reader_set_outlives_a_remeasure(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let table = window.entity(cx).expect("the window has a root view");
+        let set = ReplayColumn::ShipName;
+        let untouched = ReplayColumn::PotentialDamage;
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let grip = window.find(("replay-header-grip", set as usize)).bounds().center();
+            window.drag(grip, gpui_kit::point(grip.x - px(30.), grip.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        let dragged = cx.update(|cx| table.read(cx).width_of(set));
+        assert!(cx.update(|cx| table.read(cx).width_overrides[untouched as usize]).is_none(), "only one was set");
+
+        // Opening a row's detail re-measures every column against its content.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.click(("replay-row-caret", 0usize), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        assert_eq!(cx.update(|cx| table.read(cx).width_of(set)), dragged, "the width the reader set is still theirs");
+        assert!(
+            cx.update(|cx| table.read(cx).width_overrides[untouched as usize]).is_none(),
+            "and a column they never touched still follows its content"
+        );
+
+        // Double-clicking the grip hands the column back to its content.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.double_click(("replay-header-grip", set as usize), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert!(
+            cx.update(|cx| table.read(cx).width_overrides[set as usize]).is_none(),
+            "the set width is given up rather than kept at whatever the drag left"
+        );
+    }
+
+    /// What the copy actions put on the clipboard: one row as its visible
+    /// cells, and the whole table under a heading line, both tab separated so
+    /// a spreadsheet reads them back as columns.
+    #[gpui_kit::test]
+    fn a_row_and_the_table_copy_as_tab_separated_text(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let table = window.entity(cx).expect("the window has a root view");
+
+        cx.update(|cx| {
+            let table = table.read(cx);
+            let columns = table.model.columns.len();
+
+            let first = table.model.rows[0].db_id;
+            let row = table.row_text(first).expect("the first row copies");
+            assert_eq!(row.split('\t').count(), columns, "one field per visible column");
+
+            let whole = table.table_text();
+            let lines: Vec<&str> = whole.lines().collect();
+            assert_eq!(lines.len(), table.model.rows.len() + 1, "a heading line and one line per row");
+            assert_eq!(lines[0].split('\t').count(), columns, "the heading names every column");
+            assert_eq!(lines[1], row, "the first line under the heading is the first row");
+
+            let cell = table.cell_text(first, ReplayColumn::ShipName).expect("the cell copies");
+            assert!(row.split('\t').any(|field| field == cell), "the cell's text is one of the row's fields");
+
+            let absent = wows_replays::types::AccountId(-1);
+            assert_eq!(table.row_text(absent), None, "a player who is not in the table copies nothing");
+        });
+    }
+
+    /// And the header still sorts when it is the header that was clicked,
+    /// rather than the grip on its edge.
+    #[gpui_kit::test]
+    fn clicking_a_header_still_sorts_by_it(cx: &mut TestAppContext) {
+        let window = open_table(cx);
+        let table = window.entity(cx).expect("the window has a root view");
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("replay-header", ReplayColumn::ShipName as usize), cx);
+        })
+        .expect("the window is open");
+
+        assert_eq!(cx.update(|cx| table.read(cx).sort.column()), SortColumn::ShipName);
     }
 }
