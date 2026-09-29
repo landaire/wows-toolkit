@@ -556,7 +556,9 @@ impl ReplayBrowser {
 
             let _ = this.update(cx, |this, cx| {
                 this.summaries = summaries;
+                crate::heap_profile::mark("summaries.loaded");
                 this.rebuild_tree(cx);
+                crate::heap_profile::mark("summaries.tree");
                 cx.notify();
             });
         })
@@ -633,9 +635,10 @@ impl ReplayBrowser {
                 this.scan_progress = None;
                 this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
                 this.files = files;
+                crate::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
+                crate::heap_profile::mark("scan.tree");
                 this.watch_replays_dir(directory, generation, cx);
-                this.warm_listed_build(cx);
                 this.report_missing_builds(cx);
                 this.report_listed_builds(cx);
                 cx.notify();
@@ -735,29 +738,16 @@ impl ReplayBrowser {
                 this.scan_progress = None;
                 this.status = if files.is_empty() { ScanStatus::Empty } else { ScanStatus::Loaded };
                 this.files = files;
+                crate::heap_profile::mark("scan.files");
                 this.rebuild_tree(cx);
+                crate::heap_profile::mark("scan.tree");
                 this.watch_replays_dir(replays_dir, generation, cx);
-                this.warm_listed_build(cx);
                 this.report_missing_builds(cx);
                 this.report_listed_builds(cx);
                 cx.notify();
             });
         })
         .detach();
-    }
-
-    /// Loads the build most of the listed replays were recorded on, ahead of
-    /// anything asking for it.
-    ///
-    /// A preview cannot be baked without the build its replay was recorded
-    /// on, and that is over a second of work. The startup preload warms the
-    /// *installed* build, which is the right one only until the game
-    /// updates; after that the first hover pays for the older build every
-    /// session. Warming what the listing actually holds moves that cost off
-    /// the first hover.
-    /// Whether the scan found no replay files at all.
-    pub(crate) fn is_empty(&self) -> bool {
-        self.files.is_empty()
     }
 
     /// Walks whatever this listing is reading again.
@@ -800,21 +790,9 @@ impl ReplayBrowser {
         cx.emit(ReplayBrowserEvent::BuildsListed(builds));
     }
 
-    fn warm_listed_build(&mut self, cx: &mut Context<Self>) {
-        let Some(cache) = self.build_cache.clone() else { return };
-        let Some(build) = most_common_build(&self.files) else { return };
-        if cache.loaded_build(build).is_some() {
-            return;
-        }
-
-        cx.spawn(async move |_this, cx| {
-            let warmed = cx.background_spawn(async move { cache.get_or_load_build(build) }).await;
-            match warmed {
-                Ok(_) => tracing::debug!("replay browser: warmed build {build} for previews"),
-                Err(err) => tracing::debug!("replay browser: build {build} did not warm: {err}"),
-            }
-        })
-        .detach();
+    /// Whether the scan found no replay files at all.
+    pub(crate) fn is_empty(&self) -> bool {
+        self.files.is_empty()
     }
 
     /// Watches the replays directory so a match the game has just written
@@ -1596,19 +1574,23 @@ impl Render for ReplayBrowser {
             // Why there is none, in the space the map would have taken: a
             // replay from a build that is not installed is the ordinary case.
             (None, false) => self.preview.failure().map(|reason| {
-                h_flex()
+                // A column, clipped: the reason is a sentence rather than a
+                // word, and a row flex would run it off the side of the map's
+                // square instead of wrapping it inside.
+                v_flex()
                     .id("replay-preview-failed")
                     .test_support()
                     .aria_label(reason.clone())
                     .w(px(PREVIEW_SIZE))
                     .h(px(PREVIEW_SIZE))
                     .bg(crate::preview_hover::MAP_PLACEHOLDER)
+                    .overflow_hidden()
                     .items_center()
                     .justify_center()
                     .p_2()
                     .text_xs()
                     .text_color(crate::theme::text_dim())
-                    .child(reason.clone())
+                    .child(div().w_full().child(reason.clone()))
                     .into_any_element()
             }),
         };
@@ -1791,16 +1773,6 @@ fn missing_builds(files: &[RawReplay], cache: &GameDataCache) -> Vec<MissingBuil
 /// The most common one rather than the newest: a directory holding one
 /// replay from a build nobody plays any more should not have the session
 /// spend a second loading it.
-fn most_common_build(files: &[RawReplay]) -> Option<u32> {
-    let mut counts: HashMap<u32, usize> = HashMap::new();
-    for file in files {
-        if let Some(build) = file.listed.build {
-            *counts.entry(build).or_default() += 1;
-        }
-    }
-    counts.into_iter().max_by_key(|(build, count)| (*count, *build)).map(|(build, _)| build)
-}
-
 /// Whether `path` names a replay the listing shows. `temp.wowsreplay` is the
 /// match in progress: it has no container or metadata until the battle ends,
 /// and the game renames it into place then.

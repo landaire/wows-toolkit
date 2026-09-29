@@ -47,6 +47,11 @@ struct Shown {
     /// When the newest frame arrived. A bake that has stopped producing them
     /// is what a spinner over a playing preview is for.
     last_frame: Instant,
+    /// Whether this is the still map standing in for a track that has not
+    /// arrived. The map goes up as soon as there is one, so without this the
+    /// spinner would come down the moment it did and the reader would watch a
+    /// motionless map with nothing saying more is coming.
+    map_only: bool,
 }
 
 /// The hover state behind one surface's preview: what is being watched, what
@@ -174,6 +179,9 @@ impl PreviewHover {
             // Nothing to play yet: the bake has produced nothing, which is
             // what a reader is waiting on.
             None => true,
+            // The still map is not a preview, so it is shown under a spinner
+            // for as long as it stands in for one.
+            Some(shown) if shown.map_only => true,
             Some(shown) => shown.last_frame.elapsed() > STALLED_AFTER,
         }
     }
@@ -224,7 +232,8 @@ impl PreviewHover {
     #[cfg(test)]
     pub(crate) fn seed_playing_for_test(&mut self, path: PathBuf, frames: PreviewFrames) {
         self.baking = true;
-        self.shown = Some(Shown { path, frames, started: Instant::now(), last_frame: Instant::now() });
+        // A track, not the still map: this seeds the playing case.
+        self.shown = Some(Shown { path, frames, started: Instant::now(), last_frame: Instant::now(), map_only: false });
     }
 
     /// How many frames the current preview has. Test-only.
@@ -261,8 +270,15 @@ impl PreviewHover {
         // track is still here; there is nothing to bake or to wait for.
         if self.cached.as_ref().is_some_and(|(cached, _)| cached == &path) {
             let (_, frames) = self.cached.take().expect("the cache was just checked");
-            self.shown =
-                Some(Shown { path: path.clone(), frames, started: Instant::now(), last_frame: Instant::now() });
+            // A track kept from the row just left, so it plays rather than
+            // standing in for one still being baked.
+            self.shown = Some(Shown {
+                path: path.clone(),
+                frames,
+                started: Instant::now(),
+                last_frame: Instant::now(),
+                map_only: false,
+            });
             self.start_ticker(cx, field);
             cx.notify();
             return;
@@ -364,6 +380,7 @@ impl PreviewHover {
                             frames,
                             started: Instant::now(),
                             last_frame: Instant::now(),
+                            map_only: true,
                         });
                         cx.notify();
                     });
@@ -407,6 +424,7 @@ impl PreviewHover {
                         frames: map,
                         started: Instant::now(),
                         last_frame: Instant::now(),
+                        map_only: true,
                     });
                     cx.notify();
                 });
@@ -427,6 +445,7 @@ impl PreviewHover {
                             frames: PreviewFrames::streaming(),
                             started: Instant::now(),
                             last_frame: Instant::now(),
+                            map_only: false,
                         });
                         this.start_ticker(cx, field);
                     }
