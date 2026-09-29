@@ -131,7 +131,7 @@ pub fn renderer_for_replay(
     game_data: &crate::replay_inspector::GameDataCache,
     layout: SidePanelLayout,
 ) -> Result<(SharedPreviewRenderer, (u32, u32)), PreviewError> {
-    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build =
@@ -174,8 +174,15 @@ pub const FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_nanos(
 /// Why a preview could not be produced.
 #[derive(Debug, thiserror::Error)]
 pub enum PreviewError {
-    #[error("the replay could not be read")]
-    UnreadableReplay,
+    /// The file itself: missing, moved, or a container that will not parse.
+    #[error("the replay could not be read: {0}")]
+    UnreadableReplay(rootcause::Report<wows_replays::ParseError>),
+    /// The packet stream read, but no battle could be walked from it. A
+    /// different failure from [`Self::UnreadableReplay`], and it was reported
+    /// as that one until the two were separated: this is what a replay whose
+    /// game data does not match its packets looks like.
+    #[error("the replay's battle could not be walked: {0}")]
+    UnwalkableBattle(#[from] wows_battle_world::merged::MergeError),
     #[error("the replay reports an unreadable client version {raw:?}")]
     UnknownBuild { raw: String },
     #[error("this replay's build {version} is not loaded: {reason}")]
@@ -196,7 +203,15 @@ impl PreviewError {
     /// another bake is already running for the row they moved to.
     pub fn said(&self) -> Option<String> {
         match self {
-            Self::UnreadableReplay => Some(t!("ui.replay.preview_unreadable").into_owned()),
+            // The report's own rendering carries the source location, the
+            // attached path and every frame under it. That belongs in the log,
+            // not in a hover popup, so only the error it wraps is shown.
+            Self::UnreadableReplay(err) => {
+                Some(t!("ui.replay.preview_unreadable_because", value = err.current_context().to_string()).into_owned())
+            }
+            Self::UnwalkableBattle(err) => {
+                Some(t!("ui.replay.preview_unwalkable", value = err.to_string()).into_owned())
+            }
             Self::UnknownBuild { raw } => Some(t!("ui.replay.preview_unknown_version", value = raw).into_owned()),
             Self::NoGameData { version, .. } => {
                 Some(t!("ui.replay.preview_no_game_data", value = version).into_owned())
@@ -226,7 +241,7 @@ pub fn bake_from_file(
     on_frame: impl FnMut(Arc<RenderImage>),
 ) -> Result<(), PreviewError> {
     let read_at = std::time::Instant::now();
-    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
     tracing::debug!("preview: replay read in {:?}", read_at.elapsed());
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
@@ -286,7 +301,7 @@ pub fn extract_events(
     (TimelineExtractionResult, std::collections::HashMap<wows_replays::types::EntityId, ShipShotTimeline>),
     PreviewError,
 > {
-    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
     let build =
@@ -321,13 +336,13 @@ pub fn bake_track(
     frame_interval: f32,
     options: RenderOptions,
 ) -> Result<BakedTrack, PreviewError> {
-    let replay = ReplayFile::from_file(path).map_err(|_| PreviewError::UnreadableReplay)?;
+    let replay = ReplayFile::from_file(path).map_err(PreviewError::UnreadableReplay)?;
     // Other recordings of the same battle, so the map shows what the primary's
     // team never saw. They were checked against this battle before they reached
     // the tab that asked for this (`replay_inspector::load::check_alt`).
     let mut merged = Vec::with_capacity(alts.len());
     for alt in alts {
-        merged.push(ReplayFile::from_file(alt).map_err(|_| PreviewError::UnreadableReplay)?);
+        merged.push(ReplayFile::from_file(alt).map_err(PreviewError::UnreadableReplay)?);
     }
     let version = Version::try_from_client_exe(&replay.meta.clientVersionFromExe)
         .ok_or_else(|| PreviewError::UnknownBuild { raw: replay.meta.clientVersionFromExe.clone() })?;
@@ -357,7 +372,7 @@ pub fn bake_track(
         &replay,
         &merged,
     )
-    .map_err(|_| PreviewError::UnreadableReplay)?;
+    .map_err(PreviewError::UnwalkableBattle)?;
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
 
     let mut sink = TrackSink::with_budget(budget);
@@ -400,10 +415,26 @@ pub fn bake_track(
 /// own bake, which carries the art it was recorded against.
 pub fn map_frame(map_name: &str, game_data: &crate::replay_inspector::GameDataCache) -> Option<PreviewFrames> {
     let loaded = game_data.newest_loaded()?;
-    let renderer = renderer_for(None, map_name, loaded.vfs(), None, SidePanelLayout::None).ok()?;
-    let nothing_drawn: Vec<DrawCommand> = Vec::new();
-    let mut renderer = renderer.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-    Some(PreviewFrames::render(&mut renderer, std::slice::from_ref(&nothing_drawn)))
+    // The art alone, not a rendered frame of it: building a `PreviewRenderer`
+    // reads this build's fonts and six icon sets and then runs a full render
+    // pass, none of which draws anything on an empty command slice. The egui
+    // popup does the same, uploading the decoded map straight as a texture
+    // (`RendererTextureCache::get_or_upload_map`).
+    let art = assets::load_map_image(map_name, loaded.vfs())?;
+    Some(PreviewFrames { frames: vec![scaled_map_image(&art)], complete: true })
+}
+
+/// A decoded map scaled to the preview, with no HUD strip to crop: this art
+/// is the map itself rather than a canvas the renderer drew it into.
+fn scaled_map_image(art: &RgbImage) -> Arc<RenderImage> {
+    let scaled = image::imageops::resize(art, PREVIEW_PX, PREVIEW_PX, image::imageops::FilterType::Triangle);
+    let mut bgra = Vec::with_capacity((PREVIEW_PX * PREVIEW_PX * 4) as usize);
+    for pixel in scaled.pixels() {
+        bgra.extend_from_slice(&[pixel[2], pixel[1], pixel[0], 255]);
+    }
+    let buffer = image::RgbaImage::from_raw(PREVIEW_PX, PREVIEW_PX, bgra)
+        .expect("the buffer is four bytes per pixel of the size it was built at");
+    Arc::new(RenderImage::new(vec![image::Frame::new(buffer)]))
 }
 
 /// Draws one map with `commands` on it, and nothing else.
@@ -484,6 +515,20 @@ fn renderer_for_art(held_as: &str, art: &image::RgbImage, vfs: &VfsPath) -> Shar
     renderer
 }
 
+/// The square map out of a rendered canvas.
+///
+/// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas that is taller
+/// than the map by that strip. Resizing the canvas whole would letterbox the
+/// strip above the map and squash the map itself, since the canvas is not
+/// square and the preview is.
+fn crop_to_map(canvas: &RgbImage) -> RgbImage {
+    use wows_minimap_renderer::HUD_HEIGHT;
+    use wows_minimap_renderer::MINIMAP_SIZE;
+
+    let side = MINIMAP_SIZE.min(canvas.width()).min(canvas.height().saturating_sub(HUD_HEIGHT));
+    image::imageops::crop_imm(canvas, 0, HUD_HEIGHT, side, side).to_image()
+}
+
 /// The map layer of a rendered canvas, at its own size.
 ///
 /// The renderer draws the map at `(0, HUD_HEIGHT)` in a canvas that is taller
@@ -555,7 +600,7 @@ pub fn bake(
     tracing::debug!("preview: map frame in {:?}", map_at.elapsed());
 
     let mut session = MergedReplays::new(provider.entity_specs(), provider, constants, session_version, replay, &[])
-        .map_err(|_| PreviewError::UnreadableReplay)?;
+        .map_err(PreviewError::UnwalkableBattle)?;
     // Tracked, not Untracked: the tracer commands come from `active_shots()`,
     // which stays empty unless shot recording is on.
     session.world_mut().set_shot_tracking(ShotTracking::Tracked);
@@ -671,6 +716,7 @@ impl PreviewFrames {
 /// layout `RenderImage` stores. The renderer composes every frame over opaque
 /// map art, so the alpha channel added here is fully opaque by construction.
 fn to_image(frame: RgbImage) -> Arc<RenderImage> {
+    let frame = crop_to_map(&frame);
     let frame = image::imageops::resize(&frame, PREVIEW_PX, PREVIEW_PX, image::imageops::FilterType::Triangle);
     let mut bgra = Vec::with_capacity((PREVIEW_PX * PREVIEW_PX * 4) as usize);
     for pixel in frame.pixels() {
