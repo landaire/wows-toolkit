@@ -755,9 +755,19 @@ impl PlayerTrackerView {
         self.clan_state = LoadState::Loading;
         cx.spawn(async move |this, cx| {
             let found = runtime::spawn(cx, async move {
-                let filter = wows_toolkit_config::index::rows::MatchFilter::default();
+                crate::heap_profile::mark("clan_inputs.begin");
+                // Scoped to the live source. Unscoped, both queries walk every
+                // indexed source, so a directory opened once through "Open
+                // Replay Directory" keeps costing the clans table a full scan
+                // of its rows for the rest of the install's life.
+                let filter = wows_toolkit_config::index::rows::MatchFilter {
+                    source_ids: query::live_source_id(&pool).await?.map(|source| vec![source]),
+                    ..Default::default()
+                };
                 let latest = query::distinct_players(&pool, &filter).await?;
+                crate::heap_profile::mark("clan_inputs.players");
                 let corrections = query::clan_history_corrections(&pool, &filter).await?;
+                crate::heap_profile::mark("clan_inputs.corrections");
                 Ok::<_, wows_toolkit_config::index::rows::IndexError>((latest, corrections))
             })
             .await;
