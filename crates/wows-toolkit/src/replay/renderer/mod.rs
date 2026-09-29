@@ -141,11 +141,17 @@ pub struct RendererAssetCache {
     signal_flag_icons: VersionedAssets,
     game_fonts: HashMap<Option<Version>, GameFonts>,
     maps: HashMap<(Option<Version>, String), CachedMapData>,
+    /// `maps` keys, least recently inserted first, for the bound.
+    map_order: Vec<(Option<Version>, String)>,
     /// Resolved icon source per game-data version. Memoizing keeps the
     /// newest-dump fallback (and its log line) to once per version instead of
     /// once per icon type per frame.
     icon_sources: HashMap<Option<Version>, IconSource>,
 }
+
+/// How many decoded maps are kept. One is ~2.25 MiB, and a reader moves
+/// between a handful while reading a directory.
+const MAP_CACHE_SIZE: usize = 8;
 
 struct CachedMapData {
     image: Option<Arc<RgbaAsset>>,
@@ -447,7 +453,17 @@ impl RendererAssetCache {
         version: Option<&Version>,
         (image, info): (Option<Arc<RgbaAsset>>, Option<MapInfo>),
     ) {
-        self.maps.insert((version.copied(), map_name.to_string()), CachedMapData { image, info });
+        let key = (version.copied(), map_name.to_string());
+        self.map_order.retain(|held| held != &key);
+        self.map_order.push(key.clone());
+        self.maps.insert(key, CachedMapData { image, info });
+        // Bounded because the key carries the version: a reader sweeping a
+        // directory that spans years decodes one entry per (version, map) and
+        // nothing ever dropped them.
+        while self.map_order.len() > MAP_CACHE_SIZE {
+            let evicted = self.map_order.remove(0);
+            self.maps.remove(&evicted);
+        }
     }
 
     /// Fonts already loaded for this version, without touching the VFS.

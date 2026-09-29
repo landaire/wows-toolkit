@@ -5,6 +5,7 @@ use image::RgbImage;
 use image::RgbaImage;
 use std::collections::HashMap;
 use std::io::Read;
+use std::sync::Arc;
 use tracing::debug;
 use tracing::warn;
 use wowsunpack::data::Version;
@@ -673,9 +674,13 @@ pub struct GameFonts {
     /// Per-fallback scale correction factors (same order as `fallbacks`).
     pub fallback_scale_factors: Vec<f32>,
     /// Raw TTF bytes of the primary font (for external consumers like egui).
-    pub primary_bytes: Vec<u8>,
+    ///
+    /// Shared rather than owned: a build's CJK fallbacks come to 23 MiB, and
+    /// `GameFonts` is cloned out of the renderer cache to every holder, so an
+    /// owned copy is 23 MiB per holder rather than a refcount bump.
+    pub primary_bytes: Arc<Vec<u8>>,
     /// Raw TTF bytes of the fallback fonts (same order as `fallbacks`).
-    pub fallback_bytes: Vec<Vec<u8>>,
+    pub fallback_bytes: Vec<Arc<Vec<u8>>>,
 }
 
 impl GameFonts {
@@ -771,7 +776,7 @@ fn compute_scale_factor(font: &FontArc) -> f32 {
 
 /// Load a Latin sans-serif font from a well-known OS location, used when the game
 /// VFS carries no usable TrueType face (older clients ship bitmap fonts only).
-fn load_system_fallback_font() -> Option<(FontArc, Vec<u8>)> {
+fn load_system_fallback_font() -> Option<(FontArc, Arc<Vec<u8>>)> {
     const CANDIDATES: &[&str] = &[
         // Windows
         r"C:\Windows\Fonts\segoeui.ttf",
@@ -789,7 +794,7 @@ fn load_system_fallback_font() -> Option<(FontArc, Vec<u8>)> {
             && let Ok(font) = FontArc::try_from_vec(bytes.clone())
         {
             debug!(path, "Loaded system fallback font");
-            return Some((font, bytes));
+            return Some((font, Arc::new(bytes)));
         }
     }
     None
@@ -799,9 +804,11 @@ fn load_system_fallback_font() -> Option<(FontArc, Vec<u8>)> {
 /// a single VFS. Returns None when the VFS carries no usable Warhelios TTF
 /// (older clients shipped bitmap fonts only).
 fn game_fonts_from_vfs(vfs: &VfsPath) -> Option<GameFonts> {
-    let load_font = |path: &str| -> Option<(FontArc, Vec<u8>)> {
+    let load_font = |path: &str| -> Option<(FontArc, Arc<Vec<u8>>)> {
         let buf = read_vfs_file(vfs, path)?;
-        let raw_bytes = buf.clone();
+        // `FontArc` needs its own `Vec`, so the bytes are read once and parsed
+        // from a copy; what is shared from here on is the `Arc`.
+        let raw_bytes = Arc::new(buf.clone());
         match FontArc::try_from_vec(buf) {
             Ok(font) => {
                 debug!(path, "Loaded game font");
@@ -823,9 +830,9 @@ fn game_fonts_from_vfs(vfs: &VfsPath) -> Option<GameFonts> {
         "gui/fonts/Source_Han_Sans_JP_Bold_WH.ttf",
         "gui/fonts/Source_Han_Sans_CN_Bold_WH.ttf",
     ];
-    let fallbacks_with_bytes: Vec<(FontArc, Vec<u8>)> =
+    let fallbacks_with_bytes: Vec<(FontArc, Arc<Vec<u8>>)> =
         fallback_paths.iter().filter_map(|path| load_font(path)).collect();
-    let fallback_bytes: Vec<Vec<u8>> = fallbacks_with_bytes.iter().map(|(_, b)| b.clone()).collect();
+    let fallback_bytes: Vec<Arc<Vec<u8>>> = fallbacks_with_bytes.iter().map(|(_, b)| Arc::clone(b)).collect();
     let fallbacks: Vec<FontArc> = fallbacks_with_bytes.into_iter().map(|(f, _)| f).collect();
 
     let primary_scale_factor = compute_scale_factor(&primary);

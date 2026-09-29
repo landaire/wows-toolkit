@@ -4114,10 +4114,12 @@ impl WowsToolkitApp {
 
         let fonts = cache.get_or_load_game_fonts(&wd.vfs, version, dump_dir);
         let game_fonts = Some(GameFontsWire {
-            primary: fonts.primary_bytes.clone(),
-            fallback_ko: fonts.fallback_bytes.first().cloned(),
-            fallback_ja: fonts.fallback_bytes.get(1).cloned(),
-            fallback_zh: fonts.fallback_bytes.get(2).cloned(),
+            // The wire carries owned bytes; the cache shares them, so these
+            // are the one place a copy is still made.
+            primary: fonts.primary_bytes.as_ref().clone(),
+            fallback_ko: fonts.fallback_bytes.first().map(|bytes| bytes.as_ref().clone()),
+            fallback_ja: fonts.fallback_bytes.get(1).map(|bytes| bytes.as_ref().clone()),
+            fallback_zh: fonts.fallback_bytes.get(2).map(|bytes| bytes.as_ref().clone()),
         });
 
         let msg = PeerMessage::AssetBundle {
