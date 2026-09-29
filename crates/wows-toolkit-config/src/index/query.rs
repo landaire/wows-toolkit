@@ -1307,14 +1307,20 @@ impl Default for SortSpec {
 }
 
 impl SortSpec {
-    /// The sort a click on `column`'s header produces: a click on the column
-    /// already sorted reverses it, a click on any other starts that column at
-    /// its own natural direction.
+    /// The sort a click on `column`'s header produces: a click on any other
+    /// column starts it at its own natural direction, a second click reverses
+    /// it, and a third puts the results back in the order they opened in.
+    ///
+    /// The third state is what lets a reader undo a sort without having to know
+    /// which column the results are sorted by to begin with.
     pub fn after_click(self, column: SortColumn) -> Self {
-        if self.column == column {
+        if self.column != column {
+            return SortSpec { column, direction: column.default_direction() };
+        }
+        if self.direction == column.default_direction() {
             SortSpec { column, direction: self.direction.reversed() }
         } else {
-            SortSpec { column, direction: column.default_direction() }
+            SortSpec::default()
         }
     }
 }
@@ -1489,4 +1495,28 @@ pub async fn apply_pr_repairs(pool: &SqlitePool, repairs: &[PrRepair]) -> Result
     }
     tx.commit().await?;
     Ok(changed)
+}
+
+#[cfg(test)]
+mod sort_cycle_tests {
+    use super::SortColumn;
+    use super::SortSpec;
+
+    #[test]
+    fn a_third_click_on_one_column_returns_the_results_to_their_default() {
+        let default = SortSpec::default();
+        let first = default.after_click(SortColumn::Map);
+        assert_eq!(first.direction, SortColumn::Map.default_direction());
+        let second = first.after_click(SortColumn::Map);
+        assert_eq!(second.direction, SortColumn::Map.default_direction().reversed());
+        assert_eq!(second.after_click(SortColumn::Map), default, "the third click resets");
+    }
+
+    #[test]
+    fn moving_to_another_column_does_not_reset() {
+        let sorted = SortSpec::default().after_click(SortColumn::Map).after_click(SortColumn::Map);
+        let moved = sorted.after_click(SortColumn::Date);
+        assert_eq!(moved.column, SortColumn::Date);
+        assert_eq!(moved.direction, SortColumn::Date.default_direction());
+    }
 }
