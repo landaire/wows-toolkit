@@ -469,6 +469,7 @@ impl UnpackerView {
             let worker = cx.background_spawn(async move {
                 let targets = files_to_scan(&files, &path_filter);
                 scan(
+                    &files,
                     &targets,
                     &pattern,
                     |hit| {

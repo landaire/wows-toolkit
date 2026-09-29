@@ -28,12 +28,16 @@ use parking_lot::Mutex;
 use pickled::HashableValue;
 use serde::Serialize;
 use wows_toolkit_viewmodel::unpacker::assets_bin;
+use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
+use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry as FileEntry;
 use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
 use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries as get_dir_entries;
 use wows_toolkit_viewmodel::unpacker::listing::file_type_label;
+use wows_toolkit_viewmodel::unpacker::listing::filter_files;
+use wows_toolkit_viewmodel::unpacker::listing::is_filtering;
 use wows_toolkit_viewmodel::unpacker::queue::ExtractQueue;
 use wows_toolkit_viewmodel::unpacker::search::context_snippet as extract_context_snippet;
 use wowsunpack::data::assets_bin_vfs::PrototypeType;
@@ -46,7 +50,16 @@ use crate::ui::plaintext_viewer;
 use crate::ui::plaintext_viewer::FileType;
 use crate::ui::theme::semantic::SemanticExt;
 use crate::ui::theme::semantic::semantic;
-type FilteredFileList = Arc<Vec<(Arc<PathBuf>, VfsPath)>>;
+/// Filter results: positions rather than rows, since a three-character filter
+/// matches most of an install and a row apiece would cost more than the list
+/// itself.
+///
+/// The list travels with them, because a position only names a file against
+/// the list that issued it.
+pub struct FilterResults {
+    files: Arc<FileList>,
+    matches: Vec<FileIndex>,
+}
 
 pub static UNPACKER_STOP: AtomicBool = AtomicBool::new(false);
 
@@ -92,8 +105,10 @@ pub struct BrowserPane {
     pub source: BrowserSource,
     /// The VFS root for this browser. None while loading (assets.bin background parse).
     pub vfs: Option<VfsPath>,
-    /// Flat file list for filtering/searching. None while loading.
-    pub files: Option<Vec<(Arc<PathBuf>, VfsPath)>>,
+    /// Flat file list for filtering/searching. None while loading. Shared,
+    /// so handing it to a search thread costs a refcount rather than a copy of
+    /// every path in the build.
+    pub files: Option<Arc<FileList>>,
     /// Currently selected directory in the folder tree.
     pub selected_dir: Option<String>,
     /// Whether this pane is still loading its VFS (assets.bin only).
@@ -109,7 +124,7 @@ pub struct BrowserPane {
     /// Last-applied filter (to detect changes).
     pub used_filter: Option<String>,
     /// Cached filtered file list.
-    pub filtered_file_list: Option<FilteredFileList>,
+    pub filtered_file_list: Option<FilterResults>,
     /// Cached directory entries: (dir_path, entries). Invalidated when selected_dir changes.
     cached_dir_entries: Option<(String, Vec<FileEntry>)>,
     /// Cached folder tree structure. Built once when VFS loads.
@@ -192,7 +207,7 @@ impl Drop for ContentSearchTab {
 /// Result sent from the background assets.bin loading thread.
 pub(crate) struct AssetsBinLoadResult {
     pub vfs: VfsPath,
-    pub files: Vec<(Arc<PathBuf>, VfsPath)>,
+    pub files: Arc<FileList>,
 }
 
 /// State for the explorer-style resource browser.
@@ -441,30 +456,32 @@ impl UnpackerPaneViewer<'_> {
 
         // Main content area
         let selected_dir = browser.selected_dir.clone().unwrap_or_else(|| "/".to_string());
-        let is_filtering = browser.filter.len() >= 3;
+        let is_filtering = is_filtering(&browser.filter);
 
         egui::CentralPanel::default().show(ui, |ui| {
             if is_filtering {
-                // ── Filter results mode ──
                 ui.horizontal(|ui| {
                     ui.label(RichText::new(format!("{} Filter: \"{}\"", icons::FUNNEL, browser.filter)).strong());
                 });
                 ui.separator();
 
-                if let Some(filtered_files) = &browser.filtered_file_list {
+                if let Some(results) = &browser.filtered_file_list {
                     let items_snapshot = self.items_to_extract.lock().clone();
                     let queued_paths: HashSet<String> =
                         items_snapshot.entries().iter().map(|v| v.as_str().to_string()).collect();
 
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(format!("{} results", filtered_files.len())).weak());
-                        if !filtered_files.is_empty()
+                        ui.label(RichText::new(format!("{} results", results.matches.len())).weak());
+                        if !results.matches.is_empty()
                             && ui
                                 .small_button(wt_translations::icon_t(icons::PLUS_CIRCLE, &t!("ui.unpacker.queue_all")))
                                 .clicked()
                         {
-                            for file in filtered_files.iter() {
-                                self.items_to_extract.lock().push(file.1.clone());
+                            let mut queue = self.items_to_extract.lock();
+                            for index in results.matches.iter() {
+                                if let Some(path) = results.files.vfs_path(*index) {
+                                    queue.push(path);
+                                }
                             }
                         }
                     });
@@ -472,7 +489,8 @@ impl UnpackerPaneViewer<'_> {
 
                     render_filter_results_table(
                         ui,
-                        filtered_files,
+                        &results.files,
+                        &results.matches,
                         &queued_paths,
                         self.items_to_extract,
                         self.file_viewer,
@@ -482,7 +500,6 @@ impl UnpackerPaneViewer<'_> {
                     );
                 }
             } else {
-                // ── Directory browsing mode ──
                 ui.horizontal(|ui| {
                     let parts: Vec<&str> = selected_dir.split('/').filter(|s| !s.is_empty()).collect();
 
@@ -908,11 +925,16 @@ fn render_file_listing_table(
         });
 }
 
+/// Columns [`render_filter_results_table`] builds, which a row that has
+/// nothing to show still has to fill.
+const COLUMNS_IN_FILTER_RESULTS: usize = 5;
+
 /// Render path filter results in a table format.
 #[allow(clippy::too_many_arguments)]
 fn render_filter_results_table(
     ui: &mut Ui,
-    filtered_files: &[(Arc<PathBuf>, VfsPath)],
+    files: &FileList,
+    matches: &[FileIndex],
     queued_paths: &HashSet<String>,
     items_to_extract: &Mutex<ExtractQueue>,
     file_viewer: &Mutex<Vec<plaintext_viewer::PlaintextFileViewer>>,
@@ -948,8 +970,19 @@ fn render_filter_results_table(
             });
         })
         .body(|body| {
-            body.rows(22.0, filtered_files.len(), |mut row| {
-                let (path, vfs_path) = &filtered_files[row.index()];
+            body.rows(22.0, matches.len(), |mut row| {
+                let index = matches[row.index()];
+                let path = files.path(index);
+                // A path the VFS will no longer resolve has nothing to show
+                // and nothing to queue. The cells are still added: `rows` lays
+                // the table out at a fixed height per row, and a row that adds
+                // none takes no space and shifts everything below it.
+                let Some(vfs_path) = files.vfs_path(index) else {
+                    for _ in 0..COLUMNS_IN_FILTER_RESULTS {
+                        row.col(|_ui| {});
+                    }
+                    return;
+                };
                 let is_queued = queued_paths.contains(vfs_path.as_str());
                 let filename = vfs_path.filename();
 
@@ -959,7 +992,7 @@ fn render_filter_results_table(
                         if checked {
                             items_to_extract.lock().push(vfs_path.clone());
                         } else {
-                            items_to_extract.lock().remove(vfs_path);
+                            items_to_extract.lock().remove(&vfs_path);
                         }
                     }
                 });
@@ -971,8 +1004,7 @@ fn render_filter_results_table(
                 let (_, path_response, path_label_response) = {
                     let mut label_resp = None;
                     let (rect, cell_resp) = row.col(|ui| {
-                        let path_str = path.to_string_lossy();
-                        let display = format!("res/{}", path_str.trim_start_matches('/'));
+                        let display = format!("res/{}", path.trim_start_matches('/'));
                         label_resp = Some(ui.label(&display));
                     });
                     (rect, cell_resp, label_resp.unwrap())
@@ -991,9 +1023,9 @@ fn render_filter_results_table(
                 });
 
                 let row_response = row.response();
-                add_view_file_context_menu(file_viewer, &path_label_response, vfs_path, source);
-                add_view_file_context_menu(file_viewer, &path_response, vfs_path, source);
-                add_view_file_context_menu(file_viewer, &row_response, vfs_path, source);
+                add_view_file_context_menu(file_viewer, &path_label_response, &vfs_path, source);
+                add_view_file_context_menu(file_viewer, &path_response, &vfs_path, source);
+                add_view_file_context_menu(file_viewer, &row_response, &vfs_path, source);
                 if row_response.clicked() {
                     let vfs_str = vfs_path.as_str();
                     if let Some(parent_end) = vfs_str.rfind('/') {
@@ -1169,8 +1201,7 @@ fn render_folder_tree(
 
 /// Recompute the filtered file list for a browser pane if the filter text changed.
 fn recompute_filter(browser: &mut BrowserPane) {
-    let is_filtering = browser.filter.len() >= 3;
-    if !is_filtering {
+    if !is_filtering(&browser.filter) {
         // Clear stale filtered results when filter is too short
         if browser.filtered_file_list.is_some() {
             browser.filtered_file_list = None;
@@ -1185,60 +1216,17 @@ fn recompute_filter(browser: &mut BrowserPane) {
 
     let Some(files) = &browser.files else { return };
 
-    let filter_list = {
-        let glob = glob::Pattern::new(&browser.filter);
-        if browser.filter.contains('*')
-            && let Ok(glob) = glob
-        {
-            files.iter().filter(|(path, _node)| glob.matches_path(path)).cloned().collect()
-        } else {
-            files
-                .iter()
-                .filter(|(path, _node)| {
-                    path.to_str().map(|path| path.contains(browser.filter.as_str())).unwrap_or(false)
-                })
-                .cloned()
-                .collect()
-        }
-    };
-
-    browser.filtered_file_list = Some(Arc::new(filter_list));
+    let matches = filter_files(files, &browser.filter);
+    browser.filtered_file_list = Some(FilterResults { files: files.clone(), matches });
     browser.used_filter = Some(browser.filter.clone());
 }
 
-/// Recursively collect all files from a VFS into a flat list.
-fn collect_vfs_files(vfs: &VfsPath, prefix: &str) -> Vec<(Arc<PathBuf>, VfsPath)> {
-    let mut result = Vec::new();
-    let target = if prefix.is_empty() {
-        vfs.clone()
-    } else {
-        match vfs.join(prefix.trim_start_matches('/')) {
-            Ok(p) => p,
-            Err(_) => return result,
-        }
-    };
-
-    if let Ok(entries) = target.read_dir() {
-        for entry in entries {
-            let name = entry.filename();
-            let child_path = if prefix.is_empty() { format!("/{name}") } else { format!("{prefix}/{name}") };
-
-            if entry.is_dir().unwrap_or(false) {
-                result.extend(collect_vfs_files(vfs, &child_path));
-            } else {
-                let vfs_path = entry;
-                result.push((Arc::new(PathBuf::from(&child_path)), vfs_path));
-            }
-        }
-    }
-    result
-}
 impl ToolkitTabViewer<'_> {
     /// Start a content search on a background thread, creating a new search tab.
     /// Searches the specified browser pane's VFS.
     fn start_content_search(&mut self, target_source: BrowserSource) {
         // Find the target browser pane and extract query, path_filter, VFS, and files
-        let (query, path_filter, source, active_vfs, active_files) = {
+        let (query, path_filter, source, active_files) = {
             let mut found = None;
             for (_, pane) in self.tab_state.browser_state.dock_state.iter_all_tabs() {
                 if let UnpackerPane::Browser(browser) = pane
@@ -1246,8 +1234,8 @@ impl ToolkitTabViewer<'_> {
                 {
                     let q = browser.content_search_query.trim().to_string();
                     let pf = browser.content_search_path_filter.trim().to_string();
-                    if let (Some(vfs), Some(files)) = (&browser.vfs, &browser.files) {
-                        found = Some((q, pf, browser.source.clone(), vfs.clone(), files.clone()));
+                    if let Some(files) = &browser.files {
+                        found = Some((q, pf, browser.source.clone(), files.clone()));
                     }
                     break;
                 }
@@ -1311,8 +1299,7 @@ impl ToolkitTabViewer<'_> {
 
         // Spawn background thread
         let stop = stop_flag;
-        let filtered_files = active_files;
-        let vfs = active_vfs;
+        let files = active_files;
 
         crate::util::thread::spawn_logged("vfs-search", move || {
             let regex = match regex::bytes::Regex::new(&query) {
@@ -1326,20 +1313,7 @@ impl ToolkitTabViewer<'_> {
                 },
             };
 
-            let glob_filter = if path_filter.is_empty() { None } else { glob::Pattern::new(&path_filter).ok() };
-
-            let files_to_search: Vec<_> = filtered_files
-                .iter()
-                .filter(|(path, node)| {
-                    if !node.is_file().unwrap_or(false) {
-                        return false;
-                    }
-                    if let Some(ref glob) = glob_filter {
-                        return glob.matches_path(path);
-                    }
-                    true
-                })
-                .collect();
+            let files_to_search = wows_toolkit_viewmodel::unpacker::search::files_to_scan(&files, &path_filter);
 
             let total = files_to_search.len();
             let _ = tx.send(ContentSearchMessage::Progress(0, total));
@@ -1347,7 +1321,7 @@ impl ToolkitTabViewer<'_> {
             let mut buffer = Vec::new();
             const MAX_RETAINED: usize = 4 * 1024 * 1024;
 
-            for (i, (_path, vfs_path)) in files_to_search.iter().enumerate() {
+            for (i, index) in files_to_search.iter().enumerate() {
                 if stop.load(Ordering::Relaxed) {
                     break;
                 }
@@ -1357,10 +1331,10 @@ impl ToolkitTabViewer<'_> {
                 }
 
                 buffer.clear();
-                let Ok(joined) = vfs.join(vfs_path.as_str().trim_start_matches('/')) else {
+                let Some(vfs_path) = files.vfs_path(*index) else {
                     continue;
                 };
-                let Ok(mut file) = joined.open_file() else {
+                let Ok(mut file) = vfs_path.open_file() else {
                     continue;
                 };
                 if file.read_to_end(&mut buffer).is_err() {
@@ -1558,7 +1532,7 @@ impl ToolkitTabViewer<'_> {
             {
                 browser.cached_folder_tree = Some(build_folder_tree(&wows_data.vfs, ""));
                 browser.vfs = Some(wows_data.vfs.clone());
-                browser.files = Some(build_file_list(&wows_data.vfs));
+                browser.files = Some(Arc::new(build_file_list(&wows_data.vfs)));
             }
         }
     }
@@ -1595,7 +1569,7 @@ impl ToolkitTabViewer<'_> {
         crate::util::thread::spawn_logged("load-assets-bin", move || {
             let result = (|| -> Result<AssetsBinLoadResult, String> {
                 let vfs = assets_bin::open(&vfs).map_err(|err| err.to_string())?;
-                let files = collect_vfs_files(&vfs, "");
+                let files = Arc::new(build_file_list(&vfs));
                 Ok(AssetsBinLoadResult { vfs, files })
             })();
             let _ = tx.send(result);

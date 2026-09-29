@@ -6,8 +6,9 @@
 //! rules have one implementation, and unit-testable against an in-memory
 //! filesystem rather than a game install.
 
-use std::path::PathBuf;
-use std::sync::Arc;
+use wowsunpack::data::path_table::PathId;
+use wowsunpack::data::path_table::PathTable;
+use wowsunpack::vfs::VfsFileType;
 use wowsunpack::vfs::VfsPath;
 
 /// One directory in the folder-tree sidebar. Built once when the VFS loads:
@@ -20,8 +21,121 @@ pub struct FolderTreeNode {
     pub children: Vec<FolderTreeNode>,
 }
 
-/// A file in the flat list, paired with the VFS handle that opens it.
-pub type FileList = Vec<(Arc<PathBuf>, VfsPath)>;
+/// One file in a [`FileList`], by position.
+///
+/// A position in the list that issued it. Distinct from the `PathId` the list
+/// keeps internally so the two cannot be crossed, but an index and the list it
+/// came from still travel together: read against a different list it names a
+/// different file. Both front ends hold the pair rather than the index alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct FileIndex(u32);
+
+/// Every file in a VFS, with the root that opens them.
+///
+/// The paths live in one buffer rather than a `PathBuf` and a `VfsPath` apiece:
+/// a full install is ~390K files, and a handle per file is three copies of
+/// every path across more than a million allocations. A `VfsPath` is built for
+/// the file actually being opened.
+///
+/// Not `Clone`: the whole point is that one of these is shared by handle.
+pub struct FileList {
+    root: VfsPath,
+    /// Paths as walked, each relative to `root` and starting with a slash.
+    paths: PathTable,
+    /// Byte size per path, read from the same metadata that decided the entry
+    /// was a file. Kept rather than re-read, so drawing a row costs no VFS
+    /// lookup: under a physical-directory VFS that lookup is a `stat`.
+    /// Absent for an entry the VFS lists but has no metadata for.
+    sizes: Vec<Option<u64>>,
+}
+
+/// Prints what the list holds rather than its contents: it is carried by
+/// events that derive `Debug`, and the arena is tens of megabytes.
+impl std::fmt::Debug for FileList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FileList").field("root", &self.root.as_str()).field("files", &self.len()).finish()
+    }
+}
+
+impl FileList {
+    pub fn new(root: VfsPath) -> Self {
+        Self { root, paths: PathTable::default(), sizes: Vec::new() }
+    }
+
+    pub fn len(&self) -> usize {
+        self.paths.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paths.is_empty()
+    }
+
+    /// The path as walked: relative to the list's root, starting with a slash.
+    /// Also what a filter matches and what a filter-result row is labelled by.
+    ///
+    /// Panics past the end of the list. An index from another list of at least
+    /// this length names whatever this one holds at that position.
+    pub fn path(&self, index: FileIndex) -> &str {
+        self.paths.get(self.id(index))
+    }
+
+    /// The file's byte size as recorded when the list was walked, absent when
+    /// the VFS had no metadata for it.
+    pub fn size(&self, index: FileIndex) -> Option<u64> {
+        self.sizes[index.0 as usize]
+    }
+
+    pub fn indices(&self) -> impl ExactSizeIterator<Item = FileIndex> + use<> {
+        (0..self.paths.len() as u32).map(FileIndex)
+    }
+
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (FileIndex, &str)> {
+        self.indices().map(move |index| (index, self.path(index)))
+    }
+
+    fn id(&self, index: FileIndex) -> PathId {
+        self.paths.id_at(index.0 as usize).expect("a file index issued by this list")
+    }
+
+    /// The handle that opens the file, built on demand.
+    ///
+    /// `None` when the root will not form the path. [`build_file_list`] only
+    /// takes names that `join` reproduces, so for a list it built this means
+    /// the VFS has changed under the list.
+    pub fn vfs_path(&self, index: FileIndex) -> Option<VfsPath> {
+        self.root.join(self.path(index).trim_start_matches('/')).ok()
+    }
+
+    /// One listing row, labelled by its whole path the way a filter result is.
+    pub fn row(&self, index: FileIndex) -> Option<ListingEntry> {
+        Some(ListingEntry {
+            label: self.path(index).to_string(),
+            is_dir: false,
+            size: self.size(index),
+            path: self.vfs_path(index)?,
+        })
+    }
+
+    fn push(&mut self, path: &str, size: Option<u64>) -> FileIndex {
+        self.sizes.push(size);
+        FileIndex(self.paths.push(path).index() as u32)
+    }
+
+    fn shrink_to_fit(&mut self) {
+        self.paths.shrink_to_fit();
+        self.sizes.shrink_to_fit();
+    }
+}
+
+/// Whether an entry named `name` can be addressed through the VFS.
+///
+/// `VfsPath::join` drops an empty component and a ".", and resolves a "..",
+/// so a name like that would open something other than the entry it was
+/// walked from, or nothing at all. Such an entry cannot be opened, viewed or
+/// extracted whatever the listing shows, so it is left out.
+fn is_addressable(name: &str) -> bool {
+    !name.is_empty() && name != "." && name != ".."
+}
 
 /// The path of the VFS root, and what an unset selection means.
 pub const ROOT_PATH: &str = "/";
@@ -138,58 +252,72 @@ pub fn build_folder_tree(dir: &VfsPath, path_prefix: &str) -> Vec<FolderTreeNode
 
 /// Walks `root` into the flat list the filter runs over.
 ///
-/// Built lazily on first browser open: for a full install this is roughly
-/// 85 MiB across ~1.1M allocations, and the browser is its only consumer.
-/// Paths carry a leading slash so they match `build_folder_tree`'s keys.
+/// Built lazily on first browser open, and the browser is its only consumer.
+/// Paths carry a leading slash so they match `build_folder_tree`'s keys, and
+/// only files are listed: a directory is reached through the folder tree.
+///
+/// Paths are relative to `root`, so a list walked from somewhere other than a
+/// VFS root labels its rows from there. Both front ends pass a root.
+///
+/// The path buffer grows by doubling and is shrunk once at the end: a VFS
+/// states no file count, so there is nothing to size it from up front.
 pub fn build_file_list(root: &VfsPath) -> FileList {
-    fn collect(dir: &VfsPath, prefix: &str, out: &mut FileList) {
+    // One buffer for the path being walked, extended and truncated per level,
+    // rather than a fresh string per entry across the whole install.
+    fn collect(dir: &VfsPath, path: &mut String, out: &mut FileList) {
         let Ok(entries) = dir.read_dir() else {
             return;
         };
         for entry in entries {
-            let path = format!("{prefix}/{}", entry.filename());
-            match entry.is_dir() {
-                Ok(true) => collect(&entry, &path, out),
-                Ok(false) => out.push((Arc::new(PathBuf::from(&path)), entry)),
-                Err(_) => {}
+            let name = entry.filename();
+            if !is_addressable(&name) {
+                continue;
             }
+            // One metadata read decides what the entry is and, for a file, how
+            // big it is. `is_dir` would read it too, behind an `exists` that
+            // reads it again.
+            let meta = entry.metadata();
+
+            let parent_end = path.len();
+            path.push('/');
+            path.push_str(&name);
+            match meta {
+                Ok(meta) if meta.file_type == VfsFileType::Directory => collect(&entry, path, out),
+                Ok(meta) => {
+                    out.push(path, Some(meta.len));
+                }
+                // An entry the VFS lists but has no metadata for. assets.bin
+                // registers names from its path storage that carry no data,
+                // and both browsers have always listed those, so they stay in
+                // the listing with no size rather than disappearing from it.
+                Err(_) => {
+                    out.push(path, None);
+                }
+            }
+            path.truncate(parent_end);
         }
     }
-    let mut out = FileList::new();
-    collect(root, "", &mut out);
+    let mut out = FileList::new(root.clone());
+    collect(root, &mut String::new(), &mut out);
+    out.shrink_to_fit();
     out
 }
 
-/// Applies the listing's path filter.
+/// Which files a path filter matches, as positions in `files`.
 ///
 /// A filter containing a star is treated as a glob and matched against the
 /// whole path; anything else is a plain substring match. A star filter that
 /// does not parse as a glob falls back to the substring match, so a
 /// half-typed pattern keeps listing results instead of emptying the pane.
 ///
-/// `matches_path` runs with glob's default options, so a star spans path
-/// separators: "*.png" matches a file at any depth, not only at the root.
-pub fn filter_files(files: &FileList, filter: &str) -> FileList {
+/// The glob runs with its default options, so a star spans path separators:
+/// "*.png" matches a file at any depth, not only at the root.
+pub fn filter_files(files: &FileList, filter: &str) -> Vec<FileIndex> {
     let glob = filter.contains('*').then(|| glob::Pattern::new(filter).ok()).flatten();
     match glob {
-        Some(glob) => files.iter().filter(|(path, _)| glob.matches_path(path)).cloned().collect(),
-        None => {
-            files.iter().filter(|(path, _)| path.to_str().is_some_and(|path| path.contains(filter))).cloned().collect()
-        }
+        Some(glob) => files.iter().filter(|(_, path)| glob.matches(path)).map(|(index, _)| index).collect(),
+        None => files.iter().filter(|(_, path)| path.contains(filter)).map(|(index, _)| index).collect(),
     }
-}
-
-/// Filter results as listing rows, each labelled by its whole path.
-pub fn filtered_entries(files: &FileList, filter: &str) -> Vec<ListingEntry> {
-    filter_files(files, filter)
-        .into_iter()
-        .map(|(path, vfs_path)| ListingEntry {
-            label: path.to_string_lossy().into_owned(),
-            is_dir: false,
-            size: vfs_path.metadata().ok().map(|meta| meta.len),
-            path: vfs_path,
-        })
-        .collect()
 }
 
 /// The entries of one directory, directories first and then files, each group
@@ -248,7 +376,14 @@ mod tests {
     }
 
     fn sorted_paths(files: &FileList) -> Vec<String> {
-        let mut paths: Vec<String> = files.iter().map(|(path, _)| path.to_string_lossy().into_owned()).collect();
+        let mut paths: Vec<String> = files.iter().map(|(_, path)| path.to_string()).collect();
+        paths.sort();
+        paths
+    }
+
+    fn sorted_matches(files: &FileList, filter: &str) -> Vec<String> {
+        let mut paths: Vec<String> =
+            filter_files(files, filter).into_iter().map(|index| files.path(index).to_string()).collect();
         paths.sort();
         paths
     }
@@ -286,13 +421,13 @@ mod tests {
     #[test]
     fn a_plain_filter_matches_anywhere_in_the_path() {
         let files = build_file_list(&fixture());
-        assert_eq!(sorted_paths(&filter_files(&files, "content/")), vec!["/res/content/a.xml", "/res/content/b.png"]);
+        assert_eq!(sorted_matches(&files, "content/"), vec!["/res/content/a.xml", "/res/content/b.png"]);
     }
 
     #[test]
     fn a_star_filter_is_matched_as_a_glob_against_the_whole_path() {
         let files = build_file_list(&fixture());
-        assert_eq!(sorted_paths(&filter_files(&files, "/res/**/*.xml")), vec!["/res/content/a.xml"]);
+        assert_eq!(sorted_matches(&files, "/res/**/*.xml"), vec!["/res/content/a.xml"]);
     }
 
     #[test]
@@ -306,7 +441,47 @@ mod tests {
     #[test]
     fn a_glob_star_spans_separators_so_a_bare_extension_pattern_matches_at_any_depth() {
         let files = build_file_list(&fixture());
-        assert_eq!(sorted_paths(&filter_files(&files, "*.png")), vec!["/res/content/b.png"]);
+        assert_eq!(sorted_matches(&files, "*.png"), vec!["/res/content/b.png"]);
+    }
+
+    #[test]
+    fn every_file_opens_through_the_root_the_list_was_walked_from() {
+        use std::io::Read as _;
+        let root = fixture();
+        let files = build_file_list(&root);
+
+        for (index, path) in files.iter() {
+            let opened = files.vfs_path(index).expect("the path resolves");
+            assert_eq!(opened.as_str(), path, "the handle names the path the walk recorded");
+            let mut body = String::new();
+            opened.open_file().expect("the file opens").read_to_string(&mut body).expect("the file reads");
+            assert_eq!(files.size(index), Some(body.len() as u64), "the recorded size is the file's own");
+        }
+    }
+
+    #[test]
+    fn a_list_walked_from_a_subdirectory_labels_its_rows_from_there_and_still_opens_them() {
+        use std::io::Read as _;
+        let root = fixture();
+        let content = root.join("res/content").expect("a valid path");
+        let files = build_file_list(&content);
+
+        assert_eq!(sorted_paths(&files), vec!["/a.xml", "/b.png"], "labelled from the directory walked");
+        let index = files.iter().find(|(_, path)| *path == "/a.xml").map(|(index, _)| index).unwrap();
+        let mut body = String::new();
+        files.vfs_path(index).unwrap().open_file().unwrap().read_to_string(&mut body).unwrap();
+        assert_eq!(body, "<a/>", "and still opening the file under that directory");
+    }
+
+    #[test]
+    fn a_name_the_vfs_cannot_address_is_not_listed() {
+        // `VfsPath::join` drops these or walks out of the directory, so an
+        // entry named by one could not be opened from its listed path.
+        assert!(!is_addressable(""));
+        assert!(!is_addressable("."));
+        assert!(!is_addressable(".."));
+        assert!(is_addressable("a.xml"));
+        assert!(is_addressable("...xml"), "a leading dot is only special on its own");
     }
 
     #[test]
@@ -338,12 +513,14 @@ mod tests {
     }
 
     #[test]
-    fn filtered_rows_are_labelled_by_their_whole_path() {
+    fn filter_result_rows_are_labelled_by_their_whole_path_and_carry_a_size() {
         let files = build_file_list(&fixture());
-        let rows = filtered_entries(&files, "content/");
+        let rows: Vec<ListingEntry> =
+            filter_files(&files, "content/").into_iter().filter_map(|index| files.row(index)).collect();
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| row.label.starts_with("/res/content/")));
         assert!(rows.iter().all(|row| !row.is_dir));
+        assert!(rows.iter().all(|row| row.size.is_some()));
     }
 
     #[test]
