@@ -361,8 +361,11 @@ mod tests {
             .modifiers(vec![burn_modifier(0.9)])
             .build();
 
-        let crew =
-            Crew::builder().money_training_level(0).personality(personality()).maybe_skills(Some(vec![skill])).build();
+        let crew = Crew::builder()
+            .money_training_level(0)
+            .personality(personality())
+            .maybe_skills(Some(std::sync::Arc::from(vec![skill])))
+            .build();
 
         Param::builder()
             .id(id)

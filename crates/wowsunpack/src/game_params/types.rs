@@ -1973,7 +1973,7 @@ impl Interpolator {
     }
 }
 
-#[derive(Clone, Builder, Debug)]
+#[derive(Clone, Builder, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkillLogicTrigger {
@@ -2087,7 +2087,7 @@ impl InnateSkill {
     }
 }
 
-#[derive(Clone, Builder, Debug)]
+#[derive(Clone, Builder, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkillTiers {
@@ -2137,7 +2137,7 @@ impl CrewSkillTiers {
     }
 }
 
-#[derive(Clone, Builder, Debug)]
+#[derive(Clone, Builder, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "rkyv", derive(rkyv::Archive, rkyv::Serialize, rkyv::Deserialize))]
 pub struct CrewSkill {
@@ -2420,7 +2420,11 @@ impl CrewSkill {
 pub struct Crew {
     money_training_level: usize,
     personality: CrewPersonality,
-    skills: Option<Vec<CrewSkill>>,
+    /// Shared between the crews that learn the same list. A build ships one
+    /// `Crew` per captain and nation but only a couple of dozen distinct skill
+    /// lists, each ~28 KiB, so owning one apiece is most of what the crews cost
+    /// (see [`share_crew_skills`]).
+    skills: Option<Rc<[CrewSkill]>>,
 }
 
 impl Crew {
@@ -3144,6 +3148,9 @@ where
     I: IntoIterator<Item = Param>,
 {
     fn from(value: I) -> Self {
+        let mut owned: Vec<Param> = value.into_iter().collect();
+        share_crew_skills(&mut owned);
+        let value = owned;
         // `Vec<Param>` -> `Vec<Rc<Param>>` is an in-place collect: the source
         // buffer is reused, so the capacity it keeps is the one a 1016-byte
         // element needed, not an 8-byte pointer. Unshrunk that is 16 MiB of
@@ -3153,6 +3160,28 @@ where
         let lookups = build_param_lookups(params.as_ref());
 
         Self { params, id_to_params: lookups.by_id, index_to_params: lookups.by_index, name_to_params: lookups.by_name }
+    }
+}
+
+/// Points every crew that learned the same skills at one shared list.
+///
+/// A build ships one `Crew` per captain and nation -- 662 of them in build
+/// 13187581 -- but only 26 distinct skill lists between them, each around
+/// 28 KiB. Run once as the params are taken in, so both a fresh parse and a
+/// load from the on-disk cache end up sharing.
+///
+/// Linear against the distinct lists found so far, which is the right shape
+/// when there are a couple of dozen of them and the first is the answer for
+/// most crews.
+fn share_crew_skills(params: &mut [Param]) {
+    let mut seen: Vec<Rc<[CrewSkill]>> = Vec::new();
+    for param in params {
+        let ParamData::Crew(crew) = &mut param.data else { continue };
+        let Some(skills) = crew.skills.as_ref() else { continue };
+        match seen.iter().find(|held| held.as_ref() == skills.as_ref()) {
+            Some(shared) => crew.skills = Some(Rc::clone(shared)),
+            None => seen.push(Rc::clone(skills)),
+        }
     }
 }
 
