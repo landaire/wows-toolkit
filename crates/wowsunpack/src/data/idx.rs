@@ -443,14 +443,13 @@ pub struct ResourceFile<'a> {
 /// The path every resource across `idx_files` resolves to, with its file
 /// location when it has one.
 ///
-/// Paths are handed to `visit` as refcounted handles so a consumer that wants
-/// to keep one pays a refcount bump rather than a copy: the resolver already
-/// holds each path to serve it as a parent to that resource's children, and a
-/// build has hundreds of thousands of them.
+/// The path is borrowed for the call: a consumer that wants to keep one copies
+/// it into whatever it keeps them in, which is cheaper than the handle a build's
+/// hundreds of thousands of paths would otherwise each need.
 ///
 /// The root `/` is not a resource and so is never visited; a consumer that
 /// needs a root entry adds it.
-pub fn visit_entries<'idx>(idx_files: &'idx [IdxFile], mut visit: impl FnMut(&Rc<str>, Option<ResourceFile<'idx>>)) {
+pub fn visit_entries<'idx>(idx_files: &'idx [IdxFile], mut visit: impl FnMut(&str, Option<ResourceFile<'idx>>)) {
     let count = idx_files.iter().fold(0, |acc, file| acc + file.resources.len());
 
     // Lookup tables across all IDX files. These borrow from `idx_files`: they
@@ -474,11 +473,17 @@ pub fn visit_entries<'idx>(idx_files: &'idx [IdxFile], mut visit: impl FnMut(&Rc
         }
     }
 
-    let mut path_cache: FxHashMap<u64, Rc<str>> = FxHashMap::with_capacity_and_hasher(count, FxBuildHasher);
+    // Only a path that is served again as a parent is worth keeping; a leaf's is
+    // used once. A build is ~35K directories against ~390K files, so caching
+    // only the former is the difference between holding every path at once and
+    // holding one at a time.
+    let mut path_cache: FxHashMap<u64, Rc<str>> = FxHashMap::default();
 
-    /// Full path for a resource, walking the parent chain. Memoized, so a
-    /// directory's path is built once however many children it has.
-    fn resolve_path(
+    /// Full path for a resource that is served again as a parent, walking the
+    /// parent chain. Memoized, so it is built once however many children it
+    /// has. Only reached for a resource some other resource names as its
+    /// parent, which is why every path it resolves is worth keeping.
+    fn resolve_parent_path(
         id: u64,
         packed_resources: &FxHashMap<u64, &PackedFileMetadata>,
         path_cache: &mut FxHashMap<u64, Rc<str>>,
@@ -489,34 +494,51 @@ pub fn visit_entries<'idx>(idx_files: &'idx [IdxFile], mut visit: impl FnMut(&Rc
 
         let resource = packed_resources.get(&id).expect("failed to find packed resource");
 
-        let path: Rc<str> = if resource.parent_id == ROOT_PARENT_ID {
-            let mut path = String::with_capacity(1 + resource.filename.len());
-            path.push('/');
-            path.push_str(&resource.filename);
-            Rc::from(path)
-        } else {
-            let parent_path = resolve_path(resource.parent_id, packed_resources, path_cache);
-            let mut path = String::with_capacity(parent_path.len() + 1 + resource.filename.len());
-            path.push_str(&parent_path);
-            path.push('/');
-            path.push_str(&resource.filename);
-            Rc::from(path)
+        let parent = match resource.parent_id {
+            ROOT_PARENT_ID => None,
+            parent_id => Some(resolve_parent_path(parent_id, packed_resources, path_cache)),
         };
+        let parent = parent.as_deref().unwrap_or("");
 
+        let mut path = String::with_capacity(parent.len() + 1 + resource.filename.len());
+        path.push_str(parent);
+        path.push('/');
+        path.push_str(&resource.filename);
+
+        let path: Rc<str> = Rc::from(path);
         path_cache.insert(id, Rc::clone(&path));
         path
     }
 
+    // Reused across every file, so a build's leaf paths cost one buffer rather
+    // than one allocation apiece.
+    let mut leaf_path = String::new();
+
     for id in packed_resources.keys() {
-        let path = resolve_path(*id, &packed_resources, &mut path_cache);
         let file = file_infos
             .get(id)
             .and_then(|file_info| volumes.get(&file_info.volume_id).map(|volume| ResourceFile { file_info, volume }));
-        visit(&path, file);
+
+        match file {
+            Some(file) => {
+                let resource = packed_resources.get(id).expect("failed to find packed resource");
+                leaf_path.clear();
+                if resource.parent_id != ROOT_PARENT_ID {
+                    leaf_path.push_str(&resolve_parent_path(resource.parent_id, &packed_resources, &mut path_cache));
+                }
+                leaf_path.push('/');
+                leaf_path.push_str(&resource.filename);
+                visit(&leaf_path, Some(file));
+            }
+            None => {
+                let path = resolve_parent_path(*id, &packed_resources, &mut path_cache);
+                visit(&path, None);
+            }
+        }
     }
 }
 
-/// Build a flat path → entry map from parsed IDX files.
+/// Build a flat map from full path to entry from parsed IDX files.
 ///
 /// Returns a `HashMap` mapping full paths (using `/` separators, no leading slash)
 /// to their VFS entries. Directory entries are inferred from the parent-child
@@ -535,7 +557,7 @@ pub fn build_file_tree(idx_files: &[IdxFile]) -> HashMap<String, VfsEntry> {
 
     // The root is the one directory with no resource of its own, so it needs an
     // entry added by hand. Every other directory is a resource (an entry with no
-    // file_info) and was visited above: `resolve_path` resolves each parent id
+    // file_info) and was visited above: `resolve_parent_path` resolves each parent id
     // through the resource table and panics if one is absent, so a path can only
     // exist here when all of its ancestors do.
     entries.entry("/".to_string()).or_insert(VfsEntry::Directory);

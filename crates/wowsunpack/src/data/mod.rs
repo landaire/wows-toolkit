@@ -8,6 +8,8 @@ pub mod idx;
 pub mod idx_vfs;
 /// Shared winnow parsing utilities
 pub mod parser_utils;
+/// Paths held as one buffer rather than one allocation apiece
+pub mod path_table;
 /// Utilities for helping load and maintain `.pkg` files (memmap-backed)
 #[cfg(feature = "vfs-mmap")]
 pub mod pkg;
