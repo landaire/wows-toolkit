@@ -120,6 +120,17 @@ tempfile = "3"
 tiny-skia = "0.12"
 ab_glyph = "0.2"
 fontdb = "0.23"
+# The preview carries the replay parser's own error rather than a rendering of
+# it, and that error is a `rootcause::Report`.
+rootcause = { workspace = true }
+# Live-heap totals from the running app, behind `dhat-heap`. Off by default:
+# the tracking allocator is far slower than the system one.
+dhat = { version = "0.3", optional = true }
+
+[features]
+# Replaces the global allocator with dhat's and samples the live heap into
+# `dhat-markers.log`. Diagnostic only; never enabled for a release.
+dhat-heap = ["dep:dhat"]
 
 # A release build has no console, so `--help`, `--version` and a refused
 # argument are written to the parent's console or shown in a message box.

@@ -5,6 +5,10 @@
 // parsed at startup.
 rust_i18n::i18n!("i18n_no_compiled_locales", fallback = "en", backend = wt_translations::TranslationsBackend::load());
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 mod app;
 mod armor_viewer;
 mod child_process;
@@ -15,6 +19,7 @@ mod constants;
 mod dialog;
 mod first_run;
 mod game_data_cache;
+mod heap_profile;
 mod http;
 mod icons;
 #[cfg(test)]
@@ -59,6 +64,11 @@ const DEFAULT_WINDOW_ORIGIN: Point<Pixels> = point(px(200.), px(120.));
 const DEFAULT_WINDOW_SIZE: Size<Pixels> = size(px(1200.), px(800.));
 
 fn main() {
+    // First, so the totals cover the whole process. Inert without `dhat-heap`.
+    heap_profile::start();
+    // The zero every later mark is read against.
+    heap_profile::mark("main.begin");
+
     // Before anything is opened: an argument this build does not take is
     // reported and the process exits, rather than a window appearing as though
     // it had been honoured.
@@ -115,6 +125,7 @@ fn main() {
     }
 
     let app = gpui_kit::platform::application().with_assets(Assets);
+    heap_profile::mark("app.run");
     app.run(move |cx| {
         gpui_kit::component::init(cx);
         icons::register_font(cx);
@@ -161,6 +172,7 @@ fn main() {
                 .inspect_err(|err| tracing::error!("failed to open window: {err}"))
                 .expect("failed to open window");
             let app_entity = app_entity.expect("App entity created inside open_window's build_root_view");
+            heap_profile::mark("window.open");
 
             let loaded = runtime::spawn(cx, async move {
                 let pool = wows_toolkit_config::open_db().await?;
@@ -171,6 +183,7 @@ fn main() {
                 Ok::<_, anyhow::Error>((settings, session, pool))
             })
             .await;
+            heap_profile::mark("startup_settings.loaded");
 
             let (loaded, session, pool) = match loaded {
                 Ok(Ok(loaded)) => loaded,
