@@ -322,6 +322,20 @@ fn render_active<V: SessionHost + Render>(view: &mut V, cx: &mut Context<V>) -> 
                         .child(crate::icons::icon(crate::icons::MONITOR))
                         .child(div().flex_1().min_w(px(0.)).truncate().child(window.replay_name))
                         .child(div().text_color(crate::theme::text_dim()).child(window.map))
+                        // Only the end the session watches can tell the rest to
+                        // open one, which is what the egui popover gates it on.
+                        .when(may_steer, |this| {
+                            let replay_id = window.replay_id;
+                            this.child(
+                                Button::new(("collab-open-for-everyone", replay_id as usize))
+                                    .label(t!("ui.collab.open_for_everyone").to_string())
+                                    .compact()
+                                    .on_click(cx.listener(move |view: &mut V, _event, _window, cx| {
+                                        view.collab().link().open_for_everyone(replay_id);
+                                        cx.notify();
+                                    })),
+                            )
+                        })
                 })),
         );
     }

@@ -183,6 +183,9 @@ impl CollabState {
             board: None,
             alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
             next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            // Only a host or a co-host has a mesh to send frames into.
+            frames: self.handle.as_ref().filter(|_| self.may_steer()).map(|handle| handle.frame_tx.clone()),
+            commands: self.handle.as_ref().map(|handle| handle.command_tx.clone()),
         }
     }
 
@@ -590,6 +593,12 @@ pub struct CollabLink {
     /// Ids for the shapes added while alone. They only have to tell this end's
     /// own shapes apart; a session assigns its own.
     next_alone_id: Arc<std::sync::atomic::AtomicU64>,
+    /// Where a frame of playback goes for the rest of the session to watch.
+    /// `None` for a peer, which is sent frames rather than sending them.
+    frames: Option<std::sync::mpsc::SyncSender<wt_collab_client::peer::FrameBroadcast>>,
+    /// Where a message about the session itself goes: which replays are open,
+    /// and which end is the one being watched.
+    commands: Option<std::sync::mpsc::Sender<wt_collab_client::SessionCommand>>,
 }
 
 impl CollabLink {
@@ -610,6 +619,9 @@ impl CollabLink {
             board: Some(board_id.raw()),
             alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
             next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+            // A board draws no battle, so it sends no frames.
+            frames: None,
+            commands: self.commands.clone(),
         }
     }
 
@@ -907,6 +919,58 @@ impl CollabLink {
             .collect()
     }
 
+    /// Whether this end is the one the rest of the session watches.
+    pub fn broadcasts_frames(&self) -> bool {
+        self.frames.is_some()
+    }
+
+    /// Says a replay is open here, so the session lists it and a peer can ask to
+    /// watch it.
+    ///
+    /// The map art travels with it, as a board's does: a peer may not have the
+    /// build the replay was recorded on, and it still has to draw the battle.
+    pub fn announce_replay(&self, replay: SharedReplay) {
+        let Some(commands) = &self.commands else { return };
+        let _ = commands.send(wt_collab_client::SessionCommand::ReplayOpened {
+            replay_id: replay.replay_id.raw(),
+            replay_name: replay.replay_name,
+            map_image_png: replay.art_png.unwrap_or_default(),
+            game_version: replay.game_version,
+            map_name: replay.map_name,
+            display_name: replay.map_label,
+        });
+        // Said straight after: a session with nobody claiming to be the one
+        // being watched shows a peer an empty window.
+        if self.broadcasts_frames() {
+            let _ = commands.send(wt_collab_client::SessionCommand::BecomeFrameSource);
+        }
+    }
+
+    /// Says a replay here has been closed, so the session stops listing it.
+    pub fn close_replay(&self, replay_id: ReplayId) {
+        let Some(commands) = &self.commands else { return };
+        let _ = commands.send(wt_collab_client::SessionCommand::ReplayClosed { replay_id: replay_id.raw() });
+    }
+
+    /// Asks every peer to open one of the session's windows.
+    pub fn open_for_everyone(&self, window_id: u64) {
+        let Some(commands) = &self.commands else { return };
+        let _ = commands.send(wt_collab_client::SessionCommand::OpenWindowForEveryone { window_id });
+    }
+
+    /// Puts one frame of playback in front of the session.
+    ///
+    /// Draw commands rather than pixels, so each peer draws the battle with its
+    /// own art at its own size. Dropped rather than queued when the mesh is
+    /// behind: a frame nobody has read yet is already stale, and a reader
+    /// scrubbing would otherwise build a backlog the session plays out
+    /// afterwards.
+    pub fn broadcast_frame(&self, frame: wt_collab_client::peer::FrameBroadcast) {
+        if let Some(frames) = &self.frames {
+            let _ = frames.try_send(frame);
+        }
+    }
+
     /// Forgets the pings whose ripple has finished.
     ///
     /// The session collects them and nothing else takes them out, so a
@@ -929,6 +993,8 @@ impl CollabLink {
                 board: None,
                 alone: Arc::new(Mutex::new(wt_collab_client::AnnotationSyncState::default())),
                 next_alone_id: Arc::new(std::sync::atomic::AtomicU64::new(1)),
+                frames: None,
+                commands: None,
             },
             rx,
         )
@@ -967,6 +1033,37 @@ impl BoardId {
     pub fn fresh() -> Self {
         Self(wt_collab_client::peer::fresh_id())
     }
+}
+
+/// What a replay window is called in a session.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct ReplayId(u64);
+
+impl ReplayId {
+    pub fn raw(self) -> u64 {
+        self.0
+    }
+
+    /// A name nothing else in the session holds.
+    pub fn fresh() -> Self {
+        Self(wt_collab_client::peer::fresh_id())
+    }
+}
+
+/// A replay this app has open, as the session lists it.
+#[derive(Clone, Debug)]
+pub struct SharedReplay {
+    pub replay_id: ReplayId,
+    /// What the replay is called, which is what the session's list reads.
+    pub replay_name: String,
+    /// The map's space name, and what it is called to a reader.
+    pub map_name: String,
+    pub map_label: String,
+    /// The build it was recorded on, which some of a ship's ranges are read at.
+    pub game_version: String,
+    /// The drawn map as a PNG, for a peer whose build ships none. `None` where
+    /// there was no art to send, which the wire states as an empty one.
+    pub art_png: Option<Vec<u8>>,
 }
 
 /// What a capture point is called in a session. Its place in a list is not

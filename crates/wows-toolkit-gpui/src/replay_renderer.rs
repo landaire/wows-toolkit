@@ -141,6 +141,8 @@ struct Track {
     version: wowsunpack::data::Version,
     /// Where the map's top-left corner sits in these frames.
     map_origin: (f32, f32),
+    /// The map's space name, which a peer watching this playback loads art by.
+    space: String,
 }
 
 impl Track {
@@ -252,6 +254,12 @@ pub struct ReplayRendererPanel {
     reported_cursor: Option<[f32; 2]>,
     /// This viewport's end of a collab session. Inert until one is running.
     collab: crate::collab::CollabLink,
+    /// What this playback is called in a session, so a peer can ask to watch
+    /// this one rather than another window.
+    replay_id: crate::collab::ReplayId,
+    /// Whether the session has been told this playback is open. Said once, and
+    /// again if a session starts after it was opened.
+    shared: bool,
     /// The tool in hand and whatever it has drawn so far.
     drawing: wt_collab_client::drawing::Drawing,
     /// Where the pointer last was on the map, which is what a part-drawn
@@ -499,6 +507,8 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            replay_id: crate::collab::ReplayId::fresh(),
+            shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
             picked: wt_collab_client::drawing::Selection::default(),
@@ -611,6 +621,7 @@ impl ReplayRendererPanel {
                 // sensible on the minimap.
                 space_size: 1400.0,
                 version: wowsunpack::data::Version::base(99, 0, 0),
+                space: String::new(),
                 map_origin: (0.0, wows_minimap_renderer::HUD_HEIGHT as f32),
             }),
             renderer: None,
@@ -636,6 +647,8 @@ impl ReplayRendererPanel {
             dragging: None,
             reported_cursor: None,
             collab: crate::collab::CollabLink::default(),
+            replay_id: crate::collab::ReplayId::fresh(),
+            shared: false,
             drawing: wt_collab_client::drawing::Drawing::new(DEFAULT_INK, DEFAULT_NIB),
             pointer_at: None,
             picked: wt_collab_client::drawing::Selection::default(),
@@ -754,6 +767,8 @@ impl ReplayRendererPanel {
         let carried = self.collab.annotations_held();
         self.collab = link;
         self.collab.adopt(carried);
+        self.shared = false;
+        self.share_playback(cx);
         self.follow_collab(cx);
         cx.notify();
     }
@@ -832,6 +847,66 @@ impl ReplayRendererPanel {
             .with_priority(1)
             .into_any_element(),
         )
+    }
+
+    /// Tells the session this playback is open, and that this end is the one to
+    /// watch.
+    ///
+    /// The map art travels with it: a peer may not have the build the replay was
+    /// recorded on, and it still has to draw the battle. Nothing happens until
+    /// the replay has been read, because until then there is no map to name.
+    fn share_playback(&mut self, cx: &mut Context<Self>) {
+        if self.shared || !self.collab.broadcasts_frames() {
+            return;
+        }
+        let Some(track) = self.track() else { return };
+        let (space, version) = (track.space.clone(), track.version);
+        if space.is_empty() {
+            return;
+        }
+        self.shared = true;
+        let replay_id = self.replay_id;
+        let replay_name = self.title.to_string();
+        let game_data = self.game_data.clone();
+        let link = self.collab.clone();
+        cx.background_spawn(async move {
+            let art_png = game_data
+                .as_ref()
+                .and_then(|data| data.newest_loaded())
+                .and_then(|loaded| wows_minimap_renderer::assets::load_map_image(&space, loaded.vfs()))
+                .and_then(|art| {
+                    let mut png = Vec::new();
+                    art.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png).ok().map(|()| png)
+                });
+            link.announce_replay(crate::collab::SharedReplay {
+                replay_id,
+                replay_name,
+                map_label: wows_toolkit_viewmodel::tactics::naming::pretty_map_name(&space),
+                map_name: space,
+                game_version: version.to_path(),
+                art_png,
+            });
+        })
+        .detach();
+    }
+
+    /// Puts this frame in front of the session, where this app is the one the
+    /// rest of it watches.
+    ///
+    /// Draw commands rather than pixels, so each peer draws the battle with its
+    /// own art at its own size.
+    fn broadcast_current(&self, commands: &[DrawCommand], track: &Track) {
+        if !self.shared {
+            return;
+        }
+        self.collab.broadcast_frame(wt_collab_client::peer::FrameBroadcast {
+            replay_id: self.replay_id.raw(),
+            clock: track.seconds_at(self.at),
+            frame_index: self.at as u32,
+            total_frames: track.len() as u32,
+            game_duration: track.seconds_at(track.len().saturating_sub(1)),
+            commands: commands.to_vec(),
+        });
     }
 
     /// The handle a picked shape is turned by, drawn over the frame.
@@ -1710,6 +1785,7 @@ impl ReplayRendererPanel {
             self.renderer = Some(renderer);
             return;
         };
+        self.broadcast_current(&commands, track);
 
         let options = self.options.clone();
         let show_dead_ships = self.show_dead_ships;
@@ -2668,6 +2744,10 @@ impl Drop for ReplayRendererPanel {
         // A viewport that has been closed is not one whose battle is worth
         // finishing.
         self.cancel.store(true, Ordering::Relaxed);
+        // Nor is it one the session should still be offering to watch.
+        if self.shared {
+            self.collab.close_replay(self.replay_id);
+        }
     }
 }
 
@@ -3343,6 +3423,7 @@ fn bake(
         space_size: baked.space_size,
         version: baked.version,
         map_origin: (baked.map_origin.0 as f32, baked.map_origin.1 as f32),
+        space: baked.map_name,
     };
     Ok((track, baked.renderer))
 }

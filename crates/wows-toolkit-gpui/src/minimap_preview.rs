@@ -264,6 +264,8 @@ pub struct BakedTrack {
     /// How wide the map is in the game's own world units, which is what
     /// turns a range in metres into a distance on the minimap.
     pub space_size: f32,
+    /// The map's space name, which is what a peer loads art by.
+    pub map_name: String,
     /// The build the replay was recorded on, which some of a ship's ranges
     /// are gated on.
     pub version: Version,
@@ -382,6 +384,7 @@ pub fn bake_track(
         battle_start,
         battle_end,
         space_size,
+        map_name: map_name.clone(),
         version,
         map_origin,
     })

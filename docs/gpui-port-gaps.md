@@ -14,11 +14,9 @@ A feature is "absent" here only where a negative search for the egui symbol and
 its translation key was confirmed by reading the port's code path that would
 have used it.
 
-Every item is closed as of 2026-09-28. Two are closed as far as they go rather
-than matched: the renderer ladder (item 13) has nothing to port, because gpui
-chooses its own adapter and exposes no choice, and a peer watching the host's
-rendered frames (item 22) is an architecture this port does not have, since a
-peer here plays the battle back from its own copy.
+One item is open as of 2026-09-28: a viewport that draws frames a session sent
+it (item 22). This app can now be the end a session watches, but not one of the
+ends watching. Everything else is closed.
 
 ## Blocking: the port cannot do the thing it is for
 
@@ -135,7 +133,7 @@ peer here plays the battle back from its own copy.
     uses, the next launch reports what a crash left and offers to copy it, and the
     palette copies the newest log. `enable_logging` governs the file and now
     defaults on, as it does in the egui app.
-13. ~~**No renderer or adapter control.**~~ Closed 2026-09-28 as far as it goes.
+13. ~~**No renderer or adapter control.**~~ Done 2026-09-28.
     The process hardening is done
     2026-09-28: it moved to `crates/wows-toolkit-hardening`, which both front ends
     now apply -- extension points disabled, image loads restricted and code
@@ -150,13 +148,16 @@ peer here plays the battle back from its own copy.
     DX12 to dodge the DXGI window-drag stutter (`gpu/select.rs`, `main.rs:302-376`);
     gpui draws through Direct3D 11 on Windows and walks the adapters itself
     (`gpui-pre-windows`'s `directx_devices.rs`), with nothing an application can
-    choose, so there is no ladder to port and no ICD to pin. The armor viewport
-    still stands up its own `wgpu` device, which can land on a different adapter
-    than the UI; it now says which one it got, since nothing can make the two
-    agree. The port takes `--help` and `--version` and refuses the rest by name
-    (`crates/wows-toolkit-gpui/src/cli.rs`), reporting that the way a release build
-    can show it; the egui flags that pick a rung have nothing to pick here, and
-    the egui app has no preferred-adapter setting to read either.
+    choose, so there is no ladder to port and no ICD to pin.
+
+    The armor viewport stands up a `wgpu` device of its own, though, and that one
+    is the port's to pick: `--gpu-adapter NAME` puts it on the adapter whose name
+    contains NAME, `--cpu-renderer` puts it on WARP, `--list-gpus` says what this
+    machine offers and exits, and the device says in the log which adapter it got,
+    since nothing can make it and the window agree. `--no-hardening` skips the
+    process mitigations, which this port applies and had no way to turn off.
+    `--gpu-safe-mode` names a rung of the ladder that is not here, so it is still
+    refused by name rather than parsed and ignored.
 
 ## Reach: surfaces and entry points
 
@@ -308,22 +309,30 @@ peer here plays the battle back from its own copy.
 
 ## Detail: things that are ported but thinner
 
-22. ~~**Collab.**~~ Closed 2026-09-28 but for the client-frame viewports, which
-    are an architecture decision. The session notifications are done (2026-09-27): `poll` returns
+22. **Collab.** Everything but a frame-receiving viewport is done. The session
+    notifications are done (2026-09-27): `poll` returns
     typed `SessionNotice`s the header says after its draw -- started or connected
     by role, joined, left, timed out, ended, error, rejected, and the host
     opening or closing a replay. Done 2026-09-28: the popover lists what the
     session is on (`shared_windows`), and a debug build offers the localhost link
     beside the web one.
 
-    What the egui popover has and this does not is an Open button per shared
-    window, and with it "Open for everyone". Those exist because a peer there
-    watches the host's rendered frames; a peer here plays the battle back from its
-    own copy of the replay, which is better where they have it and impossible where
-    they do not. Closing that difference means a frame-receiving viewport
-    (`launch_client_renderer`), which is an architecture decision rather than a
-    missing control, and the spam-protection notice that stops a session opening
-    replays faster than a peer can read them belongs to those same viewports.
+    Done 2026-09-28: this app can be the end a session watches. A playback
+    announces itself with its map art (`SessionCommand::ReplayOpened`, then
+    `BecomeFrameSource`), broadcasts each frame as it draws it, and withdraws when
+    its window closes. The popover carries "Open for everyone" per shared window.
+    A frame is a `Vec<DrawCommand>` rather than an image, so each peer draws the
+    battle with its own art at its own size, and an egui peer or the web client
+    watching this app sees the battle it is playing.
+
+    Still missing is the other direction: a viewport that draws frames it is sent
+    rather than a replay it read, which is the per-window Open button and the
+    `open` string already in the catalogue. The shared client has the plumbing for
+    it (`ViewportSink`'s `frame_tx`), so this is a window type to write rather
+    than an architecture to change; earlier notes here called it the latter, on
+    the mistaken belief that frames were pixels. The spam-protection notice that
+    stops a session opening replays faster than a peer can read them belongs with
+    it, since it guards that viewport.
 
     The tactics board sync did not, and is done 2026-09-28. The popover carries
     the Tactics Board button, which opens the board the session is on. A board
