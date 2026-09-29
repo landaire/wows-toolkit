@@ -1811,7 +1811,7 @@ fn a_result_row_previews_only_after_the_pointer_settles(cx: &mut TestAppContext)
     window
         .update(cx, |app, _window, cx| {
             app.search().update(cx, |search, cx| {
-                search.hover_row(row.clone(), cx);
+                search.hover_row(row.clone(), gpui_kit::Point::default(), cx);
                 assert!(search.is_dwelling(), "the row is being watched");
                 assert_eq!(search.preview_frame_count(), None, "but nothing is baked yet");
             });
@@ -1837,11 +1837,11 @@ fn a_result_row_previews_only_after_the_pointer_settles(cx: &mut TestAppContext)
         .expect("the test window stays open");
 }
 
-/// The results strip is reserved as soon as a preview is coming, holding open
-/// water until the first frame lands: a strip that appeared with the frame would
-/// resize the results under the pointer that asked for it.
+/// The popup goes up as soon as a preview is coming, holding open water until
+/// the first frame lands, so the map arrives in place rather than the popup
+/// growing around it.
 #[gpui_kit::test]
-fn the_preview_strip_holds_its_space_before_the_first_frame(cx: &mut TestAppContext) {
+fn the_preview_popup_holds_its_space_before_the_first_frame(cx: &mut TestAppContext) {
     use std::path::PathBuf;
 
     let window = open_app(cx);
@@ -1849,7 +1849,7 @@ fn the_preview_strip_holds_its_space_before_the_first_frame(cx: &mut TestAppCont
     cx.update_window(window.into(), |_, window, cx| {
         show_tab(window, AppTab::Search, cx);
         window.render_frame(cx);
-        assert!(window.try_find("search-preview").is_none(), "nothing is hovered, so there is no strip");
+        assert!(window.try_find("search-preview").is_none(), "nothing is hovered, so there is no popup");
     })
     .expect("the test window stays open");
 
@@ -1864,7 +1864,7 @@ fn the_preview_strip_holds_its_space_before_the_first_frame(cx: &mut TestAppCont
 
     cx.update_window(window.into(), |_, window, cx| {
         window.render_frame(cx);
-        assert!(window.try_find("search-preview").is_some(), "the strip is up before anything has been baked");
+        assert!(window.try_find("search-preview").is_some(), "the popup is up before anything has been baked");
         assert!(
             window.try_find("search-preview-placeholder").is_some(),
             "holding the map's space rather than collapsing to nothing"

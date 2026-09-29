@@ -152,8 +152,13 @@ const SEARCH_SETTINGS_KEY: &str = "search";
 /// pulling an unbounded set into memory.
 const RESULT_LIMIT: i64 = 500;
 
-/// The preview's edge length. Square, as the minimap is.
-const PREVIEW_WIDTH: f32 = 240.;
+/// The preview's edge length. Square, as the minimap is, and the same figure the
+/// listing's own popup draws at so a hovered battle looks the same on either.
+const PREVIEW_WIDTH: f32 = 384.;
+
+/// How far to the right of the pointer the popup sits, so it does not cover the
+/// row being read. The listing's own offset.
+const PREVIEW_CURSOR_OFFSET: Pixels = px(24.);
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
@@ -357,6 +362,9 @@ pub struct SearchView {
     /// Hover-to-preview: the same behaviour the replay listing has
     /// (`preview_hover`), over the result rows.
     preview: crate::preview_hover::PreviewHover,
+    /// Where the pointer was when it entered the row being previewed, which is
+    /// what the popup is anchored to.
+    preview_anchor: Point<Pixels>,
     /// Game data for resolving a result's ship name in the current locale,
     /// rather than the one it was indexed in. Shared with the replay
     /// inspector, which already holds it.
@@ -435,6 +443,7 @@ impl SearchView {
             expr: None,
             on_disk: Vec::new(),
             preview: Default::default(),
+            preview_anchor: Point::default(),
             game_data: None,
             resolved_ships: HashMap::new(),
             game_mode_gap: None,
@@ -896,8 +905,9 @@ impl SearchView {
     }
 
     /// The pointer settled on `path`'s row: after the shared dwell, its
-    /// battle plays back under the results.
-    pub(crate) fn hover_row(&mut self, path: PathBuf, cx: &mut Context<Self>) {
+    /// battle plays back beside the pointer.
+    pub(crate) fn hover_row(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.preview_anchor = position;
         let cache = self.game_data.clone();
         // The index records a match's map under the name it displays, not the
         // one the art is stored under, so a result has no map to draw ahead of
@@ -1426,6 +1436,33 @@ fn cell_text(hit: &MatchHit, column: SortColumn) -> String {
     }
 }
 
+/// One labelled fact per line, as the listing's own popup draws them.
+fn preview_hover_grid(facts: &[wows_toolkit_viewmodel::listing_row::HoverFact]) -> impl IntoElement + use<> {
+    let label_color = crate::theme::text_dim();
+    v_flex().max_w(px(PREVIEW_WIDTH)).children(
+        facts
+            .iter()
+            .map(|fact| {
+                h_flex()
+                    .gap_2()
+                    .items_start()
+                    .child(
+                        div()
+                            .w(PREVIEW_LABEL_WIDTH)
+                            .flex_none()
+                            .text_xs()
+                            .text_color(label_color)
+                            .child(fact.label.clone()),
+                    )
+                    .child(div().flex_1().min_w(px(0.)).text_xs().child(fact.value.clone()))
+            })
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// How wide the labels beside the map are, so the values line up.
+const PREVIEW_LABEL_WIDTH: Pixels = px(64.);
+
 /// The tone a battle result is read in, or none for a result the index does
 /// not know.
 fn outcome_color(outcome: MatchOutcome) -> Option<Hsla> {
@@ -1804,12 +1841,13 @@ impl Render for SearchView {
                 .px_2()
                 .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                 .hover(|this| this.bg(hover_bg))
-                .on_hover(move |hovered, _window, cx| {
-                    let path = path.clone();
-                    let hovered = *hovered;
+                // Read off the window rather than an event: a hover flag carries
+                // no position, and the popup is anchored to the pointer.
+                .on_hover(move |hovered, window, cx| {
+                    let (path, hovered, at) = (path.clone(), *hovered, window.mouse_position());
                     panel.update(cx, |this, cx| {
                         if hovered {
-                            this.hover_row(path, cx);
+                            this.hover_row(path, at, cx);
                         } else {
                             this.leave_rows(cx);
                         }
@@ -1842,10 +1880,10 @@ impl Render for SearchView {
                 .into_any_element()
         };
 
-        // The dwelled row's battle, played back. The strip goes up as soon as a
-        // bake starts, holding open water until the first frame lands: a strip
-        // that appeared with the frame would resize the results under the
-        // pointer that asked for it.
+        // The dwelled row's battle, played back beside the pointer. The popup
+        // goes up as soon as a bake starts, holding open water until the first
+        // frame lands, so the map arrives in place rather than the popup growing
+        // around it.
         let preview_art: Option<AnyElement> = match self.preview.frame() {
             Some(frame) => Some(img(frame).w(px(PREVIEW_WIDTH)).h(px(PREVIEW_WIDTH)).into_any_element()),
             None if self.preview.awaits_preview() => Some(
@@ -1876,8 +1914,36 @@ impl Render for SearchView {
                     .into_any_element()
             }),
         };
-        let preview = preview_art.map(|art| {
-            div().id("search-preview").test_support().flex_none().p_1().border_t_1().border_color(border).child(art)
+        // What the hovered row says, beside the map: the detail the columns have
+        // no room for, worded by the reading both surfaces share.
+        let preview_facts = self.preview.watched_path().and_then(|path| {
+            let hit = self.hits.iter().find(|hit| hit.replay_path == path)?;
+            let live = hit.version_build.zip(hit.self_ship_id).and_then(|key| self.resolved_ships.get(&key)).cloned();
+            let ship = ship_display_name(hit, live).unwrap_or_else(|| "-".to_string());
+            Some(wows_toolkit_viewmodel::listing_row::hover_facts_for_match(hit, ship, None))
+        });
+        // Floating at the pointer rather than in a strip of its own: a battle is
+        // read beside the row it belongs to, and a strip at the foot of the tab
+        // resized the results under the pointer that asked for it.
+        let preview = (preview_art.is_some() || preview_facts.is_some()).then(|| {
+            let theme = cx.theme();
+            let anchor = point(self.preview_anchor.x + PREVIEW_CURSOR_OFFSET, self.preview_anchor.y);
+            deferred(
+                anchored().position(anchor).snap_to_window_with_margin(px(8.)).child(
+                    v_flex()
+                        .id("search-preview")
+                        .test_support()
+                        .gap_1()
+                        .p_1()
+                        .rounded(theme.radius)
+                        .border_1()
+                        .border_color(theme.border)
+                        .bg(theme.background)
+                        .children(preview_art)
+                        .when_some(preview_facts, |this, facts| this.child(preview_hover_grid(&facts))),
+                ),
+            )
+            .with_priority(1)
         });
 
         let status = match &self.state {
@@ -1977,7 +2043,7 @@ impl Render for SearchView {
             )
             .child(header)
             .child(div().flex_1().min_h(px(0.)).child(body))
-            .when_some(preview, |this, preview| this.child(preview))
             .child(footer)
+            .when_some(preview, |this, preview| this.child(preview))
     }
 }
