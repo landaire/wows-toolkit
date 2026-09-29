@@ -969,6 +969,71 @@ fn the_search_tab_invites_a_query_before_one_is_run(cx: &mut TestAppContext) {
     .expect("the test window stays open");
 }
 
+/// The completions are an answer to typing, not a panel that sits over the
+/// results: they arrive with the first edit made in the box and go away on a
+/// press anywhere off them.
+#[gpui_kit::test]
+fn the_query_bar_offers_completions_only_once_it_is_typed_in(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    // Typed from a real suggestion, so the test keeps exercising something
+    // when the vocabulary changes.
+    let first = wows_toolkit_viewmodel::query_bar::suggest::static_suggestions()
+        .first()
+        .expect("there are suggestions")
+        .label
+        .clone();
+    let needle: String = first.chars().take(3).collect();
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-completions").is_none(), "nothing is offered before the box is typed in");
+
+        window.click(SEARCH_QUERY, cx);
+        window.input(&needle, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-completions").is_some(), "typing offers what may follow it");
+
+        // Anywhere off the dropdown, which includes the box that opened it.
+        window.click(SEARCH_QUERY, cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-completions").is_none(), "a press off the dropdown puts it away");
+    })
+    .expect("the test window stays open");
+}
+
+/// Running a query is an answer to what the dropdown was offering, so it does
+/// not come back over the results: committing empties the box, and an empty
+/// box matches every suggestion there is.
+#[gpui_kit::test]
+fn running_a_query_does_not_leave_the_completions_over_the_results(cx: &mut TestAppContext) {
+    let window = open_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::Search, cx);
+        window.click(SEARCH_QUERY, cx);
+        window.input("outcome=win", cx);
+        window.render_frame(cx);
+
+        window.click("search-run", cx);
+        window.render_frame(cx);
+        assert!(
+            window.try_find("search-completions").is_none(),
+            "the query was run, so the dropdown is not still offering what might follow it"
+        );
+
+        // And the same for Enter, which is the other way to run one.
+        window.click(SEARCH_QUERY, cx);
+        window.input("outcome=loss", cx);
+        window.render_frame(cx);
+        window.press("enter", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("search-completions").is_none(), "nor after Enter");
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn a_query_that_does_not_parse_is_reported_rather_than_searched_for(cx: &mut TestAppContext) {
     let window = open_app(cx);
