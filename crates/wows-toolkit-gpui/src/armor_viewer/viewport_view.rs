@@ -570,7 +570,7 @@ pub struct ViewportView {
     /// reselecting a scheme (or the popover reopening) does not re-decode.
     /// Reset (cleared) whenever a new ship loads -- a cached decode from a
     /// previous ship is meaningless for a different ship's `CamoTextureSource`.
-    camo_texture_cache: HashMap<CamoSchemeId, SchemeTextures>,
+    camo_texture_cache: CamoTextureCache,
     /// Bumped by every camo selection and by every armor swap, so a decode
     /// that lands after the reader moved on (or after the ship changed under
     /// it) is dropped rather than applied to the wrong hull.
@@ -820,7 +820,7 @@ impl ViewportView {
             selected_modules: HashMap::new(),
             reload_generation: 0,
             selected_camo: None,
-            camo_texture_cache: HashMap::new(),
+            camo_texture_cache: CamoTextureCache::default(),
             camo_generation: 0,
             active_camo_textures: HashMap::new(),
             active_camo_uvs: HashMap::new(),
@@ -3113,7 +3113,7 @@ impl ViewportView {
         // which is far too much work to do between two frames; the hull keeps
         // the camo it has until the new one lands.
         let generation = self.camo_generation;
-        let cached = self.camo_texture_cache.get(&id).cloned();
+        let cached = self.camo_texture_cache.get(id);
         cx.spawn(async move |this, cx| {
             let decode = cx.background_spawn(async move { decode_active_camo(id, cached, &armor) }).await;
             let _ = this.update(cx, |this, cx| this.apply_camo_decode(generation, id, decode, cx));
@@ -3844,16 +3844,52 @@ fn remap_camo_selection(
 /// rather than through `&mut self`.
 fn recompute_active_camo(
     selected_camo: Option<CamoSchemeId>,
-    camo_texture_cache: &mut HashMap<CamoSchemeId, SchemeTextures>,
+    camo_texture_cache: &mut CamoTextureCache,
     armor: &LoadedShipArmor,
 ) -> (CamoTextures, HashMap<String, UvTransform>) {
     let Some(id) = selected_camo else { return (HashMap::new(), HashMap::new()) };
-    let cached = camo_texture_cache.get(&id).cloned();
+    let cached = camo_texture_cache.get(id);
     let decode = decode_active_camo(id, cached, armor);
     if let Some(textures) = decode.decoded {
         camo_texture_cache.insert(id, textures);
     }
     (decode.textures, decode.uvs)
+}
+
+/// How many schemes' decoded textures are kept. One scheme is several
+/// full-size textures, so a reader stepping through a ship's camo list would
+/// otherwise hold every one of them until the ship changes.
+const CAMO_TEXTURE_CACHE_SIZE: usize = 3;
+
+/// Decoded scheme textures, most recently used last.
+///
+/// Shared by `Arc`: a hit hands the decoder the same textures rather than a
+/// copy of every one of them, which is what reselecting a scheme used to cost.
+#[derive(Default)]
+struct CamoTextureCache {
+    entries: Vec<(CamoSchemeId, Arc<SchemeTextures>)>,
+}
+
+impl CamoTextureCache {
+    fn get(&mut self, id: CamoSchemeId) -> Option<Arc<SchemeTextures>> {
+        let at = self.entries.iter().position(|(held, _)| *held == id)?;
+        let entry = self.entries.remove(at);
+        let textures = Arc::clone(&entry.1);
+        self.entries.push(entry);
+        Some(textures)
+    }
+
+    fn insert(&mut self, id: CamoSchemeId, textures: Arc<SchemeTextures>) {
+        self.entries.retain(|(held, _)| *held != id);
+        self.entries.push((id, textures));
+        while self.entries.len() > CAMO_TEXTURE_CACHE_SIZE {
+            self.entries.remove(0);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
 }
 
 /// Per-hull-part composited camo textures, keyed as
@@ -3865,7 +3901,7 @@ struct CamoDecode {
     /// The scheme's own textures, when this run decoded them; a run that was
     /// handed them from the cache leaves this `None`, since the caller
     /// already holds them.
-    decoded: Option<SchemeTextures>,
+    decoded: Option<Arc<SchemeTextures>>,
     /// Empty means "render base albedo only", which is what stock looks
     /// like.
     textures: CamoTextures,
@@ -3881,7 +3917,7 @@ struct CamoDecode {
 /// ([`ViewportView::select_camo`]) as well as inline
 /// ([`recompute_active_camo`], which the reload path uses because it is
 /// already re-uploading the hull in the same pass).
-fn decode_active_camo(id: CamoSchemeId, cached: Option<SchemeTextures>, armor: &LoadedShipArmor) -> CamoDecode {
+fn decode_active_camo(id: CamoSchemeId, cached: Option<Arc<SchemeTextures>>, armor: &LoadedShipArmor) -> CamoDecode {
     let (textures, decoded) = match cached {
         Some(t) => (t, None),
         None => match armor.camo_source.decode(id) {
@@ -3889,7 +3925,8 @@ fn decode_active_camo(id: CamoSchemeId, cached: Option<SchemeTextures>, armor: &
                 if t.is_empty() {
                     tracing::warn!("camo scheme {id:?} decoded to zero textures for this ship; rendering as stock");
                 }
-                (t.clone(), Some(t))
+                let t = Arc::new(t);
+                (Arc::clone(&t), Some(t))
             }
             Err(e) => {
                 tracing::warn!("failed to decode camo scheme {id:?}: {e}");
