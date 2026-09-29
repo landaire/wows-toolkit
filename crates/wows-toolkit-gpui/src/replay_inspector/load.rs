@@ -72,6 +72,7 @@ use wows_toolkit_viewmodel::replay_export::Match as ExportedMatch;
 use wows_toolkit_viewmodel::stats::PerGameStat;
 use wowsunpack::data::ResourceLoader;
 use wowsunpack::data::Version;
+use wowsunpack::game_data::AssetsBin;
 use wowsunpack::game_params::cache as game_params_cache;
 use wowsunpack::game_params::provider::GameMetadataProvider;
 use wowsunpack::game_params::types::GameParamProvider;
@@ -156,12 +157,24 @@ fn load_dump_translations(cas: &BuildCas) -> Option<Catalog> {
 }
 
 /// One installed build's `GameMetadataProvider` and base `GameConstants`
+/// The `assets.bin` overlay and the blob both its layers read, built together
+/// so the blob is read once rather than once per reader.
+struct AssetsLayer {
+    vfs: VfsPath,
+    bytes: Option<Arc<Vec<u8>>>,
+}
+
 /// (before a replay's own versioned-constants overrides are merged in).
 /// Building this loads that whole build's game data; see [`GameDataCache`].
 pub struct LoadedGameData {
     provider: Arc<GameMetadataProvider>,
     base_constants: GameConstants,
     vfs: VfsPath,
+    /// The same VFS with `content/assets.bin` overlaid, built on the first
+    /// call to [`Self::vfs_with_assets`]. Kept apart from `vfs` because the
+    /// overlay reads the whole 174 MiB blob onto the heap and indexes it, and
+    /// almost nothing here addresses the paths inside it.
+    assets_vfs: OnceLock<AssetsLayer>,
     /// The build this data is for. A dump of a different build of the same
     /// version reports its own, which is what a per-build cache is keyed by.
     build: u32,
@@ -193,21 +206,52 @@ impl LoadedGameData {
         &self.vfs
     }
 
+    /// The same VFS, with the paths inside `content/assets.bin` resolvable.
+    ///
+    /// Built on first use and then shared: a reader who never opens the armor
+    /// viewer never pays for it. Falls back to the package VFS when the
+    /// overlay cannot be built, which is what a caller reading a path the
+    /// packages also hold would have got anyway.
+    pub fn vfs_with_assets(&self) -> &VfsPath {
+        &self.assets_layer().vfs
+    }
+
+    /// The `assets.bin` blob behind [`Self::vfs_with_assets`], for a caller
+    /// that parses it rather than addressing paths in it. Shared with the
+    /// overlay, so the blob is held once. `None` when this build has none.
+    pub fn assets_bin_bytes(&self) -> Option<&Arc<Vec<u8>>> {
+        self.assets_layer().bytes.as_ref()
+    }
+
+    fn assets_layer(&self) -> &AssetsLayer {
+        self.assets_vfs.get_or_init(|| match wowsunpack::game_data::overlay_assets_bin(&self.vfs) {
+            Some(overlay) => AssetsLayer { vfs: overlay.vfs, bytes: Some(overlay.bytes) },
+            None => {
+                tracing::warn!(build = self.build, "no readable assets.bin; using the package VFS");
+                AssetsLayer { vfs: self.vfs.clone(), bytes: None }
+            }
+        })
+    }
+
     /// Loads `build`'s game data from `wows_dir`. Callers are expected to
     /// have already checked `build` is present under `bin/` (see
     /// [`GameDataCache::get_or_load_build`]); this only reports the errors
     /// that can still occur while actually reading that build's files.
     fn load_build(wows_dir: &Path, build: u32) -> Result<Self, ReplayLoadError> {
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build)
+        crate::heap_profile::mark(&format!("build{build}.begin"));
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(wows_dir, build, AssetsBin::Omit)
             .map_err(|e| ReplayLoadError::GameData(e.to_string()))?;
+        crate::heap_profile::mark(&format!("build{build}.vfs"));
         let provider = Self::load_provider(&vfs, build)?;
+        crate::heap_profile::mark(&format!("build{build}.params"));
         if let Some(catalog) = load_translations_catalog(wows_dir, build) {
             provider.set_translations(catalog);
         }
         let provider = Arc::new(provider);
         let base_constants = GameConstants::from_vfs(&vfs);
+        crate::heap_profile::mark(&format!("build{build}.done"));
 
-        Ok(Self { provider, base_constants, vfs, build })
+        Ok(Self { provider, base_constants, vfs, assets_vfs: OnceLock::new(), build })
     }
 
     /// Loads a build out of the game-data cache, for a replay recorded on one
@@ -253,7 +297,7 @@ impl LoadedGameData {
 
         let base_constants = GameConstants::from_vfs(&vfs);
 
-        Ok(Self { provider: Arc::new(provider), base_constants, vfs, build: dump_build })
+        Ok(Self { provider: Arc::new(provider), base_constants, vfs, assets_vfs: OnceLock::new(), build: dump_build })
     }
 
     /// Loads `build`'s `GameMetadataProvider`, preferring the on-disk
@@ -678,7 +722,10 @@ fn preload_current_build(wows_dir: &Path, game_data: &GameDataCache) -> Result<A
 /// result back into an entity's state) rather than blocking on it.
 pub fn spawn_startup_preload(wows_dir: PathBuf, game_data: GameDataCache, cx: &App) -> Task<GameDataStatus> {
     cx.background_spawn(async move {
-        match preload_current_build(&wows_dir, &game_data) {
+        crate::heap_profile::mark("startup_preload.begin");
+        let preloaded = preload_current_build(&wows_dir, &game_data);
+        crate::heap_profile::mark("startup_preload.done");
+        match preloaded {
             Ok(loaded) => GameDataStatus::Ready(loaded),
             Err(reason) => {
                 tracing::warn!(wows_dir = %wows_dir.display(), %reason, "startup game-data preload failed");
@@ -1439,7 +1486,8 @@ dumped_at = "2026-01-01T00:00:00Z"
             .into_iter()
             .max()
             .expect("the install has at least one build");
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build).expect("the build's VFS opens");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&dir, build, AssetsBin::Omit)
+            .expect("the build's VFS opens");
 
         let params = load_game_params(&vfs, build).expect("the build's parameters load");
         assert!(!params.is_empty(), "a real install decodes to at least one parameter");

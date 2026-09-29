@@ -781,8 +781,12 @@ mod tests {
             wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
         let build = *available.last().expect("expected at least one installed build");
 
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&wows_dir, build)
-            .expect("failed to build the game VFS for the latest installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the game VFS for the latest installed build");
         let metadata = Arc::new(
             wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
                 .expect("failed to build GameMetadataProvider from the VFS"),
@@ -838,7 +842,12 @@ mod tests {
         let available =
             wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
         let build = *available.last().expect("expected at least one installed build");
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&wows_dir, build).expect("failed to build the VFS");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the VFS");
         let metadata = Arc::new(
             wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
                 .expect("failed to build GameMetadataProvider from the VFS"),
@@ -892,8 +901,12 @@ mod tests {
             wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
         let build = *available.last().expect("expected at least one installed build");
 
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&wows_dir, build)
-            .expect("failed to build the game VFS for the latest installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the game VFS for the latest installed build");
         let metadata = Arc::new(
             wowsunpack::game_params::provider::GameMetadataProvider::from_vfs(&vfs)
                 .expect("failed to build GameMetadataProvider from the VFS"),

@@ -213,7 +213,8 @@ pub fn dump_renderer_data(
             .attach_with(|| format!("Failed to clean up partial dump at {}", output_dir.display()))?;
     }
 
-    let vfs = game_data::build_game_vfs_for_build(game_dir, build).attach_with(|| "Failed to build game VFS")?;
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build, game_data::AssetsBin::Overlay)
+        .attach_with(|| "Failed to build game VFS")?;
 
     // Extract VFS files through CAS
     let mut file_hashes: BTreeMap<String, String> = BTreeMap::new();
@@ -339,7 +340,8 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
     let mut metadata =
         BuildMetadata::load(&meta_path).ok_or_else(|| report!("{} has no readable metadata.toml", entry.dir))?;
 
-    let vfs = game_data::build_game_vfs_for_build(game_dir, build).attach_with(|| "Failed to build game VFS")?;
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build, game_data::AssetsBin::Overlay)
+        .attach_with(|| "Failed to build game VFS")?;
 
     if with_gui {
         // Only the `gui/` dirs live in the gui package; re-extracting other
@@ -374,7 +376,7 @@ pub fn complete_build(game_dir: &Path, build: u32, output_base: &Path, with_gui:
 
 /// Create a configured progress bar for CLI use.
 pub fn create_progress_bar(game_dir: &Path) -> Option<ProgressBar> {
-    let vfs = game_data::build_game_vfs(game_dir).ok()?;
+    let vfs = game_data::build_game_vfs(game_dir, game_data::AssetsBin::Overlay).ok()?;
     let mut total_files = 0u64;
     for dir in VFS_DIRS {
         total_files += count_vfs_dir_files(&vfs, dir);

@@ -264,7 +264,8 @@ struct Geometry {
 
 impl Geometry {
     fn load() -> Geometry {
-        let vfs = wowsunpack::game_data::build_game_vfs(&game_dir()).expect("game install vfs");
+        let vfs = wowsunpack::game_data::build_game_vfs(&game_dir(), wowsunpack::game_data::AssetsBin::Omit)
+            .expect("game install vfs");
         let mut file = vfs.join("content/assets.bin").expect("assets.bin path").open_file().expect("open assets.bin");
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(&mut file, &mut bytes).expect("read assets.bin");

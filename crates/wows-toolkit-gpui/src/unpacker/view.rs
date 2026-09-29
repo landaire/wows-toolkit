@@ -360,7 +360,12 @@ impl UnpackerView {
         cx.spawn_in(window, async move |this, cx| {
             let loaded = cx
                 .background_spawn(async move {
-                    wowsunpack::game_data::build_game_vfs_for_build(&dir, build.0).map_err(|err| format!("{err}"))
+                    wowsunpack::game_data::build_game_vfs_for_build(
+                        &dir,
+                        build.0,
+                        wowsunpack::game_data::AssetsBin::Overlay,
+                    )
+                    .map_err(|err| format!("{err}"))
                 })
                 .await;
 

@@ -75,11 +75,17 @@ pub struct ArmorAssetsBundle {
 /// callers run it off the UI thread (see [`spawn_load_armor_assets`]).
 fn load_armor_assets(
     vfs: &VfsPath,
+    assets_bin_bytes: Option<&Arc<Vec<u8>>>,
     metadata: &Arc<GameMetadataProvider>,
     svg_renderer: &SvgRenderer,
 ) -> Result<ArmorAssetsBundle, ArmorAssetsError> {
-    let assets = ShipAssets::from_vfs_with_metadata(vfs, Arc::clone(metadata))
-        .map_err(|report| ArmorAssetsError::ShipAssets(format!("{report:?}")))?;
+    // The overlay already holds the blob; reading it again would hold 174 MiB
+    // of it twice.
+    let assets = match assets_bin_bytes {
+        Some(bytes) => ShipAssets::from_parts(vfs, Arc::clone(metadata), Arc::clone(bytes)),
+        None => ShipAssets::from_vfs_with_metadata(vfs, Arc::clone(metadata))
+            .map_err(|report| ArmorAssetsError::ShipAssets(format!("{report:?}")))?,
+    };
 
     let catalog = ShipCatalog::build(metadata);
 
@@ -130,7 +136,9 @@ pub fn spawn_load_armor_assets(
     cx: &App,
 ) -> Task<Result<ArmorAssetsBundle, ArmorAssetsError>> {
     let svg_renderer = cx.svg_renderer();
-    cx.background_spawn(async move { load_armor_assets(loaded.vfs(), loaded.provider(), &svg_renderer) })
+    cx.background_spawn(async move {
+        load_armor_assets(loaded.vfs_with_assets(), loaded.assets_bin_bytes(), loaded.provider(), &svg_renderer)
+    })
 }
 
 #[cfg(test)]
@@ -160,13 +168,19 @@ mod tests {
             wowsunpack::game_data::list_available_builds(&wows_dir).expect("failed to list installed builds");
         let build = *available.last().expect("expected at least one installed build");
 
-        let vfs = wowsunpack::game_data::build_game_vfs_for_build(&wows_dir, build)
-            .expect("failed to build the game VFS for the latest installed build");
+        let vfs = wowsunpack::game_data::build_game_vfs_for_build(
+            &wows_dir,
+            build,
+            wowsunpack::game_data::AssetsBin::Overlay,
+        )
+        .expect("failed to build the game VFS for the latest installed build");
         let metadata =
             Arc::new(GameMetadataProvider::from_vfs(&vfs).expect("failed to build GameMetadataProvider from the VFS"));
         let svg_renderer = SvgRenderer::new(Arc::new(()));
 
-        let bundle = load_armor_assets(&vfs, &metadata, &svg_renderer).expect("failed to load armor assets");
+        // The VFS this test builds carries the overlay, so `ShipAssets` reads the
+        // blob out of it: the shared-bytes path is what the app takes.
+        let bundle = load_armor_assets(&vfs, None, &metadata, &svg_renderer).expect("failed to load armor assets");
 
         let total_ships: usize = bundle.catalog.nations.iter().flat_map(|n| &n.classes).map(|c| c.ships.len()).sum();
         let total_classes: usize = bundle.catalog.nations.iter().map(|n| n.classes.len()).sum();

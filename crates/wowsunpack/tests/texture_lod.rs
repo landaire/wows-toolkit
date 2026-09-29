@@ -21,7 +21,7 @@ fn game_dir() -> PathBuf {
 }
 
 fn vfs() -> vfs::VfsPath {
-    wowsunpack::game_data::build_game_vfs(&game_dir()).expect("game vfs")
+    wowsunpack::game_data::build_game_vfs(&game_dir(), wowsunpack::game_data::AssetsBin::Overlay).expect("game vfs")
 }
 
 fn capped(pixels: u32) -> TextureLod {

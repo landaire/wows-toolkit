@@ -18,7 +18,7 @@ fn game_dir() -> PathBuf {
 }
 
 fn game_vfs() -> VfsPath {
-    wowsunpack::game_data::build_game_vfs(&game_dir()).expect("build game vfs")
+    wowsunpack::game_data::build_game_vfs(&game_dir(), wowsunpack::game_data::AssetsBin::Omit).expect("build game vfs")
 }
 
 fn read_assets_bin(vfs: &VfsPath) -> Vec<u8> {

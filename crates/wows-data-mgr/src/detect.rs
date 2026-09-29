@@ -18,7 +18,7 @@ pub fn detect_version_for_build(data_dir: &Path, build: u32) -> Result<String, R
 /// Only builds the VFS and reads Account.def — does NOT parse entity specs,
 /// which makes this work on old game versions with incompatible entity formats.
 pub fn detect_version_at_path(game_dir: &Path, build: u32) -> Result<String, Report> {
-    let vfs = game_data::build_game_vfs_for_build(game_dir, build)
+    let vfs = game_data::build_game_vfs_for_build(game_dir, build, game_data::AssetsBin::Omit)
         .attach_with(|| format!("Failed to build VFS for build {build} at {}", game_dir.display()))?;
 
     let account_def_path = "scripts/entity_defs/Account.def";

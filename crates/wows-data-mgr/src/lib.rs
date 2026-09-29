@@ -198,7 +198,7 @@ pub fn vfs_for_build(build: u32) -> Option<VfsPath> {
     if dump.has_game_files() {
         return Some(dump.vfs());
     }
-    game_data::build_game_vfs(&game_dir).ok()
+    game_data::build_game_vfs(&game_dir, game_data::AssetsBin::Omit).ok()
 }
 
 /// Returns the latest available build number and its VFS.
