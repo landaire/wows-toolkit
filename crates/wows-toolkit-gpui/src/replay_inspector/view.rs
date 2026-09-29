@@ -171,6 +171,9 @@ pub struct ReplayInspectorView {
     /// The playback viewports open, one per replay, for the same reason
     /// `open_panels` exists: a second ask brings the tab forward.
     open_renderers: HashMap<PathBuf, WeakEntity<ReplayRendererPanel>>,
+    /// The viewports onto battles the session is playing elsewhere, keyed by the
+    /// window each draws, so a second ask brings the open one forward.
+    watched: HashMap<u64, WeakEntity<crate::watched_playback::WatchedPlayback>>,
     /// The directories open as tabs of their own, so one is brought forward
     /// rather than listed twice.
     open_workspaces: HashMap<PathBuf, WeakEntity<super::workspace::ReplayWorkspace>>,
@@ -364,6 +367,7 @@ impl ReplayInspectorView {
             open_panels: HashMap::new(),
             current_replay: None,
             open_renderers: HashMap::new(),
+            watched: HashMap::new(),
             open_workspaces: HashMap::new(),
             install_dir: String::new(),
             workspace_events: Vec::new(),
@@ -1455,6 +1459,51 @@ impl ReplayInspectorView {
         self.collab.link()
     }
 
+    /// Opens a viewport on a battle the session is playing elsewhere.
+    ///
+    /// For a reader with no copy of that replay, which is the whole reason the
+    /// end that has it sends what it draws. One viewport per window: asking
+    /// twice brings the open one forward rather than drawing the same frames
+    /// into two panels.
+    pub fn watch_shared_window(
+        &mut self,
+        shared: crate::collab::SharedWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let replay_id = shared.replay_id;
+        if let Some(open) = self.watched.get(&replay_id).and_then(|panel| panel.upgrade()) {
+            let id = PanelId::from(open.entity_id());
+            self.dock_area.update(cx, |dock_area, cx| dock_area.select_panel(id, window, cx));
+            cx.notify();
+            return;
+        }
+        let link = self.collab.link();
+        let game_data = self.game_data();
+        let panel = cx.new(|cx| crate::watched_playback::WatchedPlayback::new(shared, link, game_data, cx));
+        self.watched.insert(replay_id, panel.downgrade());
+        self.dock_area.update(cx, |dock_area, cx| {
+            dock_area.add_panel_view(panel_handle(panel), DockPlacement::Center, None, window, cx);
+        });
+        cx.notify();
+    }
+
+    /// Opens what the host has asked every peer to open.
+    ///
+    /// Read as the session is polled rather than once when it starts: the ask
+    /// arrives whenever the host makes it.
+    fn open_what_the_host_asked_for(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let asked = self.collab.link().take_forced_windows();
+        if asked.is_empty() {
+            return;
+        }
+        let shared = self.collab.shared_windows();
+        for window_id in asked {
+            let Some(found) = shared.iter().find(|one| one.replay_id == window_id).cloned() else { continue };
+            self.watch_shared_window(found, window, cx);
+        }
+    }
+
     /// Answers a viewport that asked for a window of its own, or for an
     /// armor viewer on one of the battle's ships.
     fn on_renderer_event(
@@ -1836,6 +1885,7 @@ impl Render for ReplayInspectorView {
             });
         }
         self.share_session_with_renderers(cx);
+        cx.defer_in(window, Self::open_what_the_host_asked_for);
         let session = crate::collab_popover::render(self, &entity, cx);
         let replay_header = h_flex()
             .flex_none()
@@ -1959,6 +2009,15 @@ impl crate::collab_popover::SessionHost for ReplayInspectorView {
 
     fn request_tactics_board(&mut self, cx: &mut Context<Self>) {
         cx.emit(TacticsBoardRequested);
+    }
+
+    fn watch_shared_window(
+        &mut self,
+        shared: crate::collab::SharedWindow,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        ReplayInspectorView::watch_shared_window(self, shared, window, cx);
     }
 }
 

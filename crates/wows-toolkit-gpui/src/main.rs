@@ -45,6 +45,7 @@ mod unpacker;
 mod update;
 mod upload;
 mod viewport;
+mod watched_playback;
 mod window_shell;
 
 use app::App;
