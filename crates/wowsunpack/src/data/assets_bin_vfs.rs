@@ -102,7 +102,7 @@ struct FileLocation {
 /// Paths match the game's resource paths (e.g. `content/gameplay/.../foo.visual`).
 #[derive(Debug)]
 pub struct AssetsBinVfs {
-    data: Vec<u8>,
+    data: std::sync::Arc<Vec<u8>>,
     files: HashMap<String, FileLocation>,
     dirs: HashMap<String, Vec<String>>,
 }
@@ -146,9 +146,23 @@ impl AssetsBinVfs {
     /// prototype record to its byte range within `data`, then discards
     /// the parsed database. Only the raw bytes and the index are retained.
     pub fn new(data: Vec<u8>) -> Result<Self, rootcause::Report<AssetsBinError>> {
+        Self::from_shared(std::sync::Arc::new(data))
+    }
+
+    /// The same, over a blob the caller already holds.
+    ///
+    /// The blob is 174 MiB, and a reader who opens the armor viewer needs it
+    /// both as paths (here) and as bytes ([`Self::bytes`]); sharing one copy is
+    /// what keeps it from being held twice.
+    pub fn from_shared(data: std::sync::Arc<Vec<u8>>) -> Result<Self, rootcause::Report<AssetsBinError>> {
         let db = assets_bin::parse_assets_bin(&data)?;
         let (files, dirs) = Self::build_index(&db, &data);
         Ok(Self { data, files, dirs })
+    }
+
+    /// The raw blob this VFS indexes, for a caller that also needs to parse it.
+    pub fn bytes(&self) -> &std::sync::Arc<Vec<u8>> {
+        &self.data
     }
 
     fn build_index(

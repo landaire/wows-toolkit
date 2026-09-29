@@ -221,9 +221,17 @@ impl ShipAssets {
             .context("Could not find content/assets.bin in VFS")?
             .read_to_end(&mut assets_bin_bytes)?;
 
-        let camo_db = CamouflageDb::load(vfs);
+        Ok(Self::from_parts(vfs, metadata, Arc::new(assets_bin_bytes)))
+    }
 
-        Ok(Self { assets_bin_bytes: Arc::new(assets_bin_bytes), vfs: vfs.clone(), metadata, camo_db })
+    /// The same, over an `assets.bin` blob the caller already holds.
+    ///
+    /// A caller whose VFS carries the `assets.bin` overlay already has the blob
+    /// (`game_data::AssetsOverlay::bytes`); reading it again would hold 174 MiB
+    /// of it twice.
+    pub fn from_parts(vfs: &VfsPath, metadata: Arc<GameMetadataProvider>, assets_bin_bytes: Arc<Vec<u8>>) -> Self {
+        let camo_db = CamouflageDb::load(vfs);
+        Self { assets_bin_bytes, vfs: vfs.clone(), metadata, camo_db }
     }
 
     /// Load shared assets directly from a World of Warships installation directory.
@@ -234,7 +242,7 @@ impl ShipAssets {
     ///
     /// For callers who already have a VFS, use [`Self::load`] instead.
     pub fn from_game_dir(game_dir: &Path) -> Result<Self, Report> {
-        let vfs = crate::game_data::build_game_vfs(game_dir)?;
+        let vfs = crate::game_data::build_game_vfs(game_dir, crate::game_data::AssetsBin::Overlay)?;
         Self::load(&vfs)
     }
 

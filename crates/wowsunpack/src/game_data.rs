@@ -97,24 +97,39 @@ pub fn translations_path(game_dir: &Path, build: u32) -> PathBuf {
     game_dir.join("bin").join(build.to_string()).join("res/texts/en/LC_MESSAGES/global.mo")
 }
 
+/// Whether a built VFS carries the `content/assets.bin` overlay.
+///
+/// The overlay costs 213 MiB per build: the whole blob is read onto the heap
+/// and kept there, plus an index of the paths inside it. Only a caller that
+/// resolves those inner paths needs it, and a caller that reads
+/// `content/assets.bin` as a file (which is what
+/// [`crate::export::ship::ShipAssets`] does) reads it out of the package layer
+/// either way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssetsBin {
+    /// Paths inside `assets.bin` resolve against the returned VFS.
+    Overlay,
+    /// Only what the packages hold. `content/assets.bin` is still readable as
+    /// a file; its contents are not addressable as paths.
+    Omit,
+}
+
 /// Build a VFS from a World of Warships installation directory.
 ///
-/// Uses the latest build in `bin/`, loads all idx files, and overlays
-/// `assets.bin` on top of the package VFS so that asset paths resolve
-/// correctly.
+/// Uses the latest build in `bin/` and loads all idx files.
 ///
 /// This is the same VFS setup used by the CLI. If you already have a
 /// [`VfsPath`], pass it directly to [`crate::export::ship::ShipAssets::load`]
 /// instead.
-pub fn build_game_vfs(game_dir: &Path) -> Result<VfsPath, Report> {
+pub fn build_game_vfs(game_dir: &Path, assets: AssetsBin) -> Result<VfsPath, Report> {
     let builds = list_available_builds(game_dir).attach_with(|| format!("game_dir: {}", game_dir.display()))?;
     let latest_build =
         *builds.last().ok_or_else(|| rootcause::report!("No builds found in {}/bin", game_dir.display()))?;
-    build_game_vfs_for_build(game_dir, latest_build)
+    build_game_vfs_for_build(game_dir, latest_build, assets)
 }
 
 /// Build a VFS from a specific build number's idx files.
-pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, Report> {
+pub fn build_game_vfs_for_build(game_dir: &Path, build: u32, assets: AssetsBin) -> Result<VfsPath, Report> {
     let idx_dir = game_dir.join("bin").join(build.to_string()).join("idx");
     if !idx_dir.exists() {
         bail!("idx directory not found: {}", idx_dir.display());
@@ -204,22 +219,40 @@ pub fn build_game_vfs_for_build(game_dir: &Path, build: u32) -> Result<VfsPath, 
         }
     }
 
-    // Overlay assets.bin on top of the package VFS.
+    if assets == AssetsBin::Omit {
+        return Ok(pkg_vfs);
+    }
+
+    Ok(overlay_assets_bin(&pkg_vfs).map(|overlay| overlay.vfs).unwrap_or(pkg_vfs))
+}
+
+/// A package VFS with `assets.bin` over it, and the blob both layers read.
+pub struct AssetsOverlay {
+    /// The overlaid VFS: paths inside `assets.bin` resolve against it.
+    pub vfs: VfsPath,
+    /// The raw blob, shared with the overlay rather than read a second time.
+    pub bytes: std::sync::Arc<Vec<u8>>,
+}
+
+/// `pkg_vfs` with the paths inside its `content/assets.bin` resolvable.
+///
+/// Separate from [`build_game_vfs_for_build`] so a caller holding a package
+/// VFS can add the overlay later without parsing that build's idx files a
+/// second time. `None` when the build ships no readable `assets.bin`, which
+/// leaves the caller with the package VFS it already had.
+pub fn overlay_assets_bin(pkg_vfs: &VfsPath) -> Option<AssetsOverlay> {
     let mut assets_bin_data = Vec::new();
-    let assets_loaded = pkg_vfs
+    pkg_vfs
         .join("content/assets.bin")
         .and_then(|p| p.open_file())
         .and_then(|mut f| {
             f.read_to_end(&mut assets_bin_data)?;
             Ok(())
         })
-        .is_ok();
+        .ok()?;
 
-    if assets_loaded && let Ok(assets_vfs) = AssetsBinVfs::new(assets_bin_data) {
-        let assets_layer = VfsPath::new(assets_vfs);
-        let overlay = OverlayFS::new(&[assets_layer, pkg_vfs]);
-        return Ok(VfsPath::new(overlay));
-    }
-
-    Ok(pkg_vfs)
+    let bytes = std::sync::Arc::new(assets_bin_data);
+    let assets_vfs = AssetsBinVfs::from_shared(std::sync::Arc::clone(&bytes)).ok()?;
+    let overlay = OverlayFS::new(&[VfsPath::new(assets_vfs), pkg_vfs.clone()]);
+    Some(AssetsOverlay { vfs: VfsPath::new(overlay), bytes })
 }
