@@ -5,10 +5,9 @@
 //! read, and every match reports a short snippet of surrounding text.
 
 use std::io::Read as _;
-use std::path::PathBuf;
-use std::sync::Arc;
 use wowsunpack::vfs::VfsPath;
 
+use super::listing::FileIndex;
 use super::listing::FileList;
 
 /// One match, with enough context to show a row without re-reading the file.
@@ -50,17 +49,15 @@ pub fn compile_query(query: &str) -> Option<regex::bytes::Regex> {
     regex::bytes::Regex::new(query).or_else(|_| regex::bytes::Regex::new(&regex::escape(query))).ok()
 }
 
-/// Which files a scan will read: files only, narrowed by `path_filter` when it
-/// is a usable glob. An unparsable filter is ignored rather than matching
-/// nothing, matching the egui app.
-pub fn files_to_scan(files: &FileList, path_filter: &str) -> Vec<(Arc<PathBuf>, VfsPath)> {
+/// Which files a scan will read, narrowed by `path_filter` when it is a usable
+/// glob. An unparsable filter is ignored rather than matching nothing, matching
+/// the egui app. The list holds only files, so there is nothing else to reject.
+pub fn files_to_scan(files: &FileList, path_filter: &str) -> Vec<FileIndex> {
     let glob = (!path_filter.is_empty()).then(|| glob::Pattern::new(path_filter).ok()).flatten();
     files
         .iter()
-        .filter(|(path, entry)| {
-            entry.is_file().unwrap_or(false) && glob.as_ref().is_none_or(|glob| glob.matches_path(path))
-        })
-        .cloned()
+        .filter(|(_, path)| glob.as_ref().is_none_or(|glob| glob.matches(path)))
+        .map(|(index, _)| index)
         .collect()
 }
 
@@ -103,31 +100,33 @@ fn flatten(text: &str) -> String {
     text.replace('\n', " ").replace('\r', "")
 }
 
-/// Reads each file in `files` and reports every match.
+/// Reads each file `targets` names in `files` and reports every match.
 ///
-/// A file that cannot be opened or read is skipped: a scan covering the whole
-/// install will meet entries it cannot read, and stopping there would hide the
-/// matches in every later file.
+/// A file that cannot be resolved, opened or read is skipped: a scan covering
+/// the whole install will meet entries it cannot read, and stopping there would
+/// hide the matches in every later file.
 pub fn scan(
-    files: &[(Arc<PathBuf>, VfsPath)],
+    files: &FileList,
+    targets: &[FileIndex],
     pattern: &regex::bytes::Regex,
     mut on_hit: impl FnMut(ContentSearchHit),
     mut on_progress: impl FnMut(SearchProgress),
     should_stop: impl Fn() -> bool,
 ) {
-    let total = files.len();
+    let total = targets.len();
     on_progress(SearchProgress { scanned: 0, total });
 
     let mut buffer: Vec<u8> = Vec::new();
-    for (index, (path, entry)) in files.iter().enumerate() {
+    for (scanned, target) in targets.iter().enumerate() {
         if should_stop() {
             return;
         }
-        if index % PROGRESS_INTERVAL == 0 {
-            on_progress(SearchProgress { scanned: index, total });
+        if scanned % PROGRESS_INTERVAL == 0 {
+            on_progress(SearchProgress { scanned, total });
         }
 
         buffer.clear();
+        let Some(entry) = files.vfs_path(*target) else { continue };
         let Ok(mut file) = entry.open_file() else { continue };
         if file.read_to_end(&mut buffer).is_err() {
             continue;
@@ -135,7 +134,7 @@ pub fn scan(
 
         for found in pattern.find_iter(&buffer) {
             on_hit(ContentSearchHit {
-                path: path.to_string_lossy().into_owned(),
+                path: files.path(*target).to_string(),
                 vfs_path: entry.clone(),
                 context: context_snippet(&buffer, found.start(), found.end(), CONTEXT_RADIUS),
                 offset: found.start(),
@@ -190,13 +189,16 @@ mod tests {
     }
 
     #[test]
-    fn only_files_are_scanned_and_a_glob_narrows_them() {
+    fn every_file_is_scanned_and_a_glob_narrows_them() {
         let root = fixture();
         let files = build_file_list(&root);
 
         assert_eq!(files_to_scan(&files, "").len(), 3, "every file, no filter");
-        let xml: Vec<String> =
-            files_to_scan(&files, "*.xml").iter().map(|(path, _)| path.to_string_lossy().into_owned()).collect();
+        assert!(
+            !files.iter().any(|(_, path)| path == "/res/content"),
+            "the directory beside them is not in the list, so a scan cannot be handed one"
+        );
+        let xml: Vec<&str> = files_to_scan(&files, "*.xml").iter().map(|index| files.path(*index)).collect();
         assert_eq!(xml.len(), 2, "both xml files at any depth");
         assert!(xml.iter().all(|path| path.ends_with(".xml")));
     }
@@ -212,11 +214,12 @@ mod tests {
     #[test]
     fn a_scan_reports_every_match_in_every_file() {
         let root = fixture();
-        let files = files_to_scan(&build_file_list(&root), "");
+        let files = build_file_list(&root);
+        let targets = files_to_scan(&files, "");
         let pattern = compile_query("Yamato").unwrap();
 
         let mut hits = Vec::new();
-        scan(&files, &pattern, |hit| hits.push(hit), |_| {}, || false);
+        scan(&files, &targets, &pattern, |hit| hits.push(hit), |_| {}, || false);
 
         assert_eq!(hits.len(), 3, "one in a.xml and two in notes.xml");
         assert!(hits.iter().all(|hit| hit.context.contains("Yamato")));
@@ -229,11 +232,12 @@ mod tests {
     #[test]
     fn progress_starts_at_zero_and_ends_at_the_total() {
         let root = fixture();
-        let files = files_to_scan(&build_file_list(&root), "");
+        let files = build_file_list(&root);
+        let targets = files_to_scan(&files, "");
         let pattern = compile_query("Yamato").unwrap();
 
         let mut seen = Vec::new();
-        scan(&files, &pattern, |_| {}, |progress| seen.push(progress), || false);
+        scan(&files, &targets, &pattern, |_| {}, |progress| seen.push(progress), || false);
 
         assert_eq!(seen.first().copied(), Some(SearchProgress { scanned: 0, total: 3 }));
         assert_eq!(seen.last().copied(), Some(SearchProgress { scanned: 3, total: 3 }));
@@ -242,13 +246,14 @@ mod tests {
     #[test]
     fn a_stop_request_ends_the_scan_without_a_final_progress_report() {
         let root = fixture();
-        let files = files_to_scan(&build_file_list(&root), "");
+        let files = build_file_list(&root);
+        let targets = files_to_scan(&files, "");
         let pattern = compile_query("Yamato").unwrap();
         let stop = AtomicBool::new(true);
 
         let mut hits = Vec::new();
         let mut seen = Vec::new();
-        scan(&files, &pattern, |hit| hits.push(hit), |p| seen.push(p), || stop.load(Ordering::Relaxed));
+        scan(&files, &targets, &pattern, |hit| hits.push(hit), |p| seen.push(p), || stop.load(Ordering::Relaxed));
 
         assert!(hits.is_empty(), "nothing is read once stopped");
         assert_eq!(seen, vec![SearchProgress { scanned: 0, total: 3 }], "only the opening report");

@@ -43,6 +43,7 @@ use gpui_kit::*;
 use rust_i18n::t;
 use wowsunpack::vfs::VfsPath;
 
+use wows_toolkit_viewmodel::unpacker::listing::FileIndex;
 use wows_toolkit_viewmodel::unpacker::listing::FileList;
 use wows_toolkit_viewmodel::unpacker::listing::FolderTreeNode;
 use wows_toolkit_viewmodel::unpacker::listing::ListingEntry;
@@ -50,7 +51,7 @@ use wows_toolkit_viewmodel::unpacker::listing::ROOT_PATH;
 use wows_toolkit_viewmodel::unpacker::listing::build_file_list;
 use wows_toolkit_viewmodel::unpacker::listing::build_folder_tree;
 use wows_toolkit_viewmodel::unpacker::listing::directory_entries;
-use wows_toolkit_viewmodel::unpacker::listing::filtered_entries;
+use wows_toolkit_viewmodel::unpacker::listing::filter_files;
 use wows_toolkit_viewmodel::unpacker::listing::is_filtering;
 use wows_toolkit_viewmodel::unpacker::viewer::decodable_prototype;
 
@@ -103,6 +104,50 @@ struct Loaded {
     folder_tree: Vec<FolderTreeNode>,
 }
 
+/// What the listing draws.
+///
+/// Filter results are held as positions in the file list rather than as rows:
+/// a three-character filter matches most of an install, and a materialised row
+/// per match would cost several times what the list itself does.
+#[derive(Clone)]
+enum Rows {
+    /// The selected directory's own entries, which are one directory's worth.
+    Directory(Rc<Vec<ListingEntry>>),
+    Filtered {
+        files: Arc<FileList>,
+        matches: Rc<Vec<FileIndex>>,
+    },
+}
+
+impl Rows {
+    fn len(&self) -> usize {
+        match self {
+            Rows::Directory(rows) => rows.len(),
+            Rows::Filtered { matches, .. } => matches.len(),
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    /// The row at `at`, built on demand for a filter result.
+    fn row(&self, at: usize) -> Option<ListingEntry> {
+        match self {
+            Rows::Directory(rows) => rows.get(at).cloned(),
+            Rows::Filtered { files, matches } => files.row(*matches.get(at)?),
+        }
+    }
+
+    /// Every row, for an action that takes the whole listing at once.
+    fn all(&self) -> Vec<ListingEntry> {
+        match self {
+            Rows::Directory(rows) => rows.as_ref().clone(),
+            Rows::Filtered { .. } => (0..self.len()).filter_map(|at| self.row(at)).collect(),
+        }
+    }
+}
+
 /// Raised for the Unpacker tab to act on.
 #[derive(Clone, Debug)]
 pub enum BrowserEvent {
@@ -153,7 +198,7 @@ pub struct BrowserPanel {
     /// directory or the filter changes. Rebuilding per frame would re-read the
     /// directory, or re-allocate a path string per file across the whole
     /// install, on every caret blink.
-    rows: Rc<Vec<ListingEntry>>,
+    rows: Rows,
     search_state: Entity<InputState>,
     path_filter_state: Entity<InputState>,
     list_state: ListState,
@@ -185,7 +230,7 @@ impl BrowserPanel {
             queued: Rc::new(HashSet::new()),
             filter_state,
             filter_text: String::new(),
-            rows: Rc::new(Vec::new()),
+            rows: Rows::Directory(Rc::new(Vec::new())),
             search_state,
             path_filter_state,
             list_state: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
@@ -289,17 +334,19 @@ impl BrowserPanel {
     /// typed, otherwise the selected directory's own entries.
     fn rebuild_rows(&mut self, cx: &mut Context<Self>) {
         let rows = match &self.state {
-            PaneState::Ready(loaded) if is_filtering(&self.filter_text) => {
-                filtered_entries(&loaded.files, &self.filter_text)
-            }
-            PaneState::Ready(loaded) => {
-                directory_entries(&loaded.vfs, self.selected_dir.as_deref().unwrap_or(ROOT_PATH))
-            }
-            _ => Vec::new(),
+            PaneState::Ready(loaded) if is_filtering(&self.filter_text) => Rows::Filtered {
+                files: loaded.files.clone(),
+                matches: Rc::new(filter_files(&loaded.files, &self.filter_text)),
+            },
+            PaneState::Ready(loaded) => Rows::Directory(Rc::new(directory_entries(
+                &loaded.vfs,
+                self.selected_dir.as_deref().unwrap_or(ROOT_PATH),
+            ))),
+            _ => Rows::Directory(Rc::new(Vec::new())),
         };
 
         self.list_state.reset(rows.len());
-        self.rows = Rc::new(rows);
+        self.rows = rows;
         cx.notify();
     }
 
@@ -467,7 +514,7 @@ impl Render for BrowserPanel {
             let rows = rows.clone();
             move |ix: usize, _window: &mut Window, cx: &mut App| {
                 let dim = crate::theme::text_dim();
-                let Some(row) = rows.get(ix) else {
+                let Some(row) = rows.row(ix) else {
                     return div().into_any_element();
                 };
                 let entity = listing_entity.clone();
@@ -610,7 +657,7 @@ impl Render for BrowserPanel {
                     .compact()
                     .disabled(rows.is_empty())
                     .on_click(cx.listener(move |_this, _event, _window, cx| {
-                        cx.emit(BrowserEvent::Extract(queue_rows.as_ref().clone()));
+                        cx.emit(BrowserEvent::Extract(queue_rows.all()));
                     })),
             );
 
@@ -893,6 +940,37 @@ mod tests {
             assert_eq!(window.find(("queue-toggle", 1usize)).checked(), Some(true), "the queued file reads as queued");
         })
         .expect("the window is open");
+    }
+
+    /// A filter lists matching files from the whole VFS, labelled by their
+    /// whole path, and each row still resolves to a file that opens.
+    #[gpui_kit::test]
+    fn a_filter_lists_matching_files_from_the_whole_tree(cx: &mut TestAppContext) {
+        let window = open_pane(cx);
+
+        window
+            .update(cx, |pane, _window, cx| {
+                pane.filter_text = ".xml".to_string();
+                pane.rebuild_rows(cx);
+
+                let rows = pane.rows.all();
+                let mut labels: Vec<&str> = rows.iter().map(|row| row.label.as_str()).collect();
+                labels.sort_unstable();
+                assert_eq!(labels, vec!["/content/a.xml", "/content/gameplay/b.xml"], "matched at any depth");
+                assert!(rows.iter().all(|row| !row.is_dir), "a filter lists files only");
+                assert!(rows.iter().all(|row| row.size.is_some()), "each row carries its size");
+                assert!(rows.iter().all(|row| row.path.open_file().is_ok()), "each row opens");
+
+                pane.filter_text = "gameplay".to_string();
+                pane.rebuild_rows(cx);
+                assert_eq!(pane.rows.len(), 1, "the filter narrows to the nested file");
+
+                pane.filter_text.clear();
+                pane.rebuild_rows(cx);
+                let cleared: Vec<String> = pane.rows.all().into_iter().map(|row| row.label).collect();
+                assert_eq!(cleared, vec!["content"], "clearing the filter goes back to the selected directory");
+            })
+            .expect("the window is open");
     }
 
     #[gpui_kit::test]
