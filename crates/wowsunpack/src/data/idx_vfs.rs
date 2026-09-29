@@ -38,14 +38,25 @@ pub trait AsyncPrime {
 }
 
 /// File metadata stored in the VFS for each file entry.
+///
+/// Sized deliberately: one of these is held per entry and a build has hundreds
+/// of thousands, so the enum around it is what the entry map pays per slot.
+/// `volume` indexes [`IdxVfs::volumes`] rather than holding a refcounted name,
+/// since a build has a couple of hundred distinct volumes and 16 bytes of
+/// pointer per entry is 6.5 MiB of them.
 #[derive(Debug, Clone)]
 pub struct VfsFileEntry {
-    pub volume_filename: Rc<str>,
     pub offset: u64,
     pub size: u32,
     pub unpacked_size: u32,
-    pub compression_info: u64,
     pub crc32: u32,
+    pub volume: u16,
+    /// Indexes [`IdxVfs::compressions`]. The idx records a 64-bit
+    /// `compression_info` whose distinct values number in the single digits per
+    /// build (build 13187581 uses two: 0 and 0x1_0000_0005), so it is interned
+    /// rather than narrowed: the field is structured, not a flag, and a build
+    /// old enough to use another method must not read as one this understands.
+    pub compression: u8,
 }
 
 /// Entry metadata for any node (file or directory).
@@ -53,9 +64,18 @@ pub struct VfsFileEntry {
 pub enum VfsEntryMeta {
     File(VfsFileEntry),
     Directory {
-        /// Names of immediate children.
-        children: Vec<String>,
+        /// The entry map's own keys for the immediate children, shared with
+        /// it rather than a second copy of every leaf name.
+        children: Vec<Rc<str>>,
     },
+}
+
+/// The leaf name of a VFS path, which is what `read_dir` yields.
+fn leaf_of(path: &str) -> &str {
+    match path.rfind('/') {
+        Some(at) => &path[at + 1..],
+        None => path,
+    }
 }
 
 /// A virtual filesystem built from parsed IDX files, backed by PKG volume data.
@@ -66,12 +86,18 @@ pub enum VfsEntryMeta {
 pub struct IdxVfs<T> {
     source: T,
     entries: FxHashMap<Rc<str>, VfsEntryMeta>,
+    /// Distinct volume filenames, indexed by [`VfsFileEntry::volume`].
+    volumes: Vec<Rc<str>>,
+    /// Distinct `compression_info` values, indexed by
+    /// [`VfsFileEntry::compression`].
+    compressions: Vec<u64>,
 }
 
 impl<T> IdxVfs<T> {
     /// Build a VFS from parsed IDX files and a data source.
     pub fn new(source: T, idx_files: &[IdxFile]) -> Self {
-        Self { source, entries: build_vfs_entries(idx_files) }
+        let Built { entries, volumes, compressions } = build_vfs_entries(idx_files);
+        Self { source, entries, volumes, compressions }
     }
 
     /// Look up an entry by path.
@@ -97,30 +123,45 @@ impl<T> IdxVfs<T> {
 /// Goes directly to `VfsEntryMeta` rather than through `idx::build_file_tree`'s
 /// `VfsEntry` map: that intermediate owns a copy of every path and of every
 /// file-info record, and a build has hundreds of thousands of each.
-fn build_vfs_entries(idx_files: &[IdxFile]) -> FxHashMap<Rc<str>, VfsEntryMeta> {
+/// What [`build_vfs_entries`] produces: the entry map and the two tables its
+/// file entries index into.
+struct Built {
+    entries: FxHashMap<Rc<str>, VfsEntryMeta>,
+    volumes: Vec<Rc<str>>,
+    compressions: Vec<u64>,
+}
+
+fn build_vfs_entries(idx_files: &[IdxFile]) -> Built {
     let count = idx_files.iter().fold(0, |acc, file| acc + file.resources.len());
     let mut entries: FxHashMap<Rc<str>, VfsEntryMeta> = FxHashMap::with_capacity_and_hasher(count, FxBuildHasher);
 
     // Volume filenames repeat across hundreds of thousands of files but only a
-    // couple hundred are distinct; intern them so every file entry shares one
-    // refcounted handle instead of owning a duplicate String.
-    let mut volume_names: HashMap<&str, Rc<str>> = HashMap::default();
+    // couple hundred are distinct; every file entry indexes this table rather
+    // than holding a handle of its own.
+    let mut volumes: Vec<Rc<str>> = Vec::new();
+    let mut volume_index: HashMap<&str, u16> = HashMap::default();
+    let mut compressions: Vec<u64> = Vec::new();
 
-    // First pass: add all entries
     idx::visit_entries(idx_files, |path, file| {
         let meta = match file {
             Some(file) => {
-                let volume_filename = volume_names
-                    .entry(file.volume.filename.as_str())
-                    .or_insert_with(|| Rc::from(file.volume.filename.as_str()))
-                    .clone();
+                let name = file.volume.filename.as_str();
+                let volume = match volume_index.get(name) {
+                    Some(at) => *at,
+                    None => {
+                        let at = u16::try_from(volumes.len()).expect("a build has far fewer than 65536 volumes");
+                        volumes.push(Rc::from(name));
+                        volume_index.insert(name, at);
+                        at
+                    }
+                };
                 VfsEntryMeta::File(VfsFileEntry {
-                    volume_filename,
                     offset: file.file_info.offset,
                     size: file.file_info.size,
                     unpacked_size: file.file_info.unpacked_size,
-                    compression_info: file.file_info.compression_info,
                     crc32: file.file_info.crc32,
+                    volume,
+                    compression: intern_compression(&mut compressions, file.file_info.compression_info),
                 })
             }
             None => VfsEntryMeta::Directory { children: Vec::new() },
@@ -147,12 +188,7 @@ fn build_vfs_entries(idx_files: &[IdxFile]) -> FxHashMap<Rc<str>, VfsEntryMeta> 
             parent_path = "/";
         }
 
-        let child_name = match path.rfind('/') {
-            Some(pos) => &path[pos + 1..],
-            None => &**path,
-        };
-
-        if child_name.is_empty() {
+        if leaf_of(path).is_empty() {
             continue;
         }
 
@@ -167,7 +203,7 @@ fn build_vfs_entries(idx_files: &[IdxFile]) -> FxHashMap<Rc<str>, VfsEntryMeta> 
         };
 
         if let VfsEntryMeta::Directory { children } = parent {
-            children.push(child_name.to_string());
+            children.push(Rc::clone(path));
         }
     }
 
@@ -176,13 +212,29 @@ fn build_vfs_entries(idx_files: &[IdxFile]) -> FxHashMap<Rc<str>, VfsEntryMeta> 
     // Vecs each grown by amortized doubling and then shortened by dedup.
     for entry in entries.values_mut() {
         if let VfsEntryMeta::Directory { children } = entry {
-            children.sort();
-            children.dedup();
+            children.sort_by(|a, b| leaf_of(a).cmp(leaf_of(b)));
+            children.dedup_by(|a, b| leaf_of(a) == leaf_of(b));
             children.shrink_to_fit();
         }
     }
 
-    entries
+    volumes.shrink_to_fit();
+    compressions.shrink_to_fit();
+    Built { entries, volumes, compressions }
+}
+
+/// The index of `info` in `table`, appending it if it is new.
+///
+/// Linear because the table holds a handful of values; a build that somehow
+/// carried more than 256 distinct ones would be a format change, and is
+/// rejected rather than silently folded onto another value.
+fn intern_compression(table: &mut Vec<u64>, info: u64) -> u8 {
+    if let Some(at) = table.iter().position(|held| *held == info) {
+        return at as u8;
+    }
+    let at = u8::try_from(table.len()).expect("a build uses a handful of distinct compression methods");
+    table.push(info);
+    at
 }
 
 // --- vfs::FileSystem implementation ---
@@ -194,7 +246,12 @@ where
     fn read_dir(&self, path: &str) -> vfs::VfsResult<Box<dyn Iterator<Item = String> + Send>> {
         let entry = self.entry_at(path)?;
         match entry {
-            VfsEntryMeta::Directory { children } => Ok(Box::new(children.clone().into_iter())),
+            // The trait yields owned names; the stored children are the map's
+            // own keys, so the copy is made here rather than held per entry.
+            VfsEntryMeta::Directory { children } => {
+                let names: Vec<String> = children.iter().map(|child| leaf_of(child).to_string()).collect();
+                Ok(Box::new(names.into_iter()))
+            }
             VfsEntryMeta::File(_) => Err(VfsError::from(VfsErrorKind::Other("not a directory".into()))),
         }
     }
@@ -212,10 +269,19 @@ where
         let data_start = file_entry.offset as usize;
         let data_end = data_start + file_entry.size as usize;
 
-        let primed = self.source.prime_volume(&file_entry.volume_filename, data_start..data_end)?;
+        let volume = self
+            .volumes
+            .get(file_entry.volume as usize)
+            .ok_or_else(|| VfsError::from(VfsErrorKind::Other("unknown volume".into())))?;
+        let primed = self.source.prime_volume(volume, data_start..data_end)?;
         let source_bytes: &[u8] = primed.as_ref();
 
-        if file_entry.compression_info != 0 {
+        let compression = self
+            .compressions
+            .get(file_entry.compression as usize)
+            .copied()
+            .ok_or_else(|| VfsError::from(VfsErrorKind::Other("unknown compression".into())))?;
+        if compression != 0 {
             let mut data = Vec::with_capacity(file_entry.unpacked_size as usize);
             let mut decoder = DeflateDecoder::new(source_bytes);
             std::io::copy(&mut decoder, &mut data).map_err(|e| VfsError::from(VfsErrorKind::IoError(e)))?;
