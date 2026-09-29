@@ -121,7 +121,7 @@ struct LeafInfo {
 }
 
 /// Writes `paths` to the clipboard, one per line.
-fn copy_paths(paths: &[PathBuf], cx: &mut App) {
+pub(crate) fn copy_paths(paths: &[PathBuf], cx: &mut App) {
     let text = paths.iter().map(|path| path.to_string_lossy().into_owned()).collect::<Vec<_>>().join("\n");
     cx.write_to_clipboard(ClipboardItem::new_string(text));
 }
@@ -131,7 +131,7 @@ fn copy_paths(paths: &[PathBuf], cx: &mut App) {
 ///
 /// GPUI's clipboard has no file-list format, so this goes through `arboard`
 /// directly, which is what the egui app's `copy_files_to_clipboard` does.
-fn copy_replay_files(paths: &[PathBuf], window: &mut Window, cx: &mut App) {
+pub(crate) fn copy_replay_files(paths: &[PathBuf], window: &mut Window, cx: &mut App) {
     let outcome = arboard::Clipboard::new().and_then(|mut clipboard| clipboard.set().file_list(paths));
     match outcome {
         Ok(()) => {
@@ -171,7 +171,7 @@ fn open_replay_in_game(wows_dir: &str, replay: &Path, window: &mut Window, cx: &
 ///
 /// Best effort: a file manager that is not there, or refuses, leaves a log
 /// line rather than an error the listing would have to carry.
-fn reveal_in_file_manager(path: &std::path::Path) {
+pub(crate) fn reveal_in_file_manager(path: &std::path::Path) {
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut command = std::process::Command::new("explorer");

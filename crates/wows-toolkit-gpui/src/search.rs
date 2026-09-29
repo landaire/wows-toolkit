@@ -14,6 +14,7 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::calendar::Calendar;
 use gpui_kit::component::calendar::CalendarEvent;
 use gpui_kit::component::calendar::CalendarState;
@@ -22,6 +23,10 @@ use gpui_kit::component::h_flex;
 use gpui_kit::component::input::Input;
 use gpui_kit::component::input::InputEvent;
 use gpui_kit::component::input::InputState;
+use gpui_kit::component::menu::ContextMenuExt;
+use gpui_kit::component::menu::DropdownMenu;
+use gpui_kit::component::menu::PopupMenu;
+use gpui_kit::component::menu::PopupMenuItem;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -145,6 +150,18 @@ pub enum SearchEvent {
 
 impl EventEmitter<SearchEvent> for SearchView {}
 
+/// Whether replacing the box's text is something the reader may want
+/// completions for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Offer {
+    /// A fragment was taken and may be continued, so the next render offers
+    /// what can follow it.
+    WhatFollows,
+    /// The text is an answer rather than a fragment: a committed query, a step
+    /// through the history, a picked date.
+    Nothing,
+}
+
 /// The settings row both front ends keep the query bar's state in.
 const SEARCH_SETTINGS_KEY: &str = "search";
 
@@ -162,8 +179,10 @@ const PREVIEW_CURSOR_OFFSET: Pixels = px(24.);
 
 const ROW_HEIGHT: Pixels = px(24.);
 const LIST_OVERDRAW: Pixels = px(200.);
-/// The open/copy pair at the end of each row, which the header reserves.
-const ACTIONS_COLUMN_WIDTH: Pixels = px(104.);
+/// The dots at the end of each row, which is what the row reserves in place of
+/// the three buttons it used to carry: only the row being pointed at can have
+/// its actions used, so only it shows them.
+const ACTIONS_COLUMN_WIDTH: Pixels = px(28.);
 
 /// Queries the bar remembers. Older ones fall off the end rather than the
 /// row growing without bound.
@@ -303,9 +322,10 @@ pub struct SearchView {
     /// is being typed at, so Enter runs the query rather than taking whatever
     /// row happened to be first.
     completion_cursor: Option<usize>,
-    /// Whether the dropdown is showing. Closed by Escape and by taking a row,
-    /// and reopened by the next edit, so it does not sit over the results
-    /// after the query has been committed.
+    /// Whether the dropdown is showing. Closed by Escape, by taking a row, by
+    /// a pointer press anywhere off it, and by the box losing focus; reopened
+    /// by the next edit, so it does not sit over the results after the query
+    /// has been committed.
     completions_open: bool,
     /// Where the query input sits, so the dropdown can be anchored under it.
     /// Recorded during layout; `None` before the bar has been drawn once.
@@ -471,8 +491,7 @@ impl SearchView {
         let CalendarEvent::Selected(CalendarDate::Single(Some(day))) = event else { return };
         let text = self.query_input.read(cx).value().to_string();
         let replacement = suggest::replace_active_value(&text, &day.format(CALENDAR_DATE_FORMAT).to_string());
-        self.completions_open = false;
-        self.take_completion(replacement, window, cx);
+        self.take_completion(replacement, Offer::Nothing, window, cx);
     }
 
     /// Applies one of the pill menu's edits to the query the bar is holding.
@@ -571,10 +590,8 @@ impl SearchView {
         }
         self.remember_for_undo(cx);
         self.committed = whole;
-        self.query_input.update(cx, |state, cx| state.set_value("", window, cx));
+        self.set_bar_text("", Offer::Nothing, window, cx);
         self.reading = query_text::parse_query(&self.committed).ok();
-        self.completions.clear();
-        self.completions_open = false;
         self.run(cx);
         cx.notify();
     }
@@ -623,14 +640,14 @@ impl SearchView {
     /// Replaces the bar's text with `text` and runs it.
     fn set_query_text(&mut self, text: String, window: &mut Window, cx: &mut Context<Self>) {
         self.committed = text;
-        self.query_input.update(cx, |state, cx| state.set_value("", window, cx));
+        self.set_bar_text("", Offer::Nothing, window, cx);
         self.reading = query_text::parse_query(&self.committed).ok();
         self.run(cx);
         cx.notify();
     }
 
-    fn take_completion(&mut self, replacement: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.query_input.update(cx, |state, cx| state.set_value(replacement, window, cx));
+    fn take_completion(&mut self, replacement: String, offer: Offer, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_bar_text(&replacement, offer, window, cx);
         self.completion_cursor = None;
         cx.notify();
     }
@@ -702,7 +719,7 @@ impl SearchView {
                     return;
                 };
                 self.took_completion_on_enter = true;
-                self.take_completion(taken, window, cx);
+                self.take_completion(taken, Offer::WhatFollows, window, cx);
             }
             _ => {}
         }
@@ -812,14 +829,10 @@ impl SearchView {
         };
 
         self.committed = text;
-        self.query_input.update(cx, |state, cx| state.set_value("", window, cx));
         // The bar was not typed at, so the dropdown stays shut: the arrows
         // are walking the history, not a list of completions.
+        self.set_bar_text("", Offer::Nothing, window, cx);
         self.reading = query_text::parse_query(&self.committed).ok();
-        self.completions.clear();
-        self.completion_source = String::new();
-        self.completion_cursor = None;
-        self.completions_open = false;
         self.history_walk = (at >= 0).then_some((at as usize, started_from));
         self.run(cx);
     }
@@ -954,11 +967,39 @@ impl SearchView {
         self.preview.leave(cx);
     }
 
+    /// Replaces the box's text.
+    ///
+    /// `Offer::Nothing` also records the new text as what the completions were
+    /// last built for, so the next render does not read the change back as
+    /// typing. Without it, committing a query empties the box and an empty box
+    /// matches every suggestion there is, which puts the whole list up over
+    /// the results that were just asked for.
+    fn set_bar_text(&mut self, text: &str, offer: Offer, window: &mut Window, cx: &mut Context<Self>) {
+        let text = text.to_string();
+        self.query_input.update(cx, |state, cx| state.set_value(text.clone(), window, cx));
+        if offer == Offer::Nothing {
+            self.completions.clear();
+            self.completion_source = text;
+            self.completion_cursor = None;
+            self.completions_open = false;
+        }
+    }
+
+    /// Puts the dropdown away, wherever the dismissal came from.
+    fn close_completions(&mut self, cx: &mut Context<Self>) {
+        if !self.completions_open {
+            return;
+        }
+        self.completions_open = false;
+        self.completion_cursor = None;
+        cx.notify();
+    }
+
     /// Re-reads what the fragment under the caret may be completed to.
     ///
     /// Only the box: the pills come from the committed query, which typing
     /// leaves alone until a term is finished.
-    fn refresh_bar(&mut self, cx: &mut Context<Self>) {
+    fn refresh_bar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.query_input.read(cx).value().to_string();
         if text == self.completion_source {
             return;
@@ -966,9 +1007,14 @@ impl SearchView {
         self.completions = crate::search_pills::completions(&text);
         self.completion_source = text.clone();
         // Typing moves the caret off whatever row was highlighted, and an
-        // edit is what reopens a dropdown Escape closed.
+        // edit made in the box is what reopens a dropdown Escape closed.
         self.completion_cursor = None;
-        self.completions_open = true;
+        // Only an edit made in the box offers completions. The text also
+        // changes when a saved query is opened or the history is walked, and a
+        // dropdown over a bar nobody is typing in stands between the reader
+        // and the results. Read off the window rather than mirrored from the
+        // focus events, which arrive a frame after the focus itself moves.
+        self.completions_open = self.query_input.focus_handle(cx).is_focused(window);
         self.refresh_value_options(&text, cx);
     }
 
@@ -1019,6 +1065,8 @@ impl SearchView {
     /// index rather than a frame the egui tab was drawing anyway.
     fn on_query_event(&mut self, _state: Entity<InputState>, event: &InputEvent, cx: &mut Context<Self>) {
         match event {
+            InputEvent::Focus => {}
+            InputEvent::Blur => self.close_completions(cx),
             InputEvent::PressEnter { .. } => {
                 // That Enter was the dropdown's, not the bar's.
                 if std::mem::take(&mut self.took_completion_on_enter) {
@@ -1051,7 +1099,6 @@ impl SearchView {
                     let _ = this.update(cx, |this, cx| this.run(cx));
                 }));
             }
-            _ => {}
         }
     }
 
@@ -1405,54 +1452,70 @@ fn outcome_label(outcome: MatchOutcome) -> String {
 ///
 /// `exists` is checked when the results land rather than here: this runs per
 /// row per frame, and the check is a syscall.
-fn row_actions(ix: usize, hit: &MatchHit, exists: bool, search: Entity<SearchView>) -> AnyElement {
-    let path = hit.replay_path.clone();
-    let open_path = path.clone();
-    let render_path = path.clone();
+/// What a result row offers, built once and used by both the dots and the
+/// row's right-click menu so the two cannot drift apart.
+///
+/// A replay that is no longer on disk keeps its menu: its path is still worth
+/// copying. The rest is greyed out under a line that says why, since a
+/// disabled item carries no tooltip of its own to explain itself.
+fn build_row_menu(menu: PopupMenu, path: &std::path::Path, exists: bool, search: &Entity<SearchView>) -> PopupMenu {
+    let open_path = path.to_path_buf();
+    let open_search = search.clone();
+    let render_path = path.to_path_buf();
     let render_search = search.clone();
-    let copy_path = path.clone();
+    let copy_file = path.to_path_buf();
+    let copy_path = path.to_path_buf();
+    let reveal_path = path.to_path_buf();
+
+    menu.when(!exists, |menu| menu.item(PopupMenuItem::label(t!("ui.search.open_missing").into_owned())).separator())
+        .item(PopupMenuItem::new(t!("ui.search.open").into_owned()).disabled(!exists).on_click(
+            move |_event, _window, cx| {
+                let path = open_path.clone();
+                open_search.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(path)));
+            },
+        ))
+        .item(PopupMenuItem::new(t!("ui.replay.context.render_replay").into_owned()).disabled(!exists).on_click(
+            move |_event, _window, cx| {
+                let path = render_path.clone();
+                render_search.update(cx, |_this, cx| cx.emit(SearchEvent::RenderReplay(path)));
+            },
+        ))
+        .separator()
+        .item(PopupMenuItem::new(t!("ui.replay.context.copy_replay").into_owned()).disabled(!exists).on_click(
+            move |_event, window, cx| {
+                crate::replay_inspector::browser_view::copy_replay_files(std::slice::from_ref(&copy_file), window, cx);
+            },
+        ))
+        .item(PopupMenuItem::new(t!("ui.replay.context.copy_path").into_owned()).on_click(
+            move |_event, _window, cx| {
+                crate::replay_inspector::browser_view::copy_paths(std::slice::from_ref(&copy_path), cx);
+            },
+        ))
+        .item(PopupMenuItem::new(t!("ui.replay.context.show_in_explorer").into_owned()).disabled(!exists).on_click(
+            move |_event, _window, _cx| {
+                crate::replay_inspector::browser_view::reveal_in_file_manager(&reveal_path);
+            },
+        ))
+}
+
+/// The dots at the end of a result row, up only while the row is pointed at.
+///
+/// `ix` keys the trigger so every row's popover state is its own, and `group`
+/// ties the reveal to that row's hover, as the Replay Inspector's rows do.
+fn row_actions(ix: usize, path: PathBuf, exists: bool, search: Entity<SearchView>, group: SharedString) -> AnyElement {
+    let trigger = Button::new(("search-row-actions", ix))
+        .ghost()
+        .xsmall()
+        .icon(IconName::Ellipsis)
+        .tooltip(t!("ui.search.row_actions_hint").to_string());
 
     h_flex()
         .flex_none()
         .w(ACTIONS_COLUMN_WIDTH)
-        .gap_1()
         .items_center()
-        .child(
-            Button::new(("search-open", ix))
-                .icon(IconName::FolderOpen)
-                .compact()
-                .disabled(!exists)
-                .tooltip(if exists {
-                    t!("ui.search.open").into_owned()
-                } else {
-                    t!("ui.search.open_missing").into_owned()
-                })
-                .on_click(move |_event, _window, cx: &mut App| {
-                    let open_path = open_path.clone();
-                    search.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(open_path)));
-                }),
-        )
-        .child(
-            Button::new(("search-render", ix))
-                .icon(IconName::Play)
-                .compact()
-                .disabled(!exists)
-                .tooltip(t!("ui.replay.context.render_replay").to_string())
-                .on_click(move |_event, _window, cx: &mut App| {
-                    let render_path = render_path.clone();
-                    render_search.update(cx, |_this, cx| cx.emit(SearchEvent::RenderReplay(render_path)));
-                }),
-        )
-        .child(
-            Button::new(("search-copy", ix))
-                .icon(IconName::Copy)
-                .compact()
-                .tooltip(t!("ui.search.copy_path").to_string())
-                .on_click(move |_event, window, cx: &mut App| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(copy_path.to_string_lossy().into_owned()));
-                    crate::toast::ok(t!("ui.search.path_copied").to_string(), window, cx);
-                }),
-        )
+        .invisible()
+        .group_hover(group, |this| this.visible())
+        .child(trigger.dropdown_menu(move |menu, _window, _cx| build_row_menu(menu, &path, exists, &search)))
         .into_any_element()
 }
 
@@ -1560,7 +1623,7 @@ impl Render for SearchView {
         self.preview.release_dropped(window);
         self.open_saved_query(window, cx);
         self.load_column_widths(cx);
-        self.refresh_bar(cx);
+        self.refresh_bar(window, cx);
         let border = cx.theme().border;
         let hover_bg = cx.theme().accent;
 
@@ -1683,8 +1746,7 @@ impl Render for SearchView {
                     .child(div().text_sm().child(completion.label.clone()))
                     .child(div().text_xs().text_color(muted).child(completion.context.clone()))
                     .on_click(cx.listener(move |this, _event, window, cx| {
-                        this.completions_open = false;
-                        this.take_completion(replacement.clone(), window, cx);
+                        this.take_completion(replacement.clone(), Offer::WhatFollows, window, cx);
                     }))
                     .into_any_element()
             })
@@ -1715,6 +1777,9 @@ impl Render for SearchView {
                             .id("search-calendar")
                             .test_support()
                             .occlude()
+                            .on_mouse_down_out(
+                                cx.listener(|this: &mut Self, _event, _window, cx| this.close_completions(cx)),
+                            )
                             .p_1()
                             .bg(surface)
                             .border_1()
@@ -1746,7 +1811,15 @@ impl Render for SearchView {
                         .child(
                             v_flex()
                                 .id("search-completions")
+                                .test_support()
                                 .occlude()
+                                // A press anywhere off the dropdown puts it
+                                // away, as it does for the library's own
+                                // popovers (`base::popover`). A press inside
+                                // it is the row being taken.
+                                .on_mouse_down_out(
+                                    cx.listener(|this: &mut Self, _event, _window, cx| this.close_completions(cx)),
+                                )
                                 // Sized to what it lists, not to the bar: a
                                 // dropdown as wide as the window puts its
                                 // breadcrumbs an inch from the text they
@@ -1802,6 +1875,10 @@ impl Render for SearchView {
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, event: &MouseDownEvent, _window, cx| {
+                                // The grip lies over the header's sort
+                                // control. Without this, letting go of a drag
+                                // over the header also re-sorts the results.
+                                cx.stop_propagation();
                                 // Double-clicking a grip puts that column back
                                 // on its default, which is the usual way out of
                                 // a drag that went too far.
@@ -1866,8 +1943,17 @@ impl Render for SearchView {
             };
             let path = hit.replay_path.clone();
             let panel = entity.clone();
+            let exists = on_disk.get(ix).copied().unwrap_or(false);
+            let group = SharedString::from(format!("search-row-{ix}"));
+            let open_path = path.clone();
+            let open_entity = entity.clone();
+            let menu_path = path.clone();
+            let menu_entity = entity.clone();
+            let actions_path = path.clone();
             h_flex()
                 .id(ix)
+                .test_support()
+                .group(group.clone())
                 .w_full()
                 .h(ROW_HEIGHT)
                 .gap_2()
@@ -1875,6 +1961,16 @@ impl Render for SearchView {
                 .px_2()
                 .when_some(crate::ui::stripe(ix, cx), |el, color| el.bg(color))
                 .hover(|this| this.bg(hover_bg))
+                // Opening the battle is what a reader is after when they
+                // double-click one, which is how the Replay Inspector's own
+                // listing reads a double-click (`browser_view`).
+                .on_click(move |event: &ClickEvent, _window, cx: &mut App| {
+                    if event.click_count() < 2 || !exists {
+                        return;
+                    }
+                    let path = open_path.clone();
+                    open_entity.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(path)));
+                })
                 // Read off the window rather than an event: a hover flag carries
                 // no position, and the popup is anchored to the pointer.
                 .on_hover(move |hovered, window, cx| {
@@ -1910,7 +2006,10 @@ impl Render for SearchView {
                         },
                     )
                 }))
-                .child(row_actions(ix, hit, on_disk.get(ix).copied().unwrap_or(false), entity.clone()))
+                .child(row_actions(ix, actions_path, exists, entity.clone(), group))
+                // Wraps the row, so it goes last: the menu is a container
+                // around what it belongs to rather than a style on it.
+                .context_menu(move |menu, _window, _cx| build_row_menu(menu, &menu_path, exists, &menu_entity))
                 .into_any_element()
         };
 
@@ -2083,5 +2182,145 @@ impl Render for SearchView {
             .child(div().flex_1().min_h(px(0.)).child(body))
             .child(footer)
             .when_some(preview, |this, preview| this.child(preview))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui_kit::AppContext as _;
+    use gpui_kit::TestAppContext;
+    use gpui_kit::px;
+    use gpui_kit::size;
+    use gpui_kit::test::TestWindowExt as _;
+    use std::cell::RefCell;
+    use std::path::PathBuf;
+    use std::rc::Rc;
+    use wows_toolkit_config::index::rows::MatchHit;
+    use wows_toolkit_config::index::rows::MatchOutcome;
+
+    use super::SearchEvent;
+    use super::SearchState;
+    use super::SearchView;
+    use wows_toolkit_config::index::query::SortColumn;
+
+    /// One result, on disk, so a row is drawn with every action available.
+    fn hit(path: &str) -> MatchHit {
+        MatchHit {
+            arena_id: wows_replays::types::ArenaId::from(1i64),
+            timestamp: jiff::Timestamp::from_second(1_760_000_000).expect("a timestamp in range"),
+            map: "Okinawa".to_string(),
+            game_mode: "Domination".to_string(),
+            game_mode_id: None,
+            game_type: "RandomBattle".to_string(),
+            match_group: "pvp".to_string(),
+            version_build: Some(13_187_581),
+            source_id: wows_toolkit_config::index::rows::SourceId(1),
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: None,
+            self_ship_name: Some("Thunderer".to_string()),
+            self_survived: Some(true),
+            self_damage: Some(112_345),
+            self_kills: Some(2),
+            self_pr: Some(1543.0),
+            results_available: true,
+            replay_path: PathBuf::from(path),
+            file_mtime: None,
+        }
+    }
+
+    /// A view with one result already in it, so the row can be driven without
+    /// an index behind it.
+    fn open_with_one_hit(cx: &mut TestAppContext) -> gpui_kit::WindowHandle<SearchView> {
+        cx.update(gpui_kit::init);
+        cx.open_window(size(px(1200.), px(600.)), |window, cx| {
+            let mut view = SearchView::new(window, cx);
+            view.hits = vec![hit("C:/replays/one.wowsreplay")];
+            view.on_disk = vec![true];
+            view.state = SearchState::Done;
+            view.list_state.reset(1);
+            view
+        })
+    }
+
+    fn record_events(
+        window: gpui_kit::WindowHandle<SearchView>,
+        cx: &mut TestAppContext,
+    ) -> (Rc<RefCell<Vec<SearchEvent>>>, gpui_kit::Subscription) {
+        let seen: Rc<RefCell<Vec<SearchEvent>>> = Rc::new(RefCell::new(Vec::new()));
+        let view = window.entity(cx).expect("the window has a root view");
+        let recorder = seen.clone();
+        let subscription = cx.update(|cx| {
+            cx.subscribe(&view, move |_view, event: &SearchEvent, _cx| recorder.borrow_mut().push(event.clone()))
+        });
+        (seen, subscription)
+    }
+
+    #[gpui_kit::test]
+    fn double_clicking_a_result_opens_it(cx: &mut TestAppContext) {
+        let window = open_with_one_hit(cx);
+        let (seen, subscription) = record_events(window, cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(0usize, cx);
+            assert!(seen.borrow().is_empty(), "one click does not open a battle");
+
+            // The dots sit on the row, and opening their menu is not opening
+            // the battle: a double-click that lands on them must not do both.
+            window.double_click(("search-row-actions", 0usize), cx);
+            assert!(seen.borrow().is_empty(), "the dots are the row's actions, not the row");
+
+            window.double_click(0usize, cx);
+        })
+        .expect("the window is open");
+
+        let seen = seen.borrow();
+        assert!(
+            matches!(seen.first(), Some(SearchEvent::OpenReplay(path)) if path.ends_with("one.wowsreplay")),
+            "a double-click opens the replay, got {seen:?}"
+        );
+        drop(subscription);
+    }
+
+    /// Widening a column is not a request to re-sort by it. The grip lies
+    /// over the header's own sort control here, rather than inside it.
+    #[gpui_kit::test]
+    fn dragging_a_header_grip_leaves_the_sort_alone(cx: &mut TestAppContext) {
+        let window = open_with_one_hit(cx);
+        let view = window.entity(cx).expect("the window has a root view");
+        let before = cx.update(|cx| view.read(cx).sort);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            let from = window.find(("search-header-grip", 0usize)).bounds().center();
+            window.drag(from, gpui_kit::point(from.x + px(40.), from.y), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+
+        assert_eq!(cx.update(|cx| view.read(cx).sort), before, "the drag widened the column and nothing else");
+
+        // And the header still sorts when the header itself is clicked.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.click(("search-sort", SortColumn::Map as usize), cx);
+        })
+        .expect("the window is open");
+        assert_eq!(cx.update(|cx| view.read(cx).sort.column), SortColumn::Map);
+    }
+
+    #[gpui_kit::test]
+    fn a_result_row_carries_the_dots_that_open_its_actions(cx: &mut TestAppContext) {
+        let window = open_with_one_hit(cx);
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find(("search-row-actions", 0usize)).is_some(),
+                "the row carries the dots the actions hang off"
+            );
+        })
+        .expect("the window is open");
     }
 }
