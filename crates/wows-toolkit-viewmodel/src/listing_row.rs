@@ -11,6 +11,7 @@ use wows_replays::ReplayMetaRef;
 use wows_replays::types::GameParamId;
 use wows_toolkit_config::ReplayGrouping;
 use wows_toolkit_config::index::rows::DivisionMate;
+use wows_toolkit_config::index::rows::MatchHit;
 use wows_toolkit_config::index::rows::MatchOutcome;
 use wows_toolkit_config::index::rows::RowSummary;
 use wowsunpack::data::ResourceLoader;
@@ -373,6 +374,40 @@ pub fn hover_facts(identity: &RowIdentity, stats: &RowStats, locale: Option<&str
     facts
 }
 
+/// The same facts for a match the index found.
+///
+/// A search result carries what an index row holds rather than what a listing
+/// row does, so the two are brought together here rather than at each surface: a
+/// battle reads the same whether it was found by browsing or by searching.
+///
+/// `ship` is passed in because naming one needs the build's game data, which only
+/// a front end has. The mode reads as the index stored it, which is the raw match
+/// type rather than the translated name a listing row shows.
+pub fn hover_facts_for_match(hit: &MatchHit, ship: String, locale: Option<&str>) -> Vec<HoverFact> {
+    let identity = RowIdentity {
+        ship,
+        map: hit.map.clone(),
+        // The index's `game_mode` is the scenario's display string, and its
+        // `game_type` is the match type, which is the other way round from how
+        // the two are named here.
+        scenario: hit.game_mode.clone(),
+        mode: hit.game_type.clone(),
+        date_time: hit.timestamp.strftime("%Y-%m-%d %H:%M").to_string(),
+    };
+    let stats = RowStats {
+        outcome: hit.outcome,
+        damage: hit.self_damage,
+        kills: hit.self_kills,
+        survived: hit.self_survived,
+        // An index row records no division for the perspective player, so a hover
+        // says nothing about one rather than claiming there was none.
+        in_division: false,
+        division_mates: Vec::new(),
+        known: hit.results_available,
+    };
+    hover_facts(&identity, &stats, locale)
+}
+
 /// Hover text for a row. The two drawn lines omit scenario and game mode to
 /// keep the panel narrow, and line 2 draws icons rather than words, so the
 /// tooltip is where both kinds of detail live. The division member line is
@@ -468,6 +503,67 @@ mod tests {
             mode: "Randoms".into(),
             date_time: "28.07.2026 14:23:05".into(),
         }
+    }
+
+    fn hit() -> MatchHit {
+        MatchHit {
+            arena_id: wows_replays::types::ArenaId::new(1),
+            timestamp: "2026-07-28T14:23:05Z".parse().expect("a fixed instant"),
+            map: "Ocean".into(),
+            // The index keeps the scenario's display string here and the match
+            // type in `game_type`, which is the other way round from the names
+            // a listing row uses.
+            game_mode: "Domination".into(),
+            game_mode_id: Some(7),
+            game_type: "RandomBattle".into(),
+            match_group: "pvp".into(),
+            version_build: Some(12_830_008),
+            source_id: wows_toolkit_config::index::rows::SourceId(1),
+            outcome: MatchOutcome::Win,
+            self_account_id: None,
+            self_ship_id: None,
+            self_ship_name: Some("Yamato".into()),
+            self_survived: Some(true),
+            self_damage: Some(114_230),
+            self_kills: Some(3),
+            self_pr: Some(1500.0),
+            results_available: true,
+            replay_path: std::path::PathBuf::from("a.wowsreplay"),
+            file_mtime: Some(42),
+        }
+    }
+
+    /// A search result reads the same facts a listing row does, and in the same
+    /// order: the two surfaces word a battle one way.
+    #[test]
+    fn a_match_reads_the_same_facts_a_row_does() {
+        let facts = hover_facts_for_match(&hit(), "Yamato".into(), None);
+        let read: Vec<(&str, &str)> = facts.iter().map(|fact| (fact.label.as_str(), fact.value.as_str())).collect();
+
+        assert_eq!(read[0], ("Ship", "Yamato"));
+        assert_eq!(read[1], ("Map", "Ocean"));
+        // The scenario and the match type read as one line, scenario first, as
+        // the listing joins them.
+        assert_eq!(read[2], ("Mode", "Domination - RandomBattle"));
+        assert_eq!(read[3], ("Played", "2026-07-28 14:23"));
+        assert!(read.contains(&("Damage", "114,230")), "{read:?}");
+        assert!(read.contains(&("Kills", "3")), "{read:?}");
+        assert!(read.contains(&("Result", "Survived")), "{read:?}");
+        // An index row records no division for the perspective player, so the
+        // hover says nothing about one.
+        assert!(!read.iter().any(|(label, _)| *label == "Division"), "{read:?}");
+    }
+
+    /// A match whose results were never read says so, rather than reporting a
+    /// battle with no damage in it.
+    #[test]
+    fn a_match_with_no_results_says_it_is_not_indexed() {
+        let mut hit = hit();
+        hit.results_available = false;
+        let facts = hover_facts_for_match(&hit, "Yamato".into(), None);
+        let result = facts.iter().find(|fact| fact.label == "Result").expect("a result line");
+        assert_eq!(result.value, "Not indexed");
+        assert!(!facts.iter().any(|fact| fact.label == "Damage"), "{facts:?}");
     }
 
     fn summary() -> RowSummary {
