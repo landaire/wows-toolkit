@@ -673,7 +673,11 @@ mod tests {
     /// `DefenceFireProbability` is Fire Prevention Expert's internal name; the
     /// other is a decoy so a test cannot pass by recognizing any skill at all.
     fn captain_param(id: GameParamId, skills: Option<Vec<CrewSkill>>) -> Param {
-        let crew = Crew::builder().money_training_level(0).personality(personality()).maybe_skills(skills).build();
+        let crew = Crew::builder()
+            .money_training_level(0)
+            .personality(personality())
+            .maybe_skills(skills.map(std::sync::Arc::from))
+            .build();
         Param::builder()
             .id(id)
             .index("PAW001".to_owned())

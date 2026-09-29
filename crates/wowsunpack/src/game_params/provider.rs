@@ -1799,7 +1799,9 @@ impl GameMetadataProvider {
                 let crew_personality = build_crew_personality(&personality);
 
                 let skills = game_param_to_type!(param_data, "Skills", Option<HashMap<(), ()>>);
-                let skills = skills.map(|skills| build_crew_skills(&skills.inner()));
+                // Owned per crew here; `share_crew_skills` collapses the
+                // duplicates once every param is built.
+                let skills = skills.map(|skills| crate::Rc::from(build_crew_skills(&skills.inner())));
 
                 Some(ParamData::Crew(
                     Crew::builder()

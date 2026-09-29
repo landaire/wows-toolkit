@@ -21,7 +21,7 @@ const MAGIC: [u8; 4] = *b"WUGP";
 /// comes from the parser or from the cached types. New writes always carry
 /// the latest version; reads that see an older or unknown version return
 /// `None`, prompting the caller to re-parse from the source VFS.
-pub const FORMAT_VERSION: u32 = 16;
+pub const FORMAT_VERSION: u32 = 17;
 
 const HEADER_LEN: usize = MAGIC.len() + std::mem::size_of::<u32>();
 
@@ -81,9 +81,48 @@ pub fn save(path: &Path, params: &[Param]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::FORMAT_VERSION;
+    use super::HEADER_LEN;
+    use super::MAGIC;
+    use super::decode;
+    use super::encode;
+
+    /// A header this build did not write, for the rejection cases.
+    fn header(magic: &[u8], version: u32) -> Vec<u8> {
+        let mut buf = Vec::new();
+        buf.extend_from_slice(magic);
+        buf.extend_from_slice(&version.to_le_bytes());
+        buf
+    }
 
     #[test]
-    fn format_version_is_16() {
-        assert_eq!(FORMAT_VERSION, 16);
+    fn an_empty_parameter_set_round_trips() {
+        let encoded = encode(&[]).expect("encoding an empty set succeeds");
+        assert_eq!(&encoded[..MAGIC.len()], &MAGIC, "the magic leads");
+        assert_eq!(
+            u32::from_le_bytes(encoded[MAGIC.len()..HEADER_LEN].try_into().expect("four version bytes")),
+            FORMAT_VERSION,
+            "a write always carries the version this build reads"
+        );
+        assert!(decode(&encoded).is_some(), "what this build wrote, this build reads");
+    }
+
+    #[test]
+    fn a_cache_from_another_format_version_is_refused() {
+        let stale = header(&MAGIC, FORMAT_VERSION - 1);
+        assert!(decode(&stale).is_none(), "an older cache is re-parsed rather than misread");
+        let ahead = header(&MAGIC, FORMAT_VERSION + 1);
+        assert!(decode(&ahead).is_none(), "one written by a newer build is refused too");
+    }
+
+    #[test]
+    fn something_that_is_not_a_cache_is_refused() {
+        assert!(decode(&[]).is_none(), "a byte sequence shorter than the header");
+        assert!(decode(&header(b"NOPE", FORMAT_VERSION)).is_none(), "the wrong magic");
+        let truncated = {
+            let mut encoded = encode(&[]).expect("encoding an empty set succeeds");
+            encoded.truncate(HEADER_LEN + 1);
+            encoded
+        };
+        assert!(decode(&truncated).is_none(), "a payload that does not deserialize");
     }
 }
