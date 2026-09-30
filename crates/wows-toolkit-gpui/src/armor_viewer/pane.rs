@@ -90,6 +90,7 @@ use super::load_ship;
 use super::load_ship::LoadedShipArmor;
 use super::load_ship::ShipLoadError;
 use super::load_ship::spawn_load_ship_armor;
+use super::options_panel;
 use super::sidebar::CommonPaneSettings;
 use super::sidebar::CompareSplit;
 use super::sidebar::ExportModelRequested;
@@ -189,7 +190,61 @@ pub struct ArmorViewerPane {
     /// Whether the checker's panel is up beside the viewport. It stays up
     /// while the pointer sweeps the hull, which is the whole interaction.
     show_analysis: bool,
+    /// Whether the options rail is up. Open by default: the toolbar carries no
+    /// way into the controls it holds, so a closed rail would leave them
+    /// unreachable until the reader found the toggle.
+    show_options: bool,
+    /// Which of the rail's sections are expanded.
+    option_sections: OptionSectionsOpen,
     _subscriptions: Vec<Subscription>,
+}
+
+/// A section of the options rail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OptionSection {
+    Visibility,
+    Hull,
+    Display,
+}
+
+/// Which sections of the options rail are expanded.
+///
+/// A collapsed section is not built at all. The rail is rendered on every
+/// window repaint -- a hull hover notifies -- and the two trees clone the
+/// visibility maps and emit a row per zone, part and plate, which is what the
+/// popovers only paid for while they were open.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct OptionSectionsOpen {
+    pub visibility: bool,
+    pub hull: bool,
+    pub display: bool,
+}
+
+impl Default for OptionSectionsOpen {
+    /// Display alone: it is the one read most often and the cheapest of the
+    /// three to build.
+    fn default() -> Self {
+        Self { visibility: false, hull: false, display: true }
+    }
+}
+
+impl OptionSectionsOpen {
+    pub fn is_open(self, section: OptionSection) -> bool {
+        match section {
+            OptionSection::Visibility => self.visibility,
+            OptionSection::Hull => self.hull,
+            OptionSection::Display => self.display,
+        }
+    }
+
+    fn toggle(&mut self, section: OptionSection) {
+        let open = match section {
+            OptionSection::Visibility => &mut self.visibility,
+            OptionSection::Hull => &mut self.hull,
+            OptionSection::Display => &mut self.display,
+        };
+        *open = !*open;
+    }
 }
 
 impl ArmorViewerPane {
@@ -241,6 +296,8 @@ impl ArmorViewerPane {
             sync_options: false,
             pen,
             show_analysis,
+            show_options: true,
+            option_sections: OptionSectionsOpen::default(),
             _subscriptions: vec![
                 pen_search_sub,
                 ship_selected_sub,
@@ -455,6 +512,35 @@ impl ArmorViewerPane {
 
     pub(crate) fn toggle_analysis(&mut self, cx: &mut Context<Self>) {
         self.show_analysis = !self.show_analysis;
+        cx.notify();
+    }
+
+    /// Whether the options rail is up.
+    pub(crate) fn options_open(&self) -> bool {
+        self.show_options
+    }
+
+    /// Which of the rail's sections are expanded.
+    pub(crate) fn option_sections_open(&self) -> OptionSectionsOpen {
+        self.option_sections
+    }
+
+    pub(crate) fn toggle_option_section(&mut self, section: OptionSection, cx: &mut Context<Self>) {
+        self.option_sections.toggle(section);
+        cx.notify();
+    }
+
+    pub(crate) fn toggle_options(&mut self, cx: &mut Context<Self>) {
+        self.show_options = !self.show_options;
+        // A zone row hovered in the rail highlights that zone on the hull. The
+        // row leaves the tree with the rail rather than under the pointer, so
+        // no `on_hover(false)` is dispatched and the highlight would outlive
+        // what it describes. The popover triggers cleared it on close.
+        if !self.show_options {
+            for pane in self.dock.read(cx).panes().to_vec() {
+                pane.update(cx, |view, cx| view.clear_sidebar_hover(cx));
+            }
+        }
         cx.notify();
     }
 
@@ -1195,21 +1281,41 @@ impl Render for ArmorViewerPane {
                 .child(analysis::render_panel(self, &cx.entity(), cx))
         });
 
+        // Deliberately NOT a resizable panel. The sections it holds are their
+        // own fixed widths, so a drag handle could only overflow or pad them,
+        // and `ResizableState` is positional: a second conditional panel makes
+        // the first a middle one, whose close truncates the wrong entry and
+        // rescales every other panel. One optional panel in the group, at the
+        // end, is what keeps that state honest.
+        let options = self.show_options.then(|| {
+            div().flex_none().w(options_panel::PANEL_WIDTH).h_full().child(options_panel::render_panel(
+                self,
+                &cx.entity(),
+                cx,
+            ))
+        });
+
         let content = v_flex().size_full().child(
-            div().flex_1().min_h(px(0.)).child(
-                h_resizable("armor-viewer-split")
-                    .child(
-                        resizable_panel()
-                            .size(SIDEBAR_WIDTH)
-                            .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
-                            .flex_none()
-                            .child(self.sidebar.clone()),
-                    )
-                    .child(resizable_panel().child(self.dock.clone()))
-                    // `child`, not `children`: the group tracks its panels,
-                    // and a plain `ParentElement` child is not one of them.
-                    .when_some(analysis, |group, panel| group.child(panel)),
-            ),
+            h_flex()
+                .flex_1()
+                .min_h(px(0.))
+                .child(
+                    div().flex_1().min_w(px(0.)).h_full().child(
+                        h_resizable("armor-viewer-split")
+                            .child(
+                                resizable_panel()
+                                    .size(SIDEBAR_WIDTH)
+                                    .size_range(SIDEBAR_MIN_WIDTH..SIDEBAR_MAX_WIDTH)
+                                    .flex_none()
+                                    .child(self.sidebar.clone()),
+                            )
+                            .child(resizable_panel().child(self.dock.clone()))
+                            // `child`, not `children`: the group tracks its panels,
+                            // and a plain `ParentElement` child is not one of them.
+                            .when_some(analysis, |group, panel| group.child(panel)),
+                    ),
+                )
+                .children(options),
         );
 
         // Legend floats over the whole pane (not just the viewport), gated

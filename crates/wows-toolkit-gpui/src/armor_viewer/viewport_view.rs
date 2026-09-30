@@ -702,10 +702,7 @@ pub struct ViewportView {
     /// with the display defaults, because leaving it on is not a state to
     /// open the next ship in.
     show_hidden_only: bool,
-    /// Whether the display-settings popover is up. Held here rather than in
-    /// the popover's own element state because Ctrl+S opens and closes it.
-    display_popover_open: bool,
-    /// The display-settings popover's waterline/armor opacity slider state.
+    /// The display section's waterline/armor opacity slider state.
     pub(crate) display_sliders: DisplaySettingsSliders,
     /// Kept alive so `display_sliders`' `SliderEvent::Change` subscriptions
     /// keep firing; replaced wholesale (dropping and canceling the old ones)
@@ -805,7 +802,6 @@ impl ViewportView {
             show_splash_boxes: false,
             gap_count: 0,
             show_hidden_only: false,
-            display_popover_open: false,
             part_visibility: HashMap::new(),
             armor_all_visible: true,
             plate_visibility: HashMap::new(),
@@ -1821,22 +1817,6 @@ impl ViewportView {
         cx.notify();
     }
 
-    /// Whether the display-settings popover is up.
-    pub(crate) fn display_popover_open(&self) -> bool {
-        self.display_popover_open
-    }
-
-    /// Opens or closes the display-settings popover. Refused with no ship
-    /// loaded, matching the trigger button, which is disabled there.
-    pub(crate) fn set_display_popover_open(&mut self, open: bool, cx: &mut Context<Self>) {
-        let open = open && self.current_armor.is_some();
-        if self.display_popover_open == open {
-            return;
-        }
-        self.display_popover_open = open;
-        cx.notify();
-    }
-
     pub(crate) fn has_armor(&self) -> bool {
         self.current_armor.is_some()
     }
@@ -2374,7 +2354,9 @@ impl ViewportView {
             let modifiers = event.keystroke.modifiers;
             let key = event.keystroke.key.as_str();
             if modifiers.secondary() && key == "s" {
-                self.set_display_popover_open(!self.display_popover_open, cx);
+                if let Some(pane) = self.pane() {
+                    pane.update(cx, |pane, cx| pane.toggle_options(cx));
+                }
                 return;
             }
             if modifiers.secondary() && key == "t" {
