@@ -439,6 +439,62 @@ fn the_penetration_panel_stays_up_while_the_ship_is_clicked(cx: &mut TestAppCont
     .expect("the test window stays open");
 }
 
+/// The visibility, hull and display options are a rail beside the viewport.
+///
+/// Each holds a tree or a row of sliders, which a popover can only show by
+/// covering the hull it describes. The rail is up by default because the
+/// toolbar carries no way into those three.
+#[gpui_kit::test]
+fn the_toolbar_shows_and_hides_the_options_rail(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+
+        // Only the rail itself is asserted: with no game data no hull is
+        // loaded, and all three sections then say so rather than drawing
+        // controls that would act on an empty viewport.
+        assert!(window.try_find("armor-options-panel").is_some(), "the rail is up without being asked for");
+
+        window.click("armor-options-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-panel").is_none(), "the toolbar toggle puts the rail away");
+
+        window.click("armor-options-toggle", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-panel").is_some(), "and brings it back");
+    })
+    .expect("the test window stays open");
+}
+
+/// A collapsed section is not built at all.
+///
+/// The rail renders on every window repaint and a hull hover notifies, so the
+/// two trees -- which clone the visibility maps and emit a row per zone, part
+/// and plate -- start collapsed.
+#[gpui_kit::test]
+fn a_rail_section_is_built_only_while_it_is_expanded(cx: &mut TestAppContext) {
+    let window = open_wide_app(cx);
+
+    cx.update_window(window.into(), |_, window, cx| {
+        show_tab(window, AppTab::ArmorViewer, cx);
+        window.render_frame(cx);
+
+        assert!(window.try_find("armor-options-body-Display").is_some(), "the display section starts expanded");
+        assert!(window.try_find("armor-options-body-Visibility").is_none(), "the visibility tree starts collapsed");
+
+        window.click("armor-options-section-Visibility", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-body-Visibility").is_some(), "its header expands it");
+
+        window.click("armor-options-section-Display", cx);
+        window.render_frame(cx);
+        assert!(window.try_find("armor-options-body-Display").is_none(), "and collapses one that was open");
+    })
+    .expect("the test window stays open");
+}
+
 #[gpui_kit::test]
 fn typing_in_the_ship_search_records_the_query(cx: &mut TestAppContext) {
     let window = open_app(cx);

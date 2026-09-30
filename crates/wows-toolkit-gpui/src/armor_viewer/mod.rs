@@ -48,6 +48,7 @@ mod gaps;
 mod hits;
 pub mod legend;
 mod load_ship;
+pub mod options_panel;
 pub mod pane;
 pub mod picking_ui;
 pub mod popover;

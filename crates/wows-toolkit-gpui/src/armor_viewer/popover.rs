@@ -1,20 +1,18 @@
-//! Armor-visibility toolbar button and popover: the toolbar row
-//! `viewport_view.rs` renders above the 3D viewport, and the popover content
-//! it opens -- the tri-state zone/material/plate tree. Ports
-//! `armor_viewer::ui::tab::draw_armor_visibility_popover` (`tab.rs:4403-4611`).
-//! Also builds the display-settings popover (Task 7b) and the
-//! hull-visibility popover (Milestone 4 Task 8a, `render_hull_button`/
-//! `render_hull_popover_content`, porting `draw_hull_visibility_popover`,
-//! `tab.rs:3135-3317`). The popover's own `PopoverState`/`Context<PopoverState>`
-//! is a different entity than [`ViewportView`], so every row's click/hover
-//! handler captures a clone of `Entity<ViewportView>` and mutates it via
-//! `.update(cx, ..)`, matching this file's own `.context_menu()` closures.
-//! The popover's `.content()` closure is only invoked while the popover is
-//! open (see `gpui_kit::component::popover::Popover`'s `RenderOnce` impl), so
-//! rebuilding the whole tree here on every open-render does not cost
-//! anything while the popover is closed -- unlike the always-visible
-//! viewport, which re-renders on every hover-driven `cx.notify()`.
-
+//! The viewport toolbar row `viewport_view.rs` renders above the 3D viewport,
+//! and the three option sections `options_panel.rs` renders beside it: the
+//! tri-state zone/material/plate tree, the hull-visibility tree and the
+//! display settings. Ports `armor_viewer::ui::tab`'s
+//! `draw_armor_visibility_popover` (`tab.rs:4403-4611`) and
+//! `draw_hull_visibility_popover` (`tab.rs:3135-3317`).
+//!
+//! Every row's click/hover handler captures a clone of `Entity<ViewportView>`
+//! and mutates it via `.update(cx, ..)`, which is what lets the three section
+//! builders take a plain `&mut App` and so be called from the rail as well.
+//!
+//! The section builders must not read the `ArmorViewerPane` entity: the rail
+//! renders inside that pane's own render, and reading it there panics on the
+//! lease it already holds. Anything a section needs from the pane is passed
+//! in (see `render_display_popover_content`'s `legend_visible`).
 use std::collections::HashMap;
 use std::collections::HashSet;
 
@@ -30,8 +28,6 @@ use gpui_kit::component::button::Toggle;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
-use gpui_kit::component::popover::Popover;
-use gpui_kit::component::popover::PopoverState;
 use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
@@ -98,9 +94,6 @@ pub fn render_toolbar(
         .when_some(view.shown_ship_name(), |this, name| {
             this.child(div().text_xs().font_weight(FontWeight::BOLD).child(name)).child(crate::ui::rule_v(cx))
         })
-        .child(render_visibility_button(view, entity))
-        .child(render_hull_button(view, entity))
-        .child(render_display_button(view, entity))
         .child(render_hidden_plates_button(view, entity))
         .child(render_gaps_button(view, entity))
         .child(render_trajectory_button(view, entity))
@@ -109,7 +102,9 @@ pub fn render_toolbar(
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
-            this.child(crate::ui::rule_v(cx)).child(render_penetration_button(pane, cx))
+            this.child(crate::ui::rule_v(cx))
+                .child(render_options_button(pane.clone(), cx))
+                .child(render_penetration_button(pane, cx))
         })
 }
 
@@ -504,6 +499,27 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
     )
 }
 
+/// Toolbar toggle for the options rail, which holds the visibility, hull and
+/// display sections. A mode rather than an action, so it reads as selected
+/// while the rail is up.
+fn render_options_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl IntoElement + use<> {
+    let open = pane.read(cx).options_open();
+
+    crate::ui::selectable(
+        "armor-options",
+        open,
+        Button::new("armor-options-toggle")
+            .icon(IconName::Settings)
+            .label(t!("ui.armor.options").to_string())
+            .compact()
+            .selected(open)
+            .tooltip(t!("ui.armor.options_tooltip").to_string())
+            .on_click(move |_event, _window, cx: &mut App| {
+                pane.update(cx, |pane, cx| pane.toggle_options(cx));
+            }),
+    )
+}
+
 /// Toolbar toggle for the penetration checker, which belongs to the pane
 /// rather than to this viewport: the egui app puts its own Pen Check button
 /// in this same row (`ui/armor.pen_check`).
@@ -559,36 +575,11 @@ fn render_export_button(view: &ViewportView, entity: &Entity<ViewportView>) -> i
         })
 }
 
-fn render_visibility_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let has_armor = view.current_armor.is_some();
-    let close_entity = entity.clone();
-    let content_entity = entity.clone();
-
-    Popover::new("armor-visibility-popover")
-        .trigger(
-            Button::new("armor-visibility-popover-trigger")
-                .icon(IconName::Eye)
-                .label(t!("ui.armor.visibility").to_string())
-                .compact()
-                .disabled(!has_armor),
-        )
-        .on_open_change(move |open, _window, cx| {
-            if !*open {
-                close_entity.update(cx, |view, cx| view.clear_sidebar_hover(cx));
-            }
-        })
-        .content(move |_state, window, cx| render_popover_content(&content_entity, window, cx))
-}
-
 /// Builds the popover's whole tree from a snapshot of `entity`'s current
 /// state, read once up front (see the module doc: the `.content()` closure
 /// re-runs on every open-render, so this clone is cheap and short-lived, not
 /// held across the click/hover closures built below).
-fn render_popover_content(
-    entity: &Entity<ViewportView>,
-    _window: &mut Window,
-    cx: &mut Context<PopoverState>,
-) -> AnyElement {
+pub(crate) fn render_popover_content(entity: &Entity<ViewportView>, cx: &mut App) -> AnyElement {
     let (armor, part_visibility, plate_visibility, expanded_zones, expanded_parts, scroll, show_zero_mm) = {
         let view = entity.read(cx);
         (
@@ -679,34 +670,6 @@ fn render_popover_content(
         .into_any_element()
 }
 
-/// Toolbar trigger for the hull-visibility popover (Milestone 4 Task 8a):
-/// All/None, the `hull_opaque` toggle, and a per-part-group tri-state tree of
-/// hull meshes (all hidden by default -- see `viewport_view.rs`'s
-/// `hull_visibility` doc). Ports the egui app's `draw_hull_visibility_popover`
-/// V1 subset (`tab.rs:3135-3317`); see `render_hull_popover_content`'s doc for
-/// the exact deferrals.
-fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let has_armor = view.current_armor.is_some();
-    let close_entity = entity.clone();
-    let content_entity = entity.clone();
-
-    Popover::new("armor-hull-visibility-popover")
-        .trigger(
-            Button::new("armor-hull-visibility-popover-trigger")
-                .icon(IconName::Frame)
-                .label(t!("ui.armor.hull_toggle").to_string())
-                .compact()
-                .tooltip(t!("ui.armor.hull_tooltip").to_string())
-                .disabled(!has_armor),
-        )
-        .on_open_change(move |open, _window, cx| {
-            if !*open {
-                close_entity.update(cx, |view, cx| view.clear_sidebar_hover(cx));
-            }
-        })
-        .content(move |_state, window, cx| render_hull_popover_content(&content_entity, window, cx))
-}
-
 /// Builds the hull-visibility popover's tree from a snapshot of `entity`'s
 /// current state (same lazy-`.content()` rationale as
 /// `render_popover_content`'s doc). Between the header and the hull tree,
@@ -724,11 +687,7 @@ fn render_hull_button(view: &ViewportView, entity: &Entity<ViewportView>) -> imp
 /// **Deferred.** The sidebar-hover highlight for a hovered hull row (egui's
 /// `SidebarHighlightKey::HullMeshes`) is out of this port's scope -- see
 /// `upload_hull.rs`'s module doc.
-fn render_hull_popover_content(
-    entity: &Entity<ViewportView>,
-    _window: &mut Window,
-    cx: &mut Context<PopoverState>,
-) -> AnyElement {
+pub(crate) fn render_hull_popover_content(entity: &Entity<ViewportView>, cx: &mut App) -> AnyElement {
     let (
         armor,
         hull_visibility,
@@ -1154,32 +1113,6 @@ fn render_hull_mesh_row(
         .into_any_element()
 }
 
-/// Toolbar trigger for the display-settings popover (Task 7b): plate edges,
-/// waterline, zero-mm plates, armor opacity, and hull lighting. Ports the
-/// egui app's `draw_display_settings_popover` V1 subset (`tab.rs:4875-5144`)
-/// -- see `render_display_popover_content`'s doc for the exact deferrals.
-fn render_display_button(view: &ViewportView, entity: &Entity<ViewportView>) -> impl IntoElement + use<> {
-    let has_armor = view.current_armor.is_some();
-    let content_entity = entity.clone();
-    let open_entity = entity.clone();
-
-    Popover::new("armor-display-settings-popover")
-        .open(view.display_popover_open())
-        .on_open_change(move |open, _window, cx| {
-            let open = *open;
-            open_entity.update(cx, |view, cx| view.set_display_popover_open(open, cx));
-        })
-        .trigger(
-            Button::new("armor-display-settings-popover-trigger")
-                .icon(IconName::Settings)
-                .label(t!("ui.armor.display").to_string())
-                .compact()
-                .tooltip(t!("ui.armor.display_tooltip").to_string())
-                .disabled(!has_armor),
-        )
-        .content(move |_state, window, cx| render_display_popover_content(&content_entity, window, cx))
-}
-
 /// Builds the display-settings popover's content from a snapshot of
 /// `entity`'s current state (same lazy-`.content()` rationale as
 /// `render_popover_content`'s doc). Reproduces the egui app's
@@ -1252,11 +1185,27 @@ struct DisplayPopoverSnapshot {
     shininess_slider: Entity<SliderState>,
 }
 
-fn render_display_popover_content(
+/// `legend_visible` is passed in rather than read off the pane here: the
+/// options rail renders inside `ArmorViewerPane`'s own render, and reading the
+/// pane entity there panics on the borrow it already holds.
+pub(crate) fn render_display_popover_content(
     entity: &Entity<ViewportView>,
-    _window: &mut Window,
-    cx: &mut Context<PopoverState>,
+    legend_visible: bool,
+    cx: &mut App,
 ) -> AnyElement {
+    // The trigger button carried `.disabled(!has_armor)`; the rail has no
+    // button, so the guard the other two sections already had belongs here.
+    // The egui app draws none of the three without a loaded hull
+    // (`ui/tab.rs`'s `if let Some(armor) = pane.loaded_armor.take()`).
+    if !entity.read(cx).has_armor() {
+        return div()
+            .text_sm()
+            .text_color(crate::theme::text_dim())
+            .p_2()
+            .child(t!("ui.armor.no_ship_loaded").to_string())
+            .into_any_element();
+    }
+
     let pane = entity.read(cx).pane();
     let snapshot = {
         let view = entity.read(cx);
@@ -1336,11 +1285,10 @@ fn render_display_popover_content(
         // reader looks for it here: the egui display popover carries the same
         // checkbox (`ui.armor.show_armor_thickness`).
         .when_some(pane, |this, pane| {
-            let visible = pane.read(cx).legend_visible();
             this.child(
                 Checkbox::new("armor-display-legend")
                     .label(t!("ui.armor.show_armor_thickness").to_string())
-                    .checked(visible)
+                    .checked(legend_visible)
                     .on_click(move |checked: &bool, _window, cx: &mut App| {
                         let checked = *checked;
                         pane.update(cx, |pane, cx| pane.set_legend_visible(checked, cx));
