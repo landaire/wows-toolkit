@@ -1904,7 +1904,8 @@ mod tests {
     fn assert_columns_tile(columns: &[ReplayColumn], state: &str, window: &mut gpui_kit::Window) {
         let mut edge: Option<gpui_kit::Pixels> = None;
         for col in columns {
-            let cell = window.find(("replay-cell", 0usize * super::CELL_ID_STRIDE + *col as usize)).bounds();
+            // Row 0, where the id encoding `ix * CELL_ID_STRIDE + col` leaves just the column.
+            let cell = window.find(("replay-cell", *col as usize)).bounds();
             if let Some(edge) = edge {
                 assert_eq!(cell.origin.x, edge, "{state}: {col:?} does not start where the column before it ended");
             }
@@ -1945,8 +1946,8 @@ mod tests {
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
-            let first_scrolling =
-                window.find(("replay-cell", 0usize * super::CELL_ID_STRIDE + scrolling as usize)).bounds();
+            // Row 0, where the id encoding `ix * CELL_ID_STRIDE + col` leaves just the column.
+            let first_scrolling = window.find(("replay-cell", scrolling as usize)).bounds();
             assert!(
                 first_scrolling.origin.x < panel,
                 "the scrolling columns start inside the panel, at {:?} of {panel:?}",
