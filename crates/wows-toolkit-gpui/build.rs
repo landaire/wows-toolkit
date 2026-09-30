@@ -23,7 +23,10 @@ fn main() {
     copy_embedded_file("EMBEDDED_CONSTANTS", "../../embedded_resources/constants.json", "constants.json");
     println!("cargo:rerun-if-changed=../../assets/wows_toolkit.ico");
 
-    #[cfg(not(wows_buck_build))]
+    // `windows` gates on the host, matching the build-dependency: winresource is
+    // absent off Windows, so the reference to it must be too. The target check is
+    // separate, for a Windows host building for another target.
+    #[cfg(all(not(wows_buck_build), windows))]
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let mut resource = winresource::WindowsResource::new();
         resource.set_icon("../../assets/wows_toolkit.ico");
