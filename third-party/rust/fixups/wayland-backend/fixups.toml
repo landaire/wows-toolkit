@@ -1,1 +1,13 @@
 buildscript.run = false
+
+# The build script compiles these two shims with `cc` whenever the `log`
+# feature is on, and the Rust side declares the trampolines they define as
+# `extern`, so a build without them fails to link. Both are listed because
+# both Rust counterparts are gated on `log` alone, not on client/server.
+[[cxx_library]]
+name = "log_shim_client"
+srcs = ["src/sys/client_impl/log_shim.c"]
+
+[[cxx_library]]
+name = "log_shim_server"
+srcs = ["src/sys/server_impl/log_shim.c"]
