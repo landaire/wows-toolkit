@@ -1,9 +1,8 @@
 name: Probe metal toolchain
 
-# Temporary, manual only. Runs gpui-pre-apple's real build script under Cargo on
-# macOS and compares its cbindgen header against the checked-in one, which is
-# what the Buck rule will feed the pinned Metal compiler. Delete once that rule
-# is verified.
+# Temporary, manual only. Builds just the crate whose build script the macOS
+# graph was failing on, so the fixup can be checked in minutes instead of
+# waiting for the whole Buck matrix. Delete once the Buck job is green.
 
 on:
   workflow_dispatch:
@@ -14,33 +13,25 @@ jobs:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
-
-      - name: Report the pinned tools
-        run: |
-          echo "metal:    $(xcrun --sdk macosx --find metal)"
-          echo "metallib: $(xcrun --sdk macosx --find metallib)"
-          xcrun --sdk macosx metal --version
-
-      - name: Run the real build script
-        run: cargo build -p gpui-pre-apple 2>&1 | tail -5
-
-      - name: Compare the header and report the artifacts
-        run: |
-          set -euo pipefail
-          ref=$(find target -path '*gpui-pre-apple*' -name scene.h -print | head -1)
-          lib=$(find target -path '*gpui-pre-apple*' -name shaders.metallib -print | head -1)
-          echo "build script header: $ref"
-          echo "build script metallib: $lib ($(wc -c < "$lib") bytes)"
-          if diff -u "$ref" third-party/rust/fixups/gpui-pre-apple/scene.h > /tmp/hdr.diff; then
-            echo "HEADER IDENTICAL"
-          else
-            echo "HEADER DIFFERS"
-            head -60 /tmp/hdr.diff
-          fi
-
-      - uses: actions/upload-artifact@v4
+      - uses: cachix/install-nix-action@v30
         with:
-          name: gpui-pre-apple-generated
-          path: |
-            target/**/gpui-pre-apple*/out/scene.h
-            target/**/gpui-pre-apple*/out/shaders.metallib
+          nix_path: nixpkgs=channel:nixos-unstable
+      - uses: cachix/cachix-action@v15
+        with:
+          name: landaire-gh-public
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+          signingKey: '${{ secrets.CACHIX_SIGNING_KEY }}'
+
+      - name: Provision the toolchain and crate sources
+        run: nix develop --command nu scripts/refresh-buck-toolchain.nu
+
+      - name: Build the crate whose build script now runs
+        run: |
+          nix develop --command bash scripts/run-offline.sh \
+            buck2 build --target-platforms toolchains//platforms:macos_arm64 \
+            root//third-party/rust:gpui-pre-apple-0.3
+
+      - name: Confirm the action graph stays hermetic
+        run: |
+          nix develop --command bash scripts/run-offline.sh \
+            nu scripts/check-buck-hermetic.nu root//third-party/rust:gpui-pre-apple-0.3
