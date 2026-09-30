@@ -4628,6 +4628,47 @@ cargo.rust_library(
 )
 
 extract_archive(
+    name = "cbindgen-0.28.0.crate",
+    src = "vendor/cbindgen-0.28.0.crate",
+    strip_prefix = "cbindgen-0.28.0",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "cbindgen-0.28",
+    srcs = [":cbindgen-0.28.0.crate"],
+    crate = "cbindgen",
+    crate_root = "cbindgen-0.28.0.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "cbindgen",
+        "CARGO_MANIFEST_DIR": "cbindgen-0.28.0.crate",
+        "CARGO_PKG_AUTHORS": "Emilio Cobos Álvarez <emilio@crisal.io>:Jeff Muizelaar <jmuizelaar@mozilla.com>:Kartikaya Gupta <kats@mozilla.com>:Ryan Hunt <rhunt@eqrion.net>",
+        "CARGO_PKG_DESCRIPTION": "A tool for generating C bindings to Rust code.",
+        "CARGO_PKG_NAME": "cbindgen",
+        "CARGO_PKG_REPOSITORY": "https://github.com/mozilla/cbindgen",
+        "CARGO_PKG_VERSION": "0.28.0",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "28",
+        "CARGO_PKG_VERSION_PATCH": "0",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    visibility = [],
+    deps = [
+        ":heck-0.4",
+        ":indexmap-2",
+        ":log-0.4",
+        ":proc-macro2-1",
+        ":quote-1",
+        ":serde-1",
+        ":serde_json-1",
+        ":syn-2",
+        ":tempfile-3",
+        ":toml-0.8",
+    ],
+)
+
+extract_archive(
     name = "cc-1.4.7.crate",
     src = "vendor/cc-1.4.7.crate",
     strip_prefix = "cc-1.4.7",
@@ -14106,11 +14147,13 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location :gpui-pre-apple-0.3-build-script-run[out_dir])",
     },
     features = [
         "default",
         "runtime_shaders",
     ],
+    rustc_flags = ["@$(location :gpui-pre-apple-0.3-build-script-run[rustc_flags])"],
     visibility = [],
     deps = [
         ":anyhow-1",
@@ -14130,6 +14173,53 @@ cargo.rust_library(
         ":objc2-0.6",
         ":parking_lot-0.12",
     ],
+)
+
+cargo.rust_binary(
+    name = "gpui-pre-apple-0.3-build-script-build",
+    srcs = [":gpui-pre-apple-0.3.5.crate"],
+    crate = "build_script_build",
+    crate_root = "gpui-pre-apple-0.3.5.crate/build.rs",
+    edition = "2024",
+    env = {
+        "CARGO_CRATE_NAME": "build_script_build",
+        "CARGO_MANIFEST_DIR": "gpui-pre-apple-0.3.5.crate",
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Zed's `gpui_apple` crate (gpui-pre snapshot of zed@d89e9c2)",
+        "CARGO_PKG_NAME": "gpui-pre-apple",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zed-industries/zed",
+        "CARGO_PKG_VERSION": "0.3.5",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "runtime_shaders",
+    ],
+    visibility = [],
+    deps = [":cbindgen-0.28"],
+)
+
+buildscript_run(
+    name = "gpui-pre-apple-0.3-build-script-run",
+    package_name = "gpui-pre-apple",
+    buildscript_rule = ":gpui-pre-apple-0.3-build-script-build",
+    env = {
+        "CARGO_PKG_AUTHORS": "",
+        "CARGO_PKG_DESCRIPTION": "Zed's `gpui_apple` crate (gpui-pre snapshot of zed@d89e9c2)",
+        "CARGO_PKG_REPOSITORY": "https://github.com/zed-industries/zed",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "3",
+        "CARGO_PKG_VERSION_PATCH": "5",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = [
+        "default",
+        "runtime_shaders",
+    ],
+    version = "0.3.5",
 )
 
 extract_archive(
@@ -15736,6 +15826,36 @@ buildscript_run(
         "CARGO_PKG_VERSION_PRE": "",
     },
     version = "0.9.3",
+)
+
+extract_archive(
+    name = "heck-0.4.1.crate",
+    src = "vendor/heck-0.4.1.crate",
+    strip_prefix = "heck-0.4.1",
+    visibility = [],
+)
+
+cargo.rust_library(
+    name = "heck-0.4",
+    srcs = [":heck-0.4.1.crate"],
+    crate = "heck",
+    crate_root = "heck-0.4.1.crate/src/lib.rs",
+    edition = "2018",
+    env = {
+        "CARGO_CRATE_NAME": "heck",
+        "CARGO_MANIFEST_DIR": "heck-0.4.1.crate",
+        "CARGO_PKG_AUTHORS": "Without Boats <woboats@gmail.com>",
+        "CARGO_PKG_DESCRIPTION": "heck is a case conversion library.",
+        "CARGO_PKG_NAME": "heck",
+        "CARGO_PKG_REPOSITORY": "https://github.com/withoutboats/heck",
+        "CARGO_PKG_VERSION": "0.4.1",
+        "CARGO_PKG_VERSION_MAJOR": "0",
+        "CARGO_PKG_VERSION_MINOR": "4",
+        "CARGO_PKG_VERSION_PATCH": "1",
+        "CARGO_PKG_VERSION_PRE": "",
+    },
+    features = ["default"],
+    visibility = [],
 )
 
 extract_archive(

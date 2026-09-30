@@ -1,0 +1,3 @@
+# The build script only writes the crate's own test harness, from test data the
+# published archive does not carry. Nothing the library exports needs it.
+buildscript.run = false
