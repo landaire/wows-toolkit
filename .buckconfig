@@ -17,10 +17,13 @@
     target:toolchains//...->prelude//platforms:default
 
 [build]
-  execution_platforms = prelude//platforms:default
+  execution_platforms = root//platforms:default
 
 [native_build]
   mode = debug
 
 [windows_toolchain]
   manifest = toolchains/windows/toolchain-manifest.json
+ 
+[project]
+ignore = .jj
