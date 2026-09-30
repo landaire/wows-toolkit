@@ -77,14 +77,6 @@ impl ViewportDock {
         self.panes[self.active_ix].clone()
     }
 
-    /// The panes an option edit should be written to. Every pane when the
-    /// reader has asked for options to be synced, and the active one alone
-    /// otherwise, so the options panel writes through one place rather than
-    /// each of its sections learning about the sync setting.
-    pub fn option_targets(&self, sync: bool) -> Vec<Entity<ViewportView>> {
-        option_target_ixs(self.panes.len(), self.active_ix, sync).into_iter().map(|ix| self.panes[ix].clone()).collect()
-    }
-
     /// Which way the panes are laid out.
     pub fn split_axis(&self) -> Axis {
         self.split
@@ -151,15 +143,6 @@ enum CloseOutcome {
     /// `ix` is the only pane: it is emptied rather than removed, because a
     /// viewer with no viewport would render nothing.
     ResetLast,
-}
-
-/// Which panes an option edit applies to: every pane when the reader has asked
-/// for options to be synced, and the active one alone otherwise.
-fn option_target_ixs(len: usize, active_ix: usize, sync: bool) -> Vec<usize> {
-    if active_ix >= len {
-        return Vec::new();
-    }
-    if sync { (0..len).collect() } else { vec![active_ix] }
 }
 
 fn close_outcome(len: usize, ix: usize) -> CloseOutcome {
@@ -241,7 +224,6 @@ mod tests {
     use super::CloseOutcome;
     use super::active_ix_after_remove;
     use super::close_outcome;
-    use super::option_target_ixs;
 
     #[test]
     fn closing_the_only_pane_empties_it() {
@@ -288,30 +270,5 @@ mod tests {
     #[test]
     fn active_ix_stays_when_removing_the_first_pane_while_it_is_active() {
         assert_eq!(active_ix_after_remove(0, 0, 1), 0);
-    }
-
-    #[test]
-    fn an_option_edit_reaches_only_the_active_pane() {
-        assert_eq!(option_target_ixs(3, 1, false), vec![1]);
-    }
-
-    #[test]
-    fn a_synced_option_edit_reaches_every_pane() {
-        assert_eq!(option_target_ixs(3, 1, true), vec![0, 1, 2]);
-    }
-
-    #[test]
-    fn syncing_one_pane_is_still_that_pane() {
-        assert_eq!(option_target_ixs(1, 0, true), vec![0]);
-        assert_eq!(option_target_ixs(1, 0, false), vec![0]);
-    }
-
-    /// The dock always has a pane, so an active index past the end means the
-    /// caller is out of step with it; an edit is dropped rather than applied
-    /// to the wrong hull.
-    #[test]
-    fn an_active_index_past_the_end_targets_nothing() {
-        assert!(option_target_ixs(2, 2, false).is_empty());
-        assert!(option_target_ixs(0, 0, true).is_empty());
     }
 }
