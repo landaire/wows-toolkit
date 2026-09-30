@@ -14476,6 +14476,7 @@ cargo.rust_library(
         "CARGO_PKG_VERSION_MINOR": "3",
         "CARGO_PKG_VERSION_PATCH": "5",
         "CARGO_PKG_VERSION_PRE": "",
+        "OUT_DIR": "$(location //third-party/rust/fixups/gpui-pre-media:out_dir)",
     },
     visibility = [],
     deps = [

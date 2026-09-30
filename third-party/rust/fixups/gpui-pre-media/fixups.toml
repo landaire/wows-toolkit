@@ -1,2 +1,9 @@
 # bindgen against the macOS SDK, located through xcrun. macOS only.
+#
+# Neither is available to a hermetic action, and bindgen is not in the graph at
+# all, so the generated bindings are checked in beside this file and OUT_DIR
+# points at them instead.
 buildscript.run = false
+
+[env]
+OUT_DIR = "$(location //third-party/rust/fixups/gpui-pre-media:out_dir)"

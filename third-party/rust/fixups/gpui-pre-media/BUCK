@@ -1,0 +1,9 @@
+# bindings.rs is what the crate's build script would have written into OUT_DIR.
+# Regenerate it on a macOS host with `cargo build -p gpui-pre-media` if the SDK
+# the macOS builder ships moves.
+
+filegroup(
+    name = "out_dir",
+    srcs = ["bindings.rs"],
+    visibility = ["//third-party/rust/..."],
+)
