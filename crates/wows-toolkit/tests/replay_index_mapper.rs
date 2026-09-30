@@ -95,6 +95,6 @@ fn map_rows_requires_ui_report() {
     replay.battle_report = Some(report);
     // replay.ui_report intentionally left None (see module docs above).
 
-    let rows = map_rows(&replay, SourceId(1), Timestamp::now(), ConstantsFit::Exact);
+    let rows = map_rows(&replay, SourceId(1), Timestamp::now(), ConstantsFit::Matched);
     assert!(rows.is_none(), "map_rows must require ui_report, not just battle_report");
 }
