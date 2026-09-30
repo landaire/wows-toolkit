@@ -1,0 +1,40 @@
+name: Probe metal toolchain
+
+# Temporary, manual only. Establishes whether the macOS runner has the Metal
+# compiler, where it lives, and which version, so the Buck toolchain can pin it.
+# Delete once the pin exists.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    name: macOS arm64
+    runs-on: macos-14
+    steps:
+      - name: Xcode and SDK
+        run: |
+          echo "xcode-select -p: $(xcode-select -p)"
+          xcodebuild -version || true
+          echo "sdk path: $(xcrun --sdk macosx --show-sdk-path)"
+          echo "sdk version: $(xcrun --sdk macosx --show-sdk-version)"
+
+      - name: Locate the Metal compiler
+        run: |
+          echo "--- xcrun --find ---"
+          xcrun --sdk macosx --find metal || echo "metal NOT FOUND"
+          xcrun --sdk macosx --find metallib || echo "metallib NOT FOUND"
+          echo "--- versions ---"
+          xcrun --sdk macosx metal --version || echo "metal --version failed"
+          echo "--- installed metal toolchains ---"
+          xcodebuild -showComponent MetalToolchain 2>/dev/null || echo "no -showComponent support"
+          ls -la /Applications/Xcode*.app/Contents/Developer/usr/bin/ 2>/dev/null | grep -iE "metal" || echo "no metal in Xcode usr/bin"
+          ls -la /Applications/Xcode*.app/Contents/Developer/Toolchains/ 2>/dev/null || true
+
+      - name: Compile a trivial shader end to end
+        run: |
+          set -x
+          printf '#include <metal_stdlib>\nusing namespace metal;\nkernel void k() {}\n' > /tmp/t.metal
+          xcrun --sdk macosx metal -c /tmp/t.metal -o /tmp/t.air
+          xcrun --sdk macosx metallib /tmp/t.air -o /tmp/t.metallib
+          ls -la /tmp/t.air /tmp/t.metallib
