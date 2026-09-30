@@ -1,9 +1,10 @@
-load(":defs.bzl", "execution_platform", "host_configuration")
+load(":defs.bzl", "execution_platform", "host_configuration", "remote_cache_configured")
 
 execution_platform(
     name = "default",
     cpu_configuration = host_configuration.cpu,
     os_configuration = host_configuration.os,
+    remote_cache_enabled = remote_cache_configured(),
     use_windows_path_separators = host_info().os.is_windows,
     visibility = ["PUBLIC"],
 )
