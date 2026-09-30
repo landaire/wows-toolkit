@@ -1,6 +1,7 @@
 # bindings.rs is what the crate's build script would have written into OUT_DIR.
-# Regenerate it on a macOS host with `cargo build -p gpui-pre-media` if the SDK
-# the macOS builder ships moves.
+# Regenerate it on a macOS host with `cargo build -p gpui-pre-media`, copy the
+# bindings.rs from that crate's OUT_DIR here, and record the version in
+# generated-for-version, which scripts/test-generated-bindings.nu checks.
 
 filegroup(
     name = "out_dir",
