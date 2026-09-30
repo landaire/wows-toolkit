@@ -1,8 +1,9 @@
 name: Probe metal toolchain
 
-# Temporary, manual only. Validates that the checked-in scene.h compiles
-# gpui-pre-apple's shaders with the pinned Metal tools, before the Buck rule
-# that will do it is written. Delete once that rule exists.
+# Temporary, manual only. Runs gpui-pre-apple's real build script under Cargo on
+# macOS and compares its cbindgen header against the checked-in one, which is
+# what the Buck rule will feed the pinned Metal compiler. Delete once that rule
+# is verified.
 
 on:
   workflow_dispatch:
@@ -20,26 +21,26 @@ jobs:
           echo "metallib: $(xcrun --sdk macosx --find metallib)"
           xcrun --sdk macosx metal --version
 
-      - name: Compile the shaders against the checked-in header
-        run: |
-          set -euxo pipefail
-          tar -xzf third-party/rust/vendor/gpui-pre-apple-0.3.5.crate -C /tmp
-          crate=/tmp/gpui-pre-apple-0.3.5
-          out=$(mktemp -d)
-          cp "$crate/src/shaders.metal" "$out/shaders.metal"
-          "$(xcrun --sdk macosx --find metal)" \
-            -gline-tables-only -mmacosx-version-min=10.15.7 -MO -c \
-            "$out/shaders.metal" \
-            -include third-party/rust/fixups/gpui-pre-apple/scene.h \
-            -o "$out/shaders.air"
-          "$(xcrun --sdk macosx --find metallib)" "$out/shaders.air" -o "$out/shaders.metallib"
-          ls -la "$out"
-          echo "OUT_DIR=$out" >> "$GITHUB_ENV"
+      - name: Run the real build script
+        run: cargo build -p gpui-pre-apple 2>&1 | tail -5
 
-      - name: Compare against the build script's own output
+      - name: Compare the header and report the artifacts
         run: |
-          set -euxo pipefail
-          cargo build -p gpui-pre-apple 2>&1 | tail -5
+          set -euo pipefail
           ref=$(find target -path '*gpui-pre-apple*' -name scene.h -print | head -1)
+          lib=$(find target -path '*gpui-pre-apple*' -name shaders.metallib -print | head -1)
           echo "build script header: $ref"
-          diff "$ref" third-party/rust/fixups/gpui-pre-apple/scene.h && echo "HEADER IDENTICAL" || echo "HEADER DIFFERS"
+          echo "build script metallib: $lib ($(wc -c < "$lib") bytes)"
+          if diff -u "$ref" third-party/rust/fixups/gpui-pre-apple/scene.h > /tmp/hdr.diff; then
+            echo "HEADER IDENTICAL"
+          else
+            echo "HEADER DIFFERS"
+            head -60 /tmp/hdr.diff
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gpui-pre-apple-generated
+          path: |
+            target/**/gpui-pre-apple*/out/scene.h
+            target/**/gpui-pre-apple*/out/shaders.metallib
