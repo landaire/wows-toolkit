@@ -1333,6 +1333,9 @@ fn the_parameter_dump_menu_is_refused_until_a_build_is_loaded(cx: &mut TestAppCo
 /// re-applies the theme when the slider and the stored zoom disagree, and
 /// that apply would otherwise stand in for the one the control is supposed to
 /// make.
+///
+/// Not `theme::is_dark_mode`: that mirror is a process-global every test's own
+/// render writes, so reading it while the others run is a race.
 #[gpui_kit::test]
 fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
     use gpui_kit::component::theme::Theme;
@@ -1360,12 +1363,10 @@ fn the_theme_control_switches_the_palette(cx: &mut TestAppContext) {
         assert_eq!(window.find(dark).selected(), Some(true));
         assert_eq!(window.find(system).selected(), Some(false), "the choices are exclusive");
         assert_eq!(Theme::global(cx).mode, ThemeMode::Dark, "the dark palette reached the widgets");
-        assert!(crate::theme::is_dark_mode(), "and the bands follow it");
 
         window.click(light, cx);
         assert_eq!(window.find(light).selected(), Some(true));
         assert_eq!(Theme::global(cx).mode, ThemeMode::Light, "the light palette reached the widgets");
-        assert!(!crate::theme::is_dark_mode());
     })
     .expect("the test window stays open");
 
