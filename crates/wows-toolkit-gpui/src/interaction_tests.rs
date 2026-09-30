@@ -457,11 +457,11 @@ fn the_toolbar_shows_and_hides_the_options_rail(cx: &mut TestAppContext) {
         // controls that would act on an empty viewport.
         assert!(window.try_find("armor-options-panel").is_some(), "the rail is up without being asked for");
 
-        window.click("armor-options-toggle", cx);
+        window.click("collapse", cx);
         window.render_frame(cx);
         assert!(window.try_find("armor-options-panel").is_none(), "the toolbar toggle puts the rail away");
 
-        window.click("armor-options-toggle", cx);
+        window.click("collapse", cx);
         window.render_frame(cx);
         assert!(window.try_find("armor-options-panel").is_some(), "and brings it back");
     })
