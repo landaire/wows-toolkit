@@ -1,8 +1,8 @@
 name: Probe metal toolchain
 
-# Temporary, manual only. Establishes whether the macOS runner has the Metal
-# compiler, where it lives, and which version, so the Buck toolchain can pin it.
-# Delete once the pin exists.
+# Temporary, manual only. Validates that the checked-in scene.h compiles
+# gpui-pre-apple's shaders with the pinned Metal tools, before the Buck rule
+# that will do it is written. Delete once that rule exists.
 
 on:
   workflow_dispatch:
@@ -12,29 +12,34 @@ jobs:
     name: macOS arm64
     runs-on: macos-14
     steps:
-      - name: Xcode and SDK
-        run: |
-          echo "xcode-select -p: $(xcode-select -p)"
-          xcodebuild -version || true
-          echo "sdk path: $(xcrun --sdk macosx --show-sdk-path)"
-          echo "sdk version: $(xcrun --sdk macosx --show-sdk-version)"
+      - uses: actions/checkout@v4
 
-      - name: Locate the Metal compiler
+      - name: Report the pinned tools
         run: |
-          echo "--- xcrun --find ---"
-          xcrun --sdk macosx --find metal || echo "metal NOT FOUND"
-          xcrun --sdk macosx --find metallib || echo "metallib NOT FOUND"
-          echo "--- versions ---"
-          xcrun --sdk macosx metal --version || echo "metal --version failed"
-          echo "--- installed metal toolchains ---"
-          xcodebuild -showComponent MetalToolchain 2>/dev/null || echo "no -showComponent support"
-          ls -la /Applications/Xcode*.app/Contents/Developer/usr/bin/ 2>/dev/null | grep -iE "metal" || echo "no metal in Xcode usr/bin"
-          ls -la /Applications/Xcode*.app/Contents/Developer/Toolchains/ 2>/dev/null || true
+          echo "metal:    $(xcrun --sdk macosx --find metal)"
+          echo "metallib: $(xcrun --sdk macosx --find metallib)"
+          xcrun --sdk macosx metal --version
 
-      - name: Compile a trivial shader end to end
+      - name: Compile the shaders against the checked-in header
         run: |
-          set -x
-          printf '#include <metal_stdlib>\nusing namespace metal;\nkernel void k() {}\n' > /tmp/t.metal
-          xcrun --sdk macosx metal -c /tmp/t.metal -o /tmp/t.air
-          xcrun --sdk macosx metallib /tmp/t.air -o /tmp/t.metallib
-          ls -la /tmp/t.air /tmp/t.metallib
+          set -euxo pipefail
+          tar -xzf third-party/rust/vendor/gpui-pre-apple-0.3.5.crate -C /tmp
+          crate=/tmp/gpui-pre-apple-0.3.5
+          out=$(mktemp -d)
+          cp "$crate/src/shaders.metal" "$out/shaders.metal"
+          "$(xcrun --sdk macosx --find metal)" \
+            -gline-tables-only -mmacosx-version-min=10.15.7 -MO -c \
+            "$out/shaders.metal" \
+            -include third-party/rust/fixups/gpui-pre-apple/scene.h \
+            -o "$out/shaders.air"
+          "$(xcrun --sdk macosx --find metallib)" "$out/shaders.air" -o "$out/shaders.metallib"
+          ls -la "$out"
+          echo "OUT_DIR=$out" >> "$GITHUB_ENV"
+
+      - name: Compare against the build script's own output
+        run: |
+          set -euxo pipefail
+          cargo build -p gpui-pre-apple 2>&1 | tail -5
+          ref=$(find target -path '*gpui-pre-apple*' -name scene.h -print | head -1)
+          echo "build script header: $ref"
+          diff "$ref" third-party/rust/fixups/gpui-pre-apple/scene.h && echo "HEADER IDENTICAL" || echo "HEADER DIFFERS"
