@@ -37,12 +37,30 @@ def _native_build_mode():
         fail("native_build.mode must be debug or release, got {}".format(mode))
     return mode
 
+# How much debug info a debug build carries, as the Nix toolchain reads it too.
+# Release never carries any.
+_DEBUGINFO_LEVELS = {
+    "full": "2",
+    "line-tables-only": "1",
+    "none": "0",
+}
+
+def _debug_debuginfo():
+    asked = read_root_config("native_build", "debuginfo", "full")
+    level = _DEBUGINFO_LEVELS.get(asked)
+    if level == None:
+        fail("[native_build] debuginfo is {}; it must be one of {}.".format(
+            asked,
+            ", ".join(sorted(_DEBUGINFO_LEVELS)),
+        ))
+    return level
+
 def _rustc_flags():
     # No -Clinker here: the prelude already points rustc at the linker from
     # CxxToolsInfo, which is the pinned link.exe wrapper.
     if _native_build_mode() == "release":
         return ["-Copt-level=3", "-Cdebuginfo=0"]
-    return ["-Copt-level=0", "-Cdebuginfo=2"]
+    return ["-Copt-level=0", "-Cdebuginfo=" + _debug_debuginfo()]
 
 def _wrapper(ctx, name, executable):
     # cl.exe and link.exe read their search paths from the environment. The
