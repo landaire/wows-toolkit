@@ -41442,6 +41442,10 @@ extract_archive(
     name = "wayland-backend-0.3.17.crate",
     src = "vendor/wayland-backend-0.3.17.crate",
     strip_prefix = "wayland-backend-0.3.17",
+    sub_targets = [
+        "src/sys/client_impl/log_shim.c",
+        "src/sys/server_impl/log_shim.c",
+    ],
     visibility = [],
 )
 
@@ -41476,8 +41480,24 @@ cargo.rust_library(
         ":rustix-1",
         ":scoped-tls-1",
         ":smallvec-1",
+        ":wayland-backend-0.3-log_shim_client",
+        ":wayland-backend-0.3-log_shim_server",
         ":wayland-sys-0.31",
     ],
+)
+
+cxx_library(
+    name = "wayland-backend-0.3-log_shim_client",
+    srcs = [":wayland-backend-0.3.17.crate[src/sys/client_impl/log_shim.c]"],
+    headers = [],
+    visibility = [],
+)
+
+cxx_library(
+    name = "wayland-backend-0.3-log_shim_server",
+    srcs = [":wayland-backend-0.3.17.crate[src/sys/server_impl/log_shim.c]"],
+    headers = [],
+    visibility = [],
 )
 
 extract_archive(
