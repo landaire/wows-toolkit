@@ -15,9 +15,17 @@ env:
   ALIASES: "root//:"
 
 jobs:
+  # Three phases of the same graph, run as separate jobs so their wall clock
+  # overlaps instead of adding up. Each pays its own provisioning and starts
+  # from a cold buck-out, which is still cheaper in wall clock than the serial
+  # run it replaces.
   linux:
-    name: Linux x86_64
+    name: Linux x86_64 (${{ matrix.phase }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        phase: [checks, release, graph-tests]
     steps:
       - uses: actions/checkout@v4
       - uses: cachix/install-nix-action@v30
@@ -37,17 +45,21 @@ jobs:
       # Fails with a clear message if the vendored prelude was expanded from a
       # different buck2 than the pinned one, before the load-time error would.
       - name: Verify the vendored prelude matches the pinned buck2
+        if: matrix.phase == 'checks'
         run: nix build .#checks.x86_64-linux.prelude-version -L
 
       # Every step below runs Buck without a network, run-offline.sh explains
       # why each one needs the wrapper rather than the build steps alone.
       - name: Build every alias
+        if: matrix.phase == 'checks'
         run: nix develop --command bash scripts/run-offline.sh buck2 build $ALIASES
 
       - name: Build every alias in release mode
+        if: matrix.phase == 'release'
         run: nix develop --command bash scripts/run-offline.sh buck2 build -c native_build.mode=release $ALIASES
 
       - name: Check the action graph is hermetic
+        if: matrix.phase == 'checks'
         run: |
           for alias in $(nix develop --command buck2 targets $ALIASES); do
             nix develop --command bash scripts/run-offline.sh nu scripts/check-buck-hermetic.nu "$alias"
@@ -59,12 +71,15 @@ jobs:
       # the diagnostics: the prelude builds them with infallible_diagnostics,
       # so the action succeeds even when compilation does not.
       - name: Lint through Buck
+        if: matrix.phase == 'checks'
         run: nix develop --command bash scripts/run-offline.sh nu scripts/lint.nu
 
       - name: Run the unit tests through Buck
+        if: matrix.phase == 'checks'
         run: nix develop --command bash scripts/run-offline.sh buck2 test root//crates/...
 
       - name: Buck build-graph tests
+        if: matrix.phase == 'graph-tests'
         run: |
           for test in scripts/test-*.nu; do
             nix develop --command bash scripts/run-offline.sh nu "$test"
