@@ -920,6 +920,12 @@ impl SearchView {
     /// The pointer settled on `path`'s row: after the shared dwell, its
     /// battle plays back beside the pointer.
     pub(crate) fn hover_row(&mut self, path: PathBuf, position: Point<Pixels>, cx: &mut Context<Self>) {
+        // Already on this row: the pointer travelling along it is the same
+        // battle, and moving the anchor under it would have the popup chase
+        // the pointer across the row.
+        if self.preview.watched_path() == Some(path.as_path()) {
+            return;
+        }
         self.preview_anchor = position;
         let cache = self.game_data.clone();
         self.resolve_hovered_ship(&path, cx);
@@ -962,7 +968,8 @@ impl SearchView {
         .detach();
     }
 
-    /// The pointer left the results.
+    /// The pointer left the results, which is the one thing that ends a
+    /// preview: the rows themselves only start them.
     pub(crate) fn leave_rows(&mut self, cx: &mut Context<Self>) {
         self.preview.leave(cx);
     }
@@ -1971,17 +1978,16 @@ impl Render for SearchView {
                     let path = open_path.clone();
                     open_entity.update(cx, |_this, cx| cx.emit(SearchEvent::OpenReplay(path)));
                 })
-                // Read off the window rather than an event: a hover flag carries
-                // no position, and the popup is anchored to the pointer.
-                .on_hover(move |hovered, window, cx| {
-                    let (path, hovered, at) = (path.clone(), *hovered, window.mouse_position());
-                    panel.update(cx, |this, cx| {
-                        if hovered {
-                            this.hover_row(path, at, cx);
-                        } else {
-                            this.leave_rows(cx);
-                        }
-                    });
+                // Every part of the row starts that row's preview, so it
+                // does not matter where in the row the pointer came to rest.
+                // Nothing here ends one: a leave raised by one part of a row
+                // would cancel the preview another part of it had just
+                // started. The pointer leaving the results is what ends a
+                // preview, which the listing below does.
+                .on_mouse_move(move |event: &MouseMoveEvent, _window, cx: &mut App| {
+                    let path = path.clone();
+                    let at = event.position;
+                    panel.update(cx, |this, cx| this.hover_row(path, at, cx));
                 })
                 .children(drawn_columns.iter().copied().map(|DrawnColumn { column, width }| {
                     // The outcome and the rating carry their meaning in
@@ -2123,8 +2129,17 @@ impl Render for SearchView {
                 .child(div().text_sm().text_color(crate::theme::text_dim()).child(status))
                 .into_any_element(),
             None => div()
+                .id("search-results")
+                .test_support()
                 .relative()
                 .size_full()
+                // The rows start a preview; the pointer leaving all of them
+                // ends it, which is what crossing out of the results means.
+                .on_hover(cx.listener(|this, hovered: &bool, _window, cx| {
+                    if !*hovered {
+                        this.leave_rows(cx);
+                    }
+                }))
                 .child(list(self.list_state.clone(), render_row).size_full())
                 .child(Scrollbar::vertical(&self.list_state))
                 .into_any_element(),
@@ -2197,6 +2212,9 @@ mod tests {
     use std::rc::Rc;
     use wows_toolkit_config::index::rows::MatchHit;
     use wows_toolkit_config::index::rows::MatchOutcome;
+
+    /// The query box, which is somewhere off the results.
+    const SEARCH_QUERY_ID: &str = "search-query";
 
     use super::SearchEvent;
     use super::SearchState;
@@ -2308,6 +2326,49 @@ mod tests {
         })
         .expect("the window is open");
         assert_eq!(cx.update(|cx| view.read(cx).sort.column), SortColumn::Map);
+    }
+
+    /// A preview belongs to the row, not to the part of it the pointer came to
+    /// rest on: it starts anywhere in the row, and only the pointer leaving the
+    /// results ends it.
+    #[gpui_kit::test]
+    fn hovering_anywhere_in_a_row_previews_that_battle(cx: &mut TestAppContext) {
+        let window = open_with_one_hit(cx);
+        let view = window.entity(cx).expect("the window has a root view");
+        let watched = |cx: &mut TestAppContext| {
+            cx.update(|cx| view.read(cx).preview.watched_path().map(std::path::Path::to_path_buf))
+        };
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            window.hover(0usize, cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        let row = watched(cx);
+        assert!(row.is_some(), "the row under the pointer is previewed");
+        let anchor = cx.update(|cx| view.read(cx).preview_anchor);
+
+        // The dots are part of the row, not a gap in it.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.hover(("search-row-actions", 0usize), cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert_eq!(watched(cx), row, "the dots are part of the row, so it is still that battle being previewed");
+        assert_eq!(
+            cx.update(|cx| view.read(cx).preview_anchor),
+            anchor,
+            "and the popup stays where it went up rather than chasing the pointer along the row"
+        );
+
+        // Off the results altogether.
+        cx.update_window(window.into(), |_, window, cx| {
+            window.hover(SEARCH_QUERY_ID, cx);
+            window.render_frame(cx);
+        })
+        .expect("the window is open");
+        assert!(watched(cx).is_none(), "leaving the results ends the preview");
     }
 
     #[gpui_kit::test]
