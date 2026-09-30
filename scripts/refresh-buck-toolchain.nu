@@ -49,6 +49,14 @@ for tool in $required {
     # and scripts/lint.nu runs the path bxl/lint.bxl reports.
     $"rustfmt = ($toolchain_root)/bin/rustfmt"
     ""
+    # Nothing reads debug info out of a CI artifact, and carrying all of it is
+    # what makes linking the GUI binary expensive. Line tables are kept so a
+    # panic in a Buck test still names a file and line.
+    ...(if ($env.CI? | is-not-empty) {
+        ["[native_build]" "debuginfo = line-tables-only" ""]
+    } else {
+        []
+    })
 ] | str join "\n" | save -f .buckconfig.local
 
 # Crate sources are not committed; fetch them against Cargo.lock's checksums.

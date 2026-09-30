@@ -35,10 +35,31 @@ def _native_build_mode():
         fail("native_build.mode must be debug or release, got {}".format(mode))
     return mode
 
+# How much debug info a debug build carries. Release never carries any. CI reads
+# nothing out of the artifacts it builds, and full debug info is what makes
+# linking a binary the size of the GUI expensive, so the bootstrap sets this to
+# `line-tables-only` there: a panic in a Buck test still names a file and line,
+# without the rest of the DWARF the link would have to copy.
+_DEBUGINFO_LEVELS = {
+    "full": "2",
+    "line-tables-only": "1",
+    "none": "0",
+}
+
+def _debug_debuginfo():
+    asked = read_root_config("native_build", "debuginfo", "full")
+    level = _DEBUGINFO_LEVELS.get(asked)
+    if level == None:
+        fail("[native_build] debuginfo is {}; it must be one of {}.".format(
+            asked,
+            ", ".join(sorted(_DEBUGINFO_LEVELS)),
+        ))
+    return level
+
 def _rustc_flags():
     if _native_build_mode() == "release":
         return ["-Copt-level=3", "-Cdebuginfo=0"]
-    return ["-Copt-level=0", "-Cdebuginfo=2"]
+    return ["-Copt-level=0", "-Cdebuginfo=" + _debug_debuginfo()]
 
 def _cxx_compiler_flags():
     if _native_build_mode() == "release":
