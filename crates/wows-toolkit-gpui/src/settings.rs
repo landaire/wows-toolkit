@@ -100,6 +100,9 @@ pub struct GpuiSettings {
     /// Whether Code Integrity Guard is applied. Read at startup before any window
     /// exists; the control here writes it for the next launch, as the egui
     /// settings tab's own does.
+    // Off Windows that control is compiled out, leaving no reader, but the field
+    // still loads from the database so the stored preference is not lost.
+    #[cfg_attr(not(windows), expect(dead_code))]
     pub code_integrity: wows_toolkit_hardening::CodeIntegrityPreference,
 }
 
