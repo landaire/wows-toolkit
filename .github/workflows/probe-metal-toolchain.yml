@@ -25,13 +25,10 @@ jobs:
       - name: Provision the toolchain and crate sources
         run: nix develop --command nu scripts/refresh-buck-toolchain.nu
 
+      # No run-offline.sh: it drops network with unshare, which is Linux only,
+      # which is why buck.yml's macOS job does not use it either.
       - name: Build the crate whose build script now runs
-        run: |
-          nix develop --command bash scripts/run-offline.sh \
-            buck2 build --target-platforms toolchains//platforms:macos_arm64 \
-            root//third-party/rust:gpui-pre-apple-0.3
+        run: nix develop --command buck2 build --target-platforms toolchains//platforms:macos_arm64 root//third-party/rust:gpui-pre-apple-0.3
 
       - name: Confirm the action graph stays hermetic
-        run: |
-          nix develop --command bash scripts/run-offline.sh \
-            nu scripts/check-buck-hermetic.nu root//third-party/rust:gpui-pre-apple-0.3
+        run: nix develop --command nu scripts/check-buck-hermetic.nu root//third-party/rust:gpui-pre-apple-0.3
