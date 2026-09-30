@@ -230,7 +230,15 @@ mod tests {
     /// The risk gate: an owned wgpu-29 device renders a green cube offscreen, the
     /// pixels read back, and the center pixel is the mesh color (not the clear
     /// color), with an sRGB-plausible value.
+    ///
+    /// Needs a real GPU adapter, as the egui app's own render smoke test does.
+    /// Run with:
+    ///
+    /// ```text
+    /// cargo test -p wows-toolkit-gpui -- --ignored --nocapture owned_device_renders_cube_and_reads_back_center_pixel
+    /// ```
     #[test]
+    #[ignore = "needs a real GPU adapter; see the doc comment for the run command"]
     fn owned_device_renders_cube_and_reads_back_center_pixel() {
         let Ok(ctx) = GpuContext::new() else {
             panic!("owned wgpu device creation failed - no adapter available");
