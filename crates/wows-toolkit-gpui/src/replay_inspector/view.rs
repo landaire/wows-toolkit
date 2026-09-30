@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use gpui_kit::base::TestSupportExt as _;
 use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
@@ -1737,10 +1738,13 @@ impl ReplayInspectorView {
 
 /// The narrow rail the listing is collapsed and expanded from.
 fn listing_rail(entity: Entity<ReplayInspectorView>, collapsed: bool) -> impl IntoElement {
+    // The same icons `SidebarToggleButton` picks for a left-hand panel, so one
+    // affordance collapses a side panel everywhere in the app. The rail itself
+    // stays a full-height strip, as the egui tab's is.
     let (glyph, tooltip) = if collapsed {
-        (crate::icons::CARET_RIGHT, "ui.replay.expand_listing")
+        (IconName::PanelLeftOpen, "ui.replay.expand_listing")
     } else {
-        (crate::icons::CARET_LEFT, "ui.replay.collapse_listing")
+        (IconName::PanelLeftClose, "ui.replay.collapse_listing")
     };
 
     div()
@@ -1755,7 +1759,7 @@ fn listing_rail(entity: Entity<ReplayInspectorView>, collapsed: bool) -> impl In
         .cursor_pointer()
         .text_color(crate::theme::text_dim())
         .tooltip(move |window, cx| Tooltip::new(t!(tooltip).into_owned()).build(window, cx))
-        .child(crate::icons::icon(glyph))
+        .child(Icon::new(glyph))
         .on_click(move |_event, _window, cx| {
             entity.update(cx, |view, cx| view.set_listing_collapsed(!collapsed, cx));
         })
