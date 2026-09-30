@@ -1,5 +1,5 @@
-# Mirrors prelude//platforms:defs.bzl, with the executor configured to read and
-# write the remote action cache. The prelude's own platform hardcodes
+# Mirrors prelude//platforms:defs.bzl, with the executor able to read and write
+# the remote action cache. The prelude's own platform hardcodes
 # remote_enabled = False, from which remote_cache_enabled also defaults to
 # false, so no RE client is instantiated and [buck2_re_client] is ignored.
 
@@ -18,8 +18,8 @@ def _execution_platform_impl(ctx: AnalysisContext) -> list[Provider]:
         executor_config = CommandExecutorConfig(
             local_enabled = True,
             remote_enabled = False,
-            remote_cache_enabled = True,
-            allow_cache_uploads = True,
+            remote_cache_enabled = ctx.attrs.remote_cache_enabled,
+            allow_cache_uploads = ctx.attrs.remote_cache_enabled,
             use_windows_path_separators = ctx.attrs.use_windows_path_separators,
         ),
     )
@@ -39,6 +39,7 @@ execution_platform = rule(
     attrs = {
         "cpu_configuration": attrs.dep(providers = [ConfigurationInfo]),
         "os_configuration": attrs.dep(providers = [ConfigurationInfo]),
+        "remote_cache_enabled": attrs.bool(),
         "use_windows_path_separators": attrs.bool(),
     },
 )
@@ -69,3 +70,12 @@ host_configuration = struct(
     cpu = _host_cpu_configuration(),
     os = _host_os_configuration(),
 )
+
+def remote_cache_configured() -> bool:
+    """Whether this checkout has an action cache to talk to.
+
+    Enabling the cache without one is fatal, not a fallback to local: every
+    action fails with "No engine address". CI has no [buck2_re_client] section,
+    so it must build with the cache off.
+    """
+    return read_root_config("buck2_re_client", "engine_address") != None
