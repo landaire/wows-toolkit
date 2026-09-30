@@ -21,6 +21,7 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
+use gpui_kit::component::Side;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::Size;
 use gpui_kit::component::button::Button;
@@ -29,6 +30,7 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::scroll::Scrollbar;
+use gpui_kit::component::sidebar::SidebarToggleButton;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
@@ -500,24 +502,16 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
 }
 
 /// Toolbar toggle for the options rail, which holds the visibility, hull and
-/// display sections. A mode rather than an action, so it reads as selected
-/// while the rail is up.
+/// display sections. `SidebarToggleButton` is the component the rest of the app
+/// collapses a side panel with, and it picks the panel-right icons from `side`.
 fn render_options_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl IntoElement + use<> {
     let open = pane.read(cx).options_open();
 
-    crate::ui::selectable(
-        "armor-options",
-        open,
-        Button::new("armor-options-toggle")
-            .icon(IconName::Settings)
-            .label(t!("ui.armor.options").to_string())
-            .compact()
-            .selected(open)
-            .tooltip(t!("ui.armor.options_tooltip").to_string())
-            .on_click(move |_event, _window, cx: &mut App| {
-                pane.update(cx, |pane, cx| pane.toggle_options(cx));
-            }),
-    )
+    // `SidebarToggleButton` carries no tooltip of its own; the panel-right
+    // icons it picks are the app's own vocabulary for this.
+    SidebarToggleButton::new().side(Side::Right).collapsed(!open).on_click(move |_event, _window, cx: &mut App| {
+        pane.update(cx, |pane, cx| pane.toggle_options(cx));
+    })
 }
 
 /// Toolbar toggle for the penetration checker, which belongs to the pane

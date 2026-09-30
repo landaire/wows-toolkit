@@ -89,14 +89,14 @@ fn section(
         .gap_1()
         .items_center()
         .cursor_pointer()
+        // A band, not dim small caps: the trees inside carry their own group
+        // labels, and a section title has to read above them.
+        .px_2()
+        .py_1()
+        .rounded(cx.theme().radius)
+        .bg(cx.theme().muted)
         .child(Icon::new(if expanded { IconName::ChevronDown } else { IconName::ChevronRight }))
-        .child(
-            div()
-                .text_xs()
-                .font_weight(FontWeight::BOLD)
-                .text_color(cx.theme().muted_foreground)
-                .child(title.to_string()),
-        )
+        .child(div().text_sm().font_weight(FontWeight::SEMIBOLD).child(title.to_string()))
         .on_click(move |_event, _window, cx: &mut App| {
             pane.update(cx, |pane, cx| pane.toggle_option_section(which, cx));
         });
