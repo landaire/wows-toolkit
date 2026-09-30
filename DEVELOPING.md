@@ -109,6 +109,23 @@ buck2 build --target-platforms toolchains//platforms:linux_x86_64 //:wgcheck
 
 Platforms are `toolchains//platforms:linux_x86_64`, `:macos_arm64`, and `:windows_x86_64_msvc`.
 
+### Remote action cache
+
+Actions can read and write a remote action cache, which is off unless one is configured. `root//platforms:default` turns it on only when `[buck2_re_client]` names an engine address, because CI has no cache and enabling it without one fails every action rather than falling back to local execution. Point it at a cache by writing the section into `~/.buckconfig.d/`:
+
+```ini
+[buck2_re_client]
+action_cache_address = grpc://cache.example:50051
+cas_address = grpc://cache.example:50051
+engine_address = grpc://cache.example:50051
+tls = false
+
+[buck2]
+default_allow_cache_upload = true
+```
+
+Buck reads every file in that directory, so renaming one does not disable it; move it out instead. There is no remote execution, only the cache: the platform sets `remote_enabled = False`.
+
 ### Hermeticity
 
 The point of the Buck build is that its actions cannot reach outside their declared inputs. This check fails if any action in a target's graph invokes Cargo, downloads, reads a cache directory, or names a tool by bare name or by a system path such as `/bin/sh`:
@@ -208,6 +225,20 @@ Repeating the build also succeeds, because everything already built is cached, b
 ```
 
 That installs the NASM pinned by the manifest to `.tooling\nasm`, which neither `buck2 clean` nor temporary-file cleanup removes, and rewrites the entry accordingly. It requires a `.buckconfig.local` produced by the bootstrap and terminates with an error without one. Specify `-Force` to reinstall.
+
+**`Spawning executable <path>\python.exe failed`, or `can't find crate for <name>` naming a dependency that builds on its own.** The `[hermetic_tools] python` entry names an interpreter that is absent or unsuitable. A path under `%TEMP%` is removed by Windows cleanup. MSYS2's `mingw64` Python is present but wrong: it runs `rustc_action.py` far enough to invoke rustc, whose `--extern` paths then do not resolve, so the error names the dependency rather than the interpreter. Point the entry at a native CPython, which is what the manifest pins:
+
+```ini
+python = C:\Users\<user>\AppData\Local\Programs\Python\Python313\python.exe
+```
+
+**`Failed to query capabilities of remote`, or `dns error: No such host is known`.** The cache named by `[buck2_re_client]` is unreachable. Buck treats that as fatal, not as a reason to build locally, so every action fails. Build without it:
+
+```bash
+BUCK_OFFLINE_BUILD=1 buck2 build //:wgcheck
+```
+
+That sets both `--local-only` and `--no-remote-cache`. Removing the `[buck2_re_client]` file has the same effect permanently.
 
 **`buck2 daemon constraint mismatch`.** The Buck2 binary changed. It restarts itself; no action needed.
 
