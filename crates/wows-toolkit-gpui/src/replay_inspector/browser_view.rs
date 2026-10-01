@@ -35,6 +35,8 @@ use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::WindowExt as _;
+use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::menu::PopupMenuItem;
@@ -267,6 +269,9 @@ enum ScanError {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReplayBrowserEvent {
     OpenReplay(PathBuf),
+    /// Put the listing away. Raised by the control in its own header, which
+    /// goes with it, so the rail beside the dock is what brings it back.
+    CollapseListing,
     /// Open this replay beside whatever is already open rather than in place
     /// of it.
     OpenReplayInNewTab(PathBuf),
@@ -1216,9 +1221,34 @@ impl Render for ReplayBrowser {
         let border = cx.theme().border;
         let entity = cx.entity();
 
-        let header = h_flex().flex_none().gap_1().items_center().px_2().py_1().border_b_1().border_color(border).child(
-            div().flex_1().text_sm().font_weight(FontWeight::BOLD).child(t!("ui.replay.listing_caption").to_string()),
-        );
+        let header = h_flex()
+            .flex_none()
+            .gap_1()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_b_1()
+            .border_color(border)
+            // In the header rather than a rail of its own, which would hold a
+            // column of width open for one glyph the whole time the listing is
+            // up. The same icon a left-hand panel is collapsed with elsewhere.
+            .child(
+                Button::new("replay-listing-collapse")
+                    .icon(IconName::PanelLeftClose)
+                    .ghost()
+                    .small()
+                    .tooltip(t!("ui.replay.collapse_listing").to_string())
+                    .on_click(cx.listener(|_this, _event, _window, cx| {
+                        cx.emit(ReplayBrowserEvent::CollapseListing);
+                    })),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .child(t!("ui.replay.listing_caption").to_string()),
+            );
 
         let body = match &self.status {
             // A spinner beside the line, as the egui listing shows while it

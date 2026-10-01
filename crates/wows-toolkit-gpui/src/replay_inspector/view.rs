@@ -540,6 +540,7 @@ impl ReplayInspectorView {
                 self.record_session_stats(paths.clone(), *replace, cx)
             }
             ReplayBrowserEvent::RenderReplay(path) => self.render_replay(path.clone(), window, cx),
+            ReplayBrowserEvent::CollapseListing => self.set_listing_collapsed(true, cx),
             ReplayBrowserEvent::BuildsListed(builds) => {
                 self.fetch_missing_constants(builds.clone(), crate::constants::Cached::Keep, window, cx)
             }
@@ -1968,9 +1969,10 @@ impl Render for ReplayInspectorView {
                     .flex_row()
                     .flex_1()
                     .min_h(px(0.))
-                    // A rail beside the listing, as in the egui tab: one
-                    // caret, pointing the way the click will move it.
-                    .child(listing_rail(entity.clone(), self.replay_settings.listing_collapsed))
+                    // Only while the listing is away: with it up, its own
+                    // header carries the control, so the rail would hold a
+                    // column of width open for nothing.
+                    .when(self.replay_settings.listing_collapsed, |this| this.child(listing_rail(entity.clone(), true)))
                     .child(if self.replay_settings.listing_collapsed {
                         div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
                     } else {
@@ -2140,8 +2142,12 @@ mod tests {
     /// The height is the assertion that matters: the listing rendered at its
     /// content height, centred in an otherwise empty tab, for as long as its
     /// row was an `h_flex` (which installs `items_center`).
+    ///
+    /// The control that puts the listing away is in its own header, so it goes
+    /// with it; the rail that brings it back is up only while it is away, and
+    /// so holds no width open the rest of the time.
     #[gpui_kit::test]
-    fn the_rail_collapses_a_full_height_listing_and_brings_it_back(cx: &mut TestAppContext) {
+    fn the_listing_is_put_away_from_its_header_and_brought_back_by_the_rail(cx: &mut TestAppContext) {
         let (window, _view) = open_view(cx);
 
         let listing = cx
@@ -2157,16 +2163,24 @@ mod tests {
             listing.size.height
         );
 
+        // The header's control reaches the view as a `ReplayBrowserEvent`, so
+        // the effect has to be flushed before the state it sets is readable.
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
+            assert!(window.try_find("replay-listing-rail").is_none(), "no rail while the listing is up");
+            assert!(window.try_find("replay-listing-collapse").is_some(), "its header carries the control");
+            window.click("replay-listing-collapse", cx);
+        })
+        .expect("the window is open");
+        cx.run_until_parked();
+
+        cx.update_window(window.into(), |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("replay-browser-rows").is_none(), "its header took the listing off screen");
 
             window.click("replay-listing-rail", cx);
             window.render_frame(cx);
-            assert!(window.try_find("replay-browser-rows").is_none(), "the rail took the listing off screen");
-
-            window.click("replay-listing-rail", cx);
-            window.render_frame(cx);
-            assert!(window.try_find("replay-browser-rows").is_some(), "and brought it back");
+            assert!(window.try_find("replay-browser-rows").is_some(), "and the rail brought it back");
         })
         .expect("the window is open");
     }
