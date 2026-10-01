@@ -439,37 +439,11 @@ fn the_penetration_panel_stays_up_while_the_ship_is_clicked(cx: &mut TestAppCont
     .expect("the test window stays open");
 }
 
-/// The status strip is always along the bottom.
-///
-/// It reports the app's own jobs, and with none running it used to be absent
-/// altogether -- which is no place to put a control. The panel toggles for the
-/// tab in front live on it, so showing a side panel costs no width in the
-/// chrome above the thing it is about.
-#[gpui_kit::test]
-fn the_status_strip_is_up_with_no_job_running(cx: &mut TestAppContext) {
-    let window = open_wide_app(cx);
-
-    cx.update_window(window.into(), |_, window, cx| {
-        window.render_frame(cx);
-        assert!(window.try_find("app-status-strip").is_some(), "the strip is up with nothing to report");
-
-        // The toggles belong to the tab in front: the replay inspector has
-        // none, and its listing carries its own.
-        assert!(window.try_find("status-armor-options").is_none(), "no armor toggle away from that tab");
-
-        show_tab(window, AppTab::ArmorViewer, cx);
-        window.render_frame(cx);
-        assert!(window.try_find("status-armor-options").is_some(), "and one on it");
-    })
-    .expect("the test window stays open");
-}
-
 /// The visibility, hull and display options are a rail beside the viewport.
 ///
 /// Each holds a tree or a row of sliders, which a popover can only show by
-/// covering the hull it describes. The rail is up by default, and the control
-/// that puts it away is on the status strip, where it costs no width in the
-/// chrome above the hull.
+/// covering the hull it describes. The rail is up by default because the
+/// toolbar carries no way into those three.
 #[gpui_kit::test]
 fn the_toolbar_shows_and_hides_the_options_rail(cx: &mut TestAppContext) {
     let window = open_wide_app(cx);
@@ -483,11 +457,11 @@ fn the_toolbar_shows_and_hides_the_options_rail(cx: &mut TestAppContext) {
         // controls that would act on an empty viewport.
         assert!(window.try_find("armor-options-panel").is_some(), "the rail is up without being asked for");
 
-        window.click("status-armor-options", cx);
+        window.click("collapse", cx);
         window.render_frame(cx);
         assert!(window.try_find("armor-options-panel").is_none(), "the toolbar toggle puts the rail away");
 
-        window.click("status-armor-options", cx);
+        window.click("collapse", cx);
         window.render_frame(cx);
         assert!(window.try_find("armor-options-panel").is_some(), "and brings it back");
     })
