@@ -21,7 +21,6 @@ use gpui_kit::component::Disableable;
 use gpui_kit::component::Icon;
 use gpui_kit::component::IconName;
 use gpui_kit::component::Selectable;
-use gpui_kit::component::Side;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::Size;
 use gpui_kit::component::button::Button;
@@ -30,7 +29,6 @@ use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::list::ListItem;
 use gpui_kit::component::scroll::Scrollbar;
-use gpui_kit::component::sidebar::SidebarToggleButton;
 use gpui_kit::component::slider::Slider;
 use gpui_kit::component::slider::SliderState;
 use gpui_kit::component::v_flex;
@@ -104,9 +102,7 @@ pub fn render_toolbar(
         .child(render_export_button(view, entity))
         // The pane's own controls: one toolbar, not two.
         .when_some(view.pane(), |this, pane| {
-            this.child(crate::ui::rule_v(cx))
-                .child(render_options_button(pane.clone(), cx))
-                .child(render_penetration_button(pane, cx))
+            this.child(crate::ui::rule_v(cx)).child(render_penetration_button(pane, cx))
         })
 }
 
@@ -499,19 +495,6 @@ fn render_splash_boxes_button(view: &ViewportView, entity: &Entity<ViewportView>
                 entity.update(cx, |view, cx| view.set_show_splash_boxes(!state.boxes_shown, cx));
             }),
     )
-}
-
-/// Toolbar toggle for the options rail, which holds the visibility, hull and
-/// display sections. `SidebarToggleButton` is the component the rest of the app
-/// collapses a side panel with, and it picks the panel-right icons from `side`.
-fn render_options_button(pane: Entity<ArmorViewerPane>, cx: &App) -> impl IntoElement + use<> {
-    let open = pane.read(cx).options_open();
-
-    // `SidebarToggleButton` carries no tooltip of its own; the panel-right
-    // icons it picks are the app's own vocabulary for this.
-    SidebarToggleButton::new().side(Side::Right).collapsed(!open).on_click(move |_event, _window, cx: &mut App| {
-        pane.update(cx, |pane, cx| pane.toggle_options(cx));
-    })
 }
 
 /// Toolbar toggle for the penetration checker, which belongs to the pane
