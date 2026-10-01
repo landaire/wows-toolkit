@@ -823,7 +823,13 @@ impl App {
     /// -- a game-data cache job and an index build -- so neither runs invisibly.
     /// A tab's own work (a directory scan, a replay parse) is still reported by
     /// that tab and not here.
-    fn status_strip(&self, cx: &Context<Self>) -> Option<AnyElement> {
+    /// The strip along the bottom: what the app's own jobs are doing, and the
+    /// panel toggles for the tab in front.
+    ///
+    /// Always present. The toggles live here rather than in a tab's toolbar so
+    /// that showing a side panel costs no width in the chrome above the thing
+    /// it is about.
+    fn status_strip(&self, cx: &Context<Self>) -> AnyElement {
         let mut jobs: Vec<AnyElement> = Vec::new();
 
         if let Some(job) = self.cache.running {
@@ -839,24 +845,48 @@ impl App {
             jobs.push(status_job(t!("ui.app.status_indexing").into_owned(), Some((step.done, step.total))));
         }
 
-        if jobs.is_empty() {
+        h_flex()
+            .id("app-status-strip")
+            .test_support()
+            .flex_none()
+            .gap_3()
+            .items_center()
+            .px_2()
+            .py_1()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .text_xs()
+            .text_color(crate::theme::text_dim())
+            .children(self.panel_toggles(cx))
+            // The jobs sit to the trailing end, so a toggle does not move when
+            // one starts or finishes.
+            .child(div().flex_1())
+            .children(jobs)
+            .into_any_element()
+    }
+
+    /// The side-panel toggles the tab in front offers, if any.
+    fn panel_toggles(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        if self.active_tab != AppTab::ArmorViewer {
             return None;
         }
 
+        let pane = self.armor_pane.clone();
+        let open = pane.read(cx).options_open();
         Some(
             h_flex()
-                .id("app-status-strip")
-                .test_support()
-                .flex_none()
-                .gap_3()
+                .gap_1()
                 .items_center()
-                .px_2()
-                .py_1()
-                .border_t_1()
-                .border_color(cx.theme().border)
-                .text_xs()
-                .text_color(crate::theme::text_dim())
-                .children(jobs)
+                .child(
+                    Button::new("status-armor-options")
+                        .icon(if open { IconName::PanelRightClose } else { IconName::PanelRightOpen })
+                        .ghost()
+                        .small()
+                        .tooltip(t!("ui.armor.options").to_string())
+                        .on_click(move |_event, _window, cx: &mut gpui_kit::App| {
+                            pane.update(cx, |pane, cx| pane.toggle_options(cx));
+                        }),
+                )
                 .into_any_element(),
         )
     }
@@ -3647,7 +3677,7 @@ impl Render for App {
             // meeting.
             .child(div().flex_none().h(px(1.)).bg(theme::border_bright()))
             .child(div().flex_1().min_h(px(0.)).bg(cx.theme().background).child(body))
-            .children(self.status_strip(cx))
+            .child(self.status_strip(cx))
             .when(self.debug_mode, |this| this.child(debug_notice))
             // Dialogs, sheets and toasts are held by `Root` but drawn by
             // whoever renders the window's own view, so they go last and over
