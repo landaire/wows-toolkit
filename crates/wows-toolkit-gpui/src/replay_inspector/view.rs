@@ -17,6 +17,7 @@ use gpui_kit::component::IconName;
 use gpui_kit::component::IndexPath;
 use gpui_kit::component::Sizable;
 use gpui_kit::component::button::Button;
+use gpui_kit::component::button::ButtonVariants;
 use gpui_kit::component::checkbox::Checkbox;
 use gpui_kit::component::dock::DockArea;
 use gpui_kit::component::dock::DockPlacement;
@@ -1738,37 +1739,23 @@ impl ReplayInspectorView {
 }
 
 /// The narrow rail the listing is collapsed and expanded from.
-fn listing_rail(entity: Entity<ReplayInspectorView>, collapsed: bool) -> impl IntoElement {
-    // The same icons `SidebarToggleButton` picks for a left-hand panel, so one
-    // affordance collapses a side panel everywhere in the app. The rail itself
-    // stays a full-height strip, as the egui tab's is.
-    let (glyph, tooltip) = if collapsed {
-        (IconName::PanelLeftOpen, "ui.replay.expand_listing")
-    } else {
-        (IconName::PanelLeftClose, "ui.replay.collapse_listing")
-    };
-
-    div()
-        .id("replay-listing-rail")
-        .test_support()
-        .flex_none()
-        .w(LISTING_RAIL_WIDTH)
-        .h_full()
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .text_color(crate::theme::text_dim())
-        .tooltip(move |window, cx| Tooltip::new(t!(tooltip).into_owned()).build(window, cx))
-        .child(Icon::new(glyph))
-        .on_click(move |_event, _window, cx| {
-            entity.update(cx, |view, cx| view.set_listing_collapsed(!collapsed, cx));
-        })
+/// The control that brings the listing back, in the place the listing's own
+/// header keeps it while it is up.
+///
+/// Same button, same padding, same corner: collapsing the listing must not move
+/// the control under the pointer that just clicked it.
+fn listing_rail(entity: Entity<ReplayInspectorView>) -> impl IntoElement {
+    div().flex_none().px_2().py_1().child(
+        Button::new("replay-listing-rail")
+            .icon(IconName::PanelLeftOpen)
+            .ghost()
+            .small()
+            .tooltip(t!("ui.replay.expand_listing").to_string())
+            .on_click(move |_event, _window, cx| {
+                entity.update(cx, |view, cx| view.set_listing_collapsed(false, cx));
+            }),
+    )
 }
-
-/// Wide enough for a caret and its click target, and no wider: the rail is
-/// chrome beside the listing, not a column of its own.
-const LISTING_RAIL_WIDTH: Pixels = px(18.);
 
 /// One column-filter checkbox in the header toolbar: `checked` reflects
 /// `replay_settings`, clicking applies `apply` to it via `set_column_filter`
@@ -1972,7 +1959,7 @@ impl Render for ReplayInspectorView {
                     // Only while the listing is away: with it up, its own
                     // header carries the control, so the rail would hold a
                     // column of width open for nothing.
-                    .when(self.replay_settings.listing_collapsed, |this| this.child(listing_rail(entity.clone(), true)))
+                    .when(self.replay_settings.listing_collapsed, |this| this.child(listing_rail(entity.clone())))
                     .child(if self.replay_settings.listing_collapsed {
                         div().flex_1().min_w(px(0.)).child(dock_content).into_any_element()
                     } else {
@@ -2165,18 +2152,25 @@ mod tests {
 
         // The header's control reaches the view as a `ReplayBrowserEvent`, so
         // the effect has to be flushed before the state it sets is readable.
-        cx.update_window(window.into(), |_, window, cx| {
-            window.render_frame(cx);
-            assert!(window.try_find("replay-listing-rail").is_none(), "no rail while the listing is up");
-            assert!(window.try_find("replay-listing-collapse").is_some(), "its header carries the control");
-            window.click("replay-listing-collapse", cx);
-        })
-        .expect("the window is open");
+        let up = cx
+            .update_window(window.into(), |_, window, cx| {
+                window.render_frame(cx);
+                assert!(window.try_find("replay-listing-rail").is_none(), "no rail while the listing is up");
+                let at = window.find("replay-listing-collapse").bounds();
+                window.click("replay-listing-collapse", cx);
+                at
+            })
+            .expect("the window is open");
         cx.run_until_parked();
 
         cx.update_window(window.into(), |_, window, cx| {
             window.render_frame(cx);
             assert!(window.try_find("replay-browser-rows").is_none(), "its header took the listing off screen");
+
+            // The control must not move out from under the pointer that just
+            // clicked it: same button, same corner, whichever state it is in.
+            let away = window.find("replay-listing-rail").bounds();
+            assert_eq!(away.origin, up.origin, "the control moved when the listing went away");
 
             window.click("replay-listing-rail", cx);
             window.render_frame(cx);
