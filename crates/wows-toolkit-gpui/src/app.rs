@@ -1320,6 +1320,7 @@ impl App {
         wows_toolkit_viewmodel::set_locale(&code);
 
         self.replay_inspector.update(cx, |view, cx| view.set_locale(Some(code), cx));
+        self.stats.update(cx, |view, cx| view.set_locale(cx));
         // Placeholders are stored on their input states, so the ones the
         // reader sees are rewritten rather than left in the old language.
         self.refresh_placeholders(window, cx);

@@ -113,6 +113,16 @@ const CHARTS_SETTINGS_KEY: &str = "stats_charts";
 const CHARTS_DOCK_LAYOUT_KEY: &str = "stats_charts_dock_layout";
 
 impl StatsView {
+    /// Rebuilds the tab and its dock panels after the shared locale changes.
+    pub fn set_locale(&mut self, cx: &mut Context<Self>) {
+        self.overview.update(cx, |_, cx| cx.notify());
+        self.ships.update(cx, |_, cx| cx.notify());
+        for chart in &self.charts {
+            chart.update(cx, |_, cx| cx.notify());
+        }
+        cx.notify();
+    }
+
     /// Writes the open charts back to the settings row, so the tab reopens
     /// with the charts it was left with rather than one default chart.
     /// The whole set is written on every change because a chart can be added,

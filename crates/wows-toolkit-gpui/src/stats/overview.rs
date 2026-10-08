@@ -152,6 +152,7 @@ impl Render for StatsOverviewPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let border = cx.theme().border;
         let dim = crate::theme::text_dim();
+        let locale = wows_toolkit_viewmodel::locale();
         let summary = &self.computed.summary;
 
         if summary.games_played() == 0 && self.computed.ships.is_empty() {
@@ -209,12 +210,9 @@ impl Render for StatsOverviewPanel {
             })
             .when_some(summary.best_damage, |this, (ship, damage)| {
                 let ship = self.ship_name(ship);
-                this.child(
-                    div()
-                        .text_sm()
-                        .text_color(dim)
-                        .child(t!("ui.stats.max_damage", ship = ship, damage = separate_thousands(damage)).to_string()),
-                )
+                this.child(div().text_sm().text_color(dim).child(
+                    t!("ui.stats.max_damage", ship = ship, damage = separate_thousands(damage, &locale)).to_string(),
+                ))
             });
 
         let header = h_flex()
@@ -262,6 +260,7 @@ impl Render for StatsOverviewPanel {
             );
 
         let ships: Vec<(String, PerformanceInfo)> = self.computed.ships.clone();
+        let locale = locale.clone();
         let render_row = move |ix: usize, _window: &mut Window, cx: &mut App| {
             let Some((ship, info)) = ships.get(ix) else {
                 return div().into_any_element();
@@ -277,7 +276,7 @@ impl Render for StatsOverviewPanel {
                 .child(div().w(SHIP_COLUMN_WIDTH).text_sm().child(ship.clone()))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(info.total_games().to_string()))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_percent(info.win_rate())))
-                .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_number(info.avg_damage())))
+                .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_number(info.avg_damage(), &locale)))
                 .child(div().w(NUMBER_COLUMN_WIDTH).text_sm().child(optional_decimal(info.avg_frags())))
                 .into_any_element()
         };
@@ -354,17 +353,9 @@ impl Render for StatsOverviewPanel {
     }
 }
 
-/// Thousands-separated, matching the egui app's number formatting.
-fn separate_thousands(value: u64) -> String {
-    let digits = value.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (index, digit) in digits.chars().enumerate() {
-        if index > 0 && (digits.len() - index).is_multiple_of(3) {
-            out.push(',');
-        }
-        out.push(digit);
-    }
-    out
+/// Uses the shared formatter so this panel follows the selected locale.
+fn separate_thousands(value: u64, locale: &str) -> String {
+    wows_toolkit_viewmodel::formatting::separate_number(value, Some(locale))
 }
 
 /// A dash for an absent value, so an empty cell is never read as a zero.
@@ -372,8 +363,8 @@ fn optional_percent(value: Option<f64>) -> String {
     value.map(|value| format!("{value:.1}%")).unwrap_or_else(|| "-".to_string())
 }
 
-fn optional_number(value: Option<f64>) -> String {
-    value.map(|value| separate_thousands(value.round() as u64)).unwrap_or_else(|| "-".to_string())
+fn optional_number(value: Option<f64>, locale: &str) -> String {
+    value.map(|value| separate_thousands(value.round() as u64, locale)).unwrap_or_else(|| "-".to_string())
 }
 
 fn optional_decimal(value: Option<f64>) -> String {
@@ -392,20 +383,20 @@ mod tests {
 
     #[test]
     fn thousands_are_separated_from_the_right() {
-        assert_eq!(separate_thousands(0), "0");
-        assert_eq!(separate_thousands(999), "999");
-        assert_eq!(separate_thousands(1_000), "1,000");
-        assert_eq!(separate_thousands(12_345), "12,345");
-        assert_eq!(separate_thousands(1_234_567), "1,234,567");
+        assert_eq!(separate_thousands(0, "en"), "0");
+        assert_eq!(separate_thousands(999, "en"), "999");
+        assert_eq!(separate_thousands(1_000, "en"), "1,000");
+        assert_eq!(separate_thousands(12_345, "en"), "12,345");
+        assert_eq!(separate_thousands(1_234_567, "en"), "1,234,567");
     }
 
     #[test]
     fn an_absent_value_reads_as_a_dash_rather_than_a_zero() {
         assert_eq!(optional_percent(None), "-");
-        assert_eq!(optional_number(None), "-");
+        assert_eq!(optional_number(None, "en"), "-");
         assert_eq!(optional_decimal(None), "-");
         assert_eq!(optional_percent(Some(52.25)), "52.2%");
-        assert_eq!(optional_number(Some(75_000.4)), "75,000");
+        assert_eq!(optional_number(Some(75_000.4), "en"), "75,000");
         assert_eq!(optional_decimal(Some(1.005)), "1.00");
     }
 }
