@@ -275,12 +275,17 @@ impl StatsChartPanel {
         if !filters.game_modes.remove(mode) {
             filters.game_modes.insert(mode.to_string());
         }
+        self.settings_changed(cx);
         self.rebuild(cx);
     }
 
     fn clear_own_modes(&mut self, cx: &mut Context<Self>) {
         let Some(filters) = self.own_filters.as_mut() else { return };
+        if filters.game_modes.is_empty() {
+            return;
+        }
         filters.game_modes.clear();
+        self.settings_changed(cx);
         self.rebuild(cx);
     }
 
