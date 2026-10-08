@@ -697,6 +697,29 @@ pub fn per_ship_performance(games: &[&PerGameStat]) -> Vec<(String, PerformanceI
     rows
 }
 
+/// Groups filtered games by ship id, newest-played ship first.
+///
+/// Display names are labels, not identities: two ships can have the same
+/// localized name and must retain separate statistics and chart selection.
+pub fn per_ship_performance_by_id(games: &[&PerGameStat]) -> Vec<(String, PerformanceInfo)> {
+    let mut by_ship: std::collections::HashMap<GameParamId, Vec<&PerGameStat>> = std::collections::HashMap::new();
+    for game in games {
+        by_ship.entry(game.ship_id).or_default().push(game);
+    }
+
+    let mut rows: Vec<(GameParamId, String, PerformanceInfo)> = by_ship
+        .into_iter()
+        .filter_map(|(ship_id, games)| {
+            let ship = games.first()?.ship_name.clone();
+            Some((ship_id, ship, PerformanceInfo::from_games(&games)))
+        })
+        .collect();
+    rows.sort_by(|left, right| {
+        right.2.last_played().cmp(left.2.last_played()).then_with(|| left.0.raw().cmp(&right.0.raw()))
+    });
+    rows.into_iter().map(|(_, ship, info)| (ship, info)).collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

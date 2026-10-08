@@ -34,7 +34,7 @@ use wows_toolkit_viewmodel::stats::PerformanceInfo;
 use wows_toolkit_viewmodel::stats::SerializableAchievement;
 use wows_toolkit_viewmodel::stats::SessionSummary;
 use wows_toolkit_viewmodel::stats::aggregate_achievements;
-use wows_toolkit_viewmodel::stats::per_ship_performance;
+use wows_toolkit_viewmodel::stats::per_ship_performance_by_id;
 use wows_toolkit_viewmodel::stats::session_personal_rating;
 
 const ROW_HEIGHT: Pixels = px(24.);
@@ -115,7 +115,7 @@ impl StatsOverviewPanel {
         self.ship_names = games.iter().map(|game| (game.ship_id, game.ship_name.clone())).collect();
         let computed = Computed {
             summary: SessionSummary::from_games(games),
-            ships: per_ship_performance(games),
+            ships: per_ship_performance_by_id(games),
             achievements: aggregate_achievements(games),
             personal_rating: session_personal_rating(games, self.personal_rating.as_deref()),
         };
