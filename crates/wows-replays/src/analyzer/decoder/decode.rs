@@ -206,7 +206,7 @@ impl PlayerStateData {
     }
 
     fn player_key_map(version: &Version) -> HashMap<&'static str, i64> {
-        // 15.9 inserts a player field before teamId, shifting teamId and ttkStatus.
+        // 15.9 adds shipFrags to vehicle data, shifting later roster fields.
         if version.is_at_least(&Version::from_client_exe("15,9,0,0")) {
             let mut h = HashMap::new();
             h.insert(Self::KEY_ACCOUNT_DBID, 0);
@@ -428,6 +428,9 @@ impl PlayerStateData {
     /// Bot key mapping — bots have a different (smaller) set of fields with different indices.
     fn bot_key_map(version: &Version) -> HashMap<&'static str, i64> {
         if version.is_at_least(&Version::from_client_exe("0,12,8,0")) {
+            // 15.9 adds shipFrags to vehicle data for bots as well as players.
+            let team_id_index = if version.is_at_least(&Version::from_client_exe("15,9,0,0")) { 27 } else { 26 };
+            let ttk_status_index = team_id_index + 1;
             let mut h = HashMap::new();
             h.insert(Self::KEY_ACCOUNT_DBID, 0);
             h.insert(Self::KEY_ANTI_ABUSE_ENABLED, 1);
@@ -458,8 +461,8 @@ impl PlayerStateData {
             h.insert(Self::KEY_SHIP_ID, 23);
             h.insert(Self::KEY_SHIP_PARAMS_ID, 24);
             h.insert(Self::KEY_SKIN_ID, 25);
-            h.insert(Self::KEY_TEAM_ID, 26);
-            h.insert(Self::KEY_TTK_STATUS, 27);
+            h.insert(Self::KEY_TEAM_ID, team_id_index);
+            h.insert(Self::KEY_TTK_STATUS, ttk_status_index);
             h
         } else {
             // For older versions, bots weren't separately tracked or had
@@ -2973,6 +2976,35 @@ mod player_key_map_tests {
 
         assert_eq!(player.entity_id(), EntityId::from(438_335u32));
         assert_eq!(player.ship_params_id(), Some(GameParamId::from(4_076_779_344u32)));
+        assert_eq!(player.team_id(), 1);
+    }
+
+    #[test]
+    fn v15_9_moves_bot_team_id_after_new_player_field() {
+        let old = PlayerStateData::bot_key_map(&v(15, 8, 0));
+        assert_eq!(old.get(PlayerStateData::KEY_TEAM_ID), Some(&26));
+        assert_eq!(old.get(PlayerStateData::KEY_TTK_STATUS), Some(&27));
+
+        let version = v(15, 9, 0);
+        let new = PlayerStateData::bot_key_map(&version);
+        assert_eq!(new.get(PlayerStateData::KEY_TEAM_ID), Some(&27));
+        assert_eq!(new.get(PlayerStateData::KEY_TTK_STATUS), Some(&28));
+
+        let raw_values = HashMap::from([
+            (0, Value::I64(-268_633_900)),
+            (10, Value::I64(268_633_900)),
+            (13, Value::Bool(true)),
+            (19, Value::String(":Bot:".to_string().into())),
+            (23, Value::I64(292_842)),
+            (24, Value::I64(292_842)),
+            (25, Value::I64(4_074_682_352)),
+            (26, Value::I64(4_074_682_352)),
+            (27, Value::I64(1)),
+            (28, Value::I64(1)),
+        ]);
+        let mapped_values = PlayerStateData::convert_raw_dict(&raw_values, &version, true);
+        let player = PlayerStateData::from_values(raw_values, mapped_values, &version);
+
         assert_eq!(player.team_id(), 1);
     }
 
