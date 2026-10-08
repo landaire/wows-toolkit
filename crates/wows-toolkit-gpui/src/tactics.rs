@@ -540,17 +540,17 @@ const MAX_NIB: f32 = 8.0;
 ///
 /// The shapes are drawn hollow: a board is read through, and a filled one hides
 /// the map it is about.
-fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str)> {
+fn tools() -> Vec<(wt_collab_client::drawing::Tool, &'static str, &'static str, &'static str)> {
     use wt_collab_client::drawing::Tool;
     vec![
-        (Tool::Freehand, "ui.renderer.annotations.freehand"),
-        (Tool::Line, "ui.renderer.annotations.line"),
-        (Tool::Arrow, "ui.renderer.annotations.arrow"),
-        (Tool::Circle { filled: false }, "ui.renderer.annotations.circle"),
-        (Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle"),
-        (Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle"),
-        (Tool::Measurement, "ui.renderer.annotations.measure"),
-        (Tool::Eraser, "ui.renderer.annotations.eraser"),
+        (Tool::Freehand, "ui.renderer.annotations.freehand", crate::icons::PAINT_BRUSH, "2"),
+        (Tool::Line, "ui.renderer.annotations.line", crate::icons::LINE_SEGMENT, "4"),
+        (Tool::Arrow, "ui.renderer.annotations.arrow", crate::icons::ARROW_BEND_UP_RIGHT, "1"),
+        (Tool::Circle { filled: false }, "ui.renderer.annotations.circle", crate::icons::CIRCLE, "5"),
+        (Tool::Rectangle { filled: false }, "ui.renderer.annotations.rectangle", crate::icons::SQUARE, "6"),
+        (Tool::Triangle { filled: false }, "ui.renderer.annotations.triangle", crate::icons::TRIANGLE, "7"),
+        (Tool::Measurement, "ui.renderer.annotations.measure", crate::icons::RULER, "M"),
+        (Tool::Eraser, "ui.renderer.annotations.eraser", crate::icons::ERASER, "3"),
     ]
 }
 
@@ -2453,15 +2453,23 @@ impl Drop for TacticsBoard {
 impl TacticsBoard {
     /// The board's keyboard: the chords the egui board takes.
     ///
-    /// Ctrl+Z takes a change back and Ctrl+Y or Ctrl+Shift+Z puts it back;
-    /// Escape puts the tool down, and Delete erases the capture point picked
-    /// out.
+    /// Ctrl/Cmd+Z takes a change back and Ctrl/Cmd+Y or Ctrl/Cmd+Shift+Z puts it back;
+    /// Ctrl/Cmd+1..7 and Ctrl/Cmd+M select drawing tools, Escape puts the tool down,
+    /// and Delete erases the object picked out.
     fn on_key(&mut self, event: &KeyDownEvent, _window: &mut Window, cx: &mut Context<Self>) {
         let modifiers = event.keystroke.modifiers;
         if modifiers.secondary() {
             match event.keystroke.key.as_str() {
                 "z" if !modifiers.shift => self.undo(cx),
                 "y" | "z" => self.redo(cx),
+                "1" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Arrow, cx),
+                "2" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Freehand, cx),
+                "3" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Eraser, cx),
+                "4" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Line, cx),
+                "5" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Circle { filled: false }, cx),
+                "6" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Rectangle { filled: false }, cx),
+                "7" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Triangle { filled: false }, cx),
+                "m" => self.set_shortcut_tool(wt_collab_client::drawing::Tool::Measurement, cx),
                 _ => {}
             }
             return;
@@ -2474,6 +2482,14 @@ impl TacticsBoard {
             "delete" | "backspace" => self.remove_selected(cx),
             _ => {}
         }
+    }
+
+    fn set_shortcut_tool(&mut self, tool: wt_collab_client::drawing::Tool, cx: &mut Context<Self>) {
+        self.drawing.set_tool(tool);
+        self.adding = false;
+        self.selected = None;
+        self.picked = wt_collab_client::drawing::Selection::default();
+        cx.notify();
     }
 }
 
@@ -2630,16 +2646,20 @@ impl TacticsBoard {
             .gap_1()
             .flex_wrap()
             .items_center()
-            .children(tools().into_iter().enumerate().map(|(index, (tool, key))| {
+            .children(tools().into_iter().enumerate().map(|(index, (tool, key, glyph, shortcut))| {
                 let board = board.clone();
                 let chosen = in_hand == tool;
+                let label: SharedString = t!(key).into_owned().into();
+                let tooltip = format!("{label} ({}+{shortcut})", shortcut_modifier_name());
                 crate::ui::selectable(
                     ("tactics-tool", index),
                     chosen,
                     Button::new(("tactics-tool-button", index))
-                        .label(t!(key).into_owned())
                         .compact()
                         .selected(chosen)
+                        .accessibility_label(label)
+                        .tooltip(tooltip)
+                        .child(crate::icons::icon(glyph).text_size(px(16.)))
                         .on_click(move |_event, _window, cx: &mut App| {
                             let tool = tool.clone();
                             board.update(cx, |board, cx| board.set_tool(tool, cx));

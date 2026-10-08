@@ -211,9 +211,11 @@ something here steer the one device this port does pick.
     replay viewport uses (`MapViewport`).
 
     A change to what is on the board can be taken back and put back again, by
-    the buttons or by Ctrl+Z and Ctrl+Y, and a zone's width reads and steps in
-    kilometres beside the cap it belongs to. Escape puts the tool down and
-    Delete erases the cap picked out, which are the egui board's own chords.
+    the buttons or by Ctrl/Cmd+Z and Ctrl/Cmd+Y, and a zone's width reads and
+    steps in kilometres beside the cap it belongs to. Escape puts the tool down
+    and Delete erases the object picked out. Drawing tools use Ctrl/Cmd+1..7 and
+    Ctrl/Cmd+M; their compact icon buttons name both the tool and its shortcut
+    on hover.
 
     A drawn shape can be picked back up: a press on one picks it out and draws a
     halo under it, ctrl adds another, a drag moves what is picked, and Delete
