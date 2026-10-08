@@ -2740,17 +2740,28 @@ impl TacticsBoard {
                     }),
             )
             .when(!self.matched_ships.is_empty(), |this| {
-                this.child(h_flex().flex_wrap().gap_1().children(self.matched_ships.iter().cloned().enumerate().map(
-                    |(index, (species, ship))| {
-                        let board = board.clone();
-                        Button::new(("tactics-ship-match", index)).label(ship.display_name.clone()).compact().on_click(
-                            move |_event, window, cx: &mut App| {
-                                let ship = ship.clone();
-                                board.update(cx, |board, cx| board.pick_ship(species, &ship, window, cx));
+                this.child(
+                    div()
+                        .id("tactics-ship-matches")
+                        .w_full()
+                        .max_w(px(360.))
+                        .max_h(px(144.))
+                        .overflow_y_scroll()
+                        .child(v_flex().gap_1().children(self.matched_ships.iter().cloned().enumerate().map(
+                            |(index, (species, ship))| {
+                                let board = board.clone();
+                                Button::new(("tactics-ship-match", index))
+                                    .label(ship.display_name.clone())
+                                    .compact()
+                                    .w_full()
+                                    .justify_start()
+                                    .on_click(move |_event, window, cx: &mut App| {
+                                        let ship = ship.clone();
+                                        board.update(cx, |board, cx| board.pick_ship(species, &ship, window, cx));
+                                    })
                             },
-                        )
-                    },
-                )))
+                        ))),
+                )
             })
     }
 
