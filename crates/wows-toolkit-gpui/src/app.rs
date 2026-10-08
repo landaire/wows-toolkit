@@ -37,6 +37,7 @@ use rust_i18n::t;
 use std::rc::Rc;
 
 use crate::armor_viewer::ArmorViewerPane;
+use crate::armor_viewer::catalog::ShipEntry;
 use crate::game_data_cache;
 use crate::palette::PaletteAction;
 use crate::palette::PaletteEntry;
@@ -256,7 +257,6 @@ fn show_about(window: &mut Window, cx: &mut gpui_kit::App) {
 const TOO_LONG_TO_TOAST: usize = 160;
 
 /// What a palette mode backed by the replay index says when it has no rows.
-const NOTHING_INDEXED: &str = "ui.palette.nothing_indexed";
 
 /// What a finished background job has to say, until the next draw says it.
 ///
@@ -450,6 +450,151 @@ fn language_index(locale: Option<&str>) -> usize {
     wt_translations::SUPPORTED_LANGUAGES.iter().position(|lang| lang.code == code).unwrap_or(0)
 }
 
+struct PaletteModeDialog {
+    command: Entity<CommandState>,
+    owner: WeakEntity<App>,
+    mode: crate::palette::PaletteMode,
+    armor_ships: Vec<ShipEntry>,
+    entries: Vec<PaletteEntry>,
+    error: Option<String>,
+    generation: u64,
+    _query_task: Option<Task<()>>,
+}
+
+impl PaletteModeDialog {
+    fn new(
+        command: Entity<CommandState>,
+        owner: WeakEntity<App>,
+        mode: crate::palette::PaletteMode,
+        armor_ships: Vec<ShipEntry>,
+    ) -> Self {
+        Self { command, owner, mode, armor_ships, entries: Vec::new(), error: None, generation: 0, _query_task: None }
+    }
+
+    fn search(&mut self, needle: String, window: &mut Window, cx: &mut Context<Self>) {
+        self.generation = self.generation.wrapping_add(1);
+        let generation = self.generation;
+        self.entries.clear();
+        self.error = None;
+        self.command.update(cx, |command, cx| command.set_loading(true, window, cx));
+        cx.notify();
+
+        if self.mode == crate::palette::PaletteMode::ArmorShips {
+            let needle = unidecode::unidecode(&needle).to_lowercase();
+            self.entries = self
+                .armor_ships
+                .iter()
+                .filter(|ship| needle.is_empty() || ship.search_name.contains(&needle))
+                .take(crate::palette::MODE_LIMIT as usize)
+                .map(|ship| PaletteEntry {
+                    label: format!("{} -- {}", ship.display_name, crate::armor_viewer::catalog::tier_roman(ship.tier)),
+                    action: PaletteAction::ViewArmor { param_index: ship.param_index.clone() },
+                })
+                .collect();
+            self.command.update(cx, |command, cx| command.set_loading(false, window, cx));
+            cx.notify();
+            return;
+        }
+
+        let Some(pool) = settings_store::pool(cx) else {
+            self.error = Some("The replay index is not open".to_string());
+            self.command.update(cx, |command, cx| command.set_loading(false, window, cx));
+            cx.notify();
+            return;
+        };
+        let Some(runtime) = runtime::runtime(cx) else {
+            self.error = Some("The background runtime is not open".to_string());
+            self.command.update(cx, |command, cx| command.set_loading(false, window, cx));
+            cx.notify();
+            return;
+        };
+        let mode = self.mode;
+
+        self._query_task = Some(cx.spawn_in(window, async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_millis(100)).await;
+            let current = this.update(cx, |this, _cx| this.generation == generation).unwrap_or(false);
+            if !current {
+                return;
+            }
+
+            let read = cx
+                .background_spawn(async move {
+                    runtime.handle().block_on(crate::palette::mode_entries(mode, &pool, &needle))
+                })
+                .await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                if this.generation != generation {
+                    return;
+                }
+                match read {
+                    Ok(entries) => {
+                        this.entries = entries;
+                        this.error = None;
+                    }
+                    Err(error) => {
+                        tracing::warn!(%error, "palette: mode query failed");
+                        this.entries.clear();
+                        this.error = Some(error);
+                    }
+                }
+                this.command.update(cx, |command, cx| command.set_loading(false, window, cx));
+                cx.notify();
+            });
+        }));
+    }
+}
+
+impl Render for PaletteModeDialog {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let entries = Rc::new(self.entries.clone());
+        let confirm_entries = entries.clone();
+        let owner = self.owner.clone();
+        let command_state = self.command.clone();
+        let dialog = cx.entity();
+        let confirm_dialog = dialog.clone();
+        let render_generation = self.generation;
+        let command = Command::new(&self.command)
+            .filterable(false)
+            .placeholder(t!("ui.palette.placeholder").to_string())
+            .max_h(px(400.))
+            .items(crate::palette::items(&entries))
+            .empty(move |_state, _window, cx| {
+                let error = dialog.read(cx).error.clone();
+                let message = match error {
+                    Some(error) => t!("ui.search.failed", reason = error).into_owned(),
+                    None => t!("ui.search.no_matches").into_owned(),
+                };
+                div().p_4().text_sm().text_color(crate::theme::text_dim()).child(message)
+            })
+            .on_query({
+                let dialog = cx.entity();
+                move |query, window, cx| {
+                    dialog.update(cx, |dialog, cx| dialog.search(query.to_string(), window, cx));
+                }
+            })
+            .on_cancel({
+                let owner = self.owner.clone();
+                move |window, cx| {
+                    let owner = owner.clone();
+                    window.defer(cx, move |window, cx| {
+                        let _ = owner.update(cx, |app, cx| app.open_palette(window, cx));
+                    });
+                }
+            })
+            .on_confirm(move |index_path, window, cx| {
+                if command_state.read(cx).is_loading() || confirm_dialog.read(cx).generation != render_generation {
+                    return;
+                }
+                let Some(entry) = confirm_entries.get(index_path.row) else { return };
+                let action = entry.action.clone();
+                let _ = owner.update(cx, |app, cx| app.run_palette_action(action, window, cx));
+                window.close_all_dialogs(cx);
+            });
+
+        v_flex().size_full().child(command)
+    }
+}
+
 /// Load status of the settings snapshot fetched from the shared config DB.
 enum SettingsState {
     Loading,
@@ -507,8 +652,8 @@ pub struct App {
     /// What Twitch made of the stored credential, which is the only thing
     /// that can say whether it still works.
     twitch_status: TwitchStatus,
-    /// The command palette's own list and query state. Built once: what it
-    /// offers does not depend on what is on screen.
+    /// The command state for the currently open palette. Replaced on each open
+    /// so a prior query and selection do not leak into the next invocation.
     palette: Entity<CommandState>,
     palette_entries: Rc<Vec<PaletteEntry>>,
     /// The Unpacker tab: build selector, VFS browsers and the extraction
@@ -1566,61 +1711,52 @@ impl App {
     }
 
     /// Fills the palette with one of the cascading modes and reopens it.
-    ///
-    /// Read once on entering the mode rather than per keystroke: the palette
-    /// filters what it was given as the reader types, and a query per keystroke
-    /// against a year of battles is slower than the typing.
     fn enter_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
-        if mode == crate::palette::PaletteMode::ArmorShips {
-            let entries = self.armor_ship_entries(cx);
-            // Its own empty message: a ship list is empty because no build is
-            // loaded, which has nothing to do with what is indexed.
-            self.open_palette_mode_with(entries, "ui.palette.no_ship_catalogue", window, cx);
-            return;
-        }
-
-        let Some(pool) = settings_store::pool(cx) else { return };
-        let Some(runtime) = runtime::runtime(cx) else { return };
-        cx.spawn_in(window, async move |this, cx| {
-            let read = cx
-                .background_spawn(async move {
-                    runtime.handle().block_on(async move { crate::palette::mode_entries(mode, &pool).await })
-                })
-                .await;
-            let _ =
-                this.update_in(cx, |this, window, cx| this.open_palette_mode_with(read, NOTHING_INDEXED, window, cx));
-        })
-        .detach();
+        let owner = cx.weak_entity();
+        window.defer(cx, move |window, cx| {
+            let _ = owner.update(cx, |this, cx| this.open_palette_mode(mode, window, cx));
+        });
     }
 
-    /// Every ship the loaded build has armor for, as palette rows.
-    ///
-    /// Empty when no build is loaded, which the palette says rather than opening
-    /// an empty list.
-    fn armor_ship_entries(&self, cx: &Context<Self>) -> Vec<PaletteEntry> {
-        let Some(catalog) = self.armor_pane.read(cx).catalog() else { return Vec::new() };
-        catalog
-            .ships()
-            .map(|ship| PaletteEntry {
-                label: format!("{} -- {}", ship.display_name, crate::armor_viewer::catalog::tier_roman(ship.tier)),
-                action: PaletteAction::ViewArmor { param_index: ship.param_index.clone() },
+    fn open_palette_mode(&mut self, mode: crate::palette::PaletteMode, window: &mut Window, cx: &mut Context<Self>) {
+        let armor_ships = if mode == crate::palette::PaletteMode::ArmorShips {
+            let Some(catalog) = self.armor_pane.read(cx).catalog() else {
+                crate::toast::warn(t!("ui.palette.no_ship_catalogue").into_owned(), window, cx);
+                return;
+            };
+            let ships = catalog.ships().cloned().collect::<Vec<_>>();
+            if ships.is_empty() {
+                crate::toast::warn(t!("ui.palette.no_ship_catalogue").into_owned(), window, cx);
+                return;
+            }
+            ships
+        } else {
+            Vec::new()
+        };
+
+        self.palette = cx.new(|cx| CommandState::new(window, cx));
+        let command = self.palette.clone();
+        let owner = cx.weak_entity();
+        let mode_view = cx.new(|_| PaletteModeDialog::new(command.clone(), owner, mode, armor_ships));
+        mode_view.update(cx, |dialog, cx| dialog.search(String::new(), window, cx));
+
+        window.close_all_dialogs(cx);
+        let command = self.palette.clone();
+        let focus_on_mount = Rc::new(std::cell::Cell::new(true));
+        window.open_dialog(cx, move |dialog, _window, _cx| {
+            let command = command.clone();
+            let view = mode_view.clone();
+            let focus_on_mount = focus_on_mount.clone();
+            dialog.close_button(false).p_0().content(move |content, window, cx| {
+                if focus_on_mount.replace(false) {
+                    let command = command.clone();
+                    window.defer(cx, move |window, cx| {
+                        command.read(cx).focus_handle(cx).focus(window, cx);
+                    });
+                }
+                content.child(view.clone())
             })
-            .collect()
-    }
-
-    /// Opens the palette over a mode's rows, or says the mode has none.
-    fn open_palette_mode_with(
-        &mut self,
-        entries: Vec<PaletteEntry>,
-        when_empty: &str,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if entries.is_empty() {
-            crate::toast::warn(t!(when_empty).into_owned(), window, cx);
-            return;
-        }
-        self.open_palette_with(Rc::new(entries), window, cx);
+        });
     }
 
     /// Opens the palette over `entries`.
@@ -1631,6 +1767,7 @@ impl App {
         // saying whether one is open would eventually say the wrong thing
         // and refuse to open the palette at all.
         window.close_all_dialogs(cx);
+        self.palette = cx.new(|cx| CommandState::new(window, cx));
 
         let palette = self.palette.clone();
         let owner = cx.weak_entity();
