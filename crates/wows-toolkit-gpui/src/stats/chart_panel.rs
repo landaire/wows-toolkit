@@ -704,7 +704,7 @@ impl StatsChartPanel {
                                 .flex_wrap()
                                 .child(
                                     Button::new(("chart-mode-all", id))
-                                        .label(t!("ui.stats.all_ships").to_string())
+                                        .label(t!("ui.stats.div_all").to_string())
                                         .compact()
                                         .selected(chosen_modes.is_empty())
                                         .on_click(move |_event, _window, cx| {
