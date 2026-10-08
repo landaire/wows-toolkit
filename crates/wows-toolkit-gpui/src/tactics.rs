@@ -2549,49 +2549,57 @@ impl TacticsBoard {
                     .flex_wrap()
                     .items_center()
                     .py_1()
-                    .child(div().text_xs().text_color(crate::theme::text_dim()).child(t!("ui.tactics.map").to_string()))
                     .child(
-                        crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                            Select::new(&self.map_select)
-                                .id("tactics-map-select")
-                                .accessibility_label(t!("ui.tactics.map").to_string())
-                                .placeholder(t!("ui.tactics.map_hint").into_owned())
-                                .search_placeholder(t!("ui.tactics.map_hint").into_owned())
-                                .small()
-                                .w(px(280.))
-                                .menu_width(px(360.)),
-                        ),
-                    ),
-            )
-            .when(self.map.is_some(), |this| {
-                this.child(
-                    h_flex()
-                        .gap_2()
-                        .items_center()
-                        .py_1()
-                        .border_t_1()
-                        .border_color(border)
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(crate::theme::text_dim())
-                                .child(t!("ui.tactics.mode").to_string()),
-                        )
-                        .child(
-                            crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
-                                Select::new(&self.mode_select)
-                                    .id("tactics-mode-select")
-                                    .title_prefix(t!("ui.tactics.mode").into_owned())
-                                    .accessibility_label(t!("ui.tactics.mode").into_owned())
-                                    .placeholder(t!("ui.tactics.mode").into_owned())
-                                    .search_placeholder(t!("ui.tactics.mode").into_owned())
-                                    .small()
-                                    .w(px(240.))
-                                    .menu_width(px(360.)),
+                        h_flex()
+                            .gap_2()
+                            .items_center()
+                            .child(
+                                div()
+                                    .text_xs()
+                                    .text_color(crate::theme::text_dim())
+                                    .child(t!("ui.tactics.map").to_string()),
+                            )
+                            .child(
+                                crate::ui::boxed(px(280.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                    Select::new(&self.map_select)
+                                        .id("tactics-map-select")
+                                        .accessibility_label(t!("ui.tactics.map").to_string())
+                                        .placeholder(t!("ui.tactics.map_hint").into_owned())
+                                        .search_placeholder(t!("ui.tactics.map_hint").into_owned())
+                                        .small()
+                                        .w(px(280.))
+                                        .menu_width(px(360.)),
+                                ),
                             ),
-                        ),
-                )
-            })
+                    )
+                    .when(self.map.is_some(), |this| {
+                        this.child(
+                            h_flex()
+                                .gap_2()
+                                .items_center()
+                                .child(crate::ui::rule_v(cx))
+                                .child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(crate::theme::text_dim())
+                                        .child(t!("ui.tactics.mode").to_string()),
+                                )
+                                .child(
+                                    crate::ui::boxed(px(240.), crate::ui::SELECT_SMALL_HEIGHT).child(
+                                        Select::new(&self.mode_select)
+                                            .id("tactics-mode-select")
+                                            .title_prefix(t!("ui.tactics.mode").into_owned())
+                                            .accessibility_label(t!("ui.tactics.mode").into_owned())
+                                            .placeholder(t!("ui.tactics.mode").into_owned())
+                                            .search_placeholder(t!("ui.tactics.mode").into_owned())
+                                            .small()
+                                            .w(px(240.))
+                                            .menu_width(px(360.)),
+                                    ),
+                                ),
+                        )
+                    }),
+            )
             .child(
                 h_flex()
                     .gap_3()
