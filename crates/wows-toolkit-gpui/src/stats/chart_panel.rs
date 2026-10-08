@@ -80,9 +80,12 @@ pub struct ChartSettings {
     #[serde(default)]
     pub own_filters: Option<StatsFilters>,
     /// The ships plotted, when the reader picked them. Empty follows the
-    /// session, which is what a new chart does.
+    /// session in older settings rows.
     #[serde(default)]
     pub selected_ships: Vec<u64>,
+    /// Distinguishes an explicit empty selection from an older empty list.
+    #[serde(default)]
+    pub selection_touched: bool,
 }
 
 pub struct StatsChartPanel {
@@ -196,6 +199,7 @@ impl StatsChartPanel {
             } else {
                 Vec::new()
             },
+            selection_touched: self.selection_touched,
         }
     }
 
@@ -213,7 +217,7 @@ impl StatsChartPanel {
         self.combined = settings.combined;
         self.show_values = settings.show_values;
         self.own_filters = settings.own_filters;
-        if !settings.selected_ships.is_empty() {
+        if settings.selection_touched || !settings.selected_ships.is_empty() {
             self.selected_ships = settings.selected_ships.into_iter().map(GameParamId::from).collect();
             self.selection_touched = true;
         }
@@ -950,6 +954,7 @@ mod tests {
                 game_modes: ["RandomBattle".to_string()].into_iter().collect(),
             }),
             selected_ships: vec![4288575440, 3541279184],
+            selection_touched: true,
         };
 
         let json = serde_json::to_string(&saved).expect("a chart serializes");
