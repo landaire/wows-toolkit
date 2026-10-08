@@ -17,11 +17,11 @@ use gpui_kit::component::v_flex;
 use wowsunpack::vfs::VfsPath;
 
 use crate::replay_inspector::icons::IconCache;
-use gpui_kit::SvgRenderer;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use rust_i18n::t;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use wows_replays::types::GameParamId;
 use wows_toolkit_viewmodel::personal_rating;
 
@@ -62,6 +62,8 @@ pub struct StatsOverviewPanel {
     /// them. Absent until the tab is handed game data, which is when the
     /// generic glyph gives way to the real icon.
     icons: IconCache,
+    achievement_vfs: Option<VfsPath>,
+    loaded_achievement_icons: HashSet<String>,
     /// The name each ship in the session goes by, for the records that name
     /// only an id.
     ship_names: HashMap<GameParamId, String>,
@@ -79,6 +81,8 @@ impl StatsOverviewPanel {
     pub fn new(cx: &mut Context<Self>) -> Self {
         Self {
             icons: IconCache::new(),
+            achievement_vfs: None,
+            loaded_achievement_icons: HashSet::new(),
             ship_names: HashMap::new(),
             computed: Computed::default(),
             personal_rating: None,
@@ -89,12 +93,12 @@ impl StatsOverviewPanel {
         }
     }
 
-    /// Loads the art for the achievements on screen from `vfs`.
-    ///
-    /// Driven by the tab, which gets the build from the replay inspector
-    /// rather than opening a second one.
-    pub fn set_game_data(&mut self, vfs: &VfsPath, svg: &SvgRenderer, cx: &mut Context<Self>) {
-        self.icons.populate_achievements(&self.computed.achievements, vfs, svg);
+    /// Adopts the build's files for achievement art.
+    pub fn set_game_data(&mut self, vfs: &VfsPath, cx: &mut Context<Self>) {
+        self.achievement_vfs = Some(vfs.clone());
+        self.icons = IconCache::new();
+        self.loaded_achievement_icons.clear();
+        self.load_achievement_icons(&self.computed.achievements.clone());
         cx.notify();
     }
 
@@ -109,12 +113,14 @@ impl StatsOverviewPanel {
         // The records name the ship that set them, which needs a name for the
         // id `SessionSummary` carries; the games themselves have one.
         self.ship_names = games.iter().map(|game| (game.ship_id, game.ship_name.clone())).collect();
-        self.computed = Computed {
+        let computed = Computed {
             summary: SessionSummary::from_games(games),
             ships: per_ship_performance(games),
             achievements: aggregate_achievements(games),
             personal_rating: session_personal_rating(games, self.personal_rating.as_deref()),
         };
+        self.load_achievement_icons(&computed.achievements);
+        self.computed = computed;
         self.list_state.reset(self.computed.ships.len());
         cx.notify();
     }
@@ -125,6 +131,16 @@ impl StatsOverviewPanel {
     /// holds no game in it -- which cannot happen for a record set in one.
     fn ship_name(&self, ship: GameParamId) -> String {
         self.ship_names.get(&ship).cloned().unwrap_or_else(|| ship.raw().to_string())
+    }
+
+    fn load_achievement_icons(&mut self, achievements: &[SerializableAchievement]) {
+        let Some(vfs) = self.achievement_vfs.clone() else { return };
+        let missing: Vec<_> = achievements
+            .iter()
+            .filter(|achievement| self.loaded_achievement_icons.insert(achievement.icon_key.clone()))
+            .cloned()
+            .collect();
+        self.icons.populate_achievements(&missing, &vfs);
     }
 }
 

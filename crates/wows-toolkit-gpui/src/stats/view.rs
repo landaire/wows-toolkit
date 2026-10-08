@@ -695,8 +695,7 @@ impl StatsView {
 
     /// Hands the roundup the build's art for its achievements.
     pub fn set_game_data(&mut self, vfs: &wowsunpack::vfs::VfsPath, cx: &mut Context<Self>) {
-        let svg = gpui_kit::SvgRenderer::new(cx.asset_source().clone());
-        self.overview.update(cx, |panel, cx| panel.set_game_data(vfs, &svg, cx));
+        self.overview.update(cx, |panel, cx| panel.set_game_data(vfs, cx));
     }
 
     /// Forgets one ship's games, which the Ships panel asks for but the tab
