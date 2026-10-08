@@ -401,6 +401,21 @@ impl StatsChartPanel {
         self.stat.label().to_string()
     }
 
+    fn tab_title(&self) -> String {
+        let stat = self.stat.label();
+        match self.mode {
+            ChartMode::Bar if self.stat != ChartableStat::WinRate => t!("stat.avg_prefix", name = stat).into_owned(),
+            ChartMode::Bar => stat,
+            ChartMode::Line if self.combined => {
+                format!("{stat} {}", t!("chart.combined_suffix"))
+            }
+            ChartMode::Line if self.running => {
+                format!("{stat} {}", t!("chart.rolling_average_suffix"))
+            }
+            ChartMode::Line => stat,
+        }
+    }
+
     fn set_mode(&mut self, mode: ChartMode, cx: &mut Context<Self>) {
         if self.mode == mode {
             return;
@@ -763,7 +778,7 @@ impl Panel for StatsChartPanel {
             } else {
                 crate::icons::CHART_BAR
             }))
-            .child(self.value_label())
+            .child(self.tab_title())
     }
 }
 
