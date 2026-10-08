@@ -293,20 +293,13 @@ fn layouts_have_same_caps(a: &CapLayout, b: &CapLayout) -> bool {
 
 // Persistence (rkyv)
 
-/// Return the on-disk path for the cap layout cache, or `None` if no storage
-/// directory is available.
-pub fn cache_path() -> Option<std::path::PathBuf> {
-    wows_toolkit_config::storage_dir().map(|d| d.join("cap_layouts.bin"))
-}
-
 impl CapLayoutDb {
     /// Load the cap layout database from disk. Returns `None` if the file
     /// doesn't exist, is corrupt, or has an incompatible version (in which
     /// case the caller should rebuild from replays).
     pub fn load(path: &Path) -> Option<Self> {
-        let data = match std::fs::read(path) {
-            Ok(d) => d,
-            Err(_) => return None,
+        let Ok(data) = std::fs::read(path) else {
+            return None;
         };
 
         // File format (v2+): [u32 version LE] [4 bytes padding] [rkyv payload]
@@ -320,75 +313,18 @@ impl CapLayoutDb {
         let payload = &data[HEADER_SIZE..];
 
         if file_version >= CAP_LAYOUT_DB_VERSION {
-            match rkyv::from_bytes::<Versioned<CapLayoutDb>, rkyv::rancor::Error>(payload) {
-                Ok(versioned) => return Some(versioned.0),
-                Err(e) => warn!("cap layout db v{file_version} deserialization failed: {e}, discarding"),
-            }
-        } else {
-            // Old v1 files used a 4-byte header that broke rkyv alignment.
-            // Discard and rebuild from replays.
-            warn!("cap layout db version {file_version} < current {CAP_LAYOUT_DB_VERSION}, discarding");
+            let Ok(versioned) = rkyv::from_bytes::<Versioned<CapLayoutDb>, rkyv::rancor::Error>(payload)
+                .inspect_err(|err| warn!("cap layout db v{file_version} deserialization failed: {err}, discarding"))
+            else {
+                return None;
+            };
+            return Some(versioned.0);
         }
 
+        // Old v1 files used a 4-byte header that broke rkyv alignment.
+        // Discard and rebuild from replays.
+        warn!("cap layout db version {file_version} < current {CAP_LAYOUT_DB_VERSION}, discarding");
         None
-    }
-
-    /// Load the cap layout database from SQLite.
-    pub async fn load_from_db(pool: &sqlx::SqlitePool) -> Self {
-        let mut db = Self::default();
-        match wows_toolkit_config::queries::get_all_cap_layouts(pool).await {
-            Ok(rows) => {
-                for (map_id, scenario_config_id, blob) in rows {
-                    match rkyv::from_bytes::<CapLayout, rkyv::rancor::Error>(&blob) {
-                        Ok(layout) => {
-                            db.layouts.insert(
-                                CapLayoutKey { map_id: map_id as u32, scenario_config_id: scenario_config_id as u32 },
-                                layout,
-                            );
-                        }
-                        Err(e) => {
-                            warn!("failed to deserialize cap layout ({map_id}, {scenario_config_id}): {e}");
-                        }
-                    }
-                }
-                tracing::info!("loaded {} cap layouts from SQLite", db.layouts.len());
-            }
-            Err(e) => {
-                warn!("failed to load cap layouts from SQLite: {e}");
-            }
-        }
-        db
-    }
-
-    /// Save the entire cap layout database to SQLite.
-    pub async fn save_to_db(&self, pool: &sqlx::SqlitePool) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        for (key, layout) in &self.layouts {
-            let blob = rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|e| format!("{e}"))?;
-            wows_toolkit_config::queries::upsert_cap_layout(
-                pool,
-                key.map_id as i64,
-                key.scenario_config_id as i64,
-                &blob,
-            )
-            .await?;
-        }
-        Ok(())
-    }
-
-    /// Save a single cap layout to SQLite (for incremental inserts).
-    pub async fn save_layout_to_db(
-        pool: &sqlx::SqlitePool,
-        layout: &CapLayout,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let blob = rkyv::to_bytes::<rkyv::rancor::Error>(layout).map_err(|e| format!("{e}"))?;
-        wows_toolkit_config::queries::upsert_cap_layout(
-            pool,
-            layout.key.map_id as i64,
-            layout.key.scenario_config_id as i64,
-            &blob,
-        )
-        .await?;
-        Ok(())
     }
 
     /// Save the cap layout database to disk.
@@ -441,10 +377,8 @@ mod tests {
     fn raw_rkyv_roundtrip_without_versioned() {
         let db = sample_db();
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&db).unwrap();
-        match rkyv::from_bytes::<CapLayoutDb, rkyv::rancor::Error>(&bytes) {
-            Ok(loaded) => assert_eq!(loaded.len(), 1),
-            Err(e) => panic!("direct roundtrip failed: {e}"),
-        }
+        let loaded = rkyv::from_bytes::<CapLayoutDb, rkyv::rancor::Error>(&bytes).expect("direct roundtrip failed");
+        assert_eq!(loaded.len(), 1);
     }
 
     #[test]
@@ -452,10 +386,9 @@ mod tests {
         let db = sample_db();
         let versioned = Versioned(db);
         let bytes = rkyv::to_bytes::<rkyv::rancor::Error>(&versioned).unwrap();
-        match rkyv::from_bytes::<Versioned<CapLayoutDb>, rkyv::rancor::Error>(&bytes) {
-            Ok(loaded) => assert_eq!(loaded.0.len(), 1),
-            Err(e) => panic!("versioned roundtrip failed: {e}"),
-        }
+        let loaded = rkyv::from_bytes::<Versioned<CapLayoutDb>, rkyv::rancor::Error>(&bytes)
+            .expect("versioned roundtrip failed");
+        assert_eq!(loaded.0.len(), 1);
     }
 
     #[test]
@@ -470,31 +403,5 @@ mod tests {
         assert_eq!(loaded.len(), db.len());
         let key = CapLayoutKey { map_id: 45, scenario_config_id: 100 };
         assert!(loaded.contains(&key));
-    }
-
-    #[test]
-    fn load_actual_cache_file() {
-        // Attempt to load the real on-disk cache, save it, and verify roundtrip.
-        // The on-disk file may be an old version that gets discarded — in that
-        // case we just verify load returns None gracefully (no panic).
-        if let Some(path) = cache_path()
-            && path.exists()
-        {
-            match CapLayoutDb::load(&path) {
-                Some(db) => {
-                    eprintln!("loaded {} cap layouts from {}", db.len(), path.display());
-
-                    // Roundtrip: save and reload
-                    let dir = tempfile::tempdir().unwrap();
-                    let tmp_path = dir.path().join("cap_layouts.bin");
-                    db.save(&tmp_path).expect("save failed");
-                    let reloaded = CapLayoutDb::load(&tmp_path).expect("roundtrip load failed");
-                    assert_eq!(reloaded.len(), db.len());
-                }
-                None => {
-                    eprintln!("on-disk cache at {} is outdated or corrupt, skipping", path.display());
-                }
-            }
-        }
     }
 }

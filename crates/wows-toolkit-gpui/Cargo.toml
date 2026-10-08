@@ -3,6 +3,7 @@ name = "wows-toolkit-gpui"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 # GPUI Kit is the single application-facing entry point: `gpui_kit::*` is GPUI
@@ -83,6 +84,7 @@ ciborium = "0.2"
 # The replay export's spreadsheet format.
 csv = "1"
 sqlx = { version = "0.8.6", default-features = false, features = ["sqlite"] }
+rkyv = { workspace = true }
 # The recent-games input accepts digits only, which NumberInput takes as a
 # pattern.
 regex = "1"

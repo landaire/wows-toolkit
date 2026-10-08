@@ -74,6 +74,7 @@ jobs:
           # GITHUB_ENV entries exported by nix-develop override workflow env;
           # fail loudly if the devShell ever starts exporting RUSTFLAGS.
           test "$RUSTFLAGS" = "-D warnings"
+      - run: python3 scripts/check-publish-dependencies.py
       - uses: Swatinem/rust-cache@v2
         with:
           shared-key: linux-clippy

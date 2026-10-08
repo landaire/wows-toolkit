@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 repository = "https://github.com/landaire/wows-toolkit"
 description = "Peer-to-peer collaborative replay sessions for WoWs Toolkit"
+publish = false
 
 [dependencies]
 # The wire format and its validation, shared with the web client.

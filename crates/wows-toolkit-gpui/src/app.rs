@@ -1285,9 +1285,7 @@ impl App {
         cx.spawn(async move |this, cx| {
             let read = cx
                 .background_spawn(async move {
-                    runtime.handle().block_on(async move {
-                        wows_replay_insights::cap_layout::CapLayoutDb::load_from_db(&pool).await
-                    })
+                    runtime.handle().block_on(async move { crate::cap_layout_store::load_from_db(&pool).await })
                 })
                 .await;
             let _ = this.update(cx, |this, cx| {

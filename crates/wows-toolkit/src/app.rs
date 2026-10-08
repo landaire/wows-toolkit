@@ -1393,13 +1393,13 @@ impl WowsToolkitApp {
 
             // Try SQLite first.
             if let Some(ref pool) = state.db_pool {
-                let mut db = state.runtime.block_on(crate::data::cap_layout::CapLayoutDb::load_from_db(pool));
+                let mut db = state.runtime.block_on(crate::data::cap_layout::load_from_db(pool));
                 if !db.is_empty() {
                     let removed = db.dedup();
                     if removed > 0 {
                         tracing::info!("removed {removed} duplicate cap layouts from SQLite");
                         let pool = pool.clone();
-                        let _ = state.runtime.block_on(db.save_to_db(&pool));
+                        let _ = state.runtime.block_on(crate::data::cap_layout::save_to_db(&pool, &db));
                     }
                     *state.tab_state.cap_layout_db.lock() = db;
                     loaded = true;
@@ -1421,7 +1421,7 @@ impl WowsToolkitApp {
                 // Migrate file-based cap layouts to SQLite.
                 if let Some(ref pool) = state.db_pool {
                     let pool = pool.clone();
-                    if let Err(e) = state.runtime.block_on(db.save_to_db(&pool)) {
+                    if let Err(e) = state.runtime.block_on(crate::data::cap_layout::save_to_db(&pool, &db)) {
                         error!("Failed to migrate cap layouts to SQLite: {e}");
                     }
                 }
