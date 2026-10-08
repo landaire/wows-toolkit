@@ -645,6 +645,8 @@ kept so the next audit does not re-report them.
   cached ship-table values are rebuilt when the language changes.
 - [done] The Overview ship table keeps its columns readable when its dock pane
   is narrow: the header and virtualized rows scroll horizontally together.
+- [done] Expanded per-ship tables scroll horizontally in a narrow dock pane,
+  keeping all four statistic columns reachable.
 - [done] Filter changes are written back, so both front ends read the same
   values.
 - [done] The open charts are kept in a settings row: each one's statistic,

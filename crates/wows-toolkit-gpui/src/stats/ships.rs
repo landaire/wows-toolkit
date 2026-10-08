@@ -21,6 +21,7 @@ use gpui_kit::component::dock::Panel;
 use gpui_kit::component::dock::PanelEvent;
 use gpui_kit::component::h_flex;
 use gpui_kit::component::popover::Popover;
+use gpui_kit::component::scroll::Scrollbar;
 use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
@@ -38,6 +39,7 @@ use crate::icons;
 
 const LABEL_COLUMN_WIDTH: Pixels = px(140.);
 const CELL_COLUMN_WIDTH: Pixels = px(110.);
+const SHIP_TABLE_MIN_WIDTH: Pixels = px(628.);
 const COPY_MENU_WIDTH: Pixels = px(180.);
 
 /// What the panel asks the tab to do; the tab owns the session, so it is the
@@ -58,6 +60,7 @@ struct ShipSection {
     /// The collapsed line: record, win rate, and the rating when there is one.
     header: SharedString,
     rows: Vec<stats_table::StatRow>,
+    horizontal_scroll: ScrollHandle,
     /// `sort_key` of this ship's most recent game, which orders the list.
     last_played: String,
     markdown: SharedString,
@@ -188,6 +191,7 @@ impl StatsShipsPanel {
                     csv: SharedString::from(stats_table::to_csv(&rows, column_heading, stat_heading)),
                     header,
                     rows,
+                    horizontal_scroll: ScrollHandle::new(),
                     last_played: info.last_played().to_string(),
                 }
             })
@@ -348,7 +352,19 @@ impl Render for StatsShipsPanel {
                         }))
                 });
 
-                v_flex().w_full().py_1().border_b_1().border_color(border).child(heading).children(rows)
+                v_flex()
+                    .w_full()
+                    .border_b_1()
+                    .border_color(border)
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("ship-table-scroll-{ship_id}")))
+                            .w_full()
+                            .overflow_x_scroll()
+                            .track_scroll(&section.horizontal_scroll)
+                            .child(v_flex().min_w(SHIP_TABLE_MIN_WIDTH).py_1().child(heading).children(rows)),
+                    )
+                    .child(Scrollbar::horizontal(&section.horizontal_scroll))
             });
 
             v_flex().w_full().child(header).when_some(table, |this, table| this.child(table))
