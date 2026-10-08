@@ -410,10 +410,11 @@ kept so the next audit does not re-report them.
   app for this, so a session hosted from either reads the same to a peer; the
   session state carries a `SessionWaker` the front end supplies rather than an
   egui context. The event inbox is drained on every header draw, because it is
-  unbounded. Not ported: the Tactics Board button, which opens a board this
-  app has no drawing surface for; the shared-windows list and the replay
-  viewports a host opens for peers, which need that same surface; and the web
-  asset bundle, so a browser joining a session this app hosts sees no map art.
+  unbounded. The Tactics Board button opens a separate board window with map,
+  mode, cap, annotation, ship, range and preset controls (see gap 16). Not
+  ported: the shared-windows list and the replay viewports a host opens for
+  peers; and the web asset bundle, so a browser joining a session this app hosts
+  sees no map art.
 
 - [done] Re-opening an open replay did nothing; it now brings that tab
   forward.
@@ -638,6 +639,8 @@ kept so the next audit does not re-report them.
   The Overview and Ships panels still follow the bar only.
 - [done] Chart statistic names read from the catalogue rather than being
   English literals.
+- [done] Overview damage figures use the selected locale's grouping rules, and
+  cached ship-table values are rebuilt when the language changes.
 - [done] Filter changes are written back, so both front ends read the same
   values.
 - [done] The open charts are kept in a settings row: each one's statistic,
