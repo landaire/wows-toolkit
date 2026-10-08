@@ -21,6 +21,7 @@ use gpui_kit::component::searchable_list::SearchableVec;
 use gpui_kit::component::select::Select;
 use gpui_kit::component::select::SelectEvent;
 use gpui_kit::component::select::SelectState;
+use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::v_flex;
 use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
@@ -2636,8 +2637,9 @@ impl TacticsBoard {
             Some(progress) => h_flex()
                 .gap_2()
                 .items_center()
+                .child(Spinner::new().xsmall())
                 .child(div().text_xs().text_color(crate::theme::text_dim()).child(match progress.total {
-                    Some(total) => format!("{} / {total}", progress.read),
+                    Some(total) => t!("ui.tactics.scan_progress", read = progress.read, total = total).into_owned(),
                     None => t!("ui.tactics.scan_running").into_owned(),
                 }))
                 .into_any_element(),
